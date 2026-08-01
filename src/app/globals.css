@@ -1,0 +1,20 @@
+/* 💡 폰트 import를 무조건 맨 위로 올려야 합니다! */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css');
+@import url('https://fonts.googleapis.com/css2?family=Lexend:wght@700&display=swap');
+
+/* 그 다음 Tailwind를 불러옵니다. */
+@import "tailwindcss";
+
+body {
+  font-family: 'Pretendard', sans-serif;
+  background-color: #f1f5f9;
+}
+
+.font-lexend {
+  font-family: 'Lexend', sans-serif;
+}
+
+/* 커스텀 스크롤바 */
+.custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
+.custom-scroll::-webkit-scrollbar-track { background: transparent; }
+.custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }

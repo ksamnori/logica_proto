@@ -1,0 +1,384 @@
+// src/components/parent/ChatWidget.tsx
+"use client";
+
+import React, { useState, useEffect, useRef } from "react";
+import { supabase } from "@/lib/supabase";
+
+// 💡 선생님 프로필 이미지 URL 변환 헬퍼 함수 추가
+const getProfileImageUrl = (path: string | null | undefined) => {
+  if (!path || path.trim() === "") return null;
+  if (path.startsWith("http")) return path;
+  const { data } = supabase.storage.from("system_images").getPublicUrl(path);
+  return data.publicUrl;
+};
+
+export default function ChatWidget({ parentId }: { parentId: string }) {
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  const [activeChatView, setActiveChatView] = useState<"list" | "room">("list");
+  const [staffList, setStaffList] = useState<any[]>([]);
+  const [chatRooms, setChatRooms] = useState<any[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+  const [activeStaffName, setActiveStaffName] = useState("");
+  // 💡 선택된 채팅방 선생님의 프로필 이미지 상태 추가
+  const [activeStaffAvatar, setActiveStaffAvatar] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  const activeChannelRef = useRef<any>(null);
+  const globalChannelRef = useRef<any>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingTimerRef = useRef<any>(null);
+  
+  const activeRoomIdRef = useRef<string | null>(null);
+  useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
+  
+  const isChatOpenRef = useRef(isChatOpen);
+  useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
+
+  // --- 드래그 로직 ---
+  const iconRef = useRef<HTMLButtonElement>(null);
+  const iconPos = useRef({ x: 0, y: 0 });
+  const iconDrag = useRef({ isDragging: false, startX: 0, startY: 0, clickX: 0, clickY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  const panelPos = useRef({ x: 0, y: 0 });
+  const panelDrag = useRef({ isDragging: false, startX: 0, startY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const rect = e.currentTarget.getBoundingClientRect();
+    const baseLeft = rect.left - iconPos.current.x;
+    const baseTop = rect.top - iconPos.current.y;
+    iconDrag.current = {
+      isDragging: true, startX: e.clientX - iconPos.current.x, startY: e.clientY - iconPos.current.y,
+      clickX: e.clientX, clickY: e.clientY, minX: -baseLeft, maxX: window.innerWidth - rect.width - baseLeft,
+      minY: -baseTop, maxY: window.innerHeight - rect.height - baseTop
+    };
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
+    if (!iconDrag.current.isDragging || !iconRef.current) return;
+    let nextX = e.clientX - iconDrag.current.startX;
+    let nextY = e.clientY - iconDrag.current.startY;
+    nextX = Math.max(iconDrag.current.minX, Math.min(nextX, iconDrag.current.maxX));
+    nextY = Math.max(iconDrag.current.minY, Math.min(nextY, iconDrag.current.maxY));
+    iconPos.current = { x: nextX, y: nextY };
+    iconRef.current.style.transform = `translate(${nextX}px, ${nextY}px)`;
+  };
+
+  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
+    iconDrag.current.isDragging = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+    if (Math.abs(e.clientX - iconDrag.current.clickX) < 5 && Math.abs(e.clientY - iconDrag.current.clickY) < 5) {
+      if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
+      setIsChatOpen(!isChatOpen);
+    }
+  };
+
+  const handlePanelDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.currentTarget.setPointerCapture(e.pointerId);
+    if (!panelRef.current) return;
+    const rect = panelRef.current.getBoundingClientRect();
+    const baseLeft = rect.left - panelPos.current.x;
+    const baseTop = rect.top - panelPos.current.y;
+    panelDrag.current = {
+      isDragging: true, startX: e.clientX - panelPos.current.x, startY: e.clientY - panelPos.current.y,
+      minX: -baseLeft, maxX: window.innerWidth - rect.width - baseLeft, minY: -baseTop, maxY: window.innerHeight - rect.height - baseTop
+    };
+  };
+
+  const handlePanelMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!panelDrag.current.isDragging || !panelRef.current) return;
+    let nextX = e.clientX - panelDrag.current.startX;
+    let nextY = e.clientY - panelDrag.current.startY;
+    nextX = Math.max(panelDrag.current.minX, Math.min(nextX, panelDrag.current.maxX));
+    nextY = Math.max(panelDrag.current.minY, Math.min(nextY, panelDrag.current.maxY));
+    panelPos.current = { x: nextX, y: nextY };
+    panelRef.current.style.transform = `translate(${nextX}px, ${nextY}px) scale(${isChatOpenRef.current ? 1 : 0.95})`;
+  };
+
+  const handlePanelUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    panelDrag.current.isDragging = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  useEffect(() => {
+    const handleFocus = async () => {
+      if (isChatOpenRef.current && activeRoomIdRef.current) {
+        await supabase.from("chat_message").update({ is_read: true })
+          .eq("room_id", activeRoomIdRef.current)
+          .eq("sender_type", "instructor")
+          .eq("is_read", false);
+        loadChatRooms();
+      }
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, []);
+
+  useEffect(() => {
+    if (parentId) {
+      loadAvailableStaff();
+      loadChatRooms();
+      initRealtimeSystem();
+    }
+    return () => {
+      if (globalChannelRef.current) { supabase.removeChannel(globalChannelRef.current); globalChannelRef.current = null; }
+      if (activeChannelRef.current) { supabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
+    };
+  }, [parentId]);
+
+  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, isTyping]);
+
+  const loadAvailableStaff = async () => {
+    try {
+      const { data: sData } = await supabase.from("student").select("enrollment(class(instructor_id))").eq("parent_id", parentId);
+      let instructorIds = new Set<string>();
+      sData?.forEach((s: any) => { s.enrollment?.forEach((e: any) => { if (e.class?.instructor_id) instructorIds.add(e.class.instructor_id); }); });
+      let orQuery = "position.ilike.%실장%,role.eq.MANAGER,role.eq.ADMIN";
+      if (instructorIds.size > 0) orQuery += `,instructor_id.in.(${Array.from(instructorIds).join(",")})`;
+      // 💡 profile_image_url 도 함께 불러옵니다 (* 로 불러오므로 포함됨)
+      const { data } = await supabase.from("instructor").select("*").eq("status", "재직").or(orQuery);
+      setStaffList(data || []);
+    } catch (e) { console.error(e); }
+  };
+
+  const loadChatRooms = async () => {
+    try {
+      // 💡 profile_image_url 필드 추가
+      const { data } = await supabase.from("chat_room")
+        .select("room_id, instructor_id, instructor(name, position, profile_image_url), chat_message(message_id, content, created_at, sender_type, is_read)")
+        .eq("parent_id", parentId).order("created_at", { ascending: false });
+      setChatRooms(data || []);
+      let totalUnread = 0;
+      data?.forEach((r: any) => {
+        totalUnread += (r.chat_message || []).filter((m: any) => (r.room_id !== activeRoomIdRef.current) && m.sender_type === "instructor" && !m.is_read).length;
+      });
+      setUnreadCount(totalUnread);
+    } catch (e) { console.error(e); }
+  };
+
+  const createOrOpenRoom = async (instructorId: string, staffTitle: string, avatarUrl: string | null) => {
+    try {
+      const { data: existing } = await supabase.from("chat_room").select("room_id").eq("instructor_id", instructorId).eq("parent_id", parentId).maybeSingle();
+      let roomId = existing?.room_id;
+      if (!roomId) {
+        const { data: newRoom } = await supabase.from("chat_room").insert({ instructor_id: instructorId, parent_id: parentId }).select().single();
+        roomId = newRoom?.room_id;
+      }
+      openChatRoom(roomId, staffTitle, avatarUrl);
+    } catch (e) { alert("채팅방 연결 오류"); }
+  };
+
+  const openChatRoom = async (roomId: string, staffName: string, avatarUrl: string | null) => {
+    setActiveRoomId(roomId); 
+    setActiveStaffName(staffName); 
+    setActiveStaffAvatar(avatarUrl);
+    setActiveChatView("room"); 
+    setChatMessages([]);
+
+    if (activeChannelRef.current) { supabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
+    
+    const roomChannelName = `room_${roomId}`;
+    supabase.getChannels().forEach((ch) => { if (ch.topic.includes(roomChannelName)) supabase.removeChannel(ch); });
+    
+    activeChannelRef.current = supabase.channel(roomChannelName, { config: { broadcast: { self: false } } })
+      .on("broadcast", { event: "typing" }, (payload: any) => {
+        if (payload.payload?.sender_type === "instructor") {
+          setIsTyping(true); 
+          clearTimeout(typingTimerRef.current); 
+          // 💡 유지 시간을 3초(3000ms)로 연장
+          typingTimerRef.current = setTimeout(() => setIsTyping(false), 3000);
+        }
+      }).subscribe();
+
+    try {
+      await supabase.from("chat_message").update({ is_read: true }).eq("room_id", roomId).eq("sender_type", "instructor").eq("is_read", false);
+      const { data } = await supabase.from("chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
+      setChatMessages(data || []);
+      loadChatRooms(); 
+    } catch (e) { console.error(e); }
+  };
+
+  const sendParentMsg = async () => {
+    const text = chatInput.trim();
+    if (!text || !activeRoomId) return;
+    setChatInput("");
+    try {
+      const { data: roomData } = await supabase.from("chat_room").select("instructor(chat_allow_start, chat_allow_end, auto_reply_message, auto_reply_active)").eq("room_id", activeRoomId).single();
+      let isDND = false; let autoReplyMsg = "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다.";
+
+      if (roomData?.instructor) {
+        const inst: any = roomData.instructor;
+        if (inst.auto_reply_message) autoReplyMsg = inst.auto_reply_message;
+        if (inst.auto_reply_active !== false && inst.chat_allow_start && inst.chat_allow_end) {
+          const now = new Date(); const currentM = now.getHours() * 60 + now.getMinutes();
+          const [sH, sM] = inst.chat_allow_start.split(":").map(Number); const [eH, eM] = inst.chat_allow_end.split(":").map(Number);
+          const startTotal = sH * 60 + sM; const endTotal = eH * 60 + eM;
+          if (startTotal <= endTotal) { if (currentM < startTotal || currentM >= endTotal) isDND = true; } 
+          else { if (currentM < startTotal && currentM >= endTotal) isDND = true; }
+        }
+      }
+      const { data: newMsg } = await supabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "parent", content: text, is_read: false }).select().single();
+      if (newMsg) setChatMessages(prev => [...prev, newMsg]);
+      if (isDND) { setTimeout(async () => { await supabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "instructor", content: `[자동응답] ${autoReplyMsg}`, is_read: false }); }, 500); }
+    } catch (e) { alert("메시지 전송 실패"); }
+  };
+
+  const initRealtimeSystem = () => {
+    if (globalChannelRef.current) return;
+    const channelName = "parent_chat_" + parentId;
+    supabase.getChannels().forEach((ch) => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
+
+    globalChannelRef.current = supabase.channel(channelName)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload) => {
+        const msg = payload.new; setIsTyping(false);
+        const isRoomActive = document.hasFocus() && isChatOpenRef.current && String(activeRoomIdRef.current) === String(msg.room_id);
+
+        if (activeRoomIdRef.current && String(msg.room_id) === String(activeRoomIdRef.current)) {
+          if (msg.sender_type === "instructor") {
+            setChatMessages(prev => prev.find(m => m.message_id === msg.message_id) ? prev : [...prev, msg]);
+            if (isRoomActive) {
+              await supabase.from("chat_message").update({ is_read: true }).eq("message_id", msg.message_id);
+            }
+          }
+        }
+        loadChatRooms();
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload) => {
+        if (payload.new.is_read) setChatMessages(prev => prev.map(m => m.message_id === payload.new.message_id ? { ...m, is_read: true } : m));
+      }).subscribe();
+  };
+
+  return (
+    <>
+      <button ref={iconRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ touchAction: "none" }} className="fixed bottom-6 right-6 sm:bottom-10 sm:right-10 w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors z-[9999] cursor-grab active:cursor-grabbing">
+        <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+        {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+      </button>
+
+      <div ref={panelRef} className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[550px] max-h-[80vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} style={{ transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px) scale(${isChatOpenRef.current ? 1 : 0.95})`, transformOrigin: 'bottom right' }}>
+        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 cursor-move touch-none">
+          <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
+          <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
+            <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+          </button>
+        </div>
+
+        {activeChatView === "list" ? (
+          <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
+            <div className="shrink-0 p-3 pb-1 border-b border-slate-200 bg-white shadow-sm">
+              <h3 className="text-[11px] font-extrabold text-[#002864] mb-2.5 flex items-center gap-1">👩‍🏫 상담 가능한 선생님</h3>
+              <div className="flex gap-3 overflow-x-auto custom-scroll pb-2 px-1">
+                {staffList.length === 0 ? <div className="text-[10px] text-slate-400 py-2">현재 배정된 선생님이 없습니다.</div> :
+                  staffList.map(staff => {
+                    const avatarUrl = getProfileImageUrl(staff.profile_image_url);
+                    return (
+                      <div key={staff.instructor_id} onClick={() => createOrOpenRoom(staff.instructor_id, `${staff.name} ${staff.position || '선생님'}`, avatarUrl)} className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 w-14">
+                        <div className="relative w-11 h-11 rounded-full bg-[#002864]/5 border border-[#002864]/10 flex items-center justify-center text-[#002864] text-lg font-black group-hover:bg-[#002864] group-hover:text-white transition-colors shadow-sm overflow-hidden">
+                          <span className="absolute z-0">{staff.name.substring(1) || staff.name}</span>
+                          {/* 💡 상단 목록 실제 이미지 출력 */}
+                          {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                        </div>
+                        <span className="text-[10px] font-bold text-slate-700 truncate w-full text-center group-hover:text-[#002864] mt-0.5">{staff.name}</span>
+                      </div>
+                    );
+                  })
+                }
+              </div>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scroll p-3">
+              <h3 className="text-[11px] font-extrabold text-slate-400 mb-2 px-1">진행 중인 대화</h3>
+              <div className="space-y-2">
+                {chatRooms.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">진행 중인 대화가 없습니다.<br/>선생님을 선택해 대화를 시작하세요.</div> :
+                  chatRooms.map(r => {
+                    const staffName = r.instructor ? `${r.instructor.name} ${r.instructor.position || '선생님'}` : '알 수 없음';
+                    const avatarUrl = getProfileImageUrl(r.instructor?.profile_image_url);
+                    const sorted = (r.chat_message || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                    let preview = sorted.length > 0 ? sorted[0].content : '내역 없음';
+                    if (preview.length > 18) preview = preview.substring(0, 18) + '...';
+                    const isUnread = sorted.filter((m: any) => m.sender_type === "instructor" && !m.is_read).length;
+                    return (
+                      <div key={r.room_id} onClick={() => openChatRoom(r.room_id, staffName, avatarUrl)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-[#002864] transition-all flex items-center justify-between cursor-pointer group">
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="relative w-10 h-10 bg-slate-100 rounded-full flex justify-center items-center text-slate-600 font-bold shrink-0 border border-slate-200 text-lg overflow-hidden">
+                            <span className="absolute z-0">👨‍🏫</span>
+                            {/* 💡 채팅 목록 실제 이미지 출력 */}
+                            {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                          </div>
+                          <div className="flex flex-col min-w-0 flex-1">
+                            <span className="font-bold text-slate-700 text-sm truncate group-hover:text-[#002864] transition-colors">{staffName}</span>
+                            <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${isUnread > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate flex-1 pr-2`}>{preview}</span>{isUnread > 0 && <div className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">{isUnread > 99 ? '99+' : isUnread}</div>}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+                }
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#b2c7d9]">
+            <div className="bg-white/90 backdrop-blur px-3 py-2 border-b border-slate-200 flex items-center gap-2 shrink-0 shadow-sm z-10 sticky top-0">
+              <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+              </button>
+              <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeStaffName}</span><span className="text-[10px] font-bold text-emerald-600">실시간 연결됨</span></div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
+              {chatMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10 bg-white/50 p-4 rounded-xl mx-4">대화 내역이 없습니다.</div> :
+                chatMessages.map(msg => (
+                  <div key={msg.message_id} className={`flex ${msg.sender_type === "parent" ? "justify-end" : "justify-start"} w-full mb-1`}>
+                    <div className={`flex items-end gap-1.5 max-w-[85%] ${msg.sender_type === "parent" ? "flex-row-reverse" : ""}`}>
+                      
+                      {msg.sender_type !== "parent" && (
+                        <div className="relative w-7 h-7 rounded-full bg-slate-200 border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs overflow-hidden">
+                          <span className="absolute z-0">👨‍🏫</span>
+                          {/* 💡 말풍선 옆 선생님 실제 이미지 출력 */}
+                          {activeStaffAvatar && <img src={activeStaffAvatar} className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                        </div>
+                      )}
+
+                      <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type === "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
+                        {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                      </div>
+                      <div className="flex flex-col items-end shrink-0 text-[9px] text-slate-500">
+                        {msg.sender_type === 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
+                        <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              }
+
+              {isTyping && (
+                <div className="flex justify-start w-full mb-1">
+                  <div className="flex items-end gap-1.5 max-w-[85%]">
+                    <div className="relative w-7 h-7 rounded-full bg-slate-200 border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs overflow-hidden">
+                      <span className="absolute z-0">👨‍🏫</span>
+                      {/* 💡 입력 중 상태에서도 실제 이미지 출력 */}
+                      {activeStaffAvatar && <img src={activeStaffAvatar} className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                    </div>
+                    <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
+                      선생님이 메시지를 입력 중입니다...
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div ref={messagesEndRef} />
+            </div>
+            <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2">
+              <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
+              <button onClick={sendParentMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}

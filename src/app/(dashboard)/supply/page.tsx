@@ -1,0 +1,271 @@
+// src/app/(dashboard)/supply/page.tsx
+"use client";
+
+import { useEffect, useState, useMemo } from "react";
+import { supabase } from "@/lib/supabase";
+import SupplyModal from "@/components/supply/SupplyModal";
+
+export default function SupplyBoardPage() {
+  const [requests, setRequests] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
+  const [isLoading, setIsLoading] = useState(true);
+  const [statsMonth, setStatsMonth] = useState("");
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+  
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedReq, setSelectedReq] = useState<any>(null);
+
+  useEffect(() => {
+    const instId = localStorage.getItem("logica_instructor_id") || "";
+    const name = localStorage.getItem("logica_instructor_name") || "관리자";
+    const role = localStorage.getItem("logica_instructor_role") || "";
+    const pos = localStorage.getItem("logica_instructor_position") || "";
+    
+    const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
+                    ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
+    
+    setCurrentUser({ instId, name, isAdmin });
+    const now = new Date();
+    setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+    fetchRequests();
+  }, []);
+
+  const fetchRequests = async () => {
+    setIsLoading(true);
+    try {
+      const { data } = await supabase.from("supply_request").select("*").order("created_at", { ascending: false }).limit(1000);
+      setRequests(data || []);
+    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+  };
+
+  const handleDragStart = (e: React.DragEvent, reqId: string) => {
+    e.dataTransfer.setData("reqId", reqId);
+    setTimeout(() => { (e.target as HTMLElement).style.opacity = '0.5'; }, 0);
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDragOverCol(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, colName: string) => {
+    e.preventDefault();
+    if (dragOverCol !== colName) setDragOverCol(colName);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCol(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+    e.preventDefault();
+    setDragOverCol(null);
+    const reqId = e.dataTransfer.getData("reqId");
+    if (!reqId) return;
+
+    setRequests(prev => prev.map(r => r.request_id?.toString() === reqId || r.id?.toString() === reqId ? { ...r, status: newStatus } : r));
+
+    try {
+      await supabase.from("supply_request").update({ 
+        status: newStatus,
+        updated_at: new Date().toISOString(),
+        last_updater_name: currentUser.name 
+      }).eq("request_id", reqId);
+    } catch (err) {
+      alert("상태 변경 실패");
+      fetchRequests(); 
+    }
+  };
+
+  const openModal = (req: any | null = null) => {
+    setSelectedReq(req);
+    setIsModalOpen(true);
+  };
+
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedReq(null);
+  };
+
+  const todos = useMemo(() => requests.filter(r => !r.status || r.status === "대기"), [requests]);
+  const inProgress = useMemo(() => requests.filter(r => r.status === "진행중"), [requests]);
+  const dones = useMemo(() => requests.filter(r => r.status === "완료"), [requests]);
+
+  const statsReqs = useMemo(() => requests.filter(r => {
+    if (!r.created_at || !statsMonth) return false;
+    const d = new Date(r.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === statsMonth;
+  }), [requests, statsMonth]);
+
+  const statsCounts = useMemo(() => {
+    const counts = { "사무용품": 0, "교재/도서": 0, "비품/장비": 0, "기타": 0 };
+    statsReqs.forEach(r => { if (counts[r.request_type as keyof typeof counts] !== undefined) counts[r.request_type as keyof typeof counts]++; });
+    return counts;
+  }, [statsReqs]);
+
+  const archivedDones = useMemo(() => statsReqs.filter(r => r.status === "완료"), [statsReqs]);
+
+  const renderCard = (req: any) => {
+    const createdDateStr = new Date(req.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const updatedDateStr = req.updated_at ? new Date(req.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : createdDateStr;
+    const updaterName = req.last_updater_name || req.author_name || "알수없음";
+
+    let typeColor = "text-slate-600 bg-slate-100 border-slate-200";
+    if (req.request_type === "비품/장비") typeColor = "text-rose-600 bg-rose-50 border-rose-200";
+    else if (req.request_type === "교재/도서") typeColor = "text-blue-600 bg-blue-50 border-blue-200";
+    else if (req.request_type === "사무용품") typeColor = "text-emerald-600 bg-emerald-50 border-emerald-200";
+
+    const cmts = req.comments || [];
+    
+    // 💡 권한 검사: 관리자이거나, 작성자 본인일 경우에만 드래그 허용
+    const canDrag = currentUser.isAdmin || String(req.author_id) === String(currentUser.instId);
+
+    return (
+      <div 
+        key={req.request_id || req.id} 
+        draggable={canDrag} 
+        onDragStart={canDrag ? (e) => handleDragStart(e, req.request_id || req.id) : undefined} 
+        onDragEnd={canDrag ? handleDragEnd : undefined}
+        onClick={() => openModal(req)} 
+        className={`task-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
+      >
+        <div className="flex justify-between items-start mb-1">
+          <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type || "기타"}</span>
+        </div>
+        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep line-clamp-3">
+          {req.content || req.title}
+        </div>
+        {cmts.length > 0 && (
+          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
+            {cmts.slice(-2).map((c: any) => (
+              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
+          <div className="flex justify-between items-center text-[10px] font-bold">
+            <span className="text-slate-500">최종 수정: {updaterName}</span>
+            <span className="text-slate-400">{updatedDateStr}</span>
+          </div>
+          <div className="flex justify-between items-center text-[10px] font-bold">
+            <span className="text-blue-500">작성: {req.author_name}</span>
+            <span className="text-slate-400">{createdDateStr}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
+      <div className="flex justify-between items-end shrink-0">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">📦 비품 신청 보드</h2>
+          <p className="text-sm font-bold text-slate-400 mt-1">학원 내 필요한 비품, 교재, 장비를 신청하고 처리 상태를 관리하세요.</p>
+        </div>
+      </div>
+
+      <div className="flex-1 flex gap-6 overflow-hidden pb-2">
+        <div className="flex-1 min-w-[250px] bg-slate-100/50 border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-slate-100 border-b border-slate-200 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-slate-700">🛒 대기 중 (Requested)</h3>
+            <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">{todos.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "대기" ? "bg-slate-200 border-2 border-dashed border-slate-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "대기")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "대기")}
+          >
+            {todos.map(renderCard)}
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-[250px] bg-blue-50/30 border border-blue-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-blue-50 border-b border-blue-100 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-blue-700">🚚 구매/진행 중 (In Progress)</h3>
+            <span className="bg-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "진행중" ? "bg-blue-100/50 border-2 border-dashed border-blue-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "진행중")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "진행중")}
+          >
+            {inProgress.map(renderCard)}
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-[250px] bg-emerald-50/30 border border-emerald-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-emerald-50 border-b border-emerald-100 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-emerald-700">✅ 완료/지급 (Done)</h3>
+            <span className="bg-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{dones.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "완료" ? "bg-emerald-100/50 border-2 border-dashed border-emerald-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "완료")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "완료")}
+          >
+            {dones.map(renderCard)}
+          </div>
+        </div>
+
+        <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-hidden">
+          <button onClick={() => openModal()} className="w-full bg-[#002864] hover:bg-blue-900 text-white px-5 py-3.5 rounded-xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+            새 비품 신청하기
+          </button>
+
+          <div className="flex-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
+            <div className="p-4 bg-slate-800 text-white shrink-0 flex justify-between items-center rounded-t-2xl">
+              <h3 className="font-black text-sm">📊 분류별 통계 및 보관함</h3>
+            </div>
+            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] shadow-sm cursor-pointer" />
+            </div>
+            <div className="p-3 border-b border-slate-100 shrink-0">
+              <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
+                <div className="bg-emerald-50 p-2 rounded border border-emerald-100 flex justify-between shadow-sm"><span className="text-emerald-600">사무용품</span><span>{statsCounts["사무용품"]}건</span></div>
+                <div className="bg-blue-50 p-2 rounded border border-blue-100 flex justify-between shadow-sm"><span className="text-blue-600">교재/도서</span><span>{statsCounts["교재/도서"]}건</span></div>
+                <div className="bg-rose-50 p-2 rounded border border-rose-100 flex justify-between shadow-sm"><span className="text-rose-600">비품/장비</span><span>{statsCounts["비품/장비"]}건</span></div>
+                <div className="bg-purple-50 p-2 rounded border border-purple-100 flex justify-between shadow-sm"><span className="text-purple-600">기타</span><span>{statsCounts["기타"]}건</span></div>
+              </div>
+            </div>
+            <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 shrink-0">
+              <span className="text-xs font-bold text-slate-500">해당 월 완료된 신청 목록</span>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50 space-y-2">
+              {archivedDones.length === 0 ? (
+                <div className="text-center py-10 text-slate-400 font-bold text-xs">해당 월에 완료된<br/>신청 내역이 없습니다.</div>
+              ) : (
+                archivedDones.map(req => {
+                  const dateStr = new Date(req.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+                  let typeColor = "text-slate-600 bg-slate-200 border-slate-300";
+                  if (req.request_type === "비품/장비") typeColor = "text-rose-600 bg-rose-100 border-rose-200";
+                  else if (req.request_type === "교재/도서") typeColor = "text-blue-600 bg-blue-100 border-blue-200";
+                  else if (req.request_type === "사무용품") typeColor = "text-emerald-600 bg-emerald-100 border-emerald-200";
+
+                  return (
+                    <div key={req.request_id || req.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-slate-400 transition-colors" onClick={() => openModal(req)}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{req.request_type || "기타"}</span>
+                        <span className="text-[10px] font-bold text-slate-400">{dateStr}</span>
+                      </div>
+                      <div className="text-xs font-bold text-slate-700 leading-snug line-clamp-2">{req.content || req.title}</div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <SupplyModal 
+        isOpen={isModalOpen} 
+        reqData={selectedReq} 
+        currentUser={currentUser} 
+        onClose={closeModal} 
+        onSuccess={fetchRequests} 
+      />
+    </div>
+  );
+}
