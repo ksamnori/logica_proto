@@ -48,36 +48,54 @@ export default function ParentPortalPage() {
     return () => { window.removeEventListener("popstate", handlePopState); };
   }, []);
 
-  // 초기 인증 확인
+  // 초기 인증 확인 및 카카오 세션 처리
   useEffect(() => {
     const hash = window.location.hash;
     
-    // 💡 [보안 수정 1] 기존 로컬스토리지에 남아있는 취약한 로그인 정보 강제 삭제
     if (localStorage.getItem("logica_parent_id")) {
       localStorage.removeItem("logica_parent_id");
     }
 
-    // 💡 [보안 수정 2] localStorage 대신 탭/브라우저 종료 시 삭제되는 sessionStorage 사용
     const savedParentId = sessionStorage.getItem("logica_parent_id");
     
     if (hash.includes("access_token")) setIsKakaoLoading(true); 
 
     const handleKakaoSession = async (session: any) => {
-      const kakaoName = session.user?.user_metadata?.full_name || session.user?.user_metadata?.name || "";
+      let kakaoPhone = session.user?.user_metadata?.phone_number || session.user?.phone || "";
+
+      if (!kakaoPhone) {
+        alert("카카오 계정에 연동된 전화번호 정보가 없습니다.\n카카오톡 설정에서 '전화번호 제공'에 동의하시거나, 일반 로그인을 이용해주세요.");
+        await supabase.auth.signOut();
+        setIsKakaoLoading(false);
+        return;
+      }
+
+      if (kakaoPhone.startsWith("+82")) {
+        kakaoPhone = "0" + kakaoPhone.slice(3).trim(); 
+      }
+      
+      // 💡 [TS 에러 수정] m, p1, p2, p3 매개변수에 명시적으로 string 타입을 지정
+      const formattedPhone = kakaoPhone
+        .replace(/[^0-9]/g, "")
+        .replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
+
       try {
-        const { data } = await supabase.from("parent").select("parent_id").eq("name", kakaoName).limit(1).maybeSingle();
+        const { data } = await supabase.from("parent").select("parent_id").eq("phone", formattedPhone).limit(1).maybeSingle();
+        
         if (data) {
-          // 💡 [보안 수정 3] 세션 스토리지에 저장
           sessionStorage.setItem("logica_parent_id", data.parent_id);
           window.history.replaceState({ app_state: "trap" }, "", window.location.pathname);
           setIsKakaoLoading(false);
           loadDashboard(data.parent_id);
         } else {
-          alert(`카카오 이름('${kakaoName}')과 일치하는 학부모 정보가 학원 DB에 없습니다.`);
+          alert(`등록된 학원 연락처(${formattedPhone})와 일치하는 학부모 정보가 없습니다.\n학원에 등록된 번호와 카카오톡 번호가 같은지 확인해주세요.`);
           await supabase.auth.signOut();
           setIsKakaoLoading(false); 
         }
-      } catch (err) { setIsKakaoLoading(false); }
+      } catch (err) { 
+        console.error(err);
+        setIsKakaoLoading(false); 
+      }
     };
 
     const initAuth = async () => {
@@ -88,8 +106,11 @@ export default function ParentPortalPage() {
     initAuth();
   }, []);
 
+  // 💡 [TS 에러 수정] 여기에도 m, p1, p2, p3 에 string 타입을 명시
   const handlePhoneInput = (val: string) => {
-    const formatted = val.replace(/[^0-9]/g, "").replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m, p1, p2, p3) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
+    const formatted = val
+      .replace(/[^0-9]/g, "")
+      .replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
     setPhoneInput(formatted);
   };
 
@@ -104,7 +125,6 @@ export default function ParentPortalPage() {
   const loginParent = async () => {
     const result = await loginParentAction(phoneInput, pwInput);
     if (result.success && result.parentId) {
-      // 💡 [보안 수정 4] 세션 스토리지에 저장
       sessionStorage.setItem("logica_parent_id", result.parentId);
       loadDashboard(result.parentId);
     } else {
@@ -116,7 +136,6 @@ export default function ParentPortalPage() {
     if (!setupName.trim() || !setupPw.trim() || !parentId) return alert("모두 입력해주세요.");
     const result = await setupParentAction(parentId, setupName, setupPw);
     if (result.success) {
-      // 💡 [보안 수정 5] 세션 스토리지에 저장
       sessionStorage.setItem("logica_parent_id", parentId);
       loadDashboard(parentId);
     } else {
@@ -125,14 +144,18 @@ export default function ParentPortalPage() {
   };
 
   const loginWithKakao = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: "kakao", options: { redirectTo: window.location.origin + window.location.pathname }});
+    const { error } = await supabase.auth.signInWithOAuth({ 
+      provider: "kakao", 
+      options: { 
+        redirectTo: `${window.location.origin}/parent`,
+      }
+    });
     if (error) alert("카카오 로그인 중 오류가 발생했습니다.");
   };
 
   const logout = async () => {
     if (confirm("로그아웃 하시겠습니까?")) {
       await supabase.auth.signOut();
-      // 💡 [보안 수정 6] 로컬/세션 스토리지 모두 확실하게 정리
       localStorage.clear();
       sessionStorage.clear();
       window.location.reload();
@@ -160,7 +183,7 @@ export default function ParentPortalPage() {
 
   const renderAuthSection = () => {
     if (authState === "dashboard") return null;
-    if (isKakaoLoading) return <div className="flex-1 flex items-center justify-center p-4 bg-slate-50"><div className="text-lg font-bold text-slate-600 animate-pulse">카카오 연동 중...</div></div>;
+    if (isKakaoLoading) return <div className="flex-1 flex items-center justify-center p-4 bg-slate-50"><div className="text-lg font-bold text-[#FEE500] bg-slate-800 px-6 py-3 rounded-full animate-pulse shadow-lg">카카오 계정 연동 중...</div></div>;
     
     return (
       <div className="flex-1 flex items-center justify-center p-4 h-full bg-slate-50">
@@ -168,10 +191,15 @@ export default function ParentPortalPage() {
           <div className="text-center mb-6 flex justify-center"><img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-10 object-contain" alt="Logica" /></div>
           {authState === "check_phone" && (
             <div className="animate-[fadeIn_0.3s_ease-out]">
-              <input type="text" maxLength={13} value={phoneInput} onChange={e => handlePhoneInput(e.target.value)} className="w-full px-4 py-3 mb-4 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" placeholder="등록된 휴대전화번호" />
-              <button onClick={checkPhone} className="w-full bg-[#002864] text-white font-bold py-3.5 rounded-xl hover:bg-blue-900 transition-colors">전화번호로 계속하기</button>
-              <div className="flex items-center my-6"><div className="flex-1 border-t border-slate-200"></div><span className="px-4 text-xs font-bold text-slate-400">또는</span><div className="flex-1 border-t border-slate-200"></div></div>
-              <button onClick={loginWithKakao} className="w-full flex items-center justify-center gap-2 bg-[#FEE500] text-[#000000] font-bold py-3.5 px-4 rounded-xl hover:bg-[#e6cf00] transition-colors">카카오로 시작하기</button>
+              <button onClick={loginWithKakao} className="w-full flex items-center justify-center gap-2 bg-[#FEE500] text-[#000000] font-black py-4 px-4 rounded-xl hover:bg-[#e6cf00] transition-colors shadow-md mb-6">
+                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-5.523 0-10 3.51-10 7.839 0 2.825 1.83 5.305 4.606 6.643l-1.18 4.316c-.086.315.267.559.53.376l5.06-3.348c.323.033.655.051.984.051 5.523 0 10-3.51 10-7.839C22 6.51 17.523 3 12 3z"/></svg>
+                카카오톡으로 1초만에 시작하기
+              </button>
+              
+              <div className="flex items-center my-6"><div className="flex-1 border-t border-slate-200"></div><span className="px-4 text-xs font-bold text-slate-400">또는 다른 방법으로 로그인</span><div className="flex-1 border-t border-slate-200"></div></div>
+              
+              <input type="text" maxLength={13} value={phoneInput} onChange={e => handlePhoneInput(e.target.value)} className="w-full px-4 py-3 mb-4 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" placeholder="등록된 학부모 휴대전화번호" />
+              <button onClick={checkPhone} className="w-full bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors">전화번호로 로그인</button>
             </div>
           )}
           {authState === "login" && (
@@ -185,9 +213,10 @@ export default function ParentPortalPage() {
           )}
           {authState === "setup" && (
             <div className="animate-[fadeIn_0.3s_ease-out]">
-              <input type="text" value={setupName} onChange={e => setSetupName(e.target.value)} className="w-full px-4 py-2.5 mb-3 rounded-lg border border-slate-300 font-bold" placeholder="성함 (예: 홍길동)" />
-              <input type="password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className="w-full px-4 py-2.5 mb-5 rounded-lg border border-slate-300 font-bold" placeholder="초기 비밀번호 설정" />
-              <button onClick={setupParent} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl">설정 완료</button>
+              <div className="bg-blue-50 text-blue-600 font-bold text-xs p-3 rounded-lg mb-4 text-center">처음 오셨군요! 사용할 비밀번호를 설정해주세요.</div>
+              <input type="text" value={setupName} onChange={e => setSetupName(e.target.value)} className="w-full px-4 py-2.5 mb-3 rounded-lg border border-slate-300 font-bold text-center" placeholder="학부모님 성함 (예: 홍길동)" />
+              <input type="password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className="w-full px-4 py-2.5 mb-5 rounded-lg border border-slate-300 font-bold text-center" placeholder="사용할 비밀번호 설정" />
+              <button onClick={setupParent} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl">비밀번호 설정 완료</button>
             </div>
           )}
         </div>
@@ -218,7 +247,7 @@ export default function ParentPortalPage() {
           <header className="bg-white px-6 py-4 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0 z-10">
             <div className="flex items-center gap-2"><img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-6 object-contain" alt="Logica" /></div>
             <div className="flex gap-2">
-              <button onClick={logout} className="text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg">로그아웃</button>
+              <button onClick={logout} className="text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">로그아웃</button>
             </div>
           </header>
 
