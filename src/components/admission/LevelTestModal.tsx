@@ -991,7 +991,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                 선택한 대기생 배정 완료하기 ✅
               </button>
             </div>
-          </div>
+           </div>
 
         </div>
       </div>
