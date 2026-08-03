@@ -45,24 +45,21 @@ function PrintReportContent() {
 
   const fetchReportData = async () => {
     try {
-      // 💡 강력한 캐시 파괴(Cache Busting) 장치
-      const cacheBuster = Date.now().toString();
-
-      // 1. 기본 배정 정보 로드 (캐시 우회)
+      // 💡 406 에러의 주범이었던 .neq(cacheBuster) 로직을 모두 제거하고 순수 데이터 조회로 롤백했습니다.
+      
+      // 1. 기본 배정 정보 로드
       const { data: assign, error: aErr } = await supabase.from('exam_assignment')
         .select('*, student(name), exam_master(title, sub_title)')
         .eq('assignment_id', assignmentId)
-        .neq('status', cacheBuster) // 절대 일어날 수 없는 조건으로 캐시 무력화
         .single();
         
       if (aErr) throw new Error(`[기본 배정 정보 로드 실패]\n${aErr.message}`);
 
-      // 2. 🌟 핵심: admission_test_report 스냅샷 가져오기 (캐시 우회)
+      // 2. 🌟 핵심: admission_test_report 스냅샷 가져오기
       const { data: reportSnap, error: snapErr } = await supabase.from('admission_test_report')
         .select('*')
         .eq('assignment_id', assignmentId)
-        .neq('final_comment', cacheBuster)
-        .single();
+        .single(); // 💡 .neq 조건 삭제. 없으면 자연스럽게 에러 캐치로 넘어감
 
       if (snapErr || !reportSnap) {
         throw new Error("저장된 분석 리포트가 없습니다. 이전 화면에서 [진단 리포트 생성하기]를 먼저 진행해주세요.");
@@ -79,11 +76,10 @@ function PrintReportContent() {
       const studentName = Array.isArray(assign.student) ? assign.student[0]?.name : assign.student?.name || '알수없음';
       const reportDate = new Date(assign.created_at).toLocaleDateString('ko-KR');
 
-      // 3. 런타임 Max 스코어 빌더 (캐시 우회)
+      // 3. 런타임 Max 스코어 빌더
       const { data: meta } = await supabase.from('admission_standard_meta')
         .select('*')
-        .eq('standard_name', standardName)
-        .neq('standard_name', cacheBuster);
+        .eq('standard_name', standardName);
 
       let rBase = { max_geometry:0, max_measure:0, max_stat:0, max_rule:0, max_calc:0, max_calc_sense:0, max_spatial:0, max_logic:0, max_knowledge:0, max_thinking:0, max_persistence:0, max_diff_1:0, max_diff_2:0, max_diff_3:0, max_diff_4:0, max_diff_5:0, max_total_score:0 };
       const mData: any = {};
@@ -112,12 +108,11 @@ function PrintReportContent() {
         });
       }
 
-      // 4. 학생 답안 및 O/X 테이블 구성 (캐시 우회)
+      // 4. 학생 답안 및 O/X 테이블 구성
       const { data: items } = await supabase.from('exam_item').select('*').eq('exam_id', examPaperId).order('sort_order');
       const { data: answers } = await supabase.from('student_answer')
         .select('*')
-        .eq('exam_assignment_id', assignmentId)
-        .neq('grading_code', cacheBuster);
+        .eq('exam_assignment_id', assignmentId);
 
       const qIds = (items || []).map((i: any) => i.question_id);
       const uuidIds = qIds.filter((id: any) => typeof id === 'string' && id.includes('-'));
@@ -200,12 +195,12 @@ function PrintReportContent() {
         correct_cnt 
       };
 
-      // 6. 평균 산출 (캐시 우회 적용)
+      // 6. 평균 산출
       let avgStats = { geo: 0, mea: 0, stat: 0, rule: 0, calc: 0, sense: 0, space: 0, logic: 0, know: 0, think: 0, persist: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, total: 0 };
       
-      let { data: allAssignments } = await supabase.from('exam_assignment').select('assignment_id').eq('exam_id', examPaperId).neq('status', cacheBuster);
+      let { data: allAssignments } = await supabase.from('exam_assignment').select('assignment_id').eq('exam_id', examPaperId);
       if (!allAssignments) {
-        const res = await supabase.from('exam_assignment').select('assignment_id').eq('exam_paper_id', examPaperId).neq('status', cacheBuster);
+        const res = await supabase.from('exam_assignment').select('assignment_id').eq('exam_paper_id', examPaperId);
         allAssignments = res.data;
       }
       
@@ -214,7 +209,6 @@ function PrintReportContent() {
         const { data: allAnswers } = await supabase.from('student_answer')
           .select('exam_assignment_id, question_id, earned_score')
           .in('exam_assignment_id', assignIds)
-          .neq('grading_code', cacheBuster)
           .limit(10000);
         
         if (allAnswers && allAnswers.length > 0) {
@@ -566,7 +560,6 @@ function PrintReportContent() {
                     <span className="text-base font-black text-white block">최종 종합 점수</span>
                   </div>
                   
-                  {/* 💡 수정된 부분: Flexbox baseline 정렬 및 whitespace-nowrap 유지 */}
                   <div className="my-4 flex justify-center items-baseline whitespace-nowrap w-full">
                     <span className="text-[44px] font-black leading-none drop-shadow-md tracking-tighter">
                       {reportData.totalScore}
