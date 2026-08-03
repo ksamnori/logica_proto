@@ -115,16 +115,178 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
   useEffect(() => {
     if (!currentUid) return;
+
     const fetchNotifications = async () => {
       const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
       const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
+      const clearedIso = new Date(clearedTime).toISOString();
+
+      // 1. 기존 외부 알림 가져오기
       const res = await getSecureNotifications(clearedTime);
-      if (res.success && res.notiData) {
-        setNotifications(res.notiData);
-        setUnreadNotiCount(res.notiData.length);
+      let allNotis = res.success && res.notiData ? res.notiData : [];
+
+      // 2. 업무 보드의 '긴급공지' 가져오기 (status 값 포함)
+      const { data: urgentMemos } = await supabase
+        .from("instructor_memo")
+        .select("memo_id, author_name, content, created_at, status")
+        .eq("memo_type", "긴급공지")
+        .gt("created_at", clearedIso);
+
+      if (urgentMemos && urgentMemos.length > 0) {
+        const activeMemos = urgentMemos.filter(m => m.status !== "완료");
+        const memoNotis = activeMemos.map(m => ({
+          id: `memo_${m.memo_id}`,
+          title: `🚨 긴급공지 (${m.author_name})`,
+          time: new Date(m.created_at),
+          content: m.content,
+          link: "/task" 
+        }));
+        allNotis = [...allNotis, ...memoNotis];
       }
+
+      // 3. 💡 나에게 배정된 학부모 요청(CS) 가져오기
+      const { data: csLogs } = await supabase
+        .from("parent_request_log")
+        .select("request_id, request_type, reason, created_at, status, student(name)")
+        .eq("processed_instructor_id", currentUid)
+        .gt("created_at", clearedIso);
+
+      if (csLogs && csLogs.length > 0) {
+        const activeCS = csLogs.filter(c => c.status !== "완료");
+        const csNotis = activeCS.map((c: any) => {
+          const sName = Array.isArray(c.student) ? c.student[0]?.name : c.student?.name;
+          return {
+            id: `cs_${c.request_id}`,
+            title: `👨‍👩‍👧‍👦 CS 배정: ${sName || '알수없음'} 학생 (${c.request_type})`,
+            time: new Date(c.created_at),
+            content: c.reason || "내용 없음",
+            link: "/cs"
+          };
+        });
+        allNotis = [...allNotis, ...csNotis];
+      }
+
+      // 4. 시간순(최신순) 정렬 및 반영
+      allNotis.sort((a, b) => b.time.getTime() - a.time.getTime());
+      setNotifications(allNotis);
+      setUnreadNotiCount(allNotis.length);
     };
+
     fetchNotifications();
+
+    // 💡 실시간 감지(Real-time) 채널 연결
+    const notiChannel = supabase.channel('header_noti_channel')
+      
+      // (1) 긴급공지 이벤트 감지
+      .on('postgres_changes', { 
+        event: '*', 
+        schema: 'public', 
+        table: 'instructor_memo',
+        filter: "memo_type=eq.긴급공지" 
+      }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          const newMemo = payload.new as any; // 💡 타입스크립트 에러 방지용 명시적 형변환
+          if (newMemo.status !== '완료') {
+            const newNoti = {
+              id: `memo_${newMemo.memo_id}`,
+              title: `🚨 긴급공지 (${newMemo.author_name || '알수없음'})`,
+              time: new Date(newMemo.created_at),
+              content: newMemo.content,
+              link: "/task"
+            };
+            setNotifications(prev => {
+              const updated = [newNoti, ...prev].sort((a, b) => b.time.getTime() - a.time.getTime());
+              setUnreadNotiCount(updated.length);
+              return updated;
+            });
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          const updatedMemo = payload.new as any; // 💡 타입스크립트 에러 방지
+          if (updatedMemo.status === '완료') {
+            setNotifications(prev => {
+              const filtered = prev.filter(n => n.id !== `memo_${updatedMemo.memo_id}`);
+              setUnreadNotiCount(filtered.length);
+              return filtered;
+            });
+          } else {
+            const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
+            const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
+            if (new Date(updatedMemo.created_at).getTime() > clearedTime) {
+              setNotifications(prev => {
+                if (prev.some(n => n.id === `memo_${updatedMemo.memo_id}`)) return prev;
+                const restoredNoti = {
+                  id: `memo_${updatedMemo.memo_id}`,
+                  title: `🚨 긴급공지 (${updatedMemo.author_name || '알수없음'})`,
+                  time: new Date(updatedMemo.created_at),
+                  content: updatedMemo.content,
+                  link: "/task"
+                };
+                const updated = [...prev, restoredNoti].sort((a, b) => b.time.getTime() - a.time.getTime());
+                setUnreadNotiCount(updated.length);
+                return updated;
+              });
+            }
+          }
+        }
+      })
+      
+      // (2) 💡 나에게 배정된 학부모 CS 요청 감지
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'parent_request_log',
+        filter: `processed_instructor_id=eq.${currentUid}`
+      }, (payload) => {
+        const newCs = payload.new as any; // 💡 타입스크립트 에러 방지
+        if (payload.eventType === 'INSERT') {
+          if (newCs.status !== '완료') {
+            const newNoti = {
+              id: `cs_${newCs.request_id}`,
+              title: `👨‍👩‍👧‍👦 CS 배정 (${newCs.request_type})`,
+              time: new Date(newCs.created_at),
+              content: newCs.reason || "내용 없음",
+              link: "/cs"
+            };
+            setNotifications(prev => {
+              const updated = [newNoti, ...prev].sort((a, b) => b.time.getTime() - a.time.getTime());
+              setUnreadNotiCount(updated.length);
+              return updated;
+            });
+          }
+        } else if (payload.eventType === 'UPDATE') {
+          if (newCs.status === '완료') {
+            setNotifications(prev => {
+              const filtered = prev.filter(n => n.id !== `cs_${newCs.request_id}`);
+              setUnreadNotiCount(filtered.length);
+              return filtered;
+            });
+          } else {
+            // 다른 담당자에게서 나에게로 변경되었거나 완료에서 다시 대기/진행중으로 복구된 경우
+            const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
+            const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
+            if (new Date(newCs.created_at).getTime() > clearedTime) {
+              setNotifications(prev => {
+                if (prev.some(n => n.id === `cs_${newCs.request_id}`)) return prev;
+                const restoredNoti = {
+                  id: `cs_${newCs.request_id}`,
+                  title: `👨‍👩‍👧‍👦 CS 배정 (${newCs.request_type})`,
+                  time: new Date(newCs.created_at),
+                  content: newCs.reason || "내용 없음",
+                  link: "/cs"
+                };
+                const updated = [...prev, restoredNoti].sort((a, b) => b.time.getTime() - a.time.getTime());
+                setUnreadNotiCount(updated.length);
+                return updated;
+              });
+            }
+          }
+        }
+      })
+      .subscribe();
+
+    return () => { 
+      supabase.removeChannel(notiChannel); 
+    };
   }, [currentUid]);
 
   const clearNotifications = () => {
@@ -180,7 +342,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // 브라우저 호환성이 가장 확실한 FileReader 방식으로 상태 업데이트
     const reader = new FileReader();
     reader.onload = (event) => {
       if (event.target?.result) {

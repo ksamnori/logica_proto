@@ -97,26 +97,49 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const panelPos = useRef({ x: 0, y: 0 });
   const panelDrag = useRef({ isDragging: false, startX: 0, startY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
 
+  // 💡 [안전 수정] 드래그 시작 시 멀티터치 방지 및 경계값 역전 방지
   const handlePanelDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.isPrimary) return; 
     e.currentTarget.setPointerCapture(e.pointerId);
     if (!panelRef.current) return;
+    
     const rect = panelRef.current.getBoundingClientRect();
     const baseLeft = rect.left - panelPos.current.x;
     const baseTop = rect.top - panelPos.current.y;
+    
+    let minX = -baseLeft;
+    let maxX = window.innerWidth - rect.width - baseLeft;
+    let minY = -baseTop;
+    let maxY = window.innerHeight - rect.height - baseTop;
+
+    if (maxX < minX) maxX = minX;
+    if (maxY < minY) maxY = minY;
+
     panelDrag.current = {
-      isDragging: true, startX: e.clientX - panelPos.current.x, startY: e.clientY - panelPos.current.y,
-      minX: -baseLeft, maxX: window.innerWidth - rect.width - baseLeft,
-      minY: -baseTop, maxY: window.innerHeight - rect.height - baseTop
+      isDragging: true, 
+      startX: e.clientX - panelPos.current.x, 
+      startY: e.clientY - panelPos.current.y,
+      minX, maxX, minY, maxY
     };
   };
+
+  // 💡 [안전 수정] 드래그 이동 시 경계 제한 강화
   const handlePanelMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!panelDrag.current.isDragging || !panelRef.current) return;
-    let nextX = Math.max(panelDrag.current.minX, Math.min(e.clientX - panelDrag.current.startX, panelDrag.current.maxX));
-    let nextY = Math.max(panelDrag.current.minY, Math.min(e.clientY - panelDrag.current.startY, panelDrag.current.maxY));
+    if (!panelDrag.current.isDragging || !panelRef.current || !e.isPrimary) return;
+    
+    let nextX = e.clientX - panelDrag.current.startX;
+    let nextY = e.clientY - panelDrag.current.startY;
+    
+    nextX = Math.max(panelDrag.current.minX, Math.min(nextX, panelDrag.current.maxX));
+    nextY = Math.max(panelDrag.current.minY, Math.min(nextY, panelDrag.current.maxY));
+    
     panelPos.current = { x: nextX, y: nextY };
     panelRef.current.style.transform = `translate(${nextX}px, ${nextY}px) scale(${isChatOpen ? 1 : 0.95})`; 
   };
+
+  // 💡 [안전 수정] 드래그 종료 시 상태 초기화
   const handlePanelUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!e.isPrimary) return;
     panelDrag.current.isDragging = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
@@ -261,7 +284,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_room" }, () => loadChatRooms())
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload) => {
-        setTypingStaffName(null); // 💡 새 메시지 수신 시 입력 중 애니메이션 즉시 종료
+        setTypingStaffName(null); 
         const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "staff" && String(activeStaffRoomIdRef.current) === String(payload.new.room_id);
 
         if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
@@ -345,23 +368,13 @@ export default function FloatingChat({ instId }: { instId: string }) {
     e.stopPropagation();
     if (!confirm("⚠️ 이 대화방을 목록에서 삭제(나가기) 하시겠습니까?")) return;
     try {
-      // 1. 내 상태를 비활성(나가기)으로 변경
       await supabase.from("internal_chat_member").update({ is_active: false }).eq("room_id", roomId).eq("instructor_id", instId);
-
-      // 2. 이 방에 남아있는(is_active가 true인) 다른 멤버가 있는지 확인
-      const { count } = await supabase.from("internal_chat_member")
-        .select("*", { count: "exact", head: true })
-        .eq("room_id", roomId)
-        .eq("is_active", true);
-
-      // 3. 아무도 방에 남아있지 않다면(count === 0) 관련된 모든 데이터를 완전 삭제
+      const { count } = await supabase.from("internal_chat_member").select("*", { count: "exact", head: true }).eq("room_id", roomId).eq("is_active", true);
       if (count === 0) {
-        // FK 제약 조건 오류를 방지하기 위해 자식 데이터부터 순차적으로 삭제합니다.
         await supabase.from("internal_chat_message").delete().eq("room_id", roomId);
         await supabase.from("internal_chat_member").delete().eq("room_id", roomId);
         await supabase.from("internal_chat_room").delete().eq("room_id", roomId);
       }
-
       loadStaffRooms();
     } catch (error) {
       alert("삭제 중 오류가 발생했습니다.");
@@ -404,7 +417,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
       }
 
       if (!roomId) {
-        // 💡 [수정] 방 생성 시 created_by 필드에 로그인한 강사 ID(instId) 추가
         const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: `${targetName} 선생님`, created_by: instId }).select().single();
         if (roomError) throw roomError;
         if (newRoom) {
@@ -427,7 +439,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
     if (!roomName) return;
 
     try {
-      // 💡 [수정] 방 생성 시 created_by 필드에 로그인한 강사 ID(instId) 추가
       const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId }).select().single();
       const membersToInsert = selectedInstIds.map(id => ({ room_id: newRoom.room_id, instructor_id: id }));
       membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
@@ -449,7 +460,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
 
     activeStaffChannelRef.current = supabase.channel(staffRoomChannelName, { config: { broadcast: { self: false } } })
       .on("broadcast", { event: "typing" }, (payload: any) => {
-        // 💡 [수정] 상대방이 보낸 이름(sender_name)을 받아서 저장
         if (payload.payload?.sender_id !== instId) { 
           setTypingStaffName(payload.payload?.sender_name || "알 수 없는"); 
           clearTimeout(staffTypingTimerRef.current); 
@@ -514,7 +524,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
         className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[550px] max-h-[80vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         style={{ transform: `scale(${isChatOpen ? 1 : 0.95})`, transformOrigin: 'bottom right' }}
       >
-        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none">
+        {/* 💡 [수정] select-none 추가하여 텍스트 드래그(블록) 현상 방지 */}
+        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none select-none">
           <div className="px-5 py-3.5 flex justify-between items-center">
             <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> Logica 메신저</h3>
             <div className="flex gap-1.5 items-center z-10 relative">

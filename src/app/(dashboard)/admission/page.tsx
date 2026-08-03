@@ -95,12 +95,15 @@ export default function AdmissionPage() {
   const [filterGrade, setFilterGrade] = useState("ALL");
   const [searchKeyword, setSearchKeyword] = useState("");
   
-  // 💡 필터 초기 로드 완료 여부를 체크하는 방어 변수
+  // 💡 [추가] 정렬 기준을 복합적으로 관리할 수 있는 상태들
+  const [primarySort, setPrimarySort] = useState<"date" | "grade">("date");
+  const [dateSortOrder, setDateSortOrder] = useState<"desc" | "asc">("desc");
+  const [gradeSortOrder, setGradeSortOrder] = useState<"asc" | "desc">("asc");
+
   const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
 
   const appsScrollRef = useRef<HTMLDivElement>(null);
 
-  // 💡 [핵심 수정] 마운트 시 한 번만 읽어오고, 완료되면 isFiltersLoaded를 true로!
   useEffect(() => {
     const savedDt = sessionStorage.getItem('logica_adm_filter_dt');
     const savedGr = sessionStorage.getItem('logica_adm_filter_gr');
@@ -113,7 +116,6 @@ export default function AdmissionPage() {
     setIsFiltersLoaded(true);
   }, []);
 
-  // 💡 [핵심 수정] 초기 읽기가 완료된 이후(isFiltersLoaded)에만 SessionStorage에 쓰도록 락(Lock) 걸기
   useEffect(() => {
     if (isFiltersLoaded) {
       sessionStorage.setItem('logica_adm_filter_dt', filterDateTime);
@@ -306,20 +308,27 @@ export default function AdmissionPage() {
       return matchDate && matchGrade && matchKeyword;
     });
 
+    // 💡 [추가] 일자 우선 정렬 vs 학년 우선 정렬 선택 적용
     return filtered.sort((a, b) => {
       const dateA = a.test_date || "";
       const dateB = b.test_date || "";
-      if (dateA !== dateB) return dateA.localeCompare(dateB);
-
       const timeA = a.start_time || "";
       const timeB = b.start_time || "";
-      if (timeA !== timeB) return timeA.localeCompare(timeB);
-
       const gradeOrderA = getTestGradeOrder(a._extractedGrade || "기타");
       const gradeOrderB = getTestGradeOrder(b._extractedGrade || "기타");
-      return gradeOrderA - gradeOrderB;
+
+      if (primarySort === "date") {
+        if (dateA !== dateB) return dateSortOrder === "desc" ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
+        if (timeA !== timeB) return dateSortOrder === "desc" ? timeB.localeCompare(timeA) : timeA.localeCompare(timeB);
+        return gradeSortOrder === "asc" ? gradeOrderA - gradeOrderB : gradeOrderB - gradeOrderA;
+      } else {
+        if (gradeOrderA !== gradeOrderB) return gradeSortOrder === "asc" ? gradeOrderA - gradeOrderB : gradeOrderB - gradeOrderA;
+        if (dateA !== dateB) return dateSortOrder === "desc" ? dateB.localeCompare(dateA) : dateA.localeCompare(dateB);
+        if (timeA !== timeB) return dateSortOrder === "desc" ? timeB.localeCompare(timeA) : timeA.localeCompare(timeB);
+        return 0;
+      }
     });
-  }, [sessions, filterDateTime, filterGrade, searchKeyword]);
+  }, [sessions, filterDateTime, filterGrade, searchKeyword, primarySort, dateSortOrder, gradeSortOrder]);
 
   const resetFilters = () => {
     setFilterDateTime("ALL");
@@ -491,14 +500,42 @@ export default function AdmissionPage() {
       <div className="flex gap-6 flex-1 overflow-hidden">
         {/* 좌측 패널: 필터링된 일정 목록 */}
         <div className="w-1/3 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+          
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
-            <h3 className="font-bold text-[#002864] flex items-center gap-2">
-              <span>🗓️</span> 
-              개설된 일정 목록 
-              <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full ml-1">{filteredSessions.length}건</span>
-            </h3>
+            <div className="flex items-center">
+              <h3 className="font-bold text-[#002864] flex items-center gap-2">
+                <span>🗓️</span> 
+                개설된 일정 목록 
+                <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full ml-1">{filteredSessions.length}건</span>
+              </h3>
+              
+              {/* 💡 [추가] 일자 정렬 버튼 */}
+              <button 
+                onClick={() => {
+                  if (primarySort === "date") setDateSortOrder(prev => prev === "desc" ? "asc" : "desc");
+                  setPrimarySort("date");
+                }} 
+                className={`ml-3 text-[10px] font-bold border px-2 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1 ${primarySort === 'date' ? 'bg-[#002864] text-white border-[#002864]' : 'bg-white text-slate-600 border-slate-200 hover:text-[#002864] hover:border-[#002864]'}`}
+                title="일자를 최우선 기준으로 정렬합니다"
+              >
+                {dateSortOrder === "desc" ? "🔻 최신순" : "🔺 과거순"}
+              </button>
+
+              {/* 💡 [추가] 학년 정렬 버튼 */}
+              <button 
+                onClick={() => {
+                  if (primarySort === "grade") setGradeSortOrder(prev => prev === "asc" ? "desc" : "asc");
+                  setPrimarySort("grade");
+                }} 
+                className={`ml-1 text-[10px] font-bold border px-2 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1 ${primarySort === 'grade' ? 'bg-[#002864] text-white border-[#002864]' : 'bg-white text-slate-600 border-slate-200 hover:text-[#002864] hover:border-[#002864]'}`}
+                title="학년을 최우선 기준으로 정렬합니다"
+              >
+                {gradeSortOrder === "asc" ? "🔺 저학년순" : "🔻 고학년순"}
+              </button>
+            </div>
             <button onClick={() => setRefreshTrigger(prev => prev + 1)} className="text-[12px] font-bold text-slate-500 hover:text-[#002864]">새로고침 ↻</button>
           </div>
+
           <div className="flex-1 overflow-y-auto custom-scroll">
             {isLoadingSessions ? (
               <div className="p-5 text-center text-slate-400 font-bold">로딩 중...</div>
