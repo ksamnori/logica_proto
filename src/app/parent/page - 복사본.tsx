@@ -18,21 +18,21 @@ export default function ParentPortalPage() {
   
   const [parentId, setParentId] = useState<string | null>(null);
   const [infoName, setInfoName] = useState("");
+  const [isInfoModalOpen, setIsInfoModalOpen] = useState(false);
   const [studentsData, setStudentsData] = useState<any[]>([]);
-  
-  // 현재 선택된 자녀의 ID를 관리하는 상태
-  const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   // 히스토리 라우팅 (뒤로가기 방어)
   const isExitModalOpenRef = useRef(isExitModalOpen);
   isExitModalOpenRef.current = isExitModalOpen;
+  const isInfoModalOpenRef = useRef(isInfoModalOpen);
+  isInfoModalOpenRef.current = isInfoModalOpen;
   const authStateRef = useRef(authState);
   authStateRef.current = authState;
 
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
-      if (isExitModalOpenRef.current) {
-        setIsExitModalOpen(false);
+      if (isExitModalOpenRef.current || isInfoModalOpenRef.current) {
+        setIsExitModalOpen(false); setIsInfoModalOpen(false);
         window.history.pushState({ app_state: "trap" }, "", window.location.href);
       } else if (authStateRef.current === "dashboard") {
         setIsExitModalOpen(true);
@@ -47,7 +47,7 @@ export default function ParentPortalPage() {
     return () => { window.removeEventListener("popstate", handlePopState); };
   }, []);
 
-  // 초기 인증 확인 및 카카오 세션 처리 (완벽 복구!)
+  // 초기 인증 확인 및 카카오 세션 처리
   useEffect(() => {
     const hash = window.location.hash;
     
@@ -61,9 +61,10 @@ export default function ParentPortalPage() {
 
     const handleKakaoSession = async (session: any) => {
       console.log("🔥 [1단계] Supabase 세션 확인:", session);
+      
       let kakaoPhone = "";
 
-      // 💡 [핵심 비기] 카카오 출입증으로 카카오 본서버에 직접 요청
+      // 💡 [핵심 비기] Supabase를 믿지 않고, 카카오 출입증(provider_token)으로 카카오 본서버에 직접 요청
       if (session.provider_token) {
         try {
           const res = await fetch("https://kapi.kakao.com/v2/user/me", {
@@ -74,6 +75,7 @@ export default function ParentPortalPage() {
           });
           const kakaoData = await res.json();
           console.log("🚀 [2단계] 카카오 다이렉트 통신 성공! 데이터:", kakaoData);
+          
           kakaoPhone = kakaoData?.kakao_account?.phone_number || "";
         } catch (e) {
           console.error("카카오 다이렉트 호출 실패", e);
@@ -105,13 +107,13 @@ export default function ParentPortalPage() {
         kakaoPhone = "0" + kakaoPhone.slice(3).trim(); 
       }
       
-      // 💡 [하이픈 패치] 순수 숫자 버전과 하이픈 버전을 모두 준비
+      // 💡 [하이픈 패치] 순수 숫자 버전과 하이픈 버전을 모두 준비합니다.
       const rawPhone = kakaoPhone.replace(/[^0-9]/g, ""); 
       const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
       console.log("📞 [3단계] 폰 번호 검색 준비 완료:", { rawPhone, formattedPhone });
 
-      // DB 매칭 시도 (.or 로직 적용)
+      // DB(parent 테이블) 매칭 시도 (.or 로직 적용)
       try {
         const { data } = await supabase
           .from("parent")
@@ -204,55 +206,29 @@ export default function ParentPortalPage() {
     setParentId(pid);
     setAuthState("dashboard");
     try {
-      // 1. 우선 로그인에 성공한 학부모의 번호를 확인합니다.
-      const { data: pData } = await supabase.from("parent").select("name, phone").eq("parent_id", pid).single();
+      const { data: pData } = await supabase.from("parent").select("name").eq("parent_id", pid).single();
       setInfoName(pData?.name || "");
 
-      if (!pData?.phone) return;
-
-      // 2. 하이픈이 있는 번호와 없는 번호 두 가지 버전을 모두 준비합니다.
-      const rawPhone = pData.phone.replace(/[^0-9]/g, "");
-      const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
-
-      // 3. 💡 [핵심] DB에서 이 번호를 가진 '모든' 학부모 계정(parent_id)을 싹쓸이해 옵니다!
-      const { data: allParents } = await supabase
-        .from("parent")
-        .select("parent_id")
-        .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone}`);
-
-      // 찾은 모든 parent_id들을 배열로 만듭니다.
-      const pids = allParents?.map(p => p.parent_id) || [pid];
-
-      // 4. 💡 해당 부모 배열(pids)에 하나라도 속한 자녀를 모조리 불러옵니다. (.in 사용)
       const { data: sData, error } = await supabase
         .from("student")
         .select("*, enrollment(class(name, class_schedule(day_of_week, start_time))), exam_assignment(total_score, status, created_at), attendance(attendance_date, status)")
-        .in("parent_id", pids);
+        .eq("parent_id", pid);
 
-      if (!error && sData && sData.length > 0) {
+      if (!error && sData) {
         const sorted = sData.sort((a, b) => (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0));
-        setStudentsData(sorted);
-        // 첫 번째 자녀를 기본으로 선택
-        setSelectedStudentId(sorted[0].student_id);
+        setStudentsData(sorted.map(s => ({ ...s, mockHwRate: Math.floor(Math.random() * 30) + 70 })));
       }
     } catch (err) { console.error("대시보드 로드 에러", err); }
   };
 
-  // 통째로 날아갔던 로그인 UI 영역 완벽 복구!
   const renderAuthSection = () => {
     if (authState === "dashboard") return null;
-    if (isKakaoLoading) return (
-      <div className="flex-1 flex items-center justify-center p-4 bg-slate-50">
-        <div className="text-lg font-bold text-[#FEE500] bg-slate-800 px-6 py-3 rounded-full animate-pulse shadow-lg">카카오 계정 연동 중...</div>
-      </div>
-    );
+    if (isKakaoLoading) return <div className="flex-1 flex items-center justify-center p-4 bg-slate-50"><div className="text-lg font-bold text-[#FEE500] bg-slate-800 px-6 py-3 rounded-full animate-pulse shadow-lg">카카오 계정 연동 중...</div></div>;
     
     return (
       <div className="flex-1 flex items-center justify-center p-4 h-full bg-slate-50">
         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-          <div className="text-center mb-6 flex justify-center">
-            <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-10 object-contain" alt="Logica" />
-          </div>
+          <div className="text-center mb-6 flex justify-center"><img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-10 object-contain" alt="Logica" /></div>
           {authState === "check_phone" && (
             <div className="animate-[fadeIn_0.3s_ease-out]">
               <button onClick={loginWithKakao} className="w-full flex items-center justify-center gap-2 bg-[#FEE500] text-[#000000] font-black py-4 px-4 rounded-xl hover:bg-[#e6cf00] transition-colors shadow-md mb-6">
@@ -260,11 +236,7 @@ export default function ParentPortalPage() {
                 카카오톡으로 1초만에 시작하기
               </button>
               
-              <div className="flex items-center my-6">
-                <div className="flex-1 border-t border-slate-200"></div>
-                <span className="px-4 text-xs font-bold text-slate-400">또는 다른 방법으로 로그인</span>
-                <div className="flex-1 border-t border-slate-200"></div>
-              </div>
+              <div className="flex items-center my-6"><div className="flex-1 border-t border-slate-200"></div><span className="px-4 text-xs font-bold text-slate-400">또는 다른 방법으로 로그인</span><div className="flex-1 border-t border-slate-200"></div></div>
               
               <input type="text" maxLength={13} value={phoneInput} onChange={e => handlePhoneInput(e.target.value)} className="w-full px-4 py-3 mb-4 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" placeholder="등록된 학부모 휴대전화번호" />
               <button onClick={checkPhone} className="w-full bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors">전화번호로 로그인</button>
@@ -292,9 +264,6 @@ export default function ParentPortalPage() {
     );
   };
 
-  // 현재 선택된 자녀 찾기
-  const selectedStudent = studentsData.find(s => s.student_id === selectedStudentId);
-
   return (
     <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
       
@@ -311,55 +280,30 @@ export default function ParentPortalPage() {
         </div>
       )}
 
-      {authState === "dashboard" ? (
+      {renderAuthSection()}
+
+      {authState === "dashboard" && (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-          
-          {/* 상단 헤더: 좌측 로고, 우측 로그아웃 */}
-          <header className="bg-white px-6 py-4 flex justify-between items-center shadow-sm shrink-0 z-20">
-            <div className="flex items-center">
-              <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-6 object-contain" alt="Logica" />
+          <header className="bg-white px-6 py-4 flex justify-between items-center shadow-sm border-b border-slate-200 shrink-0 z-10">
+            <div className="flex items-center gap-2"><img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-6 object-contain" alt="Logica" /></div>
+            <div className="flex gap-2">
+              <button onClick={logout} className="text-[11px] font-bold text-slate-600 bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg hover:bg-slate-100 transition-colors">로그아웃</button>
             </div>
-            <button onClick={logout} className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg transition-colors">
-              로그아웃
-            </button>
           </header>
 
-          {/* 다자녀 선택 탭 (자녀가 2명 이상일 때만 렌더링됨) */}
-          {studentsData.length > 1 && (
-            <div className="bg-white px-4 pb-3 shrink-0 z-10 border-b border-slate-200">
-              <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
-                {studentsData.map((student) => (
-                  <button
-                    key={student.student_id}
-                    onClick={() => setSelectedStudentId(student.student_id)}
-                    className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-                      selectedStudentId === student.student_id
-                        ? "bg-white text-slate-800 shadow-sm border border-slate-200"
-                        : "text-slate-400 hover:text-slate-600"
-                    }`}
-                  >
-                    {student.name}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* 메인 대시보드 영역 */}
-          <main className="flex-1 overflow-y-auto custom-scroll w-full mx-auto p-4 sm:p-6 pb-32 overscroll-contain">
-            <div className="w-full max-w-4xl mx-auto">
-              {!selectedStudent ? (
+          <main className="flex-1 overflow-y-auto custom-scroll w-full mx-auto p-4 sm:p-8 pb-32 overscroll-contain">
+            <h2 className="text-lg font-extrabold text-slate-800 mb-4 flex items-center gap-2">👨‍🎓 내 자녀 학습 현황</h2>
+            <div className="flex flex-col gap-6 w-full max-w-4xl mx-auto">
+              {studentsData.length === 0 ? (
                 <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-2xl border border-slate-200">등록된 자녀 정보가 없습니다.</div>
               ) : (
-                <StudentCard student={selectedStudent} />
+                studentsData.map(s => <StudentCard key={s.student_id} student={s} />)
               )}
             </div>
           </main>
 
           {parentId && <ChatWidget parentId={parentId} />}
         </div>
-      ) : (
-        renderAuthSection()
       )}
     </div>
   );
