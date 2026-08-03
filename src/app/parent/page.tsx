@@ -61,20 +61,36 @@ export default function ParentPortalPage() {
     if (hash.includes("access_token")) setIsKakaoLoading(true); 
 
     const handleKakaoSession = async (session: any) => {
-      // 💡 [안전장치 추가] Supabase가 데이터를 숨겨놓을 수 있는 모든 경로를 샅샅이 뒤집니다.
+      // 💡 [심층 해부 로그] 점(...)으로 숨기지 못하게 JSON으로 보따리를 완전히 풀어헤칩니다!
+      console.log("🔥 [디버깅] 카카오 세션 딥-스캔:", JSON.stringify(session.user, null, 2));
+
       const meta = session.user?.user_metadata || {};
       const identityData = session.user?.identities?.[0]?.identity_data || {};
       
-      let kakaoPhone = meta.phone_number || meta.phone || identityData.phone_number || identityData.phone || session.user?.phone || "";
+      // 💡 [수정] Supabase가 카카오 데이터를 통째로 숨겨놓는 비밀 공간(kakao_account)까지 싹 스캔합니다.
+      let kakaoPhone = 
+        meta.phone_number || 
+        meta.phone || 
+        meta.kakao_account?.phone_number || 
+        identityData.phone_number || 
+        identityData.phone || 
+        session.user?.phone || 
+        "";
 
       if (!kakaoPhone) {
-        alert("카카오 계정에 연동된 전화번호 정보가 없습니다.\n카카오톡 설정에서 '전화번호 제공'에 동의하시거나, 일반 로그인을 이용해주세요.");
-        await supabase.auth.signOut();
-        setIsKakaoLoading(false);
-        return;
+        const testPhone = prompt(
+          "🚨 [임시 관리자 테스트 모드]\n데이터 스캔 중입니다.\n\n학원 DB에 등록된 학부모 연락처를 직접 입력해주세요.\n(예: 01012345678)"
+        );
+        
+        if (testPhone) {
+          kakaoPhone = testPhone;
+        } else {
+          await supabase.auth.signOut();
+          setIsKakaoLoading(false);
+          return;
+        }
       }
 
-      // +82 국가코드 안전하게 변환
       if (kakaoPhone.startsWith("+82")) {
         kakaoPhone = "0" + kakaoPhone.slice(3).trim(); 
       }
@@ -82,6 +98,8 @@ export default function ParentPortalPage() {
       const formattedPhone = kakaoPhone
         .replace(/[^0-9]/g, "")
         .replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
+
+      console.log("📞 최종 파싱된 테스트 폰 번호:", formattedPhone);
 
       try {
         const { data } = await supabase.from("parent").select("parent_id").eq("phone", formattedPhone).limit(1).maybeSingle();
@@ -92,7 +110,7 @@ export default function ParentPortalPage() {
           setIsKakaoLoading(false);
           loadDashboard(data.parent_id);
         } else {
-          alert(`등록된 학원 연락처(${formattedPhone})와 일치하는 학부모 정보가 없습니다.\n학원에 등록된 번호와 카카오톡 번호가 같은지 확인해주세요.`);
+          alert(`등록된 학원 연락처(${formattedPhone})와 일치하는 학부모 정보가 없습니다.`);
           await supabase.auth.signOut();
           setIsKakaoLoading(false); 
         }
@@ -147,11 +165,13 @@ export default function ParentPortalPage() {
     }
   };
 
+  // 💡 [수정됨] 카카오 로그인 시 전화번호(scope)를 콕 집어서 강제로 요구합니다.
   const loginWithKakao = async () => {
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider: "kakao", 
       options: { 
         redirectTo: `${window.location.origin}/parent`,
+        scopes: "phone_number profile_nickname profile_image account_email" // 카카오에 요구할 항목 명시
       }
     });
     if (error) alert("카카오 로그인 중 오류가 발생했습니다.");
