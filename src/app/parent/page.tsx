@@ -61,7 +61,11 @@ export default function ParentPortalPage() {
     if (hash.includes("access_token")) setIsKakaoLoading(true); 
 
     const handleKakaoSession = async (session: any) => {
-      let kakaoPhone = session.user?.user_metadata?.phone_number || session.user?.phone || "";
+      // 💡 [안전장치 추가] Supabase가 데이터를 숨겨놓을 수 있는 모든 경로를 샅샅이 뒤집니다.
+      const meta = session.user?.user_metadata || {};
+      const identityData = session.user?.identities?.[0]?.identity_data || {};
+      
+      let kakaoPhone = meta.phone_number || meta.phone || identityData.phone_number || identityData.phone || session.user?.phone || "";
 
       if (!kakaoPhone) {
         alert("카카오 계정에 연동된 전화번호 정보가 없습니다.\n카카오톡 설정에서 '전화번호 제공'에 동의하시거나, 일반 로그인을 이용해주세요.");
@@ -70,11 +74,11 @@ export default function ParentPortalPage() {
         return;
       }
 
+      // +82 국가코드 안전하게 변환
       if (kakaoPhone.startsWith("+82")) {
         kakaoPhone = "0" + kakaoPhone.slice(3).trim(); 
       }
       
-      // 💡 [TS 에러 수정] m, p1, p2, p3 매개변수에 명시적으로 string 타입을 지정
       const formattedPhone = kakaoPhone
         .replace(/[^0-9]/g, "")
         .replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
