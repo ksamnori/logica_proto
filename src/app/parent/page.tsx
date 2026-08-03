@@ -1,4 +1,3 @@
-// src/app/parent/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -61,27 +60,39 @@ export default function ParentPortalPage() {
     if (hash.includes("access_token")) setIsKakaoLoading(true); 
 
     const handleKakaoSession = async (session: any) => {
-      // 💡 [심층 해부 로그] 점(...)으로 숨기지 못하게 JSON으로 보따리를 완전히 풀어헤칩니다!
-      console.log("🔥 [디버깅] 카카오 세션 딥-스캔:", JSON.stringify(session.user, null, 2));
-
-      const meta = session.user?.user_metadata || {};
-      const identityData = session.user?.identities?.[0]?.identity_data || {};
+      console.log("🔥 [1단계] Supabase 세션 확인:", session);
       
-      // 💡 [수정] Supabase가 카카오 데이터를 통째로 숨겨놓는 비밀 공간(kakao_account)까지 싹 스캔합니다.
-      let kakaoPhone = 
-        meta.phone_number || 
-        meta.phone || 
-        meta.kakao_account?.phone_number || 
-        identityData.phone_number || 
-        identityData.phone || 
-        session.user?.phone || 
-        "";
+      let kakaoPhone = "";
 
+      // 💡 [핵심 비기] Supabase를 믿지 않고, 카카오 출입증(provider_token)으로 카카오 본서버에 직접 요청
+      if (session.provider_token) {
+        try {
+          const res = await fetch("https://kapi.kakao.com/v2/user/me", {
+            headers: {
+              Authorization: `Bearer ${session.provider_token}`,
+              "Content-type": "application/x-www-form-urlencoded;charset=utf-8",
+            },
+          });
+          const kakaoData = await res.json();
+          console.log("🚀 [2단계] 카카오 다이렉트 통신 성공! 데이터:", kakaoData);
+          
+          kakaoPhone = kakaoData?.kakao_account?.phone_number || "";
+        } catch (e) {
+          console.error("카카오 다이렉트 호출 실패", e);
+        }
+      }
+
+      // 백업: Supabase 메타데이터 스캔
+      if (!kakaoPhone) {
+        const meta = session.user?.user_metadata || {};
+        kakaoPhone = meta.phone_number || meta.phone || session.user?.identities?.[0]?.identity_data?.phone_number || "";
+      }
+
+      // 우회: 테스트 모드 프롬프트
       if (!kakaoPhone) {
         const testPhone = prompt(
-          "🚨 [임시 관리자 테스트 모드]\n데이터 스캔 중입니다.\n\n학원 DB에 등록된 학부모 연락처를 직접 입력해주세요.\n(예: 01012345678)"
+          "🚨 [임시 관리자 테스트 모드]\n카카오에서 전화번호를 받지 못했습니다.\n학원 DB에 등록된 학부모 연락처를 직접 입력해주세요.\n(예: 01012345678)"
         );
-        
         if (testPhone) {
           kakaoPhone = testPhone;
         } else {
@@ -91,18 +102,25 @@ export default function ParentPortalPage() {
         }
       }
 
+      // +82 10-XXXX-XXXX 형식 정리
       if (kakaoPhone.startsWith("+82")) {
         kakaoPhone = "0" + kakaoPhone.slice(3).trim(); 
       }
       
-      const formattedPhone = kakaoPhone
-        .replace(/[^0-9]/g, "")
-        .replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
+      // 💡 [하이픈 패치] 순수 숫자 버전과 하이픈 버전을 모두 준비합니다.
+      const rawPhone = kakaoPhone.replace(/[^0-9]/g, ""); 
+      const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
-      console.log("📞 최종 파싱된 테스트 폰 번호:", formattedPhone);
+      console.log("📞 [3단계] 폰 번호 검색 준비 완료:", { rawPhone, formattedPhone });
 
+      // DB(parent 테이블) 매칭 시도 (.or 로직 적용)
       try {
-        const { data } = await supabase.from("parent").select("parent_id").eq("phone", formattedPhone).limit(1).maybeSingle();
+        const { data } = await supabase
+          .from("parent")
+          .select("parent_id")
+          .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone}`)
+          .limit(1)
+          .maybeSingle();
         
         if (data) {
           sessionStorage.setItem("logica_parent_id", data.parent_id);
@@ -128,7 +146,6 @@ export default function ParentPortalPage() {
     initAuth();
   }, []);
 
-  // 💡 [TS 에러 수정] 여기에도 m, p1, p2, p3 에 string 타입을 명시
   const handlePhoneInput = (val: string) => {
     const formatted = val
       .replace(/[^0-9]/g, "")
@@ -165,13 +182,12 @@ export default function ParentPortalPage() {
     }
   };
 
-  // 💡 [수정됨] 카카오 로그인 시 전화번호(scope)를 콕 집어서 강제로 요구합니다.
   const loginWithKakao = async () => {
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider: "kakao", 
       options: { 
         redirectTo: `${window.location.origin}/parent`,
-        scopes: "phone_number profile_nickname profile_image account_email" // 카카오에 요구할 항목 명시
+        scopes: "phone_number profile_nickname profile_image account_email"
       }
     });
     if (error) alert("카카오 로그인 중 오류가 발생했습니다.");
