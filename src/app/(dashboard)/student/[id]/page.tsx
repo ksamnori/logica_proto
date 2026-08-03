@@ -98,7 +98,7 @@ export default function StudentDetailPage() {
   };
 
   const loadConsultLogs = async () => {
-    const { data } = await supabase.from("consultation_log").select("*, instructor(name)").eq("student_id", studentId).order("created_at", { ascending: false }).limit(200); // 💡 OOM 방지
+    const { data } = await supabase.from("consultation_log").select("*, instructor(name)").eq("student_id", studentId).order("created_at", { ascending: false }).limit(200);
     setConsultLogs(data || []);
   };
 
@@ -114,13 +114,12 @@ export default function StudentDetailPage() {
     setBillingList(data || []);
   };
 
-  // 💡 [보안 강화] 데이터 영구 삭제는 관리자만 가능하도록 제한
   const deleteStudentData = async () => {
     if (!currentUser.isAdmin) {
       alert("🚫 학생의 모든 데이터를 완전히 삭제하는 기능은 원장 및 관리자만 수행할 수 있습니다.");
       return;
     }
-    if (!confirm("⚠️ 경고: 학생의 기본 정보뿐만 아니라 성적, 출결, 수납 등 모든 기록이 완전히 삭제되며 절대 복구할 수 없습니다.\n\n정말 삭제하시겠습니까?")) return;
+    if (!confirm("⚠️ 경고: 학생의 기본 정보뿐만 전적, 출결, 수납 등 모든 기록이 완전히 삭제되며 절대 복구할 수 없습니다.\n\n정말 삭제하시겠습니까?")) return;
     
     try {
       await Promise.all([
@@ -188,7 +187,6 @@ export default function StudentDetailPage() {
     return enrollments.length > 0 ? enrollments.map(e => e.class?.name).join(", ") : "미배정";
   };
 
-  // 💡 [성능 최적화] 출결 상태 렌더링에 useMemo 도입 (불필요한 달력 재계산 방지)
   const calendarDays = useMemo(() => {
     const firstDay = new Date(calYear, calMonth, 1).getDay();
     const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
@@ -310,8 +308,8 @@ export default function StudentDetailPage() {
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scroll space-y-4 pb-10">
                   {consultLogs.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold border border-dashed border-slate-300 rounded-xl bg-slate-50">등록된 상담 기록이 없습니다.</div> : 
-                    consultLogs.map(log => (
-                      <div key={log.log_id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
+                    consultLogs.map((log, idx) => (
+                      <div key={log.log_id || log.id || idx} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
                         <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-400"></div>
                         <div className="flex justify-between items-start mb-3 pl-2">
                           <div className="flex items-center gap-3">
@@ -501,8 +499,8 @@ export default function StudentDetailPage() {
 
                   <div className="space-y-3">
                     {billingList.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold border border-dashed border-slate-300 rounded-xl bg-slate-50">청구 내역이 없습니다.</div> :
-                      billingList.map(bill => (
-                        <div key={bill.billing_id} className={`bg-white p-4 rounded-xl border ${bill.status === '완납' ? 'border-slate-200' : 'border-rose-300'} shadow-sm flex items-center justify-between hover:bg-slate-50 transition-colors`}>
+                      billingList.map((bill, idx) => (
+                        <div key={bill.billing_id || bill.id || idx} className={`bg-white p-4 rounded-xl border ${bill.status === '완납' ? 'border-slate-200' : 'border-rose-300'} shadow-sm flex items-center justify-between hover:bg-slate-50 transition-colors`}>
                           <div className="flex items-center gap-4">
                             <div className="w-14 h-14 rounded-xl bg-slate-100 flex flex-col items-center justify-center border border-slate-200 shrink-0 shadow-inner">
                               <span className="text-[10px] text-slate-500 font-bold">{bill.billing_month.split('-')[0]}년</span>

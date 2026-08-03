@@ -28,6 +28,10 @@ export default function TeacherDashboardPage() {
   const [attStudents, setAttStudents] = useState<any[]>([]);
   const [activeAttMenu, setActiveAttMenu] = useState<string | null>(null);
 
+  // === 수동 시간 설정 모달 상태 ===
+  const [manualModalData, setManualModalData] = useState<any | null>(null);
+  const [manualForm, setManualForm] = useState({ status: "NONE", checkIn: "", checkOut: "" });
+
   // === 업무 공유 모달 상태 ===
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
 
@@ -38,10 +42,17 @@ export default function TeacherDashboardPage() {
 
     loadDashboardData(instId);
     
-    // 바탕 클릭 시 출결 드롭다운 닫기
-    const closeMenu = () => setActiveAttMenu(null);
-    document.addEventListener("click", closeMenu);
-    return () => document.removeEventListener("click", closeMenu);
+    // 💡 [완벽 해결] 클릭한 요소가 '.kebab-container' 내부인지 확인하여 닫기 예외 처리
+    const closeMenu = (e: MouseEvent) => {
+      const target = e.target as Element;
+      if (target.closest('.kebab-container')) {
+        return; // 케밥 메뉴(버튼+드롭다운) 안쪽을 클릭했으면 무시 (안 닫음)
+      }
+      setActiveAttMenu(null); // 바깥쪽을 클릭했을 때만 닫음
+    };
+
+    document.addEventListener("mousedown", closeMenu);
+    return () => document.removeEventListener("mousedown", closeMenu);
   }, []);
 
   useEffect(() => {
@@ -55,7 +66,6 @@ export default function TeacherDashboardPage() {
   // 데이터 로딩 
   // ==========================================
   const loadDashboardData = async (instId: string) => {
-    // 1. 내 담당 반 가져오기
     const { data: classes } = await supabase
       .from("class")
       .select("*, class_schedule(day_of_week, start_time, end_time)")
@@ -74,7 +84,6 @@ export default function TeacherDashboardPage() {
       setSelectedClassId(sortedClasses[0].class_id);
     }
 
-    // 2. 미처리 학부모 요청 (CS)
     const { data: classIds } = await supabase.from("class").select("class_id").eq("instructor_id", instId);
     const cIds = classIds?.map((c: any) => c.class_id) || [];
     
@@ -90,10 +99,7 @@ export default function TeacherDashboardPage() {
       }
     }
 
-    // 3. 업무 공유 보드 (Memos)
     fetchMemos();
-
-    // 4. 오늘의 할일 (가상 카운팅)
     setTodoStats({ grading: Math.floor(Math.random() * 5) + 1, clinic: Math.floor(Math.random() * 3) });
   };
 
@@ -103,9 +109,7 @@ export default function TeacherDashboardPage() {
     setMemos(memoData || []);
   };
 
-  // 💡 [버그 픽스] UUID 하이픈 충돌을 막기 위한 안전한 배열 통합 쿼리 적용
   const fetchClassDetails = async (classId: string) => {
-    // 1. 해당 반에 배정된(enrollment) 학생과 직접 소속된(student.class_id) 학생의 ID를 모두 수집합니다.
     const [ { data: enrollData }, { data: directData } ] = await Promise.all([
       supabase.from("enrollment").select("student_id").eq("class_id", classId),
       supabase.from("student").select("student_id").eq("class_id", classId)
@@ -113,18 +117,14 @@ export default function TeacherDashboardPage() {
 
     const enrollIds = enrollData?.map((e: any) => e.student_id) || [];
     const directIds = directData?.map((s: any) => s.student_id) || [];
-    
-    // 2. 중복을 제거하여 최종 조회할 타겟 ID 배열을 만듭니다.
     const allTargetIds = Array.from(new Set([...enrollIds, ...directIds]));
 
-    // 반에 배정된 학생이 아예 없으면 즉시 빈 데이터 반환
     if (allTargetIds.length === 0) {
       setStudents([]);
       setClassStats({ avgScore: 0, hwRate: 0, bookName: "주교재 미배정", bookProgress: 0 });
       return;
     }
 
-    // 3. 구문 에러가 나지 않도록 배열(allTargetIds)을 그대로 .in() 조건에 주입합니다.
     const { data: classStudents } = await supabase
       .from("student")
       .select("*, parent(*), exam_assignment(*), enrollment(class(name))")
@@ -157,9 +157,8 @@ export default function TeacherDashboardPage() {
   // 출결 관리 (Attendance)
   // ==========================================
   const fetchAttendance = async (classId: string) => {
-    const today = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0]; // KST
+    const today = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
 
-    // 💡 [버그 픽스] 출결 조회 시에도 동일하게 안전한 ID 배열 통합 쿼리 적용
     const [ { data: enrollData }, { data: directData } ] = await Promise.all([
       supabase.from("enrollment").select("student_id").eq("class_id", classId),
       supabase.from("student").select("student_id").eq("class_id", classId)
@@ -185,22 +184,14 @@ export default function TeacherDashboardPage() {
     
     const mappedAtt = (classStudents || []).map((st: any) => {
       const todayAtt = st.attendance?.find((a: any) => a.attendance_date === today);
-      let status = "NONE";
-      let time = null;
-
-      if (todayAtt) {
-        if (todayAtt.check_out_time) status = "ENDED";
-        else if (todayAtt.status === "출석") status = "PRESENT";
-        else if (todayAtt.status === "결석") status = "ABSENT";
-        else if (todayAtt.status === "지각") status = "LATE";
-        else if (todayAtt.status === "조퇴") status = "EARLY_LEAVE";
-
-        if (todayAtt.check_in_time) {
-          time = new Date(todayAtt.check_in_time).toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" });
-        }
-      }
-
-      return { id: st.student_id, name: st.name, att_id: todayAtt?.attendance_id, status, time };
+      return { 
+        id: st.student_id, 
+        name: st.name, 
+        att_id: todayAtt?.attendance_id, 
+        status: todayAtt?.status || "NONE", 
+        checkIn: todayAtt?.check_in_time,
+        checkOut: todayAtt?.check_out_time
+      };
     });
 
     setAttStudents(mappedAtt.sort((a: any, b: any) => a.name.localeCompare(b.name)));
@@ -210,33 +201,54 @@ export default function TeacherDashboardPage() {
     let total = 0, present = 0, earlyLeave = 0, absent = 0;
     attStudents.forEach(st => {
       total++;
-      if (st.status === "ABSENT") absent++;
-      else if (st.status === "EARLY_LEAVE") earlyLeave++;
-      else if (["PRESENT", "LATE", "ENDED"].includes(st.status)) present++;
+      if (st.status === "결석") absent++;
+      else if (st.status === "조퇴") earlyLeave++;
+      else if (["출석", "지각"].includes(st.status)) present++;
     });
     return { total, present, leave: earlyLeave, absent };
   }, [attStudents]);
 
-  const updateAttendance = async (studentId: string, attId: string | null, newStatus: string) => {
+  // 원클릭 액션 핸들러
+  const handleAttAction = async (student: any, action: string) => {
     const today = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
     const nowTimestamp = new Date().toISOString();
-    
-    let dbStatus = "출석";
-    if (newStatus === "ABSENT") dbStatus = "결석";
-    if (newStatus === "LATE") dbStatus = "지각";
-    if (newStatus === "EARLY_LEAVE") dbStatus = "조퇴";
-    if (newStatus === "NONE") dbStatus = "미처리";
+    let payload: any = {};
+
+    if (action === "ABSENT" && student.status !== "결석") {
+      if (!confirm(`[${student.name}] 학생을 '결석' 처리하시겠습니까?`)) return;
+    }
+
+    if (action === "DELETE") {
+      if (!confirm(`[${student.name}] 학생의 오늘 출결 기록을 초기화(삭제)하시겠습니까?`)) return;
+      if (student.att_id) {
+        await supabase.from("attendance").delete().eq("attendance_id", student.att_id);
+      }
+      fetchAttendance(selectedClassId);
+      return;
+    }
+
+    if (action === "PRESENT") {
+      payload = { status: "출석" };
+      if (!student.checkIn) payload.check_in_time = nowTimestamp;
+    } else if (action === "LATE") {
+      payload = { status: "지각" };
+      if (!student.checkIn) payload.check_in_time = nowTimestamp;
+    } else if (action === "ABSENT") {
+      payload = { status: "결석", check_in_time: null, check_out_time: null };
+    } else if (action === "EARLY_LEAVE") {
+      payload = { status: "조퇴" };
+      if (!student.checkOut) payload.check_out_time = nowTimestamp;
+    } else if (action === "ENDED") {
+      payload = { check_out_time: nowTimestamp };
+    }
 
     try {
-      if (attId && newStatus === "ENDED") {
-        await supabase.from("attendance").update({ check_out_time: nowTimestamp }).eq("attendance_id", attId);
-      } else if (attId) {
-        if (newStatus === "NONE") await supabase.from("attendance").delete().eq("attendance_id", attId);
-        else await supabase.from("attendance").update({ status: dbStatus }).eq("attendance_id", attId);
-      } else if (newStatus !== "NONE") {
-        const { data: fallback } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", studentId).eq("class_id", selectedClassId).maybeSingle();
+      if (student.att_id) {
+        await supabase.from("attendance").update(payload).eq("attendance_id", student.att_id);
+      } else {
+        const { data: fallback } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", student.id).eq("class_id", selectedClassId).maybeSingle();
         await supabase.from("attendance").insert({
-          student_id: studentId, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, status: dbStatus
+          student_id: student.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
         });
       }
     } catch (e) { console.error(e); } finally {
@@ -245,15 +257,79 @@ export default function TeacherDashboardPage() {
   };
 
   const bulkAttend = async () => {
-    if (!confirm('현재 리스트에 있는 미처리된 모든 학생을 "출석" 처리하시겠습니까?')) return;
+    if (!confirm('현재 미처리된 모든 학생을 "출석" 처리하시겠습니까?')) return;
     const toUpdate = attStudents.filter(s => s.status === "NONE");
-    for (const s of toUpdate) await updateAttendance(s.id, s.att_id, "PRESENT");
+    for (const s of toUpdate) await handleAttAction(s, "PRESENT");
   };
 
   const bulkEnd = async () => {
-    if (!confirm('현재 리스트에 있는 출석/지각 학생을 모두 "수업 종료" 처리하시겠습니까?')) return;
-    const toUpdate = attStudents.filter(s => ["PRESENT", "LATE"].includes(s.status));
-    for (const s of toUpdate) await updateAttendance(s.id, s.att_id, "ENDED");
+    if (!confirm('현재 출석/지각 학생을 모두 "수업 종료" 처리하시겠습니까?')) return;
+    const toUpdate = attStudents.filter(s => ["출석", "지각"].includes(s.status) && !s.checkOut);
+    for (const s of toUpdate) await handleAttAction(s, "ENDED");
+  };
+
+  const formatTimeForInput = (isoStr: string) => {
+    if (!isoStr) return "";
+    const d = new Date(isoStr);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  };
+
+  const openManualModal = (student: any) => {
+    setManualModalData(student);
+    setManualForm({
+      status: student.status === "NONE" ? "출석" : student.status,
+      checkIn: formatTimeForInput(student.checkIn),
+      checkOut: formatTimeForInput(student.checkOut)
+    });
+    setActiveAttMenu(null);
+  };
+
+  const handleManualSave = async () => {
+    const today = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
+    
+    const toIsoString = (timeStr: string) => {
+      if (!timeStr) return null;
+      const [hh, mm] = timeStr.split(':');
+      const d = new Date(`${today}T${hh}:${mm}:00+09:00`);
+      return d.toISOString();
+    };
+
+    const { status, checkIn, checkOut } = manualForm;
+
+    try {
+      if (status === "NONE") {
+        if (manualModalData.att_id) {
+          await supabase.from("attendance").delete().eq("attendance_id", manualModalData.att_id);
+        }
+      } else {
+        const payload: any = {
+          status,
+          check_in_time: toIsoString(checkIn),
+          check_out_time: toIsoString(checkOut)
+        };
+
+        if (status === "결석") {
+          payload.check_in_time = null;
+          payload.check_out_time = null;
+        }
+
+        if (manualModalData.att_id) {
+          await supabase.from("attendance").update(payload).eq("attendance_id", manualModalData.att_id);
+        } else {
+          const { data: fallback } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", manualModalData.id).eq("class_id", selectedClassId).maybeSingle();
+          await supabase.from("attendance").insert({
+            student_id: manualModalData.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
+          });
+        }
+      }
+      alert("✅ 출결이 성공적으로 수동 반영되었습니다.");
+    } catch (e) { 
+      console.error(e); 
+      alert("❌ 업데이트 중 오류가 발생했습니다.");
+    } finally {
+      setManualModalData(null);
+      fetchAttendance(selectedClassId);
+    }
   };
 
   const deleteMemo = async (memoId: string) => {
@@ -484,7 +560,7 @@ export default function TeacherDashboardPage() {
           
           <div className="grid grid-cols-4 divide-x divide-slate-100 border-b border-slate-100 bg-white shrink-0">
             <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-slate-800">{attSummary.total}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">전체</span></div>
-            <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-blue-600">{attSummary.present}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">출석</span></div>
+            <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-blue-600">{attSummary.present}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">출석/지각</span></div>
             <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-indigo-500">{attSummary.leave}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">조퇴</span></div>
             <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-rose-500">{attSummary.absent}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">결석</span></div>
           </div>
@@ -497,56 +573,74 @@ export default function TeacherDashboardPage() {
           <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2 bg-slate-50 relative pb-10">
             {attStudents.length === 0 ? <div className="text-center py-6 text-xs text-slate-400 font-bold">해당 반에 조회된 학생이 없습니다.</div> :
               attStudents.map(student => {
-                let btnHtml = <></>;
-                if (student.status === 'NONE') {
-                  btnHtml = (
-                    <>
-                      <button onClick={() => updateAttendance(student.id, student.att_id, 'ABSENT')} className="px-2 py-1 border border-rose-300 text-rose-500 text-[10px] font-bold rounded hover:bg-rose-50 transition-colors">결석</button>
-                      <button onClick={() => updateAttendance(student.id, student.att_id, 'PRESENT')} className="px-2 py-1 border border-[#002864] text-[#002864] text-[10px] font-bold rounded hover:bg-blue-50 transition-colors ml-1">출석</button>
-                    </>
-                  );
-                } else if (['PRESENT', 'LATE'].includes(student.status)) {
-                  const timeColor = student.status === 'LATE' ? 'text-orange-500' : 'text-[#002864]';
-                  btnHtml = (
-                    <>
-                      <span className={`text-[10px] font-bold mr-2 ${timeColor}`}>{student.time} {student.status === 'LATE' ? '지각' : '출석'}</span>
-                      <button onClick={() => updateAttendance(student.id, student.att_id, 'ENDED')} className="px-2 py-1 border border-slate-700 text-slate-700 text-[10px] font-bold rounded hover:bg-slate-100 transition-colors">종료</button>
-                    </>
-                  );
-                } else if (student.status === 'ENDED') {
-                  btnHtml = <span className="text-[10px] font-bold text-slate-500 px-2 py-1 bg-slate-100 rounded">수업종료</span>;
-                } else if (student.status === 'ABSENT') {
-                  btnHtml = <span className="text-[10px] font-bold text-rose-500 px-2 py-1 bg-rose-50 border border-rose-200 rounded">결석처리</span>;
-                } else if (student.status === 'EARLY_LEAVE') {
-                  btnHtml = <span className="text-[10px] font-bold text-indigo-500 px-2 py-1 bg-indigo-50 border border-indigo-200 rounded">{student.time} 조퇴</span>;
-                }
-
+                const isPresent = student.status === '출석';
+                const isAbsent = student.status === '결석';
+                const isLate = student.status === '지각';
+                const isEarlyLeave = student.status === '조퇴';
                 const isMenuOpen = activeAttMenu === student.id;
 
+                const timeInStr = student.checkIn ? new Date(student.checkIn).toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" }) : "";
+                const timeOutStr = student.checkOut ? new Date(student.checkOut).toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" }) : "";
+
                 return (
-                  <div key={student.id} className="bg-white p-2.5 rounded-xl border border-slate-200 flex items-center justify-between text-xs shadow-sm hover:border-slate-300 transition-colors relative">
-                    <div className="flex items-center gap-2">
-                      <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                  <div key={student.id} className="bg-white p-2 rounded-xl border border-slate-200 flex flex-col justify-center text-xs shadow-sm hover:border-slate-300 transition-colors relative gap-2">
+                    
+                    <div className="flex justify-between items-center w-full">
+                      <div className="flex items-center gap-2">
+                        <div className="w-7 h-7 rounded-full bg-slate-100 flex items-center justify-center text-slate-400">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+                        </div>
+                        <span className="font-bold text-slate-800 text-[13px]">{student.name}</span>
                       </div>
-                      <span className="font-bold text-slate-800">{student.name}</span>
-                    </div>
-                    <div className="flex items-center">
-                      {btnHtml}
-                      <div className="relative inline-block ml-1">
-                        <button onClick={(e) => { e.stopPropagation(); setActiveAttMenu(isMenuOpen ? null : student.id); }} className="p-1 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded transition-colors">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"></circle><circle cx="12" cy="5" r="1"></circle><circle cx="12" cy="19" r="1"></circle></svg>
+
+                      {/* 💡 [완벽 해결] 케밥 버튼 영역을 .kebab-container 클래스로 묶어 외부 클릭 시 닫히는 로직과 분리 */}
+                      <div className="relative inline-block shrink-0 kebab-container">
+                        <button 
+                          onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} 
+                          className="p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded transition-colors"
+                        >
+                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
                         </button>
                         {isMenuOpen && (
-                          <div className="absolute right-0 top-6 w-24 bg-white shadow-xl rounded-xl border border-slate-200 z-50 py-1">
-                            <button onClick={() => updateAttendance(student.id, student.att_id, 'LATE')} className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50">지각 처리</button>
-                            <button onClick={() => updateAttendance(student.id, student.att_id, 'EARLY_LEAVE')} className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50">조퇴 처리</button>
-                            <hr className="border-slate-100 my-0.5" />
-                            <button onClick={() => updateAttendance(student.id, student.att_id, 'NONE')} className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-400 hover:bg-slate-50">초기화</button>
-                          </div>
+                            <div className="absolute right-0 top-6 w-32 bg-white shadow-xl rounded-xl border border-slate-200 z-50 py-1">
+                              <button onClick={() => { openManualModal(student); }} className="w-full text-left px-4 py-2.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2">⚙️ 수동 설정</button>
+                              <hr className="border-slate-100 my-0.5" />
+                              <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-4 py-2.5 text-[11px] font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-2">🗑️ 기록 삭제</button>
+                            </div>
                         )}
                       </div>
                     </div>
+
+                    <div className="flex items-center w-full rounded-md border border-slate-200 overflow-hidden shadow-sm">
+                      <button onClick={() => handleAttAction(student, 'PRESENT')} className={`flex-1 py-1.5 text-[11px] font-extrabold transition-colors ${isPresent ? 'bg-emerald-500 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>출석</button>
+                      <div className="w-px bg-slate-200 h-4"></div>
+                      <button onClick={() => handleAttAction(student, 'ABSENT')} className={`flex-1 py-1.5 text-[11px] font-extrabold transition-colors ${isAbsent ? 'bg-rose-400 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>결석</button>
+                      <div className="w-px bg-slate-200 h-4"></div>
+                      <button onClick={() => handleAttAction(student, 'LATE')} className={`flex-1 py-1.5 text-[11px] font-extrabold transition-colors ${isLate ? 'bg-amber-400 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>지각</button>
+                      <div className="w-px bg-slate-200 h-4"></div>
+                      <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className={`flex-1 py-1.5 text-[11px] font-extrabold transition-colors ${isEarlyLeave ? 'bg-indigo-400 text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>조퇴</button>
+                    </div>
+
+                    <div className="flex items-center justify-between min-h-[24px]">
+                      <div className="flex items-center gap-2">
+                        { (isPresent || isLate) && (
+                           <span className={`text-[10px] font-black ${isLate ? 'text-amber-500' : 'text-emerald-600'}`}>{timeInStr} {isLate ? '지각' : '출석'}</span>
+                        )}
+                        { isEarlyLeave && (
+                           <span className="text-[10px] font-black text-indigo-500">{timeOutStr} 조퇴</span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center">
+                         {(isPresent || isLate) && !student.checkOut && (
+                            <button onClick={() => handleAttAction(student, 'ENDED')} className="px-3 py-1 bg-slate-700 text-white text-[10px] font-extrabold rounded-md shadow-sm hover:bg-slate-900 transition-colors">종료</button>
+                         )}
+                         {student.checkOut && !isEarlyLeave && (
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-md font-extrabold border border-slate-200">종료됨 {timeOutStr}</span>
+                         )}
+                      </div>
+                    </div>
+
                   </div>
                 );
               })
@@ -555,6 +649,47 @@ export default function TeacherDashboardPage() {
         </div>
 
       </section>
+
+      {/* 수동 설정 모달 */}
+      {manualModalData && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
+          <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">
+            <h3 className="text-lg font-black text-slate-800 mb-5 border-b border-slate-100 pb-3 flex items-center gap-2">⚙️ 수동 출결 설정 <span className="text-sm font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded ml-auto">{manualModalData.name}</span></h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-extrabold text-slate-500 mb-1.5">출석 상태</label>
+                <select value={manualForm.status} onChange={e => setManualForm({...manualForm, status: e.target.value})} className="border border-slate-300 p-2.5 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-[#002864] bg-slate-50">
+                  <option value="출석">✅ 출석</option>
+                  <option value="결석">❌ 결석</option>
+                  <option value="지각">⏰ 지각</option>
+                  <option value="조퇴">🏃 조퇴</option>
+                  <option value="NONE">🗑️ 미처리 (초기화)</option>
+                </select>
+              </div>
+
+              {manualForm.status !== "NONE" && manualForm.status !== "결석" && (
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-500 mb-1.5">출석(시작) 시간</label>
+                  <input type="time" value={manualForm.checkIn} onChange={e => setManualForm({...manualForm, checkIn: e.target.value})} className="border border-slate-300 p-2 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-[#002864]" />
+                </div>
+              )}
+
+              {manualForm.status !== "NONE" && manualForm.status !== "결석" && (
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-500 mb-1.5">조퇴/종료 시간</label>
+                  <input type="time" value={manualForm.checkOut} onChange={e => setManualForm({...manualForm, checkOut: e.target.value})} className="border border-slate-300 p-2 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-[#002864]" />
+                </div>
+              )}
+            </div>
+
+            <div className="flex justify-end gap-2 mt-8">
+              <button onClick={() => setManualModalData(null)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-colors">취소</button>
+              <button onClick={handleManualSave} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-xl text-sm shadow-md transition-colors">저장하기</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <MemoModal 
         isOpen={isMemoModalOpen} 
