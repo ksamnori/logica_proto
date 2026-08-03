@@ -11,6 +11,7 @@ import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_C
 // 이미 실행되어 API가 다 붙은 뒤)에서 window.MathJax를 덮어써서 그 API가 통째로 날아가는 문제가 있었다.
 // clinic/viewer/page.tsx와 동일하게, config를 먼저 심고 그 다음에 스크립트 태그를 만들어 붙인다.
 let mathJaxInitStarted = false;
+
 const initMathJax = () => {
   if (typeof window === 'undefined' || mathJaxInitStarted || document.getElementById('mathjax-script')) return;
   mathJaxInitStarted = true;
@@ -52,7 +53,8 @@ export default function TaHandheldDashboard() {
 
   useEffect(() => { initMathJax(); }, []);
 
-  const unresolvedCount = Object.keys(callsSnapshot).length + Object.keys(rechecksSnapshot).length;
+  const seatFontSize = 60;
+
   const currentCall = selectedCallKey ? callsSnapshot[selectedCallKey] : null;
   const currentRecheck = selectedCallKey ? rechecksSnapshot[selectedCallKey] : null;
 
@@ -66,6 +68,12 @@ export default function TaHandheldDashboard() {
     ...Object.values(rechecksSnapshot).map(r => ({ key: `${r.seat}::${r.uid}`, type: 'recheck' as const, seat: r.seat, name: r.name, classes: r.classes, time: r.requestedAt })),
   ].filter(req => selectedCallKey === req.key || assignmentMap[req.seat] === taClientId || assignmentMap[req.seat] === undefined)
    .sort((a, b) => a.time - b.time);
+
+  // 💡 [버그 수정] 예전엔 시스템 전체(callsSnapshot/rechecksSnapshot 전부)의 미처리 건수로
+  // "근무 종료" 버튼을 막아서, 내 담당이 아닌 — 다른 조교에게 배정된 — 호출이 남아있다는 이유로
+  // 정작 내 몫은 다 끝낸 조교(알바)가 퇴근을 못 누르는 상황이 생겼다. requestList는 이미
+  // "나에게 보이는(내 담당 + 미배정)" 요청만 걸러둔 목록이므로 그 길이를 대신 쓴다.
+  const unresolvedCount = requestList.length;
 
   return (
     <div className="h-screen bg-slate-100 flex flex-col overflow-hidden font-pretendard select-none">
@@ -110,7 +118,9 @@ export default function TaHandheldDashboard() {
 
           {/* 좌석 현황 패널 */}
           <div className="bg-white rounded-2xl shadow-sm p-2.5 flex flex-col">
-            <h2 className="text-[11px] font-bold text-slate-700 mb-1.5">좌석 현황</h2>
+            <div className="flex items-center justify-between mb-1.5">
+              <h2 className="text-[11px] font-bold text-slate-700">좌석 현황</h2>
+            </div>
             <div className="w-full mb-2" style={{ aspectRatio: `${canvasWidth || DEFAULT_CANVAS_W} / ${canvasHeight || DEFAULT_CANVAS_H}` }}>
               <SeatCanvas
                 seats={allSeatObjs}
@@ -122,12 +132,18 @@ export default function TaHandheldDashboard() {
                   const isCall = Object.keys(st?.calls || {}).length > 0;
                   const isRecheck = recheckSeatSet.has(seat);
                   const isMine = myAssignedSeats.has(seat);
-                  const tokenStyle = { width: seatWidth || DEFAULT_SEAT_CARD_W, height: seatHeight || DEFAULT_SEAT_CARD_H, transform: `scale(${scale})`, transformOrigin: 'center' } as const;
+                  // 💡 칸 사이에 실제 여백(GAP)을 두고, 스케일이 많이 축소돼도 둥근 모서리가
+                  // 눈에 보이도록 반지름을 넉넉히 줘야 한다 — 스케일 전 좌표에 4px짜리
+                  // border-radius를 주면 축소 후엔 1px도 안 남아 그냥 각진 사각형처럼 보인다.
+                  const GAP = 10;
+                  const renderW = Math.max(20, (seatWidth || DEFAULT_SEAT_CARD_W) - GAP);
+                  const renderH = Math.max(20, (seatHeight || DEFAULT_SEAT_CARD_H) - GAP);
+                  const tokenStyle = { width: renderW, height: renderH, borderRadius: 20, fontSize: seatFontSize, transform: `scale(${scale})`, transformOrigin: 'center' } as const;
 
-                  if (!st) return <div style={tokenStyle} className="rounded flex items-center justify-center text-[8px] font-bold transition-all bg-[#e2e8f0] text-[#94a3b8]">{formatSeat(seat)}</div>;
+                  if (!st) return <div style={tokenStyle} className="flex items-center justify-center font-bold transition-all bg-[#e2e8f0] text-[#94a3b8]">{formatSeat(seat)}</div>;
 
                   return (
-                    <div style={tokenStyle} className={`rounded flex items-center justify-center text-[8px] font-bold text-white transition-all shadow-sm ${isCall ? 'seat-call' : isRecheck ? 'seat-recheck' : st.status === 'hint' ? 'hint-flash text-yellow-900 border border-slate-200' : st.status === 'away' ? 'bg-amber-500' : st.status === 'submitted' ? 'bg-blue-500' : 'bg-[#002864]'} ${isMine ? 'outline outline-2 outline-amber-500 outline-offset-1' : ''}`} title={st.name}>
+                    <div style={tokenStyle} className={`flex items-center justify-center font-bold text-white transition-all shadow-sm ${isCall ? 'seat-call' : isRecheck ? 'seat-recheck' : st.status === 'hint' ? 'hint-flash text-yellow-900 border border-slate-200' : st.status === 'submitted' ? 'bg-blue-500' : 'bg-[#002864]'} ${isMine ? 'outline outline-2 outline-amber-500 outline-offset-1' : ''}`} title={st.name}>
                       {formatSeat(seat)}
                     </div>
                   );

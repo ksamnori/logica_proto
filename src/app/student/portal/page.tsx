@@ -5,8 +5,9 @@ import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { resolveTodaySession, closeSessionAtLimit, setActiveCall, clearActiveCall, setAway, clearAway } from '@/lib/clinicSession';
 import { useClinicEndRequest } from '@/hooks/useClinicEndRequest';
-import { getPointBalance } from '@/lib/mockShop';
+import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
+import { resolveClassWeekType, getISOWeekKST } from '@/lib/classRound';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -35,11 +36,16 @@ export default function StudentPortal() {
     const [studentInfo, setStudentInfo] = useState({ id: '', name: '', phone: '', classes: [] as string[] });
     const [activeTab, setActiveTab] = useState('home');
     const [weekTypes, setWeekTypes] = useState<Record<string, string>>({});
+    const [selectedClass, setSelectedClass] = useState('');
     
     const [clinicSession, setClinicSession] = useState<any>(null);
     const [roundResults, setRoundResults] = useState<Record<string, any>>({});
     const [blockStates, setBlockStates] = useState<Record<string, any>>({});
     const [hwProgress, setHwProgress] = useState<Record<string, any>>({});
+    // 💡 exam_type='과제'/'과제프린트'로 개별 배정된 exam_assignment — 새 카드를 만들지 않고
+    // 기존 "정규 과제"(block2) 카드/흐름에 그대로 합류시킨다. 클릭 시 이 값이 있으면 round=1(exam 채점,
+    // 그 흐름이 원래 쓰던 타이머 포함)로, 없으면 기존 tq_id 기반 round=2로 라우팅한다.
+    const [pendingExamAssignment, setPendingExamAssignment] = useState<{ assignment_id: number; title: string; className: string | null } | null>(null);
     
     const [now, setNow] = useState(Date.now());
     const [timeUpModal, setTimeUpModal] = useState({ isOpen: false, icon: '⏰', title: '클리닉 시간이 종료되었습니다', desc: '오늘 배정된 클리닉 시간이 모두 지났어요.' });
@@ -91,10 +97,21 @@ export default function StudentPortal() {
             } catch (e) {}
             if (classes.length === 0) classes = ['반 미배정'];
             setStudentInfo({ id: sid, name: sname, phone: localStorage.getItem('logica_student_phone') || '', classes });
-            setMockPoints(getPointBalance(sid));
+            setSelectedClass(classes[0]);
+            getPointBalance(sid).then(setMockPoints).catch(err => console.error('포인트 조회 중 오류:', err));
 
             const wTypes: any = {};
-            classes.forEach(c => wTypes[c] = localStorage.getItem(`logica_demo_week_type_${c}`) || 'odd');
+            if (classes[0] !== '반 미배정') {
+                const { data: cRows } = await supabaseClient.from('class').select('class_id, name, week_type, week_type_updated_date, session_parity, class_schedule(day_of_week)').in('name', classes);
+                await Promise.all((cRows || []).map(async (c: any) => {
+                    const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
+                    const { weekType } = await resolveClassWeekType(supabaseClient, {
+                        class_id: c.class_id, class_name: c.name, week_type: c.week_type, week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays
+                    });
+                    wTypes[c.name] = weekType;
+                }));
+            }
+            classes.forEach(c => { if (!wTypes[c]) wTypes[c] = 'odd'; });
             setWeekTypes(wTypes);
 
             const today = getKSTDateString();
@@ -193,23 +210,45 @@ export default function StudentPortal() {
 
         const { data: cData } = await supabaseClient.from('class').select('class_id, name').in('name', classes);
         const nameToId: any = {};
-        cData?.forEach((c: any) => nameToId[c.name] = c.class_id);
+        const idToName: any = {};
+        cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; idToName[c.class_id] = c.name; });
 
-        const { data: examsData } = await supabaseClient.from('exam_assignment').select('status, exam_master!inner(exam_type)').eq('student_id', sid).in('exam_master.exam_type', ['주간테스트', '과제오답유사']).order('created_at', { ascending: false });
-        const exams: any[] = examsData || []; 
-        
+        const currentWeek = getISOWeekKST();
+        const { data: examsData } = await supabaseClient.from('exam_assignment').select('status, exam_master!inner(exam_type, test_week)').eq('student_id', sid).in('exam_master.exam_type', ['주간테스트', '과제오답유사']).order('created_at', { ascending: false });
+        const exams: any[] = examsData || [];
+
         if (exams.length > 0) {
-            const wt = exams.find((e: any) => e.exam_master?.exam_type === '주간테스트' || e.exam_master?.[0]?.exam_type === '주간테스트');
-            const hw = exams.find((e: any) => e.exam_master?.exam_type === '과제오답유사' || e.exam_master?.[0]?.exam_type === '과제오답유사');
+            const getMeta = (e: any) => Array.isArray(e.exam_master) ? e.exam_master[0] : e.exam_master;
+            // 💡 주간테스트는 exam_master.test_week가 이번 주(ISO 달력 주차)와 일치하는 것만 "이번 주 테스트"로 인정한다.
+            const wt = exams.find((e: any) => getMeta(e)?.exam_type === '주간테스트' && getMeta(e)?.test_week === currentWeek);
+            const hw = exams.find((e: any) => getMeta(e)?.exam_type === '과제오답유사');
             classes.forEach(c => {
                 if (wt) newBlockStates[c].weekly_test = wt.status || '미응시';
                 if (hw) newBlockStates[c].similar_hw = hw.status || '미응시';
             });
         }
 
+        // 💡 exam_type='과제'/'과제프린트'로 강사가 개별 배정한 exam_assignment도 "정규 과제"(block2) 카드에
+        // 그대로 합류시킨다 — 새 카드를 만들지 않고, 미완료인 게 있으면 그 카드를 열어준다.
+        // class_id가 찍혀 있으면 그 반에만, 없으면(수동 배포 시 반 지정 없이 배정된 경우) 부득이하게
+        // 모든 반에 노출한다 — 특정 반 소속이 아니라는 뜻이므로 아무 반에서도 못 보는 것보단 낫다.
+        const { data: examHwData } = await supabaseClient.from('exam_assignment')
+            .select('assignment_id, status, class_id, exam_master!inner(title, exam_type)')
+            .eq('student_id', sid)
+            .in('exam_master.exam_type', ['과제', '과제프린트'])
+            .order('created_at', { ascending: false });
+        const pendingExamHw = (examHwData || []).find((a: any) => !['제출완료', '채점완료'].includes(a.status));
+        const pendingExamHwClassName: string | null = pendingExamHw?.class_id ? (idToName[pendingExamHw.class_id] || null) : null;
+        if (pendingExamHw) {
+            const getExamTitle = (a: any) => Array.isArray(a.exam_master) ? a.exam_master[0]?.title : a.exam_master?.title;
+            setPendingExamAssignment({ assignment_id: pendingExamHw.assignment_id, title: getExamTitle(pendingExamHw) || '배정된 과제', className: pendingExamHwClassName });
+        } else {
+            setPendingExamAssignment(null);
+        }
+
         const { data: hwsData } = await supabaseClient.from('student_homework_result').select('status, completed_tq_ids, homework_assignment!inner(homework_id, class_id, due_date, target_questions)').eq('student_id', sid);
-        const hws: any[] = hwsData || []; 
-        
+        const hws: any[] = hwsData || [];
+
         if (hws.length > 0) {
             const nTime = new Date();
             classes.forEach(c => {
@@ -249,6 +288,14 @@ export default function StudentPortal() {
 
                 newHwProgress[c] = { totalQuestions: tQ, completedQuestions: cQ, hwIds: aIds, incTotalQuestions: iTQ, incCompletedQuestions: iCQ, incHwIds: iIds };
             });
+        }
+
+        // 💡 tq_id 기반 과제가 전부 끝나 있어도, 강사가 개별 배정한 exam_type 과제가 아직 남아있으면
+        // "정규 과제" 카드가 완료 처리되지 않도록 마지막에 강제 오버라이드한다.
+        // class_id가 명확한 경우 그 반에만 반영 — 다른 반 학생 화면에 엉뚱하게 뜨지 않게 한다.
+        if (pendingExamHw) {
+            const targetClasses = pendingExamHwClassName ? [pendingExamHwClassName] : classes;
+            targetClasses.forEach(c => { if (newBlockStates[c]) newBlockStates[c].assignment = '미응시'; });
         }
 
         setBlockStates(newBlockStates);
@@ -453,12 +500,22 @@ export default function StudentPortal() {
 
         const testName = typeKey === 'weekly_test' ? '주간테스트' : typeKey === 'similar_hw' ? '유사과제' : typeKey === 'assignment' ? '정규과제' : '미완성과제';
 
-        if (typeKey === 'weekly_test' || typeKey === 'similar_hw') {
-            const { data } = await supabaseClient.from('exam_assignment').select('assignment_id').eq('student_id', studentInfo.id).eq('exam_master.exam_type', typeKey === 'weekly_test' ? '주간테스트' : '과제오답유사').order('created_at', { ascending: false }).limit(1);
+        if (typeKey === 'weekly_test') {
+            const currentWeek = getISOWeekKST();
+            const { data } = await supabaseClient.from('exam_assignment').select('assignment_id, exam_master!inner(test_week)').eq('student_id', studentInfo.id).eq('exam_master.exam_type', '주간테스트').eq('exam_master.test_week', currentWeek).order('created_at', { ascending: false }).limit(1);
+            if (data && data.length > 0) params.append('assignment_id', data[0].assignment_id);
+        } else if (typeKey === 'similar_hw') {
+            const { data } = await supabaseClient.from('exam_assignment').select('assignment_id').eq('student_id', studentInfo.id).eq('exam_master.exam_type', '과제오답유사').order('created_at', { ascending: false }).limit(1);
             if (data && data.length > 0) params.append('assignment_id', data[0].assignment_id);
         } else if (typeKey === 'assignment') {
+            // 💡 exam_type='과제'/'과제프린트'로 개별 배정된 게 있으면 tq_id 기반 정규과제와
+            // 같은 round=2 큐에 병합해서 보낸다 — 별도 round로 빼지 않는다.
+            // class_id가 특정 반으로 찍혀있으면 그 반 카드에서만 합쳐 보낸다(다른 반 카드는 그대로 tq_id만).
             const hwIds = hwProgress[className]?.hwIds || [];
             if (hwIds.length > 0) params.append('homework_ids', hwIds.join(','));
+            if (pendingExamAssignment && (!pendingExamAssignment.className || pendingExamAssignment.className === className)) {
+                params.append('assignment_id', String(pendingExamAssignment.assignment_id));
+            }
         } else if (typeKey === 'incomplete_assignment') {
             const incHwIds = hwProgress[className]?.incHwIds || [];
             if (incHwIds.length > 0) params.append('homework_ids', incHwIds.join(','));
@@ -487,12 +544,6 @@ export default function StudentPortal() {
         }
 
         router.push(`/clinic/viewer?${params.toString()}`);
-    };
-
-    const toggleWeekType = (className: string) => {
-        const next = weekTypes[className] === 'odd' ? 'even' : 'odd';
-        localStorage.setItem(`logica_demo_week_type_${className}`, next);
-        setWeekTypes((p: Record<string, string>) => ({ ...p, [className]: next }));
     };
 
     const demoCompleteBlock = async (className: string, blockKey: string) => {
@@ -575,11 +626,6 @@ export default function StudentPortal() {
             return (
                 <div key={`${className}-${blockKey}-${idx}`} className={`clinic-card snap-start shrink-0 w-[300px] md:w-[360px] ${v.card} rounded-2xl p-6 shadow-lg relative overflow-hidden group flex flex-col`}>
                     {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.dark.ctaText} text-[10px] font-black px-2 py-1 rounded-full shadow-md z-20 border border-slate-100`}>✅ {scoreLabel}</span>}
-                    <div className="relative z-10 mb-3">
-                        <button onClick={(e) => { e.stopPropagation(); toggleWeekType(className); }} title={`테스트: 주차 토글 (현재 ${weekTypes[className] || 'odd'}주)`} className="text-[10px] font-black bg-white/80 hover:bg-white text-slate-600 pl-2 pr-2.5 py-1 rounded-full backdrop-blur-sm shadow-sm transition-colors inline-flex items-center gap-1">
-                            <span>🏫</span>{className}
-                        </button>
-                    </div>
                     <div className="flex justify-between items-start mb-6 relative z-10">
                         <span className={`text-[10px] font-black ${v.badge} px-2 py-1 rounded shadow-sm`}>{theme.label}</span>
                         {!isDone && (isPreview ? <span className={`text-xs font-bold ${v.sub}`}>다음 주 공개</span> : <span className="text-xs font-bold text-amber-200 flex items-center gap-1">⏱️ 20분 제한</span>)}
@@ -607,9 +653,6 @@ export default function StudentPortal() {
             <div key={`${className}-${blockKey}-${idx}`} className="clinic-card snap-start shrink-0 w-[300px] md:w-[360px] bg-gradient-to-br from-[#002864] to-[#004080] rounded-2xl p-6 text-white shadow-lg relative overflow-hidden group flex flex-col">
                 {isLocked && <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2 z-20 rounded-2xl"><span className="text-3xl">🔒</span><span className="text-xs font-bold text-white/90 px-6 text-center">{isInc ? '과제를 완료하면 열려요' : '이번 주 클리닉을 완료하면 열려요'}</span></div>}
                 {isDone && <span className="absolute top-5 right-5 bg-white/90 text-[#002864] text-[10px] font-black px-2 py-1 rounded-full shadow-md z-20 border border-slate-100">✅ {scoreLabel}</span>}
-                <div className="relative z-10 mb-3">
-                    <button onClick={(e) => { e.stopPropagation(); toggleWeekType(className); }} className="text-[10px] font-black bg-white/80 hover:bg-white text-slate-600 pl-2 pr-2.5 py-1 rounded-full backdrop-blur-sm shadow-sm transition-colors inline-flex items-center gap-1"><span>🏫</span>{className}</button>
-                </div>
                 <div className="flex justify-between items-start mb-6 relative z-10">
                     <span className="text-[10px] font-black bg-blue-500 text-white px-2 py-1 rounded shadow-sm flex items-center">{isInc ? '미완성 과제' : '통합 과제 보드'}</span>
                     {!isDone && <span className={`text-xs font-bold ${isInc ? 'text-rose-300' : 'text-blue-200'}`}>{isInc ? '마감 임박' : '⏱️ D-1'}</span>}
@@ -728,19 +771,20 @@ export default function StudentPortal() {
             <main className="max-w-[1400px] w-full mx-auto p-6 md:p-8 flex-1">
                 {activeTab === 'home' && studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
                     <section className="mb-8">
-                        <div className="flex justify-between items-end mb-4">
+                        <div className="flex items-center gap-2 mb-4">
                             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">🚀 오늘의 학습 클리닉</h2>
-                            <div className="flex items-center gap-2">
-                                <button onClick={() => carouselRef.current?.scrollBy({ left: -336, behavior: 'smooth' })} className="w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center hover:bg-slate-50 font-bold">‹</button>
-                                <button onClick={() => carouselRef.current?.scrollBy({ left: 336, behavior: 'smooth' })} className="w-8 h-8 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center hover:bg-slate-50 font-bold">›</button>
-                            </div>
+                            {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
+                                <button key={cls} onClick={() => setSelectedClass(cls)} className={`text-xs font-black px-2.5 py-1 rounded-full backdrop-blur-sm shadow-sm transition-colors inline-flex items-center gap-1 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                    <span>🏫</span>{cls}
+                                </button>
+                            ))}
                         </div>
-                        <div ref={carouselRef} onPointerDown={onDragStart} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerLeave={onDragEnd} 
+                        <div ref={carouselRef} onPointerDown={onDragStart} onPointerMove={onDragMove} onPointerUp={onDragEnd} onPointerLeave={onDragEnd}
                              className="flex gap-4 overflow-x-auto no-scrollbar snap-x snap-mandatory pb-2 scroll-smooth select-none">
-                            {studentInfo.classes.map((cls, idx) => renderCard(weekTypes[cls] === 'odd' ? 'weekly_test' : 'similar_hw', 'block1', 1, cls, idx))}
-                            {studentInfo.classes.map((cls, idx) => renderCard('assignment', 'block2', 2, cls, idx))}
-                            {studentInfo.classes.map((cls, idx) => renderCard('incomplete_assignment', 'block3', 3, cls, idx))}
-                            {studentInfo.classes.map((cls, idx) => renderCard(weekTypes[cls] === 'odd' ? 'similar_hw' : 'weekly_test', 'block4', 4, cls, idx))}
+                            {renderCard(weekTypes[selectedClass] === 'odd' ? 'weekly_test' : 'similar_hw', 'block1', 1, selectedClass, 0)}
+                            {renderCard('assignment', 'block2', 2, selectedClass, 0)}
+                            {renderCard('incomplete_assignment', 'block3', 3, selectedClass, 0)}
+                            {renderCard(weekTypes[selectedClass] === 'odd' ? 'similar_hw' : 'weekly_test', 'block4', 4, selectedClass, 0)}
                         </div>
                     </section>
                 )}

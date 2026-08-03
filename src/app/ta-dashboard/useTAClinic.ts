@@ -154,10 +154,9 @@ export function useTAClinic() {
     const taClientIdSet = new Set<string>();
     const currentTaNames: string[] = [];
 
-    // 수정된 부분: 타입 강제 할당 적용
-    (Object.values(state) as any[][]).forEach((metas) => {
+    Object.values(state).forEach((metas) => {
       let latestMeta: any = null;
-      metas.forEach(meta => { if (!latestMeta || (meta.updatedAt || 0) > (latestMeta.updatedAt || 0)) latestMeta = meta; });
+      (metas as any[]).forEach(meta => { if (!latestMeta || (meta.updatedAt || 0) > (latestMeta.updatedAt || 0)) latestMeta = meta; });
       if (!latestMeta) return;
 
       const candidateUpdatedAt = latestMeta.updatedAt || 0;

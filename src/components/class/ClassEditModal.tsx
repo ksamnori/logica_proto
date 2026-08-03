@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { resolveClassWeekType, setClassHoliday, removeClassHoliday, setClassExtraSession, removeClassExtraSession } from "@/lib/classRound";
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
@@ -26,6 +27,14 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
   const [searchKeyword, setSearchKeyword] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
+  const [weekType, setWeekType] = useState<string | null>(null);
+  const [holidays, setHolidays] = useState<any[]>([]);
+  const [newHolidayDate, setNewHolidayDate] = useState("");
+  const [newHolidayReason, setNewHolidayReason] = useState("");
+  const [extraSessions, setExtraSessions] = useState<any[]>([]);
+  const [newExtraDate, setNewExtraDate] = useState("");
+  const [newExtraReason, setNewExtraReason] = useState("");
+
   useEffect(() => {
     if (isOpen && classItem) {
       setModalData({ ...classItem, originalName: classItem.name, originalCode: classItem.code });
@@ -36,11 +45,70 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
       setModalSchedules(schedules);
       setIsEditMode(false);
       setSearchKeyword("");
-      
+
       fetchClassStudents(classItem.class_id);
       searchAllStudents("");
+      fetchWeekTypeState(classItem);
+      fetchHolidays(classItem.class_id);
+      fetchExtraSessions(classItem.class_id);
     }
   }, [isOpen, classItem]);
+
+  const fetchWeekTypeState = async (c: any) => {
+    const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
+    const { weekType: wt } = await resolveClassWeekType(supabase, {
+      class_id: c.class_id, class_name: c.name, week_type: c.week_type, week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays
+    });
+    setWeekType(wt);
+  };
+
+  const fetchHolidays = async (classId: string) => {
+    const { data } = await supabase.from("class_holiday").select("*").eq("class_id", classId).order("holiday_date", { ascending: true });
+    setHolidays(data || []);
+  };
+
+  const addHoliday = async () => {
+    if (!newHolidayDate) return alert("휴일 날짜를 선택해주세요.");
+    const { error } = await setClassHoliday(supabase, modalData.class_id, newHolidayDate, newHolidayReason);
+    if (error) return alert("휴일 등록 중 오류가 발생했습니다: " + error.message);
+    setNewHolidayDate(""); setNewHolidayReason("");
+    fetchHolidays(modalData.class_id);
+  };
+
+  const deleteHoliday = async (id: string) => {
+    const { error } = await removeClassHoliday(supabase, id);
+    if (error) return alert("휴일 삭제 중 오류가 발생했습니다: " + error.message);
+    fetchHolidays(modalData.class_id);
+  };
+
+  const fetchExtraSessions = async (classId: string) => {
+    const { data } = await supabase.from("class_extra_session").select("*").eq("class_id", classId).order("session_date", { ascending: true });
+    setExtraSessions(data || []);
+  };
+
+  const addExtraSession = async () => {
+    if (!newExtraDate) return alert("보강 날짜를 선택해주세요.");
+    const { error } = await setClassExtraSession(supabase, modalData.class_id, newExtraDate, newExtraReason);
+    if (error) return alert("보강일 등록 중 오류가 발생했습니다: " + error.message);
+    setNewExtraDate(""); setNewExtraReason("");
+    fetchExtraSessions(modalData.class_id);
+  };
+
+  const deleteExtraSession = async (id: string) => {
+    const { error } = await removeClassExtraSession(supabase, id);
+    if (error) return alert("보강일 삭제 중 오류가 발생했습니다: " + error.message);
+    fetchExtraSessions(modalData.class_id);
+  };
+
+  // 💡 수동 전환은 "지금 이 시점에 회차가 막 지나갔다"고 취급한다 — session_parity를 false로
+  // 리셋해서, 자동 계산 로직이 다음 실제 수업일부터 다시 정상적으로 2회 단위 페어링을 이어가게 한다.
+  const forceToggleWeekType = async () => {
+    const next = weekType === "odd" ? "even" : "odd";
+    if (!confirm(`현재 회차 유형을 강제로 '${next === "odd" ? "주간테스트" : "과제오답유사"}'(으)로 전환하시겠습니까?`)) return;
+    const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split("T")[0];
+    await supabase.from("class").update({ week_type: next, week_type_updated_date: today, session_parity: false }).eq("class_id", modalData.class_id);
+    setWeekType(next);
+  };
 
   const fetchClassStudents = async (classId: string) => {
     const { data: enrollData } = await supabase.from("enrollment").select("student_id").eq("class_id", classId);
@@ -219,6 +287,58 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
                   </div>
                 ))}
               </div>
+            </div>
+
+            <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-lg p-4">
+              <div className="flex items-center justify-between mb-3">
+                <label className="block text-xs font-bold text-slate-500">클리닉 라운드1/4 회차 (주간테스트 ↔ 과제오답유사, 실제 수업 2회마다 전환)</label>
+                <span className={`px-2 py-0.5 rounded text-xs font-extrabold ${weekType === "odd" ? "bg-emerald-100 text-emerald-700" : "bg-violet-100 text-violet-700"}`}>
+                  현재 회차: {weekType === null ? "확인 중..." : weekType === "odd" ? "주간테스트" : "과제오답유사"}
+                </span>
+              </div>
+              {canEdit && weekType !== null && (
+                <button onClick={forceToggleWeekType} className="text-xs bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 px-3 py-1.5 rounded font-bold shadow-sm mb-4">
+                  수동으로 회차 전환하기
+                </button>
+              )}
+
+              <label className="block text-xs font-bold text-slate-500 mb-2">이 반의 휴일 (지정된 날짜엔 회차로 세지 않고 다음 실제 수업일로 미뤄집니다)</label>
+              <div className="flex flex-col gap-1.5 mb-2">
+                {holidays.length === 0 ? (
+                  <span className="text-xs text-slate-400 font-bold">등록된 휴일이 없습니다.</span>
+                ) : holidays.map(h => (
+                  <div key={h.id} className="flex items-center justify-between bg-white border border-slate-200 rounded px-3 py-1.5 text-xs">
+                    <span className="font-bold text-slate-700">{h.holiday_date} {h.reason ? `— ${h.reason}` : ""}</span>
+                    {canEdit && <button onClick={() => deleteHoliday(h.id)} className="text-rose-500 hover:text-rose-700 font-bold">삭제</button>}
+                  </div>
+                ))}
+              </div>
+              {canEdit && (
+                <div className="flex items-center gap-2 mb-4">
+                  <input type="date" value={newHolidayDate} onChange={e => setNewHolidayDate(e.target.value)} className="px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
+                  <input type="text" value={newHolidayReason} onChange={e => setNewHolidayReason(e.target.value)} placeholder="사유 (선택)" className="flex-1 px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
+                  <button onClick={addHoliday} className="bg-slate-700 text-white px-3 py-1.5 rounded text-xs font-bold shadow-sm">휴일 추가</button>
+                </div>
+              )}
+
+              <label className="block text-xs font-bold text-slate-500 mb-2">이 반의 보강일 (정규 요일이 아니어도 실제 수업 1회로 세어져 회차 전환에 포함됩니다)</label>
+              <div className="flex flex-col gap-1.5 mb-2">
+                {extraSessions.length === 0 ? (
+                  <span className="text-xs text-slate-400 font-bold">등록된 보강일이 없습니다.</span>
+                ) : extraSessions.map(e => (
+                  <div key={e.id} className="flex items-center justify-between bg-white border border-slate-200 rounded px-3 py-1.5 text-xs">
+                    <span className="font-bold text-slate-700">{e.session_date} {e.reason ? `— ${e.reason}` : ""}</span>
+                    {canEdit && <button onClick={() => deleteExtraSession(e.id)} className="text-rose-500 hover:text-rose-700 font-bold">삭제</button>}
+                  </div>
+                ))}
+              </div>
+              {canEdit && (
+                <div className="flex items-center gap-2">
+                  <input type="date" value={newExtraDate} onChange={e => setNewExtraDate(e.target.value)} className="px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
+                  <input type="text" value={newExtraReason} onChange={e => setNewExtraReason(e.target.value)} placeholder="사유 (선택)" className="flex-1 px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
+                  <button onClick={addExtraSession} className="bg-slate-700 text-white px-3 py-1.5 rounded text-xs font-bold shadow-sm">보강일 추가</button>
+                </div>
+              )}
             </div>
 
             <div>

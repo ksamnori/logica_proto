@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { supabase, CLINIC_ROOM } from "@/lib/supabase";
 import { getActiveSeatLayout, saveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { Seat, SeatLayout, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H, renumberSeats } from "@/lib/clinicSeatLayout";
@@ -37,10 +38,26 @@ export default function SeatLayoutEditorPage() {
     // 클리닉 쪽(학생/TA pad/supervisor) 접속 여부 — 하나라도 있으면 편집 잠금
     const [clinicOccupied, setClinicOccupied] = useState<boolean | null>(null); // null = 아직 확인 중
     const [editing, setEditing] = useState(false);
+    const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+    // 닫기 확인 모달은 <main>의 z-10 스택킹 컨텍스트 안에 그대로 두면 z-index를 아무리 올려도
+    // 그 컨텍스트 밖(사이드바 z-20, 로그인 캡슐 z-60)보다 위로 못 뜨므로, document.body에 포탈로 그린다.
+    const [closeConfirmPortalTarget, setCloseConfirmPortalTarget] = useState<HTMLElement | null>(null);
+    useEffect(() => { setCloseConfirmPortalTarget(document.body); }, []);
 
     const channelRef = useRef<any>(null);
     const editorClientIdRef = useRef<string>("");
     const dragStateRef = useRef<{ id: string; startX: number; startY: number; origX: number; origY: number; scale: number } | null>(null);
+
+    // 서버에서 받아온(=마지막으로 저장된) 배치 상태를 그대로 화면 state에 반영한다.
+    // 최초 로드뿐 아니라, 저장 없이 닫을 때 편집 중 바뀐 내용을 되돌리는 데도 재사용한다.
+    const applyLayoutState = useCallback((l: SeatLayout) => {
+        setLayout(l);
+        setSeats(l.seats);
+        setSeatW(clampSeatSize(l.seatWidth));
+        setSeatH(clampSeatSize(l.seatHeight));
+        setCanvasW(clampCanvasSize(l.canvasWidth));
+        setCanvasH(clampCanvasSize(l.canvasHeight));
+    }, []);
 
     useEffect(() => {
         let saved = localStorage.getItem(EDITOR_ID_KEY);
@@ -51,12 +68,7 @@ export default function SeatLayoutEditorPage() {
         editorClientIdRef.current = saved;
 
         getActiveSeatLayout().then(l => {
-            setLayout(l);
-            setSeats(l.seats);
-            setSeatW(clampSeatSize(l.seatWidth));
-            setSeatH(clampSeatSize(l.seatHeight));
-            setCanvasW(clampCanvasSize(l.canvasWidth));
-            setCanvasH(clampCanvasSize(l.canvasHeight));
+            applyLayoutState(l);
             setLoading(false);
         });
 
@@ -92,11 +104,30 @@ export default function SeatLayoutEditorPage() {
         setEditing(true);
     };
 
-    const exitEditMode = () => {
-        // 💡 저장 안 한 변경사항이 있는 채로 닫으면 그대로 날아가버리므로, dirty 상태일 때만 한 번 확인한다.
-        if (dirty && !window.confirm('저장하지 않은 변경사항이 있습니다. 저장하지 않고 닫으시겠습니까?')) return;
+    // 실제로 편집 모드를 벗어나는 부분(untrack + setEditing)만 분리 — 저장 여부와 상관없이 공통으로 쓴다.
+    const leaveEditMode = () => {
         channelRef.current?.untrack();
         setEditing(false);
+        setShowCloseConfirm(false);
+    };
+
+    const exitEditMode = () => {
+        // 💡 저장 안 한 변경사항이 있으면 alert 한 번으로 넘기지 않고, 저장/미저장/취소를 직접 고르게 한다.
+        if (dirty) { setShowCloseConfirm(true); return; }
+        leaveEditMode();
+    };
+
+    const confirmSaveAndClose = async () => {
+        const ok = await doSave();
+        if (ok) leaveEditMode();
+    };
+
+    const confirmDiscardAndClose = () => {
+        // 저장하지 않은 변경사항은 화면 state에서도 되돌려서, 새로고침 없이 다시 편집을 시작해도
+        // 방금 취소한 내용이 남아있지 않고 마지막 저장 상태 그대로 보이게 한다.
+        if (layout) applyLayoutState(layout);
+        setDirty(false);
+        leaveEditMode();
     };
 
     // ===== 드래그 + 스냅 =====
@@ -196,23 +227,25 @@ export default function SeatLayoutEditorPage() {
         setDirty(true);
     };
 
-    const handleSave = async () => {
+    // 저장 로직 자체 — 성공하면 true를 돌려주고, "저장 완료" 알림은 호출한 쪽(버튼 클릭 vs 저장 후 닫기)에서
+    // 필요할 때만 띄우도록 분리했다.
+    const doSave = async (): Promise<boolean> => {
         setSaving(true);
         const res = await saveSeatLayout(seats, canvasW, canvasH, seatW, seatH, editorClientIdRef.current);
         setSaving(false);
         if (res.success && res.layout) {
-            setLayout(res.layout);
-            setSeats(res.layout.seats);
-            setSeatW(clampSeatSize(res.layout.seatWidth));
-            setSeatH(clampSeatSize(res.layout.seatHeight));
-            setCanvasW(clampCanvasSize(res.layout.canvasWidth));
-            setCanvasH(clampCanvasSize(res.layout.canvasHeight));
+            applyLayoutState(res.layout);
             setDirty(false);
             channelRef.current?.send({ type: 'broadcast', event: 'layout_updated', payload: { at: Date.now() } });
-            alert('좌석 배치가 저장되었습니다.');
-        } else {
-            alert(`저장 실패: ${res.message || '알 수 없는 오류'}`);
+            return true;
         }
+        alert(`저장 실패: ${res.message || '알 수 없는 오류'}`);
+        return false;
+    };
+
+    const handleSave = async () => {
+        const ok = await doSave();
+        if (ok) alert('좌석 배치가 저장되었습니다.');
     };
 
     if (loading) {
@@ -225,7 +258,7 @@ export default function SeatLayoutEditorPage() {
 
     if (clinicOccupied && !editing) {
         return (
-            <div className="p-8">
+            <div className="p-8 pt-28">
                 <div className="bg-amber-50 border-2 border-amber-300 rounded-2xl p-8 text-center max-w-lg mx-auto">
                     <div className="text-4xl mb-3">🔒</div>
                     <h2 className="text-lg font-bold text-amber-800 mb-2">클리닉 사용 중입니다</h2>
@@ -237,7 +270,7 @@ export default function SeatLayoutEditorPage() {
 
     if (!editing) {
         return (
-            <div className="p-8">
+            <div className="p-8 pt-28">
                 <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center max-w-lg mx-auto shadow-sm">
                     <h2 className="text-lg font-bold text-slate-800 mb-2">좌석 배치 편집</h2>
                     <p className="text-sm text-slate-500 mb-6">현재 클리닉 접속자가 없습니다. 편집을 시작하면<br />편집이 끝날 때까지 클리닉 화면들이 잠깁니다.</p>
@@ -248,7 +281,7 @@ export default function SeatLayoutEditorPage() {
     }
 
     return (
-        <div className="flex flex-col h-full pt-20 px-4 pb-4 gap-3" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
+        <div className="flex flex-col h-full pt-28 px-4 pb-4 gap-3" onPointerMove={handlePointerMove} onPointerUp={handlePointerUp}>
             <div className="flex items-center justify-between gap-3 bg-white border border-slate-200 rounded-xl px-4 py-3 shrink-0">
                 <div className="flex items-center gap-3">
                     <h1 className="font-bold text-slate-800">좌석 배치 편집</h1>
@@ -372,6 +405,23 @@ export default function SeatLayoutEditorPage() {
                     }}
                 />
             </div>
+
+            {showCloseConfirm && closeConfirmPortalTarget && createPortal(
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[10000] flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+                        <h3 className="font-bold text-slate-800 mb-2">저장하지 않은 변경사항이 있습니다</h3>
+                        <p className="text-sm text-slate-500 mb-6">닫기 전에 변경사항을 저장하시겠습니까?</p>
+                        <div className="flex flex-col gap-2">
+                            <button onClick={confirmSaveAndClose} disabled={saving} className="bg-[#002864] text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">
+                                {saving ? '저장 중...' : '저장하고 닫기'}
+                            </button>
+                            <button onClick={confirmDiscardAndClose} disabled={saving} className="bg-rose-50 text-rose-600 font-bold text-sm px-5 py-2.5 rounded-lg hover:bg-rose-100 disabled:opacity-50">저장하지 않고 닫기</button>
+                            <button onClick={() => setShowCloseConfirm(false)} disabled={saving} className="text-slate-500 font-semibold text-sm px-5 py-2.5 rounded-lg border border-slate-200 hover:bg-slate-50 disabled:opacity-50">취소</button>
+                        </div>
+                    </div>
+                </div>,
+                closeConfirmPortalTarget
+            )}
         </div>
     );
 }

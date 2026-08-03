@@ -4,6 +4,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getISOWeekKST } from "@/lib/classRound";
 
 // 분리된 컴포넌트 불러오기
 import ViewerHeader from "@/components/exam/ViewerHeader";
@@ -46,6 +47,11 @@ export default function ExamViewerPage() {
 
   // === 레이아웃 UI 상태 ===
   const [layoutType, setLayoutType] = useState("주간테스트");
+  // === 주간테스트 전용: 주차/학년 자동 배정 ===
+  const [testWeek, setTestWeek] = useState<number>(getISOWeekKST());
+  const [weeklyTargetGrade, setWeeklyTargetGrade] = useState("");
+  const [gradeOptions, setGradeOptions] = useState<string[]>([]);
+  const [weeklyMatchedCount, setWeeklyMatchedCount] = useState<number | null>(null);
   const [template, setTemplate] = useState("basic1");
   const [titleMode, setTitleMode] = useState("all");
   const [columns, setColumns] = useState(2);
@@ -189,6 +195,8 @@ export default function ExamViewerPage() {
     let lType = "주간테스트";
     let dbLayoutSettings: any = null;
     let orderedQuestions: any[] = [];
+    let wWeek: number | null = null;
+    let wGrade = "";
 
     try {
       if (urlExamId) {
@@ -203,6 +211,8 @@ export default function ExamViewerPage() {
         title = examData.title || '시험지';
         lType = examData.exam_type || '주간테스트';
         dbLayoutSettings = examData.layout_settings || null;
+        wWeek = examData.test_week || null;
+        wGrade = examData.target_grade || "";
 
         const { data: assignmentCheck } = await supabase.from('exam_assignment').select('assignment_id').eq('exam_id', urlExamId).limit(1);
         setIsExamDistributed(!!(assignmentCheck && assignmentCheck.length > 0));
@@ -233,6 +243,8 @@ export default function ExamViewerPage() {
             badge = origExam.sub_title || '';
             lType = origExam.exam_type || '주간테스트';
             dbLayoutSettings = origExam.layout_settings || null;
+            wWeek = origExam.test_week || null;
+            wGrade = origExam.target_grade || "";
             if (duplicateExamId && dbLayoutSettings) {
                 let cloned = typeof dbLayoutSettings === 'string' ? JSON.parse(dbLayoutSettings) : { ...dbLayoutSettings };
                 delete cloned.examDate;
@@ -258,6 +270,8 @@ export default function ExamViewerPage() {
       setDisplayBadge(badge);
       setLayoutType(lType);
       setIsAdmissionLock(lType === '입학테스트');
+      if (wWeek) setTestWeek(wWeek);
+      if (wGrade) setWeeklyTargetGrade(wGrade);
 
       let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
       let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
@@ -892,6 +906,60 @@ export default function ExamViewerPage() {
     localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(newPal));
   };
 
+  // === 주간테스트: 반의 target_grade 기준 자동 배정 대상 계산 ===
+  useEffect(() => {
+    if (layoutType !== '주간테스트') return;
+    (async () => {
+      const { data } = await supabase.from('class').select('class_id, target_grade').not('target_grade', 'is', null);
+      const options = Array.from(new Set((data || []).map((c: any) => c.target_grade).filter(Boolean))) as string[];
+      setGradeOptions(options);
+    })();
+  }, [layoutType]);
+
+  useEffect(() => {
+    if (layoutType !== '주간테스트' || !weeklyTargetGrade) { setWeeklyMatchedCount(null); return; }
+    let cancelled = false;
+    (async () => {
+      const count = await countStudentsForGrade(weeklyTargetGrade);
+      if (!cancelled) setWeeklyMatchedCount(count);
+    })();
+    return () => { cancelled = true; };
+  }, [layoutType, weeklyTargetGrade]);
+
+  // 학년(target_grade)이 일치하는 반들에 재원 중인 학생 목록을 모아 온다.
+  const fetchStudentsForGrade = async (targetGrade: string): Promise<string[]> => {
+    const { data: classes } = await supabase.from('class').select('class_id').eq('target_grade', targetGrade);
+    const classIds = (classes || []).map((c: any) => c.class_id);
+    if (classIds.length === 0) return [];
+
+    const [{ data: directStudents }, { data: enrolls }] = await Promise.all([
+      supabase.from('student').select('student_id, status').in('class_id', classIds),
+      supabase.from('enrollment').select('student_id, student(status)').in('class_id', classIds),
+    ]);
+
+    const studentMap = new Map<string, string>();
+    (directStudents || []).forEach((s: any) => studentMap.set(s.student_id, s.status));
+    (enrolls || []).forEach((e: any) => { if (e.student) studentMap.set(e.student_id, (e.student as any).status); });
+
+    return Array.from(studentMap.entries()).filter(([, status]) => status === '재원').map(([id]) => id);
+  };
+
+  const countStudentsForGrade = async (targetGrade: string) => (await fetchStudentsForGrade(targetGrade)).length;
+
+  // 주간테스트를 저장할 때, target_grade가 일치하는 반의 재원 학생 전원에게 exam_assignment를 자동 생성한다.
+  // (기존에 배정된 학생은 건너뜀 — 몇 번을 다시 저장해도 안전)
+  const autoAssignWeeklyTest = async (examId: string) => {
+    if (layoutType !== '주간테스트' || !weeklyTargetGrade) return;
+    const studentIds = await fetchStudentsForGrade(weeklyTargetGrade);
+    if (studentIds.length === 0) return;
+
+    const { data: existing } = await supabase.from('exam_assignment').select('student_id').eq('exam_id', examId);
+    const existingIds = new Set((existing || []).map((e: any) => e.student_id));
+
+    const inserts = studentIds.filter(id => !existingIds.has(id)).map(id => ({ exam_id: examId, student_id: id, status: '미응시' }));
+    if (inserts.length > 0) await supabase.from('exam_assignment').insert(inserts);
+  };
+
   const saveExam = async (skipNav: boolean = false): Promise<boolean> => {
     setIsSaving(true);
     try {
@@ -900,7 +968,10 @@ export default function ExamViewerPage() {
       if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
 
       const finalLayoutSettings = { column: columns, split: splits, titleMode, numberColor: colorNum, titleColor: colorTitle, lineColor: colorLine, examDate: examDate || null, template };
-      
+      const isWeeklyTest = layoutType === '주간테스트';
+      if (isWeeklyTest && !weeklyTargetGrade) throw new Error('주간테스트는 배정할 학년을 선택해야 합니다.');
+      const weeklyFields = isWeeklyTest ? { test_week: testWeek, target_grade: weeklyTargetGrade } : { test_week: null, target_grade: null };
+
       let examId = currentExamIdRef.current;
       if (isNewExamRef.current) {
         if (rebuildExamIdRef.current) {
@@ -909,7 +980,7 @@ export default function ExamViewerPage() {
             total_questions: examStateRef.current?.groups.length || 0, instructor_id: instId,
             major_grade: sessionStorage.getItem('majorGrade') || null, avg_difficulty: sessionStorage.getItem('avgDifficulty') || null,
             scope_start: sessionStorage.getItem('scopeStart') || null, scope_end: sessionStorage.getItem('scopeEnd') || null,
-            layout_settings: finalLayoutSettings
+            layout_settings: finalLayoutSettings, ...weeklyFields
           }).eq('exam_id', rebuildExamIdRef.current);
           if (rebuildErr) throw new Error(`시험지 저장 실패: ${rebuildErr.message}`);
           examId = rebuildExamIdRef.current;
@@ -921,7 +992,7 @@ export default function ExamViewerPage() {
             total_questions: examStateRef.current?.groups.length || 0, instructor_id: instId,
             major_grade: sessionStorage.getItem('majorGrade') || null, avg_difficulty: sessionStorage.getItem('avgDifficulty') || null,
             scope_start: sessionStorage.getItem('scopeStart') || null, scope_end: sessionStorage.getItem('scopeEnd') || null,
-            layout_settings: finalLayoutSettings
+            layout_settings: finalLayoutSettings, ...weeklyFields
           }).select().single();
           if (insertErr || !data) throw new Error(`시험지 생성 실패: ${insertErr?.message || '알 수 없는 오류'}`);
           examId = data.exam_id;
@@ -935,9 +1006,11 @@ export default function ExamViewerPage() {
         const { error: itemsErr } = await supabase.from('exam_item').insert(items);
         if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
       } else {
-        const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType, layout_settings: finalLayoutSettings }).eq('exam_id', examId);
+        const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType, layout_settings: finalLayoutSettings, ...weeklyFields }).eq('exam_id', examId);
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
+
+      if (isWeeklyTest && examId) await autoAssignWeeklyTest(examId);
 
       hasUnsavedChangesRef.current = false;
       const wasNew = isNewExamRef.current;
@@ -1149,6 +1222,26 @@ export default function ExamViewerPage() {
                                   <option value="입학테스트">입학테스트</option>
                               </select>
                           </div>
+                          {layoutType === '주간테스트' && (
+                              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-3">
+                                  <div className="flex items-center justify-between">
+                                      <span className="text-[11px] font-bold text-emerald-700">🎯 주간테스트 자동 배정</span>
+                                      <span className="text-[11px] font-black text-emerald-700">{weeklyMatchedCount ?? 0}명</span>
+                                  </div>
+                                  <div>
+                                      <label className="block text-[11px] font-bold text-slate-500 mb-1.5">주차 (ISO 달력 주차, 전원 공통)</label>
+                                      <input type="number" min={1} max={53} value={testWeek} onChange={e => setTestWeek(parseInt(e.target.value, 10) || 1)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
+                                  </div>
+                                  <div>
+                                      <label className="block text-[11px] font-bold text-slate-500 mb-1.5">배정 대상 학년 (class.target_grade 기준)</label>
+                                      <select value={weeklyTargetGrade} onChange={e => setWeeklyTargetGrade(e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none">
+                                          <option value="">학년 선택</option>
+                                          {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
+                                      </select>
+                                  </div>
+                                  <p className="text-[10px] text-emerald-700/70 font-medium leading-relaxed">저장하면 학년이 일치하는 반의 재원 학생 전원에게 자동으로 배정됩니다(수동 배포 불필요).</p>
+                              </div>
+                          )}
                       </div>
                     </div>
                   </div>

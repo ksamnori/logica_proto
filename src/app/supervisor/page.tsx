@@ -120,17 +120,21 @@ export default function SupervisorDashboard() {
                     </div>
                 </div>
             )}
+            {/* 💡 실제 좌석 칸(예약 카드)과 같은 크기·레이아웃으로 보이도록, ghostRect 자체가 이미
+                화면에 그려진 좌석 칸의 실제 픽셀 크기(scale:1)라 별도 축소 없이 그대로 쓴다. */}
             {draggedListStudent && ghostRect && (
-                <div id="drag-ghost" className="fixed pointer-events-none z-[9999] opacity-[0.65] shadow-2xl bg-white border border-slate-200 rounded-xl overflow-hidden"
+                <div id="drag-ghost" className="fixed pointer-events-none z-[9999] opacity-[0.85] shadow-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/80 rounded-xl p-2 flex flex-col justify-center overflow-hidden"
                      style={{ left: ghostRect.left, top: ghostRect.top, width: ghostRect.width, height: ghostRect.height }}>
-                    <div className="p-2 flex flex-col justify-center h-full"
-                         style={{ width: ghostRect.width / ghostRect.scale, height: ghostRect.height / ghostRect.scale, transform: `scale(${ghostRect.scale})`, transformOrigin: 'top left' }}>
-                        <span className="bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm w-max mb-1">신규 배정</span>
-                        <div className="font-bold text-slate-900 text-[13px] truncate mb-1">{draggedListStudent.name}</div>
-                        {draggedListStudent.classes?.length > 0 ? (
-                            <div className="text-[9px] font-bold text-emerald-600 truncate">{draggedListStudent.classes[0]}</div>
-                        ) : <div className="text-[9px] font-bold text-slate-300 truncate">반 없음</div>}
+                    <div className="flex items-center justify-between gap-1 mb-0.5">
+                        <div className="flex items-center gap-1 min-w-0">
+                            <span className="shrink-0 bg-indigo-500 text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">🕒</span>
+                            <span className="font-bold text-slate-700 text-[12px] truncate leading-tight">{draggedListStudent.name}</span>
+                        </div>
+                        <span className="shrink-0 text-[8px] font-bold px-1 py-px rounded bg-indigo-600 text-white leading-none">신규 배정</span>
                     </div>
+                    {draggedListStudent.classes?.length > 0 ? (
+                        <div className="text-[8px] font-bold text-emerald-600 truncate leading-none">{draggedListStudent.classes[0]}</div>
+                    ) : <div className="text-[8px] font-bold text-slate-300 truncate leading-none">반 없음</div>}
                 </div>
             )}
 

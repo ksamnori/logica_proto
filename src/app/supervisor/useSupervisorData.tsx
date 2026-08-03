@@ -741,11 +741,16 @@ export function useSupervisorData() {
 
     const handleListPointerDown = (e: React.PointerEvent, student: any) => {
         if (e.button !== 0) return;
-        const target = e.currentTarget as HTMLElement;
-        const rect = target.getBoundingClientRect();
-        const scale = target.offsetWidth > 0 ? rect.width / target.offsetWidth : 1;
-        dragOffsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
-        setGhostRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height, scale });
+        // 💡 목록 항목(왼쪽 패널의 좁고 낮은 행) 크기를 그대로 고스트에 쓰면, 실제 좌석 칸과 전혀
+        // 다른 비율/크기라 놓기 전까지 "신규 배정" 박스가 대시보드 좌석 카드와 안 닮아 보였다.
+        // 지금 화면에 이미 그려져 있는 좌석 칸(data-seat) 하나를 그대로 재서, 그 실제 렌더 크기
+        // (이미 SeatCanvas 배율까지 반영된 최종 픽셀 크기)를 고스트 크기로 그대로 가져다 쓴다.
+        const anySeatEl = document.querySelector('[data-seat]') as HTMLElement | null;
+        const rect = anySeatEl?.getBoundingClientRect();
+        const width = rect?.width || seatWidth;
+        const height = rect?.height || seatHeight;
+        dragOffsetRef.current = { x: width / 2, y: height / 2 };
+        setGhostRect({ left: e.clientX - width / 2, top: e.clientY - height / 2, width, height, scale: 1 });
         setDraggedListStudent(student); e.preventDefault();
     };
 

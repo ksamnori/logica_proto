@@ -46,7 +46,7 @@ export default function SeatCanvas({
         >
             <div
                 className="relative"
-                style={{ width: canvasWidth * scale, height: canvasHeight * scale, margin: "0 auto" }}
+                style={{ width: Math.round(canvasWidth * scale), height: Math.round(canvasHeight * scale), margin: "0 auto" }}
                 data-seat-canvas
                 data-scale={scale}
             >

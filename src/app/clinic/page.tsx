@@ -4,6 +4,9 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
+import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
+import { resolvePendingHomeworkQuestions } from "@/lib/clinicHomework";
+import { resolveTodaySession } from "@/lib/clinicSession";
 
 // ==========================================
 // 상수 및 환경 설정
@@ -12,11 +15,10 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbworn
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtmd2xtYndvcm5pdmtydm9lcWRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDUzNzQsImV4cCI6MjA5NTMyMTM3NH0.Kh9MPHzUxf9xLRYTH_UqoIhxOm4lybA_OL8Z60H9vqo";
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 const CLINIC_ROOM = "logica-clinic-room";
+// 💡 자정 이후(00시~09시 KST)에는 UTC 날짜와 KST 날짜가 어긋나 세션이 "다른 날"로 기록되는 버그가 있었음 — 항상 KST 기준으로 통일
+const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
 
-const DEFAULT_CLINIC_SESSION_DURATION_MS = 60 * 60 * 1000;
 const ROUND1_TIME_LIMIT_SECONDS = 20 * 60;
-const SEAT_ROWS = ['A', 'B', 'C', 'D', 'E', 'F'];
-const ALL_SEATS = SEAT_ROWS.flatMap(r => Array.from({ length: 10 }, (_, i) => `${r}-${String(i + 1).padStart(2, '0')}`));
 
 const GEMINI_API_KEY_STORAGE_KEY = 'logica_gemini_api_key';
 const GEMINI_MODEL_STORAGE_KEY = 'logica_gemini_model';
@@ -45,7 +47,7 @@ export default function StudentClinicPage() {
   // === UI & 라우팅 파라미터 상태 ===
   const [isStarted, setIsStarted] = useState(false);
   const [studentInfo, setStudentInfo] = useState({ id: '', name: '학생', classes: [] as string[] });
-  const [params, setParams] = useState({ round: 0, className: '', weekType: 'odd', assignmentId: '', homeworkIdsStr: '' });
+  const [params, setParams] = useState({ round: 0, className: '', weekType: 'odd', assignmentId: '', homeworkIdsStr: '', bookId: 'all' });
   const [isTimedRound, setIsTimedRound] = useState(false);
   const [globalExamTitle, setGlobalExamTitle] = useState('과제');
   
@@ -88,10 +90,19 @@ export default function StudentClinicPage() {
   
   // === 캔버스 및 기타 Ref ===
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  const ctxRef = useRef<CanvasRenderingContextElement | null>(null);
   const isDrawing = useRef(false);
   const clinicChannelRef = useRef<any>(null);
   const mySeatRef = useRef<string | null>(null);
+  const seatKeysRef = useRef<string[]>([]);
+  const [editorLocked, setEditorLocked] = useState(false);
+
+  useEffect(() => {
+    getActiveSeatLayout().then(layout => {
+      seatKeysRef.current = layout.seats.map(s => String(s.number));
+    });
+  }, []);
+  const hasTrackedPresenceRef = useRef(false);
   const clinicSessionStateRef = useRef<any>(null);
   const lastGradingContextRef = useRef<any>(null);
   const mathJaxRef = useRef(false);
@@ -111,17 +122,18 @@ export default function StudentClinicPage() {
     const weekType = p.get('week') === 'even' ? 'even' : 'odd';
     const assignmentId = p.get('assignment_id') || '';
     const homeworkIdsStr = p.get('homework_ids') || '';
+    const bookId = p.get('book_id') || 'all';
 
     if (!round || isNaN(round) || !className) {
       alert('잘못된 접근입니다. 포털에서 다시 시작해주세요.');
       router.push('/student/portal'); return;
     }
 
-    setParams({ round, className, weekType, assignmentId, homeworkIdsStr });
+    setParams({ round, className, weekType, assignmentId, homeworkIdsStr, bookId });
     setIsTimedRound(round === 1 || round === 4);
 
     initMathJax();
-    initSessionAndFetch(sId, round, className, weekType, assignmentId, homeworkIdsStr);
+    initSessionAndFetch(sId, round, className, weekType, assignmentId, homeworkIdsStr, bookId);
 
     const handleUnload = () => untrackPresence();
     window.addEventListener('pagehide', handleUnload);
@@ -143,46 +155,36 @@ export default function StudentClinicPage() {
   // ==========================================
   // 2. 세션 타이머 및 데이터 로딩
   // ==========================================
-  const initSessionAndFetch = async (sId: string, round: number, cls: string, week: string, assignId: string, hwIds: string) => {
-    const today = new Date().toISOString().slice(0, 10);
-    let { data: sessionData } = await supabase.from('clinic_session_state').select('*').eq('student_id', sId).maybeSingle();
-    
-    if (!sessionData || sessionData.session_date !== today) {
-      const fresh = { student_id: sId, session_date: today, started_at: new Date().toISOString(), duration_ms: DEFAULT_CLINIC_SESSION_DURATION_MS, seat: null, manual_seat: sessionData?.manual_seat || null };
-      const { data } = await supabase.from('clinic_session_state').upsert(fresh).select().single();
-      sessionData = data || fresh;
-    }
+  const initSessionAndFetch = async (sId: string, round: number, cls: string, week: string, assignId: string, hwIds: string, bookId: string = 'all') => {
+    const today = getKSTDateString();
+    const sessionData = await resolveTodaySession(supabase, sId, today);
     clinicSessionStateRef.current = sessionData;
 
     connectChannel(sId, sessionData);
+    // 💡 좌석 배정이 실시간(presence) 연결에만 의존하면, 그 연결이 막히거나 늦을 때 세션은 생겨도
+    // 좌석은 영원히 null로 남아 조교 화면에서 학생이 보이지 않는 문제가 있었다. DB 조회로 직접 배정한다.
+    assignSeatDirectly(sId, sessionData);
 
     const { data: eData } = await supabase.from('enrollment').select('class(name)').eq('student_id', sId);
     if (eData) {
-      const cNames = Array.from(new Set(eData.map((e:any) => {
-        const clsObj = Array.isArray(e.class) ? (e.class as any[])[0] : (e.class as any);
-        return clsObj?.name;
-      }).filter(Boolean))) as string[];
+      const cNames = Array.from(new Set(eData.map((e:any) => e.class?.name).filter(Boolean))) as string[];
       setStudentInfo(prev => ({ ...prev, classes: cNames.length ? cNames : [cls] }));
     }
 
     if (round === 1 || round === 4) await fetchWeeklyTest(sId, week, cls, assignId);
-    else if (round === 2 || round === 3) await fetchHomework(sId, hwIds);
+    else if (round === 2 || round === 3) await fetchHomework(sId, hwIds, bookId);
     else await fetchIncorrect(sId);
   };
 
   const fetchWeeklyTest = async (sId: string, week: string, cls: string, assignId: string) => {
+    if (week === 'even') return fetchHomeworkSimilarIncorrect(sId);
     try {
       let matchedExamId = null; let matchedTitle = null;
-      const examType = week === 'even' ? '과제오답유사' : '주간테스트';
-      
+      const examType = '주간테스트';
+
       if (assignId) {
         const { data } = await supabase.from('exam_assignment').select('exam_id, exam_master(title)').eq('assignment_id', assignId).maybeSingle();
-        if (data && data.exam_id) { 
-          matchedExamId = data.exam_id; 
-          // ✅ 타입 에러 해결: Supabase 관계형 데이터의 배열/객체 타입 단언
-          const masterData = data.exam_master as { title: string } | { title: string }[] | null;
-          matchedTitle = Array.isArray(masterData) ? masterData[0]?.title : masterData?.title; 
-        }
+        if (data && data.exam_id) { matchedExamId = data.exam_id; matchedTitle = data.exam_master?.title; }
       }
 
       if (!matchedExamId) {
@@ -208,43 +210,79 @@ export default function StudentClinicPage() {
     } catch(e) {}
   };
 
-  const fetchHomework = async (sId: string, hwIdsStr: string) => {
+  const fetchHomework = async (sId: string, hwIdsStr: string, bookId: string = 'all') => {
     try {
       if (!hwIdsStr) { setPendingQCount(`대기 중인 과제: 0문제`); setQuestions([]); return; }
       const hwIdsArray = hwIdsStr.split(',').map(Number).filter(n => !isNaN(n));
-      const { data: assignments } = await supabase.from('homework_assignment').select('homework_id, homework_title, target_questions, student_homework_result(status, completed_tq_ids)').in('homework_id', hwIdsArray);
-      if (!assignments || assignments.length === 0) { setPendingQCount(`대기 중인 과제: 0문제`); setQuestions([]); return; }
+      const { rows } = await resolvePendingHomeworkQuestions(supabase, sId, hwIdsArray);
+      const qs = bookId && bookId !== 'all' ? rows.filter(r => String(r.book_id) === bookId) : rows;
+      if (qs.length === 0) { setPendingQCount(`모든 과제를 완료했습니다!`); setQuestions([]); return; }
 
-      let allTqIds: number[] = []; const metaMap: any = {};
-      assignments.forEach((hw:any) => {
-        let tqIds = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions;
-        const res = hw.student_homework_result?.find((r:any) => r.student_id === sId) || {};
-        let compIds = typeof res.completed_tq_ids === 'string' ? JSON.parse(res.completed_tq_ids) : res.completed_tq_ids;
-        if (!Array.isArray(tqIds)) tqIds = []; if (!Array.isArray(compIds)) compIds = [];
-        
-        tqIds.forEach((idNum: number) => {
-          if (!compIds.includes(idNum)) { allTqIds.push(idNum); metaMap[idNum] = { homework_id: hw.homework_id, homework_title: hw.homework_title }; }
-        });
-      });
+      const bookLabel = bookId && bookId !== 'all' ? (qs[0].bookTitle || qs[0].bookType) : null;
+      setGlobalExamTitle(bookLabel ? `${bookLabel} 과제` : '정규 과제');
+      setPendingQCount(`대기 중인 ${bookLabel ? bookLabel + ' ' : '병합 '}과제: ${qs.length}문제`);
 
-      allTqIds = [...new Set(allTqIds)];
-      if (allTqIds.length === 0) { setPendingQCount(`모든 과제를 완료했습니다!`); setQuestions([]); return; }
-
-      setGlobalExamTitle('정규 과제');
-      const { data: qs } = await supabase.from('textbook_question').select('*').in('tq_id', allTqIds);
-      setPendingQCount(`대기 중인 병합 과제: ${(qs||[]).length}문제`);
-      
-      const mapped = (qs||[]).map((q:any, i:number) => {
+      const mapped = qs.map((q:any, i:number) => {
         const raw = q.raw_metadata || {};
         return {
-          index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: metaMap[q.tq_id]?.homework_id || null, tq_id: q.tq_id, question_id: q.question_id,
-          source: metaMap[q.tq_id]?.homework_title || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
+          index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: q.homeworkId, tq_id: q.tq_id, question_id: q.question_id,
+          source: q.homeworkTitle || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
           imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || q.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
-          answer: String(q.answer || '').trim(), explanation: raw.explanation || raw.solution || '', hints: ['교재 문제라 힌트가 없습니다.', '교재 문제라 힌트가 없습니다.']
+          answer: String(q.answer || '').trim(), explanation: raw.explanation || raw.solution || '', hints: ['교재 문제라 힌트가 없습니다.', '교재 문제라 힌트가 없습니다.'],
+          bookId: q.book_id, bookType: q.bookType, bookTitle: q.bookTitle
         };
       });
       setQuestions(mapped);
     } catch(e){}
+  };
+
+  // 💡 '과제오답유사' 라운드: 정식 출제(exam_master) 없이, 과제 채점 중 틀린 문항이 쌓이는
+  // student_incorrect_record(source_type='과제오답')를 그대로 문제 세트로 사용한다.
+  const fetchHomeworkSimilarIncorrect = async (sId: string) => {
+    try {
+      // 💡 과제 오답은 두 출처가 섞여 쌓인다: 문제은행(exam) 문항은 question_id→question_db,
+      // 교재(주교재/워크북) 문항은 tq_id→textbook_question. 두 테이블 사이에 FK가 없어 embed가
+      // 안 되므로, record를 먼저 가져온 뒤 tq_id/question_id를 모아 따로 조회해 JS에서 합친다.
+      const { data: records } = await supabase.from('student_incorrect_record').select('record_id, tq_id, question_id, source_type').eq('student_id', sId).eq('source_type', '과제오답').is('resolved_at', null);
+      if (!records || records.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
+
+      const qIds = [...new Set(records.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
+      const tqIds = [...new Set(records.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))];
+      const [{ data: qDbRows }, { data: tqRows }] = await Promise.all([
+        qIds.length > 0 ? supabase.from('question_db').select('*').in('question_id', qIds) : Promise.resolve({ data: [] }),
+        tqIds.length > 0 ? supabase.from('textbook_question').select('*, textbook(book_type, title)').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
+      ]);
+      const qDbMap = new Map<any, any>((qDbRows || []).map((q:any) => [q.question_id, q]));
+      const tqMap = new Map<any, any>((tqRows || []).map((tq:any) => [tq.tq_id, tq]));
+
+      const mapped: any[] = [];
+      records.forEach((r:any) => {
+        if (r.question_id && qDbMap.has(r.question_id)) {
+          const q = qDbMap.get(r.question_id);
+          mapped.push({
+            index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: q.question_id,
+            source: '과제오답유사', questionText: formatMathTextForWeb(q.question),
+            imageUrl: getCleanUrl(q.image_url), options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
+            answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '', hints: [q.step_1_concept || "개념 힌트 없음", q.step_2_approach || "접근법 힌트 없음"]
+          });
+        } else if (r.tq_id && tqMap.has(r.tq_id)) {
+          const tq = tqMap.get(r.tq_id);
+          const raw = tq.raw_metadata || {};
+          mapped.push({
+            index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, tq_id: tq.tq_id,
+            source: '과제오답유사', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
+            imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
+            answer: String(tq.answer || '').trim(), explanation: raw.explanation || raw.solution || '', hints: ['교재 문제라 힌트가 없습니다.', '교재 문제라 힌트가 없습니다.'],
+            bookId: tq.book_id, bookType: tq.textbook?.book_type, bookTitle: tq.textbook?.title
+          });
+        }
+      });
+
+      if (mapped.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
+      setGlobalExamTitle('이번 주 과제오답유사');
+      setPendingQCount(`이번 주 과제오답유사: ${mapped.length}문제`);
+      setQuestions(mapped);
+    } catch(e) {}
   };
 
   const fetchIncorrect = async (sId: string) => {
@@ -268,19 +306,46 @@ export default function StudentClinicPage() {
   // ==========================================
   // 3. 실시간 동기화 (Presence)
   // ==========================================
+  // 💡 좌석 배정을 presence sync 이벤트에만 맡기면, 실시간 연결이 막히거나 늦을 때 세션은 생겨도
+  // 좌석은 영원히 null로 남아 조교 화면에서 학생이 보이지 않게 된다. DB 조회로 직접(REST) 배정한다.
+  const assignSeatDirectly = async (sId: string, sessionState: any) => {
+    if (mySeatRef.current) return;
+    if (sessionState.manual_seat) { mySeatRef.current = sessionState.manual_seat; return; }
+
+    const storedSeat = sessionState.session_date === getKSTDateString() ? sessionState.seat : null;
+    if (storedSeat) { mySeatRef.current = storedSeat; return; }
+
+    const todayStr = getKSTDateString();
+    const { data: rows } = await supabase.from('clinic_session_state').select('seat, manual_seat').eq('session_date', todayStr).is('ended_at', null);
+    const occupied = new Set<string>();
+    (rows || []).forEach((r: any) => { if (r.manual_seat) occupied.add(r.manual_seat); else if (r.seat) occupied.add(r.seat); });
+    const candidate = seatKeysRef.current.find(s => !occupied.has(s));
+    if (!candidate || mySeatRef.current) return;
+
+    const { data: updated } = await supabase.from('clinic_session_state').update({ seat: candidate }).eq('student_id', sId).is('seat', null).select().maybeSingle();
+    if (updated && !mySeatRef.current) mySeatRef.current = candidate;
+  };
+
   const connectChannel = (sId: string, sessionState: any) => {
     clinicChannelRef.current = supabase.channel(CLINIC_ROOM);
     clinicChannelRef.current
       .on('presence', { event: 'sync' }, () => {
-        if (mySeatRef.current) return;
         const state = clinicChannelRef.current.presenceState();
+        const hasEditor = Object.values(state).some((metas) => (metas as any[]).some(m => m.role === 'editor'));
+        setEditorLocked(hasEditor);
+
+        if (mySeatRef.current) {
+          // 좌석은 이미 DB 직접 배정으로 정해졌을 수 있다 — presence 등록만 아직이면 여기서 한다.
+          if (!hasTrackedPresenceRef.current) trackPresence(mySeatRef.current, sId, sessionState);
+          return;
+        }
         const occupied = new Set();
-        Object.values(state).forEach((metas: any) => metas.forEach((m: any) => { if(m.seat) occupied.add(m.seat); }));
-        
+        Object.values(state).forEach((metas) => (metas as any[]).forEach(m => { if(m.seat) occupied.add(m.seat); }));
+
         const manualSeat = sessionState.manual_seat;
-        const storedSeat = sessionState.session_date === new Date().toISOString().slice(0, 10) ? sessionState.seat : null;
-        const seat = manualSeat || storedSeat || ALL_SEATS.find(s => !occupied.has(s)) || null;
-        
+        const storedSeat = sessionState.session_date === getKSTDateString() ? sessionState.seat : null;
+        const seat = manualSeat || storedSeat || seatKeysRef.current.find(s => !occupied.has(s)) || null;
+
         if (seat) {
           mySeatRef.current = seat;
           supabase.from('clinic_session_state').update({ seat }).eq('student_id', sId).then();
@@ -293,6 +358,7 @@ export default function StudentClinicPage() {
 
   const trackPresence = (seat: string, sId: string, sessionState: any) => {
     if (!clinicChannelRef.current) return;
+    hasTrackedPresenceRef.current = true;
     const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? '과제 풀이중' : params.round === 3 ? '미완성 과제 풀이중' : '클리닉 풀이중';
     clinicChannelRef.current.track({
       seat, name: studentInfo.name, studentId: sId, classes: studentInfo.classes, activity, updatedAt: Date.now(),
@@ -519,15 +585,29 @@ export default function StudentClinicPage() {
         let comp = typeof hwRes.completed_tq_ids === 'string' ? JSON.parse(hwRes.completed_tq_ids) : hwRes.completed_tq_ids;
         if (!Array.isArray(comp)) comp = [];
         const cSet = new Set(comp.map(Number)); cSet.add(Number(q.tq_id));
-        
-        // ✅ 타입 에러 해결: 배열/객체 타입 단언
-        const hwAssignData = hwRes.homework_assignment as { target_questions: any } | { target_questions: any }[] | null;
-        const hwAssign = Array.isArray(hwAssignData) ? hwAssignData[0] : hwAssignData;
-        let tq = typeof hwAssign?.target_questions === 'string' ? JSON.parse(hwAssign.target_questions) : hwAssign?.target_questions;
-        
+        let tq = typeof hwRes.homework_assignment?.target_questions === 'string' ? JSON.parse(hwRes.homework_assignment.target_questions) : hwRes.homework_assignment?.target_questions;
         if (!Array.isArray(tq)) tq = [];
         const allDone = tq.every((id:any) => cSet.has(Number(id)));
         await supabase.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined }).eq('hw_result_id', hwRes.hw_result_id);
+      }
+    } else if (!q.record_id && (q.tq_id || q.question_id)) {
+      // 💡 과제 오답도 시험 오답(saveExamResultsToDB)과 동일하게 student_incorrect_record에 쌓아
+      // 오답노트/오답유사 클리닉 파이프라인에 자동 편입되게 한다(기존엔 이 upsert가 빠져 있었음).
+      // 과제 문항 대부분은 question_db가 아니라 textbook_question(tq_id) 소속이라 tq_id도 함께 본다.
+      // record_id가 이미 있는 문항(오답노트/오답유사에서 온 문항)은 위에서 이미 상태를
+      // 갱신했으므로 여기서 다시 덮어쓰지 않는다.
+      // 💡 실제 student_incorrect_record 스키마의 컬럼명은 status다(이 파일의 다른 기존 코드는
+      // current_status를 쓰고 있는데 이는 이 라우트가 미사용 상태라 발견되지 않은 기존 버그로 보임 —
+      // /clinic/viewer가 실제 사용되는 라우트이며 거기선 status를 올바르게 쓰고 있다).
+      // student_id+tq_id 조합엔 upsert onConflict가 걸릴 unique 제약이 없다고 가정하고
+      // (question_id 쪽만 확인됨) 직접 조회 후 없을 때만 insert한다.
+      const filterCol = q.tq_id ? 'tq_id' : 'question_id';
+      const filterVal = q.tq_id ?? q.question_id;
+      const { data: existingRecord } = await supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null).maybeSingle();
+      if (!existingRecord) {
+        await supabase.from('student_incorrect_record').insert(
+          { student_id: studentInfo.id, tq_id: q.tq_id ?? null, question_id: q.question_id ?? null, source_type: '과제오답', status: 'X', resolved_at: null }
+        );
       }
     }
   };
@@ -559,11 +639,7 @@ export default function StudentClinicPage() {
     if (uIds.length === 0) return;
     try {
       const { data: cls } = await supabase.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).single();
-      
-      // ✅ 타입 에러 해결: 배열/객체 타입 단언
-      const clsData = cls?.class as { instructor_id: string } | { instructor_id: string }[] | null;
-      let instId = Array.isArray(clsData) ? clsData[0]?.instructor_id : clsData?.instructor_id;
-      
+      let instId = cls?.class?.instructor_id;
       if (!instId) { const { data: fb } = await supabase.from('instructor').select('instructor_id').limit(1).single(); instId = fb?.instructor_id; }
       if (!instId) return;
 
@@ -689,6 +765,15 @@ export default function StudentClinicPage() {
 
   return (
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none">
+      {editorLocked && (
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 text-center max-w-sm">
+            <div className="text-4xl mb-3">🔒</div>
+            <h3 className="text-lg font-extrabold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
+            <p className="text-sm text-slate-500">관리자가 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
+          </div>
+        </div>
+      )}
       <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center shrink-0">
         <div className="flex items-center gap-4">
           <div className="font-lexend text-2xl font-bold text-[#002864] tracking-tighter">Logica</div><div className="w-px h-6 bg-slate-300"></div>

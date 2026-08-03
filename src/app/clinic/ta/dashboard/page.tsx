@@ -1,4 +1,3 @@
-// src/app/clinic/ta/dashboard/page.tsx
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -189,10 +188,9 @@ export default function TACinicDashboard() {
     const taClientIdSet = new Set<string>();
     const currentTaNames: string[] = [];
 
-    // [수정됨] any[] 에서 any로 변경하여 타입 에러 해결
-    Object.values(state).forEach((metas: any) => {
+    Object.values(state).forEach((metas) => {
       let latestMeta: any = null;
-      metas.forEach((meta: any) => {
+      (metas as any[]).forEach(meta => {
         if (!latestMeta || (meta.updatedAt || 0) > (latestMeta.updatedAt || 0)) latestMeta = meta;
       });
       if (!latestMeta) return;
@@ -645,10 +643,9 @@ export default function TACinicDashboard() {
               if (!student) {
                 return (
                   <div key={seat} 
-                    // [수정됨] onDragOver, onDrop이 정의되지 않은 오타를 handleDragOver, handleDrop으로 수정했습니다.
-                    onDragOver={(e) => handleDragOver(e, seat)} 
+                    onDragOver={(e) => onDragOver(e, seat)} 
                     onDragLeave={handleDragLeave} 
-                    onDrop={(e) => handleDrop(e, seat)}
+                    onDrop={(e) => onDrop(e, seat)}
                     className={`aspect-square rounded-md flex items-center justify-center text-[10px] font-bold transition-all ${isDragTarget ? 'border-2 border-indigo-400 bg-indigo-50 text-indigo-500 shadow-inner' : 'bg-[#e2e8f0] text-[#94a3b8]'}`}>
                     {seat}
                   </div>
