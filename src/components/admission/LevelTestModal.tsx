@@ -40,7 +40,7 @@ const formatTestDate = (val: any) => {
   return str; 
 };
 
-// 💡 날짜를 '7월 31일' 형태로 보여주는 헬퍼 함수
+// 날짜를 '7월 31일' 형태로 보여주는 헬퍼 함수
 const formatKoreanDate = (dateStr: string) => {
   if (!dateStr) return "";
   const parts = dateStr.split("-");
@@ -48,7 +48,7 @@ const formatKoreanDate = (dateStr: string) => {
   return `${parseInt(parts[1], 10)}월 ${parseInt(parts[2], 10)}일`;
 };
 
-// 💡 방 코드(LT52...)에서 학년을 추출하는 헬퍼 함수 (예: LT52 -> 초5-2)
+// 방 코드(LT52...)에서 학년을 추출하는 헬퍼 함수
 const extractGradeFromTitle = (title: string) => {
   const match = title.match(/^LT(\d{2})/);
   if (!match) return "";
@@ -97,9 +97,13 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const [exams, setExams] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
 
-  // 우측/좌측 일정 선택용 상태
+  // 💡 우측 상단 필터 및 정렬용 상태
   const [sessionDateFilter, setSessionDateFilter] = useState("");
-  const [leftDateFilter, setLeftDateFilter] = useState("all"); // 💡 좌측 목록용 날짜 필터
+  const [sessionTimeFilter, setSessionTimeFilter] = useState(""); 
+  const [sessionSortOrder, setSessionSortOrder] = useState<"asc" | "desc">("asc");
+  const [sessionGradeOrder, setSessionGradeOrder] = useState<"asc" | "desc">("asc");
+  
+  const [leftDateFilter, setLeftDateFilter] = useState("all"); 
   const [selectedSessionId, setSelectedSessionId] = useState("");
   
   const [waitingStudents, setWaitingStudents] = useState<any[]>([]);
@@ -144,8 +148,13 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     new Set(waitingStudents.map(s => formatTestDate(s.test_date) || "날짜없음"))
   ).sort();
 
+  // 날짜/시간 드롭다운 항목 생성
   const uniqueSessionDates = Array.from(
     new Set(sessions.map(s => s.test_date).filter(Boolean))
+  ).sort();
+
+  const uniqueSessionTimes = Array.from(
+    new Set(sessions.map(s => s.start_time ? s.start_time.substring(0, 5) : "").filter(Boolean))
   ).sort();
 
   // 좌측 일정 리스트용 필터링
@@ -407,7 +416,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         if (error) throw error;
         alert(`🎉 입학테스트 방이 성공적으로 수정되었습니다!`);
         
-        // 💡 수정 완료 후 작성 필드는 유지하되, 상태만 신규 작성 모드로 변경
         setEditSessionId(null);
       } else {
         const { error: exErr } = await supabase.from("exam_session").insert([{
@@ -423,7 +431,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         alert(`🎉 입학테스트 방 [${previewName}] 성공적으로 개설되었습니다!`);
       }
       
-      // 💡 개설하기 완료 후, 리셋 코드를 삭제하여 입력값을 그대로 보존합니다.
       loadSessions();
       onSuccess(); 
     } catch (e: any) { alert(`❌ 오류 발생: ${e.message}`); } finally { setIsLoading(false); }
@@ -669,15 +676,13 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
               <h3 className="font-bold text-sm">🗓️ 1. 방 {editSessionId ? "수정" : "개설"}</h3>
             </div>
             
-            {/* 💡 폼 입력 필드 상하 여백 및 크기 대폭 압축 */}
             <div className="p-3 space-y-2 border-b border-slate-100 bg-slate-50 shrink-0">
               
-              {/* 줄 1: 방코드 & 미리보기 */}
               <div className="flex flex-col gap-1">
                 <label className="block text-[11px] font-bold text-slate-700">테스트 방 코드 설정 <span className="text-red-500">*</span></label>
                 <div className="flex space-x-1">
                   <span className="px-2 py-1.5 bg-slate-200 rounded border border-slate-300 font-extrabold text-slate-700 text-xs shrink-0 flex items-center">LT</span>
-                  <select value={sGradeSem} onChange={(e) => setSGradeSem(e.target.value)} className="flex-1 px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]">
+                  <select value={sGradeSem} onChange={(e) => setSGradeSem(e.target.value)} className="flex-1 px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
                     <option value="11">초1-1</option><option value="12">초1-2</option>
                     <option value="21">초2-1</option><option value="22">초2-2</option>
                     <option value="31">초3-1</option><option value="32">초3-2</option>
@@ -686,13 +691,13 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                     <option value="61">초6-1</option><option value="62">초6-2</option>
                     <option value="71">중1-1</option><option value="72">중1-2</option>
                   </select>
-                  <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-[45px] px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]">
+                  <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-[40px] px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
                     <option value="A">A</option><option value="B">B</option>
                   </select>
-                  <select value={sYear} onChange={(e) => setSYear(e.target.value)} className="w-[55px] px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]">
+                  <select value={sYear} onChange={(e) => setSYear(e.target.value)} className="w-[50px] px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
                     <option value="26">26년</option><option value="27">27년</option><option value="28">28년</option><option value="29">29년</option><option value="30">30년</option>
                   </select>
-                  <select value={sMonth} onChange={(e) => setSMonth(e.target.value)} className="w-[45px] px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]">
+                  <select value={sMonth} onChange={(e) => setSMonth(e.target.value)} className="w-[45px] px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
                     {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map(m => (
                       <option key={m} value={m}>{m}월</option>
                     ))}
@@ -701,48 +706,44 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                 <div className="text-[10px] font-bold text-blue-800 text-right">미리보기: {previewName}</div>
               </div>
 
-              {/* 줄 2: 날짜 & 시간 */}
               <div className="grid grid-cols-2 gap-2">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">시험 날짜 <span className="text-red-500">*</span></label>
-                  <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]" />
+                  <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]" />
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">시작 시간 <span className="text-red-500">*</span></label>
                   <div className="flex space-x-1">
-                    <select value={testHour} onChange={(e) => setTestHour(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]"><option value="">시</option>{hours.map(h => <option key={h} value={h}>{h}시</option>)}</select>
-                    <select value={testMinute} onChange={(e) => setTestMinute(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]"><option value="">분</option>{minutes.map(m => <option key={m} value={m}>{m}분</option>)}</select>
+                    <select value={testHour} onChange={(e) => setTestHour(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]"><option value="">시</option>{hours.map(h => <option key={h} value={h}>{h}시</option>)}</select>
+                    <select value={testMinute} onChange={(e) => setTestMinute(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]"><option value="">분</option>{minutes.map(m => <option key={m} value={m}>{m}분</option>)}</select>
                   </div>
                 </div>
               </div>
 
-              {/* 줄 3: 시험지 & 코멘트 */}
               <div className="grid grid-cols-2 gap-2">
                 <div className="min-w-0">
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">사용할 시험지 <span className="text-red-500">*</span></label>
-                  <select value={examId} onChange={handleExamChange} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-[#002864]">
+                  <select value={examId} onChange={handleExamChange} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
                     <option value="">시험지를 선택하세요</option>
                     {exams.map(e => <option key={e.exam_id} value={e.exam_id} className="truncate">{e.title} {e.sub_title ? `[${e.sub_title}]` : ''}</option>)}
                   </select>
                 </div>
                 <div className="min-w-0">
                   <label className="block text-[11px] font-bold text-slate-700 mb-1">시험 구분 코멘트</label>
-                  <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: [초6/중1] 입학테스트 공통" className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-slate-700 text-xs outline-none focus:border-[#002864]" />
+                  <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: [초6/중1] 입학테스트 공통" className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-slate-700 text-[11px] outline-none focus:border-[#002864]" />
                 </div>
               </div>
 
-              {/* 개설 버튼 */}
               <div className="flex gap-2 pt-1">
                 <button onClick={saveSession} disabled={isLoading || !hasAdminPermission} className={`flex-1 ${editSessionId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#002864] hover:bg-blue-900'} text-white font-bold py-2 rounded shadow transition-colors text-xs`}>{isLoading ? "저장 중..." : (editSessionId ? "수정하기" : "개설하기")}</button>
                 {editSessionId && <button onClick={cancelEdit} className="px-4 bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors font-bold rounded text-xs">취소</button>}
               </div>
             </div>
             
-            {/* 💡 2줄로 압축된 시험 목록 및 날짜 필터 (좌측 하단) */}
             <div className="p-2 border-b border-slate-200 bg-white shrink-0 flex items-center justify-between">
                <div className="flex items-center gap-2 w-full">
                  <span className="text-[11px] font-bold text-slate-600 shrink-0 pl-1">🗓️ 날짜</span>
-                 <select value={leftDateFilter} onChange={(e) => setLeftDateFilter(e.target.value)} className="flex-1 text-xs border border-slate-300 rounded px-2 py-1.5 font-bold text-slate-700 focus:ring-1 focus:ring-[#002864] outline-none">
+                 <select value={leftDateFilter} onChange={(e) => setLeftDateFilter(e.target.value)} className="flex-1 text-[11px] border border-slate-300 rounded px-2 py-1.5 font-bold text-slate-700 focus:ring-1 focus:ring-[#002864] outline-none">
                    <option value="all">전체 일정 보기</option>
                    {uniqueSessionDates.map(d => <option key={d as string} value={d as string}>{formatKoreanDate(d as string)}</option>)}
                  </select>
@@ -790,44 +791,104 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
               <h3 className="font-bold">👨‍🎓 2. 지원자 배정 관리</h3>
             </div>
             
-            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 flex gap-2 items-center">
+            {/* 💡 우측 상단 필터 및 정렬 (시간/학년순 버튼 추가) */}
+            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 flex flex-wrap gap-1.5 items-center">
               <select 
                 value={sessionDateFilter} 
                 onChange={(e) => {
                   setSessionDateFilter(e.target.value);
                   setSelectedSessionId(""); 
                 }}
-                className="w-28 px-2 py-2 rounded-md border border-slate-300 font-bold text-xs text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
+                className="w-[85px] px-1.5 py-1.5 rounded border border-slate-300 font-bold text-[11px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
               >
-                <option value="">🗓️ 전체 날짜</option>
+                <option value="">🗓️ 날짜</option>
                 {uniqueSessionDates.map(d => (
                   <option key={d as string} value={d as string}>{formatKoreanDate(d as string)}</option>
                 ))}
               </select>
 
               <select 
+                value={sessionTimeFilter} 
+                onChange={(e) => {
+                  setSessionTimeFilter(e.target.value);
+                  setSelectedSessionId(""); 
+                }}
+                className="w-[75px] px-1.5 py-1.5 rounded border border-slate-300 font-bold text-[11px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
+              >
+                <option value="">⏰ 시간</option>
+                {uniqueSessionTimes.map(t => (
+                  <option key={t as string} value={t as string}>{t as string}</option>
+                ))}
+              </select>
+
+              <div className="flex gap-1 shrink-0 bg-white border border-slate-300 rounded p-0.5 shadow-sm">
+                <button 
+                  onClick={() => setSessionSortOrder(prev => prev === "asc" ? "desc" : "asc")}
+                  className="px-2 py-1 rounded hover:bg-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                  title="시간 오름차순/내림차순"
+                >
+                  시간 {sessionSortOrder === "asc" ? "🔼" : "🔽"}
+                </button>
+                <div className="w-px bg-slate-200 my-1"></div>
+                <button 
+                  onClick={() => setSessionGradeOrder(prev => prev === "asc" ? "desc" : "asc")}
+                  className="px-2 py-1 rounded hover:bg-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                  title="학년 오름차순/내림차순"
+                >
+                  학년 {sessionGradeOrder === "asc" ? "🔼" : "🔽"}
+                </button>
+              </div>
+
+              <select 
                 value={selectedSessionId} 
                 onChange={(e) => setSelectedSessionId(e.target.value)} 
-                className="flex-1 min-w-0 px-2 py-2 rounded-md border border-slate-300 font-bold text-xs text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all text-ellipsis"
+                className="flex-1 min-w-[120px] px-2 py-1.5 rounded border border-emerald-400 font-bold text-[11px] text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all text-ellipsis"
               >
-                <option value="">일정을 선택해주세요</option>
-                {sessions
-                  .filter(s => !sessionDateFilter || s.test_date === sessionDateFilter)
-                  .map(s => <option key={s.admission_session_id} value={s.admission_session_id}>[{formatKoreanDate(s.test_date)}] {s.title} {s.session_comment ? `- ${s.session_comment}` : ''}</option>)
+                <option value="">일정 선택</option>
+                {[...sessions]
+                  .filter(s => {
+                    const matchDate = !sessionDateFilter || s.test_date === sessionDateFilter;
+                    const matchTime = !sessionTimeFilter || (s.start_time && s.start_time.substring(0, 5) === sessionTimeFilter);
+                    return matchDate && matchTime;
+                  })
+                  .sort((a, b) => {
+                     const dtA = new Date(`${a.test_date}T${a.start_time || '00:00:00'}`).getTime();
+                     const dtB = new Date(`${b.test_date}T${b.start_time || '00:00:00'}`).getTime();
+                     
+                     if (!isNaN(dtA) && !isNaN(dtB) && dtA !== dtB) {
+                       return sessionSortOrder === "asc" ? dtA - dtB : dtB - dtA;
+                     }
+
+                     const matchA = a.title.match(/LT(\d{2})/);
+                     const matchB = b.title.match(/LT(\d{2})/);
+                     const numA = matchA ? parseInt(matchA[1], 10) : 9999;
+                     const numB = matchB ? parseInt(matchB[1], 10) : 9999;
+                     
+                     if (numA !== numB) {
+                       return sessionGradeOrder === "asc" ? numA - numB : numB - numA;
+                     }
+                     
+                     return a.title.localeCompare(b.title);
+                  })
+                  .map(s => (
+                    <option key={s.admission_session_id} value={s.admission_session_id}>
+                      [{formatKoreanDate(s.test_date)} {s.start_time?.substring(0,5)}] {s.title} {s.session_comment ? `- ${s.session_comment}` : ''}
+                    </option>
+                  ))
                 }
               </select>
             </div>
 
-            <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
-              <div className="flex flex-wrap items-center gap-2">
-                <h3 className="font-bold text-slate-700 text-sm whitespace-nowrap">📝 명단</h3>
+            <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <h3 className="font-bold text-slate-700 text-[11px] whitespace-nowrap mr-1">📝 명단</h3>
                 
                 <select 
                   value={gradeFilter} 
                   onChange={(e) => setGradeFilter(e.target.value)} 
-                  className="text-xs border border-slate-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
+                  className="text-[11px] border border-slate-300 rounded px-1.5 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
                 >
-                  <option value="all">전체 학년</option>
+                  <option value="all">학년</option>
                   {Array.from(new Set(waitingStudents.map(s => s.grade)))
                     .sort((a, b) => getGradeOrder(a) - getGradeOrder(b))
                     .map(g => (
@@ -838,9 +899,9 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                 <select 
                   value={dateFilter} 
                   onChange={(e) => setDateFilter(e.target.value)} 
-                  className="text-xs border border-slate-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
+                  className="text-[11px] border border-slate-300 rounded px-1.5 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
                 >
-                  <option value="all">전체 신청일</option>
+                  <option value="all">신청일</option>
                   {uniqueDates.map(d => (
                     <option key={d} value={d as string}>{d as string}</option>
                   ))}
@@ -848,68 +909,68 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
 
                 <input 
                   type="text" 
-                  placeholder="이름, 연락처 검색" 
+                  placeholder="이름, 연락처" 
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
-                  className="text-xs border border-slate-300 rounded-md px-2 py-1.5 focus:ring-2 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm bg-slate-50 w-32 sm:w-40"
+                  className="text-[11px] border border-slate-300 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm bg-slate-50 w-24 sm:w-28"
                 />
               </div>
               
-              <label className="flex items-center space-x-1 cursor-pointer text-xs text-slate-600 font-bold bg-slate-100 border border-slate-200 px-2 py-1.5 rounded-md hover:bg-slate-200 transition-colors shadow-sm whitespace-nowrap ml-2">
-                <input type="checkbox" checked={isAllChecked} onChange={(e) => toggleCheckAll(e.target.checked)} className="w-3.5 h-3.5 accent-emerald-600" />
-                <span>미배정 전체 선택</span>
+              <label className="flex items-center space-x-1 cursor-pointer text-[10px] text-slate-600 font-bold bg-slate-100 border border-slate-200 px-2 py-1 rounded hover:bg-slate-200 transition-colors shadow-sm whitespace-nowrap ml-1">
+                <input type="checkbox" checked={isAllChecked} onChange={(e) => toggleCheckAll(e.target.checked)} className="w-3 h-3 accent-emerald-600" />
+                <span>전체선택</span>
               </label>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-4 custom-scroll space-y-2 bg-slate-50">
-              {!selectedSessionId ? <div className="text-center text-slate-400 py-10 text-sm font-medium">일정을 선택하면 명단이 나타납니다.</div> :
-               filteredStudents.length === 0 ? <div className="text-center text-slate-400 py-10 text-sm font-medium">조건에 맞는 대기생이 없습니다.</div> :
+            <div className="flex-1 overflow-y-auto p-3 custom-scroll space-y-2 bg-slate-50">
+              {!selectedSessionId ? <div className="text-center text-slate-400 py-10 text-xs font-medium">일정을 선택하면 명단이 나타납니다.</div> :
+               filteredStudents.length === 0 ? <div className="text-center text-slate-400 py-10 text-xs font-medium">조건에 맞는 대기생이 없습니다.</div> :
                filteredStudents.map(std => {
                  const stdId = std.id; 
                  const isAssigned = std.isAssigned;
                  const korGradeName = formatKoreanGrade(std.grade);
 
                  const sourceBadge = std.source === 'temp' 
-                   ? <span className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
-                   : <span className="text-[10px] bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
+                   ? <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 px-1 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
+                   : <span className="text-[9px] bg-purple-100 text-purple-700 border border-purple-200 px-1 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
 
                  if (isAssigned) {
                    return (
-                     <div key={stdId} className="flex items-center justify-between p-3 bg-white border-2 border-emerald-400 rounded-lg shadow-sm gap-2">
-                       <div className="flex items-center space-x-3 min-w-0">
-                         <div className="w-5 h-5 flex items-center justify-center bg-emerald-500 rounded text-white text-xs font-bold shrink-0">✓</div>
-                         <div className="flex flex-col min-w-0">
-                           <div className="flex items-center gap-1.5 mb-0.5">
-                             <span className="font-extrabold text-slate-800 truncate text-sm">{std.student_name}</span>
-                             <span className="text-[10px] bg-[#002864] text-white px-1.5 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
-                             <span className="text-[10px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-bold shrink-0">✅ 배정됨</span>
+                     <div key={stdId} className="flex items-center justify-between p-2.5 bg-white border-2 border-emerald-400 rounded-lg shadow-sm gap-2">
+                       <div className="flex items-center space-x-2.5 min-w-0">
+                         <div className="w-4 h-4 flex items-center justify-center bg-emerald-500 rounded text-white text-[10px] font-bold shrink-0">✓</div>
+                         <div className="flex flex-col min-w-0 gap-0.5">
+                           <div className="flex items-center gap-1">
+                             <span className="font-extrabold text-slate-800 truncate text-[13px]">{std.student_name}</span>
+                             <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
+                             <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-1 py-0.5 rounded font-bold shrink-0">✅ 배정됨</span>
                            </div>
-                           <div className="text-[11px] text-slate-400 font-medium truncate flex items-center gap-1.5">
-                             <span>🏫 {std.school_name || "학교 미입력"}</span>
+                           <div className="text-[10px] text-slate-400 font-medium truncate flex items-center gap-1">
+                             <span>🏫 {std.school_name || "미입력"}</span>
                              <span className="text-slate-300">|</span>
                              <span>📞 {formatContact(std.contact)}</span>
                            </div>
                          </div>
                        </div>
-                       <div className="flex items-center gap-1.5 shrink-0">
-                         <button onClick={() => unassignStudent(stdId, std.student_name)} className="text-[11px] bg-white hover:bg-red-50 text-red-500 border border-slate-200 hover:border-red-200 px-2.5 py-1.5 rounded-md font-bold transition-colors shadow-sm">
-                           배정 취소
+                       <div className="flex items-center gap-1 shrink-0">
+                         <button onClick={() => unassignStudent(stdId, std.student_name)} className="text-[10px] bg-white hover:bg-red-50 text-red-500 border border-slate-200 hover:border-red-200 px-2 py-1 rounded font-bold transition-colors shadow-sm">
+                           취소
                          </button>
                        </div>
                      </div>
                    )
                  } else {
                    return (
-                     <label key={stdId} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 shadow-sm transition-all gap-2">
-                       <div className="flex items-center space-x-3 min-w-0">
-                         <input type="checkbox" checked={checkedStudents.includes(stdId)} onChange={() => toggleStudentCheck(stdId)} className="w-4 h-4 accent-emerald-600 shrink-0" />
-                         <div className="flex flex-col min-w-0">
-                           <div className="flex items-center gap-1.5 mb-0.5">
-                             <span className="font-bold text-slate-800 truncate text-sm">{std.student_name}</span>
-                             <span className="text-[10px] bg-[#002864] text-white px-1.5 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
+                     <label key={stdId} className="flex items-center justify-between p-2.5 bg-white border border-slate-200 rounded-lg cursor-pointer hover:bg-slate-50 shadow-sm transition-all gap-2">
+                       <div className="flex items-center space-x-2.5 min-w-0">
+                         <input type="checkbox" checked={checkedStudents.includes(stdId)} onChange={() => toggleStudentCheck(stdId)} className="w-3.5 h-3.5 accent-emerald-600 shrink-0" />
+                         <div className="flex flex-col min-w-0 gap-0.5">
+                           <div className="flex items-center gap-1">
+                             <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
+                             <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              {sourceBadge}
                            </div>
-                           <div className="text-[11px] text-slate-500 font-medium truncate flex items-center gap-1.5">
+                           <div className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">
                              <span>🏫 {std.school_name || "-"}</span>
                              <span className="text-slate-300">|</span>
                              <span>📅 {formatTestDate(std.test_date) || "-"}</span>
@@ -925,8 +986,8 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
               }
             </div>
 
-            <div className="p-4 bg-white border-t border-slate-200 shrink-0">
-              <button onClick={assignStudents} disabled={isLoading || !selectedSessionId} className="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded-lg shadow-md transition-colors disabled:opacity-50">
+            <div className="p-3 bg-white border-t border-slate-200 shrink-0">
+              <button onClick={assignStudents} disabled={isLoading || !selectedSessionId} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded text-xs shadow-md transition-colors disabled:opacity-50">
                 선택한 대기생 배정 완료하기 ✅
               </button>
             </div>
