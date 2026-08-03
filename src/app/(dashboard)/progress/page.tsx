@@ -59,6 +59,9 @@ export default function ProgressPage() {
   const [toastMsg, setToastMsg] = useState("");
   const mathJaxRef = useRef<boolean>(false);
 
+  // 💡 [핵심 1] 다중 클릭 동시성(Race Condition) 방지를 위한 대기열(Queue) 변수
+  const actionQueue = useRef<Promise<void>>(Promise.resolve());
+
   useEffect(() => {
     fetchInitialClasses();
     loadMathJax();
@@ -192,7 +195,6 @@ export default function ProgressPage() {
 
   const getStatusKey = (tq_id: number, sId: string) => `${selectedClassId}_${tq_id}_${sId}`;
 
-  // 💡 [핵심] '전체 학생(all)' 뷰에서도 1학생 1과제로 분할된 데이터를 정확히 취합하여 렌더링하도록 집계 방식 고도화
   const loadStatusMapDB = async (classId: string, studentIds: string[]) => {
     try {
       const { data: assignments, error } = await supabase
@@ -231,7 +233,6 @@ export default function ProgressPage() {
         });
       });
 
-      // 전체 탭(all)용 상태 집계
       const totalStudents = studentIds.length;
       if (totalStudents > 0) {
           Object.entries(studentCountByTq).forEach(([tqIdStr, counts]: [string, any]) => {
@@ -243,7 +244,7 @@ export default function ProgressPage() {
               } else if (counts.hwCount >= totalStudents) {
                   newMap[getStatusKey(tqId, 'all')] = 'homework';
               } else if (counts.hwCount > 0) {
-                  newMap[getStatusKey(tqId, 'all')] = 'partial'; // 일부만 과제가 있는 경우
+                  newMap[getStatusKey(tqId, 'all')] = 'partial';
               }
           });
       }
@@ -254,13 +255,11 @@ export default function ProgressPage() {
     }
   };
 
-  // 💡 [초핵심] 1학생 1과제 원칙! 모든 학생에게 각각 개인용으로 과제를 생성/병합합니다.
   const assignHomeworkToStudents = async (targetStudentIds: string[], mainIds: number[], wbIds: number[], titleStr: string) => {
     try {
         const allTqIds = [...mainIds, ...wbIds];
         if (!allTqIds.length || !selectedBookId || !targetStudentIds.length) return;
 
-        // 1. 한국 시간(KST) 절대 기준일 확보
         const now = new Date();
         const kstOffset = 9 * 60 * 60 * 1000;
         const kstDate = new Date(now.getTime() + kstOffset);
@@ -269,12 +268,11 @@ export default function ProgressPage() {
         const startOfTodayKST = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
         const endOfTodayKST = new Date(`${dateStr}T23:59:59.999+09:00`).toISOString();
 
-        // 2. 타겟 학생들을 한 명씩 순회하며 철저하게 개인 과제화
         for (const sId of targetStudentIds) {
             const { data: existing } = await supabase.from('homework_assignment')
                 .select('homework_id, target_questions, homework_title')
                 .eq('class_id', selectedClassId)
-                .eq('target_student_id', sId) // 💡 해당 학생 전용 과제만 정밀 타겟팅
+                .eq('target_student_id', sId)
                 .neq('homework_title', '[시스템] 수업 진도 완료 기록')
                 .gte('created_at', startOfTodayKST)
                 .lte('created_at', endOfTodayKST)
@@ -282,13 +280,11 @@ export default function ProgressPage() {
                 .limit(1);
 
             if (existing && existing.length > 0) {
-                // 이미 오늘자 이 학생의 개인 과제가 있다면 무조건 합병 (Merge)
                 const hwId = existing[0].homework_id;
                 const prevQs = safeParseIds(existing[0].target_questions);
                 const newQs = Array.from(new Set([...prevQs, ...allTqIds]));
 
                 let updatedTitle = existing[0].homework_title;
-                // 주교재/워크북이 혼합되는 순간 제목을 '통합 과제'로 통일
                 if (!updatedTitle.includes('통합')) {
                     if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
                         updatedTitle = `통합 과제 (${dateStr})`;
@@ -297,13 +293,11 @@ export default function ProgressPage() {
 
                 await supabase.from('homework_assignment').update({ target_questions: newQs, homework_title: updatedTitle }).eq('homework_id', hwId);
 
-                // 결과지 안정성 보장
                 const { data: res } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
                 if (!res) {
                     await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '미제출', completed_tq_ids: [] });
                 }
             } else {
-                // 오늘 생성된 개인 과제가 없으면 1개 신규 생성
                 let expectedTitle = `${titleStr} (${dateStr})`;
                 if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `통합 과제 (${dateStr})`;
 
@@ -311,7 +305,7 @@ export default function ProgressPage() {
                     book_id: Number(selectedBookId),
                     target_questions: allTqIds,
                     class_id: selectedClassId,
-                    target_student_id: sId, // 💡 무조건 개인 전용 과제로 박음
+                    target_student_id: sId,
                     due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                     homework_title: expectedTitle
                 }).select();
@@ -331,7 +325,6 @@ export default function ProgressPage() {
     }
   };
 
-  // 진도 완료 기록도 학생별 1과제 1덩어리 룰 적용
   const markProgressAsCompleteInDB = async (tq_ids: number[], targetStudentIds: string[]) => {
     try {
       if (!tq_ids.length || !selectedBookId || !targetStudentIds.length) return;
@@ -369,7 +362,6 @@ export default function ProgressPage() {
     }
   };
 
-  // 💡 [핵심 3] 취소 로직도 해당 타겟 학생들의 기록만 안전하게 소거하여 다른 학생 영향 차단
   const cancelProgressForIds = async (tqIds: number[], targetStudentIds: string[]) => {
     try {
       if (!tqIds.length || !selectedClassId || !targetStudentIds.length) return;
@@ -380,7 +372,6 @@ export default function ProgressPage() {
       if (getErr) return;
       
       for (const hw of (assignments || [])) {
-        // 개인 전용 과제일 경우, 조작하려는 타겟 학생이 아니면 절대 건드리지 않음 (방어 로직)
         if (hw.target_student_id && !targetStudentIds.includes(hw.target_student_id)) continue;
 
         const { data: results } = await supabase.from('student_homework_result')
@@ -401,7 +392,6 @@ export default function ProgressPage() {
         const isTargetingAll = selectedStudentId === 'all';
         const isPersonalHw = hw.target_student_id !== null && targetStudentIds.includes(hw.target_student_id);
 
-        // 전체 대상 취소거나, 학생 개인의 전용 과제일 때만 원본 과제 배열(target_questions) 정리
         if (isTargetingAll || isPersonalHw) {
             const tqArr = safeParseIds(hw.target_questions);
             const remaining = tqArr.filter((id: number) => !tqIds.includes(id));
@@ -427,6 +417,7 @@ export default function ProgressPage() {
   };
 
   const applyActionToIds = async (actionType: string, mainIds: number[], wbIds: number[]) => {
+    // 1. 화면(UI) 상태는 클릭 즉시 바로 업데이트 (반응성 보장)
     const newMap = { ...statusMap };
     const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
 
@@ -453,22 +444,26 @@ export default function ProgressPage() {
 
     setStatusMap(newMap);
 
-    await cancelProgressForIds([...mainIds, ...wbIds], targets);
-    
-    // 💡 [핵심] 쪼개지지 않도록 딱 한 번만 통합 호출하여 병합 보장
-    if (actionType === 'DONE_AND_WB_HW') {
-      if (mainIds.length > 0) await markProgressAsCompleteInDB(mainIds, targets);
-      if (wbIds.length > 0) await assignHomeworkToStudents(targets, [], wbIds, '워크북 과제');
-    } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-      const titleStr = (mainIds.length > 0 && wbIds.length === 0) ? '본교재 과제' : ((wbIds.length > 0 && mainIds.length === 0) ? '워크북 과제' : '통합 과제');
-      const combinedHwIds = [...mainIds, ...wbIds];
-      if (combinedHwIds.length > 0) await assignHomeworkToStudents(targets, mainIds, wbIds, titleStr);
-    }
-
     let tMsg = "선택한 상태가 취소되었습니다.";
     if (actionType === 'DONE_AND_WB_HW') tMsg = `본교재 진도완료 및 워크북 과제(${wbIds.length}문제)가 배부되었습니다!`;
     if (actionType === 'MAIN_HW_AND_WB_HW') tMsg = `과제 배부가 완료되었습니다!`;
     showToast(tMsg);
+
+    // 2. 🌟 [핵심 2] 실제 DB 서버 전송 작업은 대기열(Queue)에 줄을 세워서 순차적으로 실행
+    actionQueue.current = actionQueue.current.then(async () => {
+      await cancelProgressForIds([...mainIds, ...wbIds], targets);
+      
+      if (actionType === 'DONE_AND_WB_HW') {
+        if (mainIds.length > 0) await markProgressAsCompleteInDB(mainIds, targets);
+        if (wbIds.length > 0) await assignHomeworkToStudents(targets, [], wbIds, '워크북 과제');
+      } else if (actionType === 'MAIN_HW_AND_WB_HW') {
+        const titleStr = (mainIds.length > 0 && wbIds.length === 0) ? '본교재 과제' : ((wbIds.length > 0 && mainIds.length === 0) ? '워크북 과제' : '통합 과제');
+        const combinedHwIds = [...mainIds, ...wbIds];
+        if (combinedHwIds.length > 0) await assignHomeworkToStudents(targets, mainIds, wbIds, titleStr);
+      }
+    }).catch(err => {
+      console.error("큐(Queue) 처리 중 오류 발생:", err);
+    });
   };
 
   const executeProgressAction = async (actionType: string) => {

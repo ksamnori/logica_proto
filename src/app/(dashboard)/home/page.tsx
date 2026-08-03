@@ -42,13 +42,13 @@ export default function TeacherDashboardPage() {
 
     loadDashboardData(instId);
     
-    // 💡 [완벽 해결] 클릭한 요소가 '.kebab-container' 내부인지 확인하여 닫기 예외 처리
+    // 바탕 클릭 시 출결 드롭다운 닫기
     const closeMenu = (e: MouseEvent) => {
       const target = e.target as Element;
       if (target.closest('.kebab-container')) {
-        return; // 케밥 메뉴(버튼+드롭다운) 안쪽을 클릭했으면 무시 (안 닫음)
+        return;
       }
-      setActiveAttMenu(null); // 바깥쪽을 클릭했을 때만 닫음
+      setActiveAttMenu(null);
     };
 
     document.addEventListener("mousedown", closeMenu);
@@ -125,9 +125,10 @@ export default function TeacherDashboardPage() {
       return;
     }
 
+    // 💡 [핵심 수정] consultation_log 테이블 조인 추가
     const { data: classStudents } = await supabase
       .from("student")
-      .select("*, parent(*), exam_assignment(*), enrollment(class(name))")
+      .select("*, parent(*), exam_assignment(*), enrollment(class(name)), consultation_log(created_at)")
       .eq("status", "재원")
       .in("student_id", allTargetIds);
     
@@ -208,7 +209,6 @@ export default function TeacherDashboardPage() {
     return { total, present, leave: earlyLeave, absent };
   }, [attStudents]);
 
-  // 원클릭 액션 핸들러
   const handleAttAction = async (student: any, action: string) => {
     const today = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
     const nowTimestamp = new Date().toISOString();
@@ -491,13 +491,16 @@ export default function TeacherDashboardPage() {
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead className="bg-white sticky top-0 shadow-sm z-10">
                 <tr>
-                  <th className="py-3 px-4 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">이름</th>
-                  <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">수강중 반 목록</th>
+                  {/* 💡 [핵심] 이름 칸의 너비를 고정하고 간격을 줄임 */}
+                  <th className="py-3 pl-4 pr-2 w-28 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">이름</th>
+                  {/* 💡 [핵심] 수강중 반 목록 칸의 좌측 패딩을 줄여 이름과 밀착시킴 */}
+                  <th className="py-3 pl-0 pr-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">수강중 반 목록</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학교</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학년</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학생 연락처</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학부모 연락처</th>
-                  <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">최근 성적</th>
+                  {/* 💡 [핵심] 최근 성적 -> 최근 상담 타이틀 변경 */}
+                  <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">최근 상담</th>
                   <th className="py-3 px-4 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-right">관리</th>
                 </tr>
               </thead>
@@ -510,16 +513,28 @@ export default function TeacherDashboardPage() {
                     const parentContact = s.parent?.phone || s.parent?.parent_contact || "-";
                     const classNames = s.enrollment?.map((e: any) => e.class?.name).filter(Boolean).join(", ") || "반 미배정";
 
-                    let scoreHtml = <span className="text-xs font-bold text-slate-400">미응시</span>;
-                    if (s.exam_assignment?.length > 0 && s.exam_assignment[0].total_score !== null) {
-                      const score = s.exam_assignment[0].total_score;
-                      if (score < 70) scoreHtml = <><span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded">미달</span> <span className="font-extrabold text-rose-600 ml-1">{score}점</span></>;
-                      else scoreHtml = <><span className="text-[11px] font-bold text-emerald-500 bg-emerald-50 px-1.5 py-0.5 rounded">완료</span> <span className="font-extrabold text-slate-700 ml-1">{score}점</span></>;
+                    // 💡 [핵심] 상담 기록 추출 및 버튼 HTML 생성
+                    let consultHtml = <span className="text-[11px] font-bold text-slate-300">기록없음</span>;
+                    if (s.consultation_log && s.consultation_log.length > 0) {
+                      // 최신 순 정렬
+                      const logs = [...s.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+                      // 날짜 포맷 (예: 25. 12. 31)
+                      const recentDate = new Date(logs[0].created_at).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }).replace(/\.$/, '');
+                      
+                      consultHtml = (
+                        <button 
+                          onClick={() => window.open(`/student/${s.student_id}?tab=consult`, '_blank')}
+                          className="text-[11px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 hover:text-indigo-700 px-2 py-1 rounded transition-colors shadow-sm"
+                        >
+                          {recentDate}
+                        </button>
+                      );
                     }
 
                     return (
                       <tr key={s.student_id} className="hover:bg-blue-50/40 transition-colors border-b border-slate-100">
-                        <td className="py-3 px-4">
+                        {/* 💡 [핵심] 이름 칸 너비 적용 */}
+                        <td className="py-3 pl-4 pr-2 w-28">
                           <div 
                             className="flex items-center gap-3 cursor-pointer group w-max"
                             onClick={() => window.open(`/student/${s.student_id}`, '_blank')}
@@ -532,14 +547,16 @@ export default function TeacherDashboardPage() {
                             </span>
                           </div>
                         </td>
-                        <td className="py-3 px-3 text-[12px] font-bold text-slate-600 truncate max-w-[120px]" title={classNames}>{classNames}</td>
+                        {/* 💡 [핵심] 수강중 반 목록 칸 패딩 조정 */}
+                        <td className="py-3 pl-0 pr-3 text-[12px] font-bold text-slate-600 truncate max-w-[140px]" title={classNames}>{classNames}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-medium text-slate-500 truncate max-w-[80px]" title={schoolName}>{schoolName}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-bold text-slate-600 whitespace-nowrap">{gradeText}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-medium text-slate-500 whitespace-nowrap">{studentContact}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-medium text-slate-500 whitespace-nowrap">{parentContact}</td>
-                        <td className="py-3 px-3 text-center whitespace-nowrap">{scoreHtml}</td>
+                        {/* 💡 [핵심] 렌더링 값 교체 */}
+                        <td className="py-3 px-3 text-center whitespace-nowrap">{consultHtml}</td>
                         <td className="py-3 px-4 text-right">
-                          <button className="text-[11px] font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors shadow-sm whitespace-nowrap">리포트</button>
+                          <button onClick={() => window.open(`/student/${s.student_id}`, '_blank')} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors shadow-sm whitespace-nowrap">리포트</button>
                         </td>
                       </tr>
                     );
@@ -593,7 +610,6 @@ export default function TeacherDashboardPage() {
                         <span className="font-bold text-slate-800 text-[13px]">{student.name}</span>
                       </div>
 
-                      {/* 💡 [완벽 해결] 케밥 버튼 영역을 .kebab-container 클래스로 묶어 외부 클릭 시 닫히는 로직과 분리 */}
                       <div className="relative inline-block shrink-0 kebab-container">
                         <button 
                           onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} 

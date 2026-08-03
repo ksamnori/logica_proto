@@ -22,7 +22,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
   const [publishSearch, setPublishSearch] = useState("");
   const [alwaysOpen, setAlwaysOpen] = useState(true);
   
-  // 💡 [핵심 수정] 선택된 학생 목록에 class_id를 함께 저장하도록 객체 배열로 변경
   const [selectedStudents, setSelectedStudents] = useState<any[]>([]);
   
   const [expandedGroups, setExpandedGroups] = useState<string[]>([]);
@@ -53,7 +52,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       const role = localStorage.getItem('logica_instructor_role') || '';
       const pos = localStorage.getItem('logica_instructor_position') || '';
       
-      // 💡 최고관리자, SUPER_ADMIN 권한 적용
       const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장');
 
       let classQuery = supabase.from('class').select('*');
@@ -102,15 +100,19 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       const activeStudentsMap = new Map();
       processedStudents.forEach(s => activeStudentsMap.set(s.student_id, s));
 
-      const order = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강'];
-      const getOrder = (name: string) => {
-        for (let i = 0; i < order.length; i++) if (name.includes(order[i])) return i;
-        return 999; 
+      // 💡 [수정됨] 클래스 정렬 순서 강제: Ultimate -> Master -> Apex -> Titan -> Horizon -> 기타
+      const order = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '기타'];
+      const getOrder = (c: any) => {
+        const targetStr = (c.level_name || c.name || "");
+        for (let i = 0; i < order.length; i++) {
+          if (order[i] !== '기타' && targetStr.includes(order[i])) return i;
+        }
+        return order.indexOf('기타'); 
       };
 
       cls.sort((a, b) => {
-        const oA = getOrder(a.name);
-        const oB = getOrder(b.name);
+        const oA = getOrder(a);
+        const oB = getOrder(b);
         if (oA !== oB) return oA - oB;
         return a.name.localeCompare(b.name);
       });
@@ -139,7 +141,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     setExpandedClassGroups(prev => prev.includes(classId) ? prev.filter(id => id !== classId) : [...prev, classId]);
   };
 
-  // 💡 선택 헬퍼 함수
   const isSelected = (studentId: string, classId: string | null) => {
     return selectedStudents.some(s => s.student_id === studentId && s.class_id === classId);
   };
@@ -158,7 +159,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     setSelectedStudents(prev => {
       const newArr = [...prev];
       targetStudents.forEach(s => {
-        // 학년 탭에서 선택 시 학생의 첫 번째 등록된 반을 사용하거나 없으면 null
         const defaultClassId = s.classIds && s.classIds.length > 0 ? s.classIds[0] : null;
         const defaultClassName = s.displayClassNames.split(',')[0] || '반 미지정';
         
@@ -191,7 +191,12 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     if (!confirm(`선택한 ${selectedStudents.length}건의 출제를 진행하시겠습니까?`)) return;
 
     try {
-      // 💡 기존에 배부된 기록을 가져올 때 class_id도 함께 조회하여, '같은 학생이더라도 반이 다르면' 새로 배부할 수 있도록 허용
+      // 💡 [핵심 추가] '과제프린트'를 학습 관리 페이지에서 인식하도록 '과제'로 타입 강제 업데이트
+      const { data: exMaster } = await supabase.from('exam_master').select('exam_type').eq('exam_id', examId).single();
+      if (exMaster?.exam_type === '과제프린트') {
+        await supabase.from('exam_master').update({ exam_type: '과제' }).eq('exam_id', examId);
+      }
+
       const { data: existing } = await supabase.from('exam_assignment').select('student_id, class_id').eq('exam_id', examId);
       
       const inserts = selectedStudents.filter(sel => {
@@ -200,12 +205,12 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       }).map(sel => ({
         exam_id: examId,
         student_id: sel.student_id,
-        class_id: sel.class_id, // 💡 드디어 반 정보를 함께 저장!
+        class_id: sel.class_id,
         status: '미응시'
       }));
 
       if (inserts.length === 0) { 
-        alert("선택한 모든 학생이 이미 이 반으로 시험지를 배부받았습니다."); 
+        alert("선택한 모든 학생이 이미 이 반으로 시험지/과제를 배부받았습니다."); 
         onClose(); 
         return; 
       }
@@ -213,10 +218,23 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       const { error } = await supabase.from('exam_assignment').insert(inserts);
       if (error) throw error;
 
-      alert(`🎉 성공적으로 ${inserts.length}건의 문제지가 배부되었습니다.`);
+      alert(`🎉 성공적으로 ${inserts.length}건의 배부가 완료되었습니다.`);
       onSuccess();
       onClose();
     } catch (e: any) { alert(`❌ 출제 실패: ${e.message}`); }
+  };
+
+  // 💡 [수정됨] 학년별 오름차순(저학년->고학년) 정렬을 위한 가중치 계산 함수
+  const getGradeWeight = (gName: string) => {
+    let weight = 0;
+    if (gName.includes('초등')) weight = 100;
+    else if (gName.includes('중등')) weight = 200;
+    else if (gName.includes('고등')) weight = 300;
+    else return 999;
+    
+    const numMatch = gName.match(/\d+/);
+    if (numMatch) weight += parseInt(numMatch[0], 10);
+    return weight;
   };
 
   if (!isOpen) return null;
@@ -250,7 +268,8 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
               {isLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-400 font-bold text-sm">데이터를 불러오는 중입니다...</div>
               ) : publishTab === 'grade' ? (
-                Object.keys(groupedStudents).sort().map(groupName => {
+                // 💡 [수정됨] 알파벳 순(고등->초등)이 아닌 가중치 기반 오름차순(초등->고등)으로 정렬
+                Object.keys(groupedStudents).sort((a, b) => getGradeWeight(a) - getGradeWeight(b)).map(groupName => {
                   const studentsInGroup = groupedStudents[groupName].filter((s: any) => {
                     const defaultClassId = s.classIds && s.classIds.length > 0 ? s.classIds[0] : null;
                     return !isSelected(s.student_id, defaultClassId) && (publishSearch === '' || s.name.toLowerCase().includes(publishSearch.toLowerCase()));

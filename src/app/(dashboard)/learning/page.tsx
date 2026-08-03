@@ -90,6 +90,23 @@ export default function LearningPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allStudentsList]);
 
+  // 💡 [핵심 추가 1] 우측에서 학생 또는 반 선택 시, 좌측 사이드바의 해당 아코디언을 자동으로 열어주는 효과
+  useEffect(() => {
+    if (currentView.type === 'STUDENT' || currentView.type === 'CLASS') {
+      const cId = currentView.classId;
+      if (cId) {
+        setExpandedClasses(prev => prev.includes(cId) ? prev : [...prev, cId]);
+        
+        for (const [level, classes] of Object.entries(groupedClasses)) {
+          if (classes.some(c => c.class_id === cId)) {
+            setExpandedLevels(prev => prev.includes(level) ? prev : [...prev, level]);
+            break;
+          }
+        }
+      }
+    }
+  }, [currentView.classId, currentView.type, groupedClasses]);
+
   const handleMainTabClick = (tab: TabType) => {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
@@ -325,10 +342,6 @@ export default function LearningPage() {
     } catch(e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  const fetchStudentDetails = async (tab: TabType, studentId: string, classId: string) => {
-    fetchStudentTimeline(studentId, classId);
-  };
-
   const fetchGlobalListForTab = async (tab: TabType, students: StudentInfo[]) => {
     setIsLoading(true);
     setGlobalList([]);
@@ -389,7 +402,6 @@ export default function LearningPage() {
 
               const res = hwResultMap.get(`${s.id}_${hw.homework_id}`);
               
-              // 💡 [버그 픽스] target_questions가 JSON 배열 객체일 때 발생하는 parse 에러 해결 (안전한 배열 반환)
               let totalQ = 0;
               try { 
                 const tQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []);
@@ -1001,11 +1013,24 @@ export default function LearningPage() {
                               {isClassExpanded && (
                                 <div className="flex flex-col bg-white">
                                   {c.students.length === 0 ? <div className="py-4 text-center text-sm text-slate-400 font-bold bg-slate-50/50">학생 없음</div> : (
-                                    c.students.map(s => (
-                                      <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full text-left pl-10 pr-5 py-3 text-[15px] font-bold text-slate-500 hover:bg-slate-50 hover:text-blue-700 transition-colors border-l-4 ${currentView.studentId === s.id && currentView.classId === c.class_id ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'border-transparent'}`}>
-                                        {s.name}
-                                      </button>
-                                    ))
+                                    c.students.map(s => {
+                                      // 💡 [핵심 추가 2] 아코디언 학생 이름 옆에 띄울 미해결 뱃지 수치 계산
+                                      const stats = (activeTab === 'INCORRECT' || c.class_id === 'UNKNOWN') 
+                                        ? studentStatsMap[`${s.id}_ALL`] 
+                                        : studentStatsMap[`${s.id}_${c.class_id}`];
+                                      const displayCount = activeTab === 'INCORRECT' ? (stats?.pendingQ || 0) : (stats?.pending || 0);
+
+                                      return (
+                                        <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full flex items-center justify-between pl-10 pr-5 py-3 text-[15px] font-bold transition-colors border-l-4 ${currentView.studentId === s.id && currentView.classId === c.class_id ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'text-slate-500 hover:bg-slate-50 hover:text-blue-700 border-transparent'}`}>
+                                          <span className="truncate">{s.name}</span>
+                                          {displayCount > 0 && (
+                                            <span className={`shrink-0 ml-2 text-[10px] font-black px-1.5 py-0.5 rounded-full shadow-sm ${activeTab === 'INCORRECT' ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'}`}>
+                                              {displayCount}
+                                            </span>
+                                          )}
+                                        </button>
+                                      );
+                                    })
                                   )}
                                 </div>
                               )}
