@@ -8,7 +8,7 @@ export default function StudentCard({ student }: { student: any }) {
 
   // 💡 [탭 상태 관리]
   const tabs = [
-    { id: "calendar", label: "출결·달력" },
+    { id: "calendar", label: "출결" },
     { id: "progress", label: "진도" },
     { id: "homework", label: "과제" },
     { id: "makeup", label: "보강" },
