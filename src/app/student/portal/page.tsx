@@ -52,8 +52,32 @@ export default function StudentPortal() {
     const isSyncingSessionRef = useRef(false);
 
     const [isMounted, setIsMounted] = useState(false);
+    const [isFullscreen, setIsFullscreen] = useState(false); // 전체화면 상태 관리
 
     useEffect(() => { setIsMounted(true); }, []);
+
+    // 💡 전체화면 토글 함수
+    const toggleFullScreen = () => {
+        if (!document.fullscreenElement) {
+            document.documentElement.requestFullscreen().catch(err => {
+                console.log("전체화면을 지원하지 않는 기기입니다.", err);
+                alert("이 기기나 브라우저에서는 전체화면을 지원하지 않습니다.");
+            });
+        } else {
+            if (document.exitFullscreen) {
+                document.exitFullscreen();
+            }
+        }
+    };
+
+    // 전체화면 상태 변화 감지
+    useEffect(() => {
+        const handleFullscreenChange = () => {
+            setIsFullscreen(!!document.fullscreenElement);
+        };
+        document.addEventListener("fullscreenchange", handleFullscreenChange);
+        return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+    }, []);
 
     useEffect(() => {
         const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -428,7 +452,6 @@ export default function StudentPortal() {
         });
     };
 
-    // 💡 1.시험, 2.과제, 3.오답 (더 크고 웅장해진 카드 디자인 적용)
     const renderCard = (typeKey: string, round: number, className: string) => {
         const cState = blockStates[className] || {};
         const isDone = cState[typeKey] === '제출완료' || cState[typeKey] === '채점완료';
@@ -470,7 +493,6 @@ export default function StudentPortal() {
         );
     };
 
-    // 💡 4. 다가오는 시험 (D-Day 예비칸) 
     const renderUpcomingTestCard = () => {
         const targetDate = new Date('2026-08-07');
         const today = new Date(getKSTDateString());
@@ -582,6 +604,12 @@ export default function StudentPortal() {
                             {isPortalCalling ? '🚨 호출 취소' : '🙋 조교 호출'}
                         </button>
                     )}
+
+                    {/* 💡 전체화면 토글 버튼 추가 */}
+                    <button onClick={toggleFullScreen} className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-slate-200 transition-colors shadow-sm hidden sm:flex">
+                        <span className="text-[11px] font-bold text-slate-600">{isFullscreen ? '🗗 기본화면' : '📺 전체화면'}</span>
+                    </button>
+
                     <button onClick={() => router.push('/student/shop')} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-amber-100 transition-colors shadow-sm">
                         <span className="text-amber-500 text-sm font-black font-lexend">{mockPoints.toLocaleString()} P</span>
                         <span className="text-[10px] font-bold text-amber-700 bg-amber-200 px-1.5 rounded-full">상점 가기 🛒</span>
@@ -623,7 +651,6 @@ export default function StudentPortal() {
                                 </button>
                             ))}
                         </div>
-                        {/* 💡 2x2 그리드 배열, 카드 대형화 및 간격 확장 */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}
