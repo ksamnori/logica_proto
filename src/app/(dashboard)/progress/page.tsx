@@ -255,6 +255,7 @@ export default function ProgressPage() {
     }
   };
 
+  // 1. [완전 개편] 철저한 "개인 중심" 당일 과제 통합 로직
   const assignHomeworkToStudents = async (targetStudentIds: string[], mainIds: number[], wbIds: number[], titleStr: string) => {
     try {
         const allTqIds = [...mainIds, ...wbIds];
@@ -264,101 +265,145 @@ export default function ProgressPage() {
         const kstOffset = 9 * 60 * 60 * 1000;
         const kstDate = new Date(now.getTime() + kstOffset);
         const dateStr = kstDate.toISOString().split('T')[0];
-
+        
         const startOfTodayKST = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
         const endOfTodayKST = new Date(`${dateStr}T23:59:59.999+09:00`).toISOString();
 
-        for (const sId of targetStudentIds) {
-            const { data: existing } = await supabase.from('homework_assignment')
-                .select('homework_id, target_questions, homework_title')
-                .eq('class_id', selectedClassId)
-                .eq('target_student_id', sId)
-                .neq('homework_title', '[시스템] 수업 진도 완료 기록')
-                .gte('created_at', startOfTodayKST)
-                .lte('created_at', endOfTodayKST)
-                .order('created_at', { ascending: false })
-                .limit(1);
+        // 💡 7명이면 7번, 1명이면 1번. 철저하게 "개별 학생" 단위로 병렬 처리합니다.
+        await Promise.all(targetStudentIds.map(async (sId) => {
+            try {
+                const studentName = students.find(s => s.id === sId)?.name || '학생';
 
-            if (existing && existing.length > 0) {
-                const hwId = existing[0].homework_id;
-                const prevQs = safeParseIds(existing[0].target_questions);
-                const newQs = Array.from(new Set([...prevQs, ...allTqIds]));
+                // [핵심 1] 오늘 이 학생(sId)에게 배부된 과제 묶음이 있는지 확인합니다.
+                const { data: existing, error: existErr } = await supabase.from('homework_assignment')
+                    .select('homework_id, target_questions, homework_title')
+                    .eq('class_id', selectedClassId)
+                    .eq('target_student_id', sId) // 철저한 개인 격리
+                    .neq('homework_title', '[시스템] 수업 진도 완료 기록')
+                    .gte('created_at', startOfTodayKST)
+                    .lte('created_at', endOfTodayKST)
+                    .order('created_at', { ascending: false })
+                    .limit(1);
 
-                let updatedTitle = existing[0].homework_title;
-                if (!updatedTitle.includes('통합')) {
-                    if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
-                        updatedTitle = `통합 과제 (${dateStr})`;
+                if (existErr) throw existErr;
+
+                let hwId: number;
+
+                if (existing && existing.length > 0) {
+                    // [상황 A] 이미 오늘 만들어진 과제 묶음이 있음 -> 기존 묶음에 문항을 합산(Merge)
+                    hwId = existing[0].homework_id;
+                    const prevQs = safeParseIds(existing[0].target_questions);
+                    const newQs = Array.from(new Set([...prevQs, ...allTqIds])); // 중복 방지 합산
+
+                    let updatedTitle = existing[0].homework_title || '';
+                    // 본교재만 있다가 워크북이 추가되거나 하면 이름을 "통합 과제"로 업그레이드
+                    if (!updatedTitle.includes('통합')) {
+                        if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
+                            updatedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
+                        }
                     }
+                    
+                    await supabase.from('homework_assignment')
+                        .update({ target_questions: newQs, homework_title: updatedTitle })
+                        .eq('homework_id', hwId);
+                } else {
+                    // [상황 B] 오늘 처음 나가는 과제임 -> 새로운 묶음(방) 생성
+                    let expectedTitle = `[${studentName}] ${titleStr} (${dateStr})`;
+                    if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
+
+                    const { data: hwData, error: insErr } = await supabase.from('homework_assignment').insert({
+                        book_id: Number(selectedBookId),
+                        target_questions: allTqIds,
+                        class_id: selectedClassId,
+                        target_student_id: sId, // 철저한 개인 격리
+                        due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+                        homework_title: expectedTitle
+                    }).select();
+
+                    if (insErr) throw insErr;
+                    if (!hwData || hwData.length === 0) return;
+                    hwId = hwData[0].homework_id;
                 }
 
-                await supabase.from('homework_assignment').update({ target_questions: newQs, homework_title: updatedTitle }).eq('homework_id', hwId);
-
-                const { data: res } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
+                // [핵심 2] 해당 과제 방에 대한 학생의 결과(채점용) 테이블 레코드 확인 및 생성
+                const { data: res } = await supabase.from('student_homework_result')
+                    .select('hw_result_id')
+                    .eq('homework_id', hwId)
+                    .eq('student_id', sId)
+                    .maybeSingle();
+                    
                 if (!res) {
-                    await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '미제출', completed_tq_ids: [] });
-                }
-            } else {
-                let expectedTitle = `${titleStr} (${dateStr})`;
-                if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `통합 과제 (${dateStr})`;
-
-                const { data: hwData } = await supabase.from('homework_assignment').insert({
-                    book_id: Number(selectedBookId),
-                    target_questions: allTqIds,
-                    class_id: selectedClassId,
-                    target_student_id: sId,
-                    due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                    homework_title: expectedTitle
-                }).select();
-
-                if (hwData && hwData.length > 0) {
-                    await supabase.from('student_homework_result').insert({
-                        homework_id: hwData[0].homework_id,
-                        student_id: sId,
-                        status: '미제출',
-                        completed_tq_ids: []
+                    await supabase.from('student_homework_result').insert({ 
+                        homework_id: hwId, student_id: sId, status: '미제출', completed_tq_ids: [] 
                     });
                 }
+            } catch (err) {
+                console.error(`[과제배부 에러] 학생 ID ${sId}:`, err);
             }
-        }
+        }));
     } catch (e: any) {
-        console.error("assignHomeworkToStudents 에러:", e.message || e);
+        console.error("assignHomeworkToStudents 전체 런타임 에러:", e.message || e);
     }
   };
 
+  // 2. [완전 개편] 진도 완료 기록 역시 철저한 "개인 단위" 처리
   const markProgressAsCompleteInDB = async (tq_ids: number[], targetStudentIds: string[]) => {
     try {
       if (!tq_ids.length || !selectedBookId || !targetStudentIds.length) return;
 
-      for (const sId of targetStudentIds) {
-        let { data: existing } = await supabase.from('homework_assignment')
-          .select('homework_id')
-          .eq('class_id', selectedClassId)
-          .eq('book_id', Number(selectedBookId))
-          .eq('target_student_id', sId)
-          .eq('homework_title', '[시스템] 수업 진도 완료 기록')
-          .limit(1);
+      await Promise.all(targetStudentIds.map(async (sId) => {
+        try {
+          // 이 학생만의 진도 완료 기록용 숨김 방(Assignment)이 있는지 확인
+          const { data: existing } = await supabase.from('homework_assignment')
+            .select('homework_id')
+            .eq('class_id', selectedClassId)
+            .eq('book_id', Number(selectedBookId))
+            .eq('target_student_id', sId) // 철저한 개인 격리
+            .eq('homework_title', '[시스템] 수업 진도 완료 기록')
+            .limit(1);
 
-        let hwId: number;
-        if (existing && existing.length > 0) {
-          hwId = existing[0].homework_id;
-        } else {
-          const { data: ins } = await supabase.from('homework_assignment').insert({
-            book_id: Number(selectedBookId), target_questions: [], due_date: '2099-12-31', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId
-          }).select();
-          hwId = ins![0].homework_id;
-        }
+          let hwId: number;
+          if (existing && existing.length > 0) {
+            hwId = existing[0].homework_id;
+          } else {
+            const { data: ins, error: insErr } = await supabase.from('homework_assignment').insert({
+              book_id: Number(selectedBookId), 
+              target_questions: [], 
+              due_date: '2099-12-31', 
+              homework_title: '[시스템] 수업 진도 완료 기록', 
+              class_id: selectedClassId, 
+              target_student_id: sId // 철저한 개인 격리
+            }).select();
+            
+            if (insErr) throw insErr;
+            if (!ins || ins.length === 0) return;
+            hwId = ins[0].homework_id;
+          }
 
-        const { data: res } = await supabase.from('student_homework_result').select('hw_result_id, completed_tq_ids').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
-        if (res) {
-          const comp = safeParseIds(res.completed_tq_ids);
-          const newComp = Array.from(new Set([...comp, ...tq_ids]));
-          await supabase.from('student_homework_result').update({ completed_tq_ids: newComp, status: '채점완료' }).eq('hw_result_id', res.hw_result_id);
-        } else {
-          await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids });
+          // 해당 진도 완료 방에 문항 추가
+          const { data: res } = await supabase.from('student_homework_result')
+            .select('hw_result_id, completed_tq_ids')
+            .eq('homework_id', hwId)
+            .eq('student_id', sId)
+            .maybeSingle();
+
+          if (res) {
+            const comp = safeParseIds(res.completed_tq_ids);
+            const newComp = Array.from(new Set([...comp, ...tq_ids]));
+            await supabase.from('student_homework_result')
+                .update({ completed_tq_ids: newComp, status: '채점완료' })
+                .eq('hw_result_id', res.hw_result_id);
+          } else {
+            await supabase.from('student_homework_result').insert({ 
+                homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids 
+            });
+          }
+        } catch (err) {
+          console.error(`[진도기록 에러] 학생 ID ${sId}:`, err);
         }
-      }
+      }));
     } catch (e: any) {
-      console.error("markProgressAsCompleteInDB 에러:", e.message || e);
+      console.error("markProgressAsCompleteInDB 전체 런타임 에러:", e.message || e);
     }
   };
 

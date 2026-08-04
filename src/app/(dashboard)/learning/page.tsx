@@ -4,6 +4,9 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import StudentDashboard from "./components/StudentDashboard";
+import GlobalList from "./components/GlobalList";
+import StudentTimeline from "./components/StudentTimeline";
 
 const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강', '메이크업/보강', '기타'];
 
@@ -14,6 +17,7 @@ interface StudentInfo {
   name: string;
   className: string;
   classId: string;
+  allClassIds?: string[]; // 💡 다중 수강반 완벽 지원을 위한 필드 추가
 }
 
 interface ClassInfo {
@@ -154,11 +158,16 @@ export default function LearningPage() {
       const studentsByClass: Record<string, StudentInfo[]> = {};
       const allStudents: StudentInfo[] = [];
       const processedStudentIds = new Set<string>();
+      
+      const studentClassMap = new Map<string, string[]>(); // 💡 학생이 속한 모든 반 ID 추적
 
       const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, student(name, status)').in('class_id', classIds);
 
       enrollments?.forEach((e: any) => {
         if (e.student && e.student.status === '재원') {
+          if (!studentClassMap.has(e.student_id)) studentClassMap.set(e.student_id, []);
+          studentClassMap.get(e.student_id)!.push(e.class_id);
+
           if (!studentsByClass[e.class_id]) studentsByClass[e.class_id] = [];
           const studentName = Array.isArray(e.student) ? e.student[0]?.name : e.student.name;
           const sObj: StudentInfo = { id: e.student_id, name: studentName, className: classes.find(c => c.class_id === e.class_id)?.name || '', classId: e.class_id };
@@ -187,8 +196,14 @@ export default function LearningPage() {
       });
 
       setGroupedClasses(groups);
-      const uniqueStudents = Array.from(new Map(allStudents.map(s => [s.id, s])).values());
-      setAllStudentsList(uniqueStudents);
+      
+      const uniqueStudentsMap = new Map<string, StudentInfo>();
+      allStudents.forEach(s => {
+        if (!uniqueStudentsMap.has(s.id)) {
+           uniqueStudentsMap.set(s.id, { ...s, allClassIds: studentClassMap.get(s.id) || [s.classId] });
+        }
+      });
+      setAllStudentsList(Array.from(uniqueStudentsMap.values()));
     } catch (e) { console.error(e); setIsLoading(false); }
   };
 
@@ -196,7 +211,8 @@ export default function LearningPage() {
     setIsLoading(true);
     try {
       const studentIds = students.map(s => s.id);
-      const classIds = [...new Set(students.map(s => s.classId))];
+      // 💡 각 학생이 수강중인 모든 반 ID를 추출하여 데이터 누락 방지
+      const classIds = [...new Set(students.flatMap(s => s.allClassIds || [s.classId]))]; 
       let fetchedStats: any[] = [];
       const chunkSize = 200;
       
@@ -215,18 +231,34 @@ export default function LearningPage() {
           const hwResultMap = new Map();
           hwStats?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
 
+          // 💡 새로 적용된 개인화 과제(target_student_id) 완벽 대응 로직
           allHws?.forEach(hw => {
-            students.filter(s => s.classId === hw.class_id && chunk.includes(s.id)).forEach(s => {
-              if (hw.target_student_id && hw.target_student_id !== s.id) return;
-              
-              const res = hwResultMap.get(`${s.id}_${hw.homework_id}`);
-              fetchedStats.push({
-                student_id: s.id,
-                class_id: hw.class_id,
-                status: res?.status || '미제출',
-                homework_assignment: { class_id: hw.class_id, homework_title: hw.homework_title }
-              });
-            });
+            if (hw.target_student_id) {
+               // 1. 특정 학생 전용 과제일 경우
+               if (chunk.includes(hw.target_student_id)) {
+                  const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
+                  fetchedStats.push({
+                    student_id: hw.target_student_id,
+                    class_id: hw.class_id,
+                    status: res?.status || '미제출',
+                    homework_assignment: { class_id: hw.class_id, homework_title: hw.homework_title }
+                  });
+               }
+            } else {
+               // 2. 예전 방식(반 전체 배부) 과제일 경우 (다중 반 수강생 완벽 처리)
+               chunk.forEach(sId => {
+                  const s = students.find(st => st.id === sId);
+                  if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
+                     const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
+                     fetchedStats.push({
+                       student_id: sId,
+                       class_id: hw.class_id,
+                       status: res?.status || '미제출',
+                       homework_assignment: { class_id: hw.class_id, homework_title: hw.homework_title }
+                     });
+                  }
+               });
+            }
           });
 
           const { data: examStats } = await supabase.from('exam_assignment').select('student_id, status, class_id, exam_master!inner(exam_type, title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
@@ -336,9 +368,14 @@ export default function LearningPage() {
 
     try {
       const studentIds = students.map(s => s.id);
-      const classIds = [...new Set(students.map(s => s.classId))];
+      const classIds = [...new Set(students.flatMap(s => s.allClassIds || [s.classId]))]; 
       let list: any[] = [];
       const chunkSize = 200;
+
+      const getStudentName = (sId: string) => {
+        const s = students.find(st => st.id === sId);
+        return s ? s.name : '알수없음';
+      };
 
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
@@ -384,32 +421,53 @@ export default function LearningPage() {
           hwData?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
 
           allHws?.forEach(hw => {
-            students.filter(s => s.classId === hw.class_id && chunk.includes(s.id)).forEach(s => {
-              if (hw.target_student_id && hw.target_student_id !== s.id) return;
+            let totalQ = 0;
+            try { 
+              const tQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []);
+              totalQ = tQs.length; 
+            } catch(e){}
 
-              const res = hwResultMap.get(`${s.id}_${hw.homework_id}`);
-              
-              let totalQ = 0;
-              try { 
-                const tQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []);
-                totalQ = tQs.length; 
-              } catch(e){}
-
-              list.push({
-                is_exam_hw: false,
-                homework_id: hw.homework_id,
-                student_id: s.id,
-                class_id: hw.class_id,
-                class_name: hw.class?.name || '반 미지정',
-                student: { name: s.name },
-                homework_assignment: hw,
-                status: res?.status || '미제출',
-                sort_date: hw.due_date || hw.created_at,
-                oCount: hCounts[`${hw.homework_id}_${s.id}`]?.o || 0,
-                xCount: hCounts[`${hw.homework_id}_${s.id}`]?.x || 0,
-                totalQ: totalQ
+            // 💡 글로벌 리스트에도 개인화 과제 완벽 매칭 로직 적용
+            if (hw.target_student_id) {
+              if (chunk.includes(hw.target_student_id)) {
+                const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
+                list.push({
+                  is_exam_hw: false,
+                  homework_id: hw.homework_id,
+                  student_id: hw.target_student_id,
+                  class_id: hw.class_id,
+                  class_name: hw.class?.name || '반 미지정',
+                  student: { name: getStudentName(hw.target_student_id) },
+                  homework_assignment: hw,
+                  status: res?.status || '미제출',
+                  sort_date: hw.due_date || hw.created_at,
+                  oCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.o || 0,
+                  xCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.x || 0,
+                  totalQ: totalQ
+                });
+              }
+            } else {
+              chunk.forEach(sId => {
+                const s = students.find(st => st.id === sId);
+                if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
+                  const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
+                  list.push({
+                    is_exam_hw: false,
+                    homework_id: hw.homework_id,
+                    student_id: sId,
+                    class_id: hw.class_id,
+                    class_name: hw.class?.name || '반 미지정',
+                    student: { name: getStudentName(sId) },
+                    homework_assignment: hw,
+                    status: res?.status || '미제출',
+                    sort_date: hw.due_date || hw.created_at,
+                    oCount: hCounts[`${hw.homework_id}_${sId}`]?.o || 0,
+                    xCount: hCounts[`${hw.homework_id}_${sId}`]?.x || 0,
+                    totalQ: totalQ
+                  });
+                }
               });
-            });
+            }
           });
 
           const { data: examData } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
@@ -843,7 +901,6 @@ export default function LearningPage() {
     });
   }, [timelineData, dateFilter, activeTab]);
 
-  // === UI 핸들러 (복구됨) ===
   const toggleAllAccordions = () => {
     if (isAllExpanded) {
       setExpandedLevels([]); setExpandedClasses([]);
@@ -874,93 +931,6 @@ export default function LearningPage() {
     return { title: '오답 현황', icon: '❌' };
   };
   const currentTitles = getTabTitles();
-
-  const renderStudentCard = (s: StudentInfo, classId: string, cName: string, showClassNameBadge = false) => {
-    const stats = (activeTab === 'INCORRECT' || classId === 'UNKNOWN') 
-      ? studentStatsMap[`${s.id}_ALL`] 
-      : studentStatsMap[`${s.id}_${classId}`];
-      
-    const { pending = 0, pendingQ = 0 } = stats || { pending: 0, pendingQ: 0 };
-    const displayCount = activeTab === 'INCORRECT' ? pendingQ : pending;
-    
-    if (isFilterActive && displayCount === 0) return null;
-
-    return (
-      <div 
-        key={s.id} 
-        onClick={() => handleStudentClick(s.id, s.name, classId, cName)} 
-        className={`px-3 py-2.5 rounded-xl border shadow-sm cursor-pointer transition-all flex items-center justify-between ${
-          displayCount > 0 
-          ? 'bg-rose-50/50 border-rose-300 hover:border-rose-500 hover:-translate-y-0.5' 
-          : 'bg-white border-slate-200 hover:border-[#002864] hover:-translate-y-0.5'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          {showClassNameBadge && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${displayCount > 0 ? 'bg-rose-100 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{cName}</span>}
-          <div className={`font-extrabold text-[13px] truncate ${displayCount > 0 ? 'text-rose-900' : 'text-slate-800'}`}>{s.name}</div>
-        </div>
-        
-        <div className="flex shrink-0 ml-1.5">
-          {displayCount > 0 && (
-             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm ${activeTab === 'INCORRECT' ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'}`}>
-               {activeTab === 'INCORRECT' ? `오답 ${displayCount}문항` : `미해결 ${displayCount}건`}
-             </span>
-          )}
-        </div>
-      </div>
-    );
-  };
-
-  const renderStudentHeader = () => {
-    let titleStr = "전체 활동 타임라인";
-    let visibleCount = 0;
-    
-    if (activeTab === 'DASHBOARD') { titleStr = "전체 활동 타임라인"; visibleCount = filteredTimeline.length; } 
-    else if (activeTab === 'EXAM') { titleStr = "전체 시험 타임라인"; visibleCount = filteredTimeline.length; } 
-    else if (activeTab === 'HOMEWORK') { titleStr = "전체 과제 타임라인"; visibleCount = filteredTimeline.length; } 
-    else if (activeTab === 'INCORRECT') { titleStr = "전체 오답 풀이 타임라인"; visibleCount = filteredTimeline.length; }
-
-    const isAllSelected = visibleCount > 0 && selectedBlocks.length === visibleCount;
-
-    return (
-      <div className="px-5 py-3 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2.5">
-        <div className="flex justify-between items-center">
-          <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
-            <span className="bg-[#002864] text-white text-[10px] font-bold px-1.5 py-0.5 rounded shadow-sm">{currentView.className}</span>
-            <span className="text-[#002864]">{currentView.studentName}</span> 학생 {titleStr}
-          </h2>
-          <div className="flex items-center gap-2">
-            <div className="flex bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm">
-              <button onClick={() => setDateFilter('1W')} className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${dateFilter === '1W' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1주일</button>
-              <div className="w-px bg-slate-300"></div>
-              <button onClick={() => setDateFilter('1M')} className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${dateFilter === '1M' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1개월</button>
-              <div className="w-px bg-slate-300"></div>
-              <button onClick={() => setDateFilter('ALL')} className={`px-3 py-1.5 text-[11px] font-bold transition-colors ${dateFilter === 'ALL' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>전체</button>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex justify-between items-center bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm mt-0.5">
-          <label className="flex items-center gap-1.5 cursor-pointer pl-1.5">
-            <input type="checkbox" checked={isAllSelected} onChange={handleSelectAllStudent} className="w-4 h-4 accent-rose-500" />
-            <span className="text-[12px] font-bold text-slate-700">전체 선택</span>
-          </label>
-          <div className="flex items-center gap-1.5">
-            <button onClick={handleBulkCompleteStudent} disabled={selectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[11px] transition-colors disabled:opacity-40">
-              ✅ 선택 완료처리 ({selectedBlocks.length})
-            </button>
-            <button onClick={handleBulkDeleteStudent} disabled={selectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[11px] transition-colors disabled:opacity-40">
-              🗑️ 선택 삭제 ({selectedBlocks.length})
-            </button>
-            <div className="w-px h-4 bg-slate-300 mx-0.5"></div>
-            <button onClick={handleGenerateIncorrectPrint} disabled={selectedBlocks.length === 0 || isGeneratingPrint} className="px-3 py-1 rounded font-black text-[11px] text-white bg-[#002864] hover:bg-blue-900 disabled:opacity-40 disabled:cursor-not-allowed transition-all flex items-center gap-1">
-              {isGeneratingPrint ? '생성 중...' : `🖨️ 오답 프린트 생성`}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative">
@@ -1046,413 +1016,21 @@ export default function LearningPage() {
 
         <div className="flex-1 flex flex-col relative bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           
-          {currentView.type === 'ALL' && (
-            <>
-              <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-800">전체 반 학생 요약 목록</h2>
-                  <p className="text-[11px] font-bold text-slate-400 mt-0.5">모든 반의 학생들을 한눈에 확인하고 미해결 항목을 관리하세요.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {activeTab !== 'DASHBOARD' && (
-                    <button 
-                      onClick={() => handleViewChange({ type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' })}
-                      className="px-4 py-2 rounded-lg text-[12px] font-bold bg-white text-[#002864] border border-[#002864] hover:bg-blue-50 transition-colors shadow-sm"
-                    >
-                      전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'} 보기 ➔
-                    </button>
-                  )}
-                  <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-[12px] font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
-                    🚨 미해결 학생만 보기
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-slate-50/50">
-                {LEVEL_ORDER.map(lvl => {
-                  const classList = groupedClasses[lvl];
-                  if (!classList || classList.length === 0) return null;
-                  
-                  const visibleClasses = classList.filter(c => c.students.some(s => {
-                    const stats = studentStatsMap[`${s.id}_${c.class_id}`] || { pending: 0, pendingQ: 0 };
-                    return !isFilterActive || (stats.pending > 0 || stats.pendingQ > 0);
-                  }));
-                  
-                  if (visibleClasses.length === 0) return null;
-
-                  return visibleClasses.map((c, cIdx) => (
-                    <div key={`class_group_${c.class_id}_${cIdx}`} className="mb-6">
-                      <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-1.5">
-                        <span className="bg-[#002864] text-white text-[9px] font-black px-1.5 py-0.5 rounded tracking-wider">{lvl}</span>
-                        <h2 className="text-base font-extrabold text-slate-800">{c.name}</h2>
-                      </div>
-                      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                        {c.students.map((s, sIdx) => renderStudentCard(s, c.class_id, c.name, true))}
-                      </div>
-                    </div>
-                  ));
-                })}
-              </div>
-            </>
-          )}
-
-          {currentView.type === 'CLASS' && (
-            <>
-              <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
-                <div>
-                  <h2 className="text-lg font-extrabold text-slate-800"><span className="text-[#002864]">{currentView.className}</span> 반 학생 목록</h2>
-                </div>
-                <div className="flex items-center gap-2">
-                  {activeTab !== 'DASHBOARD' && (
-                    <button 
-                      onClick={() => handleViewChange({ type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' })}
-                      className="px-4 py-2 rounded-lg text-[12px] font-bold bg-white text-[#002864] border border-[#002864] hover:bg-blue-50 transition-colors shadow-sm"
-                    >
-                      전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'} 보기 ➔
-                    </button>
-                  )}
-                  <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-[12px] font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
-                    🚨 미해결 학생만 보기
-                  </button>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-slate-50/50">
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                  {Object.values(groupedClasses).flat().find(c => c.class_id === currentView.classId)?.students.map(s => renderStudentCard(s, currentView.classId, currentView.className))}
-                </div>
-              </div>
-            </>
-          )}
+          { (currentView.type === 'ALL' || currentView.type === 'CLASS') && (
+            <StudentDashboard currentView={currentView} activeTab={activeTab} isFilterActive={isFilterActive} setIsFilterActive={setIsFilterActive} handleViewChange={handleViewChange} handleStudentClick={handleStudentClick} groupedClasses={groupedClasses} studentStatsMap={studentStatsMap} LEVEL_ORDER={LEVEL_ORDER} />
+          )}  
 
           {currentView.type === 'GLOBAL_LIST' && (
-            <>
-              <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2.5">
-                <div className="flex justify-between items-center">
-                  <div>
-                    <h2 className="text-base font-extrabold text-slate-800 flex items-center gap-1.5">
-                      <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'}</span> 
-                    </h2>
-                    <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
-                  </div>
-                  <button onClick={() => handleViewChange({ type: 'ALL', classId: '', className: '', studentId: '', studentName: '' })} className="px-4 py-2 border border-slate-300 bg-white hover:bg-slate-100 rounded-lg text-[12px] font-bold text-slate-600 transition-colors shadow-sm">
-                    돌아가기 ↺
-                  </button>
-                </div>
-
-                <div className="flex justify-between items-center bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm mt-0.5">
-                  <label className="flex items-center gap-1.5 cursor-pointer pl-1.5">
-                    <input type="checkbox" checked={globalList.length > 0 && globalSelectedBlocks.length === globalList.length} onChange={handleSelectAllGlobal} className="w-4 h-4 accent-rose-500" />
-                    <span className="text-[12px] font-bold text-slate-700">전체 선택</span>
-                  </label>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={handleBulkCompleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[11px] transition-colors disabled:opacity-40">
-                      ✅ 선택 완료처리 ({globalSelectedBlocks.length})
-                    </button>
-                    <button onClick={handleBulkDeleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[11px] transition-colors disabled:opacity-40">
-                      🗑️ 선택 삭제 ({globalSelectedBlocks.length})
-                    </button>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-slate-50/50">
-                {isLoading ? (
-                  <div className="text-center font-bold text-slate-400 py-10 text-[12px]">전체 리스트를 불러오는 중입니다...</div>
-                ) : globalList.length === 0 ? (
-                  <div className="text-center font-bold text-slate-400 py-10 text-[12px]">배부된 기록이 없습니다.</div>
-                ) : (
-                  <div className="space-y-2.5 pb-20">
+            <GlobalList 
+              activeTab={activeTab} globalList={globalList} isLoading={isLoading} 
+              globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
+              handleBulkCompleteGlobal={handleBulkCompleteGlobal} handleBulkDeleteGlobal={handleBulkDeleteGlobal} 
+              handleViewChange={handleViewChange} toggleGlobalSelection={toggleGlobalSelection} 
+              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
+              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
+            />
+          )}
                     
-                    {activeTab === 'EXAM' && globalList.map((res: any, idx: number) => {
-                      const m = unwrap(res.exam_master) || {};
-                      const studentName = unwrap(res.student)?.name || '알수없음';
-                      const className = unwrap(res.class)?.name || '반 미지정';
-                      const itemId = `exam_${res.assignment_id}_${res.student_id}`;
-                      const isSelected = globalSelectedBlocks.includes(itemId);
-                      
-                      let statusBadge = "bg-slate-100 text-slate-500";
-                      if(res.status === '미응시' || res.status === '응시전') statusBadge = "bg-rose-50 text-rose-500 border border-rose-100";
-                      else if(res.status === '채점완료' || res.status === '제출완료' || res.status === '완료') statusBadge = "bg-emerald-50 text-emerald-600 border border-emerald-100";
-                      else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
-
-                      return (
-                        <div key={itemId} onClick={() => toggleGlobalSelection(itemId)} className={`bg-white border-2 rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${isSelected ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' : 'border-slate-200 hover:border-[#002864]'}`}>
-                          <div className="flex items-center gap-2.5 w-1/2 min-w-0 shrink-0 flex-1">
-                            <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                            <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight">
-                              {formatDateLabel(res.created_at, false)}
-                            </div>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 bg-blue-100 text-blue-700 border-blue-200">📝 시험</span>
-                            <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0">{className}</span>
-                            <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
-                            <div className="flex-1 font-extrabold text-slate-800 text-[13px] truncate" title={m.title || '제목 없음'}>
-                              {m.title || '제목 없음'}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3 shrink-0 justify-end w-1/2">
-                            <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right">총 {m.total_questions || 0}문항</div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {res.oCount}</span>
-                              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {res.xCount}</span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 w-[120px] justify-end">
-                              <button onClick={(e) => handleForceComplete(e, 'exam', res.assignment_id, res.student_id)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 transition-colors flex items-center gap-1 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
-                                ✅ 완료처리
-                              </button>
-                              <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold ${statusBadge}`}>
-                                {res.status || '대기'}
-                              </span>
-                            </div>
-                            
-                            <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                              <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m.exam_id}&exam_id=${m.exam_id}`, '_blank'); }} className="text-[11px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[11px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                              <button onClick={(e) => { e.stopPropagation(); window.location.href = `/exam/review?assignment_id=${res.assignment_id}`; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5">상세/수정 ➔</button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-
-                    {activeTab === 'HOMEWORK' && globalList.map((res: any, idx: number) => {
-                      const itemId = res.is_exam_hw ? `hw_exam_${res.assignment_id}_${res.student_id}` : `hw_${res.homework_id}_${res.student_id}`;
-                      const isSelected = globalSelectedBlocks.includes(itemId);
-
-                      if (res.is_exam_hw) {
-                        const m = unwrap(res.exam_master) || {};
-                        const studentName = unwrap(res.student)?.name || '알수없음';
-                        const className = res.class_name;
-                        
-                        let statusBadge = "bg-slate-100 text-slate-500";
-                        if(res.status === '미응시' || res.status === '응시전') statusBadge = "bg-rose-50 text-rose-500 border border-rose-100";
-                        else if(res.status === '채점완료' || res.status === '제출완료') statusBadge = "bg-emerald-50 text-emerald-600 border border-emerald-100";
-                        else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
-
-                        return (
-                          <div key={itemId} onClick={() => toggleGlobalSelection(itemId)} className={`bg-white border-2 rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${isSelected ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' : 'border-slate-200 hover:border-[#002864]'}`}>
-                            <div className="flex items-center gap-2.5 w-1/2 min-w-0 shrink-0 flex-1">
-                              <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                              <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight">
-                                {formatDateLabel(res.sort_date || res.created_at, false)}
-                              </div>
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 bg-amber-100 text-amber-700 border-amber-200">📝 문제지 과제</span>
-                              <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0">{className}</span>
-                              <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
-                              <div className="flex-1 font-extrabold text-slate-800 text-[13px] truncate" title={m.title || '제목 없음'}>
-                                {m.title || '제목 없음'}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-4 shrink-0 justify-end w-1/2">
-                              <div className="text-[12px] font-bold text-slate-500 shrink-0 w-[60px] text-right">총 {res.totalQ}문항</div>
-                              <div className="flex items-center gap-1.5 shrink-0">
-                                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {res.oCount}</span>
-                                <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {res.xCount}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 shrink-0 w-[140px] justify-end">
-                                <button onClick={(e) => handleForceComplete(e, 'exam', res.assignment_id, res.student_id)} className="text-[10px] font-bold text-slate-600 hover:text-emerald-600 transition-colors flex items-center gap-1 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
-                                  ✅ 완료처리
-                                </button>
-                                <span className={`w-[56px] text-center px-1.5 py-0.5 rounded text-[10px] font-extrabold ${statusBadge}`}>
-                                  {res.status || '미제출'}
-                                </span>
-                              </div>
-                              
-                              <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                                <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m.exam_id}&exam_id=${m.exam_id}`, '_blank'); }} className="text-[13px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                                <button onClick={(e) => { e.stopPropagation(); window.location.href = `/exam/review?assignment_id=${res.assignment_id}`; }} className="text-[11px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-3 py-1.5 rounded transition-colors shadow-sm ml-1">상세/채점 ➔</button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      } else {
-                        const hw = res.homework_assignment || {};
-                        const studentName = unwrap(res.student)?.name || '알수없음';
-                        const className = res.class_name;
-                        
-                        let statusStr = res.status || '미제출';
-                        let statusBadge = "bg-slate-100 text-slate-500";
-                        if(statusStr === '미제출') statusBadge = "bg-rose-50 text-rose-500 border border-rose-100";
-                        else if(statusStr === '진행중') statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
-                        else statusBadge = "bg-emerald-50 text-emerald-600 border border-emerald-100";
-                        
-                        return (
-                          <div key={itemId} onClick={() => toggleGlobalSelection(itemId)} className={`bg-white border-2 rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${isSelected ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' : 'border-slate-200 hover:border-[#002864]'}`}>
-                            <div className="flex items-center gap-2.5 w-1/2 min-w-0 shrink-0 flex-1">
-                              <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                              <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight">
-                                {formatDateLabel(res.sort_date || res.created_at, false)}
-                              </div>
-                              <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 bg-amber-100 text-amber-700 border-amber-200">📚 교재 과제</span>
-                              <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0">{className}</span>
-                              <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
-                              <div className="flex-1 font-extrabold text-slate-800 text-[13px] truncate" title={hw.homework_title}>
-                                {hw.homework_title}
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-3 shrink-0 justify-end w-1/2">
-                              <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right">총 {res.totalQ}문항</div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {res.oCount}</span>
-                                <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {res.xCount}</span>
-                              </div>
-                              <div className="flex items-center gap-1 shrink-0 w-[120px] justify-end">
-                                <button onClick={(e) => handleForceComplete(e, 'hw', hw.homework_id, res.student_id)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
-                                  ✅ 완료처리
-                                </button>
-                                <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold ${statusBadge}`}>
-                                  {statusStr}
-                                </span>
-                              </div>
-                              
-                              <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                                <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?homework_id=${hw.homework_id}`, '_blank'); }} className="text-[13px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteHomework(hw.homework_id, res.student_id); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                                <button onClick={(e) => { e.stopPropagation(); window.location.href = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5">상세/채점 ➔</button>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      }
-                    })}
-
-                    {activeTab === 'INCORRECT' && globalList.map((p: any, idx: number) => {
-                      const studentName = unwrap(p.student)?.name || '알수없음';
-                      const m = unwrap(p.exam_master);
-                      const qCount = m?.total_questions || 0;
-                      const statusBadge = p.status === '미응시' ? 'bg-rose-50 text-rose-500 border-rose-100' : 'bg-emerald-50 text-emerald-600 border-emerald-100';
-                      const className = unwrap(p.class)?.name || '반 미지정';
-                      
-                      const itemId = `print_${p.assignment_id}_${p.student_id}`;
-                      const isSelected = globalSelectedBlocks.includes(itemId);
-
-                      return (
-                        <div key={itemId} onClick={() => toggleGlobalSelection(itemId)} className={`bg-white border-2 rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${isSelected ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' : 'border-slate-200 hover:border-[#002864]'}`}>
-                          <div className="flex items-center gap-2.5 w-1/2 min-w-0 shrink-0 flex-1">
-                            <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                            <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight">
-                              {formatDateLabel(p.created_at, false)}
-                            </div>
-                            <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 bg-emerald-100 text-emerald-700 border-emerald-200">🖨️ 오답프린트</span>
-                            <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0">{className}</span>
-                            <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
-                            <div className="flex-1 font-extrabold text-slate-800 text-[13px] truncate" title={m?.title || '제목 없음'}>
-                              {m?.title || '제목 없음'}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3 shrink-0 justify-end w-1/2">
-                            <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right">총 {qCount}문항</div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {p.oCount}</span>
-                              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {p.xCount}</span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 w-[120px] justify-end">
-                              <button onClick={(e) => handleForceComplete(e, 'print', p.assignment_id, p.student_id)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 transition-colors flex items-center gap-1 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
-                                ✅ 완료처리
-                              </button>
-                              <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold ${statusBadge}`}>
-                                {p.status || '미응시'}
-                              </span>
-                            </div>
-                            
-                            <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                              <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?exam_id=${m?.exam_id}`, '_blank'); }} className="text-[13px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                              <button onClick={(e) => { e.stopPropagation(); handleDeletePrint(p.assignment_id, unwrap(p.exam_master)?.exam_id); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                              <button onClick={(e) => { e.stopPropagation(); window.location.href = `/exam/review?assignment_id=${p.assignment_id}`; }} className="text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded shadow-sm transition-colors ml-0.5">프린트 채점 ➔</button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
-          {currentView.type === 'STUDENT' && (
-            <>
-              {renderStudentHeader()}
-              <div className="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50/50">
-                {isLoading ? (
-                  <div className="text-center font-bold text-slate-400 py-20 text-[12px]">타임라인을 구성하는 중입니다...</div>
-                ) : filteredTimeline.length === 0 ? (
-                  <div className="text-center font-bold text-slate-400 py-20 border-2 border-dashed border-slate-200 rounded-2xl text-[12px]">해당 기간에 기록된 활동이 없습니다.</div>
-                ) : (
-                  <div className="space-y-2.5 pb-20">
-                    {filteredTimeline.map((item, idx) => {
-                      const isSelected = selectedBlocks.includes(item.id);
-                      let badgeColor = "bg-slate-100 text-slate-500";
-                      let typeLabel = "";
-                      if (item.type === 'exam') { badgeColor = "bg-blue-100 text-blue-700 border-blue-200"; typeLabel = "📝 시험"; }
-                      else if (item.type === 'hw' || item.type === 'hw_exam') { badgeColor = "bg-amber-100 text-amber-700 border-amber-200"; typeLabel = "📚 과제"; }
-                      else { badgeColor = "bg-emerald-100 text-emerald-700 border-emerald-200"; typeLabel = "🖨️ 오답프린트"; }
-
-                      return (
-                        <div 
-                          key={`${item.id}_${idx}`} 
-                          className={`bg-white border-2 rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${isSelected ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' : 'border-slate-200 hover:border-[#002864]'}`}
-                          onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
-                        >
-                          <div className="flex items-center gap-2.5 w-1/2 min-w-0 shrink-0 flex-1">
-                            <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                            <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight">
-                              {formatDateLabel(item.date, false)}
-                            </div>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 ${badgeColor}`}>{typeLabel}</span>
-                            <div className="flex-1 font-extrabold text-slate-800 text-[13px] truncate" title={item.title}>
-                              {item.title}
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-3 shrink-0 justify-end w-1/2">
-                            <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right">총 {item.total}문항</div>
-                            <div className="flex items-center gap-1 shrink-0">
-                              <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {item.oCount}</span>
-                              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {item.xCount}</span>
-                            </div>
-                            <div className="flex items-center gap-1 shrink-0 w-[120px] justify-end">
-                              <button onClick={(e) => handleForceComplete(e, item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : 'exam', item.realId, currentView.studentId)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 transition-colors flex items-center gap-1 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
-                                ✅ 완료처리
-                              </button>
-                              <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold ${item.isCompleted ? 'bg-slate-100 text-slate-500' : 'bg-rose-50 text-rose-500 border border-rose-200'}`}>
-                                {item.status || '미제출'}
-                              </span>
-                            </div>
-                            
-                            <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                              {item.type !== 'exam' && (
-                                 <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?${item.type.includes('hw') ? 'homework_id' : 'exam_id'}=${item.masterId}`, '_blank'); }} className="text-[11px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                              )}
-                              <button onClick={(e) => { 
-                                e.stopPropagation(); 
-                                if(item.type === 'exam' || item.type === 'hw_exam') handleDeleteExam(item.realId, currentView.studentId);
-                                else if(item.type === 'hw') handleDeleteHomework(item.realId, currentView.studentId);
-                                else if(item.type === 'print') handleDeletePrint(item.realId, item.masterId);
-                              }} className="text-[11px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                              <button 
-                                onClick={(e) => {
-                                  e.stopPropagation(); 
-                                  window.location.href = item.type === 'hw' ? `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}` : `/exam/review?assignment_id=${item.realId}`;
-                                }}
-                                className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5"
-                              >
-                                상세/채점 ➔
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-
         </div>
       </div>
     </div>
