@@ -643,9 +643,9 @@ export default function TACinicDashboard() {
               if (!student) {
                 return (
                   <div key={seat} 
-                    onDragOver={(e) => onDragOver(e, seat)} 
+                    onDragOver={(e) => handleDragOver(e, seat)} 
                     onDragLeave={handleDragLeave} 
-                    onDrop={(e) => onDrop(e, seat)}
+                    onDrop={(e) => handleDrop(e, seat)}
                     className={`aspect-square rounded-md flex items-center justify-center text-[10px] font-bold transition-all ${isDragTarget ? 'border-2 border-indigo-400 bg-indigo-50 text-indigo-500 shadow-inner' : 'bg-[#e2e8f0] text-[#94a3b8]'}`}>
                     {seat}
                   </div>
