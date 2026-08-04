@@ -1,3 +1,5 @@
+// src/app/student/portal/page.tsx
+
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -52,16 +54,14 @@ export default function StudentPortal() {
     const isSyncingSessionRef = useRef(false);
 
     const [isMounted, setIsMounted] = useState(false);
-    const [isFullscreen, setIsFullscreen] = useState(false); // 전체화면 상태 관리
+    const [isFullscreen, setIsFullscreen] = useState(false); 
 
     useEffect(() => { setIsMounted(true); }, []);
 
-    // 💡 전체화면 토글 함수
     const toggleFullScreen = () => {
         if (!document.fullscreenElement) {
             document.documentElement.requestFullscreen().catch(err => {
                 console.log("전체화면을 지원하지 않는 기기입니다.", err);
-                alert("이 기기나 브라우저에서는 전체화면을 지원하지 않습니다.");
             });
         } else {
             if (document.exitFullscreen) {
@@ -70,7 +70,6 @@ export default function StudentPortal() {
         }
     };
 
-    // 전체화면 상태 변화 감지
     useEffect(() => {
         const handleFullscreenChange = () => {
             setIsFullscreen(!!document.fullscreenElement);
@@ -197,10 +196,16 @@ export default function StudentPortal() {
             .select('assignment_id, status, class_id, exam_master!inner(exam_type)')
             .eq('student_id', sid);
 
-        const { data: hwsData } = await supabaseClient.from('homework_assignment')
-            .select('homework_id, class_id, target_student_id')
-            .in('class_id', Object.values(nameToId))
-            .neq('homework_title', '[시스템] 수업 진도 완료 기록');
+        // 💡 [버그 픽스] 반이 지정되지 않아 빈 배열일 경우 Supabase 에러(크래시) 방지 가드
+        const classIds = Object.values(nameToId).filter(Boolean);
+        let hwsData: any[] = [];
+        if (classIds.length > 0) {
+            const { data } = await supabaseClient.from('homework_assignment')
+                .select('homework_id, class_id, target_student_id')
+                .in('class_id', classIds as string[])
+                .neq('homework_title', '[시스템] 수업 진도 완료 기록');
+            hwsData = data || [];
+        }
 
         const { data: hwResData } = await supabaseClient.from('student_homework_result')
             .select('homework_id, status')
@@ -605,7 +610,7 @@ export default function StudentPortal() {
                         </button>
                     )}
 
-                    {/* 💡 전체화면 토글 버튼 추가 */}
+                    {/* 전체화면 토글 버튼 */}
                     <button onClick={toggleFullScreen} className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-slate-200 transition-colors shadow-sm hidden sm:flex">
                         <span className="text-[11px] font-bold text-slate-600">{isFullscreen ? '🗗 기본화면' : '📺 전체화면'}</span>
                     </button>

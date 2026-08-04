@@ -1,9 +1,12 @@
+// src/app/student/login/page.tsx
+
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation"; // 💡 SPA 라우터 추가
 import { searchStudentsByDigits, loginStudentAction } from "@/app/actions/studentAuth";
 
-// 💡 아바타 에셋 유지
+// 아바타 에셋 유지
 const ANIMALS = ['🐶', '🦒', '🦊', '🐱', '🐰'];
 const AVATAR_COLORS = [
   { bg: 'bg-blue-50',    ring: 'group-hover:border-blue-500',    text: 'group-hover:text-blue-600' },
@@ -39,6 +42,7 @@ function gradeLabel(grade: string) {
 const IconDelete = () => <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>;
 
 export default function StudentKioskLogin() {
+  const router = useRouter(); // 💡 라우터 초기화
   const [step, setStep] = useState<"phone" | "profile" | "password">("phone");
   const [digits, setDigits] = useState("");
   const [matchedList, setMatchedList] = useState<any[]>([]);
@@ -46,7 +50,6 @@ export default function StudentKioskLogin() {
   const [passwordInput, setPasswordInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   
-  // 💡 전체화면 상태 관리 (로그인 직후 전체화면 전환 시 필요)
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   useEffect(() => {
@@ -55,7 +58,6 @@ export default function StudentKioskLogin() {
     return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
   }, []);
 
-  // 💡 전체화면 토글 함수 (비밀 버튼에 연결됨)
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
       document.documentElement.requestFullscreen().catch(err => {
@@ -134,12 +136,14 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
       
-      // 혹시나 비밀 버튼을 못 누르고 로그인에 성공했더라도, 이 시점에 전체화면 강제 발동
+      // 로그인 성공 시 전체화면 진입 시도
       if (!document.fullscreenElement) {
         document.documentElement.requestFullscreen().catch(() => {});
       }
 
-      window.location.href = "/student"; 
+      // 💡 window.location.href 대신 router.push를 사용하여 전체화면이 풀리지 않고 넘어가게 합니다!
+      // 💡 경로 오타 수정 (/student -> /student/portal)
+      router.push("/student/portal"); 
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
       setPasswordInput(""); 
@@ -149,7 +153,6 @@ export default function StudentKioskLogin() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-100 font-pretendard select-none py-12 px-4 relative">
       
-      {/* 전역 로딩 오버레이 */}
       {isProcessing && (
         <div className="fixed inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="text-[#002864] font-bold text-2xl animate-pulse">데이터를 불러오는 중입니다...</div>
@@ -160,7 +163,7 @@ export default function StudentKioskLogin() {
       {step === "phone" && (
         <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
           
-          {/* 💡 투명한 비밀 버튼 (흰색 상자의 오른쪽 맨 위 구석) */}
+          {/* 투명한 비밀 버튼 (흰색 상자의 오른쪽 맨 위 구석) */}
           <button 
             onClick={toggleFullScreen} 
             className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
@@ -208,7 +211,6 @@ export default function StudentKioskLogin() {
       {step === "profile" && matchedList.length > 0 && (
         <div className="bg-white p-12 rounded-[32px] shadow-2xl w-[750px] max-w-full text-center animate-[fadeIn_0.3s_ease-out] relative z-10 overflow-hidden">
           
-          {/* 💡 프로필 창에도 비밀 버튼 추가 */}
           <button 
             onClick={toggleFullScreen} 
             className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
@@ -252,7 +254,6 @@ export default function StudentKioskLogin() {
         return (
           <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
             
-            {/* 💡 PIN 입력 창에도 비밀 버튼 추가 */}
             <button 
               onClick={toggleFullScreen} 
               className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
