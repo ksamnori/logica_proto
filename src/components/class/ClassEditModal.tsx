@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { resolveClassWeekType, setClassHoliday, removeClassHoliday, setClassExtraSession, removeClassExtraSession } from "@/lib/classRound";
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
@@ -53,9 +54,12 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
     }
   }, [isOpen, classItem]);
 
-  // 💡 [수정] 외부 모듈에 의존하지 않고, DB에 있는 회차 값을 그대로 가져옵니다.
   const fetchWeekTypeState = async (c: any) => {
-    setWeekType(c.week_type || "odd");
+    const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
+    const { weekType: wt } = await resolveClassWeekType(supabase, {
+      class_id: c.class_id, class_name: c.name, week_type: c.week_type, week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays
+    });
+    setWeekType(wt);
   };
 
   const fetchHolidays = async (classId: string) => {
@@ -63,22 +67,16 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
     setHolidays(data || []);
   };
 
-  // 💡 [수정] 환각 모듈 제거 -> Supabase 직접 insert
   const addHoliday = async () => {
     if (!newHolidayDate) return alert("휴일 날짜를 선택해주세요.");
-    const { error } = await supabase.from("class_holiday").insert({
-      class_id: modalData.class_id,
-      holiday_date: newHolidayDate,
-      reason: newHolidayReason
-    });
+    const { error } = await setClassHoliday(supabase, modalData.class_id, newHolidayDate, newHolidayReason);
     if (error) return alert("휴일 등록 중 오류가 발생했습니다: " + error.message);
     setNewHolidayDate(""); setNewHolidayReason("");
     fetchHolidays(modalData.class_id);
   };
 
-  // 💡 [수정] 환각 모듈 제거 -> Supabase 직접 delete
   const deleteHoliday = async (id: string) => {
-    const { error } = await supabase.from("class_holiday").delete().eq("id", id);
+    const { error } = await removeClassHoliday(supabase, id);
     if (error) return alert("휴일 삭제 중 오류가 발생했습니다: " + error.message);
     fetchHolidays(modalData.class_id);
   };
@@ -88,26 +86,22 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
     setExtraSessions(data || []);
   };
 
-  // 💡 [수정] 환각 모듈 제거 -> Supabase 직접 insert
   const addExtraSession = async () => {
     if (!newExtraDate) return alert("보강 날짜를 선택해주세요.");
-    const { error } = await supabase.from("class_extra_session").insert({
-      class_id: modalData.class_id,
-      session_date: newExtraDate,
-      reason: newExtraReason
-    });
+    const { error } = await setClassExtraSession(supabase, modalData.class_id, newExtraDate, newExtraReason);
     if (error) return alert("보강일 등록 중 오류가 발생했습니다: " + error.message);
     setNewExtraDate(""); setNewExtraReason("");
     fetchExtraSessions(modalData.class_id);
   };
 
-  // 💡 [수정] 환각 모듈 제거 -> Supabase 직접 delete
   const deleteExtraSession = async (id: string) => {
-    const { error } = await supabase.from("class_extra_session").delete().eq("id", id);
+    const { error } = await removeClassExtraSession(supabase, id);
     if (error) return alert("보강일 삭제 중 오류가 발생했습니다: " + error.message);
     fetchExtraSessions(modalData.class_id);
   };
 
+  // 💡 수동 전환은 "지금 이 시점에 회차가 막 지나갔다"고 취급한다 — session_parity를 false로
+  // 리셋해서, 자동 계산 로직이 다음 실제 수업일부터 다시 정상적으로 2회 단위 페어링을 이어가게 한다.
   const forceToggleWeekType = async () => {
     const next = weekType === "odd" ? "even" : "odd";
     if (!confirm(`현재 회차 유형을 강제로 '${next === "odd" ? "주간테스트" : "과제오답유사"}'(으)로 전환하시겠습니까?`)) return;
@@ -126,7 +120,7 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
 
   const searchAllStudents = async (grade: string) => {
     setSearchGrade(grade);
-    let query = supabase.from("student").select("student_id, name, phone, grade, school_name, school").order("name").limit(300);
+    let query = supabase.from("student").select("student_id, name, phone, grade, school_name, school").order("name").limit(300); // 💡 OOM 방어 리미트
     if (grade) {
       const gradeMap: any = {
         '1': ['1', '초1', '초등 1학년'], '2': ['2', '초2', '초등 2학년'], '3': ['3', '초3', '초등 3학년'],
@@ -184,7 +178,7 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
 
     await supabase.from("enrollment").insert([{ student_id: selected.student_id, class_id: modalData.class_id, start_date: new Date().toISOString().split("T")[0] }]);
     setSearchKeyword(""); fetchClassStudents(modalData.class_id);
-    onSuccess();
+    onSuccess(); // 메인 리스트 학생 수 갱신용
   };
 
   const removeStudent = async (studentId: string) => {
@@ -237,6 +231,7 @@ export default function ClassEditModal({ isOpen, classItem, instructors, current
 
   if (!isOpen) return null;
 
+  // 💡 보안: 관리자이거나 담당 강사인 경우에만 수정/삭제 권한 부여
   const canEdit = currentUser.isAdmin || String(modalData.instructor_id) === String(currentUser.instId);
 
   return (
