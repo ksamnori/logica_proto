@@ -1,7 +1,7 @@
-// src/app/(dashboard)/learning/components/StudentDashboard.tsx
+"use client";
+
 import React from "react";
 
-// page.tsx에서 사용하던 타입들을 가져옵니다.
 interface StudentDashboardProps {
   currentView: any;
   activeTab: string;
@@ -15,49 +15,43 @@ interface StudentDashboardProps {
 }
 
 export default function StudentDashboard({
-  currentView,
-  activeTab,
-  isFilterActive,
-  setIsFilterActive,
-  handleViewChange,
-  handleStudentClick,
-  groupedClasses,
-  studentStatsMap,
-  LEVEL_ORDER
+  currentView, activeTab, isFilterActive, setIsFilterActive, handleViewChange,
+  handleStudentClick, groupedClasses, studentStatsMap, LEVEL_ORDER
 }: StudentDashboardProps) {
 
-  // 💡 기존 page.tsx에 있던 학생 카드 렌더링 함수를 이 안으로 옮겨왔습니다.
-  const renderStudentCard = (s: any, classId: string, cName: string, showClassNameBadge = false) => {
-    const stats = (activeTab === 'INCORRECT' || classId === 'UNKNOWN') 
-      ? studentStatsMap[`${s.id}_ALL`] 
-      : studentStatsMap[`${s.id}_${classId}`];
-      
-    const { pending = 0, pendingQ = 0 } = stats || { pending: 0, pendingQ: 0 };
-    const displayCount = activeTab === 'INCORRECT' ? pendingQ : pending;
+  const renderStudentCard = (s: any, classId: string, cName: string) => {
+    // 💡 [핵심 수정] 탭이나 반(Class)에 상관없이 무조건 학생 본인의 전체(_ALL) 미해결 문제 수를 가져옵니다!
+    // 이렇게 해야 탭을 이리저리 이동해도 3색 버블의 숫자가 절대 변하지 않습니다.
+    const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
     
-    if (isFilterActive && displayCount === 0) return null;
+    const displayExamQ = allStats.examQ;
+    const displayHwQ = allStats.hwQ;
+    const displayPrintQ = allStats.printQ;
+
+    // 💡 카드의 빨간색 음영(하이라이트) 여부는 현재 선택된 탭에 맞춰서 똑똑하게 반응합니다.
+    let displayTotal = 0;
+    if (activeTab === 'EXAM') displayTotal = displayExamQ;
+    else if (activeTab === 'HOMEWORK') displayTotal = displayHwQ;
+    else if (activeTab === 'INCORRECT') displayTotal = displayPrintQ;
+    else displayTotal = displayExamQ + displayHwQ + displayPrintQ;
+
+    // 미해결 학생만 보기 필터가 켜져 있고, 현재 탭의 미해결 건수가 없으면 숨김
+    if (isFilterActive && displayTotal === 0) return null;
 
     return (
-      <div 
-        key={s.id} 
-        onClick={() => handleStudentClick(s.id, s.name, classId, cName)} 
-        className={`px-3 py-2.5 rounded-xl border shadow-sm cursor-pointer transition-all flex items-center justify-between ${
-          displayCount > 0 
-          ? 'bg-rose-50/50 border-rose-300 hover:border-rose-500 hover:-translate-y-0.5' 
-          : 'bg-white border-slate-200 hover:border-[#002864] hover:-translate-y-0.5'
+      <div key={`${s.id}_${classId}`} onClick={() => handleStudentClick(s.id, s.name, classId, cName)} 
+        className={`px-3 py-3 rounded-xl border shadow-sm cursor-pointer transition-all flex items-center justify-between ${
+          displayTotal > 0 ? 'bg-rose-50/50 border-rose-300 hover:border-rose-500 hover:-translate-y-0.5' : 'bg-white border-slate-200 hover:border-[#002864] hover:-translate-y-0.5'
         }`}
       >
         <div className="flex items-center gap-1.5 min-w-0">
-          {showClassNameBadge && <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${displayCount > 0 ? 'bg-rose-100 text-rose-700 border-rose-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{cName}</span>}
-          <div className={`font-extrabold text-[13px] truncate ${displayCount > 0 ? 'text-rose-900' : 'text-slate-800'}`}>{s.name}</div>
+          <div className={`font-extrabold text-[14px] truncate ${displayTotal > 0 ? 'text-rose-900' : 'text-slate-800'}`}>{s.name}</div>
         </div>
         
-        <div className="flex shrink-0 ml-1.5">
-          {displayCount > 0 && (
-             <span className={`text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm ${activeTab === 'INCORRECT' ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'}`}>
-               {activeTab === 'INCORRECT' ? `오답 ${displayCount}문항` : `미해결 ${displayCount}건`}
-             </span>
-          )}
+        <div className="flex items-center gap-1.5 shrink-0 ml-2">
+          {displayExamQ > 0 && <span className="bg-blue-100 text-blue-700 px-2 py-0.5 min-w-[28px] text-center rounded-full shadow-sm text-[12px] font-black" title="시험 미해결 문항">{displayExamQ}</span>}
+          {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 min-w-[28px] text-center rounded-full shadow-sm text-[12px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
+          {displayPrintQ > 0 && <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 min-w-[28px] text-center rounded-full shadow-sm text-[12px] font-black" title="오답 미해결 문항">{displayPrintQ}</span>}
         </div>
       </div>
     );
@@ -71,55 +65,55 @@ export default function StudentDashboard({
         <div>
           {isAllView ? (
             <>
-              <h2 className="text-lg font-extrabold text-slate-800">전체 반 학생 요약 목록</h2>
-              <p className="text-[11px] font-bold text-slate-400 mt-0.5">모든 반의 학생들을 한눈에 확인하고 미해결 항목을 관리하세요.</p>
+              <h2 className="text-base font-extrabold text-slate-800">전체 학생 요약 대시보드</h2>
+              <p className="text-[12px] font-bold text-slate-500 mt-0.5">모든 반의 학생들을 한눈에 확인하고 미해결 항목을 관리하세요.</p>
             </>
           ) : (
-            <h2 className="text-lg font-extrabold text-slate-800"><span className="text-[#002864]">{currentView.className}</span> 반 학생 목록</h2>
+            <h2 className="text-base font-extrabold text-slate-800"><span className="text-[#002864]">{currentView.className}</span> 반 학생 목록</h2>
           )}
         </div>
         <div className="flex items-center gap-2">
           {activeTab !== 'DASHBOARD' && (
-            <button 
-              onClick={() => handleViewChange({ type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' })}
-              className="px-4 py-2 rounded-lg text-[12px] font-bold bg-white text-[#002864] border border-[#002864] hover:bg-blue-50 transition-colors shadow-sm"
-            >
+            <button onClick={() => handleViewChange({ type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' })} className="px-4 py-2 rounded-lg text-[13px] font-bold bg-white text-[#002864] border border-[#002864] hover:bg-blue-50 transition-colors shadow-sm">
               전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'} 보기 ➔
             </button>
           )}
-          <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-[12px] font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
+          <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-[13px] font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
             🚨 미해결 학생만 보기
           </button>
         </div>
       </div>
       
-      <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-slate-50/50">
+      <div className="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50/50">
         {isAllView ? (
           LEVEL_ORDER.map(lvl => {
             const classList = groupedClasses[lvl];
             if (!classList || classList.length === 0) return null;
-            
             const visibleClasses = classList.filter(c => c.students.some((s: any) => {
-              const stats = studentStatsMap[`${s.id}_${c.class_id}`] || { pending: 0, pendingQ: 0 };
-              return !isFilterActive || (stats.pending > 0 || stats.pendingQ > 0);
+              const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
+              let dTotal = 0;
+              if (activeTab === 'EXAM') dTotal = allStats.examQ;
+              else if (activeTab === 'HOMEWORK') dTotal = allStats.hwQ;
+              else if (activeTab === 'INCORRECT') dTotal = allStats.printQ;
+              else dTotal = allStats.examQ + allStats.hwQ + allStats.printQ;
+              return !isFilterActive || dTotal > 0;
             }));
-            
             if (visibleClasses.length === 0) return null;
 
             return visibleClasses.map((c, cIdx) => (
-              <div key={`class_group_${c.class_id}_${cIdx}`} className="mb-6">
-                <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-1.5">
-                  <span className="bg-[#002864] text-white text-[9px] font-black px-1.5 py-0.5 rounded tracking-wider">{lvl}</span>
-                  <h2 className="text-base font-extrabold text-slate-800">{c.name}</h2>
+              <div key={`class_group_${c.class_id}_${cIdx}`} className="mb-8">
+                <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-2">
+                  <span className="bg-[#002864] text-white text-[11px] font-black px-2 py-0.5 rounded tracking-wider">{lvl}</span>
+                  <h2 className="text-[15px] font-extrabold text-slate-800">{c.name}</h2>
                 </div>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
-                  {c.students.map((s: any) => renderStudentCard(s, c.class_id, c.name, true))}
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
+                  {c.students.map((s: any) => renderStudentCard(s, c.class_id, c.name))}
                 </div>
               </div>
             ));
           })
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
             {Object.values(groupedClasses).flat().find((c: any) => c.class_id === currentView.classId)?.students.map((s: any) => renderStudentCard(s, currentView.classId, currentView.className))}
           </div>
         )}

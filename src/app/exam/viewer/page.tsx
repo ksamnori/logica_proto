@@ -46,7 +46,7 @@ export default function ExamViewerPage() {
   const [isExamDistributed, setIsExamDistributed] = useState<boolean>(false);
 
   // === 레이아웃 UI 상태 ===
-  const [layoutType, setLayoutType] = useState("주간테스트");
+  const [layoutType, setLayoutType] = useState("선택없음"); 
   // === 주간테스트 전용: 주차/학년 자동 배정 ===
   const [testWeek, setTestWeek] = useState<number>(getISOWeekKST());
   const [weeklyTargetGrade, setWeeklyTargetGrade] = useState("");
@@ -192,7 +192,7 @@ export default function ExamViewerPage() {
     let isNew = false;
     let title = "시험지";
     let badge = "";
-    let lType = "주간테스트";
+    let lType = "선택없음";
     let dbLayoutSettings: any = null;
     let orderedQuestions: any[] = [];
     let wWeek: number | null = null;
@@ -201,7 +201,7 @@ export default function ExamViewerPage() {
     try {
       if (urlExamId) {
         currentExamIdRef.current = urlExamId;
-        setSavedExamId(urlExamId); // Publish 패널 활성화용
+        setSavedExamId(urlExamId);
 
         const { data: examData } = await supabase.from('exam_master').select('*').eq('exam_id', urlExamId).single();
         if (!examData) throw new Error("시험지를 찾을 수 없습니다.");
@@ -209,7 +209,7 @@ export default function ExamViewerPage() {
         badge = [examData.target_grade || examData.grade, examData.course || examData.course_name].filter(Boolean).join(' ');
         if (!badge) badge = examData.sub_title || '';
         title = examData.title || '시험지';
-        lType = examData.exam_type || '주간테스트';
+        lType = examData.exam_type || '선택없음';
         dbLayoutSettings = examData.layout_settings || null;
         wWeek = examData.test_week || null;
         wGrade = examData.target_grade || "";
@@ -241,7 +241,7 @@ export default function ExamViewerPage() {
           if (origExam) {
             title = duplicateExamId ? (origExam.title + ' (복제본)') : origExam.title;
             badge = origExam.sub_title || '';
-            lType = origExam.exam_type || '주간테스트';
+            lType = origExam.exam_type || '선택없음';
             dbLayoutSettings = origExam.layout_settings || null;
             wWeek = origExam.test_week || null;
             wGrade = origExam.target_grade || "";
@@ -344,15 +344,15 @@ export default function ExamViewerPage() {
     if (currTmpl === 'basic2') {
       const courseBadge = badge ? `<div class="font-bold text-[14px] px-3 py-1.5 rounded-md shadow-sm bg-slate-200 shrink-0" style="color: var(--color-title);">${badge}</div>` : '';
       if (!showTitle) {
-          return `<div class="flex justify-end items-center border-b-[2px] pb-3 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">${courseBadge}</div>`;
+          return `<div class="flex justify-end items-center border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">${courseBadge}</div>`;
       }
       const yearText = eDate ? `${eDate.split('-')[0]}년` : '';
       const yearHtml = yearText ? `<div class="text-[14px] font-bold text-slate-500 whitespace-nowrap shrink-0">${yearText}</div>` : '';
       return `
-          <div class="flex justify-between items-center border-b-[2px] pb-3 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
-              <div class="h-[104px] flex items-center gap-4 overflow-hidden" style="max-width: 70%;">
+          <div class="flex justify-between items-end border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
+              <div class="h-[80px] flex items-center gap-4 overflow-hidden" style="max-width: 70%;">
                   <img src="${LOGO_FOOTER_LEFT_URL}" class="h-9 object-contain shrink-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-lg shrink-0\\'>LOGICA</span>'">
-                  <h1 class="text-[22px] font-bold whitespace-nowrap overflow-hidden text-ellipsis" style="color: var(--color-title);">${title}</h1>
+                  <h1 class="text-[22px] font-bold whitespace-nowrap overflow-hidden text-ellipsis translate-y-1" style="color: var(--color-title);">${title}</h1>
                   ${yearHtml}
               </div>
               ${courseBadge}
@@ -364,14 +364,14 @@ export default function ExamViewerPage() {
     const topRightStack = (dateHtml || courseBadge) ? `<div class="flex flex-col items-end gap-1">${dateHtml}${courseBadge}</div>` : '';
     
     if (!showTitle) {
-      return `<div class="flex justify-end items-center border-b-[2px] pb-3 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">${topRightStack}</div>`;
+      return `<div class="flex justify-end items-center border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">${topRightStack}</div>`;
     }
     return `
-        <div class="flex justify-between items-start border-b-[2px] pb-3 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
-            <div class="h-[104px] flex items-center overflow-hidden" style="max-width: 70%;">
+        <div class="flex justify-between items-end border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
+            <div class="h-[80px] flex items-end overflow-hidden pb-1" style="max-width: 70%;">
                 <h1 class="text-[26px] font-bold whitespace-nowrap overflow-hidden text-ellipsis w-full" style="color: var(--color-title);">${title}</h1>
             </div>
-            <div class="mt-7">${topRightStack}</div>
+            <div class="mt-4">${topRightStack}</div>
         </div>`;
   };
 
@@ -719,7 +719,7 @@ export default function ExamViewerPage() {
     
     setTotalPages(pages.length);
     updatePreviewViewport();
-    (window as any).__examRenderReady = true;
+    (window as any).__examRenderReady = false;
   };
 
   const updatePreviewViewport = (zf: number = zoomFactor) => {
@@ -864,10 +864,25 @@ export default function ExamViewerPage() {
     if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
   };
 
+  const getNextTuesdayWeekString = () => {
+    const today = new Date();
+    const currentDay = today.getDay();
+    let daysUntilNextTuesday = (2 - currentDay + 7) % 7;
+    if (daysUntilNextTuesday === 0) daysUntilNextTuesday = 7;
+
+    const nextTuesday = new Date(today);
+    nextTuesday.setDate(today.getDate() + daysUntilNextTuesday);
+
+    const month = nextTuesday.getMonth() + 1;
+    const date = nextTuesday.getDate();
+    const weekOfMonth = Math.ceil(date / 7);
+
+    return `${month}월 ${weekOfMonth}주차`;
+  };
+
   const handleSettingChange = (field: string, val: any) => {
     hasUnsavedChangesRef.current = true;
     
-    // 색상 변경은 HTML/레이아웃 재계산 없이 즉시 상태만 업데이트 (CSS 변수로 즉각 반영됨)
     if (field === 'colorNum') { setColorNum(val); return; }
     if (field === 'colorTitle') { setColorTitle(val); return; }
     if (field === 'colorLine') { setColorLine(val); return; }
@@ -884,16 +899,24 @@ export default function ExamViewerPage() {
     if (field === 'layoutType') {
       setLayoutType(val);
       setIsAdmissionLock(val === '입학테스트');
+
+      let newExamTitle = examTitle;
+      // 💡 [수정] 주간테스트 선택 시, 기존 값을 덮어쓰고 'x월 x주차'를 "시험지 제목"에 자동 설정
+      if (val === '주간테스트') {
+        newExamTitle = getNextTuesdayWeekString();
+        setExamTitle(newExamTitle);
+      }
+
       if (val === '입학테스트') {
         if (examStateRef.current?.groups.length !== 30) {
           alert('입학테스트 문제는 30개로 고정되어 있습니다.');
-          setLayoutType(layoutType);
+          setLayoutType(layoutType); 
           setIsAdmissionLock(false);
           return;
         }
         renderAdmissionTestPages();
       } else {
-        remeasureAndRender(columns, splits, titleMode, template, examDate, examTitle, displayBadge);
+        remeasureAndRender(columns, splits, titleMode, template, examDate, newExamTitle, displayBadge);
       }
     }
   };
@@ -906,7 +929,6 @@ export default function ExamViewerPage() {
     localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(newPal));
   };
 
-  // === 주간테스트: 반의 target_grade 기준 자동 배정 대상 계산 ===
   useEffect(() => {
     if (layoutType !== '주간테스트') return;
     (async () => {
@@ -926,7 +948,6 @@ export default function ExamViewerPage() {
     return () => { cancelled = true; };
   }, [layoutType, weeklyTargetGrade]);
 
-  // 학년(target_grade)이 일치하는 반들에 재원 중인 학생 목록을 모아 온다.
   const fetchStudentsForGrade = async (targetGrade: string): Promise<string[]> => {
     const { data: classes } = await supabase.from('class').select('class_id').eq('target_grade', targetGrade);
     const classIds = (classes || []).map((c: any) => c.class_id);
@@ -946,8 +967,6 @@ export default function ExamViewerPage() {
 
   const countStudentsForGrade = async (targetGrade: string) => (await fetchStudentsForGrade(targetGrade)).length;
 
-  // 주간테스트를 저장할 때, target_grade가 일치하는 반의 재원 학생 전원에게 exam_assignment를 자동 생성한다.
-  // (기존에 배정된 학생은 건너뜀 — 몇 번을 다시 저장해도 안전)
   const autoAssignWeeklyTest = async (examId: string) => {
     if (layoutType !== '주간테스트' || !weeklyTargetGrade) return;
     const studentIds = await fetchStudentsForGrade(weeklyTargetGrade);
@@ -969,8 +988,10 @@ export default function ExamViewerPage() {
 
       const finalLayoutSettings = { column: columns, split: splits, titleMode, numberColor: colorNum, titleColor: colorTitle, lineColor: colorLine, examDate: examDate || null, template };
       const isWeeklyTest = layoutType === '주간테스트';
-      if (isWeeklyTest && !weeklyTargetGrade) throw new Error('주간테스트는 배정할 학년을 선택해야 합니다.');
-      const weeklyFields = isWeeklyTest ? { test_week: testWeek, target_grade: weeklyTargetGrade } : { test_week: null, target_grade: null };
+      
+      const weeklyFields = isWeeklyTest && weeklyTargetGrade 
+        ? { test_week: testWeek, target_grade: weeklyTargetGrade } 
+        : { test_week: null, target_grade: null };
 
       let examId = currentExamIdRef.current;
       if (isNewExamRef.current) {
@@ -1010,7 +1031,7 @@ export default function ExamViewerPage() {
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
 
-      if (isWeeklyTest && examId) await autoAssignWeeklyTest(examId);
+      if (isWeeklyTest && examId && weeklyTargetGrade) await autoAssignWeeklyTest(examId);
 
       hasUnsavedChangesRef.current = false;
       const wasNew = isNewExamRef.current;
@@ -1019,7 +1040,7 @@ export default function ExamViewerPage() {
         sessionStorage.removeItem('examQuestions'); sessionStorage.removeItem('qCount');
         sessionStorage.removeItem('examTitle'); sessionStorage.removeItem('editExamId'); sessionStorage.removeItem('duplicateExamId');
         currentExamIdRef.current = examId; 
-        setSavedExamId(examId); // PublishPanel 활성화 트리거
+        setSavedExamId(examId); 
         isNewExamRef.current = false; 
         rebuildExamIdRef.current = null;
       }
@@ -1079,7 +1100,6 @@ export default function ExamViewerPage() {
         #exam-container { will-change: transform; backface-visibility: hidden; }
         .a3-page + .a3-page { margin-top: 24px; }
         
-        /* CSS 변수 바인딩 (여기서 레이아웃의 모든 색상을 처리함) */
         .exam-grid-admission { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20mm; flex: 1; min-height: 0; width: 100%; position: relative; overflow: hidden; }
         .exam-grid-admission::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background-color: var(--color-line); transform: translateX(-50%); }
         .math-protect { min-width: 0; max-width: 100%; word-break: keep-all; overflow-wrap: break-word; }
@@ -1190,12 +1210,12 @@ export default function ExamViewerPage() {
                     </div>
                   </div>
 
-                  {/* 오른쪽 단: 시험지 메타 수정 */}
+                  {/* 오른쪽 단: 시험지 메타 수정 (💡간격 및 정렬 UI 수정) */}
                   <div className="w-1/2 flex flex-col">
                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col gap-4">
                       <h3 className="font-bold text-slate-700 border-b pb-2 flex items-center gap-1.5 text-[13px] shrink-0">✏️ 시험지 메타 수정</h3>
                       
-                      <div className="flex-1 flex flex-col justify-between">
+                      <div className="flex-1 flex flex-col gap-4">
                           <div>
                               <label className="block text-[11px] font-bold text-slate-500 mb-1.5">시험지 제목</label>
                               <input type="text" value={examTitle} onChange={e => handleSettingChange('examTitle', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
@@ -1217,15 +1237,19 @@ export default function ExamViewerPage() {
                           <div>
                               <label className="block text-[11px] font-bold text-slate-500 mb-1.5">프린트 양식</label>
                               <select value={layoutType} onChange={e => handleSettingChange('layoutType', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none">
-                                  <option value="과제프린트">과제프린트</option><option value="주간테스트">주간테스트</option>
-                                  <option value="중간평가">중간평가</option><option value="분기평가">분기평가</option>
+                                  <option value="선택없음">선택없음</option>
+                                  <option value="과제프린트">과제프린트</option>
+                                  <option value="오답프린트">오답프린트</option>
+                                  <option value="주간테스트">주간테스트</option>
+                                  <option value="중간평가">중간평가</option>
+                                  <option value="분기평가">분기평가</option>
                                   <option value="입학테스트">입학테스트</option>
                               </select>
                           </div>
                           {layoutType === '주간테스트' && (
-                              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-3">
+                              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-3 pointer-events-none opacity-60 select-none">
                                   <div className="flex items-center justify-between">
-                                      <span className="text-[11px] font-bold text-emerald-700">🎯 주간테스트 자동 배정</span>
+                                      <span className="text-[11px] font-bold text-emerald-700">🎯 주간테스트 자동 배정 (사용 중지)</span>
                                       <span className="text-[11px] font-black text-emerald-700">{weeklyMatchedCount ?? 0}명</span>
                                   </div>
                                   <div>
@@ -1234,12 +1258,11 @@ export default function ExamViewerPage() {
                                   </div>
                                   <div>
                                       <label className="block text-[11px] font-bold text-slate-500 mb-1.5">배정 대상 학년 (class.target_grade 기준)</label>
-                                      <select value={weeklyTargetGrade} onChange={e => setWeeklyTargetGrade(e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none">
+                                      <select value={weeklyTargetGrade} onChange={e => setWeeklyTargetGrade(e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none bg-slate-100">
                                           <option value="">학년 선택</option>
                                           {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
                                       </select>
                                   </div>
-                                  <p className="text-[10px] text-emerald-700/70 font-medium leading-relaxed">저장하면 학년이 일치하는 반의 재원 학생 전원에게 자동으로 배정됩니다(수동 배포 불필요).</p>
                               </div>
                           )}
                       </div>
@@ -1247,8 +1270,8 @@ export default function ExamViewerPage() {
                   </div>
                </div>
 
-               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 */}
-               <div className="w-full mb-8">
+               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 (간격 띄움) */}
+               <div className="w-full mb-8 mt-4">
                   <PublishPanel 
                     examId={savedExamId} 
                     onPublishComplete={() => setIsExamDistributed(true)} 

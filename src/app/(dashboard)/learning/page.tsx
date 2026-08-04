@@ -4,9 +4,11 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+
 import StudentDashboard from "./components/StudentDashboard";
 import GlobalList from "./components/GlobalList";
 import StudentTimeline from "./components/StudentTimeline";
+import LearningCalendar from "./components/LearningCalendar";
 
 const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강', '메이크업/보강', '기타'];
 
@@ -17,7 +19,7 @@ interface StudentInfo {
   name: string;
   className: string;
   classId: string;
-  allClassIds?: string[]; // 💡 다중 수강반 완벽 지원을 위한 필드 추가
+  allClassIds?: string[];
 }
 
 interface ClassInfo {
@@ -47,15 +49,15 @@ export default function LearningPage() {
   const [currentStats, setCurrentStats] = useState<any[]>([]); 
   const [isLoading, setIsLoading] = useState(true);
 
-  const [studentDetails, setStudentDetails] = useState<any>({ hws: [], exams: [], prints: [], records: [] });
   const [globalList, setGlobalList] = useState<any[]>([]);
-  
   const [timelineData, setTimelineData] = useState<any[]>([]);
+  const [classCalendarEvents, setClassCalendarEvents] = useState<any[]>([]);
   
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
   const [globalSelectedBlocks, setGlobalSelectedBlocks] = useState<string[]>([]);
 
   const [dateFilter, setDateFilter] = useState<'ALL' | '1W' | '1M'>('ALL');
+  const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [isGeneratingPrint, setIsGeneratingPrint] = useState(false);
 
   const [currentView, setCurrentView] = useState<ViewState>({ type: 'ALL', classId: '', className: '', studentId: '', studentName: '' });
@@ -83,12 +85,12 @@ export default function LearningPage() {
       setCurrentView(view);
       setIsFilterActive(false);
 
+      fetchStatsForTab(allStudentsList);
+
       if (view.type === 'STUDENT') {
         fetchStudentTimeline(view.studentId, view.classId);
       } else if (view.type === 'GLOBAL_LIST') {
         fetchGlobalListForTab(savedTab, allStudentsList);
-      } else {
-        fetchStatsForTab(savedTab, allStudentsList);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -99,7 +101,6 @@ export default function LearningPage() {
       const cId = currentView.classId;
       if (cId) {
         setExpandedClasses(prev => prev.includes(cId) ? prev : [...prev, cId]);
-        
         for (const [level, classes] of Object.entries(groupedClasses)) {
           if (classes.some(c => c.class_id === cId)) {
             setExpandedLevels(prev => prev.includes(level) ? prev : [...prev, level]);
@@ -114,14 +115,43 @@ export default function LearningPage() {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
     
-    const newView: ViewState = { type: 'ALL', classId: '', className: '', studentId: '', studentName: '' };
-    setCurrentView(newView);
-    sessionStorage.setItem('logica_learning_view', JSON.stringify(newView));
-    
     setSelectedBlocks([]);
     setGlobalSelectedBlocks([]);
     setIsFilterActive(false);
-    fetchStatsForTab(tab, allStudentsList);
+    setSelectedDate(null); 
+
+    setGlobalList([]);
+    setTimelineData([]);
+    
+    if (currentView.type === 'STUDENT') {
+      fetchStudentTimeline(currentView.studentId, currentView.classId);
+    } else if (currentView.type === 'GLOBAL_LIST') {
+      fetchGlobalListForTab(tab, allStudentsList);
+    }
+  };
+
+  const handleCalendarSummaryClick = (tab: TabType) => {
+    setActiveTab(tab);
+    sessionStorage.setItem('logica_learning_tab', tab);
+
+    setSelectedBlocks([]);
+    setGlobalSelectedBlocks([]);
+    
+    setGlobalList([]);
+    setTimelineData([]);
+
+    let newView = currentView;
+    if (currentView.type === 'ALL' || currentView.type === 'CLASS') {
+      newView = { type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' };
+      setCurrentView(newView);
+      sessionStorage.setItem('logica_learning_view', JSON.stringify(newView));
+    }
+
+    if (newView.type === 'STUDENT') {
+      fetchStudentTimeline(newView.studentId, newView.classId);
+    } else if (newView.type === 'GLOBAL_LIST') {
+      fetchGlobalListForTab(tab, allStudentsList);
+    }
   };
 
   const handleViewChange = (view: ViewState) => {
@@ -130,14 +160,20 @@ export default function LearningPage() {
     
     setSelectedBlocks([]);
     setGlobalSelectedBlocks([]);
+    setSelectedDate(null); 
+
+    setGlobalList([]);
+    setTimelineData([]);
 
     if (view.type === 'STUDENT') {
       fetchStudentTimeline(view.studentId, view.classId);
     } else if (view.type === 'GLOBAL_LIST') {
       fetchGlobalListForTab(activeTab, allStudentsList);
-    } else {
-      fetchStatsForTab(activeTab, allStudentsList);
     }
+  };
+
+  const handleStudentClick = (studentId: string, studentName: string, classId: string, className: string) => {
+    handleViewChange({ type: 'STUDENT', classId, className, studentId, studentName });
   };
 
   const fetchBaseData = async () => {
@@ -159,7 +195,7 @@ export default function LearningPage() {
       const allStudents: StudentInfo[] = [];
       const processedStudentIds = new Set<string>();
       
-      const studentClassMap = new Map<string, string[]>(); // 💡 학생이 속한 모든 반 ID 추적
+      const studentClassMap = new Map<string, string[]>();
 
       const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, student(name, status)').in('class_id', classIds);
 
@@ -207,87 +243,92 @@ export default function LearningPage() {
     } catch (e) { console.error(e); setIsLoading(false); }
   };
 
-  const fetchStatsForTab = async (tab: TabType, students: StudentInfo[]) => {
+  const fetchStatsForTab = async (students: StudentInfo[]) => {
     setIsLoading(true);
     try {
       const studentIds = students.map(s => s.id);
-      // 💡 각 학생이 수강중인 모든 반 ID를 추출하여 데이터 누락 방지
       const classIds = [...new Set(students.flatMap(s => s.allClassIds || [s.classId]))]; 
       let fetchedStats: any[] = [];
+      let allCalEvents: any[] = []; 
       const chunkSize = 200;
       
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
         
-        if (tab === 'EXAM' || tab === 'DASHBOARD') {
-          const { data: stats } = await supabase.from('exam_assignment').select('student_id, status, class_id, exam_master!inner(exam_type, title, total_questions)').in('student_id', chunk).neq('exam_master.exam_type', '과제').neq('exam_master.exam_type', '오답프린트');
-          if (stats) fetchedStats = [...fetchedStats, ...stats];
-        } 
+        const { data: stats } = await supabase.from('exam_assignment')
+          .select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
+          .in('student_id', chunk).neq('exam_master.exam_type', '과제').neq('exam_master.exam_type', '오답프린트');
+        if (stats) {
+          fetchedStats = [...fetchedStats, ...stats.map(s => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'EXAM'}))];
+          stats.forEach(s => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+        }
         
-        if (tab === 'HOMEWORK' || tab === 'DASHBOARD') {
-          const { data: allHws } = await supabase.from('homework_assignment').select('homework_id, class_id, homework_title, target_student_id').in('class_id', classIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
-          const { data: hwStats } = await supabase.from('student_homework_result').select('student_id, status, homework_id').in('student_id', chunk);
-          
-          const hwResultMap = new Map();
-          hwStats?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
-
-          // 💡 새로 적용된 개인화 과제(target_student_id) 완벽 대응 로직
-          allHws?.forEach(hw => {
-            if (hw.target_student_id) {
-               // 1. 특정 학생 전용 과제일 경우
-               if (chunk.includes(hw.target_student_id)) {
-                  const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
-                  fetchedStats.push({
-                    student_id: hw.target_student_id,
-                    class_id: hw.class_id,
-                    status: res?.status || '미제출',
-                    homework_assignment: { class_id: hw.class_id, homework_title: hw.homework_title }
-                  });
-               }
-            } else {
-               // 2. 예전 방식(반 전체 배부) 과제일 경우 (다중 반 수강생 완벽 처리)
-               chunk.forEach(sId => {
-                  const s = students.find(st => st.id === sId);
-                  if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
-                     const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
-                     fetchedStats.push({
-                       student_id: sId,
-                       class_id: hw.class_id,
-                       status: res?.status || '미제출',
-                       homework_assignment: { class_id: hw.class_id, homework_title: hw.homework_title }
-                     });
-                  }
-               });
-            }
-          });
-
-          const { data: examStats } = await supabase.from('exam_assignment').select('student_id, status, class_id, exam_master!inner(exam_type, title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
-          if (examStats) fetchedStats = [...fetchedStats, ...examStats];
-        } 
+        const { data: allHws } = await supabase.from('homework_assignment')
+          .select('homework_id, class_id, homework_title, target_student_id, target_questions, created_at, due_date')
+          .in('class_id', classIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
+        const { data: hwStats } = await supabase.from('student_homework_result').select('student_id, status, homework_id').in('student_id', chunk);
         
-        if (tab === 'INCORRECT' || tab === 'DASHBOARD') {
-          const { data: printStats } = await supabase.from('exam_assignment')
-            .select('student_id, status, class_id, exam_master!inner(exam_type, title, total_questions)')
-            .in('student_id', chunk)
-            .eq('exam_master.exam_type', '오답프린트');
-          
-          if (printStats) fetchedStats = [...fetchedStats, ...printStats];
+        const hwResultMap = new Map();
+        hwStats?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
+
+        allHws?.forEach(hw => {
+          let hwQCount = 0;
+          try { const tqs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []); hwQCount = tqs.length; } catch(e){}
+          const hwDate = hw.due_date || hw.created_at;
+
+          if (hw.target_student_id) {
+             if (chunk.includes(hw.target_student_id)) {
+                const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
+                fetchedStats.push({ student_id: hw.target_student_id, class_id: hw.class_id, status: res?.status || '미제출', type: 'HW', qCount: hwQCount });
+                allCalEvents.push({ date: hwDate, type: 'hw', isCompleted: ['채점완료', '제출완료', '완료'].includes(res?.status), class_id: hw.class_id, student_id: hw.target_student_id });
+             }
+          } else {
+             chunk.forEach(sId => {
+                const s = students.find(st => st.id === sId);
+                if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
+                   const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
+                   fetchedStats.push({ student_id: sId, class_id: hw.class_id, status: res?.status || '미제출', type: 'HW', qCount: hwQCount });
+                   allCalEvents.push({ date: hwDate, type: 'hw', isCompleted: ['채점완료', '제출완료', '완료'].includes(res?.status), class_id: hw.class_id, student_id: sId });
+                }
+             });
+          }
+        });
+
+        const { data: examStats } = await supabase.from('exam_assignment')
+          .select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
+          .in('student_id', chunk).eq('exam_master.exam_type', '과제');
+        if (examStats) {
+          fetchedStats = [...fetchedStats, ...examStats.map(s => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'HW'}))];
+          examStats.forEach(s => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+        }
+
+        const { data: printStats } = await supabase.from('exam_assignment')
+          .select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
+          .in('student_id', chunk).eq('exam_master.exam_type', '오답프린트');
+        if (printStats) {
+          fetchedStats = [...fetchedStats, ...printStats.map(s => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'PRINT'}))];
+          printStats.forEach(s => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
         }
       }
       setCurrentStats(fetchedStats);
+      setClassCalendarEvents(allCalEvents); 
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
   const fetchStudentTimeline = async (studentId: string, classId: string) => {
     setIsLoading(true);
     try {
+      const studentObj = allStudentsList.find(s => s.id === studentId);
+      const targetClassIds = studentObj?.allClassIds && studentObj.allClassIds.length > 0 
+          ? studentObj.allClassIds : [classId];
+
       const { data: exams } = await supabase.from('exam_assignment')
         .select('assignment_id, status, total_score, created_at, exam_master!inner(exam_id, title, exam_type, total_questions)')
-        .eq('student_id', studentId).eq('class_id', classId).order('created_at', { ascending: false });
+        .eq('student_id', studentId).order('created_at', { ascending: false });
 
       const { data: hws } = await supabase.from('homework_assignment')
         .select('*, textbook(title), student_homework_result(*)')
-        .eq('class_id', classId).neq('homework_title', '[시스템] 수업 진도 완료 기록');
+        .in('class_id', targetClassIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
 
       const examIds = exams?.map(e => e.assignment_id) || [];
       const hwIds = hws?.map(h => h.homework_id) || [];
@@ -340,6 +381,9 @@ export default function LearningPage() {
         let targetQs = [];
         try { targetQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
         const tb = unwrap(hw.textbook);
+        
+        if (!hw.target_student_id && !res) return;
+
         combined.push({
           id: `hw_${hw.homework_id}`,
           type: 'hw',
@@ -422,28 +466,15 @@ export default function LearningPage() {
 
           allHws?.forEach(hw => {
             let totalQ = 0;
-            try { 
-              const tQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []);
-              totalQ = tQs.length; 
-            } catch(e){}
+            try { const tQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []); totalQ = tQs.length; } catch(e){}
 
-            // 💡 글로벌 리스트에도 개인화 과제 완벽 매칭 로직 적용
             if (hw.target_student_id) {
               if (chunk.includes(hw.target_student_id)) {
                 const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
                 list.push({
-                  is_exam_hw: false,
-                  homework_id: hw.homework_id,
-                  student_id: hw.target_student_id,
-                  class_id: hw.class_id,
-                  class_name: hw.class?.name || '반 미지정',
-                  student: { name: getStudentName(hw.target_student_id) },
-                  homework_assignment: hw,
-                  status: res?.status || '미제출',
-                  sort_date: hw.due_date || hw.created_at,
-                  oCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.o || 0,
-                  xCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.x || 0,
-                  totalQ: totalQ
+                  is_exam_hw: false, homework_id: hw.homework_id, student_id: hw.target_student_id, class_id: hw.class_id, class_name: hw.class?.name || '반 미지정',
+                  student: { name: getStudentName(hw.target_student_id) }, homework_assignment: hw, status: res?.status || '미제출', sort_date: hw.due_date || hw.created_at,
+                  oCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.x || 0, totalQ: totalQ
                 });
               }
             } else {
@@ -452,18 +483,9 @@ export default function LearningPage() {
                 if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
                   const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
                   list.push({
-                    is_exam_hw: false,
-                    homework_id: hw.homework_id,
-                    student_id: sId,
-                    class_id: hw.class_id,
-                    class_name: hw.class?.name || '반 미지정',
-                    student: { name: getStudentName(sId) },
-                    homework_assignment: hw,
-                    status: res?.status || '미제출',
-                    sort_date: hw.due_date || hw.created_at,
-                    oCount: hCounts[`${hw.homework_id}_${sId}`]?.o || 0,
-                    xCount: hCounts[`${hw.homework_id}_${sId}`]?.x || 0,
-                    totalQ: totalQ
+                    is_exam_hw: false, homework_id: hw.homework_id, student_id: sId, class_id: hw.class_id, class_name: hw.class?.name || '반 미지정',
+                    student: { name: getStudentName(sId) }, homework_assignment: hw, status: res?.status || '미제출', sort_date: hw.due_date || hw.created_at,
+                    oCount: hCounts[`${hw.homework_id}_${sId}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${sId}`]?.x || 0, totalQ: totalQ
                   });
                 }
               });
@@ -482,13 +504,8 @@ export default function LearningPage() {
           });
 
           const formattedExamHws = (examData || []).map((e:any) => ({
-            ...e, 
-            is_exam_hw: true, 
-            sort_date: e.created_at, 
-            class_name: unwrap(e.class)?.name || '반 미지정', 
-            oCount: eCounts[e.assignment_id]?.o || 0, 
-            xCount: eCounts[e.assignment_id]?.x || 0,
-            totalQ: unwrap(e.exam_master)?.total_questions || 0
+            ...e, is_exam_hw: true, sort_date: e.created_at, class_name: unwrap(e.class)?.name || '반 미지정', 
+            oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, totalQ: unwrap(e.exam_master)?.total_questions || 0
           }));
           list = [...list, ...formattedExamHws];
         } 
@@ -503,14 +520,33 @@ export default function LearningPage() {
     setGlobalSelectedBlocks(prev => prev.includes(id) ? prev.filter(v => v !== id) : [...prev, id]);
   };
 
+  const filterByDate = (dateStr: string) => {
+    if (selectedDate) {
+      const d = new Date(dateStr);
+      const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      return ymd === selectedDate;
+    }
+    if (dateFilter === 'ALL') return true;
+    const diff = new Date().getTime() - new Date(dateStr).getTime();
+    return dateFilter === '1W' ? diff <= 7 * 24 * 3600000 : diff <= 30 * 24 * 3600000;
+  };
+
+  const filteredGlobalList = useMemo(() => {
+    return globalList.filter(item => {
+      if (!filterByDate(item.sort_date || item.created_at)) return false;
+      return true;
+    });
+  }, [globalList, dateFilter, selectedDate]);
+
   const handleSelectAllGlobal = () => {
-    if (globalSelectedBlocks.length === globalList.length && globalList.length > 0) {
+    if (globalSelectedBlocks.length === filteredGlobalList.length && filteredGlobalList.length > 0) {
       setGlobalSelectedBlocks([]);
     } else {
-      setGlobalSelectedBlocks(globalList.map(res => {
-         if (activeTab === 'EXAM') return `exam_${res.assignment_id}_${res.student_id}`;
-         if (activeTab === 'HOMEWORK') return res.is_exam_hw ? `hw_exam_${res.assignment_id}_${res.student_id}` : `hw_${res.homework_id}_${res.student_id}`;
-         if (activeTab === 'INCORRECT') return `print_${res.assignment_id}_${res.student_id}`;
+      setGlobalSelectedBlocks(filteredGlobalList.map(res => {
+         const safeId = res.assignment_id || res.homework_id || Math.random().toString(36).substr(2, 9);
+         if (activeTab === 'EXAM') return `exam_${safeId}_${res.student_id}`;
+         if (activeTab === 'HOMEWORK') return res.is_exam_hw ? `hw_exam_${safeId}_${res.student_id}` : `hw_${safeId}_${res.student_id}`;
+         if (activeTab === 'INCORRECT') return `print_${safeId}_${res.student_id}`;
          return '';
       }));
     }
@@ -539,7 +575,7 @@ export default function LearningPage() {
       alert("✅ 선택 항목이 일괄 완료처리 되었습니다.");
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(activeTab, allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch(e) {
       alert("처리 중 오류가 발생했습니다.");
       setIsLoading(false);
@@ -578,16 +614,26 @@ export default function LearningPage() {
       alert("🗑️ 선택 항목이 삭제되었습니다.");
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(activeTab, allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch(e) {
        alert("삭제 중 오류가 발생했습니다.");
        setIsLoading(false);
     }
   };
 
+  const filteredTimeline = useMemo(() => {
+    return timelineData.filter(item => {
+      if (!filterByDate(item.date)) return false;
+      if (activeTab === 'EXAM' && item.type !== 'exam') return false;
+      if (activeTab === 'HOMEWORK' && !item.type.includes('hw')) return false;
+      if (activeTab === 'INCORRECT' && item.type !== 'print') return false;
+      return true;
+    });
+  }, [timelineData, dateFilter, activeTab, selectedDate]);
+
   const handleSelectAllStudent = () => {
     let visibleIds: string[] = [];
-    visibleIds = filteredTimeline.map(i => i.id);
+    visibleIds = filteredTimeline.map((i: any) => i.id);
 
     if (selectedBlocks.length === visibleIds.length && visibleIds.length > 0) {
       setSelectedBlocks([]); 
@@ -618,7 +664,7 @@ export default function LearningPage() {
       alert("✅ 선택 항목이 일괄 완료처리 되었습니다.");
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId);
-      fetchStatsForTab(activeTab, allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch(e) {
        alert("처리 중 오류가 발생했습니다.");
        setIsLoading(false);
@@ -655,7 +701,7 @@ export default function LearningPage() {
       alert("🗑️ 선택 항목이 삭제되었습니다.");
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId);
-      fetchStatsForTab(activeTab, allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch(e) {
        alert("삭제 중 오류가 발생했습니다.");
        setIsLoading(false);
@@ -681,7 +727,7 @@ export default function LearningPage() {
       alert("✅ 채점 완료 처리되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
       else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(activeTab, allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch (err) {
       alert("완료 처리 중 오류가 발생했습니다.");
     }
@@ -695,7 +741,7 @@ export default function LearningPage() {
       
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId);
       else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(activeTab, allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch (e) { alert("삭제 실패"); }
   };
 
@@ -718,7 +764,7 @@ export default function LearningPage() {
       
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId);
       else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab('HOMEWORK', allStudentsList);
-      fetchStatsForTab('HOMEWORK', allStudentsList);
+      fetchStatsForTab(allStudentsList);
     } catch (e) { alert("삭제 실패"); }
   };
 
@@ -827,79 +873,29 @@ export default function LearningPage() {
   };
 
   const studentStatsMap = useMemo(() => {
-    const map: Record<string, { pending: number; pendingQ: number; done: number; pendingItems: string[] }> = {};
+    const map: Record<string, { examQ: number; hwQ: number; printQ: number; }> = {};
     
     currentStats.forEach(e => {
-      let statClassId = 'UNKNOWN';
-      let title = '';
-
-      const hwAssign = unwrap(e.homework_assignment);
-      const exMaster = unwrap(e.exam_master);
-
-      if (hwAssign) {
-        statClassId = hwAssign.class_id || 'UNKNOWN';
-        title = hwAssign.homework_title;
-      } else if (exMaster) {
-        statClassId = e.class_id || 'UNKNOWN';
-        title = exMaster.title;
-      }
+      let statClassId = e.class_id || 'UNKNOWN';
 
       const key = `${e.student_id}_${statClassId}`;
       const globalKey = `${e.student_id}_ALL`;
 
-      if (!map[key]) map[key] = { pending: 0, pendingQ: 0, done: 0, pendingItems: [] };
-      if (!map[globalKey]) map[globalKey] = { pending: 0, pendingQ: 0, done: 0, pendingItems: [] };
+      if (!map[key]) map[key] = { examQ: 0, hwQ: 0, printQ: 0 };
+      if (!map[globalKey]) map[globalKey] = { examQ: 0, hwQ: 0, printQ: 0 };
       
-      let isPending = false;
-      let isDone = false;
       const statusStr = e.status || '미제출';
-      
-      if (['미제출', '진행중', '미응시', '응시전', '응시중'].includes(statusStr)) isPending = true;
-      if (['제출완료', '채점완료', '완료'].includes(statusStr)) isDone = true;
+      const isPending = ['미제출', '진행중', '미응시', '응시전', '응시중'].includes(statusStr);
 
       if (isPending) { 
-        map[key].pending++; 
-        map[globalKey].pending++; 
-        if (title && !map[key].pendingItems.includes(title)) map[key].pendingItems.push(title);
-        if (title && !map[globalKey].pendingItems.includes(title)) map[globalKey].pendingItems.push(title);
-        
-        if (exMaster && exMaster.exam_type === '오답프린트') {
-            const tq = exMaster.total_questions || 0;
-            map[key].pendingQ += tq;
-            map[globalKey].pendingQ += tq;
-        }
-      }
-      if (isDone) { 
-        map[key].done++; 
-        map[globalKey].done++; 
+        const qCount = e.qCount || 0;
+        if (e.type === 'EXAM') { map[key].examQ += qCount; map[globalKey].examQ += qCount; }
+        else if (e.type === 'HW') { map[key].hwQ += qCount; map[globalKey].hwQ += qCount; }
+        else if (e.type === 'PRINT') { map[key].printQ += qCount; map[globalKey].printQ += qCount; }
       }
     });
     return map;
   }, [currentStats]);
-
-  const formatDateLabel = (dateStr: string, includeTime = false) => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
-    const dt = `${d.getMonth()+1}/${d.getDate()}(${['일','월','화','수','목','금','토'][d.getDay()]})`;
-    if (includeTime) return `${dt} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
-    return dt;
-  };
-
-  const filterByDate = (dateStr: string) => {
-    if (dateFilter === 'ALL') return true;
-    const diff = new Date().getTime() - new Date(dateStr).getTime();
-    return dateFilter === '1W' ? diff <= 7 * 24 * 3600000 : diff <= 30 * 24 * 3600000;
-  };
-
-  const filteredTimeline = useMemo(() => {
-    return timelineData.filter(item => {
-      if (!filterByDate(item.date)) return false;
-      if (activeTab === 'EXAM' && item.type !== 'exam') return false;
-      if (activeTab === 'HOMEWORK' && !item.type.includes('hw')) return false;
-      if (activeTab === 'INCORRECT' && item.type !== 'print') return false;
-      return true;
-    });
-  }, [timelineData, dateFilter, activeTab]);
 
   const toggleAllAccordions = () => {
     if (isAllExpanded) {
@@ -920,17 +916,13 @@ export default function LearningPage() {
     handleViewChange({ type: 'CLASS', classId, className, studentId: '', studentName: '' });
   };
 
-  const handleStudentClick = (studentId: string, studentName: string, classId: string, className: string) => {
-    handleViewChange({ type: 'STUDENT', classId, className, studentId, studentName });
+  const formatDateLabel = (dateStr: string, includeTime = false) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    const dt = `${d.getMonth()+1}/${d.getDate()}(${['일','월','화','수','목','금','토'][d.getDay()]})`;
+    if (includeTime) return `${dt} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+    return dt;
   };
-
-  const getTabTitles = () => {
-    if (activeTab === 'DASHBOARD') return { title: '대시보드', icon: '📈' };
-    if (activeTab === 'EXAM') return { title: '시험 현황', icon: '📝' };
-    if (activeTab === 'HOMEWORK') return { title: '과제 현황', icon: '📚' };
-    return { title: '오답 현황', icon: '❌' };
-  };
-  const currentTitles = getTabTitles();
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative">
@@ -947,9 +939,10 @@ export default function LearningPage() {
 
       <div className="flex flex-1 gap-4 overflow-hidden">
         
-        <div className="w-[240px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0 flex justify-between items-center">
-            <h3 className="text-[12px] font-extrabold text-[#002864] flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => handleViewChange({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
+        {/* 💡 폭을 260px -> 230px로 슬림하게 압축 */}
+        <div className="w-[230px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
+          <div className={`p-4 border-b border-slate-200 shrink-0 flex justify-between items-center transition-colors ${currentView.type === 'ALL' ? 'bg-blue-50' : 'bg-slate-50'}`}>
+            <h3 className={`text-[12px] font-extrabold flex items-center gap-1.5 cursor-pointer hover:underline ${currentView.type === 'ALL' ? 'text-blue-700' : 'text-[#002864]'}`} onClick={() => handleViewChange({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
               <span>📂 전체 학생 목록</span>
             </h3>
             <button onClick={toggleAllAccordions} className="text-[11px] font-bold bg-white border border-slate-300 px-2.5 py-1 rounded hover:bg-slate-100 transition-colors shadow-sm focus:outline-none">
@@ -957,45 +950,52 @@ export default function LearningPage() {
             </button>
           </div>
           <div className="flex-1 overflow-y-auto custom-scroll">
-            {isLoading ? <div className="p-8 text-center text-slate-400 font-bold text-xs">로딩 중...</div> : (
+            {isLoading ? <div className="p-8 text-center text-slate-400 font-bold text-[12px]">로딩 중...</div> : (
               LEVEL_ORDER.map(lvl => {
                 const classList = groupedClasses[lvl];
                 if (!classList || classList.length === 0) return null;
+                
                 const isLvlExpanded = expandedLevels.includes(lvl);
+                const isLevelHighlighted = isLvlExpanded;
                 
                 return (
                   <div key={lvl} className="border-b border-slate-200">
-                    <button onClick={() => handleLevelClick(lvl)} className="w-full flex justify-between items-center px-4 py-3 bg-white hover:bg-slate-50 transition-colors">
-                      <span className="font-extrabold text-slate-700 text-[13px]">{lvl}</span>
-                      <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isLvlExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                    <button onClick={() => handleLevelClick(lvl)} className={`w-full flex justify-between items-center pr-4 pl-3 py-3 transition-colors border-l-4 ${isLevelHighlighted ? 'bg-slate-100 border-[#002864]' : 'bg-white hover:bg-slate-50 border-transparent'}`}>
+                      {/* 💡 폰트 한 단계 축소 */}
+                      <span className={`font-extrabold text-[12px] ${isLevelHighlighted ? 'text-[#002864]' : 'text-slate-700'}`}>{isLevelHighlighted ? '📂 ' : '📁 '}{lvl}</span>
+                      <svg className={`w-3.5 h-3.5 transition-transform ${isLvlExpanded ? "rotate-180 text-[#002864]" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
                     {isLvlExpanded && (
                       <div className="flex flex-col bg-slate-50 border-t border-slate-100">
                         {classList.map(c => {
                           const isClassExpanded = expandedClasses.includes(c.class_id);
+                          const isClassActive = currentView.classId === c.class_id && currentView.type !== 'ALL';
+                          
                           return (
                             <div key={c.class_id} className="border-b border-slate-200/60 last:border-0">
-                              <button onClick={() => handleClassClick(c.class_id, c.name)} className="w-full flex justify-between items-center pl-5 pr-4 py-2.5 hover:bg-blue-50/50 transition-colors">
-                                <span className="font-bold text-[#002864] text-[11px] text-left">{c.name}</span>
-                                <svg className={`w-3 h-3 text-blue-300 transition-transform ${isClassExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+                              <button onClick={() => handleClassClick(c.class_id, c.name)} className={`w-full flex justify-between items-center pr-4 py-2.5 transition-colors border-l-4 pl-4 ${isClassActive ? 'bg-blue-50/80 border-blue-500' : 'hover:bg-blue-50/40 border-transparent'}`}>
+                                <span className={`font-bold text-[11px] text-left ${isClassActive ? 'text-blue-700' : 'text-[#002864]'}`}>{isClassActive ? '📌 ' : ''}{c.name}</span>
+                                <svg className={`w-3 h-3 transition-transform ${isClassExpanded ? "rotate-180" : ""} ${isClassActive ? "text-blue-500" : "text-blue-300"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                               </button>
                               {isClassExpanded && (
                                 <div className="flex flex-col bg-white">
                                   {c.students.length === 0 ? <div className="py-3 text-center text-[10px] text-slate-400 font-bold bg-slate-50/50">학생 없음</div> : (
                                     c.students.map(s => {
-                                      const stats = (activeTab === 'INCORRECT' || c.class_id === 'UNKNOWN') 
-                                        ? studentStatsMap[`${s.id}_ALL`] 
-                                        : studentStatsMap[`${s.id}_${c.class_id}`];
-                                      const displayCount = activeTab === 'INCORRECT' ? (stats?.pendingQ || 0) : (stats?.pending || 0);
+                                      const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
+                                      const displayExamQ = allStats.examQ;
+                                      const displayHwQ = allStats.hwQ;
+                                      const displayPrintQ = allStats.printQ;
+                                      const isStudentActive = currentView.studentId === s.id && currentView.classId === c.class_id;
 
                                       return (
-                                        <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full flex items-center justify-between pl-8 pr-4 py-2 text-[11px] font-bold transition-colors border-l-4 ${currentView.studentId === s.id && currentView.classId === c.class_id ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'text-slate-500 hover:bg-slate-50 hover:text-blue-700 border-transparent'}`}>
-                                          <span className="truncate">{s.name}</span>
-                                          {displayCount > 0 && (
-                                            <span className={`shrink-0 ml-1.5 text-[9px] font-black px-1.5 py-0.5 rounded-full shadow-sm ${activeTab === 'INCORRECT' ? 'bg-amber-100 text-amber-600' : 'bg-rose-100 text-rose-600'}`}>
-                                              {displayCount}
-                                            </span>
-                                          )}
+                                        <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full flex items-center justify-between pl-8 pr-3 py-2 text-[11px] font-bold transition-colors border-l-4 ${isStudentActive ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'text-slate-500 hover:bg-slate-50 hover:text-blue-700 border-transparent'}`}>
+                                          <span className="truncate">{isStudentActive ? '👉 ' : ''}{s.name}</span>
+                                          {/* 💡 버블 크기 및 폰트 최소화 연동 */}
+                                          <div className="flex items-center gap-1 shrink-0 ml-1.5">
+                                            {displayExamQ > 0 && <span className="bg-blue-100 text-blue-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="시험 미해결 문항">{displayExamQ}</span>}
+                                            {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
+                                            {displayPrintQ > 0 && <span className="bg-emerald-100 text-emerald-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="오답 미해결 문항">{displayPrintQ}</span>}
+                                          </div>
                                         </button>
                                       );
                                     })
@@ -1015,14 +1015,13 @@ export default function LearningPage() {
         </div>
 
         <div className="flex-1 flex flex-col relative bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          
           { (currentView.type === 'ALL' || currentView.type === 'CLASS') && (
             <StudentDashboard currentView={currentView} activeTab={activeTab} isFilterActive={isFilterActive} setIsFilterActive={setIsFilterActive} handleViewChange={handleViewChange} handleStudentClick={handleStudentClick} groupedClasses={groupedClasses} studentStatsMap={studentStatsMap} LEVEL_ORDER={LEVEL_ORDER} />
           )}  
 
           {currentView.type === 'GLOBAL_LIST' && (
             <GlobalList 
-              activeTab={activeTab} globalList={globalList} isLoading={isLoading} 
+              activeTab={activeTab} globalList={filteredGlobalList} isLoading={isLoading} 
               globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
               handleBulkCompleteGlobal={handleBulkCompleteGlobal} handleBulkDeleteGlobal={handleBulkDeleteGlobal} 
               handleViewChange={handleViewChange} toggleGlobalSelection={toggleGlobalSelection} 
@@ -1030,8 +1029,35 @@ export default function LearningPage() {
               handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
             />
           )}
-                    
+
+          {currentView.type === 'STUDENT' && (
+            <StudentTimeline 
+              currentView={currentView} activeTab={activeTab} dateFilter={dateFilter} setDateFilter={setDateFilter} 
+              isLoading={isLoading} filteredTimeline={filteredTimeline} selectedBlocks={selectedBlocks} 
+              setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
+              handleBulkCompleteStudent={handleBulkCompleteStudent} handleBulkDeleteStudent={handleBulkDeleteStudent} 
+              handleGenerateIncorrectPrint={handleGenerateIncorrectPrint} isGeneratingPrint={isGeneratingPrint} 
+              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
+              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
+            />
+          )}
         </div>
+
+        <div className="w-[300px] shrink-0">
+          <LearningCalendar 
+             currentView={currentView} 
+             activeTab={activeTab} 
+             timelineData={timelineData} 
+             globalList={globalList} 
+             classCalendarEvents={classCalendarEvents} 
+             selectedDate={selectedDate} 
+             setSelectedDate={setSelectedDate} 
+             handleCalendarSummaryClick={handleCalendarSummaryClick} 
+             /* 💡 전체 학생 뷰로 전환하는 함수 추가 */
+             handleViewAllStudents={() => handleViewChange({ type: 'ALL', classId: '', className: '', studentId: '', studentName: '' })}
+          />
+        </div>
+
       </div>
     </div>
   );
