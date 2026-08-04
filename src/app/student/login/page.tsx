@@ -108,7 +108,7 @@ export default function StudentKioskLogin() {
     setStep("profile"); 
   };
 
-  // 비밀번호(PIN) 로그인 (서버 액션 연동)
+  // 💡 비밀번호(PIN) 로그인 (전체화면 전환 기능 추가)
   const handlePasswordLogin = async (pinToUse?: string) => {
     const finalPin = typeof pinToUse === 'string' ? pinToUse : passwordInput;
     if (!finalPin || finalPin.length < 4) return alert("비밀번호 4자리를 모두 입력해주세요.");
@@ -122,8 +122,17 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
       
+      // 💡 로그인 성공 시 전체화면 강제 발동!
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(err => {
+            console.log("전체화면 자동 전환 미지원 기기", err);
+        });
+      }
+
       alert(`환영합니다, ${result.name} 학생!`);
-      window.location.href = "/student/portal"; 
+      // 💡 location.href를 쓰면 새로고침이 일어나서 전체화면이 풀릴 수 있으므로 router.push는 아니지만 SPA 방식 라우팅 권장
+      // 다만 최상위 이동은 window.location.assign("/") 도 가능하지만, 클리닉 뷰어로 부드럽게 이어지려면 router.push 사용이 좋습니다.
+      window.location.href = "/student"; 
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
       setPasswordInput(""); // 틀렸을 경우 즉시 초기화
