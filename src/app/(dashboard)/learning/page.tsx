@@ -136,10 +136,6 @@ export default function LearningPage() {
     }
   };
 
-  const handleStudentClick = (studentId: string, studentName: string, classId: string, className: string) => {
-    handleViewChange({ type: 'STUDENT', classId, className, studentId, studentName });
-  };
-
   const fetchBaseData = async () => {
     setIsLoading(true);
     try {
@@ -330,11 +326,6 @@ export default function LearningPage() {
 
       combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setTimelineData(combined);
-      
-      const exms = combined.filter(c => c.type === 'exam').map(c => ({...c, assignment_id: c.realId, exam_master: {title: c.title, total_questions: c.total}, created_at: c.date}));
-      const hwks = combined.filter(c => c.type.includes('hw')).map(c => ({...c, is_exam_hw: c.type === 'hw_exam', assignment_id: c.realId, homework_id: c.realId, exam_master: {title: c.title, total_questions: c.total}, homework_title: c.title, sort_date: c.date, total_questions: c.total}));
-      const prns = combined.filter(c => c.type === 'print').map(c => ({...c, assignment_id: c.realId, exam_master: {title: c.title, total_questions: c.total}, created_at: c.date}));
-      setStudentDetails({ exams: exms, hws: hwks, prints: prns, records: [] });
       
     } catch(e) { console.error(e); } finally { setIsLoading(false); }
   };
@@ -852,6 +843,38 @@ export default function LearningPage() {
     });
   }, [timelineData, dateFilter, activeTab]);
 
+  // === UI 핸들러 (복구됨) ===
+  const toggleAllAccordions = () => {
+    if (isAllExpanded) {
+      setExpandedLevels([]); setExpandedClasses([]);
+    } else {
+      const allLevels = LEVEL_ORDER.filter(l => groupedClasses[l]?.length > 0);
+      const allClasses: string[] = [];
+      Object.values(groupedClasses).flat().forEach(c => allClasses.push(c.class_id));
+      setExpandedLevels(allLevels); setExpandedClasses(allClasses);
+    }
+    setIsAllExpanded(!isAllExpanded);
+  };
+
+  const handleLevelClick = (lvl: string) => setExpandedLevels(prev => prev.includes(lvl) ? prev.filter(l => l !== lvl) : [...prev, lvl]);
+  
+  const handleClassClick = (classId: string, className: string) => {
+    setExpandedClasses(prev => prev.includes(classId) ? prev.filter(c => c !== classId) : [...prev, classId]);
+    handleViewChange({ type: 'CLASS', classId, className, studentId: '', studentName: '' });
+  };
+
+  const handleStudentClick = (studentId: string, studentName: string, classId: string, className: string) => {
+    handleViewChange({ type: 'STUDENT', classId, className, studentId, studentName });
+  };
+
+  const getTabTitles = () => {
+    if (activeTab === 'DASHBOARD') return { title: '대시보드', icon: '📈' };
+    if (activeTab === 'EXAM') return { title: '시험 현황', icon: '📝' };
+    if (activeTab === 'HOMEWORK') return { title: '과제 현황', icon: '📚' };
+    return { title: '오답 현황', icon: '❌' };
+  };
+  const currentTitles = getTabTitles();
+
   const renderStudentCard = (s: StudentInfo, classId: string, cName: string, showClassNameBadge = false) => {
     const stats = (activeTab === 'INCORRECT' || classId === 'UNKNOWN') 
       ? studentStatsMap[`${s.id}_ALL`] 
@@ -864,7 +887,7 @@ export default function LearningPage() {
 
     return (
       <div 
-        key={`${s.id}_${classId}`} 
+        key={s.id} 
         onClick={() => handleStudentClick(s.id, s.name, classId, cName)} 
         className={`px-3 py-2.5 rounded-xl border shadow-sm cursor-pointer transition-all flex items-center justify-between ${
           displayCount > 0 
@@ -942,7 +965,6 @@ export default function LearningPage() {
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative">
       
-      {/* 💡 상단 탭 메뉴 */}
       <div className="flex justify-between items-center shrink-0">
         <div className="flex gap-2 p-1.5 bg-slate-200/60 rounded-xl shadow-inner">
           <button onClick={() => handleMainTabClick('DASHBOARD')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all ${activeTab === 'DASHBOARD' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📈 학생 대시보드</button>
@@ -955,7 +977,6 @@ export default function LearningPage() {
 
       <div className="flex flex-1 gap-4 overflow-hidden">
         
-        {/* 1. 좌측 사이드바 아코디언 메뉴 */}
         <div className="w-[240px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0 flex justify-between items-center">
             <h3 className="text-[12px] font-extrabold text-[#002864] flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => handleViewChange({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
@@ -974,7 +995,7 @@ export default function LearningPage() {
                 
                 return (
                   <div key={lvl} className="border-b border-slate-200">
-                    <button onClick={() => setExpandedLevels(p => p.includes(lvl) ? p.filter(l => l !== lvl) : [...p, lvl])} className="w-full flex justify-between items-center px-4 py-3 bg-white hover:bg-slate-50 transition-colors">
+                    <button onClick={() => handleLevelClick(lvl)} className="w-full flex justify-between items-center px-4 py-3 bg-white hover:bg-slate-50 transition-colors">
                       <span className="font-extrabold text-slate-700 text-[13px]">{lvl}</span>
                       <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isLvlExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
@@ -984,7 +1005,7 @@ export default function LearningPage() {
                           const isClassExpanded = expandedClasses.includes(c.class_id);
                           return (
                             <div key={c.class_id} className="border-b border-slate-200/60 last:border-0">
-                              <button onClick={() => { setExpandedClasses(p => p.includes(c.class_id) ? p.filter(id => id !== c.class_id) : [...p, c.class_id]); handleViewChange({ type: 'CLASS', classId: c.class_id, className: c.name, studentId: '', studentName: '' }); }} className="w-full flex justify-between items-center pl-5 pr-4 py-2.5 hover:bg-blue-50/50 transition-colors">
+                              <button onClick={() => handleClassClick(c.class_id, c.name)} className="w-full flex justify-between items-center pl-5 pr-4 py-2.5 hover:bg-blue-50/50 transition-colors">
                                 <span className="font-bold text-[#002864] text-[11px] text-left">{c.name}</span>
                                 <svg className={`w-3 h-3 text-blue-300 transition-transform ${isClassExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                               </button>
@@ -1222,25 +1243,25 @@ export default function LearningPage() {
                               </div>
                             </div>
 
-                            <div className="flex items-center gap-3 shrink-0 justify-end w-1/2">
-                              <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right">총 {res.totalQ}문항</div>
-                              <div className="flex items-center gap-1 shrink-0">
-                                <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {res.oCount}</span>
-                                <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {res.xCount}</span>
+                            <div className="flex items-center gap-4 shrink-0 justify-end w-1/2">
+                              <div className="text-[12px] font-bold text-slate-500 shrink-0 w-[60px] text-right">총 {res.totalQ}문항</div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100">✅ {res.oCount}</span>
+                                <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100">❌ {res.xCount}</span>
                               </div>
-                              <div className="flex items-center gap-1 shrink-0 w-[120px] justify-end">
-                                <button onClick={(e) => handleForceComplete(e, 'exam', res.assignment_id, res.student_id)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 transition-colors flex items-center gap-1 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
+                              <div className="flex items-center gap-1.5 shrink-0 w-[140px] justify-end">
+                                <button onClick={(e) => handleForceComplete(e, 'exam', res.assignment_id, res.student_id)} className="text-[10px] font-bold text-slate-600 hover:text-emerald-600 transition-colors flex items-center gap-1 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm">
                                   ✅ 완료처리
                                 </button>
-                                <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold ${statusBadge}`}>
+                                <span className={`w-[56px] text-center px-1.5 py-0.5 rounded text-[10px] font-extrabold ${statusBadge}`}>
                                   {res.status || '미제출'}
                                 </span>
                               </div>
                               
                               <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                                <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m.exam_id}&exam_id=${m.exam_id}`, '_blank'); }} className="text-[11px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[11px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                                <button onClick={(e) => { e.stopPropagation(); window.location.href = `/exam/review?assignment_id=${res.assignment_id}`; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5">상세/채점 ➔</button>
+                                <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m.exam_id}&exam_id=${m.exam_id}`, '_blank'); }} className="text-[13px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
+                                <button onClick={(e) => { e.stopPropagation(); window.location.href = `/exam/review?assignment_id=${res.assignment_id}`; }} className="text-[11px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-3 py-1.5 rounded transition-colors shadow-sm ml-1">상세/채점 ➔</button>
                               </div>
                             </div>
                           </div>
@@ -1287,8 +1308,8 @@ export default function LearningPage() {
                               </div>
                               
                               <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                                <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?homework_id=${hw.homework_id}`, '_blank'); }} className="text-[11px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                                <button onClick={(e) => { e.stopPropagation(); handleDeleteHomework(hw.homework_id, res.student_id); }} className="text-[11px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
+                                <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?homework_id=${hw.homework_id}`, '_blank'); }} className="text-[13px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
+                                <button onClick={(e) => { e.stopPropagation(); handleDeleteHomework(hw.homework_id, res.student_id); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
                                 <button onClick={(e) => { e.stopPropagation(); window.location.href = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5">상세/채점 ➔</button>
                               </div>
                             </div>
@@ -1338,8 +1359,8 @@ export default function LearningPage() {
                             </div>
                             
                             <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2">
-                              <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?exam_id=${m?.exam_id}`, '_blank'); }} className="text-[11px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
-                              <button onClick={(e) => { e.stopPropagation(); handleDeletePrint(p.assignment_id, unwrap(p.exam_master)?.exam_id); }} className="text-[11px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
+                              <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?exam_id=${m?.exam_id}`, '_blank'); }} className="text-[13px] hover:text-blue-600 transition-colors" title="수정">✏️</button>
+                              <button onClick={(e) => { e.stopPropagation(); handleDeletePrint(p.assignment_id, unwrap(p.exam_master)?.exam_id); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
                               <button onClick={(e) => { e.stopPropagation(); window.location.href = `/exam/review?assignment_id=${p.assignment_id}`; }} className="text-[10px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 px-2 py-1 rounded shadow-sm transition-colors ml-0.5">프린트 채점 ➔</button>
                             </div>
                           </div>
