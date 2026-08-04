@@ -1,7 +1,6 @@
-// src/app/student/login/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { searchStudentsByDigits, loginStudentAction } from "@/app/actions/studentAuth";
 
 // 💡 아바타 에셋 유지
@@ -37,7 +36,6 @@ function gradeLabel(grade: string) {
   return '학년 정보 없음';
 }
 
-// 아이콘 컴포넌트
 const IconDelete = () => <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>;
 
 export default function StudentKioskLogin() {
@@ -47,6 +45,28 @@ export default function StudentKioskLogin() {
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [passwordInput, setPasswordInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  
+  // 💡 전체화면 상태 관리 (로그인 직후 전체화면 전환 시 필요)
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
+    document.addEventListener("fullscreenchange", handleFullscreenChange);
+    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
+  }, []);
+
+  // 💡 전체화면 토글 함수 (비밀 버튼에 연결됨)
+  const toggleFullScreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(err => {
+        console.log("전체화면 미지원 기기", err);
+      });
+    } else {
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      }
+    }
+  };
 
   const resetState = () => {
     setStep("phone");
@@ -56,14 +76,11 @@ export default function StudentKioskLogin() {
     setPasswordInput("");
   };
 
-  // 💡 전화번호 키패드 입력 (비밀번호와 동일한 동작)
   const handleDigit = (num: string) => {
     if (step === "phone") {
       if (digits.length < 4 && !isProcessing) {
         const newDigits = digits + num;
         setDigits(newDigits);
-        
-        // 4자리가 입력되는 순간 자동 조회 트리거
         if (newDigits.length === 4) {
           searchDBAndProcess(newDigits);
         }
@@ -75,13 +92,10 @@ export default function StudentKioskLogin() {
     if (step === "phone") setDigits(digits.slice(0, -1));
   };
 
-  // 💡 PIN 번호 키패드 입력
   const handlePinDigit = (num: string) => {
     if (passwordInput.length < 4 && !isProcessing) {
       const newPin = passwordInput + num;
       setPasswordInput(newPin);
-      
-      // 4자리가 입력되는 순간 자동 로그인 트리거
       if (newPin.length === 4) {
         handlePasswordLogin(newPin);
       }
@@ -92,7 +106,6 @@ export default function StudentKioskLogin() {
     setPasswordInput(prev => prev.slice(0, -1));
   };
 
-  // 전화번호 4자리 조회 (서버 액션 연동)
   const searchDBAndProcess = async (code: string) => {
     setIsProcessing(true);
     const result = await searchStudentsByDigits(code);
@@ -108,7 +121,6 @@ export default function StudentKioskLogin() {
     setStep("profile"); 
   };
 
-  // 💡 비밀번호(PIN) 로그인 (전체화면 전환 기능 추가)
   const handlePasswordLogin = async (pinToUse?: string) => {
     const finalPin = typeof pinToUse === 'string' ? pinToUse : passwordInput;
     if (!finalPin || finalPin.length < 4) return alert("비밀번호 4자리를 모두 입력해주세요.");
@@ -122,25 +134,20 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
       
-      // 💡 로그인 성공 시 전체화면 강제 발동!
+      // 혹시나 비밀 버튼을 못 누르고 로그인에 성공했더라도, 이 시점에 전체화면 강제 발동
       if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(err => {
-            console.log("전체화면 자동 전환 미지원 기기", err);
-        });
+        document.documentElement.requestFullscreen().catch(() => {});
       }
 
-      alert(`환영합니다, ${result.name} 학생!`);
-      // 💡 location.href를 쓰면 새로고침이 일어나서 전체화면이 풀릴 수 있으므로 router.push는 아니지만 SPA 방식 라우팅 권장
-      // 다만 최상위 이동은 window.location.assign("/") 도 가능하지만, 클리닉 뷰어로 부드럽게 이어지려면 router.push 사용이 좋습니다.
       window.location.href = "/student"; 
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
-      setPasswordInput(""); // 틀렸을 경우 즉시 초기화
+      setPasswordInput(""); 
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-100 font-pretendard select-none py-12 px-4">
+    <div className="min-h-screen flex items-center justify-center bg-slate-100 font-pretendard select-none py-12 px-4 relative">
       
       {/* 전역 로딩 오버레이 */}
       {isProcessing && (
@@ -149,10 +156,17 @@ export default function StudentKioskLogin() {
         </div>
       )}
 
-      {/* 1단계: 전화번호 입력 (비밀번호 창과 동일한 디자인 적용) */}
+      {/* 1단계: 전화번호 입력 */}
       {step === "phone" && (
-        <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center">
+        <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
           
+          {/* 💡 투명한 비밀 버튼 (흰색 상자의 오른쪽 맨 위 구석) */}
+          <button 
+            onClick={toggleFullScreen} 
+            className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
+            title="전체화면 토글"
+          />
+
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mb-6 opacity-80" />
           
           <h2 className="text-xl font-extrabold text-slate-800 mb-1">
@@ -162,7 +176,6 @@ export default function StudentKioskLogin() {
             학생 본인 또는 학부모님 전화번호
           </p>
 
-          {/* 전화번호 입력 인디케이터 */}
           <div className="flex gap-4 mb-6">
             {[0, 1, 2, 3].map((idx) => (
               <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-black transition-all border-2 ${digits.length > idx ? 'border-[#002864] text-[#002864] bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
@@ -171,7 +184,6 @@ export default function StudentKioskLogin() {
             ))}
           </div>
 
-          {/* 공통 디자인 키패드 */}
           <div className="grid grid-cols-3 gap-3 w-full mt-2">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
               <button key={num} onClick={() => handleDigit(num.toString())} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
@@ -192,9 +204,17 @@ export default function StudentKioskLogin() {
         </div>
       )}
 
-      {/* 2단계: 프로필 선택 (넓게 펼쳐지는 아바타 뷰) */}
+      {/* 2단계: 프로필 선택 */}
       {step === "profile" && matchedList.length > 0 && (
-        <div className="bg-white p-12 rounded-[32px] shadow-2xl w-[750px] max-w-full text-center animate-[fadeIn_0.3s_ease-out]">
+        <div className="bg-white p-12 rounded-[32px] shadow-2xl w-[750px] max-w-full text-center animate-[fadeIn_0.3s_ease-out] relative z-10 overflow-hidden">
+          
+          {/* 💡 프로필 창에도 비밀 버튼 추가 */}
+          <button 
+            onClick={toggleFullScreen} 
+            className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
+            title="전체화면 토글"
+          />
+
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mb-8 inline-block opacity-50" />
           <h2 className="text-3xl font-extrabold text-slate-800 mb-10">누구로 접속할까요?</h2>
           
@@ -230,8 +250,15 @@ export default function StudentKioskLogin() {
       {step === "password" && selectedStudent && (() => {
         const avatar = getAvatarFor(selectedStudent.student_id);
         return (
-          <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center">
+          <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
             
+            {/* 💡 PIN 입력 창에도 비밀 버튼 추가 */}
+            <button 
+              onClick={toggleFullScreen} 
+              className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
+              title="전체화면 토글"
+            />
+
             <div className={`w-20 h-20 rounded-full ${avatar.color.bg} flex items-center justify-center mb-4 shadow-sm`}>
               <span className="text-4xl">{avatar.animal}</span>
             </div>
@@ -242,7 +269,6 @@ export default function StudentKioskLogin() {
               PIN 번호 4자리를 입력해주세요
             </p>
 
-            {/* PIN 입력 인디케이터 */}
             <div className="flex gap-4 mb-6">
               {[0, 1, 2, 3].map((idx) => (
                 <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-black transition-all border-2 ${passwordInput.length > idx ? 'border-[#002864] text-[#002864] bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
@@ -251,7 +277,6 @@ export default function StudentKioskLogin() {
               ))}
             </div>
 
-            {/* 공통 디자인 키패드 */}
             <div className="grid grid-cols-3 gap-3 w-full mt-2">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button key={num} onClick={() => handlePinDigit(num.toString())} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
