@@ -1,7 +1,7 @@
 // src/components/TopHeader.tsx
 "use client";
 
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { getSecureNotifications } from "@/app/actions/profile";
 import { supabase } from "@/lib/supabase";
@@ -53,7 +53,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // 💡 직관적인 사진 자르기(Crop) 상태 관리
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
@@ -113,181 +112,100 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     return () => { isMounted = false; };
   }, []);
 
+  const loadNotifications = useCallback(async () => {
+    if (!currentUid) return;
+
+    // 💡 권한 로직을 실시간으로 확인 (관리자는 모든 CS 확인 가능)
+    const role = localStorage.getItem("logica_instructor_role") || "";
+    const pos = localStorage.getItem("logica_instructor_position") || "";
+    const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
+                    ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
+
+    const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
+    const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
+    const clearedIso = new Date(clearedTime).toISOString();
+
+    const res = await getSecureNotifications(clearedTime);
+    let allNotis = res.success && res.notiData ? res.notiData : [];
+
+    // 1. 업무 보드의 '긴급공지' (완료 제외) - 모두에게 보임
+    const { data: urgentMemos } = await supabase
+      .from("instructor_memo")
+      .select("memo_id, author_name, content, created_at, updated_at, status")
+      .eq("memo_type", "긴급공지")
+      .or(`created_at.gt.${clearedIso},updated_at.gt.${clearedIso}`);
+
+    if (urgentMemos && urgentMemos.length > 0) {
+      const activeMemos = urgentMemos.filter(m => m.status !== "완료");
+      const memoNotis = activeMemos.map(m => ({
+        id: `memo_${m.memo_id}`,
+        title: `🚨 긴급공지 (${m.author_name})`,
+        time: new Date(m.updated_at || m.created_at), 
+        content: m.content,
+        link: "/task" 
+      }));
+      allNotis = [...allNotis, ...memoNotis];
+    }
+
+    // 2. 💡 학부모 요청(CS) 로드 (관리자: 모두 / 일반: 본인 배정건만)
+    let csQuery = supabase
+      .from("parent_request_log")
+      .select("request_id, request_type, reason, created_at, updated_at, status, student(name)")
+      .or(`created_at.gt.${clearedIso},updated_at.gt.${clearedIso}`);
+
+    // 관리자가 아니면 '내게 배정된 CS'만 필터링
+    if (!isAdmin) {
+      csQuery = csQuery.eq("processed_instructor_id", currentUid);
+    }
+
+    const { data: csLogs } = await csQuery;
+
+    if (csLogs && csLogs.length > 0) {
+      const activeCS = csLogs.filter(c => c.status !== "완료");
+      const csNotis = activeCS.map((c: any) => {
+        const sName = Array.isArray(c.student) ? c.student[0]?.name : c.student?.name;
+        return {
+          id: `cs_${c.request_id}`,
+          title: `👨‍👩‍👧‍👦 CS 요청: ${sName || '알수없음'} 학생 (${c.request_type})`,
+          time: new Date(c.updated_at || c.created_at), 
+          content: c.reason || "내용 없음",
+          link: "/cs"
+        };
+      });
+      allNotis = [...allNotis, ...csNotis];
+    }
+
+    // 시간순 정렬 및 반영
+    allNotis.sort((a, b) => b.time.getTime() - a.time.getTime());
+    setNotifications(allNotis);
+    
+    setUnreadNotiCount(prev => allNotis.length);
+  }, [currentUid]);
+
   useEffect(() => {
     if (!currentUid) return;
 
-    const fetchNotifications = async () => {
-      const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
-      const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
-      const clearedIso = new Date(clearedTime).toISOString();
+    loadNotifications();
 
-      // 1. 기존 외부 알림 가져오기
-      const res = await getSecureNotifications(clearedTime);
-      let allNotis = res.success && res.notiData ? res.notiData : [];
-
-      // 2. 업무 보드의 '긴급공지' 가져오기 (status 값 포함)
-      const { data: urgentMemos } = await supabase
-        .from("instructor_memo")
-        .select("memo_id, author_name, content, created_at, status")
-        .eq("memo_type", "긴급공지")
-        .gt("created_at", clearedIso);
-
-      if (urgentMemos && urgentMemos.length > 0) {
-        const activeMemos = urgentMemos.filter(m => m.status !== "완료");
-        const memoNotis = activeMemos.map(m => ({
-          id: `memo_${m.memo_id}`,
-          title: `🚨 긴급공지 (${m.author_name})`,
-          time: new Date(m.created_at),
-          content: m.content,
-          link: "/task" 
-        }));
-        allNotis = [...allNotis, ...memoNotis];
-      }
-
-      // 3. 💡 나에게 배정된 학부모 요청(CS) 가져오기
-      const { data: csLogs } = await supabase
-        .from("parent_request_log")
-        .select("request_id, request_type, reason, created_at, status, student(name)")
-        .eq("processed_instructor_id", currentUid)
-        .gt("created_at", clearedIso);
-
-      if (csLogs && csLogs.length > 0) {
-        const activeCS = csLogs.filter(c => c.status !== "완료");
-        const csNotis = activeCS.map((c: any) => {
-          const sName = Array.isArray(c.student) ? c.student[0]?.name : c.student?.name;
-          return {
-            id: `cs_${c.request_id}`,
-            title: `👨‍👩‍👧‍👦 CS 배정: ${sName || '알수없음'} 학생 (${c.request_type})`,
-            time: new Date(c.created_at),
-            content: c.reason || "내용 없음",
-            link: "/cs"
-          };
-        });
-        allNotis = [...allNotis, ...csNotis];
-      }
-
-      // 4. 시간순(최신순) 정렬 및 반영
-      allNotis.sort((a, b) => b.time.getTime() - a.time.getTime());
-      setNotifications(allNotis);
-      setUnreadNotiCount(allNotis.length);
-    };
-
-    fetchNotifications();
-
-    // 💡 실시간 감지(Real-time) 채널 연결
     const notiChannel = supabase.channel('header_noti_channel')
-      
-      // (1) 긴급공지 이벤트 감지
-      .on('postgres_changes', { 
-        event: '*', 
-        schema: 'public', 
-        table: 'instructor_memo',
-        filter: "memo_type=eq.긴급공지" 
-      }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          const newMemo = payload.new as any; // 💡 타입스크립트 에러 방지용 명시적 형변환
-          if (newMemo.status !== '완료') {
-            const newNoti = {
-              id: `memo_${newMemo.memo_id}`,
-              title: `🚨 긴급공지 (${newMemo.author_name || '알수없음'})`,
-              time: new Date(newMemo.created_at),
-              content: newMemo.content,
-              link: "/task"
-            };
-            setNotifications(prev => {
-              const updated = [newNoti, ...prev].sort((a, b) => b.time.getTime() - a.time.getTime());
-              setUnreadNotiCount(updated.length);
-              return updated;
-            });
-          }
-        } else if (payload.eventType === 'UPDATE') {
-          const updatedMemo = payload.new as any; // 💡 타입스크립트 에러 방지
-          if (updatedMemo.status === '완료') {
-            setNotifications(prev => {
-              const filtered = prev.filter(n => n.id !== `memo_${updatedMemo.memo_id}`);
-              setUnreadNotiCount(filtered.length);
-              return filtered;
-            });
-          } else {
-            const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
-            const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
-            if (new Date(updatedMemo.created_at).getTime() > clearedTime) {
-              setNotifications(prev => {
-                if (prev.some(n => n.id === `memo_${updatedMemo.memo_id}`)) return prev;
-                const restoredNoti = {
-                  id: `memo_${updatedMemo.memo_id}`,
-                  title: `🚨 긴급공지 (${updatedMemo.author_name || '알수없음'})`,
-                  time: new Date(updatedMemo.created_at),
-                  content: updatedMemo.content,
-                  link: "/task"
-                };
-                const updated = [...prev, restoredNoti].sort((a, b) => b.time.getTime() - a.time.getTime());
-                setUnreadNotiCount(updated.length);
-                return updated;
-              });
-            }
-          }
-        }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_memo' }, () => {
+        loadNotifications(); 
       })
-      
-      // (2) 💡 나에게 배정된 학부모 CS 요청 감지
-      .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'parent_request_log',
-        filter: `processed_instructor_id=eq.${currentUid}`
-      }, (payload) => {
-        const newCs = payload.new as any; // 💡 타입스크립트 에러 방지
-        if (payload.eventType === 'INSERT') {
-          if (newCs.status !== '완료') {
-            const newNoti = {
-              id: `cs_${newCs.request_id}`,
-              title: `👨‍👩‍👧‍👦 CS 배정 (${newCs.request_type})`,
-              time: new Date(newCs.created_at),
-              content: newCs.reason || "내용 없음",
-              link: "/cs"
-            };
-            setNotifications(prev => {
-              const updated = [newNoti, ...prev].sort((a, b) => b.time.getTime() - a.time.getTime());
-              setUnreadNotiCount(updated.length);
-              return updated;
-            });
-          }
-        } else if (payload.eventType === 'UPDATE') {
-          if (newCs.status === '완료') {
-            setNotifications(prev => {
-              const filtered = prev.filter(n => n.id !== `cs_${newCs.request_id}`);
-              setUnreadNotiCount(filtered.length);
-              return filtered;
-            });
-          } else {
-            // 다른 담당자에게서 나에게로 변경되었거나 완료에서 다시 대기/진행중으로 복구된 경우
-            const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
-            const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
-            if (new Date(newCs.created_at).getTime() > clearedTime) {
-              setNotifications(prev => {
-                if (prev.some(n => n.id === `cs_${newCs.request_id}`)) return prev;
-                const restoredNoti = {
-                  id: `cs_${newCs.request_id}`,
-                  title: `👨‍👩‍👧‍👦 CS 배정 (${newCs.request_type})`,
-                  time: new Date(newCs.created_at),
-                  content: newCs.reason || "내용 없음",
-                  link: "/cs"
-                };
-                const updated = [...prev, restoredNoti].sort((a, b) => b.time.getTime() - a.time.getTime());
-                setUnreadNotiCount(updated.length);
-                return updated;
-              });
-            }
-          }
-        }
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, () => {
+        loadNotifications();
       })
       .subscribe();
 
     return () => { 
       supabase.removeChannel(notiChannel); 
     };
-  }, [currentUid]);
+  }, [currentUid, loadNotifications]);
+
+  const toggleNotiWindow = () => {
+    if (!isNotiOpen) loadNotifications(); 
+    setIsNotiOpen(!isNotiOpen);
+    setUnreadNotiCount(0); 
+  };
 
   const clearNotifications = () => {
     localStorage.setItem(`noti_cleared_at_${currentUid}`, new Date().toISOString());
@@ -335,9 +253,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     return res.substring(0, 3) + '-' + res.substring(3, 7) + '-' + res.substring(7, 11) + '-' + res.substring(11);
   };
 
-  // ==========================================
-  // 사진 업로드 및 자르기(Crop) 로직
-  // ==========================================
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -486,8 +401,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
         </button>
 
         <div className={`relative shrink-0 transition-all duration-500 ${isHeaderExpanded ? 'ml-2' : 'ml-1'}`}>
-          <button onClick={() => { setIsNotiOpen(!isNotiOpen); setUnreadNotiCount(0); }} className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors focus:outline-none">
-            🔔 {unreadNotiCount > 0 && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white"></span>}
+          <button onClick={toggleNotiWindow} className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors focus:outline-none">
+            🔔 {unreadNotiCount > 0 && !isNotiOpen && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white"></span>}
           </button>
 
           {isNotiOpen && (
@@ -555,7 +470,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 <h3 className="text-sm font-black text-slate-800 mb-4 w-full text-left">프로필 사진</h3>
                 
                 {!imageSrc ? (
-                  // 1. 현재 사진 뷰 모드
                   <div className="flex flex-col items-center">
                     <div className="w-[160px] h-[160px] rounded-full border border-slate-200 shadow-sm overflow-hidden mb-4 bg-slate-100 flex items-center justify-center">
                       {finalProfileImgUrl && !imgError ? (
@@ -565,7 +479,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                       )}
                     </div>
                     
-                    {/* 💡 100% 작동하는 물리적 편법: 버튼 레이아웃 안을 투명한 파일 입력창으로 꽉 채움 */}
                     <label className="relative overflow-hidden cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-5 rounded-xl border border-slate-300 transition-colors shadow-sm flex items-center gap-2">
                       <span className="text-base z-10">📸</span> <span className="z-10 relative">새 사진 업로드 및 자르기</span>
                       <input 
@@ -578,7 +491,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                     </label>
                   </div>
                 ) : (
-                  // 2. 사진 편집(Crop) 모드
                   <div className="flex flex-col items-center w-full bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-inner">
                     <p className="text-[11px] font-bold text-blue-600 mb-3 bg-blue-50 px-3 py-1 rounded-full">👆 마우스나 손가락으로 사진을 끌어 맞추세요</p>
                     

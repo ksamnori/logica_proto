@@ -30,6 +30,22 @@ export default function CSBoardPage() {
     const now = new Date();
     setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
     fetchInitialData(instId, isAdmin);
+
+    // 💡 1. 완벽한 리얼타임(Real-time) CS 보드 구축 (추가, 변경, 삭제 시 모든 사용자 화면 즉각 반영)
+    const channel = supabase.channel('cs_board_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          // 관계 데이터(학생이름 등)가 필요하므로 INSERT 시엔 데이터를 재호출
+          fetchInitialData(instId, isAdmin);
+        } else if (payload.eventType === 'UPDATE') {
+          setRequests(prev => prev.map(r => r.request_id === payload.new.request_id ? { ...r, ...payload.new } : r));
+        } else if (payload.eventType === 'DELETE') {
+          setRequests(prev => prev.filter(r => r.request_id !== payload.old.request_id));
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const fetchInitialData = async (instId: string, isAdmin: boolean) => {
@@ -91,18 +107,26 @@ export default function CSBoardPage() {
     setDragOverCol(null);
   };
 
+  // 💡 2. 낙관적 UI 업데이트 및 시간 정보 로컬 갱신
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
     setDragOverCol(null);
     const reqId = e.dataTransfer.getData("reqId");
     if (!reqId) return;
 
-    setRequests(prev => prev.map(r => r.request_id.toString() === reqId ? { ...r, status: newStatus } : r));
+    const now = new Date().toISOString();
+
+    setRequests(prev => prev.map(r => r.request_id.toString() === reqId ? { 
+      ...r, 
+      status: newStatus,
+      updated_at: now,
+      last_updater_name: currentUser.name 
+    } : r));
 
     try {
       await supabase.from("parent_request_log").update({ 
         status: newStatus,
-        updated_at: new Date().toISOString(),
+        updated_at: now,
         last_updater_name: currentUser.name 
       }).eq("request_id", reqId);
     } catch (err) {
@@ -157,7 +181,6 @@ export default function CSBoardPage() {
 
     const cmts = req.comments || [];
     
-    // 💡 권한 검사: 관리자이거나, 작성자 본인이거나, 담당자로 지정된 사람일 경우 드래그 허용
     const canDrag = currentUser.isAdmin || String(req.author_id) === String(currentUser.instId) || String(req.processed_instructor_id) === String(currentUser.instId);
 
     return (

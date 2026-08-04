@@ -28,6 +28,25 @@ export default function TaskBoardPage() {
     const now = new Date();
     setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
     fetchTasks();
+
+    // 💡 1. 완벽한 리얼타임(Real-time) 칸반 보드 구축
+    // 누군가 카드를 추가, 수정, 삭제하면 모든 브라우저에서 즉시 동기화됩니다.
+    const channel = supabase.channel('task_board_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_memo' }, (payload) => {
+        if (payload.eventType === 'INSERT') {
+          setTasks(prev => {
+            if (prev.find(t => t.memo_id === payload.new.memo_id)) return prev;
+            return [payload.new, ...prev];
+          });
+        } else if (payload.eventType === 'UPDATE') {
+          setTasks(prev => prev.map(t => t.memo_id === payload.new.memo_id ? { ...t, ...payload.new } : t));
+        } else if (payload.eventType === 'DELETE') {
+          setTasks(prev => prev.filter(t => t.memo_id !== payload.old.memo_id));
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
   }, []);
 
   const fetchTasks = async () => {
@@ -58,19 +77,32 @@ export default function TaskBoardPage() {
     setDragOverCol(null);
   };
 
+  // 💡 2. 낙관적 UI 개선 및 헤더 버그 원천 차단
   const handleDrop = async (e: React.DragEvent, newStatus: string) => {
     e.preventDefault();
     setDragOverCol(null);
     const memoId = e.dataTransfer.getData("memoId");
     if (!memoId) return;
 
-    setTasks(prev => prev.map(t => t.memo_id.toString() === memoId ? { ...t, status: newStatus } : t));
+    const targetTask = tasks.find(t => t.memo_id.toString() === memoId);
+    if (!targetTask) return;
+
+    const now = new Date().toISOString();
+
+    // 시간과 작업자 정보를 화면(State)에 즉시 꽂아넣습니다.
+    setTasks(prev => prev.map(t => t.memo_id.toString() === memoId ? { 
+      ...t, 
+      status: newStatus,
+      updated_at: now,
+      last_updater_name: currentUser.name
+    } : t));
 
     try {
       await supabase.from("instructor_memo").update({ 
         status: newStatus,
-        updated_at: new Date().toISOString(),
-        last_updater_name: currentUser.name 
+        updated_at: now,
+        last_updater_name: currentUser.name,
+        memo_type: targetTask.memo_type // 💡 알림(TopHeader)이 이벤트를 씹지 못하도록 태그 정보도 강제로 전송!
       }).eq("memo_id", memoId);
     } catch (err) {
       alert("상태 변경 실패");
@@ -108,6 +140,7 @@ export default function TaskBoardPage() {
 
   const renderCard = (task: any) => {
     const createdDateStr = new Date(task.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    // 업데이트 시간이 있으면 보여주기
     const updatedDateStr = task.updated_at ? new Date(task.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : createdDateStr;
     const updaterName = task.last_updater_name || task.author_name || "알수없음";
 
@@ -118,7 +151,6 @@ export default function TaskBoardPage() {
 
     const cmts = task.comments || [];
     
-    // 💡 권한 검사: 관리자이거나, 작성자 본인일 경우에만 드래그 허용
     const canDrag = currentUser.isAdmin || String(task.instructor_id) === String(currentUser.instId);
 
     return (
