@@ -5,12 +5,9 @@ import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStude
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { Seat, SEAT_LAYOUT_UPDATED_EVENT, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
 
-// 💡 아직 해결되지 않은(호출/자리비움/재확인/종료요청) 상태를 나타내는 로그는 5분이 지나도
-// 자동으로 사라지면 안 된다 — removeLogsByTypeAndSeat로 실제 해결될 때만 사라져야 한다.
 const PERSIST_UNTIL_RESOLVED_TYPES = ['call', 'away', 'recheck', 'end_request'];
 
 export function useSupervisorData() {
-    // 💡 [보안 수정] 실제 DB 검증을 위한 권한 상태 (null: 로딩중, true: 허용, false: 거부)
     const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
     const [authMessage, setAuthMessage] = useState<string>('권한을 확인하는 중입니다...');
 
@@ -27,30 +24,23 @@ export function useSupervisorData() {
     const [allStudents, setAllStudents] = useState<Record<string, any[]>>({});
     const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
 
-    // 💡 클리닉 이용 기록(오늘 날짜, 학생별 회차별 시작/종료 시각 + 시간)
     const [clinicRecords, setClinicRecords] = useState<Record<string, any>>({});
     const [expandedRecords, setExpandedRecords] = useState<Record<string, boolean>>({});
     
     const [draggedSeat, setDraggedSeat] = useState<string | null>(null);
     const [draggedListStudent, setDraggedListStudent] = useState<any>(null);
     const [selectedSeatForMove, setSelectedSeatForMove] = useState<string | null>(null);
-    // 💡 드래그 시작한 카드의 실제 화면 위치/크기 — 고스트가 "처음 잡은 그 자리"에서 나타나도록 함.
-    // scale은 그 카드가 화면에 축소되어 그려진 배율(카드 본래 크기 대비) — 고스트 안의 글씨도
-    // 카드와 똑같이 이 배율만큼 줄여서 그려야, 잡는 순간 글씨가 갑자기 커 보이는 일이 없다.
     const [ghostRect, setGhostRect] = useState<{ left: number; top: number; width: number; height: number; scale: number } | null>(null);
-    // 💡 카드 안에서 정확히 어느 지점을 클릭했는지 — 드래그 내내 그 지점이 커서를 따라가도록 함
     const dragOffsetRef = useRef({ x: 0, y: 0 });
 
     const [forceCheckoutModal, setForceCheckoutModal] = useState<{ isOpen: boolean, seat: string | null }>({ isOpen: false, seat: null });
     const [recheckModal, setRecheckModal] = useState<{ isOpen: boolean, seat: string | null, uid: string | null }>({ isOpen: false, seat: null, uid: null });
     const [endRequestModal, setEndRequestModal] = useState<{ isOpen: boolean, seat: string | null }>({ isOpen: false, seat: null });
-    // 💡 예약 기능: 로그인 전 좌석을 미리 잡아두는 모달 상태
     const [reservationModal, setReservationModal] = useState<{ isOpen: boolean; seat: string | null; student: any | null }>({ isOpen: false, seat: null, student: null });
     const RESERVATION_GRACE_MS = 10 * 60 * 1000;
 
     const studentsRef = useRef<Record<string, any>>({});
     const channelRef = useRef<any>(null);
-    const logsRef = useRef<any[]>([]);
 
     const pendingMovesRef = useRef<Record<string, any>>({});
     const pendingDeletesRef = useRef<Record<string, number>>({});
@@ -59,8 +49,6 @@ export function useSupervisorData() {
     const checkReservationExpiryRef = useRef<any>(null);
     const checkClinicTimeExpiryRef = useRef<any>(null);
 
-    // 좌석 배치 에디터가 저장한 좌석 목록(번호+좌표). 에디터에서 편집 중이면 editorLocked가 true가 되어
-    // 이 화면의 좌석 조작을 잠근다(상호 배제).
     const [seats, setSeats] = useState<string[]>([]);
     const [seatObjs, setSeatObjs] = useState<Seat[]>([]);
     const [canvasWidth, setCanvasWidth] = useState(DEFAULT_CANVAS_W);
@@ -83,12 +71,9 @@ export function useSupervisorData() {
 
     useEffect(() => { loadSeats(); }, [loadSeats]);
 
-    // 🌟 초기 로드 시 관리자 권한(원장/실장) 검증
     useEffect(() => {
         setIsMounted(true);
-        
-        const verifyAdminAccess = () => { // 💡 async도 필요 없습니다.
-            // 💡 1. 서버에서 로그인할 때 구워준 티켓을 그대로 꺼냅니다.
+        const verifyAdminAccess = () => {
             const instId = localStorage.getItem('logica_instructor_id');
             const role = localStorage.getItem('logica_instructor_role') || '';
             const position = localStorage.getItem('logica_instructor_position') || '';
@@ -99,25 +84,16 @@ export function useSupervisorData() {
                 return;
             }
 
-            // 💡 2. RLS에 막히는 DB 2차 검문(supabaseClient.from) 코드를 완전 삭제!
-            // 기획하신 의도대로, 원장/실장이거나 ADMIN/SUPER_ADMIN 권한이면 즉시 문을 열어줍니다.
             if (
-                role === 'ADMIN' ||
-                role === 'MANAGER' ||
-                role === 'PRINCIPAL' ||
-                role === 'SUPER_ADMIN' ||
-                position.includes('원장') ||
-                position.includes('실장') ||
-                position.includes('최고관리자') ||
-                position.includes('대장')
+                role === 'ADMIN' || role === 'MANAGER' || role === 'PRINCIPAL' || role === 'SUPER_ADMIN' ||
+                position.includes('원장') || position.includes('실장') || position.includes('최고관리자') || position.includes('대장')
             ) {
-                setIsAuthorized(true); // 프리패스 승인
+                setIsAuthorized(true);
             } else {
                 setAuthMessage(`접근 불가: [${position || '미지정'}] 권한입니다. 원장 또는 실장만 접속 가능합니다.`);
-                setIsAuthorized(false); // 일반 강사 차단
+                setIsAuthorized(false);
             }
         };
-        
         verifyAdminAccess();
     }, []);
 
@@ -126,39 +102,39 @@ export function useSupervisorData() {
         setActiveStudents({ ...newStudents });
     }, []);
 
-    const updateLogs = useCallback((newLogs: any[]) => {
-        logsRef.current = newLogs;
-        setLogs([...newLogs]);
-    }, []);
-
+    // 💡 로그 생성 및 삭제를 더욱 안전하고 강력하게 개선했습니다. (Race Condition 방지)
     const appendLog = useCallback((borderClass: string, badgeBg: string, badgeText: string, title: string | React.ReactNode, subtitle: string | React.ReactNode, type?: string, data?: any) => {
-        const logId = `log-${Date.now()}-${Math.random()}`;
+        const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
         const persistUntilResolved = !!type && PERSIST_UNTIL_RESOLVED_TYPES.includes(type);
+        
         const newLog = {
-            id: logId, timestamp: new Date().toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-            borderClass, badgeBg, badgeText, title, subtitle, type, data, expiresAt: persistUntilResolved ? null : Date.now() + LOG_AUTO_EXPIRE_MS
+            id: logId, 
+            timestamp: new Date().toLocaleTimeString('ko-KR', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+            borderClass, badgeBg, badgeText, title, subtitle, type, data, 
+            expiresAt: persistUntilResolved ? null : Date.now() + LOG_AUTO_EXPIRE_MS
         };
-        updateLogs([newLog, ...logsRef.current]);
-        // 💡 미해결 상태 로그(call/away/recheck/end_request)는 여기서 자동 삭제 타이머를 걸지 않는다 —
-        // 실제로 해결되는 시점에 removeLogsByTypeAndSeat가 지운다.
+
+        setLogs(prev => [newLog, ...prev].slice(0, 100));
+
         if (!persistUntilResolved) {
-            setTimeout(() => updateLogs(logsRef.current.filter(l => l.id !== logId)), LOG_AUTO_EXPIRE_MS);
+            setTimeout(() => {
+                setLogs(prev => prev.filter(l => l.id !== logId));
+            }, LOG_AUTO_EXPIRE_MS);
         }
         return logId;
-    }, [updateLogs]);
+    }, []);
 
     const removeLogsByTypeAndSeat = useCallback((type: string, seat: string, qNum?: number) => {
-        updateLogs(logsRef.current.filter(l => !(l.data?.seat === seat && l.type === type && (!qNum || l.data?.qNum === qNum))));
-    }, [updateLogs]);
+        setLogs(prev => prev.filter(l => !(l.data?.seat === seat && l.type === type && (!qNum || l.data?.qNum === qNum))));
+    }, []);
 
     const sendToStudent = (seat: string, action: string, extra = {}) => {
         if (!channelRef.current) return;
         channelRef.current.send({ type: 'broadcast', event: 'ta_action', payload: { seat, action, ...extra, timestamp: Date.now() } });
     };
 
-    // 🌟 권한이 확인된 후: 전체 학생 목록 및 DB 세션 데이터 로드
     useEffect(() => {
-        if (!isAuthorized) return; // 💡 권한이 없으면 실행하지 않음
+        if (!isAuthorized) return;
         
         const fetchAllStudents = async () => {
             const { data } = await supabaseClient.from('student').select('student_id, name, enrollment(class(name))');
@@ -180,7 +156,6 @@ export function useSupervisorData() {
         const loadInitialSeatsFromDB = async () => {
             const todayStr = getKSTDateString();
             const { data: rawSessionData } = await supabaseClient.from('clinic_session_state').select('*').eq('session_date', todayStr);
-            // 💡 재이용으로 하루에 여러 세션(session_no)이 생길 수 있으므로 학생별 최신 세션만 남긴다.
             const sessionData = rawSessionData && rawSessionData.length > 0 ? pickLatestSessionPerStudent(rawSessionData) : [];
 
             const newStudents = { ...studentsRef.current };
@@ -207,13 +182,12 @@ export function useSupervisorData() {
                 }
             }
 
-            // 💡 예약(아직 로그인 전) 복원 — 실제로 로그인해서 세션이 생긴 학생은 건너뛴다.
             const assignedStudentIds = new Set(Object.values(newStudents).map((s: any) => s.studentId));
             const { data: reservations } = await supabaseClient.from('clinic_reservation').select('*').eq('session_date', todayStr);
             (reservations || []).forEach((r: any) => {
                 if (assignedStudentIds.has(r.student_id) || newStudents[r.seat]) return;
                 const expiresAt = new Date(r.expires_at).getTime();
-                if (Date.now() > expiresAt) return; // 만료된 예약은 곧 자동 정리된다
+                if (Date.now() > expiresAt) return;
                 newStudents[r.seat] = {
                     type: 'reserved', name: r.student_name || '학생', classes: r.classes || [], studentId: r.student_id,
                     reservedFor: new Date(r.reserved_for).getTime(), expiresAt, calls: {}, totalCalls: 0, totalHints: 0
@@ -225,7 +199,6 @@ export function useSupervisorData() {
         fetchAllStudents(); loadInitialSeatsFromDB();
     }, [isAuthorized, updateStudents]);
 
-    // 💡 오늘 클리닉 이용 기록: 학생별로 오늘 있었던 모든 세션(회차)을 시작~종료 시각과 함께 모아온다.
     const fetchClinicRecords = useCallback(async () => {
         const todayStr = getKSTDateString();
         const { data: sessions } = await supabaseClient
@@ -255,7 +228,6 @@ export function useSupervisorData() {
         setClinicRecords(grouped);
     }, []);
 
-    // 이용 기록 탭이 열려있는 동안만 주기적으로 갱신 (진행 중인 세션의 경과 시간 반영)
     useEffect(() => {
         if (!isAuthorized || leftTab !== 'records') return;
         fetchClinicRecords();
@@ -267,7 +239,6 @@ export function useSupervisorData() {
         setExpandedRecords(prev => ({ ...prev, [studentId]: !prev[studentId] }));
     }, []);
 
-    // 1초 단위 시간 업데이트 및 5초 주기 DB 동기화
     useEffect(() => {
         if (!isAuthorized) return;
         const interval = setInterval(() => {
@@ -285,7 +256,6 @@ export function useSupervisorData() {
             const todayStr = getKSTDateString();
             const { data: rawSessionData, error } = await supabaseClient.from('clinic_session_state').select('*').eq('session_date', todayStr);
             if (error || !rawSessionData) return;
-            // 💡 재이용으로 하루에 여러 세션(session_no)이 생길 수 있으므로 학생별 최신 세션만 진실로 취급한다.
             const sessionData = pickLatestSessionPerStudent(rawSessionData);
 
             const dbSeats = new Map();
@@ -302,8 +272,6 @@ export function useSupervisorData() {
             let isModified = false;
 
             for (const [targetSeat, dbRecord] of Array.from(dbSeats.entries())) {
-                // 💡 예약해뒀던 학생이 실제로 로그인해서 DB에 진짜 세션이 생겼다면,
-                // 예약 placeholder는 지워주고(어느 자리에 예약했었는지는 상관없이) 실제 배정으로 전환한다.
                 const staleReservedSeat = Object.keys(current).find(s => current[s].type === 'reserved' && current[s].studentId === dbRecord.student_id);
                 if (staleReservedSeat) {
                     delete current[staleReservedSeat]; isModified = true;
@@ -326,9 +294,6 @@ export function useSupervisorData() {
                         totalCalls: 0, totalHints: 0, calls: {}, activity: '포털/수동 배정 연동'
                     };
                     isModified = true;
-                    // 💡 session_no === 1이고 방금 막 시작(started_at이 최근)한 경우에만 "입장"으로 남긴다.
-                    // 그 외(재이용 세션 전환, 수퍼바이저 새로고침으로 기존 접속자를 다시 불러온 경우)는
-                    // 이미 접속해 있던 학생이므로 새 입장으로 취급하지 않는다.
                     const justStarted = Date.now() - (new Date(dbRecord.started_at).getTime() || 0) < 10000;
                     if (justStarted) {
                         appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-700', '입장', `[${targetSeat}] ${entryName} 입장`, `클리닉에 접속했습니다.`);
@@ -346,7 +311,6 @@ export function useSupervisorData() {
                         current[targetSeat].firstSeenAt = new Date(dbRecord.started_at).getTime() || current[targetSeat].firstSeenAt;
                         isModified = true;
                     }
-                    // 💡 종료 요청 브로드캐스트를 놓쳤을 수도 있으니(새로고침, 재연결 등), DB 상태로 자가 복구한다.
                     const dbPending = dbRecord.end_request_status === 'pending';
                     if (dbPending && !current[targetSeat].endRequestPending) {
                         current[targetSeat].endRequestPending = true;
@@ -362,8 +326,6 @@ export function useSupervisorData() {
                     }
                 }
 
-                // 💡 호출/재확인/자리비움도 종료요청과 같은 방식으로 DB에서 자가복구한다 — 이 화면을
-                // 방금 열었거나(초기 로드가 이미 지나갔어도) broadcast를 놓친 경우 모두 여기서 따라잡는다.
                 if (current[targetSeat] && current[targetSeat].type !== 'reserved') {
                     const st = current[targetSeat];
                     if (!st.calls) st.calls = {};
@@ -404,8 +366,6 @@ export function useSupervisorData() {
                     Object.keys(st.rechecks).forEach(uid => {
                         if (dbRechecks[uid]) return;
                         delete st.rechecks[uid];
-                        // 💡 재확인 로그는 qNum이 아니라 uid로 구분되는데 removeLogsByTypeAndSeat는 qNum만 비교하므로,
-                        // 기존 코드(SeatGrid의 오답/정답 버튼)와 동일하게 seat+type만으로 매칭한다.
                         removeLogsByTypeAndSeat('recheck', targetSeat);
                         isModified = true;
                     });
@@ -421,9 +381,6 @@ export function useSupervisorData() {
                 }
             }
 
-            // 💡 하트비트 타임아웃 검사: 학생 화면이 정상 종료 절차(로그아웃/강제퇴실/시간만료) 없이
-            // 응답을 멈춘 경우(전원 종료, 크래시, 네트워크 완전 단절 등) 일정 시간 뒤 비정상 종료로 정리한다.
-            // 정상 종료 로그("퇴실완료"/"강제퇴실")와는 다른 색/문구로 구분해 남긴다.
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
                 const sinceLastSeen = Date.now() - new Date(dbRecord.last_seen_at).getTime();
@@ -489,9 +446,8 @@ export function useSupervisorData() {
         updateStudents(currentStudents);
     };
 
-    // 실시간(Realtime) 채널 연결
     useEffect(() => {
-        if (!isAuthorized) return; // 💡 권한이 없으면 채널 연결도 하지 않음
+        if (!isAuthorized) return;
         
         const channel = supabaseClient.channel(CLINIC_ROOM);
         channelRef.current = channel;
@@ -510,7 +466,11 @@ export function useSupervisorData() {
                         delete st[activeSeat];
                     }
                 } else if (st[activeSeat]) {
-                    if (action === 'update_activity') { st[activeSeat].activity = data.activity; }
+                    // 💡 [핵심 수정] update_activity 이벤트가 발생할 때 드디어 라이브 로그(appendLog)를 남기도록 추가했습니다!
+                    if (action === 'update_activity') { 
+                        st[activeSeat].activity = data.activity; 
+                        appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });
+                    }
                     else if (action === 'typing') {
                         st[activeSeat].isTyping = true;
                         if (st[activeSeat].typingTimeout) clearTimeout(st[activeSeat].typingTimeout);
@@ -519,7 +479,6 @@ export function useSupervisorData() {
                         }, 2000);
                     } else if (action === 'call') {
                         st[activeSeat].calls[data.qNum] = Date.now(); st[activeSeat].status = 'call';
-                        // 💡 포탈에서 보낸 호출은 특정 문항이 아니라 일반 호출이라 qNum이 없다('general') — 문항 번호 없이 안내한다.
                         if (data.qNum === 'general') {
                             appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '조교호출', `${data.name} 학생이 조교를 호출했습니다.`, `[${activeSeat}] 포탈에서 호출했습니다 · 확인 후 처리하세요.`, 'call', { seat: activeSeat, qNum: data.qNum });
                         } else {
@@ -540,7 +499,7 @@ export function useSupervisorData() {
                         setTimeout(() => { if (studentsRef.current[activeSeat]?.status === 'hint') updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], status: 'idle' } }); }, 10000);
                     } else if (action === 'submit') {
                         st[activeSeat].status = 'submitted'; st[activeSeat].score = data.score;
-                        appendLog('border-blue-500', 'bg-blue-100 text-blue-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score} / 5].`);
+                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score} / 5].`);
                     } else if (action === 'recheck_request') {
                         if (!st[activeSeat].rechecks) st[activeSeat].rechecks = {};
                         st[activeSeat].rechecks[data.uid] = { ...data, seat: activeSeat };
@@ -592,9 +551,6 @@ export function useSupervisorData() {
             }
         });
 
-        // 💡 좌석 상태는 "배정완료" / "예약" 단 두 가지뿐이다. presence는 활동 정보(activity) 갱신에만 쓰고,
-        // 접속 끊김 자체로 상태를 바꾸지는 않는다 — 클리닉 종료(로그아웃/시간종료 등)는 별도 경로(student_action 'depart',
-        // DB 교차검증의 유령 청소)로 좌석이 통째로 사라지는 방식으로 처리된다.
         let isModified = false;
         Object.keys(currentStudents).forEach(seat => {
             const st = currentStudents[seat];
@@ -611,8 +567,6 @@ export function useSupervisorData() {
     };
     syncPresenceRef.current = syncActiveStudentsFromPresence;
 
-    // 💡 학생 화면(클리닉/포탈)의 자체 타이머에만 의존하지 않고, 수퍼바이저 화면도 매초 직접
-    // 배정 시간 만료를 감지해 즉시 처리한다 — 학생 화면이 멈추거나 닫혀 있어도 지체 없이 퇴실 처리된다.
     const checkClinicTimeExpiry = useCallback(() => {
         const current = { ...studentsRef.current };
         let isModified = false;
@@ -633,7 +587,6 @@ export function useSupervisorData() {
     }, [updateStudents, appendLog, removeLogsByTypeAndSeat]);
     checkClinicTimeExpiryRef.current = checkClinicTimeExpiry;
 
-    // 💡 예약 시간 + 10분이 지나도록 로그인하지 않은 예약을 만료 처리한다. 알림은 카드가 아니라 우측 현장 로그에 남긴다.
     const checkReservationExpiry = useCallback(() => {
         const current = { ...studentsRef.current };
         let isModified = false;
@@ -650,7 +603,6 @@ export function useSupervisorData() {
     }, [updateStudents, appendLog]);
     checkReservationExpiryRef.current = checkReservationExpiry;
 
-    // 드래그 앤 드롭 전역 이벤트 핸들러
     useEffect(() => {
         const handlePointerMove = (e: PointerEvent) => {
             if (!draggedSeat && !draggedListStudent) return;
@@ -722,7 +674,6 @@ export function useSupervisorData() {
 
     const handlePointerDown = (e: React.PointerEvent, seat: string) => {
         if (e.button !== 0 || !activeStudents[seat] || (e.target as HTMLElement).closest('button')) return;
-        // 💡 자리비움/호출 등 처리 중인 상태에서는 자리 이동을 막는다 — 상태가 풀린 뒤에만 이동 가능.
         const st = activeStudents[seat];
         if (st.type !== 'reserved' && st.status && st.status !== 'idle') {
             const statusLabel = st.status === 'away' ? '자리비움' : st.status === 'call' ? '호출' : st.status === 'hint' ? '힌트 진행' : st.status === 'submitted' ? '제출' : st.status;
@@ -731,8 +682,6 @@ export function useSupervisorData() {
         }
         const target = e.currentTarget as HTMLElement;
         const rect = target.getBoundingClientRect();
-        // offsetWidth/Height는 CSS transform(카드에 걸린 축소 scale)의 영향을 받지 않는 "원래" 크기이므로,
-        // 화면에 실제로 보이는 크기(rect.width)와 비교하면 그 카드가 몇 배로 축소되어 그려졌는지 알 수 있다.
         const scale = target.offsetWidth > 0 ? rect.width / target.offsetWidth : 1;
         dragOffsetRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
         setGhostRect({ left: rect.left, top: rect.top, width: rect.width, height: rect.height, scale });
@@ -741,10 +690,6 @@ export function useSupervisorData() {
 
     const handleListPointerDown = (e: React.PointerEvent, student: any) => {
         if (e.button !== 0) return;
-        // 💡 목록 항목(왼쪽 패널의 좁고 낮은 행) 크기를 그대로 고스트에 쓰면, 실제 좌석 칸과 전혀
-        // 다른 비율/크기라 놓기 전까지 "신규 배정" 박스가 대시보드 좌석 카드와 안 닮아 보였다.
-        // 지금 화면에 이미 그려져 있는 좌석 칸(data-seat) 하나를 그대로 재서, 그 실제 렌더 크기
-        // (이미 SeatCanvas 배율까지 반영된 최종 픽셀 크기)를 고스트 크기로 그대로 가져다 쓴다.
         const anySeatEl = document.querySelector('[data-seat]') as HTMLElement | null;
         const rect = anySeatEl?.getBoundingClientRect();
         const width = rect?.width || seatWidth;
@@ -754,8 +699,6 @@ export function useSupervisorData() {
         setDraggedListStudent(student); e.preventDefault();
     };
 
-    // 💡 예약 확정: 아직 로그인 전인 학생을 지정한 시각 + 10분 유예로 좌석에 예약해둔다.
-    // 실제 "배정완료"는 그 학생이 진짜 로그인해서 clinic_session_state에 세션이 생겼을 때만 일어난다(DB 교차검증에서 처리).
     const confirmReservation = async (timeStr: string) => {
         const { seat, student } = reservationModal;
         if (!seat || !student || !timeStr) return;
@@ -777,7 +720,6 @@ export function useSupervisorData() {
         appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-700', '예약', `[${seat}] ${student.name}`, `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} 예약 등록`);
         setReservationModal({ isOpen: false, seat: null, student: null });
 
-        // 💡 새로고침해도 예약이 사라지지 않도록 DB에도 남긴다(로그인하면 실제 세션으로 대체됨).
         await supabaseClient.from('clinic_reservation').upsert({
             student_id: student.id, student_name: student.name, classes: student.classes, seat, session_date: todayStr,
             reserved_for: new Date(reservedFor).toISOString(), expires_at: new Date(expiresAt).toISOString()
@@ -792,7 +734,6 @@ export function useSupervisorData() {
         if (st?.studentId) await supabaseClient.from('clinic_reservation').delete().eq('student_id', st.studentId).eq('session_date', getKSTDateString());
     };
 
-    // 액션 핸들러들
     const adjustClinicTime = async (seat: string, deltaMinutes: number) => {
         const st = studentsRef.current[seat];
         if (!st) return;
@@ -821,7 +762,6 @@ export function useSupervisorData() {
         setForceCheckoutModal({ isOpen: false, seat: null });
     };
 
-    // 학생의 클리닉 종료 요청을 승인/거부한다. 승인 시 그 시점이 이용시간 종료(ended_at)로 확정된다.
     const resolveEndRequest = async (approved: boolean) => {
         const seat = endRequestModal.seat;
         if (!seat) return;
