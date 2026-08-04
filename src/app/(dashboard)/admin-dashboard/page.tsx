@@ -108,7 +108,6 @@ export default function AdminDashboardPage() {
             ctx.font = `900 ${fontSize}em Pretendard`;
             ctx.textBaseline = "middle";
             ctx.fillStyle = "#1e293b";
-            // 💡 [변경됨] "명" -> "건" 으로 변경하여 오해를 방지합니다.
             const text = `${total}건`, textX = Math.round((width - ctx.measureText(text).width) / 2) - 40, textY = height / 2;
             ctx.fillText(text, textX, textY);
             ctx.save();
@@ -163,7 +162,11 @@ export default function AdminDashboardPage() {
   };
 
   const fetchCSRequests = async () => {
-    const { data } = await supabase.from('parent_request_log').select('*, student(name)').eq('status', '대기').order('created_at', { ascending: false }).limit(15);
+    const { data } = await supabase.from('parent_request_log')
+      .select('*, student(name)')
+      .neq('status', '완료') 
+      .order('created_at', { ascending: false })
+      .limit(15);
     setCsRequests(data || []);
     setKpi(prev => ({ ...prev, csCount: data?.length || 0 }));
   };
@@ -225,24 +228,20 @@ export default function AdminDashboardPage() {
     setInstructorsStats(stats);
   };
 
-  // 💡 [핵심 수정 부분] 차트 데이터와 반별 데이터를 1:1로 일치시킵니다.
   const fetchClassMonitoring = async () => {
     const [{ data: classes }, { data: students }, { data: enrolls }] = await Promise.all([
       supabase.from('class').select('*, instructor(*), class_schedule(*)').neq('status', '종료'),
-      supabase.from('student').select('student_id, status'), // 상태 체크용
+      supabase.from('student').select('student_id, status'), 
       supabase.from('enrollment').select('*')
     ]);
 
-    // 1. 현재 '재원' 상태인 학생들의 ID만 Set으로 만들어 빠르게 필터링할 준비를 합니다.
     const activeStudentIds = new Set(
       (students || []).filter(s => s.status === '재원').map(s => s.student_id)
     );
 
-    // 2. 각 수강반(Class)별로 '재원생'의 수강 기록(Enrollment)을 카운트합니다.
     const cStats = (classes || []).map(c => {
       let sCount = 0;
       (enrolls || []).forEach(e => {
-        // 해당 반에 등록되어 있고, 학생 상태가 '재원'인 경우에만 인원수로 산정!
         if (e.class_id === c.class_id && activeStudentIds.has(e.student_id)) {
           sCount++;
         }
@@ -251,8 +250,6 @@ export default function AdminDashboardPage() {
       return { ...c, sCount, capacity, vacancy, fillRate };
     }).sort((a, b) => b.vacancy - a.vacancy);
     
-    // 3. 차트용 레벨 데이터 집계 (위에서 계산된 sCount를 그대로 레벨별로 누적합)
-    // -> 이렇게 하면 왼쪽 결원 모니터링의 합과 오른쪽 그래프의 합이 완벽하게 100% 일치합니다.
     let lvCounts: any = { 'Ultimate': 0, 'Master': 0, 'Apex': 0, 'Titan': 0, 'Horizon': 0, '기타': 0 };
     cStats.forEach(c => {
       const lv = c.level_name || '기타';
@@ -288,7 +285,6 @@ export default function AdminDashboardPage() {
       return; 
     }
     const { data } = await supabase.from("student").select("*, parent(phone), enrollment(class(name))").in("student_id", enrollIds);
-    // 현재 모달에 띄운 클래스의 학생들만 필터링 (퇴원생 제외 등 로직 추가 가능)
     setClassStudents(data || []);
   };
 
@@ -396,15 +392,21 @@ export default function AdminDashboardPage() {
             <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
             <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
               <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">🚨 학부모 요청</span>
-              <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">{kpi.csCount}건</span>
+              <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">{kpi.csCount}건 미결</span>
             </div>
             <div className="flex-1 flex flex-col gap-2 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
               {csRequests.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">미처리 요청이 없습니다. 🎉</div> : 
-                csRequests.map(r => (
-                  <div key={r.request_id} className="shrink-0 text-[11px] font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 truncate shadow-sm">
-                    <span className="text-rose-600 mr-1">{r.student?.name || '알수없음'}:</span>{r.reason}
-                  </div>
-                ))
+                csRequests.map(r => {
+                  const isProcessing = r.status === '처리중';
+                  return (
+                    <div key={r.request_id} className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 shadow-sm">
+                      <span className={`px-1 py-0.5 rounded text-[9px] shrink-0 ${isProcessing ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-200 text-rose-700 border border-rose-300'}`}>
+                        {isProcessing ? '처리중' : '대기'}
+                      </span>
+                      <span className="truncate flex-1"><span className="text-rose-600 mr-1">{r.student?.name || '알수없음'}:</span>{r.reason}</span>
+                    </div>
+                  );
+                })
               }
             </div>
           </div>
@@ -445,42 +447,56 @@ export default function AdminDashboardPage() {
             <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">👨‍🏫 강사별 운영 및 원생 관리 성과</h3>
             <span className="text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-2 py-1 rounded shadow-sm">실시간 자동 분류</span>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 p-6 bg-transparent border border-t-0 border-slate-200 rounded-b-2xl shadow-sm">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 p-5 bg-transparent border border-t-0 border-slate-200 rounded-b-2xl shadow-sm">
             {instructorsStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">강사 데이터를 불러오는 중입니다...</div> : 
               instructorsStats.map(inst => (
-                <div key={inst.instructor_id} onClick={() => router.push(`/instructor/${inst.instructor_id}`)} className="border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow-lg transition-shadow bg-white hover:border-[#002864] flex flex-col justify-between cursor-pointer">
-                  <div className="flex gap-4">
-                    <div className="w-20 h-24 bg-gradient-to-br from-[#002864] to-blue-500 rounded-xl shadow-inner overflow-hidden flex-shrink-0 border border-slate-200">
-                      {inst.profile_image_url ? (
-                        <img 
-                          src={inst.profile_image_url.startsWith('http') ? inst.profile_image_url : `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/${inst.profile_image_url}`} 
-                          className="w-full h-full object-cover" 
-                          alt="profile"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center text-3xl font-black text-blue-200">
-                          {inst.name?.charAt(0) || 'T'}
+                <div key={inst.instructor_id} onClick={() => router.push(`/instructor/${inst.instructor_id}`)} className="border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow bg-white hover:border-[#002864] flex cursor-pointer gap-2.5 h-[110px]">
+                  
+                  {/* 왼쪽: 사진을 꽉 채워서 크게 배치 */}
+                  <div className="w-[72px] bg-gradient-to-br from-[#002864] to-blue-500 rounded-lg shadow-inner overflow-hidden flex-shrink-0 border border-slate-200 relative h-full">
+                    {inst.profile_image_url ? (
+                      <img 
+                        src={inst.profile_image_url.startsWith('http') ? inst.profile_image_url : `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/${inst.profile_image_url}`} 
+                        className="absolute inset-0 w-full h-full object-cover" 
+                        alt="profile"
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-2xl font-black text-blue-200">
+                        {inst.name?.charAt(0) || 'T'}
+                      </div>
+                    )}
+                  </div>
+                  
+                  {/* 오른쪽: 모든 텍스트 정보를 이곳에 배치 */}
+                  <div className="flex-1 flex flex-col min-w-0 h-full">
+                    {/* 상단: 이름 + 입퇴원 성과 + 총 인원 한 줄 배치 */}
+                    <div className="flex justify-between items-center mb-1.5 gap-1 shrink-0">
+                      <div className="font-extrabold text-[13px] text-slate-800 truncate leading-none mt-0.5">{inst.name} 선생님</div>
+                      
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        {/* 💡 이달 입학/퇴휴원 정보를 총 인원 좌측으로 끌어올림 */}
+                        <div className="flex gap-0.5 text-[9px] font-bold">
+                          <span className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 shadow-sm flex items-center">입학 +{inst.newCnt}</span>
+                          <span className="text-rose-500 bg-rose-50 px-1 py-0.5 rounded border border-rose-100 shadow-sm flex items-center">퇴원 -{inst.leftCnt}</span>
                         </div>
-                      )}
-                    </div>
-                    <div className="flex-1 flex flex-col min-w-0">
-                      <div className="flex justify-between items-start mb-2">
-                        <div className="font-extrabold text-[16px] text-slate-800">{inst.name} 선생님</div>
-                        <div className="text-right leading-none">
-                          <span className="text-xl font-black text-[#002864]">{inst.studentCount}</span><span className="text-[10px] font-bold text-slate-400 ml-0.5">명</span>
+                        
+                        {/* 💡 세로선 구분 기호 및 총 인원 */}
+                        <div className="text-right leading-none shrink-0 border-l border-slate-200 pl-1.5 flex items-baseline">
+                          <span className="text-base font-black text-[#002864]">{inst.studentCount}</span><span className="text-[9px] font-bold text-slate-400 ml-0.5">명</span>
                         </div>
                       </div>
-                      <div className="text-[10px] font-bold text-slate-500 mb-1 flex items-center gap-1"><span>📚</span> 담당 수강반 ({inst.myClasses.length})</div>
-                      <div className="flex flex-wrap gap-1 content-start flex-1 overflow-y-auto max-h-[50px] custom-scroll pr-1">
-                        {inst.myClasses.length === 0 ? <span className="text-[10px] text-slate-400 mt-0.5 font-bold">배정된 반 없음</span> : 
-                          inst.myClasses.map((c: any) => <span key={c.class_id} className="text-[10px] font-bold bg-white border border-slate-200 px-2 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap">{c.name}</span>)
+                    </div>
+                    
+                    {/* 하단: 담당 수강반 (독립 스크롤 활성화) */}
+                    <div className="border-t border-slate-100 pt-1.5 flex flex-col flex-1 min-h-0">
+                      <div className="text-[9px] font-bold text-slate-500 mb-1 flex items-center gap-1 shrink-0"><span>📚</span> 담당 수강반 ({inst.myClasses.length})</div>
+                      {/* 💡 max-h 제거, flex-1 min-h-0으로 박스 내부 꽉 채우며 독립 스크롤 구현 */}
+                      <div className="flex flex-wrap gap-1 content-start flex-1 overflow-y-auto custom-scroll pr-1 pb-1 min-h-0">
+                        {inst.myClasses.length === 0 ? <span className="text-[10px] text-slate-400 font-bold">배정된 반 없음</span> : 
+                          inst.myClasses.map((c: any) => <span key={c.class_id} className="text-[9px] font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap">{c.name}</span>)
                         }
                       </div>
                     </div>
-                  </div>
-                  <div className="flex justify-between border-t border-slate-100 pt-3 mt-3 text-[11px] font-bold">
-                    <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 shadow-sm flex items-center gap-1">이달 입학 <span className="text-xs">+{inst.newCnt}</span></span>
-                    <span className="text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100 shadow-sm flex items-center gap-1">퇴/휴원 <span className="text-xs">-{inst.leftCnt}</span></span>
                   </div>
                 </div>
               ))
@@ -526,7 +542,6 @@ export default function AdminDashboardPage() {
 
           <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden h-[380px]">
             <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
-              {/* 💡 [변경됨] 그래프 제목을 명확히 하여 혼동을 줄입니다. */}
               <h3 className="text-sm font-extrabold text-slate-800">📊 레벨별 수강 비중 <span className="text-xs font-normal text-slate-500">(총 수강 건수)</span></h3>
             </div>
             <div className="flex-1 p-5 flex flex-col items-center justify-center relative bg-white">

@@ -45,8 +45,6 @@ function PrintReportContent() {
 
   const fetchReportData = async () => {
     try {
-      // 💡 406 에러의 주범이었던 .neq(cacheBuster) 로직을 모두 제거하고 순수 데이터 조회로 롤백했습니다.
-      
       // 1. 기본 배정 정보 로드
       const { data: assign, error: aErr } = await supabase.from('exam_assignment')
         .select('*, student(name), exam_master(title, sub_title)')
@@ -59,7 +57,7 @@ function PrintReportContent() {
       const { data: reportSnap, error: snapErr } = await supabase.from('admission_test_report')
         .select('*')
         .eq('assignment_id', assignmentId)
-        .single(); // 💡 .neq 조건 삭제. 없으면 자연스럽게 에러 캐치로 넘어감
+        .single(); 
 
       if (snapErr || !reportSnap) {
         throw new Error("저장된 분석 리포트가 없습니다. 이전 화면에서 [진단 리포트 생성하기]를 먼저 진행해주세요.");
@@ -184,7 +182,7 @@ function PrintReportContent() {
         }
       });
 
-      // 5. 🌟 스냅샷 기반으로 학생 스탯 완벽 매핑 (재계산 금지)
+      // 5. 스냅샷 기반으로 학생 스탯 매핑
       const stats = { 
         geo: reportSnap.score_geometry, mea: reportSnap.score_measure, stat: reportSnap.score_stat, 
         rule: reportSnap.score_rule, calc: reportSnap.score_calc, sense: reportSnap.score_calc_sense, 
@@ -257,18 +255,29 @@ function PrintReportContent() {
         }
       }
 
-      // 7. 코멘트 등 스냅샷 데이터 활용
+      // 7. 코멘트 등 스냅샷 데이터 활용 및 [상대평가 보정 로직] 적용
       const evalComment = reportSnap.final_comment || '분석된 종합 평가 결과가 없습니다.';
       const getPct = (earned: number, max: number) => (!max || max === 0) ? 0 : Math.round((earned / max) * 100);
-      const totalPct = getPct(stats.total, rBase.max_total_score);
+      
+      const totalPct = getPct(stats.total, rBase.max_total_score); // 학생 절대평가 백분율
+      const avgPct = getPct(avgStats.total, rBase.max_total_score); // 시험 전체 평균 백분율
 
+      // 💡 [수정] 상대평가 보정치 계산: 기준 평균을 50%로 두고 차이의 절반(0.5)만큼 보정
+      // 평균이 낮으면(어려움) 플러스 보정, 평균이 높으면(쉬움) 마이너스 보정 (최대 ±10% 제한)
+      const difficultyAdjustment = Math.max(-10, Math.min(10, (50 - avgPct) * 0.5));
+      const adjustedPct = Math.round(Math.min(100, Math.max(0, totalPct + difficultyAdjustment)));
+
+      // 💡 [수정] 90, 80, 60, 40, 20 허들 적용 (보정된 점수 기준)
       const getUmathClass = (pct: number) => {
         if (pct >= 90) return 'Ultimate<br><span class="text-[11px] font-normal text-amber-100">(최상위 영재반)</span>';
         if (pct >= 80) return 'Master<br><span class="text-[11px] font-normal text-amber-100">(심화 사고력반)</span>';
-        if (pct >= 65) return 'Apex<br><span class="text-[11px] font-normal text-amber-100">(응용 심화반)</span>';
-        if (pct >= 50) return 'Titan<br><span class="text-[11px] font-normal text-amber-100">(개념 응용반)</span>';
-        return 'Horizon<br><span class="text-[11px] font-normal text-amber-100">(기초 탄탄반)</span>';
+        if (pct >= 60) return 'Apex<br><span class="text-[11px] font-normal text-amber-100">(응용 심화반)</span>';
+        if (pct >= 40) return 'Titan<br><span class="text-[11px] font-normal text-amber-100">(개념 응용반)</span>';
+        if (pct >= 20) return 'Horizon<br><span class="text-[11px] font-normal text-amber-100">(기초 탄탄반)</span>';
+        return 'Pre-Course<br><span class="text-[11px] font-normal text-amber-100">(기초 집중 / 입학 대기)</span>';
       };
+
+      const recommendedClass = getUmathClass(adjustedPct);
 
       const catPcts = [
         { name: '수와 연산', pct: getPct(stats.calc, rBase.max_calc) },
@@ -288,7 +297,7 @@ function PrintReportContent() {
         studentName, standardName, reportDate,
         totalScore: parseFloat(stats.total.toFixed(1)), correctCount: stats.correct_cnt,
         avgTotalScore: parseFloat(avgStats.total.toFixed(1)),
-        recommendedClass: getUmathClass(totalPct),
+        recommendedClass,
         bestCat, worstCat, evalComment,
         sData, stats, avgStats, rBase
       });
