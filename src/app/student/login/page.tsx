@@ -3,7 +3,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { useRouter } from "next/navigation"; // 💡 SPA 라우터 추가
+import { useRouter } from "next/navigation";
 import { searchStudentsByDigits, loginStudentAction } from "@/app/actions/studentAuth";
 
 // 아바타 에셋 유지
@@ -42,7 +42,7 @@ function gradeLabel(grade: string) {
 const IconDelete = () => <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 4H8l-7 8 7 8h13a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2z"></path><line x1="18" y1="9" x2="12" y2="15"></line><line x1="12" y1="9" x2="18" y2="15"></line></svg>;
 
 export default function StudentKioskLogin() {
-  const router = useRouter(); // 💡 라우터 초기화
+  const router = useRouter(); 
   const [step, setStep] = useState<"phone" | "profile" | "password">("phone");
   const [digits, setDigits] = useState("");
   const [matchedList, setMatchedList] = useState<any[]>([]);
@@ -127,6 +127,14 @@ export default function StudentKioskLogin() {
     const finalPin = typeof pinToUse === 'string' ? pinToUse : passwordInput;
     if (!finalPin || finalPin.length < 4) return alert("비밀번호 4자리를 모두 입력해주세요.");
     
+    // 💡 [핵심 해결 로직] 서버(DB) 통신을 하기 "전"에, 마지막 터치가 일어난 직후 바로 전체화면을 요청합니다!
+    // 이렇게 해야 브라우저가 보안 정책 위반으로 차단하지 않습니다.
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+          console.log("전체화면 미지원 기기", err);
+      });
+    }
+
     setIsProcessing(true);
     const result = await loginStudentAction(selectedStudent.student_id, finalPin);
     setIsProcessing(false);
@@ -136,14 +144,11 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
       
-      // 로그인 성공 시 전체화면 진입 시도
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
+      // 💡 전체화면 애니메이션이 켜지는 시간을 벌어주기 위해 0.1초(100ms) 여유를 두고 부드럽게 화면을 넘깁니다.
+      setTimeout(() => {
+        router.push("/student/portal"); 
+      }, 100);
 
-      // 💡 window.location.href 대신 router.push를 사용하여 전체화면이 풀리지 않고 넘어가게 합니다!
-      // 💡 경로 오타 수정 (/student -> /student/portal)
-      router.push("/student/portal"); 
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
       setPasswordInput(""); 
