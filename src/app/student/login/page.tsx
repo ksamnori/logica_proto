@@ -49,14 +49,15 @@ export default function StudentKioskLogin() {
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [passwordInput, setPasswordInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-  
-  const [isFullscreen, setIsFullscreen] = useState(false);
 
-  useEffect(() => {
-    const handleFullscreenChange = () => setIsFullscreen(!!document.fullscreenElement);
-    document.addEventListener("fullscreenchange", handleFullscreenChange);
-    return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-  }, []);
+  // 💡 [핵심] 어떠한 터치든 감지되면 즉시 전체화면으로 밀어넣는 전용 함수
+  const ensureFullscreen = () => {
+    if (typeof document !== "undefined" && !document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch(() => {
+        // 아이폰 등 미지원 기기는 조용히 무시
+      });
+    }
+  };
 
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
@@ -71,6 +72,7 @@ export default function StudentKioskLogin() {
   };
 
   const resetState = () => {
+    ensureFullscreen(); // 초기화 버튼 누를 때도 강제 유지
     setStep("phone");
     setDigits("");
     setMatchedList([]);
@@ -79,6 +81,7 @@ export default function StudentKioskLogin() {
   };
 
   const handleDigit = (num: string) => {
+    ensureFullscreen(); // 💡 키패드 누르는 즉시 전체화면 진입!
     if (step === "phone") {
       if (digits.length < 4 && !isProcessing) {
         const newDigits = digits + num;
@@ -91,10 +94,12 @@ export default function StudentKioskLogin() {
   };
 
   const handleDelete = () => {
+    ensureFullscreen();
     if (step === "phone") setDigits(digits.slice(0, -1));
   };
 
   const handlePinDigit = (num: string) => {
+    ensureFullscreen(); // 💡 비밀번호 누를 때도 전체화면 강제 락인!
     if (passwordInput.length < 4 && !isProcessing) {
       const newPin = passwordInput + num;
       setPasswordInput(newPin);
@@ -105,6 +110,7 @@ export default function StudentKioskLogin() {
   };
 
   const handlePinDelete = () => {
+    ensureFullscreen();
     setPasswordInput(prev => prev.slice(0, -1));
   };
 
@@ -127,14 +133,6 @@ export default function StudentKioskLogin() {
     const finalPin = typeof pinToUse === 'string' ? pinToUse : passwordInput;
     if (!finalPin || finalPin.length < 4) return alert("비밀번호 4자리를 모두 입력해주세요.");
     
-    // 💡 [핵심 해결 로직] 서버(DB) 통신을 하기 "전"에, 마지막 터치가 일어난 직후 바로 전체화면을 요청합니다!
-    // 이렇게 해야 브라우저가 보안 정책 위반으로 차단하지 않습니다.
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-          console.log("전체화면 미지원 기기", err);
-      });
-    }
-
     setIsProcessing(true);
     const result = await loginStudentAction(selectedStudent.student_id, finalPin);
     setIsProcessing(false);
@@ -144,11 +142,8 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
       
-      // 💡 전체화면 애니메이션이 켜지는 시간을 벌어주기 위해 0.1초(100ms) 여유를 두고 부드럽게 화면을 넘깁니다.
-      setTimeout(() => {
-        router.push("/student/portal"); 
-      }, 100);
-
+      // 이미 터치 시점에 전체화면이 적용되어 있으므로 바로 넘겨도 튕기지 않습니다!
+      router.push("/student/portal"); 
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
       setPasswordInput(""); 
@@ -198,7 +193,7 @@ export default function StudentKioskLogin() {
                 {num}
               </button>
             ))}
-            <button onClick={() => setDigits("")} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
+            <button onClick={resetState} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
               초기화
             </button>
             <button onClick={() => handleDigit('0')} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
@@ -229,7 +224,7 @@ export default function StudentKioskLogin() {
             {matchedList.map(student => {
               const { animal, color } = getAvatarFor(student.student_id);
               return (
-                <div key={student.student_id} onClick={() => { setSelectedStudent(student); setStep("password"); setPasswordInput(""); }}
+                <div key={student.student_id} onClick={() => { ensureFullscreen(); setSelectedStudent(student); setStep("password"); setPasswordInput(""); }}
                   className="group cursor-pointer flex flex-col items-center w-40 shrink-0 transition-transform hover:-translate-y-2">
                   <div className={`w-32 h-32 rounded-full ${color.bg} flex items-center justify-center mb-5 border-4 border-transparent ${color.ring} transition-colors shadow-md group-hover:shadow-xl`}>
                     <span className="text-6xl">{animal}</span>
@@ -289,7 +284,7 @@ export default function StudentKioskLogin() {
                   {num}
                 </button>
               ))}
-              <button onClick={() => setPasswordInput("")} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
+              <button onClick={() => { ensureFullscreen(); setPasswordInput(""); }} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
                 초기화
               </button>
               <button onClick={() => handlePinDigit('0')} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
@@ -300,7 +295,7 @@ export default function StudentKioskLogin() {
               </button>
             </div>
             
-            <button onClick={() => { setStep("profile"); setPasswordInput(""); }} className="mt-8 text-sm text-slate-400 hover:text-slate-600 underline font-medium underline-offset-4">
+            <button onClick={() => { ensureFullscreen(); setStep("profile"); setPasswordInput(""); }} className="mt-8 text-sm text-slate-400 hover:text-slate-600 underline font-medium underline-offset-4">
               다른 프로필 선택하기
             </button>
           </div>

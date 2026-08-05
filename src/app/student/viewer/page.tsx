@@ -1,4 +1,3 @@
-// src/app/student/viewer/page.tsx
 "use client";
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -6,7 +5,6 @@ import Script from 'next/script';
 import { useClinicStudent } from './useClinicStudent';
 
 export default function ClinicViewer() {
-    // 💡 분리된 로직(Hook)에서 필요한 상태와 함수만 가져옵니다.
     const {
         mySeat, myName, isScreenStarted, setIsScreenStarted,
         dbQuestions, currentQIndex, setCurrentQIndex,
@@ -16,24 +14,21 @@ export default function ClinicViewer() {
         toggleCallTA, toggleAway, leaveClinic, toggleAnswerMode, reportTypingAction, sendAction
     } = useClinicStudent();
 
-    // === 캔버스(손글씨) 관련 상태 및 Refs ===
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
     const isDrawingRef = useRef(false);
     const [penWidth] = useState(3);
 
-    // 💡 MathJax 안전 렌더링 (버그 수정)
     useEffect(() => {
-        if (!isScreenStarted || dbQuestions.length === 0) return;
+        if (!isScreenStarted || dbQuestions?.length === 0) return;
         
-        // MathJax가 아직 로드되지 않았을 때 앱이 뻗는 현상을 방지합니다.
         if (typeof window !== 'undefined' && (window as any).MathJax && (window as any).MathJax.typesetPromise) {
             (window as any).MathJax.typesetPromise().catch((err: any) => console.error("MathJax 렌더링 에러:", err));
         }
     }, [currentQIndex, isScreenStarted, dbQuestions]);
 
-    // === 캔버스 셋업 및 그리기 로직 ===
     useEffect(() => {
+        if (!dbQuestions || dbQuestions.length === 0) return;
         if (answerModes[currentQIndex] !== 'pen' || !dbQuestions[currentQIndex]) return;
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -41,7 +36,6 @@ export default function ClinicViewer() {
         const dpr = window.devicePixelRatio || 1;
         const rect = canvas.getBoundingClientRect();
         
-        // 캔버스 해상도 선명하게 유지
         canvas.width = rect.width * dpr; 
         canvas.height = rect.height * dpr;
         
@@ -55,14 +49,13 @@ export default function ClinicViewer() {
         ctx.lineWidth = penWidth;
         ctxRef.current = ctx;
 
-        // 이전에 그렸던 그림이 있다면 복원
         const saved = studentDrawings[currentQIndex];
         if (saved) {
             const img = new Image();
             img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
             img.src = saved;
         }
-    }, [currentQIndex, answerModes, penWidth, studentDrawings]);
+    }, [currentQIndex, answerModes, penWidth, studentDrawings, dbQuestions]);
 
     const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
         if (!ctxRef.current || !canvasRef.current) return;
@@ -84,7 +77,6 @@ export default function ClinicViewer() {
         if (!isDrawingRef.current || !canvasRef.current) return;
         isDrawingRef.current = false;
         
-        // 그림 데이터를 저장하여 상태 동기화
         const dataUrl = canvasRef.current.toDataURL('image/png');
         setStudentDrawings(p => ({ ...p, [currentQIndex]: dataUrl }));
         setStudentAnswers(p => ({ ...p, [currentQIndex]: dataUrl }));
@@ -100,22 +92,42 @@ export default function ClinicViewer() {
     // ==========================================
     // 렌더링 영역
     // ==========================================
+    
+    // 💡 1. 시작 전 대기 화면 (여기서도 빠져나갈 수 있게 버튼 추가)
     if (!isScreenStarted) {
         return (
-            <div className="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50">
-                <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-lg text-center animate-[fadeIn_0.3s_ease-out]">
-                    <div className="text-4xl font-black text-[#002864] mb-4 tracking-tighter">Logica Clinic</div>
-                    <button onClick={() => setIsScreenStarted(true)} className="w-full bg-[#002864] text-white font-bold py-4 rounded-xl shadow-md transition-all hover:bg-blue-900">
+            <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50">
+                <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-lg text-center animate-[fadeIn_0.3s_ease-out]">
+                    <div className="text-5xl font-black text-[#002864] mb-6 tracking-tighter">Logica Clinic</div>
+                    <button onClick={() => setIsScreenStarted(true)} className="w-full bg-[#002864] text-white font-extrabold text-lg py-5 rounded-2xl shadow-lg transition-all hover:bg-blue-900 hover:scale-[1.02] mb-4">
                         🚀 오답 풀이 시작하기
+                    </button>
+                    <button onClick={leaveClinic} className="w-full bg-slate-100 text-slate-500 font-bold text-base py-4 rounded-2xl transition-colors hover:bg-slate-200">
+                        🚪 포탈로 돌아가기
                     </button>
                 </div>
             </div>
         );
     }
 
-    const q = dbQuestions[currentQIndex];
-    if (!q) return <div className="h-screen flex items-center justify-center text-slate-500 font-bold">문제를 불러오는 중입니다...</div>;
+    // 💡 2. 문항이 없을 때(또는 로딩 중일 때) 갇히지 않도록 안전망 화면 제공
+    const q = dbQuestions ? dbQuestions[currentQIndex] : null;
+    if (!q) {
+        return (
+            <div className="h-screen flex flex-col items-center justify-center bg-slate-100 font-pretendard p-6">
+                <div className="text-6xl mb-6 animate-pulse">📭</div>
+                <h2 className="text-3xl font-black text-slate-800 mb-3">문제를 불러오고 있습니다...</h2>
+                <p className="text-slate-500 font-bold text-lg mb-10 text-center">
+                    잠시 기다려도 화면이 넘어가지 않는다면,<br/>현재 배정된 문제가 없거나 모두 푼 상태입니다.
+                </p>
+                <button onClick={leaveClinic} className="bg-white border-2 border-[#002864] text-[#002864] font-extrabold text-lg px-10 py-4 rounded-2xl shadow-sm hover:bg-blue-50 transition-all hover:scale-105">
+                    포탈로 안전하게 나가기 ➔
+                </button>
+            </div>
+        );
+    }
 
+    // 💡 3. 정상 문항 출력 화면
     return (
         <div className="bg-slate-100 h-screen flex flex-col font-pretendard">
             {editorLocked && (
@@ -127,10 +139,9 @@ export default function ClinicViewer() {
                     </div>
                 </div>
             )}
-            {/* 수식 렌더링 스크립트 */}
+            
             <Script id="mathjax" src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js" strategy="lazyOnload" />
             
-            {/* 상단 헤더 */}
             <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center shrink-0 z-10 relative">
                 <div className="flex items-center gap-4">
                     <div className="text-2xl font-black text-[#002864] tracking-tighter">Logica</div>
@@ -147,7 +158,6 @@ export default function ClinicViewer() {
                     
                     {/* 좌측 문제 패널 */}
                     <div className="col-span-7 flex flex-col gap-4 overflow-hidden">
-                        {/* 문항 번호 네비게이션 */}
                         <div className="bg-white rounded-2xl shadow-sm p-4 flex gap-2 overflow-x-auto border border-slate-200 shrink-0" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
                             {dbQuestions.map((_, idx) => (
                                 <button key={idx} onClick={() => setCurrentQIndex(idx)} 
@@ -157,20 +167,16 @@ export default function ClinicViewer() {
                             ))}
                         </div>
 
-                        {/* 실제 문제 뷰어 */}
                         <div className="bg-white rounded-2xl shadow-sm flex flex-col flex-1 border border-slate-200 overflow-hidden">
                             <div className="p-5 border-b border-slate-100 bg-slate-50 flex items-center justify-between shrink-0">
                                 <span className="text-2xl font-black text-[#002864] w-14 tracking-tighter">{String(currentQIndex + 1).padStart(2, '0')}</span>
                             </div>
-                            {/* MathJax를 통해 수식이 렌더링 될 영역 */}
                             <div className="flex-1 overflow-y-auto p-8 text-slate-800 text-lg leading-relaxed font-medium" dangerouslySetInnerHTML={{ __html: q.questionText }}></div>
                         </div>
                     </div>
 
                     {/* 우측 정답 입력 및 컨트롤 패널 */}
                     <div className="col-span-3 flex flex-col gap-4">
-                        
-                        {/* 정답 입력 영역 */}
                         <div className="bg-white rounded-2xl p-5 flex-1 flex flex-col shadow-sm border border-slate-200 overflow-hidden">
                             <div className="flex justify-between items-center mb-3 shrink-0">
                                 <h3 className="font-bold text-sm text-slate-700">정답 입력</h3>
@@ -199,7 +205,6 @@ export default function ClinicViewer() {
                             )}
                         </div>
                         
-                        {/* 하단 액션 버튼들 */}
                         <div className="flex flex-col gap-3 shrink-0">
                             <button onClick={() => sendAction('submit', { score: 100 })} className="w-full bg-[#002864] hover:bg-[#001b44] text-white font-extrabold text-lg py-4 rounded-xl shadow-md transition-colors border-b-4 border-[#001330] active:border-b-0 active:translate-y-1">
                                 ✅ 답안 제출하기

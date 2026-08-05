@@ -1,4 +1,3 @@
-// src/app/clinic/viewer/page.tsx
 "use client";
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
@@ -10,9 +9,6 @@ import { awardClinicMinutePoints, spendPoints } from "@/app/actions/shopPoints";
 import { resolvePendingHomeworkQuestions, BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
 import PointBadge from "@/components/clinic/PointBadge";
 
-// ==========================================
-// 상수 및 환경 설정
-// ==========================================
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const getSupabaseClient = () => {
@@ -21,7 +17,6 @@ const getSupabaseClient = () => {
     return (window as any)._supabaseInstance;
 };
 const supabaseClient = getSupabaseClient();
-// 💡 자정 이후(00시~09시 KST)에는 UTC 날짜와 KST 날짜가 어긋나 세션이 "다른 날"로 기록되는 버그가 있었음 — 항상 KST 기준으로 통일
 const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
 
 const CLINIC_ROOM = "logica-clinic-room";
@@ -31,13 +26,8 @@ const GEMINI_API_KEY_STORAGE_KEY = 'logica_gemini_api_key';
 const GEMINI_MODEL_STORAGE_KEY = 'logica_gemini_model';
 const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 
-// ==========================================
-// 유틸리티
-// ==========================================
 const formatMathTextForWeb = (text: string) => {
   if (!text) return "";
-  // 💡 <br> 태그는 실제 줄바꿈으로 남아야 하므로, </> 이스케이프보다 먼저 placeholder로 빼뒀다가 되돌린다.
-  // (순서가 바뀌면 <br>이 &lt;br&gt;로 이스케이프되어 화면에 글자 그대로 노출되고, 아래 콤마 정리 규칙도 항상 무효가 된다.)
   let t = text.replace(/<br\s*\/?>/gi, '__LOGICA_BR_PLACEHOLDER__');
   t = t.replace(/</g, ' &lt; ').replace(/>/g, ' &gt; ');
   t = t.replace(/__LOGICA_BR_PLACEHOLDER__/g, '<br>');
@@ -58,10 +48,6 @@ const getCleanUrl = (url: string) => {
   return validUrl;
 };
 
-// 💡 힌트 열람 상태(hintState)는 React ref라 컴포넌트가 다시 마운트되면(새로고침, 재입장) 사라진다.
-// 문항 자체는 question_id/tq_id로 안정적으로 식별 가능하므로, localStorage에 학생별·문항별로
-// 열람 여부를 남겨뒀다가 문항을 불러올 때마다 복원한다 — 안 그러면 같은 힌트를 다시 눌러
-// 포인트가 또 차감되는 문제가 생긴다.
 const hintStorageKey = (sId: string, q: any) => `logica_hint_${sId}_${q.question_id ?? 'q'}_${q.tq_id ?? 'tq'}`;
 
 const hydrateHintState = (sId: string, mapped: any[]): Record<number, any> => {
@@ -81,8 +67,6 @@ const saveHintState = (sId: string, q: any, hq: any) => {
   try { window.localStorage.setItem(hintStorageKey(sId, q), JSON.stringify(hq)); } catch (e) {}
 };
 
-// 💡 힌트가 없는 건 "교재 문제 전체"가 아니라 주교재/부교재뿐이다 — 워크북(과 연산교재)은
-// textbook_question에 큐레이션된 힌트 컬럼이 없을 뿐, AI가 그 자리에서 생성해 보여준다.
 const NO_HINT_BOOK_TYPES = ['주교재', '부교재'];
 const textbookHintFields = (bookType: string | null | undefined) => {
   if (bookType && NO_HINT_BOOK_TYPES.includes(bookType)) {
@@ -91,12 +75,6 @@ const textbookHintFields = (bookType: string | null | undefined) => {
   return { hasHint: true, needsAiHint: true, hints: ['', ''] };
 };
 
-// 💡 옛날 순수 HTML 버전은 innerHTML을 직접 조작하는 명령형 코드라, 문제를 바꿀 때만 DOM이 갱신되고
-// 그 외(호출/자리비움 등 실시간 브로드캐스트로 인한 화면 갱신)에는 애초에 이 부분이 다시 그려지지 않았다.
-// React에서 같은 안정성을 얻으려면 "리렌더될 때마다 재타이프셋"(→ 매번 원본 텍스트로 잠깐 되돌아갔다가
-// 다시 그려지는 깜빡임 발생)이 아니라, "이 내용이 실제로 바뀔 때만 리렌더되도록" 컴포넌트를 분리해야 한다.
-// React.memo로 감싸서 questionText/imageUrl이 바뀔 때만(=문항이 실제로 바뀔 때만) DOM이 갱신되게 하고,
-// 그 순간에만 MathJax를 다시 타이프셋한다 — 그 사이 부모가 아무리 자주 리렌더돼도 이 DOM은 그대로 유지된다.
 const QuestionDisplay = React.memo(function QuestionDisplay({ html, imageUrl }: { html: string; imageUrl?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -113,8 +91,6 @@ const QuestionDisplay = React.memo(function QuestionDisplay({ html, imageUrl }: 
   );
 });
 
-// 힌트 열람 텍스트도 같은 이유로 분리 — hintState.current는 ref라서 자체적으론 리렌더를 유발하지 않지만,
-// forceUpdate()로 부모가 리렌더될 때 이 블록도 매번 다시 그려지고 있었다. revealed 배열 자체가 바뀔 때만 갱신되게 한다.
 const HintRevealBox = React.memo(function HintRevealBox({ revealed }: { revealed: { level: number; text: string }[] }) {
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -135,41 +111,30 @@ const HintRevealBox = React.memo(function HintRevealBox({ revealed }: { revealed
 export default function ClinicViewer() {
   const router = useRouter();
 
-  // === UI & 라우팅 파라미터 상태 ===
   const [isStarted, setIsStarted] = useState(false);
   const [studentInfo, setStudentInfo] = useState({ id: '', name: '학생', classes: [] as string[] });
   const [params, setParams] = useState({ round: 0, className: '', weekType: 'odd', assignmentId: '', homeworkIdsStr: '' });
   const [isTimedRound, setIsTimedRound] = useState(false);
   const [globalExamTitle, setGlobalExamTitle] = useState('과제');
 
-  // === 포인트 (클리닉 이용 1분당 1P 적립) ===
-  // 💡 0으로 초기화하면 첫 조회 결과가 반영되는 순간 PointBadge가 "0 → 실제잔액"을 진짜 적립으로
-  // 착각해 화면에 들어올 때마다 튀어오르는 애니메이션이 뜬다. null(아직 모름)로 시작한다.
   const [points, setPoints] = useState<number | null>(null);
 
-  // === 타이머 상태 ===
   const [clinicRemainingStr, setClinicRemainingStr] = useState("60:00");
   const [isClinicUrgent, setIsClinicUrgent] = useState(false);
   const [roundRemainingSec, setRoundRemainingSec] = useState(ROUND1_TIME_LIMIT_SECONDS);
   const [timeIsUp, setTimeIsUp] = useState(false);
 
-  // === 문항 및 답안 상태 ===
   const [questions, setQuestions] = useState<any[]>([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [pendingQCount, setPendingQCount] = useState<string>("로딩 중...");
-  // 💡 정규과제/미완성과제 문제가 여러 교재(주교재/워크북 등)에 걸쳐 있을 때, 풀이 화면 안에서
-  // 상단 탭으로 교재를 골라 "문항 이동" 그리드를 필터링한다. 'all'이면 전부 보여준다.
   const [bookFilter, setBookFilter] = useState<number | 'all'>('all');
 
-  // 💡 채점/완료로 문항이 배열에서 빠지며 currentQIndex가 다른 교재의 문제로 넘어갈 수 있다 —
-  // 탭이 가리키는 교재와 실제 보이는 문항이 항상 일치하도록, 어긋나면 '전체' 탭으로 되돌린다.
   useEffect(() => {
     if (bookFilter === 'all') return;
     const cur = questions[currentQIndex];
     if (!cur || cur.bookId !== bookFilter) setBookFilter('all');
   }, [currentQIndex, questions, bookFilter]);
 
-  // 잦은 업데이트가 발생하는 답안, 캔버스 등은 Ref로 관리하여 리렌더링 방지
   const [, setUiTrigger] = useState(0);
   const forceUpdate = useCallback(() => setUiTrigger(p => p + 1), []);
 
@@ -186,7 +151,6 @@ export default function ClinicViewer() {
   const [myAwayActive, setMyAwayActive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // === 모달 및 오버레이 상태 ===
   const [resultModal, setResultModal] = useState<any>(null);
   const [recheckToast, setRecheckToast] = useState("");
   const [timeUpModal, setTimeUpModal] = useState(false);
@@ -201,7 +165,6 @@ export default function ClinicViewer() {
   const [logoutTarget, setLogoutTarget] = useState<'portal' | 'login'>('portal');
   const [sessionInfo, setSessionInfo] = useState<any>(null);
 
-  // === 캔버스 및 기타 Ref ===
   const optionsRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
@@ -222,13 +185,8 @@ export default function ClinicViewer() {
   const mathJaxRef = useRef(false);
   const correctSolvedCountRef = useRef(0);
   const totalQuestionsInRoundRef = useRef(0);
-  // 💡 round=2에 병합된 exam_type='과제'/'과제프린트' 문항의 assignment_id별 남은 문항 수.
-  // 전부 정답으로 풀리면(0이 되면) 그 exam_assignment를 완료 처리한다.
   const examAssignmentTotalsRef = useRef<Record<string, number>>({});
 
-  // ==========================================
-  // 1. 초기화 및 권한 체크
-  // ==========================================
   useEffect(() => {
     const sId = localStorage.getItem('logica_student_id');
     const sName = localStorage.getItem('logica_student_name');
@@ -268,16 +226,11 @@ export default function ClinicViewer() {
       mathJaxRef.current = true;
       (window as any).MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]], processEscapes: true }, chtml: { displayAlign: 'left' } };
       const script = document.createElement("script"); script.id = "MathJax-script"; script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"; script.async = true;
-      // 💡 클리닉 시작 버튼 클릭 직후에는 이 스크립트가 아직 로드 중일 수 있어, 최초 typesetPromise() 호출이
-      // 조용히 무시되곤 했다(마운트 시점에는 typesetPromise가 아직 없으므로). 로드 완료 시 한 번 더 타이프셋한다.
       script.onload = () => { (window as any).MathJax?.typesetPromise?.().catch((err: any) => console.error("MathJax 타이프셋 에러:", err)); };
       document.head.appendChild(script);
     }
   };
 
-  // ==========================================
-  // 2. 세션 타이머 및 데이터 로딩
-  // ==========================================
   const initSessionAndFetch = async (sId: string, round: number, cls: string, week: string, assignId: string, hwIds: string) => {
     const today = getKSTDateString();
     const sessionData = await resolveTodaySession(supabaseClient, sId, today);
@@ -285,8 +238,6 @@ export default function ClinicViewer() {
     setSessionInfo(sessionData);
 
     await connectChannel(sId, sessionData);
-    // 💡 좌석 배정을 presence sync 이벤트에만 맡기면, 실시간 연결이 막히거나 늦을 때 세션은 생겨도
-    // 좌석은 영원히 null로 남아 조교 화면에서 학생이 보이지 않게 된다. DB 조회로 직접(REST) 배정한다.
     assignSeatDirectly(sId, sessionData);
 
     const { data: eData } = await supabaseClient.from('enrollment').select('class(name)').eq('student_id', sId);
@@ -295,18 +246,37 @@ export default function ClinicViewer() {
       setStudentInfo(prev => ({ ...prev, classes: cNames.length ? cNames : [cls] }));
     }
 
-    if (round === 1 || round === 4) await fetchWeeklyTest(sId, week, cls, assignId);
-    else if (round === 2 || round === 3) await fetchHomework(sId, hwIds, round === 2 ? assignId : '');
-    else await fetchIncorrect(sId);
+    // 💡 [핵심 수정] Round 3 (오답클리닉) 예외 라우팅 처리!
+    if (round === 1 || round === 4) {
+      await fetchWeeklyTest(sId, week, cls, assignId);
+    } else if (round === 2) {
+      await fetchHomework(sId, hwIds, assignId);
+    } else if (round === 3) {
+      if (assignId) {
+        // 오답프린트로 생성된 별도 시험지가 배정된 경우
+        const { rows, title } = await fetchAssignedExamQuestions(assignId);
+        if (rows.length > 0) {
+          examAssignmentTotalsRef.current[assignId] = rows.length;
+          setGlobalExamTitle(title || '오답 프린트');
+          setPendingQCount(`대기 중인 오답: ${rows.length}문제`);
+          const mapped = rows.map((q:any, i:number) => ({ ...q, index: i, uid: 'rq' + i + '_' + Date.now() }));
+          totalQuestionsInRoundRef.current = mapped.length;
+          hintState.current = hydrateHintState(sId, mapped);
+          setQuestions(mapped);
+        } else {
+          await fetchIncorrect(sId);
+        }
+      } else {
+        // 배정된 오답시험지가 없다면 평소처럼 누적된 오답노트를 불러옴
+        await fetchIncorrect(sId);
+      }
+    } else {
+      await fetchIncorrect(sId);
+    }
   };
 
-  // 💡 '과제오답유사' 라운드: 정식 출제(exam_master) 없이, 과제 채점 중 틀린 문항이 쌓이는
-  // student_incorrect_record(source_type='과제오답')를 그대로 문제 세트로 사용한다.
   const fetchHomeworkSimilarIncorrect = async (sId: string) => {
     try {
-      // 💡 과제 오답은 두 출처가 섞여 쌓인다: 문제은행(exam) 문항은 question_id→question_db,
-      // 교재(주교재/워크북) 문항은 tq_id→textbook_question. 두 테이블 사이에 FK가 없어 embed가
-      // 안 되므로, record를 먼저 가져온 뒤 tq_id/question_id를 모아 따로 조회해 JS에서 합친다.
       const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, tq_id, question_id, source_type').eq('student_id', sId).eq('source_type', '과제오답').is('resolved_at', null);
       if (!records || records.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
 
@@ -359,10 +329,6 @@ export default function ClinicViewer() {
       let displayLabel = examType;
 
       if (assignId) {
-        // 💡 round=1은 실제 주간테스트 전용이다 — assignment_id가 가리키는 exam_master가
-        // exam_type='주간테스트'가 아니면(예: '과제'/'과제프린트') 절대 여기서 불러오면 안 된다.
-        // 라벨을 실제 타입으로 고쳐 보여주는 건 미봉책이었고, 애초에 이 라운드가 다른 종류를
-        // 끌어오는 것 자체가 문제였다.
         const { data } = await supabaseClient.from('exam_assignment').select('exam_id, exam_master!inner(title, exam_type)').eq('assignment_id', assignId).eq('exam_master.exam_type', examType).maybeSingle();
         if (data && data.exam_id) {
           matchedExamId = data.exam_id;
@@ -404,9 +370,6 @@ export default function ClinicViewer() {
     } catch(e) {}
   };
 
-  // 💡 exam_type='과제'/'과제프린트'로 강사가 개별 배정한 exam_assignment 문항을, tq_id 기반
-  // 정규과제와 별도 라운드로 보내지 않고 이 함수(round=2) 안에서 같은 큐에 병합한다. 새로 만들지 않고
-  // 기존 정규과제 흐름(타이머 없음, 문항별 즉시 채점, 오답은 큐에 남아 다시 풀 때까지 반복) 그대로 재사용한다.
   const fetchAssignedExamQuestions = async (assignId: string) => {
     if (!assignId) return { rows: [], title: null };
     const { data } = await supabaseClient.from('exam_assignment').select('exam_id, exam_master(title)').eq('assignment_id', assignId).maybeSingle();
@@ -416,13 +379,10 @@ export default function ClinicViewer() {
     const validItems = (items || []).filter((it: any) => it.question_db);
     const title = data.exam_master?.title || null;
 
-    // 💡 주교재/워크북처럼 상단 교재 필터 탭에서 구분해 볼 수 있도록 "기타" 카테고리로 태그한다.
-    // 실제 textbook_question으로 복제하지 않고, questions 배열에만 bookId/bookType을 붙여
-    // 기존 availableBooks/switchBookFilter 로직이 그대로 인식하게 한다.
     const rows = validItems.map((it: any) => ({
       examAssignmentId: assignId, question_id: it.question_db.question_id,
-      bookId: Number(assignId), bookType: '기타', bookTitle: title || '배정된 과제',
-      source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
+      bookId: Number(assignId), bookType: '기타', bookTitle: title || '배정된 문제',
+      source: title || '배정된 문제', questionText: formatMathTextForWeb(it.question_db.question),
       imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
       answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
       hints: [it.question_db.step_1_concept || "개념 힌트 없음", it.question_db.step_2_approach || "접근법 힌트 없음"],
@@ -506,10 +466,6 @@ export default function ClinicViewer() {
   };
 
   const connectChannel = async (sId: string, sessionState: any) => {
-    // 💡 React StrictMode(개발 모드)의 mount→cleanup→mount 재실행이나 Fast Refresh로
-    // 이 effect가 두 번 실행되면, unsubscribe()만으로는 supabase-js 채널 목록에서 즉시
-    // 지워지지 않아 두 번째 호출이 "이미 subscribe된" 옛 채널 객체를 재사용하게 되고
-    // .on('presence', ...) 추가 시 에러가 난다. removeChannel을 기다린 뒤 새로 만든다.
     if (clinicChannelRef.current) {
       await supabaseClient.removeChannel(clinicChannelRef.current);
       clinicChannelRef.current = null;
@@ -523,7 +479,6 @@ export default function ClinicViewer() {
         setEditorLocked(hasEditor);
 
         if (mySeatRef.current) {
-          // 좌석은 이미 DB 직접 배정으로 정해졌을 수 있다 — presence 등록만 아직이면 여기서 한다.
           if (!hasTrackedPresenceRef.current) trackPresenceRef.current(mySeatRef.current, sId, sessionState);
           return;
         }
@@ -537,9 +492,6 @@ export default function ClinicViewer() {
         if (seat) {
           mySeatRef.current = seat;
           supabaseClient.from('clinic_session_state').update({ seat }).eq('student_id', sId).then();
-          // 💡 connectChannel은 마운트 시 한 번만 실행되므로, 이 presence-sync 콜백이 직접
-          // trackPresence를 참조하면 그 시점(아직 studentInfo.name/classes가 채워지기 전, "학생"/[]
-          // 기본값)에 영원히 고정된다. ref로 감싸 항상 최신 studentInfo를 참조하도록 한다.
           trackPresenceRef.current(seat, sId, sessionState);
         }
       })
@@ -550,7 +502,7 @@ export default function ClinicViewer() {
   const trackPresence = (seat: string, sId: string, sessionState: any) => {
     if (!clinicChannelRef.current) return;
     hasTrackedPresenceRef.current = true;
-    const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? '과제 풀이중' : params.round === 3 ? '미완성 과제 풀이중' : '클리닉 풀이중';
+    const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? '과제 풀이중' : params.round === 3 ? '오답 풀이중' : '클리닉 풀이중';
     clinicChannelRef.current.track({
       seat, name: studentInfo.name, studentId: sId, classes: studentInfo.classes, activity, updatedAt: Date.now(),
       startedAt: new Date(sessionState.started_at).getTime(), durationMs: sessionState.duration_ms
@@ -564,9 +516,6 @@ export default function ClinicViewer() {
     if (clinicChannelRef.current) {
       const ch = clinicChannelRef.current;
       clinicChannelRef.current = null;
-      // 💡 unsubscribe()만 하면 supabase-js 클라이언트의 채널 목록에서 안 지워져서, 다음
-      // connectChannel()이 같은 topic으로 .channel()을 호출할 때 이 "이미 subscribe된" 옛
-      // 객체를 재사용하게 된다. removeChannel로 완전히 제거해야 다음 구독이 안전하다.
       try { await ch.untrack(); } catch(e) {}
       try { await supabaseClient.removeChannel(ch); } catch(e) {}
     }
@@ -599,10 +548,6 @@ export default function ClinicViewer() {
     } else if (payload.action === 'move_seat') {
       if (payload.seat === mySeatRef.current && payload.newSeat) {
         mySeatRef.current = payload.newSeat;
-        // 💡 [버그 수정] seat만 갱신하고 manual_seat는 그대로 둬서, manual_seat를 우선하는 화면
-        // (수퍼바이저)에서는 옛 좌석이 계속 보이는 불일치가 있었다. 두 컬럼을 함께 갱신하고,
-        // student_id로만 필터링하면 그날 지난(ended_at이 찍힌) 옛 세션 행까지 덩달아 갱신돼
-        // "좀비" 좌석 데이터가 쌓이므로 현재 진행 중인 세션 행으로 범위를 좁힌다.
         supabaseClient.from('clinic_session_state').update({ seat: payload.newSeat, manual_seat: payload.newSeat }).eq('student_id', sId).is('ended_at', null).then();
         trackPresence(payload.newSeat, sId, sessionState);
       }
@@ -631,11 +576,6 @@ export default function ClinicViewer() {
     }
   };
 
-  // 💡 handleTaAction은 questions/isTimedRound 등 리액트 state를 참조하는데,
-  // connectChannel의 broadcast 구독은 최초 렌더링 시 한 번만 등록된다.
-  // 구독 콜백이 그 시점의(state가 비어있던) handleTaAction을 영원히 붙잡고 있으면
-  // 이후 채점된 questions를 절대 찾지 못해 재확인(recheck) 승인이 항상 무시된다.
-  // 매 렌더마다 ref를 최신 함수로 갱신해 구독 콜백은 항상 최신 버전을 호출하도록 한다.
   const handleTaActionRef = useRef(handleTaAction);
   useEffect(() => { handleTaActionRef.current = handleTaAction; });
 
@@ -671,11 +611,6 @@ export default function ClinicViewer() {
     return () => { clearInterval(sessionTimer); if (roundTimer) clearInterval(roundTimer); };
   }, [isStarted, isTimedRound, timeIsUp]);
 
-  // 💡 클리닉 이용 1분당 1P 적립. 실제 지급량은 서버(awardClinicMinutePoints)가 "마지막 지급
-  // 이후 실제로 흐른 시간"만 분 단위로 잘라 지급하므로, 이 주기를 짧게 잡아도(더 자주 호출해도)
-  // 더 빨리 받게 되지는 않는다 — 화면에 반영되는 지연 시간만 줄어들 뿐이다. 어차피 1분 단위로만
-  // 오르는데 20초마다 확인하면 3번 중 2번은 아무것도 못 받는 헛 쿼리라서(DB 요청 낭비), 실제
-  // 지급 주기(1분)보다 살짝만 긴 65초로 잡아 쿼리 수를 1/3로 줄이면서도 체감 지연은 거의 없게 한다.
   useEffect(() => {
     if (!studentInfo.id) return;
     let cancelled = false;
@@ -692,9 +627,6 @@ export default function ClinicViewer() {
     return () => { cancelled = true; clearInterval(iv); };
   }, [studentInfo.id]);
 
-  // 💡 객관식 보기(options)는 QuestionDisplay처럼 별도 컴포넌트로 메모하면 선택 상태(ref 기반) 갱신이
-  // 끊기므로, 문항이 바뀔 때만 이 영역을 다시 타이프셋하도록 별도 effect로 처리한다.
-  // (그렇지 않으면 첫 문항 이후로는 보기 안의 수식이 LaTeX 원문 그대로 노출된다.)
   useEffect(() => {
     const mj = (window as any).MathJax;
     if (mj && mj.typesetPromise && optionsRef.current) {
@@ -702,7 +634,6 @@ export default function ClinicViewer() {
     }
   }, [currentQIndex, questions[currentQIndex]?.options]);
 
-  // 💡 자리비움/호출/재확인 대기 중에는 화면 이동(뒤로가기/닫기/새로고침)을 막는다.
   const hasActiveCallForGuard = Object.values(callState.current).some(v => v);
   const hasPendingRecheckForGuard = Object.values(recheckState.current).some(v => v === 'pending');
   const isNavigationBlocked = myAwayActive || hasActiveCallForGuard || hasPendingRecheckForGuard;
@@ -748,8 +679,6 @@ export default function ClinicViewer() {
     const incQIds = questions.filter((q, i) => !keypadAnswersMatch(studentAnswers.current[i], q.answer) && q.question_id).map(q => q.question_id);
     if (incQIds.length > 0) await generateIncorrectPrint(incQIds, globalExamTitle);
 
-    // 라운드(문제풀이) 시간초과는 포털로만 돌아가면 되지만, 클리닉 전체 이용시간 종료(자연 만료/조교 강제퇴실)는
-    // 하루 세션 자체가 끝난 것이므로 로그인 화면으로 완전히 내보내야 한다.
     const wholeSessionEnd = sessionExpired || forceAction === 'force_checkout' || forceAction === 'force_checkout_by_ta';
     setLogoutTarget(wholeSessionEnd ? 'login' : 'portal');
 
@@ -767,8 +696,6 @@ export default function ClinicViewer() {
   };
 
   const submitSingleAnswer = async () => {
-    // 💡 isSubmitting으로 중복 클릭을 막는다. AI 채점은 네트워크 왕복이 있어서
-    // 버튼이 계속 눌리는 상태로 남아있으면 여러 번 눌러 여러 번 채점 요청/신호가 나갈 수 있다.
     if (isSubmitting || timeIsUp || callState.current[currentQIndex] || recheckState.current[currentQIndex] === 'pending') return;
     const q = questions[currentQIndex];
     const isSubjective = !(q.options && q.options.length > 0);
@@ -878,13 +805,6 @@ export default function ClinicViewer() {
         await supabaseClient.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined }).eq('hw_result_id', hwRes.hw_result_id);
       }
     } else if (!q.record_id && (q.tq_id || q.question_id)) {
-      // 💡 과제 오답도 시험 오답(saveExamResultsToDB)과 동일하게 student_incorrect_record에 쌓아
-      // 오답노트/오답유사 클리닉 파이프라인에 자동 편입되게 한다(기존엔 이 upsert가 빠져 있었음).
-      // 과제 문항 대부분은 question_db가 아니라 textbook_question(tq_id) 소속이라 tq_id도 함께 본다.
-      // record_id가 이미 있는 문항(오답노트/오답유사에서 온 문항)은 위에서 이미 status를 갱신했으므로
-      // 여기서 다시 덮어쓰지 않는다.
-      // student_id+tq_id 조합엔 upsert onConflict가 걸릴 unique 제약이 없다고 가정하고
-      // 직접 조회 후 없을 때만 insert한다.
       const filterCol = q.tq_id ? 'tq_id' : 'question_id';
       const filterVal = q.tq_id ?? q.question_id;
       const { data: existingRecord } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null).maybeSingle();
@@ -896,9 +816,6 @@ export default function ClinicViewer() {
     }
   };
 
-  // 💡 round=2에 병합된 exam_type='과제'/'과제프린트' 문항(tq_id 없음, examAssignmentId만 있음) 전용.
-  // 오답이면 오답노트에 쌓고(다시 풀 때까지 큐에 남음), 그 assignment의 문항이 전부 정답으로
-  // 풀리면 exam_assignment.status를 완료 처리한다.
   const finalizeExamAssignmentProgress = async (q: any, isCorrect: boolean) => {
     if (!q.examAssignmentId) return;
     if (!isCorrect) {
@@ -919,8 +836,6 @@ export default function ClinicViewer() {
     }
   };
 
-  // 문항이 tq_id 기반(정규 교재 과제)인지 exam_assignment 기반(과제프린트로 배정된 것)인지에 따라
-  // 알맞은 진행률 저장 함수로 갈라 보낸다.
   const finalizeQuestionProgress = async (q: any, isCorrect: boolean) => {
     if (q.examAssignmentId) await finalizeExamAssignmentProgress(q, isCorrect);
     else await finalizeHomeworkProgress(q, isCorrect);
@@ -1063,9 +978,6 @@ export default function ClinicViewer() {
     return JSON.parse(text.replace(/```json|```/g, '').trim());
   };
 
-  // 💡 워크북/연산교재 문항은 textbook_question에 큐레이션된 힌트 컬럼이 없어서, 손글씨 채점과
-  // 같은 제미나이 키/모델 설정을 재사용해 그 자리에서 힌트를 생성한다. API 키가 없거나 호출이
-  // 실패해도 힌트 기능 자체는 계속 쓸 수 있어야 하므로 목업 문구로 조용히 대체한다.
   const AI_HINT_MOCK: Record<1 | 2, string> = {
     1: '문제에서 주어진 조건을 다시 한 번 차근차근 읽고, 어떤 개념을 써야 할지 떠올려보세요.',
     2: '주어진 조건들을 식으로 정리한 뒤, 구하려는 값을 중심으로 순서를 세워 풀어보세요.'
@@ -1114,7 +1026,7 @@ export default function ClinicViewer() {
     router.push('/student/portal');
   };
 
-  // 💡 자리비움/호출/재확인 대기 중에는 포탈로 못 나가게 막는다 — 확인 절차를 우회해 URL로 빠져나가는 것도 방지.
+  // 💡 포탈 복귀 요청 시, 문항이 0개일 때는 귀찮게 묻지 않고 바로 내보냅니다.
   const requestLeaveToHome = () => {
     const hasActiveCall = Object.values(callState.current).some(v => v);
     const hasPendingRecheck = Object.values(recheckState.current).some(v => v === 'pending');
@@ -1122,10 +1034,11 @@ export default function ClinicViewer() {
       alert('자리비움/호출/재확인 처리 중에는 포탈로 나갈 수 없습니다. 상태 해제 후 다시 시도해주세요.');
       return;
     }
-    if (window.confirm('아직 모든 문제를 푸신 게 아닙니다. 정말 나가시겠습니까?')) leaveAndGoHome();
+    if (questions.length === 0 || window.confirm('아직 모든 문제를 푸신 게 아닙니다. 정말 나가시겠습니까?')) {
+        leaveAndGoHome();
+    }
   };
 
-  // 승인된 종료 요청 / 클리닉 전체 시간종료(자연만료·강제퇴실) 시: 하루 세션이 완전히 끝난 것이므로 로그인 화면으로 보낸다.
   const finalizeAndGoToLogin = async () => {
     setIsLoggingOut(true);
     sendAction('depart');
@@ -1137,13 +1050,10 @@ export default function ClinicViewer() {
   };
 
   const q = questions[currentQIndex];
-  // 교재가 여러 종류 섞여 있을 때만 상단 탭을 보여준다 — 주간테스트/오답클리닉은 애초에
-  // bookId가 없는 문제들이라 availableBooks가 항상 비어 있어 자연히 탭이 안 뜬다.
   const availableBooks = [...new Map(questions.filter(qq => qq.bookId != null).map(qq => [qq.bookId, qq])).values()]
     .map(qq => ({ bookId: qq.bookId, bookType: qq.bookType, bookTitle: qq.bookTitle, count: questions.filter(x => x.bookId === qq.bookId).length }));
   const visibleIndices = questions.map((_, i) => i).filter(i => bookFilter === 'all' || questions[i].bookId === bookFilter);
-  // 탭 전환 시 bookFilter만 바꾸면, currentQIndex가 아직 안 따라와서 아래 정합성 가드가 방금
-  // 고른 탭을 즉시 '전체'로 되돌려버린다 — 탭을 고른 문항으로 함께 점프시켜야 한다.
+  
   const switchBookFilter = (bookId: number | 'all') => {
     setBookFilter(bookId);
     if (bookId !== 'all') {
@@ -1151,18 +1061,28 @@ export default function ClinicViewer() {
       if (idx !== -1) { setCurrentQIndex(idx); setTimeout(() => initCanvas(idx), 50); }
     }
   };
+
+  // 💡 비상 탈출구가 추가된 대기 화면 (풀 문제가 없어도 여기서 바로 포탈로 나갈 수 있음!)
   if (!isStarted) {
     return (
       <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-lg text-center animate-[fadeIn_0.3s_ease-out]">
-          <div className="font-lexend text-4xl font-black text-[#002864] tracking-tighter mb-4">Logica Clinic</div>
-          <p className="text-sm text-slate-500 font-bold mb-8">{isTimedRound ? '그동안의 노력을 테스트해보세요!' : params.round===3?'이번 회차 전에 끝내지 못한 과제를 마무리해봐요!':'배부된 과제를 풀어봐요!'}</p>
-          <div className="mb-8 bg-slate-50 border border-slate-200 rounded-xl p-5">
+        <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-lg text-center animate-[fadeIn_0.3s_ease-out]">
+          <div className="font-lexend text-5xl font-black text-[#002864] tracking-tighter mb-4">Logica Clinic</div>
+          <p className="text-sm text-slate-500 font-bold mb-8">
+            {isTimedRound ? '그동안의 노력을 테스트해보세요!' : 
+             params.round === 3 ? '이번 주 과제 중 틀린 문제를 다시 확인해봐요!' : '배부된 과제를 풀어봐요!'}
+          </p>
+          <div className="mb-8 bg-slate-50 border border-slate-200 rounded-2xl p-6">
             <p className="text-xs font-bold text-slate-400 mb-1">학생 이름</p><p className="text-2xl font-extrabold text-slate-800">{studentInfo.name}</p>
-            <div className="mt-4"><span className="text-xs font-bold text-rose-500 bg-rose-100 px-3 py-1.5 rounded-full">{pendingQCount}</span></div>
+            <div className="mt-4"><span className={`text-sm font-bold px-4 py-2 rounded-full ${questions.length > 0 ? 'bg-indigo-100 text-indigo-600' : 'bg-rose-100 text-rose-500'}`}>{questions.length > 0 ? pendingQCount : '모든 오답을 해결했거나 배정된 문항이 없습니다.'}</span></div>
           </div>
-          <button onClick={startClinic} disabled={questions.length === 0} className="w-full bg-[#002864] hover:bg-blue-950 text-white font-bold py-4 rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={startClinic} disabled={questions.length === 0} className="w-full bg-[#002864] hover:bg-blue-950 text-white font-bold py-5 rounded-2xl shadow-lg transition-all disabled:opacity-50 disabled:cursor-not-allowed mb-3 text-lg hover:scale-[1.02]">
             {questions.length > 0 ? (isTimedRound ? '⏱️ 20분 타이머 시작하기' : '🚀 풀이 시작하기') : '풀 문제가 없습니다!'}
+          </button>
+          
+          {/* 💡 비상 탈출구 버튼 추가 */}
+          <button onClick={requestLeaveToHome} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold py-4 rounded-2xl shadow-sm transition-all text-base">
+            🚪 포탈로 돌아가기
           </button>
         </div>
       </div>
