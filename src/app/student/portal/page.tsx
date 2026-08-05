@@ -1,5 +1,3 @@
-// src/app/student/portal/page.tsx
-
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -196,7 +194,6 @@ export default function StudentPortal() {
             .select('assignment_id, status, class_id, exam_master!inner(exam_type)')
             .eq('student_id', sid);
 
-        // 💡 [버그 픽스] 반이 지정되지 않아 빈 배열일 경우 Supabase 에러(크래시) 방지 가드
         const classIds = Object.values(nameToId).filter(Boolean);
         let hwsData: any[] = [];
         if (classIds.length > 0) {
@@ -476,21 +473,21 @@ export default function StudentPortal() {
         else theme = { label: '🖨️ 오답', desc: '틀린 문제들만 모아 다시 풉니다.', bg: 'bg-gradient-to-br from-emerald-700 to-emerald-600', badge: 'bg-emerald-400 text-emerald-900', btnText: 'text-emerald-900', textColor: 'text-emerald-100' };
 
         return (
-            <div key={`${className}-${typeKey}`} className={`w-full ${theme.bg} rounded-[2rem] p-8 md:p-10 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[280px] md:min-h-[320px] justify-between`}>
-                {isDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText} text-[13px] font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ {scoreLabel}</span>}
+            <div key={`${className}-${typeKey}`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[240px] md:min-h-[260px] justify-between`}>
+                {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-[12px] font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ {scoreLabel}</span>}
                 <div>
-                    <div className="flex justify-between items-start mb-8 relative z-10">
-                        <span className={`text-[13px] font-black ${theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
+                    <div className="flex justify-between items-start mb-5 relative z-10">
+                        <span className={`text-[12px] font-black ${theme.badge} px-2.5 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
                         {!isDone && pendingCount > 0 && <span className={`text-sm font-bold ${theme.textColor}`}>남은 항목: {pendingCount}건</span>}
                     </div>
-                    <h3 className="text-2xl font-black mb-3 relative z-10">{theme.label.replace(/[^가-힣 ]/g, '').trim()} 클리닉</h3>
+                    <h3 className="text-2xl font-black mb-2 relative z-10">{theme.label.replace(/[^가-힣 ]/g, '').trim()} 클리닉</h3>
                     <p className={`text-base ${theme.textColor} font-medium relative z-10`}>{theme.desc}</p>
                 </div>
                 <div className="flex items-center justify-end relative z-10">
                     {isDone ? 
-                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-8 py-3.5 text-lg rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>완료됨</button> 
+                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>완료됨</button> 
                     : 
-                        <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-8 py-3.5 text-lg rounded-2xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>응시하기</button>
+                        <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>응시하기</button>
                     }
                 </div>
                 {!isDone && <button onClick={(e) => { e.stopPropagation(); demoCompleteBlock(className, round); }} className="absolute bottom-5 left-6 text-[12px] underline text-white/50 hover:text-white z-50 transition-colors">테스트 완료처리</button>}
@@ -517,26 +514,26 @@ export default function StudentPortal() {
         };
 
         return (
-            <div key="upcoming-test" className={`w-full ${theme.bg} rounded-[2rem] p-8 md:p-10 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[280px] md:min-h-[320px] justify-between`}>
+            <div key="upcoming-test" className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[240px] md:min-h-[260px] justify-between`}>
                 {!isToday && (
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 z-20 rounded-[2rem] transition-all">
+                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 z-20 rounded-[1.5rem] transition-all">
                         <span className="text-4xl">🔒</span>
                         <span className="text-base font-bold text-white/90 px-6 text-center">시험 당일에 활성화됩니다</span>
                     </div>
                 )}
                 <div>
-                    <div className="flex justify-between items-start mb-8 relative z-10">
-                        <span className={`text-[13px] font-black ${theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
+                    <div className="flex justify-between items-start mb-5 relative z-10">
+                        <span className={`text-[12px] font-black ${theme.badge} px-2.5 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
                         <span className={`text-sm font-black bg-rose-500 text-white px-3 py-1 rounded-full shadow-sm ${!isToday && 'animate-pulse'}`}>{dDayLabel}</span>
                     </div>
-                    <h3 className="text-2xl font-black mb-3 relative z-10">8월 1주차 단원평가</h3>
+                    <h3 className="text-2xl font-black mb-2 relative z-10">8월 1주차 단원평가</h3>
                     <p className={`text-base ${theme.textColor} font-medium relative z-10`}>{theme.desc}</p>
                 </div>
                 <div className="flex items-center justify-end relative z-10">
                     <button 
                         disabled={!isToday} 
                         onClick={() => isToday ? alert('시험 응시 화면으로 이동합니다.') : null} 
-                        className={`bg-white ${theme.btnText} font-black px-8 py-3.5 text-lg rounded-2xl shadow-lg ${isToday ? 'hover:scale-105 hover:bg-slate-50 transition-all' : 'opacity-90'}`}
+                        className={`bg-white ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-lg ${isToday ? 'hover:scale-105 hover:bg-slate-50 transition-all' : 'opacity-90'}`}
                     >
                         {isToday ? '응시하기' : '대기 중'}
                     </button>
@@ -579,7 +576,8 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
-            <nav className="bg-white px-8 py-4 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+            {/* 💡 상단 패딩 축소 (py-4 -> py-3) */}
+            <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
                 <div className="flex items-center gap-8">
                     <div className="flex items-center">
                         <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-8 object-contain" />
@@ -610,7 +608,6 @@ export default function StudentPortal() {
                         </button>
                     )}
 
-                    {/* 전체화면 토글 버튼 */}
                     <button onClick={toggleFullScreen} className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-slate-200 transition-colors shadow-sm hidden sm:flex">
                         <span className="text-[11px] font-bold text-slate-600">{isFullscreen ? '🗗 기본화면' : '📺 전체화면'}</span>
                     </button>
@@ -645,10 +642,12 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
-            <main className="max-w-[1200px] w-full mx-auto p-6 md:p-8 flex-1">
+            {/* 💡 메인 영역 상하 패딩 축소 (py-8 -> py-4 ~ py-5) */}
+            <main className="max-w-[1200px] w-full mx-auto py-5 px-6 md:py-6 md:px-8 flex-1">
                 {activeTab === 'home' && studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
-                    <section className="mb-10">
-                        <div className="flex items-center gap-4 mb-8">
+                    <section className="mb-4">
+                        {/* 💡 헤더 영역 여백 축소 (mb-8 -> mb-5) */}
+                        <div className="flex items-center gap-4 mb-5">
                             <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
                                 <button key={cls} onClick={() => setSelectedClass(cls)} className={`text-base font-black px-5 py-2 rounded-full shadow-sm transition-colors inline-flex items-center gap-1.5 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
@@ -656,7 +655,8 @@ export default function StudentPortal() {
                                 </button>
                             ))}
                         </div>
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-8">
+                        {/* 💡 카드 그리드 간격 축소 (gap-8 -> gap-6) */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}
                             {renderCard('print', 3, selectedClass)}
