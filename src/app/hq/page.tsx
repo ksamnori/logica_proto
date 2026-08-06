@@ -564,6 +564,7 @@ export default function HQWorkspacePage() {
         onClose={() => setIsProfileOpen(false)} 
         instId={instId} 
         instructorName={instName} 
+        isHQ={true}
       />
     </div>
   );

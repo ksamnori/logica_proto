@@ -12,10 +12,11 @@ export default function FloatingChat({ instId }: { instId: string }) {
     return data.publicUrl;
   };
 
-  const [isHQ, setIsHQ] = useState(false); // 💡 본사 직원 여부 상태
+  const [isHQ, setIsHQ] = useState(false); 
 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"parent" | "staff">("parent"); 
+  // 💡 [수정] 기본 활성 탭을 '사내 메신저(staff)'로 변경
+  const [activeTab, setActiveTab] = useState<"parent" | "staff">("staff"); 
 
   const [activeChatView, setActiveChatView] = useState<"list" | "room" | "new">("list");
   const [chatRooms, setChatRooms] = useState<any[]>([]);
@@ -172,19 +173,18 @@ export default function FloatingChat({ instId }: { instId: string }) {
   useEffect(() => {
     if (!instId) return;
 
-    // 💡 1. 현재 접속한 사람의 테넌트(본사인지 지점인지)를 판별합니다.
     const checkHQStatus = async () => {
       const { data: me } = await supabase.from('instructor').select('tenant_id').eq('instructor_id', instId).maybeSingle();
       if (me?.tenant_id) {
         const { data: myTenant } = await supabase.from('academy_tenant').select('tenant_type').eq('tenant_id', me.tenant_id).maybeSingle();
         if (myTenant?.tenant_type === 'HQ') {
           setIsHQ(true);
-          setActiveTab('staff'); // 본사 직원은 무조건 선생님(사내) 탭 고정
+          setActiveTab('staff'); 
         } else {
-          loadChatRooms(); // 지점(학원) 강사일 때만 학부모 상담방 로드
+          loadChatRooms(); 
         }
       } else {
-        loadChatRooms(); // 예외처리: 소속 미지정이어도 기본 로드
+        loadChatRooms(); 
       }
     };
 
@@ -245,7 +245,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
   }, [instId]);
 
   const loadChatRooms = async () => {
-    if (isHQ) return; // 본사 직원은 학부모 채팅을 로드하지 않음
+    if (isHQ) return; 
 
     const { data } = await supabase.from("chat_room")
       .select("room_id, parent_id, parent(phone, student(name)), chat_message(message_id, content, created_at, sender_type, is_read)")
@@ -296,13 +296,14 @@ export default function FloatingChat({ instId }: { instId: string }) {
             .maybeSingle();
           
           if (otherMember?.instructor_id) {
+            // 💡 [수정] 상대방 정보를 부를 때 chat_position 추가
             const { data: instData } = await supabase.from('instructor')
-              .select('name, profile_image_url')
+              .select('name, position, chat_position, profile_image_url')
               .eq('instructor_id', otherMember.instructor_id)
               .maybeSingle();
             
             if (instData) {
-              if (instData.name) displayTitle = `${instData.name} 선생님`;
+              displayTitle = `${instData.name} ${instData.chat_position || instData.position || '선생님'}`;
               if (instData.profile_image_url) displayAvatar = getProfileImageUrl(instData.profile_image_url);
             }
           }
@@ -427,8 +428,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
             safeTenantMap[String(t.tenant_id)] = t.name; 
           });
         }
-      } catch (e) {
-      }
+      } catch (e) {}
 
       const { data: instData } = await supabase.from("instructor")
         .select("*")
@@ -464,7 +464,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
     setSelectedInstIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
-  const handleCreateOrOpenStaffRoom = async (targetInstId: string, targetName: string) => {
+  const handleCreateOrOpenStaffRoom = async (targetInstId: string, targetName: string, targetPos?: string) => {
     try {
       const { data: targetRooms, error: targetError } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
       if (targetError) throw targetError;
@@ -477,14 +477,16 @@ export default function FloatingChat({ instId }: { instId: string }) {
       }
 
       if (!roomId) {
-        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: `${targetName} 선생님`, created_by: instId }).select().single();
+        // 💡 [수정] 방을 생성할 때도 방 제목에 직책 반영
+        const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
+        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
         if (roomError) throw roomError;
         if (newRoom) {
           roomId = newRoom.room_id;
           await supabase.from('internal_chat_member').insert([{ room_id: roomId, instructor_id: instId }, { room_id: roomId, instructor_id: targetInstId }]);
         }
       }
-      if (roomId) openStaffChatRoom(roomId, `${targetName} 선생님`);
+      if (roomId) openStaffChatRoom(roomId, `${targetName} ${targetPos || '선생님'}`);
     } catch (e: any) { alert("방 생성 에러: " + e.message); }
   };
 
@@ -492,7 +494,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
     if (selectedInstIds.length === 0) return;
     if (selectedInstIds.length === 1) {
       const target = allInstructors.find((i: any) => i.instructor_id === selectedInstIds[0]);
-      if (target) await handleCreateOrOpenStaffRoom(target.instructor_id, target.name);
+      if (target) await handleCreateOrOpenStaffRoom(target.instructor_id, target.name, target.chat_position || target.position);
       return;
     }
     const roomName = prompt("새 그룹 채팅방 이름을 입력하세요.", "새 그룹 채팅방");
@@ -532,7 +534,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
       
       const [msgRes, memRes] = await Promise.all([
         supabase.from("internal_chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-        supabase.from("internal_chat_member").select("instructor_id, last_read_at, instructor(name, profile_image_url)").eq("room_id", roomId)
+        // 💡 [수정] 방 멤버를 불러올 때 chat_position 추가
+        supabase.from("internal_chat_member").select("instructor_id, last_read_at, instructor(name, position, chat_position, profile_image_url)").eq("room_id", roomId)
       ]);
       
       setStaffMessages(msgRes.data || []);
@@ -610,8 +613,20 @@ export default function FloatingChat({ instId }: { instId: string }) {
             </div>
           </div>
           
-          {/* 💡 본사 직원이면 학부모 탭을 아예 숨깁니다! */}
           <div className="flex px-3">
+            {/* 💡 [수정] 탭 순서를 '사내 메신저' -> '학부모 상담'으로 변경 */}
+            <button 
+              onPointerDown={(e) => e.stopPropagation()} 
+              onClick={() => { 
+                if (activeTab === "staff") { staffChatView === "list" ? showNewStaffChatView() : setStaffChatView("list"); } else { setActiveTab("staff"); setStaffChatView("list"); }
+                setActiveStaffRoomId(null); 
+                loadStaffRooms(); 
+              }}
+              className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" || isHQ ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
+            >
+              👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
+            </button>
+
             {!isHQ && (
               <button 
                 onPointerDown={(e) => e.stopPropagation()} 
@@ -625,18 +640,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
                 👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
               </button>
             )}
-
-            <button 
-              onPointerDown={(e) => e.stopPropagation()} 
-              onClick={() => { 
-                if (activeTab === "staff") { staffChatView === "list" ? showNewStaffChatView() : setStaffChatView("list"); } else { setActiveTab("staff"); setStaffChatView("list"); }
-                setActiveStaffRoomId(null); 
-                loadStaffRooms(); 
-              }}
-              className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" || isHQ ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
-            >
-              👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
-            </button>
           </div>
         </div>
 
@@ -722,15 +725,26 @@ export default function FloatingChat({ instId }: { instId: string }) {
               <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
                 {chatMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10 bg-white/50 p-4 rounded-xl mx-4">대화 내역이 없습니다.</div> :
                   chatMessages.map(msg => (
-                    <div key={msg.message_id} className={`flex ${msg.sender_type === "parent" ? "justify-end" : "justify-start"} w-full mb-1`}>
-                      <div className={`flex items-end gap-1.5 max-w-[85%] ${msg.sender_type === "parent" ? "flex-row-reverse" : ""}`}>
-                        {msg.sender_type !== "parent" && <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs">👨‍🏫</div>}
-                        <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type === "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
-                          {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
-                        </div>
-                        <div className="flex flex-col items-end shrink-0 text-[9px] text-slate-500">
-                          {msg.sender_type === 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
-                          <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                    // 💡 [수정] 학부모 상담방도 카카오톡 스타일(세로 정렬)로 변경
+                    <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_type === "parent" ? "justify-start" : "justify-end"}`}>
+                      
+                      {msg.sender_type === "parent" && (
+                        <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
+                      )}
+                      
+                      <div className={`flex flex-col max-w-[85%] ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
+                        {msg.sender_type === "parent" && (
+                          <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
+                        )}
+                        
+                        <div className={`flex items-end gap-1.5 ${msg.sender_type !== "parent" ? "flex-row-reverse" : "flex-row"}`}>
+                          <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type !== "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
+                            {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                          </div>
+                          <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
+                            {msg.sender_type !== 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
+                            <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -739,10 +753,11 @@ export default function FloatingChat({ instId }: { instId: string }) {
 
                 {isTyping && (
                   <div className="flex justify-start w-full mb-1">
-                    <div className="flex items-end gap-1.5 max-w-[85%]">
-                      <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs">👨‍🏫</div>
+                    <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
+                    <div className="flex flex-col items-start max-w-[85%]">
+                      <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
                       <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
-                        학부모님이 메시지를 입력 중입니다...
+                        메시지를 입력 중입니다...
                       </div>
                     </div>
                   </div>
@@ -767,7 +782,11 @@ export default function FloatingChat({ instId }: { instId: string }) {
                 {filteredInstructors.length === 0 ? (
                   <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
                 ) : (
-                  Object.keys(orgTree).sort().map(tenantName => {
+                  Object.keys(orgTree).sort((a, b) => {
+                    if (a === '본사') return -1;
+                    if (b === '본사') return 1;
+                    return a.localeCompare(b);
+                  }).map(tenantName => {
                     const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
                     const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
                     
@@ -812,8 +831,9 @@ export default function FloatingChat({ instId }: { instId: string }) {
                                               )}
                                             </div>
                                             <div className="flex-1">
-                                              <div className="font-bold text-slate-700 text-sm">{inst.name} 선생님</div>
-                                              <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.position || '강사'}</div>
+                                              <div className="font-bold text-slate-700 text-sm">{inst.name}</div>
+                                              {/* 💡 [수정] 조직도에 chat_position 우선 반영 */}
+                                              <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
                                             </div>
                                           </div>
                                         )
@@ -897,10 +917,12 @@ export default function FloatingChat({ instId }: { instId: string }) {
                     const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
 
                     return (
-                      <div key={msg.message_id} className={`flex gap-1.5 w-full mb-1 ${msg.sender_id === instId ? 'flex-col items-end' : ''}`}>
+                      // 💡 [수정] 사내 메신저 카카오톡 스타일 적용 (이름 위, 버블 아래)
+                      <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_id === instId ? 'justify-end' : 'justify-start'}`}>
+                        
                         {msg.sender_id !== instId && (
-                          <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden">
-                            <span className="absolute z-0">T</span>
+                          <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
+                            <span className="absolute z-0 font-bold">T</span>
                             {avatarUrl && (
                               <img 
                                 src={avatarUrl} 
@@ -911,13 +933,24 @@ export default function FloatingChat({ instId }: { instId: string }) {
                             )}
                           </div>
                         )}
-                        <div className={`flex items-end gap-1.5 max-w-[85%] ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row'}`}>
-                          <div className={`px-3.5 py-2 rounded-2xl shadow-sm text-[13px] ${msg.sender_id === instId ? 'bg-slate-700 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm'}`}>
-                            {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
-                          </div>
-                          <div className="flex flex-col items-end shrink-0 text-[9px] text-slate-500">
-                            {msg.sender_id === instId && unreadBy > 0 && <span className="text-slate-600 font-bold mb-0.5">{unreadBy}</span>}
-                            <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                        
+                        <div className={`flex flex-col max-w-[85%] ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
+                          {msg.sender_id !== instId && (
+                            // 💡 상대방의 1순위 chat_position 반영
+                            <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">
+                              {senderInfo?.name || '알수없음'} 
+                              <span className="font-normal text-[10px] text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
+                            </span>
+                          )}
+                          
+                          <div className={`flex items-end gap-1.5 ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row'}`}>
+                            <div className={`px-3.5 py-2 rounded-2xl shadow-sm text-[13px] ${msg.sender_id === instId ? 'bg-slate-700 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
+                              {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                            </div>
+                            <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
+                              {msg.sender_id === instId && unreadBy > 0 && <span className="text-slate-600 font-bold mb-0.5">{unreadBy}</span>}
+                              <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -925,23 +958,23 @@ export default function FloatingChat({ instId }: { instId: string }) {
                   })
                 }
 
-                {/* 💡 누가 입력 중인지 선생님 이름을 띄워주는 UI 적용 */}
                 {typingStaffName && (
                   <div className="flex justify-start w-full mb-1">
-                    <div className="flex items-end gap-1.5 max-w-[85%]">
-                      <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden">
-                        <span className="absolute z-0">T</span>
-                        {staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar && (
-                          <img 
-                            src={staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar} 
-                            alt="profile" 
-                            className="absolute w-full h-full object-cover z-10" 
-                            onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                          />
-                        )}
-                      </div>
+                    <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
+                      <span className="absolute z-0">T</span>
+                      {staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar && (
+                        <img 
+                          src={staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar} 
+                          alt="profile" 
+                          className="absolute w-full h-full object-cover z-10" 
+                          onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                        />
+                      )}
+                    </div>
+                    <div className="flex flex-col items-start max-w-[85%]">
+                      <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">{typingStaffName}</span>
                       <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
-                        {typingStaffName} 선생님이 메시지를 입력 중입니다...
+                        메시지를 입력 중입니다...
                       </div>
                     </div>
                   </div>
