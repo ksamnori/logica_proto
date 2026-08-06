@@ -12,6 +12,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
     return data.publicUrl;
   };
 
+  const [isHQ, setIsHQ] = useState(false); // 💡 본사 직원 여부 상태
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<"parent" | "staff">("parent"); 
 
@@ -39,8 +41,10 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [staffRoomMembers, setStaffRoomMembers] = useState<any[]>([]);
   
-  // 💡 [수정] 누가 입력 중인지 알기 위해 boolean 대신 이름을 저장합니다.
   const [typingStaffName, setTypingStaffName] = useState<string | null>(null);
+
+  const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
+  const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
 
   const activeRoomIdRef = useRef<string | null>(null);
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
@@ -97,7 +101,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const panelPos = useRef({ x: 0, y: 0 });
   const panelDrag = useRef({ isDragging: false, startX: 0, startY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
 
-  // 💡 [안전 수정] 드래그 시작 시 멀티터치 방지 및 경계값 역전 방지
   const handlePanelDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!e.isPrimary) return; 
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -123,7 +126,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
     };
   };
 
-  // 💡 [안전 수정] 드래그 이동 시 경계 제한 강화
   const handlePanelMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!panelDrag.current.isDragging || !panelRef.current || !e.isPrimary) return;
     
@@ -137,7 +139,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
     panelRef.current.style.transform = `translate(${nextX}px, ${nextY}px) scale(${isChatOpen ? 1 : 0.95})`; 
   };
 
-  // 💡 [안전 수정] 드래그 종료 시 상태 초기화
   const handlePanelUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!e.isPrimary) return;
     panelDrag.current.isDragging = false;
@@ -145,7 +146,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
   };
 
   const scrollToBottom = () => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); };
-  // 💡 [수정] 스크롤 조건에 typingStaffName 추가
   useEffect(() => { scrollToBottom(); }, [chatMessages, staffMessages, isTyping, typingStaffName, activeTab]);
 
   useEffect(() => {
@@ -169,7 +169,84 @@ export default function FloatingChat({ instId }: { instId: string }) {
     return () => window.removeEventListener("focus", handleFocus);
   }, [instId]);
 
+  useEffect(() => {
+    if (!instId) return;
+
+    // 💡 1. 현재 접속한 사람의 테넌트(본사인지 지점인지)를 판별합니다.
+    const checkHQStatus = async () => {
+      const { data: me } = await supabase.from('instructor').select('tenant_id').eq('instructor_id', instId).maybeSingle();
+      if (me?.tenant_id) {
+        const { data: myTenant } = await supabase.from('academy_tenant').select('tenant_type').eq('tenant_id', me.tenant_id).maybeSingle();
+        if (myTenant?.tenant_type === 'HQ') {
+          setIsHQ(true);
+          setActiveTab('staff'); // 본사 직원은 무조건 선생님(사내) 탭 고정
+        } else {
+          loadChatRooms(); // 지점(학원) 강사일 때만 학부모 상담방 로드
+        }
+      } else {
+        loadChatRooms(); // 예외처리: 소속 미지정이어도 기본 로드
+      }
+    };
+
+    checkHQStatus();
+    loadStaffRooms(); 
+
+    const channelName = `inst_global_${instId}`;
+    supabase.getChannels().forEach(ch => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
+
+    globalChannelRef.current = supabase.channel(channelName)
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload) => {
+        setIsTyping(false);
+        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "parent" && String(activeRoomIdRef.current) === String(payload.new.room_id);
+
+        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
+          setChatMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
+        }
+        if (isRoomActive && payload.new.sender_type === "parent") {
+          await supabase.from("chat_message").update({ is_read: true }).eq("message_id", payload.new.message_id);
+        }
+        loadChatRooms(); 
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload) => {
+        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
+          setChatMessages(prev => prev.map(m => m.message_id === payload.new.message_id ? { ...m, is_read: payload.new.is_read } : m));
+        }
+        loadChatRooms();
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_room" }, () => loadChatRooms())
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload) => {
+        setTypingStaffName(null); 
+        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "staff" && String(activeStaffRoomIdRef.current) === String(payload.new.room_id);
+
+        if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
+          setStaffMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
+        }
+        if (isRoomActive && payload.new.sender_id !== instId) {
+          await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
+        }
+        
+        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
+        loadStaffRooms(); 
+      })
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "internal_chat_member" }, (payload) => {
+        if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
+          setStaffRoomMembers(prev => prev.map(m => m.instructor_id === payload.new.instructor_id ? { ...m, last_read_at: payload.new.last_read_at } : m));
+        }
+        loadStaffRooms(); 
+      })
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_member" }, () => loadStaffRooms())
+      .subscribe();
+
+    return () => { 
+      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current); 
+      if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
+      if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
+    };
+  }, [instId]);
+
   const loadChatRooms = async () => {
+    if (isHQ) return; // 본사 직원은 학부모 채팅을 로드하지 않음
+
     const { data } = await supabase.from("chat_room")
       .select("room_id, parent_id, parent(phone, student(name)), chat_message(message_id, content, created_at, sender_type, is_read)")
       .eq("instructor_id", instId);
@@ -255,64 +332,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
     } catch(e) {}
   };
 
-  useEffect(() => {
-    if (!instId) return;
-    loadChatRooms();
-    loadStaffRooms(); 
-
-    const channelName = `inst_global_${instId}`;
-    supabase.getChannels().forEach(ch => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
-
-    globalChannelRef.current = supabase.channel(channelName)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload) => {
-        setIsTyping(false);
-        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "parent" && String(activeRoomIdRef.current) === String(payload.new.room_id);
-
-        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-          setChatMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
-        }
-        if (isRoomActive && payload.new.sender_type === "parent") {
-          await supabase.from("chat_message").update({ is_read: true }).eq("message_id", payload.new.message_id);
-        }
-        loadChatRooms(); 
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload) => {
-        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-          setChatMessages(prev => prev.map(m => m.message_id === payload.new.message_id ? { ...m, is_read: payload.new.is_read } : m));
-        }
-        loadChatRooms();
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_room" }, () => loadChatRooms())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload) => {
-        setTypingStaffName(null); 
-        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "staff" && String(activeStaffRoomIdRef.current) === String(payload.new.room_id);
-
-        if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
-          setStaffMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
-        }
-        if (isRoomActive && payload.new.sender_id !== instId) {
-          await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
-        }
-        
-        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
-        loadStaffRooms(); 
-      })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "internal_chat_member" }, (payload) => {
-        if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
-          setStaffRoomMembers(prev => prev.map(m => m.instructor_id === payload.new.instructor_id ? { ...m, last_read_at: payload.new.last_read_at } : m));
-        }
-        loadStaffRooms(); 
-      })
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_member" }, () => loadStaffRooms())
-      .subscribe();
-
-    return () => { 
-      if (globalChannelRef.current) supabase.removeChannel(globalChannelRef.current); 
-      if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
-      if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
-    };
-  }, [instId]);
-
   const showNewChatView = async () => {
     setActiveChatView("new"); setSearchKeyword(""); setExpandedClasses([]);
     const { data } = await supabase.from("student").select("student_id, name, parent_id, parent(phone), enrollment(class(name))").not("parent_id", "is", null).eq("status", "재원");
@@ -395,9 +414,50 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const showNewStaffChatView = async () => {
     setStaffChatView("new"); setStaffSearchKeyword(""); setSelectedInstIds([]);
     try {
-      const { data } = await supabase.from("instructor").select("instructor_id, name, position, profile_image_url").neq("instructor_id", instId).order("name");
-      setAllInstructors(data || []);
-    } catch(e) {}
+      const safeTenantMap: Record<string, string> = {
+        '1ff4299c-d72b-4d99-97b0-45fee08e3b73': '대치 본원',
+        'd59395b0-8c9c-4dd3-9e25-ff569da98abc': '본사',
+        'e24e540f-ebdd-40eb-b20b-696c113def6d': '서초 가맹점'
+      };
+
+      try {
+        const { data: tenantData } = await supabase.from("academy_tenant").select("*");
+        if (tenantData) {
+          tenantData.forEach((t: any) => { 
+            safeTenantMap[String(t.tenant_id)] = t.name; 
+          });
+        }
+      } catch (e) {
+      }
+
+      const { data: instData } = await supabase.from("instructor")
+        .select("*")
+        .neq("instructor_id", instId)
+        .eq("status", "재직")
+        .order("name");
+      
+      if (instData) {
+        const enrichedData = instData.map((inst: any) => ({
+           ...inst,
+           academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' }
+        }));
+
+        setAllInstructors(enrichedData);
+
+        const tSet = new Set<string>();
+        const dSet = new Set<string>();
+        enrichedData.forEach((inst: any) => {
+          const tName = inst.academy_tenant.name;
+          const dName = inst.department || '부서 미지정';
+          tSet.add(tName);
+          dSet.add(`${tName}_${dName}`);
+        });
+        setExpandedTenants(Array.from(tSet));
+        setExpandedDepts(Array.from(dSet));
+      }
+    } catch(e) {
+      console.error(e);
+    }
   };
 
   const toggleInstSelection = (id: string) => {
@@ -409,7 +469,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
       const { data: targetRooms, error: targetError } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
       if (targetError) throw targetError;
 
-      const targetRoomIds = targetRooms?.map(r => r.room_id) || [];
+      const targetRoomIds = targetRooms?.map((r: any) => r.room_id) || [];
       let roomId = null;
       if (targetRoomIds.length > 0) {
         const { data: commonMembers } = await supabase.from('internal_chat_member').select('room_id, internal_chat_room!inner(room_type)').eq('instructor_id', instId).in('room_id', targetRoomIds).eq('internal_chat_room.room_type', 'DIRECT');
@@ -431,7 +491,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const handleStartGroupChat = async () => {
     if (selectedInstIds.length === 0) return;
     if (selectedInstIds.length === 1) {
-      const target = allInstructors.find(i => i.instructor_id === selectedInstIds[0]);
+      const target = allInstructors.find((i: any) => i.instructor_id === selectedInstIds[0]);
       if (target) await handleCreateOrOpenStaffRoom(target.instructor_id, target.name);
       return;
     }
@@ -451,8 +511,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const openStaffChatRoom = async (roomId: string, roomName: string) => {
     setActiveStaffRoomId(roomId); setActiveStaffRoomName(roomName); setStaffChatView("room"); setStaffMessages([]);
     
-    setStaffUnreadCount(prev => Math.max(0, prev - (staffRooms.find(r => r.room_id === roomId)?.unreadCount || 0)));
-    setStaffRooms(prev => prev.map(r => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
+    setStaffUnreadCount(prev => Math.max(0, prev - (staffRooms.find((r: any) => r.room_id === roomId)?.unreadCount || 0)));
+    setStaffRooms(prev => prev.map((r: any) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
 
     if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
     const staffRoomChannelName = `staff_room_${roomId}`;
@@ -496,9 +556,9 @@ export default function FloatingChat({ instId }: { instId: string }) {
     } catch (e: any) { alert("메시지 전송 에러: " + e.message); }
   };
 
-  const filteredParents = newChatParents.filter(s => s.name.toLowerCase().includes(searchKeyword.toLowerCase()));
+  const filteredParents = newChatParents.filter((s: any) => (s?.name || "").toLowerCase().includes(searchKeyword.toLowerCase()));
   const groupedParents: Record<string, any[]> = {};
-  filteredParents.forEach(s => {
+  filteredParents.forEach((s: any) => {
     let classes: string[] = [];
     if (s.enrollment && s.enrollment.length > 0) s.enrollment.forEach((e: any) => { if (e.class?.name) classes.push(e.class.name); });
     if (classes.length === 0) classes.push("반 미배정");
@@ -507,6 +567,22 @@ export default function FloatingChat({ instId }: { instId: string }) {
       if (!groupedParents[cName].find(x => x.student_id === s.student_id)) groupedParents[cName].push(s);
     });
   });
+
+  const filteredInstructors = allInstructors.filter((inst: any) => (inst?.name || "").includes(staffSearchKeyword));
+  const orgTree: Record<string, Record<string, any[]>> = {};
+  
+  filteredInstructors.forEach((inst: any) => {
+    const tenantName = inst.academy_tenant?.name || '소속 미지정';
+    const deptName = inst.department || '부서 미지정';
+    
+    if (!orgTree[tenantName]) orgTree[tenantName] = {};
+    if (!orgTree[tenantName][deptName]) orgTree[tenantName][deptName] = [];
+    
+    orgTree[tenantName][deptName].push(inst);
+  });
+
+  const toggleTenant = (t: string) => setExpandedTenants(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
+  const toggleDept = (d: string) => setExpandedDepts(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d]);
 
   return (
     <>
@@ -521,10 +597,9 @@ export default function FloatingChat({ instId }: { instId: string }) {
 
       <div 
         ref={panelRef}
-        className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[550px] max-h-[80vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+        className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[680px] max-h-[85vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
         style={{ transform: `scale(${isChatOpen ? 1 : 0.95})`, transformOrigin: 'bottom right' }}
       >
-        {/* 💡 [수정] select-none 추가하여 텍스트 드래그(블록) 현상 방지 */}
         <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none select-none">
           <div className="px-5 py-3.5 flex justify-between items-center">
             <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> Logica 메신저</h3>
@@ -535,18 +610,21 @@ export default function FloatingChat({ instId }: { instId: string }) {
             </div>
           </div>
           
+          {/* 💡 본사 직원이면 학부모 탭을 아예 숨깁니다! */}
           <div className="flex px-3">
-            <button 
-              onPointerDown={(e) => e.stopPropagation()} 
-              onClick={() => { 
-                if (activeTab === "parent") { activeChatView === "list" ? showNewChatView() : setActiveChatView("list"); } else { setActiveTab("parent"); setActiveChatView("list"); }
-                setActiveRoomId(null); 
-                loadChatRooms(); 
-              }}
-              className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "parent" ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
-            >
-              👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
-            </button>
+            {!isHQ && (
+              <button 
+                onPointerDown={(e) => e.stopPropagation()} 
+                onClick={() => { 
+                  if (activeTab === "parent") { activeChatView === "list" ? showNewChatView() : setActiveChatView("list"); } else { setActiveTab("parent"); setActiveChatView("list"); }
+                  setActiveRoomId(null); 
+                  loadChatRooms(); 
+                }}
+                className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "parent" ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
+              >
+                👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
+              </button>
+            )}
 
             <button 
               onPointerDown={(e) => e.stopPropagation()} 
@@ -555,14 +633,14 @@ export default function FloatingChat({ instId }: { instId: string }) {
                 setActiveStaffRoomId(null); 
                 loadStaffRooms(); 
               }}
-              className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
+              className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" || isHQ ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
             >
-              👥 선생님 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
+              👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
             </button>
           </div>
         </div>
 
-        {activeTab === "parent" ? (
+        {activeTab === "parent" && !isHQ ? (
           activeChatView === "new" ? (
             <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50 relative">
               <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
@@ -683,38 +761,72 @@ export default function FloatingChat({ instId }: { instId: string }) {
             <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
               <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
                 <button onClick={() => { setStaffChatView("list"); loadStaffRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                <input type="text" value={staffSearchKeyword} onChange={e => setStaffSearchKeyword(e.target.value)} placeholder="선생님 이름 검색" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400" />
+                <input type="text" value={staffSearchKeyword} onChange={e => setStaffSearchKeyword(e.target.value)} placeholder="이름 또는 부서 검색" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400" />
               </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2 pb-16">
-                {allInstructors.filter(inst => inst.name.includes(staffSearchKeyword)).length === 0 ? (
+              <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-3 pb-16">
+                {filteredInstructors.length === 0 ? (
                   <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
                 ) : (
-                  allInstructors.filter(inst => inst.name.includes(staffSearchKeyword)).map(inst => {
-                    const isSelected = selectedInstIds.includes(inst.instructor_id);
-                    const avatarUrl = getProfileImageUrl(inst.profile_image_url);
-
+                  Object.keys(orgTree).sort().map(tenantName => {
+                    const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
+                    const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
+                    
                     return (
-                      <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-3 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 mb-2 ${isSelected ? 'border-slate-500 bg-slate-100' : 'border-slate-200 hover:border-slate-400'}`}>
-                        <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
-                          {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                        </div>
-                        <div className="relative w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[13px] shrink-0 overflow-hidden">
-                          <span className="absolute z-0">T</span>
-                          {avatarUrl && (
-                            <img 
-                              src={avatarUrl} 
-                              alt="profile" 
-                              className="absolute w-full h-full object-cover z-10" 
-                              onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                            />
-                          )}
-                        </div>
-                        <div className="flex-1">
-                          <div className="font-bold text-slate-700 text-sm">{inst.name} 선생님</div>
-                          <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.position || '강사'}</div>
-                        </div>
+                      <div key={tenantName} className="mb-2">
+                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
+                          <span>🏢 {tenantName} <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span></span>
+                          <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        {isTenantExpanded && (
+                          <div className="mt-1.5 ml-2 border-l-2 border-slate-200 pl-2 space-y-2">
+                            {Object.keys(orgTree[tenantName]).sort().map(deptName => {
+                              const deptId = `${tenantName}_${deptName}`;
+                              const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
+                              const deptMembers = orgTree[tenantName][deptName];
+                              
+                              return (
+                                <div key={deptId} className="mb-1">
+                                  <button onClick={() => toggleDept(deptId)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-[12px] flex justify-between items-center transition-colors">
+                                    <span>📁 {deptName} <span className="text-[10px] font-normal ml-1">({deptMembers.length}명)</span></span>
+                                    <svg className={`w-3.5 h-3.5 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                  </button>
+                                  {isDeptExpanded && (
+                                    <div className="mt-1.5 ml-2 space-y-1.5">
+                                      {deptMembers.map((inst: any) => {
+                                        const isSelected = selectedInstIds.includes(inst.instructor_id);
+                                        const avatarUrl = getProfileImageUrl(inst.profile_image_url);
+                                        return (
+                                          <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-2.5 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-500 bg-slate-100' : 'border-slate-200 hover:border-slate-400'}`}>
+                                            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
+                                              {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                                            </div>
+                                            <div className="relative w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[11px] shrink-0 overflow-hidden">
+                                              <span className="absolute z-0">T</span>
+                                              {avatarUrl && (
+                                                <img 
+                                                  src={avatarUrl} 
+                                                  alt="profile" 
+                                                  className="absolute w-full h-full object-cover z-10" 
+                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                                                />
+                                              )}
+                                            </div>
+                                            <div className="flex-1">
+                                              <div className="font-bold text-slate-700 text-sm">{inst.name} 선생님</div>
+                                              <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.position || '강사'}</div>
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
                       </div>
-                    );
+                    )
                   })
                 )}
               </div>
@@ -733,7 +845,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
               {staffRooms.length === 0 ? (
                  <div className="text-center py-10 flex flex-col items-center gap-3">
                    <span className="text-slate-400 font-bold text-sm">참여중인 대화방이 없습니다.</span>
-                   <button onClick={showNewStaffChatView} className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-colors">+ 선생님 목록 보기</button>
+                   <button onClick={showNewStaffChatView} className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-colors">+ 조직도 열기</button>
                  </div>
               ) : (
                 staffRooms.map((r, idx) => {
@@ -813,7 +925,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
                   })
                 }
 
-                {/* 💡 [수정] 누가 입력 중인지 선생님 이름을 띄워주는 UI 적용 */}
+                {/* 💡 누가 입력 중인지 선생님 이름을 띄워주는 UI 적용 */}
                 {typingStaffName && (
                   <div className="flex justify-start w-full mb-1">
                     <div className="flex items-end gap-1.5 max-w-[85%]">
@@ -838,7 +950,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
                 <div ref={messagesEndRef} />
               </div>
               <div className="bg-white p-3 border-t flex items-end gap-2">
-                {/* 💡 [수정] 내가 보낼 때 내 이름(sender_name)도 같이 태워서 보냄 */}
                 <textarea 
                   rows={1} 
                   value={staffChatInput} 

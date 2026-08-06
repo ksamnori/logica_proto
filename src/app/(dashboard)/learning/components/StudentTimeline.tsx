@@ -34,6 +34,16 @@ const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => 
   return id; 
 };
 
+const getDiffScore = (diff: string) => {
+  if (!diff) return 3;
+  if (diff.includes('최상')) return 5;
+  if (diff.includes('상')) return 4;
+  if (diff.includes('중')) return 3;
+  if (diff.includes('하')) return 2;
+  if (diff.includes('최하')) return 1;
+  return 3;
+};
+
 export default function StudentTimeline({
   currentView, activeTab, dateFilter, setDateFilter, isLoading,
   filteredTimeline = [], selectedBlocks = [], setSelectedBlocks, handleSelectAllStudent,
@@ -239,26 +249,57 @@ export default function StudentTimeline({
 
   const calculateExactMatches = async () => {
     try {
-      let targetWQs = [];
+      let uniqueQids: string[] = [];
+
       if (modalTab === 'TAXONOMY') {
           const selArr = Array.from(selectedTaxonomyIds);
-          targetWQs = allIncorrectRecords.filter(r => {
+          const targetWQs = allIncorrectRecords.filter(r => {
               const tax = Array.isArray(r.question_db) ? r.question_db[0]?.taxonomy_id : r.question_db?.taxonomy_id;
               if (!tax) return false;
               return selArr.some(sel => tax.startsWith(sel)); 
           });
+          uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
       } else if (modalTab === 'PERIOD') {
           const start = new Date(startDate).getTime();
           const end = new Date(endDate).getTime() + 86400000;
-          targetWQs = allIncorrectRecords.filter(r => {
+          const targetWQs = allIncorrectRecords.filter(r => {
               const t = new Date(r.created_at).getTime();
               return t >= start && t < end;
           });
+          uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
       } else if (modalTab === 'SELECTED') {
-          targetWQs = allIncorrectRecords; 
+          let tempQIds: string[] = [];
+          for (const block of selectedBlocks) {
+            if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_')) {
+              const assignId = block.split('_').pop();
+              const { data: ans } = await supabaseClient.from('student_answer')
+                .select('question_id')
+                .eq('exam_assignment_id', assignId)
+                .in('grading_code', ['X', 'TX', '☆', 'B']);
+              ans?.forEach(a => { if (a.question_id) tempQIds.push(a.question_id); });
+            } else if (block.startsWith('hw_')) {
+              const hwId = block.split('_')[1];
+              const { data: hwAns } = await supabaseClient.from('student_homework_answer')
+                .select('tq_id, question_id')
+                .eq('homework_id', hwId)
+                .eq('student_id', currentView.studentId)
+                .in('grading_code', ['X', 'TX', '☆', 'B']);
+                
+              if (hwAns && hwAns.length > 0) {
+                const tqIds = hwAns.map(a => a.tq_id).filter(Boolean);
+                if (tqIds.length > 0) {
+                  const { data: tqs } = await supabaseClient.from('textbook_question').select('question_id').in('tq_id', tqIds);
+                  tqs?.forEach(t => { if(t.question_id) tempQIds.push(t.question_id); });
+                }
+                hwAns.forEach(a => { if (a.question_id) tempQIds.push(a.question_id); });
+              }
+            }
+          }
+          // 💡 [핵심 버그 수정] unresolvedSet 교집합 필터를 완전히 삭제했습니다!
+          // 체크한 시험지의 실제 오답(X, TX 등)을 무조건 끌고 옵니다.
+          uniqueQids = Array.from(new Set(tempQIds.filter(Boolean)));
       }
 
-      const uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
       if (uniqueQids.length === 0) { setMatchedCache([]); setIsCalculating(false); return; }
       if (genMethod === 'SAME') { setMatchedCache(uniqueQids); setIsCalculating(false); return; }
 
@@ -291,6 +332,11 @@ export default function StudentTimeline({
     sessionStorage.setItem('restoreExamQuestions', '1');
     sessionStorage.setItem('examQuestions', JSON.stringify(matchedCache));
     sessionStorage.setItem('examTitle', `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`);
+    
+    // 🌟 [추가된 부분] 최종 뷰어에서 사용할 수 있도록 학생 정보도 같이 싸서 보냅니다!
+    sessionStorage.setItem('clinicTargetStudentId', currentView?.studentId);
+    sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
+    sessionStorage.setItem('isClinicMode', 'true'); // 클리닉 모드라는 꼬리표
     
     window.location.href = '/exam/step2?source=clinic_incorrect';
   };
@@ -427,7 +473,6 @@ export default function StudentTimeline({
       if (isLeaf) {
         return (
           <div key={key} className="flex items-center py-1 px-1.5 ml-3 hover:bg-slate-50 rounded transition-colors group">
-            {/* 🌟 [수정] 텍스트가 아무리 길어도 배지가 찌그러지지 않도록 min-w-0, shrink-0, whitespace-nowrap 적용 */}
             <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 py-1">
               <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer" />
               <span className="flex-1 text-[13px] font-semibold text-slate-600 truncate group-hover:text-[#002864] transition-colors min-w-0" title={displayName}>{displayName}</span>
@@ -484,7 +529,7 @@ export default function StudentTimeline({
                 {modalTab === 'TAXONOMY' && (
                   <div className="space-y-2">
                     <div className="flex justify-between items-center mb-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200">
-                      <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">💡 최근 1년 내 푼 단원의 <strong className="text-slate-800">정답률(%)</strong>과 <strong className="text-rose-500">오답 수</strong>입니다.</span>
+                      <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5">💡 최근 1년 내 푼 단원의 <strong className="text-slate-800">최초 정답률(%)</strong>과 <strong className="text-rose-500">현재 미해결 오답 수</strong>입니다.</span>
                     </div>
                     {isTaxonomyLoading ? (
                        <div className="text-center py-20 text-slate-400 font-bold animate-pulse text-sm">데이터를 분석 중입니다... 📊</div>
