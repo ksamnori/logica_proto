@@ -7,7 +7,6 @@ import { supabase } from '@/lib/supabase';
 
 export default function HQSignupPage() {
   const router = useRouter();
-  // 💡 [수정] formData에 position(직책) 추가
   const [formData, setFormData] = useState({ name: '', phone: '', password: '', department: '', position: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [hqTenantId, setHqTenantId] = useState<string | null>(null);
@@ -47,7 +46,6 @@ export default function HQSignupPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hqTenantId) return alert('본사(HQ) 테넌트 정보가 시스템에 설정되어 있지 않습니다.');
-    // 💡 [수정] 필수 입력 항목에 직책(position) 추가
     if (!formData.name || !formData.phone || !formData.password || !formData.department || !formData.position) return alert('모든 항목을 입력해주세요.');
 
     const cleanPhone = formData.phone.replace(/[^0-9]/g, '');
@@ -72,7 +70,9 @@ export default function HQSignupPage() {
         name: formData.name,
         email: fakeEmail,
         phone: formData.phone,
-        position: formData.position, // 💡 사용자가 입력한 직책을 저장
+        // 💡 [핵심] 시스템 권한은 '본사 관리자'로 고정하고, 화면용 직책을 따로 분리 저장합니다!
+        position: '본사 관리자', 
+        chat_position: formData.position, 
         role: 'SUPER_ADMIN', 
         tenant_id: hqTenantId, 
         department: formData.department,
@@ -113,7 +113,6 @@ export default function HQSignupPage() {
             <label className="block text-xs font-bold text-slate-600 mb-1">비밀번호</label>
             <input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] text-slate-800" placeholder="••••••••" />
           </div>
-          {/* 💡 [추가] 부서와 직책을 나란히 배치 */}
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs font-bold text-slate-600 mb-1">소속 부서</label>

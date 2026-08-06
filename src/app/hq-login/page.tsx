@@ -10,7 +10,6 @@ export default function HQLoginPage() {
   const [formData, setFormData] = useState({ phone: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
 
-  // 휴대폰 번호 자동 하이픈(-) 포맷팅
   const formatPhone = (val: string) => {
     const res = val.replace(/[^0-9]/g, '');
     if (res.length < 4) return res;
@@ -33,9 +32,8 @@ export default function HQLoginPage() {
     setIsLoading(true);
     try {
       const cleanPhone = formData.phone.replace(/[^0-9]/g, '');
-      const fakeEmail = `${cleanPhone}@logica.com`; // 본사 가입 시 사용한 규칙 그대로 적용
+      const fakeEmail = `${cleanPhone}@logica.com`; 
 
-      // 1. Supabase Auth 로그인
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: fakeEmail,
         password: formData.password,
@@ -43,23 +41,24 @@ export default function HQLoginPage() {
 
       if (authError) throw new Error('연락처나 비밀번호가 일치하지 않습니다.');
 
-      // 2. 강사(Staff) 정보 불러오기
+      // 💡 [수정] DB에서 chat_position을 함께 불러옵니다.
       const { data: instData, error: dbError } = await supabase
         .from('instructor')
-        .select('instructor_id, name, role, position, tenant_id, academy_tenant(tenant_type)')
+        .select('instructor_id, name, role, position, chat_position, tenant_id, academy_tenant(tenant_type)')
         .eq('instructor_id', authData.user.id)
         .single();
 
       if (dbError || !instData) throw new Error('직원 정보를 찾을 수 없습니다.');
 
-      // 3. 브라우저 저장소에 로그인 정보 세팅
       localStorage.setItem('logica_instructor_id', instData.instructor_id);
       localStorage.setItem('logica_instructor_name', instData.name);
       localStorage.setItem('logica_instructor_role', instData.role || 'SUPER_ADMIN');
-      localStorage.setItem('logica_instructor_position', instData.position || '본사 직원');
+      
+      // 💡 [핵심] 브라우저에 "chat_position(채팅용 직책)"을 1순위로 저장. (없으면 기존 position 사용)
+      localStorage.setItem('logica_instructor_position', instData.chat_position || instData.position || '본사 직원');
+      
       if (instData.tenant_id) localStorage.setItem('logica_tenant_id', instData.tenant_id);
 
-      // 4. HQ 전용 채팅/업무 공간으로 이동
       router.push('/hq');
 
     } catch (error: any) {
@@ -71,13 +70,10 @@ export default function HQLoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900 font-pretendard">
-      {/* 💡 회원가입과 100% 동일한 컨테이너 (패딩, 라운드, 그림자 등) */}
       <div className="bg-white p-10 rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden">
-        {/* 상단 컬러 바 포인트 */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#002864] to-blue-500"></div>
         
         <div className="text-center mb-8">
-          {/* 💡 회원가입과 완벽히 동일한 타이틀 텍스트와 폰트 크기 */}
           <h1 className="text-3xl font-black text-slate-800 tracking-tight">천종현수학연구소 <span className="text-[#002864]">HQ</span></h1>
           <p className="text-sm font-bold text-slate-400 mt-2">본사/출판사 임직원 전용 로그인</p>
         </div>
@@ -112,7 +108,6 @@ export default function HQLoginPage() {
           </button>
         </form>
 
-        {/* 하단 회원가입 이동 링크 */}
         <div className="mt-8 text-center border-t border-slate-100 pt-6">
           <p className="text-xs text-slate-400 font-bold">
             계정이 없으신가요? <button type="button" onClick={() => router.push('/hq-signup')} className="text-[#002864] hover:underline ml-1">본사 직원 가입하기</button>
