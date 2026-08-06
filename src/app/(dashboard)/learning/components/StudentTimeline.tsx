@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-// 환경 변수 설정
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -29,7 +28,6 @@ interface StudentTimelineProps {
   handleDeletePrint: (assignmentId: string, examId: string) => void;
 }
 
-// Taxonomy ID를 실제 이름으로 변환
 const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => {
   if (!id) return "분류 없음";
   if (categoryMap && categoryMap[id]) return categoryMap[id];
@@ -46,12 +44,11 @@ export default function StudentTimeline({
   const [modalTab, setModalTab] = useState<'TAXONOMY' | 'PERIOD' | 'SELECTED' | null>(null);
   const [isEngineRunning, setIsEngineRunning] = useState(false);
 
-  // 💡 출제 방식 및 문제 수, 디테일 옵션 상태 관리
-  const [genMethod, setGenMethod] = useState<'SAME' | 'TWIN'>('SAME');
+  const [genMethod, setGenMethod] = useState<'SAME' | 'TWIN'>('TWIN');
   const [twinCount, setTwinCount] = useState<number>(1);
   const [similarCount, setSimilarCount] = useState<number>(1);
   const [difficultyOption, setDifficultyOption] = useState<string>('그대로');
-  const [excludeOriginal, setExcludeOriginal] = useState<boolean>(true); // 기본: 원본 제외
+  const [excludeOriginal, setExcludeOriginal] = useState<boolean>(true);
   const [maxTypeLimit, setMaxTypeLimit] = useState<number>(3);
   const [isMaxTypeLimitActive, setIsMaxTypeLimitActive] = useState<boolean>(true);
 
@@ -66,6 +63,10 @@ export default function StudentTimeline({
   const [selectedTaxonomyIds, setSelectedTaxonomyIds] = useState<Set<string>>(new Set());
 
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
+  const [allIncorrectRecords, setAllIncorrectRecords] = useState<any[]>([]);
+  
+  const [isCalculating, setIsCalculating] = useState(false);
+  const [matchedCache, setMatchedCache] = useState<string[]>([]);
 
   useEffect(() => {
     const fetchMasterCategory = async () => {
@@ -99,8 +100,7 @@ export default function StudentTimeline({
         if (!fileError && fileData) {
           const text = await fileData.text();
           const json = JSON.parse(text);
-          const dataArray = Array.isArray(json) ? json : Object.values(json);
-          finalMap = buildMap(dataArray);
+          finalMap = buildMap(Array.isArray(json) ? json : Object.values(json));
         }
 
         if (Object.keys(finalMap).length === 0) {
@@ -133,64 +133,44 @@ export default function StudentTimeline({
   const loadTaxonomyData = async () => {
     setIsTaxonomyLoading(true);
     try {
-      const { data: ansData } = await supabaseClient
-        .from('student_answer')
-        .select('is_correct, question_db(taxonomy_id)')
-        .eq('student_id', currentView.studentId)
-        .not('question_db', 'is', null);
-
-      const { data: incData } = await supabaseClient
-        .from('student_incorrect_record')
-        .select('question_db(taxonomy_id)')
-        .eq('student_id', currentView.studentId)
-        .is('resolved_at', null)
-        .not('question_db', 'is', null);
-
-      const stats: Record<string, { total: number; correct: number; pending: number }> = {};
+      const { data: statsData, error: statsErr } = await supabaseClient.rpc('get_taxonomy_stats', { p_student_id: currentView.studentId });
       
-      const addStat = (taxId: string, isCorrect?: boolean, isPending?: boolean) => {
-        if (!taxId) return;
-        const parts = taxId.split('-');
-        for (let i = 1; i <= Math.min(parts.length, 7); i++) {
-          const prefix = parts.slice(0, i).join('-');
-          if (!stats[prefix]) stats[prefix] = { total: 0, correct: 0, pending: 0 };
-          if (isCorrect !== undefined) {
-            stats[prefix].total += 1;
-            if (isCorrect) stats[prefix].correct += 1;
+      if (!statsErr && statsData) {
+        const stats: Record<string, { total: number; correct: number; pending: number }> = {};
+        
+        statsData.forEach((row: any) => {
+          const parts = row.taxonomy_id.split('-');
+          for (let i = 1; i <= Math.min(parts.length, 5); i++) {
+            const prefix = parts.slice(0, i).join('-');
+            if (!stats[prefix]) stats[prefix] = { total: 0, correct: 0, pending: 0 };
+            stats[prefix].total += Number(row.total_cnt);
+            stats[prefix].correct += Number(row.correct_cnt);
+            stats[prefix].pending += Number(row.pending_cnt);
           }
-          if (isPending) stats[prefix].pending += 1;
-        }
-      };
+        });
 
-      ansData?.forEach((row: any) => {
-          const qDb = Array.isArray(row.question_db) ? row.question_db[0] : row.question_db;
-          addStat(qDb?.taxonomy_id, row.is_correct, false);
-      });
+        setTaxonomyStats(stats);
 
-      incData?.forEach((row: any) => {
-          const qDb = Array.isArray(row.question_db) ? row.question_db[0] : row.question_db;
-          addStat(qDb?.taxonomy_id, undefined, true);
-      });
+        const tree: any = {};
+        Object.keys(stats).forEach(prefix => {
+            const parts = prefix.split('-');
+            let currentLevel = tree;
+            let currentPrefix = "";
+            parts.forEach((part, idx) => {
+                currentPrefix = currentPrefix ? `${currentPrefix}-${part}` : part;
+                if (!currentLevel[currentPrefix]) currentLevel[currentPrefix] = { children: {} };
+                if (idx < parts.length - 1) currentLevel = currentLevel[currentPrefix].children;
+            });
+        });
+        setTaxonomyTree(tree);
+      }
 
-      setTaxonomyStats(stats);
+      const { data: incData } = await supabaseClient.from('student_incorrect_record')
+        .select('record_id, question_id, created_at, question_db!inner(taxonomy_id, difficulty)')
+        .eq('student_id', currentView.studentId)
+        .is('resolved_at', null);
 
-      const tree: any = {};
-      Object.keys(stats).forEach(prefix => {
-          const parts = prefix.split('-');
-          let currentLevel = tree;
-          let currentPrefix = "";
-          parts.forEach((part, idx) => {
-              currentPrefix = currentPrefix ? `${currentPrefix}-${part}` : part;
-              if (!currentLevel[currentPrefix]) {
-                  currentLevel[currentPrefix] = { children: {} };
-              }
-              if (idx < parts.length - 1) {
-                  currentLevel = currentLevel[currentPrefix].children;
-              }
-          });
-      });
-
-      setTaxonomyTree(tree);
+      setAllIncorrectRecords(incData || []);
     } catch (e) {
       console.error("분류 체계 로딩 오류:", e);
     } finally {
@@ -202,41 +182,27 @@ export default function StudentTimeline({
     setSelectedTaxonomyIds(prev => {
       const next = new Set(prev);
       const allKeys = Object.keys(taxonomyStats);
-
       if (isChecked) {
-        allKeys.forEach(k => {
-          if (k === prefix || k.startsWith(prefix + '-')) next.add(k);
-        });
+        allKeys.forEach(k => { if (k === prefix || k.startsWith(prefix + '-')) next.add(k); });
       } else {
-        allKeys.forEach(k => {
-          if (k === prefix || k.startsWith(prefix + '-')) next.delete(k);
-        });
+        allKeys.forEach(k => { if (k === prefix || k.startsWith(prefix + '-')) next.delete(k); });
         const parts = prefix.split('-');
         let ancestor = '';
-        parts.forEach(p => {
-          ancestor = ancestor ? `${ancestor}-${p}` : p;
-          next.delete(ancestor);
-        });
+        parts.forEach(p => { ancestor = ancestor ? `${ancestor}-${p}` : p; next.delete(ancestor); });
       }
       return next;
     });
   };
 
   const openModal = (tab: 'TAXONOMY' | 'PERIOD' | 'SELECTED') => {
-    if (tab === 'SELECTED' && selectedBlocks.length === 0) {
-      alert('먼저 오답을 추출할 학습지(블록)를 타임라인에서 체크해주세요!');
-      return;
-    }
+    if (tab === 'SELECTED' && selectedBlocks.length === 0) return alert('먼저 타임라인에서 학습지를 체크해주세요!');
     setModalTab(tab);
   };
 
-  // 💡 [핵심] 원본 오답 개수 파악
   const getBasePendingCount = () => {
     if (modalTab === 'TAXONOMY') {
       const selectedArray = Array.from(selectedTaxonomyIds).sort();
-      const topLevelSelected = selectedArray.filter(id => {
-         return !selectedArray.some(otherId => id !== otherId && id.startsWith(otherId + '-'));
-      });
+      const topLevelSelected = selectedArray.filter(id => !selectedArray.some(otherId => id !== otherId && id.startsWith(otherId + '-')));
       return topLevelSelected.reduce((acc, id) => acc + (taxonomyStats[id]?.pending || 0), 0);
     } else if (modalTab === 'SELECTED') {
       return filteredTimeline.filter(item => selectedBlocks.includes(item.id)).reduce((acc, curr) => acc + (curr.xCount || 0), 0);
@@ -253,78 +219,148 @@ export default function StudentTimeline({
 
   const basePendingCount = getBasePendingCount();
   
-  // 💡 [핵심 완벽 적용] 실시간 오답 개수 로직: 드롭다운 수치에 따라 즉시 100% 반영됨!
-  let finalQuestionCount = 0;
+  let expectedFinalCount = 0;
   if (genMethod === 'SAME') {
-    finalQuestionCount = basePendingCount;
+    expectedFinalCount = basePendingCount;
   } else {
-    // 쌍둥이/유사 출제 모드일 경우: (원본 수 × 쌍둥이 수) + (원본 수 × 유사 수)
-    finalQuestionCount = (basePendingCount * twinCount) + (basePendingCount * similarCount);
-    // 기존 문제 제외를 해제했을 경우, 원본 문제 개수도 학습지에 더해줍니다.
-    if (!excludeOriginal) {
-      finalQuestionCount += basePendingCount; 
+    expectedFinalCount = (basePendingCount * twinCount) + (basePendingCount * similarCount);
+    if (!excludeOriginal) expectedFinalCount += basePendingCount;
+  }
+
+  useEffect(() => {
+    if (!modalTab || expectedFinalCount === 0) {
+      setMatchedCache([]);
+      return;
     }
-  }
+    setIsCalculating(true);
+    const timer = setTimeout(() => { calculateExactMatches(); }, 300);
+    return () => clearTimeout(timer);
+  }, [selectedTaxonomyIds, selectedBlocks, modalTab, twinCount, similarCount, difficultyOption, excludeOriginal, genMethod, isMaxTypeLimitActive, maxTypeLimit]);
 
-  // (만약 TAXONOMY 모드이고 유형별 제한이 켜져있다면, 각 유형별로 제한을 씌워 더 정확하게 깎아줍니다)
-  if (modalTab === 'TAXONOMY' && isMaxTypeLimitActive && genMethod === 'TWIN') {
-     const selectedArray = Array.from(selectedTaxonomyIds).sort();
-     const topLevelSelected = selectedArray.filter(id => !selectedArray.some(otherId => id !== otherId && id.startsWith(otherId + '-')));
-     let cappedTotal = 0;
-     topLevelSelected.forEach(id => {
-        let pending = taxonomyStats[id]?.pending || 0;
-        let expected = (pending * twinCount) + (pending * similarCount);
-        if (!excludeOriginal) expected += pending;
-        cappedTotal += Math.min(expected, maxTypeLimit);
-     });
-     finalQuestionCount = cappedTotal;
-  }
+  const calculateExactMatches = async () => {
+    try {
+      let targetWQs = [];
+      if (modalTab === 'TAXONOMY') {
+          const selArr = Array.from(selectedTaxonomyIds);
+          targetWQs = allIncorrectRecords.filter(r => {
+              const tax = Array.isArray(r.question_db) ? r.question_db[0]?.taxonomy_id : r.question_db?.taxonomy_id;
+              if (!tax) return false;
+              return selArr.some(sel => tax.startsWith(sel)); 
+          });
+      } else if (modalTab === 'PERIOD') {
+          const start = new Date(startDate).getTime();
+          const end = new Date(endDate).getTime() + 86400000;
+          targetWQs = allIncorrectRecords.filter(r => {
+              const t = new Date(r.created_at).getTime();
+              return t >= start && t < end;
+          });
+      } else if (modalTab === 'SELECTED') {
+          targetWQs = allIncorrectRecords; 
+      }
 
-  // 💡 [핵심] 편집 후 만들기 라우팅 로직 (데이터 풀패키지 전달)
-  const handleEditAndCreate = () => {
-    if (finalQuestionCount === 0) return alert("추출할 오답 문항이 없습니다. 세팅을 확인해주세요.");
+      const uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
+      if (uniqueQids.length === 0) { setMatchedCache([]); setIsCalculating(false); return; }
+      if (genMethod === 'SAME') { setMatchedCache(uniqueQids); setIsCalculating(false); return; }
+
+      const { data: matchedIds, error } = await supabaseClient.rpc('get_clinic_matches', {
+        p_target_qids: uniqueQids,
+        p_twin_count: twinCount,
+        p_sim_count: similarCount,
+        p_diff_opt: difficultyOption,
+        p_exclude_orig: excludeOriginal,
+        p_max_limit: maxTypeLimit,
+        p_is_limit_active: isMaxTypeLimitActive
+      });
+
+      if (error) {
+        console.error("Match Engine RPC Error:", error);
+        setMatchedCache([]);
+      } else {
+        setMatchedCache(matchedIds || []);
+      }
+    } catch (err) {
+      console.error("Calculate Catch Error:", err);
+    } finally {
+      setIsCalculating(false);
+    }
+  };
+
+  const handleEditAndCreate = async () => {
+    if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다. 세팅을 확인해주세요.");
     
-    // 현재 세팅된 모든 값들을 스토리지에 상세하게 담아 step2로 넘깁니다.
-    const payload = {
-      studentId: currentView?.studentId,
-      studentName: currentView?.studentName,
-      sourceMode: modalTab,
-      basePendingCount, // 💡 Step2에서 참고할 수 있도록 원본 갯수도 명시
-      finalQuestionCount, // 💡 Step2에서 목표로 삼을 최종 갯수 명시
-      selectedTaxonomyIds: Array.from(selectedTaxonomyIds),
-      selectedBlocks,
-      startDate,
-      endDate,
-      genMethod,
-      twinCount,      // 💡 선택한 쌍둥이 배수
-      similarCount,   // 💡 선택한 유사 배수
-      difficultyOption,
-      excludeOriginal,
-      isMaxTypeLimitActive,
-      maxTypeLimit
-    };
+    sessionStorage.setItem('restoreExamQuestions', '1');
+    sessionStorage.setItem('examQuestions', JSON.stringify(matchedCache));
+    sessionStorage.setItem('examTitle', `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`);
     
-    sessionStorage.setItem('logica_clinic_pending_print', JSON.stringify(payload));
     window.location.href = '/exam/step2?source=clinic_incorrect';
   };
 
   const handleCreatePrint = async () => {
-    if (finalQuestionCount === 0) return alert("추출할 오답 문항이 0개입니다. 조건이나 문제 수를 확인해주세요.");
+    if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다.");
     setIsEngineRunning(true);
     
     try {
-      // 오해를 유발했던 DB 풀(Pool) 알림창은 제거하고, 정확한 타겟팅 알림창으로 변경했습니다.
-      alert(
-        `[자동 출제 시스템 가동 🚀]\n\n` +
-        `설정하신 조건에 따라 총 ${finalQuestionCount}개의 맞춤형 유사/쌍둥이 문항을 구성하여 3라운드 클리닉 패드로 전송합니다.\n` +
-        `(실제 DB 문항 보유 상황에 따라 최종 생성 개수는 일부 조정될 수 있습니다.)`
-      );
+      const instId = localStorage.getItem('logica_instructor_id');
+      if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다. 다시 로그인 해주세요.");
 
-      // (추후 여기에 실제 서버 API 호출 로직을 결합하면 됩니다.)
+      const examTitle = `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`;
+      
+      const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
+        title: examTitle,
+        sub_title: '유형별 맞춤 오답',
+        exam_type: '오답프린트', 
+        total_questions: matchedCache.length,
+        instructor_id: instId,
+        layout_settings: { 
+          column: 2, 
+          split: 4, 
+          titleMode: 'all', 
+          template: 'basic1',
+          numberColor: '#175b6a',
+          titleColor: '#002864',
+          lineColor: '#94a3b8'
+        }
+      }).select().single();
+
+      if (masterErr || !masterData) throw new Error(`시험지 마스터 생성 실패: ${masterErr?.message}`);
+      const newExamId = masterData.exam_id;
+
+      const examItems = matchedCache.map((qId, idx) => ({
+        exam_id: newExamId,
+        question_id: qId,
+        sort_order: idx + 1
+      }));
+      const { error: itemsErr } = await supabaseClient.from('exam_item').insert(examItems);
+      if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
+
+      const { error: assignErr } = await supabaseClient.from('exam_assignment').insert({
+        exam_id: newExamId,
+        student_id: currentView.studentId,
+        class_id: currentView.classId,
+        status: '미응시'
+      });
+      if (assignErr) throw new Error(`학생 배부 실패: ${assignErr.message}`);
+
+      const tasks = matchedCache.map(qId => ({
+        student_id: currentView.studentId,
+        task_type: '유형오답클리닉',
+        question_id: qId,
+        status: '대기' 
+      }));
+
+      const { error: taskErr } = await supabaseClient.from('clinic_task').insert(tasks);
+      if (taskErr) throw new Error(`클리닉 전송 실패: ${taskErr.message}`);
+
+      alert(`[출제 및 전송 완료! 🎉]\n조회된 ${matchedCache.length}개의 맞춤 문항이 '학습 타임라인'에 배부되었으며,\n학생의 클리닉 패드로 즉시 전송되었습니다!`);
       setModalTab(null);
-    } catch (err) {
+      
+      setTimeout(() => {
+        window.location.reload();
+      }, 500);
+
+    } catch (err: any) {
       console.error(err);
-      alert("출제 가동 중 오류가 발생했습니다.");
+      alert(`출제 중 오류가 발생했습니다: ${err.message}`);
     } finally {
       setIsEngineRunning(false);
     }
@@ -351,7 +387,7 @@ export default function StudentTimeline({
         <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm mt-0.5">
           <div className="flex items-center gap-3 pl-2">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={isAllSelected} onChange={handleSelectAllStudent} className="w-5 h-5 accent-rose-500" />
+              <input type="checkbox" checked={isAllSelected || false} onChange={handleSelectAllStudent || (() => {})} className="w-5 h-5 accent-rose-500" />
               <span className="text-[13px] font-bold text-slate-700">전체 선택</span>
             </label>
             <div className="w-px h-4 bg-slate-300 mx-1"></div>
@@ -388,27 +424,27 @@ export default function StudentTimeline({
         </div>
       );
 
-      // 말단 노드 (폰트 사이즈 복구)
       if (isLeaf) {
         return (
           <div key={key} className="flex items-center py-1 px-1.5 ml-3 hover:bg-slate-50 rounded transition-colors group">
+            {/* 🌟 [수정] 텍스트가 아무리 길어도 배지가 찌그러지지 않도록 min-w-0, shrink-0, whitespace-nowrap 적용 */}
             <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 py-1">
               <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer" />
-              <span className="text-[13px] font-semibold text-slate-600 truncate group-hover:text-[#002864] transition-colors" title={displayName}>{displayName}</span>
-              {stat.pending > 0 && <span className="ml-1 text-[10px] font-extrabold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded leading-none shadow-sm">오답 {stat.pending}</span>}
+              <span className="flex-1 text-[13px] font-semibold text-slate-600 truncate group-hover:text-[#002864] transition-colors min-w-0" title={displayName}>{displayName}</span>
+              {stat.pending > 0 && <span className="ml-1 text-[10px] font-extrabold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}
             </label>
             {progressBar}
           </div>
         );
       }
 
-      // 상위 폴더 노드 (폰트 사이즈 복구)
       return (
         <details key={key} open={depth <= 2} className={depth === 1 ? "mb-2" : "mb-1 pl-1 ml-2 border-l border-slate-200"}>
           <summary className={`cursor-pointer flex items-center py-1.5 transition-colors select-none group ${depth === 1 ? "bg-slate-50 hover:bg-slate-100 px-3 rounded-lg border border-slate-200 shadow-sm" : "hover:bg-slate-50 px-2 rounded-md"}`}>
             <svg className="w-4 h-4 text-slate-400 group-hover:text-[#002864] transition-transform details-arrow shrink-0 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
             <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer mr-2" />
-            <span className={`flex-1 truncate ${depth === 1 ? "text-[14px] font-extrabold text-[#002864]" : "text-[13px] font-bold text-slate-700"}`} title={displayName}>{displayName}</span>
+            <span className={`flex-1 truncate min-w-0 ${depth === 1 ? "text-[14px] font-extrabold text-[#002864]" : "text-[13px] font-bold text-slate-700"}`} title={displayName}>{displayName}</span>
+            {stat.pending > 0 && <span className="ml-2 text-[10px] font-extrabold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}
             {progressBar}
           </summary>
           <div className={depth === 1 ? "pl-2 mt-1 space-y-0.5" : "mt-0.5 space-y-0.5"}>
@@ -428,8 +464,7 @@ export default function StudentTimeline({
           
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
             <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
-              {currentView?.studentName} 학생 오답 관리
-              {modalTab === 'TAXONOMY' && <span className="text-sm font-bold text-slate-500 ml-2">선택된 원본 오답 <span className="text-rose-500">{basePendingCount}개</span></span>}
+              {currentView?.studentName} 학생 맞춤 클리닉 출제
             </h2>
             <button onClick={() => setModalTab(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -437,14 +472,12 @@ export default function StudentTimeline({
           </div>
 
           <div className="flex flex-1 overflow-hidden">
-            {/* 좌측 탭 네비게이션 */}
             <div className="w-40 border-r border-slate-200 bg-slate-50 flex flex-col pt-4 shrink-0">
               <button onClick={() => setModalTab('TAXONOMY')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'TAXONOMY' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>단원별 취약 유형</button>
               <button onClick={() => setModalTab('PERIOD')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'PERIOD' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>기간별 오답</button>
               <button onClick={() => setModalTab('SELECTED')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'SELECTED' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>학습지별 오답</button>
             </div>
 
-            {/* 중앙 영역 */}
             <div className="flex-1 flex flex-col bg-white overflow-hidden relative">
               <div className="absolute inset-0 overflow-y-auto custom-scrollbar p-6">
                 
@@ -503,11 +536,9 @@ export default function StudentTimeline({
               </div>
             </div>
 
-            {/* 💡 우측 출제 옵션 패널 (줄바꿈 방지 적용) */}
             <div className="w-[420px] bg-white border-l border-slate-200 flex flex-col shrink-0 z-10 shadow-[-4px_0_15px_rgba(0,0,0,0.02)]">
               <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
                 
-                {/* 💡 상세 출제 설정 */}
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 text-[13px] font-bold text-slate-600 leading-loose shadow-sm break-keep">
                   대상 문제의 <span className="text-sky-500 font-black">쌍둥이문제</span> 
                   <select 
@@ -533,7 +564,6 @@ export default function StudentTimeline({
                   </select> 출제합니다.
                 </div>
 
-                {/* 💡 디테일 체크박스 옵션 */}
                 <div className="space-y-4 mb-8 pl-1">
                   <label className="flex items-center gap-2 cursor-pointer group w-max">
                     <input type="checkbox" checked={excludeOriginal} onChange={e => setExcludeOriginal(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-sky-500" />
@@ -555,22 +585,24 @@ export default function StudentTimeline({
                 </div>
               </div>
 
-              {/* 💡 하단 실시간 문항 수 집계 & 버튼 영역 */}
               <div className="bg-slate-50/80 border-t border-slate-200 p-6 shrink-0 flex flex-col items-center">
                 <div className="text-center flex flex-col items-center justify-center">
-                  <span className="font-extrabold text-slate-800 text-base">최대 예상 문항 수</span>
-                  <div className="flex items-end mt-1">
-                    <span className="font-black text-4xl text-[#002864] tracking-tighter">{finalQuestionCount}</span>
-                    <span className="font-extrabold text-slate-800 text-base mb-1 ml-1.5">개</span>
+                  <span className="font-extrabold text-slate-800 text-base">최종 출제 문항 수</span>
+                  <div className="flex items-end mt-1 h-12">
+                    {isCalculating ? (
+                      <span className="font-black text-2xl text-sky-500 tracking-tighter animate-pulse mb-1">계산 중...</span>
+                    ) : (
+                      <>
+                        <span className="font-black text-4xl text-[#002864] tracking-tighter">{matchedCache.length}</span>
+                        <span className="font-extrabold text-slate-800 text-base mb-1 ml-1.5">개</span>
+                      </>
+                    )}
                   </div>
                 </div>
-                <div className="text-center mt-3 mb-6">
-                  <span className="text-[11px] font-bold text-rose-500">※ DB 보유량에 따라 실제 생성되는 문제 수는 다를 수 있습니다.</span>
-                </div>
                 
-                <div className="flex gap-2 w-full">
-                  <button onClick={handleEditAndCreate} className="flex-1 px-4 py-3.5 bg-white border border-slate-300 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-slate-600">편집 후 만들기</button>
-                  <button onClick={handleCreatePrint} disabled={isEngineRunning || finalQuestionCount === 0} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-extrabold text-white disabled:opacity-50">바로 만들기</button>
+                <div className="flex gap-2 w-full mt-4">
+                  <button onClick={handleEditAndCreate} disabled={matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-white border border-slate-300 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-slate-600 disabled:opacity-50">편집 후 만들기</button>
+                  <button onClick={handleCreatePrint} disabled={isEngineRunning || matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-extrabold text-white disabled:opacity-50">바로 만들기</button>
                 </div>
               </div>
             </div>
