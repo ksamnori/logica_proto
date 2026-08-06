@@ -10,8 +10,20 @@ export default function HQLoginPage() {
   const [formData, setFormData] = useState({ phone: '', password: '' });
   const [isLoading, setIsLoading] = useState(false);
 
+  // 휴대폰 번호 자동 하이픈(-) 포맷팅
+  const formatPhone = (val: string) => {
+    const res = val.replace(/[^0-9]/g, '');
+    if (res.length < 4) return res;
+    if (res.length < 8) return res.substring(0, 3) + '-' + res.substring(3);
+    return res.substring(0, 3) + '-' + res.substring(3, 7) + '-' + res.substring(7, 11);
+  };
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (e.target.name === 'phone') {
+      setFormData({ ...formData, phone: formatPhone(e.target.value) });
+    } else {
+      setFormData({ ...formData, [e.target.name]: e.target.value });
+    }
   };
 
   const handleLogin = async (e: React.FormEvent) => {
@@ -40,14 +52,14 @@ export default function HQLoginPage() {
 
       if (dbError || !instData) throw new Error('직원 정보를 찾을 수 없습니다.');
 
-      // 3. 브라우저 저장소에 로그인 정보 세팅 (채팅방 등에서 사용됨)
+      // 3. 브라우저 저장소에 로그인 정보 세팅
       localStorage.setItem('logica_instructor_id', instData.instructor_id);
       localStorage.setItem('logica_instructor_name', instData.name);
       localStorage.setItem('logica_instructor_role', instData.role || 'SUPER_ADMIN');
       localStorage.setItem('logica_instructor_position', instData.position || '본사 직원');
       if (instData.tenant_id) localStorage.setItem('logica_tenant_id', instData.tenant_id);
 
-      // 💡 4. 핵심: 로그인 성공 시 무조건 HQ 전용 채팅/업무 공간으로 꽂아버림!
+      // 4. HQ 전용 채팅/업무 공간으로 이동
       router.push('/hq');
 
     } catch (error: any) {
@@ -58,49 +70,52 @@ export default function HQLoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900 font-pretendard relative overflow-hidden">
-      {/* 배경 장식 */}
-      <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-blue-600/20 rounded-full blur-[100px] pointer-events-none"></div>
-      <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-indigo-600/20 rounded-full blur-[100px] pointer-events-none"></div>
-
-      <div className="bg-white/95 backdrop-blur-sm p-10 rounded-3xl shadow-2xl w-full max-w-md relative z-10 border border-white/20">
-        <div className="text-center mb-10">
-          <h1 className="text-4xl font-black text-slate-800 tracking-tighter">LOGICA <span className="text-blue-600">HQ</span></h1>
-          <p className="text-sm font-bold text-slate-500 mt-2">본사/출판사 임직원 전용 로그인</p>
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 font-pretendard">
+      {/* 💡 회원가입과 100% 동일한 컨테이너 (패딩, 라운드, 그림자 등) */}
+      <div className="bg-white p-10 rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden">
+        {/* 상단 컬러 바 포인트 */}
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#002864] to-blue-500"></div>
+        
+        <div className="text-center mb-8">
+          {/* 💡 회원가입과 완벽히 동일한 타이틀 텍스트와 폰트 크기 */}
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">천종현수학연구소 <span className="text-[#002864]">HQ</span></h1>
+          <p className="text-sm font-bold text-slate-400 mt-2">본사/출판사 임직원 전용 로그인</p>
         </div>
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1.5 pl-1">연락처 (아이디)</label>
+            <label className="block text-xs font-bold text-slate-600 mb-1">연락처 (아이디)</label>
             <input 
               type="text" 
               name="phone" 
               value={formData.phone} 
+              maxLength={13} 
               onChange={handleChange} 
-              className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white font-bold tracking-wider transition-all" 
-              placeholder="01012345678" 
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold tracking-wider" 
+              placeholder="010-1234-5678" 
             />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1.5 pl-1">비밀번호</label>
+            <label className="block text-xs font-bold text-slate-600 mb-1">비밀번호</label>
             <input 
               type="password" 
               name="password" 
               value={formData.password} 
               onChange={handleChange} 
-              className="w-full px-5 py-3.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white transition-all" 
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864]" 
               placeholder="••••••••" 
             />
           </div>
 
-          <button type="submit" disabled={isLoading} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-black py-4 rounded-xl shadow-[0_8px_20px_rgba(0,40,100,0.3)] transition-all mt-6 disabled:opacity-50">
+          <button type="submit" disabled={isLoading} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-extrabold py-4 rounded-xl shadow-lg transition-colors mt-4 disabled:opacity-50">
             {isLoading ? '로그인 중...' : 'HQ 워크스페이스 입장'}
           </button>
         </form>
 
+        {/* 하단 회원가입 이동 링크 */}
         <div className="mt-8 text-center border-t border-slate-100 pt-6">
-          <p className="text-xs text-slate-400 font-medium">
-            계정이 없으신가요? <button onClick={() => router.push('/hq-signup')} className="text-blue-600 font-bold hover:underline ml-1">본사 직원 가입하기</button>
+          <p className="text-xs text-slate-400 font-bold">
+            계정이 없으신가요? <button type="button" onClick={() => router.push('/hq-signup')} className="text-[#002864] hover:underline ml-1">본사 직원 가입하기</button>
           </p>
         </div>
       </div>

@@ -4,7 +4,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import ProfileModal from "@/components/ProfileModal"; // 💡 정보 수정 모달 연결
+import ProfileModal from "@/components/ProfileModal"; 
 
 export default function HQWorkspacePage() {
   const router = useRouter();
@@ -42,7 +42,7 @@ export default function HQWorkspacePage() {
     const id = localStorage.getItem("logica_instructor_id");
     if (!id) {
       alert("로그인이 필요합니다.");
-      router.push("/");
+      router.push("/hq-login"); 
       return;
     }
     setInstId(id);
@@ -228,7 +228,6 @@ export default function HQWorkspacePage() {
 
     if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
     
-    // 💡 [핵심] 주파수를 staff_room으로 통일하여 지점 강사님들과 완벽히 연결되게 수정했습니다!
     const roomChannelName = `staff_room_${roomId}`;
     supabase.getChannels().forEach((ch) => { if (ch.topic.includes(roomChannelName)) supabase.removeChannel(ch); });
 
@@ -287,7 +286,7 @@ export default function HQWorkspacePage() {
   const handleLogout = () => {
     if (confirm('로그아웃 하시겠습니까?')) {
       localStorage.clear();
-      router.push('/hq-login'); // 💡 로그아웃 시 HQ 전용 로그인 페이지로 이동하도록 수정 완료!
+      router.push('/hq-login');
     }
   };
 
@@ -310,39 +309,37 @@ export default function HQWorkspacePage() {
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-200 font-pretendard">
       
-      {/* 💡 헤더 영역 */}
-      <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-5 py-3 flex justify-between items-center shadow-md z-20 shrink-0">
-        <div className="flex items-center gap-3">
-          <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center font-black text-white shadow-inner">HQ</div>
-          <div>
-            <h1 className="text-[16px] font-black leading-tight">천종현수학연구소 본사 통합 메신저</h1>
-            <p className="text-[11px] text-slate-400 mt-0.5 leading-tight">전사 소통 채널 (B2B / 사내)</p>
+      <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 sm:px-5 py-3 flex justify-between items-center shadow-md z-20 shrink-0 gap-2">
+        <div className="flex items-center min-w-0">
+          <div className="min-w-0">
+            <h1 className="text-[14px] sm:text-[16px] font-black leading-tight truncate">천종현수학연구소 통합 메신저</h1>
+            <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 leading-tight truncate">전사 소통 채널 (B2B / 사내)</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
           <div className="text-right hidden sm:block mr-2">
             <div className="text-[13px] font-bold leading-tight">{instName}</div>
             <div className="text-[10px] text-slate-400 font-normal">본사 임직원</div>
           </div>
-          <button onClick={() => setIsProfileOpen(true)} className="p-2 bg-slate-700/50 hover:bg-slate-700 rounded-full transition-colors group relative" title="내 정보 수정 및 자동응답 설정">
+          <button onClick={() => setIsProfileOpen(true)} className="p-2 bg-slate-700/50 hover:bg-slate-700 rounded-full transition-colors group relative shrink-0" title="내 정보 수정 및 자동응답 설정">
             <svg className="w-5 h-5 text-slate-200 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
-          <div className="w-px h-5 bg-slate-600"></div>
-          <button onClick={handleLogout} className="text-[11px] font-bold text-rose-300 hover:text-rose-400 bg-rose-500/10 px-3 py-1.5 rounded-lg transition-colors">로그아웃</button>
+          <div className="w-px h-5 bg-slate-600 shrink-0"></div>
+          <button onClick={handleLogout} className="whitespace-nowrap text-[11px] font-bold text-rose-300 hover:text-rose-400 bg-rose-500/10 px-2 sm:px-3 py-1.5 rounded-lg transition-colors shrink-0">로그아웃</button>
         </div>
       </header>
 
-      {/* 💡 모바일 친화적 화면 분할 영역 */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* 좌측 사이드바: 목록 및 조직도 (모바일에서는 방 입장 시 숨김 처리) */}
+        {/* 좌측 사이드바 */}
         <div className={`${activeRoomId ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-r border-slate-300 shrink-0 z-10 shadow-lg`}>
           <div className="flex px-4 pt-4 pb-0 bg-slate-50 border-b border-slate-200 gap-2">
-            <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView !== "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full">{unreadCount}</span>}
-            </button>
+            {/* 💡 [수정] 탭 순서를 조직도 -> 채팅목록으로 변경 */}
             <button onClick={() => { showNewChatView(); setActiveRoomId(null); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView === "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
               조직도
+            </button>
+            <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView !== "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full">{unreadCount}</span>}
             </button>
           </div>
 
@@ -353,7 +350,11 @@ export default function HQWorkspacePage() {
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 pb-20">
                 {Object.keys(orgTree).length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div> :
-                  Object.keys(orgTree).sort().map(tenantName => {
+                  Object.keys(orgTree).sort((a, b) => {
+                    if (a === '본사') return -1;
+                    if (b === '본사') return 1;
+                    return a.localeCompare(b);
+                  }).map(tenantName => {
                     const isTenantExpanded = expandedTenants.includes(tenantName) || searchKeyword.length > 0;
                     const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
                     return (
@@ -452,7 +453,7 @@ export default function HQWorkspacePage() {
           )}
         </div>
 
-        {/* 우측 메인 채팅방 (모바일에서는 방 선택 전까지 숨김 처리) */}
+        {/* 우측 메인 채팅방 */}
         <div className={`${!activeRoomId ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#eef2f6] relative`}>
           {activeRoomId ? (
             <>
@@ -527,7 +528,7 @@ export default function HQWorkspacePage() {
                   }} 
                   onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} 
                   className="flex-1 bg-slate-100 rounded-xl px-4 py-3 text-[14px] font-bold text-slate-800 resize-none focus:outline-none focus:ring-2 focus:ring-slate-300 custom-scroll" 
-                  placeholder="메시지를 입력하세요 (Enter로 전송, Shift+Enter로 줄바꿈)" 
+                  placeholder="메시지를 입력하세요" 
                 />
                 <button onClick={sendMsg} disabled={!chatInput.trim()} className="p-4 bg-slate-800 text-white rounded-xl hover:bg-slate-900 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed shrink-0">
                   <svg className="w-5 h-5 translate-x-[2px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg>
@@ -543,7 +544,6 @@ export default function HQWorkspacePage() {
         </div>
       </div>
 
-      {/* 💡 기존 프로필 모달 재사용 (자동응답 설정 포함) */}
       <ProfileModal 
         isOpen={isProfileOpen} 
         onClose={() => setIsProfileOpen(false)} 
