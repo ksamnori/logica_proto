@@ -168,7 +168,7 @@ export default function HQWorkspacePage() {
         if (tenantData) tenantData.forEach((t: any) => { safeTenantMap[String(t.tenant_id)] = t.name; });
       } catch (e) {}
 
-      const { data: instData } = await supabase.from("instructor").select("*").neq("instructor_id", instId).eq("status", "재직").order("name");
+      const { data: instData } = await supabase.from("instructor").select("*").eq("status", "재직").order("name");
       
       if (instData) {
         const enrichedData = instData.map((inst: any) => ({ ...inst, academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' } }));
@@ -176,7 +176,8 @@ export default function HQWorkspacePage() {
 
         const tSet = new Set<string>(); const dSet = new Set<string>();
         enrichedData.forEach((inst: any) => {
-          const tName = inst.academy_tenant.name; const dName = inst.department || '부서 미지정';
+          const tName = (inst.academy_tenant.name || '소속 미지정').trim();
+          const dName = (inst.department || '부서 미지정').trim();
           tSet.add(tName); dSet.add(`${tName}_${dName}`);
         });
         setExpandedTenants(Array.from(tSet)); setExpandedDepts(Array.from(dSet));
@@ -191,22 +192,49 @@ export default function HQWorkspacePage() {
     if (selectedInstIds.length === 1) {
       const target = allInstructors.find((i: any) => i.instructor_id === selectedInstIds[0]);
       if (target) {
+        const targetInstId = target.instructor_id;
+        const targetName = target.name;
+        const targetPos = target.chat_position || target.position;
+
         try {
-          const { data: targetRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', target.instructor_id);
+          if (targetInstId === instId) {
+            const { data: myRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
+            const myRoomIds = myRooms?.map((r: any) => r.room_id) || [];
+            if (myRoomIds.length > 0) {
+               const { data: selfRoom } = await supabase.from('internal_chat_room')
+                  .select('room_id')
+                  .in('room_id', myRoomIds)
+                  .ilike('title', '%(나)%')
+                  .limit(1).maybeSingle();
+               if (selfRoom) {
+                   openRoom(selfRoom.room_id, `${targetName} (나)`);
+                   return;
+               }
+            }
+            const titleWithPos = `${targetName} (나)`;
+            const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
+            if (newRoom) {
+              await supabase.from('internal_chat_member').insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
+              openRoom(newRoom.room_id, titleWithPos);
+            }
+            return;
+          }
+
+          const { data: targetRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
           let rId = null;
           if (targetRooms && targetRooms.length > 0) {
             const { data: commonMembers } = await supabase.from('internal_chat_member').select('room_id, internal_chat_room!inner(room_type)').eq('instructor_id', instId).in('room_id', targetRooms.map(r=>r.room_id)).eq('internal_chat_room.room_type', 'DIRECT');
             if (commonMembers && commonMembers.length > 0) rId = commonMembers[0].room_id;
           }
           if (!rId) {
-            const titleWithPos = `${target.name} ${target.chat_position || target.position || '선생님'}`;
+            const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
             const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
             if (newRoom) {
               rId = newRoom.room_id;
-              await supabase.from('internal_chat_member').insert([{ room_id: rId, instructor_id: instId }, { room_id: rId, instructor_id: target.instructor_id }]);
+              await supabase.from('internal_chat_member').insert([{ room_id: rId, instructor_id: instId }, { room_id: rId, instructor_id: targetInstId }]);
             }
           }
-          if (rId) openRoom(rId, `${target.name} ${target.chat_position || target.position || '선생님'}`);
+          if (rId) openRoom(rId, `${targetName} ${targetPos || '선생님'}`);
         } catch(e) { alert("방 생성 에러"); }
       }
       return;
@@ -218,7 +246,7 @@ export default function HQWorkspacePage() {
     try {
       const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId }).select().single();
       const membersToInsert = selectedInstIds.map(id => ({ room_id: newRoom.room_id, instructor_id: id }));
-      membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
+      if (!selectedInstIds.includes(instId)) membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
       await supabase.from('internal_chat_member').insert(membersToInsert);
       openRoom(newRoom.room_id, roomName);
     } catch (e: any) { alert("그룹방 생성 에러: " + e.message); }
@@ -296,8 +324,8 @@ export default function HQWorkspacePage() {
   const filteredInstructors = allInstructors.filter((inst: any) => (inst?.name || "").includes(searchKeyword));
   const orgTree: Record<string, Record<string, any[]>> = {};
   filteredInstructors.forEach((inst: any) => {
-    const tenantName = inst.academy_tenant?.name || '소속 미지정';
-    const deptName = inst.department || '부서 미지정';
+    const tenantName = (inst.academy_tenant?.name || '소속 미지정').trim();
+    const deptName = (inst.department || '부서 미지정').trim();
     if (!orgTree[tenantName]) orgTree[tenantName] = {};
     if (!orgTree[tenantName][deptName]) orgTree[tenantName][deptName] = [];
     orgTree[tenantName][deptName].push(inst);
@@ -307,6 +335,10 @@ export default function HQWorkspacePage() {
   const toggleDept = (d: string) => setExpandedDepts(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d]);
 
   if (!instId) return <div className="min-h-screen bg-slate-100 flex items-center justify-center font-bold text-slate-400">데이터 로딩 중...</div>;
+
+  const meInst = allInstructors.find(i => i.instructor_id === instId);
+  const activeMyTenantName = (meInst?.academy_tenant?.name || '소속 미지정').trim();
+  const activeMyDeptName = (meInst?.department || '부서 미지정').trim();
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-200 font-pretendard">
@@ -324,7 +356,6 @@ export default function HQWorkspacePage() {
             <svg className="w-4 h-4 sm:w-5 sm:h-5 text-slate-200 group-hover:text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
           </button>
           
-          {/* 💡 [수정] 톱니바퀴와 로그아웃 사이로 이름/직책 이동 (모바일에서도 노출) */}
           <div className="text-right flex flex-col justify-center mx-1">
             <div className="text-[12px] sm:text-[13px] font-bold leading-tight truncate max-w-[65px] sm:max-w-[120px]">{instName}</div>
             <div className="text-[9px] sm:text-[10px] text-slate-400 font-normal truncate max-w-[65px] sm:max-w-[120px]">{instPosition}</div>
@@ -357,35 +388,64 @@ export default function HQWorkspacePage() {
               <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 pb-20">
                 {Object.keys(orgTree).length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div> :
                   Object.keys(orgTree).sort((a, b) => {
-                    if (a === '본사') return -1;
-                    if (b === '본사') return 1;
+                    const aTrim = a.trim();
+                    const bTrim = b.trim();
+                    if (activeMyTenantName && aTrim === activeMyTenantName) return -1;
+                    if (activeMyTenantName && bTrim === activeMyTenantName) return 1;
+                    if (aTrim === '본사') return -1;
+                    if (bTrim === '본사') return 1;
                     return a.localeCompare(b);
                   }).map(tenantName => {
                     const isTenantExpanded = expandedTenants.includes(tenantName) || searchKeyword.length > 0;
                     const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
+                    const isMyTenant = activeMyTenantName && tenantName.trim() === activeMyTenantName;
+
                     return (
                       <div key={tenantName} className="mb-2">
                         <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200/80 hover:bg-slate-300/80 text-slate-800 px-4 py-3 rounded-xl font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
-                          <span>🏢 {tenantName} <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span></span>
+                          <span className="flex items-center">
+                            🏢 {tenantName} 
+                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] rounded font-black">내 지점</span>}
+                            <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span>
+                          </span>
                           <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                         </button>
                         {isTenantExpanded && (
                           <div className="mt-2 ml-2 border-l-2 border-slate-200 pl-3 space-y-2">
-                            {Object.keys(orgTree[tenantName]).sort().map(deptName => {
+                            {Object.keys(orgTree[tenantName]).sort((a, b) => {
+                              const aTrim = a.trim();
+                              const bTrim = b.trim();
+                              if (isMyTenant && activeMyDeptName && aTrim === activeMyDeptName) return -1;
+                              if (isMyTenant && activeMyDeptName && bTrim === activeMyDeptName) return 1;
+                              return a.localeCompare(b);
+                            }).map(deptName => {
                               const deptId = `${tenantName}_${deptName}`;
                               const isDeptExpanded = expandedDepts.includes(deptId) || searchKeyword.length > 0;
                               const deptMembers = orgTree[tenantName][deptName];
+                              const isMyDept = isMyTenant && activeMyDeptName && deptName.trim() === activeMyDeptName;
+
                               return (
                                 <div key={deptId} className="mb-1">
                                   <button onClick={() => toggleDept(deptId)} className="w-full bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[12px] flex justify-between items-center border border-slate-200 transition-colors shadow-sm">
-                                    <span>📁 {deptName} <span className="text-[10px] font-normal ml-1 text-slate-400">({deptMembers.length}명)</span></span>
+                                    <span className="flex items-center">
+                                      📁 {deptName} 
+                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] rounded font-black">내 부서</span>}
+                                      <span className="text-[10px] font-normal ml-1 text-slate-400">({deptMembers.length}명)</span>
+                                    </span>
                                     <svg className={`w-3.5 h-3.5 text-slate-400 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                   </button>
                                   {isDeptExpanded && (
                                     <div className="mt-1.5 space-y-1.5">
-                                      {deptMembers.map((inst: any) => {
+                                      {/* 💡 [핵심 해결] 내 아이디를 무조건 0순위로 맨 위로 올리는 정렬 로직 추가! */}
+                                      {[...deptMembers].sort((a: any, b: any) => {
+                                        if (a.instructor_id === instId) return -1;
+                                        if (b.instructor_id === instId) return 1;
+                                        return a.name.localeCompare(b.name);
+                                      }).map((inst: any) => {
                                         const isSelected = selectedInstIds.includes(inst.instructor_id);
                                         const avatarUrl = getProfileImageUrl(inst.profile_image_url);
+                                        const isMe = inst.instructor_id === instId;
+
                                         return (
                                           <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-3 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-400'}`}>
                                             <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-800 border-slate-800 text-white' : 'border-slate-300'}`}>
@@ -395,9 +455,10 @@ export default function HQWorkspacePage() {
                                               <span className="absolute z-0">T</span>
                                               {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                                             </div>
-                                            <div className="flex-1">
-                                              <div className="font-bold text-slate-800 text-sm">
+                                            <div className="flex-1 flex flex-col">
+                                              <div className="font-bold text-slate-800 text-sm flex items-center">
                                                 {inst.name}
+                                                {isMe && <span className="ml-1.5 px-1.5 py-0.5 bg-[#002864] text-white text-[9px] rounded font-bold">나</span>}
                                               </div>
                                               <div className="text-[11px] text-slate-500 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
                                             </div>

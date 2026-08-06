@@ -3,7 +3,8 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { getExamsAction, deleteExamAction } from "@/app/actions/examActions"; // 💡 서버 액션 임포트
+import { getExamsAction, deleteExamAction } from "@/app/actions/examActions";
+import { supabase } from "@/lib/supabase"; 
 
 // 분리된 모달 컴포넌트 임포트
 import PublishModal from "@/components/exam/PublishModal";
@@ -25,11 +26,11 @@ export default function ExamListPage() {
   const [publishModal, setPublishModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
   const [gradingModal, setGradingModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
 
-  // 💡 최고관리자(SUPER_ADMIN) 여부 상태
+  // === 최고관리자(SUPER_ADMIN) 여부 상태 ===
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
 
   useEffect(() => {
-    // 💡 마운트 시 권한 체크: '원장'도 제외하고 오직 'SUPER_ADMIN', '최고관리자'만 허용
+    // 마운트 시 권한 체크: '원장'도 제외하고 오직 'SUPER_ADMIN', '최고관리자'만 허용
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const isSuper = role.toUpperCase() === "SUPER_ADMIN" || pos.includes("최고관리자");
@@ -44,7 +45,6 @@ export default function ExamListPage() {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  // 💡 서버 액션을 통한 안전한 데이터 조회
   const loadExams = async () => {
     setIsLoading(true);
     const result = await getExamsAction();
@@ -56,12 +56,10 @@ export default function ExamListPage() {
     setIsLoading(false);
   };
 
-  // 안전한 구조분해 및 필터 목록 생성
   const uniqueGrades = useMemo(() => Array.from(new Set(exams.map(e => e.major_grade).filter(Boolean))).sort(), [exams]);
   const uniqueTypes = useMemo(() => Array.from(new Set(exams.map(e => e.exam_type || '평가'))).sort(), [exams]);
   const uniqueCreators = useMemo(() => {
     return Array.from(new Set(exams.map(e => {
-      // 💡 배열 형태로 넘어올 경우를 대비한 안전한 처리
       const instructor = Array.isArray(e.instructor) ? e.instructor[0] : e.instructor;
       return instructor?.name || '시스템 선생님';
     }))).sort();
@@ -84,14 +82,40 @@ export default function ExamListPage() {
     setFilterGrade("ALL"); setFilterType("ALL"); setFilterCreator("ALL");
   };
 
-  // 💡 서버 액션을 통한 안전한 삭제 처리
-  const deleteExam = async (examId: string) => {
+  const deleteExam = async (examId: string, examType: string, assignCount: number) => {
     if (!confirm("⚠️ 이 문제지를 정말 삭제하시겠습니까?\n(삭제하면 복구할 수 없습니다.)")) return;
     
+    if (examType === '오답프린트') {
+      if (assignCount >= 2) {
+        alert("🚨 2명 이상의 학생에게 배부된 오답 프린트는 직접 삭제할 수 없습니다!\n(다른 학생의 채점 기록이 함께 증발하는 것을 방지합니다.)\n\n해당 학생의 타임라인에서 개별적으로 배부 취소(삭제)를 진행해 주세요.");
+        return;
+      }
+
+      try {
+        const { data: assignments } = await supabase.from('exam_assignment').select('assignment_id').eq('exam_id', examId);
+        
+        if (assignments && assignments.length > 0) {
+          const assignIds = assignments.map(a => a.assignment_id);
+          await supabase.from('student_answer').delete().in('exam_assignment_id', assignIds);
+          await supabase.from('exam_assignment').delete().eq('exam_id', examId);
+        }
+        
+        await supabase.from('exam_item').delete().eq('exam_id', examId);
+        await supabase.from('exam_master').delete().eq('exam_id', examId);
+
+        alert("🗑️ 맞춤 오답 프린트가 완전히 파기되었습니다.");
+        loadExams();
+        return; 
+      } catch (err: any) {
+        alert("오답 프린트 삭제 중 오류가 발생했습니다: " + err.message);
+        return;
+      }
+    }
+
     const result = await deleteExamAction(examId);
     if (result.success) {
       alert(result.message);
-      loadExams(); // 삭제 성공 시 목록 새로고침
+      loadExams(); 
     } else {
       alert(result.message);
     }
@@ -109,7 +133,6 @@ export default function ExamListPage() {
     router.push(`/exam/step2?exam_id=${examId}`);
   };
 
-  // 💡 최고관리자 전용 강제 수정 핸들러
   const handleForceEdit = (examId: string) => {
     if (confirm("🚨 경고: 이미 배부되어 학생이 풀고 있을 수 있는 시험지입니다!\n강제 수정 시 기존 문항 및 채점 기록과 충돌이 발생할 수 있습니다.\n\n정말 강제로 수정하시겠습니까? (최고관리자 전용 기능)")) {
       editExam(examId);
@@ -186,7 +209,8 @@ export default function ExamListPage() {
                   if (exam.scope_start && exam.scope_end) scope = (exam.scope_start === exam.scope_end) ? exam.scope_start : `${exam.scope_start} ~ ${exam.scope_end}`;
                   else if (exam.scope_start) scope = exam.scope_start;
 
-                  const isDistributed = exam.exam_assignment ? exam.exam_assignment.length > 0 : false;
+                  const assignCount = exam.exam_assignment ? exam.exam_assignment.length : 0;
+                  const isDistributed = assignCount > 0;
                   
                   const createdTime = new Date(exam.created_at).getTime();
                   const isNew = !isNaN(createdTime) && ((Date.now() - createdTime) / (1000 * 3600 * 24)) <= 2;
@@ -209,23 +233,38 @@ export default function ExamListPage() {
                       <td className="py-4 px-5 text-center text-slate-600 font-bold text-xs">{creatorName}</td>
                       <td className="py-4 px-5">
                         <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                          <button onClick={() => setPublishModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[64px] shrink-0 py-1.5 bg-[#002864] hover:bg-blue-900 text-white rounded text-[11px] font-bold shadow-sm transition-colors text-center px-0">출제하기</button>
-                          <button onClick={() => setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[64px] shrink-0 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold shadow-sm transition-colors text-center px-0">출제현황</button>
+                          <button onClick={() => setPublishModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[64px] h-[30px] flex items-center justify-center shrink-0 bg-[#002864] hover:bg-blue-900 text-white rounded text-[11px] font-bold shadow-sm transition-colors">
+                            출제하기
+                          </button>
                           
-                          {/* 💡 이미 출제된 시험지일 경우 권한에 따른 버튼 분기 처리 */}
+                          <button onClick={() => setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[84px] h-[30px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold shadow-sm transition-colors">
+                            출제현황({assignCount}명)
+                          </button>
+                          
                           {isDistributed ? (
                             isSuperAdmin ? (
-                              <button onClick={() => handleForceEdit(exam.exam_id)} className="w-[60px] shrink-0 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200 text-center px-0" title="최고관리자 전용 강제 수정">🚨 강제수정</button>
+                              <button onClick={() => handleForceEdit(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200 gap-0.5" title="최고관리자 전용 강제 수정">
+                                🚨 강제수정
+                              </button>
                             ) : (
-                              <button disabled className="w-[60px] shrink-0 py-1.5 bg-slate-50 text-slate-400 rounded text-[11px] font-bold cursor-not-allowed border border-slate-200 text-center px-0" title="이미 출제되어 수정할 수 없습니다">🔒 수정불가</button>
+                              <button disabled className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-slate-50 text-slate-400 rounded text-[11px] font-bold cursor-not-allowed border border-slate-200 gap-0.5" title="이미 출제되어 수정할 수 없습니다">
+                                🔒 수정불가
+                              </button>
                             )
                           ) : (
-                            <button onClick={() => editExam(exam.exam_id)} className="w-[60px] shrink-0 py-1.5 bg-white hover:bg-slate-50 text-slate-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-slate-300 text-center px-0">수정</button>
+                            // 💡 [수정됨] 60px에서 76px로 크기 통일! 앞줄이 완벽히 일치하게 됩니다.
+                            <button onClick={() => editExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-slate-50 text-slate-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-slate-300">
+                              수정
+                            </button>
                           )}
 
-                          <button onClick={() => duplicateAndEditExam(exam.exam_id)} className="w-[76px] shrink-0 py-1.5 bg-white hover:bg-indigo-50 text-indigo-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-indigo-200 text-center px-0">복제후수정</button>
+                          <button onClick={() => duplicateAndEditExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-indigo-50 text-indigo-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-indigo-200">
+                            복제후수정
+                          </button>
                           
-                          <button onClick={() => deleteExam(exam.exam_id)} className="w-[48px] shrink-0 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200 text-center px-0">삭제</button>
+                          <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
+                            삭제
+                          </button>
                         </div>
                       </td>
                     </tr>

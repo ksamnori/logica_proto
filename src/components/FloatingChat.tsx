@@ -13,9 +13,10 @@ export default function FloatingChat({ instId }: { instId: string }) {
   };
 
   const [isHQ, setIsHQ] = useState(false); 
+  const [myTenantName, setMyTenantName] = useState<string>(""); 
+  const [myDeptName, setMyDeptName] = useState<string>("");
 
   const [isChatOpen, setIsChatOpen] = useState(false);
-  // 💡 [수정] 기본 활성 탭을 '사내 메신저(staff)'로 변경
   const [activeTab, setActiveTab] = useState<"parent" | "staff">("staff"); 
 
   const [activeChatView, setActiveChatView] = useState<"list" | "room" | "new">("list");
@@ -174,17 +175,25 @@ export default function FloatingChat({ instId }: { instId: string }) {
     if (!instId) return;
 
     const checkHQStatus = async () => {
-      const { data: me } = await supabase.from('instructor').select('tenant_id').eq('instructor_id', instId).maybeSingle();
-      if (me?.tenant_id) {
-        const { data: myTenant } = await supabase.from('academy_tenant').select('tenant_type').eq('tenant_id', me.tenant_id).maybeSingle();
-        if (myTenant?.tenant_type === 'HQ') {
-          setIsHQ(true);
-          setActiveTab('staff'); 
+      const { data: me } = await supabase.from('instructor').select('tenant_id, department').eq('instructor_id', instId).maybeSingle();
+      if (me) {
+        setMyDeptName(me.department || ""); 
+        if (me.tenant_id) {
+          const { data: myTenant } = await supabase.from('academy_tenant').select('tenant_type, name').eq('tenant_id', me.tenant_id).maybeSingle();
+          if (myTenant) {
+            setMyTenantName(myTenant.name || ""); 
+            if (myTenant.tenant_type === 'HQ') {
+              setIsHQ(true);
+              setActiveTab('staff'); 
+            } else {
+              loadChatRooms(); 
+            }
+          } else {
+            loadChatRooms();
+          }
         } else {
           loadChatRooms(); 
         }
-      } else {
-        loadChatRooms(); 
       }
     };
 
@@ -296,7 +305,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
             .maybeSingle();
           
           if (otherMember?.instructor_id) {
-            // 💡 [수정] 상대방 정보를 부를 때 chat_position 추가
             const { data: instData } = await supabase.from('instructor')
               .select('name, position, chat_position, profile_image_url')
               .eq('instructor_id', otherMember.instructor_id)
@@ -430,9 +438,9 @@ export default function FloatingChat({ instId }: { instId: string }) {
         }
       } catch (e) {}
 
+      // 💡 [핵심 해결] .neq("instructor_id", instId) 코드를 삭제하여 나 자신도 불러옵니다!
       const { data: instData } = await supabase.from("instructor")
         .select("*")
-        .neq("instructor_id", instId)
         .eq("status", "재직")
         .order("name");
       
@@ -447,8 +455,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
         const tSet = new Set<string>();
         const dSet = new Set<string>();
         enrichedData.forEach((inst: any) => {
-          const tName = inst.academy_tenant.name;
-          const dName = inst.department || '부서 미지정';
+          const tName = (inst.academy_tenant.name || '소속 미지정').trim();
+          const dName = (inst.department || '부서 미지정').trim();
           tSet.add(tName);
           dSet.add(`${tName}_${dName}`);
         });
@@ -466,6 +474,30 @@ export default function FloatingChat({ instId }: { instId: string }) {
 
   const handleCreateOrOpenStaffRoom = async (targetInstId: string, targetName: string, targetPos?: string) => {
     try {
+      if (targetInstId === instId) {
+        const { data: myRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
+        const myRoomIds = myRooms?.map((r: any) => r.room_id) || [];
+        if (myRoomIds.length > 0) {
+           const { data: selfRoom } = await supabase.from('internal_chat_room')
+              .select('room_id')
+              .in('room_id', myRoomIds)
+              .ilike('title', '%(나)%')
+              .limit(1).maybeSingle();
+           if (selfRoom) {
+               openStaffChatRoom(selfRoom.room_id, `${targetName} (나)`);
+               return;
+           }
+        }
+        const titleWithPos = `${targetName} (나)`;
+        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
+        if (roomError) throw roomError;
+        if (newRoom) {
+          await supabase.from('internal_chat_member').insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
+          openStaffChatRoom(newRoom.room_id, titleWithPos);
+        }
+        return;
+      }
+
       const { data: targetRooms, error: targetError } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
       if (targetError) throw targetError;
 
@@ -477,7 +509,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
       }
 
       if (!roomId) {
-        // 💡 [수정] 방을 생성할 때도 방 제목에 직책 반영
         const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
         const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
         if (roomError) throw roomError;
@@ -503,9 +534,9 @@ export default function FloatingChat({ instId }: { instId: string }) {
     try {
       const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId }).select().single();
       const membersToInsert = selectedInstIds.map(id => ({ room_id: newRoom.room_id, instructor_id: id }));
-      membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
-      await supabase.from('internal_chat_member').insert(membersToInsert);
+      if (!selectedInstIds.includes(instId)) membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
       
+      await supabase.from('internal_chat_member').insert(membersToInsert);
       openStaffChatRoom(newRoom.room_id, roomName);
     } catch (e: any) { alert("그룹방 생성 에러: " + e.message); }
   };
@@ -534,7 +565,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
       
       const [msgRes, memRes] = await Promise.all([
         supabase.from("internal_chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-        // 💡 [수정] 방 멤버를 불러올 때 chat_position 추가
         supabase.from("internal_chat_member").select("instructor_id, last_read_at, instructor(name, position, chat_position, profile_image_url)").eq("room_id", roomId)
       ]);
       
@@ -575,8 +605,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
   const orgTree: Record<string, Record<string, any[]>> = {};
   
   filteredInstructors.forEach((inst: any) => {
-    const tenantName = inst.academy_tenant?.name || '소속 미지정';
-    const deptName = inst.department || '부서 미지정';
+    const tenantName = (inst.academy_tenant?.name || '소속 미지정').trim();
+    const deptName = (inst.department || '부서 미지정').trim();
     
     if (!orgTree[tenantName]) orgTree[tenantName] = {};
     if (!orgTree[tenantName][deptName]) orgTree[tenantName][deptName] = [];
@@ -614,7 +644,6 @@ export default function FloatingChat({ instId }: { instId: string }) {
           </div>
           
           <div className="flex px-3">
-            {/* 💡 [수정] 탭 순서를 '사내 메신저' -> '학부모 상담'으로 변경 */}
             <button 
               onPointerDown={(e) => e.stopPropagation()} 
               onClick={() => { 
@@ -725,9 +754,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
               <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
                 {chatMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10 bg-white/50 p-4 rounded-xl mx-4">대화 내역이 없습니다.</div> :
                   chatMessages.map(msg => (
-                    // 💡 [수정] 학부모 상담방도 카카오톡 스타일(세로 정렬)로 변경
                     <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_type === "parent" ? "justify-start" : "justify-end"}`}>
-                      
                       {msg.sender_type === "parent" && (
                         <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
                       )}
@@ -783,37 +810,64 @@ export default function FloatingChat({ instId }: { instId: string }) {
                   <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
                 ) : (
                   Object.keys(orgTree).sort((a, b) => {
-                    if (a === '본사') return -1;
-                    if (b === '본사') return 1;
+                    const aTrim = a.trim();
+                    const bTrim = b.trim();
+                    if (myTenantName && aTrim === myTenantName) return -1;
+                    if (myTenantName && bTrim === myTenantName) return 1;
+                    if (aTrim === '본사') return -1;
+                    if (bTrim === '본사') return 1;
                     return a.localeCompare(b);
                   }).map(tenantName => {
                     const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
                     const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
+                    const isMyTenant = myTenantName && tenantName.trim() === myTenantName;
                     
                     return (
                       <div key={tenantName} className="mb-2">
                         <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
-                          <span>🏢 {tenantName} <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span></span>
+                          <span className="flex items-center">
+                            🏢 {tenantName} 
+                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] rounded font-black">내 지점</span>}
+                            <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span>
+                          </span>
                           <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                         </button>
                         {isTenantExpanded && (
                           <div className="mt-1.5 ml-2 border-l-2 border-slate-200 pl-2 space-y-2">
-                            {Object.keys(orgTree[tenantName]).sort().map(deptName => {
+                            {Object.keys(orgTree[tenantName]).sort((a, b) => {
+                              const aTrim = a.trim();
+                              const bTrim = b.trim();
+                              if (isMyTenant && myDeptName && aTrim === myDeptName) return -1;
+                              if (isMyTenant && myDeptName && bTrim === myDeptName) return 1;
+                              return a.localeCompare(b);
+                            }).map(deptName => {
                               const deptId = `${tenantName}_${deptName}`;
                               const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
                               const deptMembers = orgTree[tenantName][deptName];
+                              const isMyDept = isMyTenant && myDeptName && deptName.trim() === myDeptName;
                               
                               return (
                                 <div key={deptId} className="mb-1">
                                   <button onClick={() => toggleDept(deptId)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-[12px] flex justify-between items-center transition-colors">
-                                    <span>📁 {deptName} <span className="text-[10px] font-normal ml-1">({deptMembers.length}명)</span></span>
+                                    <span className="flex items-center">
+                                      📁 {deptName} 
+                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] rounded font-black">내 부서</span>}
+                                      <span className="text-[10px] font-normal ml-1">({deptMembers.length}명)</span>
+                                    </span>
                                     <svg className={`w-3.5 h-3.5 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                   </button>
                                   {isDeptExpanded && (
                                     <div className="mt-1.5 ml-2 space-y-1.5">
-                                      {deptMembers.map((inst: any) => {
+                                      {/* 💡 [핵심 해결] 내 아이디를 무조건 0순위로 맨 위로 올리는 정렬 로직 추가! */}
+                                      {[...deptMembers].sort((a: any, b: any) => {
+                                        if (a.instructor_id === instId) return -1;
+                                        if (b.instructor_id === instId) return 1;
+                                        return a.name.localeCompare(b.name);
+                                      }).map((inst: any) => {
                                         const isSelected = selectedInstIds.includes(inst.instructor_id);
                                         const avatarUrl = getProfileImageUrl(inst.profile_image_url);
+                                        const isMe = inst.instructor_id === instId;
+
                                         return (
                                           <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-2.5 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-500 bg-slate-100' : 'border-slate-200 hover:border-slate-400'}`}>
                                             <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
@@ -830,10 +884,13 @@ export default function FloatingChat({ instId }: { instId: string }) {
                                                 />
                                               )}
                                             </div>
-                                            <div className="flex-1">
-                                              <div className="font-bold text-slate-700 text-sm">{inst.name}</div>
-                                              {/* 💡 [수정] 조직도에 chat_position 우선 반영 */}
-                                              <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
+                                            <div className="flex-1 flex flex-col">
+                                              <div className="font-bold text-slate-700 text-sm flex items-center">
+                                                {inst.name}
+                                                {/* 💡 [핵심 해결] 내 이름 옆에 나임을 표시 */}
+                                                {isMe && <span className="ml-1 px-1.5 py-0.5 bg-[#002864] text-white text-[9px] rounded font-bold">나</span>}
+                                              </div>
+                                              <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '강사'}</div>
                                             </div>
                                           </div>
                                         )
@@ -917,9 +974,7 @@ export default function FloatingChat({ instId }: { instId: string }) {
                     const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
 
                     return (
-                      // 💡 [수정] 사내 메신저 카카오톡 스타일 적용 (이름 위, 버블 아래)
                       <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_id === instId ? 'justify-end' : 'justify-start'}`}>
-                        
                         {msg.sender_id !== instId && (
                           <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
                             <span className="absolute z-0 font-bold">T</span>
@@ -933,10 +988,8 @@ export default function FloatingChat({ instId }: { instId: string }) {
                             )}
                           </div>
                         )}
-                        
                         <div className={`flex flex-col max-w-[85%] ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
                           {msg.sender_id !== instId && (
-                            // 💡 상대방의 1순위 chat_position 반영
                             <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">
                               {senderInfo?.name || '알수없음'} 
                               <span className="font-normal text-[10px] text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>

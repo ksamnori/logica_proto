@@ -44,6 +44,80 @@ const getDiffScore = (diff: string) => {
   return 3;
 };
 
+// 한국 시간(KST) 기준으로 날짜를 정확히 자르는 헬퍼 함수
+const getLocalDateStr = (isoString: string) => {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
+};
+
+// 슬림해진 220px 사이즈 인라인 캘린더
+const InlineCalendar = ({ label, dateValue, onDateChange, colorTheme }: { label: string, dateValue: string, onDateChange: (d: string) => void, colorTheme: 'blue' | 'red' }) => {
+  const [currentMonth, setCurrentMonth] = useState(new Date(dateValue));
+
+  useEffect(() => {
+    setCurrentMonth(new Date(dateValue));
+  }, [dateValue]);
+
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstDayOfMonth = new Date(year, month, 1).getDay();
+
+  const handlePrevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
+  const handleNextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
+
+  const theme = colorTheme === 'blue' ? {
+    bg: 'bg-sky-500', text: 'text-sky-600', lightBg: 'bg-sky-50', border: 'border-sky-200'
+  } : {
+    bg: 'bg-rose-400', text: 'text-rose-500', lightBg: 'bg-rose-50', border: 'border-rose-200'
+  };
+
+  const days = [];
+  for (let i = 0; i < firstDayOfMonth; i++) {
+    days.push(<div key={`empty-${i}`} className="w-6 h-6"></div>);
+  }
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const isSelected = dateValue === dateStr;
+    const isToday = new Date().toISOString().split('T')[0] === dateStr;
+
+    days.push(
+      <button
+        key={d}
+        onClick={() => onDateChange(dateStr)}
+        className={`w-6 h-6 flex items-center justify-center rounded-full text-[11px] font-bold transition-all
+          ${isSelected ? `${theme.bg} text-white shadow-md transform scale-110` :
+            isToday ? `${theme.text} ${theme.lightBg} border ${theme.border}` :
+            `text-slate-600 hover:bg-slate-100`}`}
+      >
+        {d}
+      </button>
+    );
+  }
+
+  return (
+    <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-3 w-[220px]">
+      <div className="flex justify-between items-center mb-3">
+        <span className={`text-[10px] font-black ${theme.text} ${theme.lightBg} px-2 py-1 rounded-md shadow-sm border ${theme.border}`}>{label}</span>
+        <div className="flex items-center gap-1">
+          <button onClick={handlePrevMonth} className="w-5 h-5 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors text-[10px]">◀</button>
+          <span className="font-extrabold text-[12px] text-slate-700 w-14 text-center">{year}.{String(month + 1).padStart(2, '0')}</span>
+          <button onClick={handleNextMonth} className="w-5 h-5 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors text-[10px]">▶</button>
+        </div>
+      </div>
+      <div className="grid grid-cols-7 gap-1 mb-1.5 text-center text-[10px] font-black text-slate-400">
+        <div className="text-rose-400">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div className="text-blue-400">토</div>
+      </div>
+      <div className="grid grid-cols-7 gap-1 justify-items-center">
+        {days}
+      </div>
+    </div>
+  );
+};
+
 export default function StudentTimeline({
   currentView, activeTab, dateFilter, setDateFilter, isLoading,
   filteredTimeline = [], selectedBlocks = [], setSelectedBlocks, handleSelectAllStudent,
@@ -135,7 +209,7 @@ export default function StudentTimeline({
   }, []);
 
   useEffect(() => {
-    if (modalTab === 'TAXONOMY' && currentView?.studentId) {
+    if ((modalTab === 'TAXONOMY' || modalTab === 'PERIOD') && currentView?.studentId) {
       loadTaxonomyData();
     }
   }, [modalTab, currentView?.studentId]);
@@ -217,12 +291,12 @@ export default function StudentTimeline({
     } else if (modalTab === 'SELECTED') {
       return filteredTimeline.filter(item => selectedBlocks.includes(item.id)).reduce((acc, curr) => acc + (curr.xCount || 0), 0);
     } else if (modalTab === 'PERIOD') {
-      const start = new Date(startDate).getTime();
-      const end = new Date(endDate).getTime() + 86400000;
-      return filteredTimeline.filter(item => {
-         const t = new Date(item.date).getTime();
-         return t >= start && t < end;
-      }).reduce((acc, curr) => acc + (curr.xCount || 0), 0);
+      const targetWQs = allIncorrectRecords.filter(r => {
+         const localDate = getLocalDateStr(r.created_at);
+         return localDate >= startDate && localDate <= endDate;
+      });
+      const uniqueQids = new Set(targetWQs.map(r => r.question_id));
+      return uniqueQids.size;
     }
     return 0;
   };
@@ -245,7 +319,7 @@ export default function StudentTimeline({
     setIsCalculating(true);
     const timer = setTimeout(() => { calculateExactMatches(); }, 300);
     return () => clearTimeout(timer);
-  }, [selectedTaxonomyIds, selectedBlocks, modalTab, twinCount, similarCount, difficultyOption, excludeOriginal, genMethod, isMaxTypeLimitActive, maxTypeLimit]);
+  }, [selectedTaxonomyIds, selectedBlocks, modalTab, twinCount, similarCount, difficultyOption, excludeOriginal, genMethod, isMaxTypeLimitActive, maxTypeLimit, startDate, endDate, expectedFinalCount]);
 
   const calculateExactMatches = async () => {
     try {
@@ -260,11 +334,9 @@ export default function StudentTimeline({
           });
           uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
       } else if (modalTab === 'PERIOD') {
-          const start = new Date(startDate).getTime();
-          const end = new Date(endDate).getTime() + 86400000;
           const targetWQs = allIncorrectRecords.filter(r => {
-              const t = new Date(r.created_at).getTime();
-              return t >= start && t < end;
+              const localDate = getLocalDateStr(r.created_at);
+              return localDate >= startDate && localDate <= endDate;
           });
           uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
       } else if (modalTab === 'SELECTED') {
@@ -295,8 +367,6 @@ export default function StudentTimeline({
               }
             }
           }
-          // 💡 [핵심 버그 수정] unresolvedSet 교집합 필터를 완전히 삭제했습니다!
-          // 체크한 시험지의 실제 오답(X, TX 등)을 무조건 끌고 옵니다.
           uniqueQids = Array.from(new Set(tempQIds.filter(Boolean)));
       }
 
@@ -329,14 +399,20 @@ export default function StudentTimeline({
   const handleEditAndCreate = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다. 세팅을 확인해주세요.");
     
+    // 🌟 [추가됨] 뷰어 화면에서도 어떤 모달 탭에서 생성되었는지 알 수 있도록 서브타이틀 보관
+    let subTitle = '맞춤 오답';
+    if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
+    else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
+    else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
+
     sessionStorage.setItem('restoreExamQuestions', '1');
     sessionStorage.setItem('examQuestions', JSON.stringify(matchedCache));
     sessionStorage.setItem('examTitle', `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`);
+    sessionStorage.setItem('examSubTitle', subTitle); // 뷰어 연동용 서브타이틀
     
-    // 🌟 [추가된 부분] 최종 뷰어에서 사용할 수 있도록 학생 정보도 같이 싸서 보냅니다!
     sessionStorage.setItem('clinicTargetStudentId', currentView?.studentId);
     sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
-    sessionStorage.setItem('isClinicMode', 'true'); // 클리닉 모드라는 꼬리표
+    sessionStorage.setItem('isClinicMode', 'true');
     
     window.location.href = '/exam/step2?source=clinic_incorrect';
   };
@@ -351,9 +427,15 @@ export default function StudentTimeline({
 
       const examTitle = `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`;
       
+      // 🌟 [핵심 수정] 어떤 탭에서 생성했는지에 따라 서브 타이틀(배지)을 동적으로 변경!
+      let subTitle = '맞춤 오답';
+      if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
+      else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
+      else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
+      
       const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
         title: examTitle,
-        sub_title: '유형별 맞춤 오답',
+        sub_title: subTitle, // 💡 동적으로 변경된 꼬리표 삽입
         exam_type: '오답프린트', 
         total_questions: matchedCache.length,
         instructor_id: instId,
@@ -545,18 +627,21 @@ export default function StudentTimeline({
 
                 {modalTab === 'PERIOD' && (
                   <div className="flex flex-col h-full">
-                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-6">
-                      <span className="text-xs font-bold text-slate-600 flex items-center gap-1">💡 기간의 시작일을 기준으로 <strong className="text-sky-600">최대 1년 전 오답</strong>까지 조회할 수 있습니다.</span>
+                    <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-6 flex justify-between items-center">
+                      <span className="text-xs font-bold text-slate-600 flex items-center gap-1">💡 선택한 기간에 발생한 <strong className="text-sky-600">미해결 오답</strong>을 조회합니다.</span>
+                      <span className="text-xs font-black text-rose-500 bg-rose-50 px-2 py-1 rounded shadow-sm border border-rose-100">조회된 오답: {basePendingCount}개</span>
                     </div>
-                    <div className="flex flex-col items-center justify-center flex-1 pb-10 gap-8">
-                      <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 w-72 relative group">
-                        <div className="absolute -top-3 left-5 bg-sky-500 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">시작일</div>
-                        <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full text-xl font-black text-slate-700 bg-slate-50 border-2 border-slate-100 hover:border-sky-300 rounded-lg px-4 py-3 outline-none focus:border-sky-500 transition-colors mt-2 text-center" />
+                    <div className="flex items-start justify-center flex-1 pb-10 gap-2 mt-2">
+                      <div className="flex flex-col items-center gap-2">
+                        <InlineCalendar label="시작일" dateValue={startDate} onDateChange={setStartDate} colorTheme="blue" />
+                        <div className="text-[11px] font-black text-sky-600 bg-sky-50 px-3 py-1 rounded-full border border-sky-100 shadow-sm">{startDate}</div>
                       </div>
-                      <div className="w-1 h-6 bg-slate-200 rounded-full"></div>
-                      <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 w-72 relative group">
-                        <div className="absolute -top-3 left-5 bg-rose-400 text-white text-xs font-bold px-3 py-1 rounded-full shadow-sm">종료일</div>
-                        <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full text-xl font-black text-slate-700 bg-slate-50 border-2 border-slate-100 hover:border-rose-400 rounded-lg px-4 py-3 outline-none focus:border-rose-400 transition-colors mt-2 text-center" />
+                      <div className="flex flex-col items-center justify-center h-[230px] px-2">
+                        <svg className="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg>
+                      </div>
+                      <div className="flex flex-col items-center gap-2">
+                        <InlineCalendar label="종료일" dateValue={endDate} onDateChange={setEndDate} colorTheme="red" />
+                        <div className="text-[11px] font-black text-rose-500 bg-rose-50 px-3 py-1 rounded-full border border-rose-100 shadow-sm">{endDate}</div>
                       </div>
                     </div>
                   </div>

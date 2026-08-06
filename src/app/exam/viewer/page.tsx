@@ -41,13 +41,12 @@ export default function ExamViewerPage() {
   const rebuildExamIdRef = useRef<string | null>(null);
   const currentExamIdRef = useRef<string | null>(null);
   
-  // PublishPanel에 넘길 React State (Ref 대신 변경 감지용)
+  // PublishPanel에 넘길 React State
   const [savedExamId, setSavedExamId] = useState<string | null>(null);
   const [isExamDistributed, setIsExamDistributed] = useState<boolean>(false);
 
   // === 레이아웃 UI 상태 ===
   const [layoutType, setLayoutType] = useState("선택없음"); 
-  // === 주간테스트 전용: 주차/학년 자동 배정 ===
   const [testWeek, setTestWeek] = useState<number>(getISOWeekKST());
   const [weeklyTargetGrade, setWeeklyTargetGrade] = useState("");
   const [gradeOptions, setGradeOptions] = useState<string[]>([]);
@@ -236,12 +235,26 @@ export default function ExamViewerPage() {
 
         title = sessionStorage.getItem('examTitle') || '새로운 테스트';
 
+        // 🌟 [핵심 수정] 클리닉 모드(맞춤 오답)에서 넘어왔을 경우 양식을 '오답프린트'로 강제 고정!
+        if (sessionStorage.getItem('isClinicMode') === 'true') {
+          lType = '오답프린트';
+        } else {
+          try {
+            const step1Data = JSON.parse(sessionStorage.getItem('exam_step1_data') || '{}');
+            if (step1Data.examType === 'print') lType = '오답프린트';
+            else if (step1Data.examType === 'homework') lType = '과제프린트';
+          } catch(e) {}
+        }
+
         if (loadExamId) {
           const { data: origExam } = await supabase.from('exam_master').select('*').eq('exam_id', loadExamId).single();
           if (origExam) {
             title = duplicateExamId ? (origExam.title + ' (복제본)') : origExam.title;
             badge = origExam.sub_title || '';
-            lType = origExam.exam_type || '선택없음';
+            // 클리닉 모드가 아닐 때만 기존 양식을 덮어씀
+            if (sessionStorage.getItem('isClinicMode') !== 'true') {
+              lType = origExam.exam_type || '선택없음';
+            }
             dbLayoutSettings = origExam.layout_settings || null;
             wWeek = origExam.test_week || null;
             wGrade = origExam.target_grade || "";
@@ -901,7 +914,6 @@ export default function ExamViewerPage() {
       setIsAdmissionLock(val === '입학테스트');
 
       let newExamTitle = examTitle;
-      // 💡 [수정] 주간테스트 선택 시, 기존 값을 덮어쓰고 'x월 x주차'를 "시험지 제목"에 자동 설정
       if (val === '주간테스트') {
         newExamTitle = getNextTuesdayWeekString();
         setExamTitle(newExamTitle);
@@ -1033,6 +1045,55 @@ export default function ExamViewerPage() {
 
       if (isWeeklyTest && examId && weeklyTargetGrade) await autoAssignWeeklyTest(examId);
 
+      // ==========================================
+      // 🌟 [추가됨] 클리닉 모드 감지 및 다이렉트 배부/전송 로직
+      // ==========================================
+      let isClinicRouted = false;
+
+      if (sessionStorage.getItem('isClinicMode') === 'true' && examId) {
+        const clinicStudentId = sessionStorage.getItem('clinicTargetStudentId');
+        const clinicClassId = sessionStorage.getItem('clinicTargetClassId');
+        
+        if (clinicStudentId) {
+          try {
+            // 1. 학생 타임라인 노출을 위한 시험지 배부
+            await supabase.from('exam_assignment').insert({
+              exam_id: examId,
+              student_id: clinicStudentId,
+              class_id: clinicClassId || null,
+              status: '미응시'
+            });
+
+            // 2. 학생 패드로 즉시 클리닉 문제 전송
+            const tasks: any[] = [];
+            examStateRef.current?.groups.forEach((g: any) => {
+              g.questions.forEach((q: any) => {
+                tasks.push({
+                  student_id: clinicStudentId,
+                  task_type: '유형오답클리닉',
+                  question_id: q.question_id,
+                  status: '대기'
+                });
+              });
+            });
+            
+            if (tasks.length > 0) {
+              await supabase.from('clinic_task').insert(tasks);
+            }
+
+            // 3. 세션스토리지 청소
+            sessionStorage.removeItem('clinicTargetStudentId');
+            sessionStorage.removeItem('clinicTargetClassId');
+            sessionStorage.removeItem('isClinicMode');
+            
+            isClinicRouted = true;
+          } catch (err: any) {
+            console.error("클리닉 자동 배부 에러:", err);
+            alert("문제지는 저장되었으나, 학생 자동 배부 중 오류가 발생했습니다.");
+          }
+        }
+      }
+
       hasUnsavedChangesRef.current = false;
       const wasNew = isNewExamRef.current;
 
@@ -1046,8 +1107,13 @@ export default function ExamViewerPage() {
       }
 
       if (!skipNav) {
-        alert('✅ 성공적으로 저장되었습니다. 문제지 관리 페이지로 이동합니다.');
-        router.push('/exam-list');
+        if (isClinicRouted) {
+          alert('✅ 클리닉 맞춤 오답 문제지가 성공적으로 저장되고, 학생에게 배부/전송되었습니다!');
+          router.push('/learning');
+        } else {
+          alert('✅ 성공적으로 저장되었습니다. 문제지 관리 페이지로 이동합니다.');
+          router.push('/exam-list');
+        }
       }
       return true;
     } catch (e: any) {
@@ -1210,7 +1276,7 @@ export default function ExamViewerPage() {
                     </div>
                   </div>
 
-                  {/* 오른쪽 단: 시험지 메타 수정 (💡간격 및 정렬 UI 수정) */}
+                  {/* 오른쪽 단: 시험지 메타 수정 */}
                   <div className="w-1/2 flex flex-col">
                     <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col gap-4">
                       <h3 className="font-bold text-slate-700 border-b pb-2 flex items-center gap-1.5 text-[13px] shrink-0">✏️ 시험지 메타 수정</h3>
@@ -1270,7 +1336,7 @@ export default function ExamViewerPage() {
                   </div>
                </div>
 
-               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 (간격 띄움) */}
+               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 */}
                <div className="w-full mb-8 mt-4">
                   <PublishPanel 
                     examId={savedExamId} 
@@ -1293,7 +1359,7 @@ export default function ExamViewerPage() {
           </div>
         </aside>
 
-        {/* 중앙 미리보기 영역 (CSS 변수 적용) */}
+        {/* 중앙 미리보기 영역 */}
         <main 
           id="preview-viewport" 
           className="flex-1 h-full flex flex-col overflow-hidden relative z-0" 
