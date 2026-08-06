@@ -7,7 +7,8 @@ import { supabase } from '@/lib/supabase';
 
 export default function HQSignupPage() {
   const router = useRouter();
-  const [formData, setFormData] = useState({ name: '', phone: '', password: '', department: '' });
+  // 💡 [수정] formData에 position(직책) 추가
+  const [formData, setFormData] = useState({ name: '', phone: '', password: '', department: '', position: '' });
   const [isLoading, setIsLoading] = useState(false);
   const [hqTenantId, setHqTenantId] = useState<string | null>(null);
 
@@ -46,7 +47,8 @@ export default function HQSignupPage() {
   const handleSignup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!hqTenantId) return alert('본사(HQ) 테넌트 정보가 시스템에 설정되어 있지 않습니다.');
-    if (!formData.name || !formData.phone || !formData.password || !formData.department) return alert('모든 항목을 입력해주세요.');
+    // 💡 [수정] 필수 입력 항목에 직책(position) 추가
+    if (!formData.name || !formData.phone || !formData.password || !formData.department || !formData.position) return alert('모든 항목을 입력해주세요.');
 
     const cleanPhone = formData.phone.replace(/[^0-9]/g, '');
     if (!/^010\d{8}$/.test(cleanPhone)) {
@@ -70,7 +72,7 @@ export default function HQSignupPage() {
         name: formData.name,
         email: fakeEmail,
         phone: formData.phone,
-        position: '본사 관리자',
+        position: formData.position, // 💡 사용자가 입력한 직책을 저장
         role: 'SUPER_ADMIN', 
         tenant_id: hqTenantId, 
         department: formData.department,
@@ -89,9 +91,8 @@ export default function HQSignupPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-900 font-pretendard">
+    <div className="min-h-screen flex items-center justify-center bg-slate-900 font-pretendard py-10">
       <div className="bg-white p-10 rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden">
-        {/* 상단 컬러 바 (로그인과 통일) */}
         <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#002864] to-blue-500"></div>
         
         <div className="text-center mb-8">
@@ -99,30 +100,36 @@ export default function HQSignupPage() {
           <p className="text-sm font-bold text-slate-400 mt-2">본사/출판사 임직원 전용 계정 생성</p>
         </div>
 
-        <form onSubmit={handleSignup} className="space-y-5">
+        <form onSubmit={handleSignup} className="space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">이름</label>
             <input type="text" name="name" value={formData.name} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-800" placeholder="홍길동" />
           </div>
           <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">연락처 (로그인 아이디로 사용됨)</label>
+            <label className="block text-xs font-bold text-slate-600 mb-1">연락처 (로그인 아이디)</label>
             <input type="text" name="phone" value={formData.phone} maxLength={13} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold tracking-wider text-slate-800" placeholder="010-1234-5678" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-600 mb-1">비밀번호</label>
             <input type="password" name="password" value={formData.password} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] text-slate-800" placeholder="••••••••" />
           </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-1">소속 부서</label>
-            <input type="text" name="department" value={formData.department} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-800" placeholder="예: 사업부, 콘텐츠연구소, 경영지원팀" />
+          {/* 💡 [추가] 부서와 직책을 나란히 배치 */}
+          <div className="flex gap-3">
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-slate-600 mb-1">소속 부서</label>
+              <input type="text" name="department" value={formData.department} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-800" placeholder="예: 사업부" />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-bold text-slate-600 mb-1">직책 (채팅용)</label>
+              <input type="text" name="position" value={formData.position} onChange={handleChange} className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-800" placeholder="예: 팀장, 주임" />
+            </div>
           </div>
 
-          <button type="submit" disabled={isLoading} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-extrabold py-4 rounded-xl shadow-lg transition-colors mt-4 disabled:opacity-50">
+          <button type="submit" disabled={isLoading} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-extrabold py-4 rounded-xl shadow-lg transition-colors mt-6 disabled:opacity-50">
             {isLoading ? '생성 중...' : '본사 계정 생성 완료'}
           </button>
         </form>
         
-        {/* 하단 로그인 이동 링크 추가 */}
         <div className="mt-8 text-center border-t border-slate-100 pt-6">
           <p className="text-xs text-slate-400 font-bold">
             이미 계정이 있으신가요? <button type="button" onClick={() => router.push('/hq-login')} className="text-[#002864] hover:underline ml-1">로그인하기</button>

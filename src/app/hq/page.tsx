@@ -290,7 +290,6 @@ export default function HQWorkspacePage() {
     }
   };
 
-  // 조직도 렌더링용 변수
   const filteredInstructors = allInstructors.filter((inst: any) => (inst?.name || "").includes(searchKeyword));
   const orgTree: Record<string, Record<string, any[]>> = {};
   filteredInstructors.forEach((inst: any) => {
@@ -334,7 +333,6 @@ export default function HQWorkspacePage() {
         {/* 좌측 사이드바 */}
         <div className={`${activeRoomId ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-r border-slate-300 shrink-0 z-10 shadow-lg`}>
           <div className="flex px-4 pt-4 pb-0 bg-slate-50 border-b border-slate-200 gap-2">
-            {/* 💡 [수정] 탭 순서를 조직도 -> 채팅목록으로 변경 */}
             <button onClick={() => { showNewChatView(); setActiveRoomId(null); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView === "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
               조직도
             </button>
@@ -470,31 +468,37 @@ export default function HQWorkspacePage() {
                 </div>
               </div>
 
-              <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4">
+              <div className="flex-1 overflow-y-auto p-4 sm:p-5 flex flex-col gap-3">
                 {messages.length === 0 ? <div className="text-center text-slate-400 font-bold text-sm mt-20">대화를 시작해보세요.</div> :
                   messages.map(msg => {
+                    const isMe = msg.sender_id === instId;
                     const unreadBy = roomMembers.filter(m => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
                     const senderInfo = roomMembers.find(m => m.instructor_id === msg.sender_id)?.instructor;
                     const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
 
                     return (
-                      <div key={msg.message_id} className={`flex gap-2 w-full mb-1 ${msg.sender_id === instId ? 'flex-col items-end' : ''}`}>
-                        {msg.sender_id !== instId && (
-                          <div className="flex items-center gap-2 mb-1 pl-1">
-                            <div className="relative w-8 h-8 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden">
-                              <span className="absolute z-0">T</span>
-                              {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
-                            </div>
-                            <span className="text-[12px] font-bold text-slate-600">{senderInfo?.name || '알수없음'}</span>
+                      // 💡 [수정] 카카오톡 스타일: 프로필 사진 우측에 이름과 말풍선이 세로로 정렬됨
+                      <div key={msg.message_id} className={`flex w-full mb-1 ${isMe ? 'justify-end' : 'justify-start'}`}>
+                        
+                        {!isMe && (
+                          <div className="relative w-9 h-9 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden shadow-sm mr-2">
+                            <span className="absolute z-0 font-bold text-[14px]">T</span>
+                            {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                           </div>
                         )}
-                        <div className={`flex items-end gap-2 max-w-[75%] ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row ml-10'}`}>
-                          <div className={`px-4 py-2.5 rounded-2xl shadow-sm text-[14px] leading-relaxed break-words font-medium ${msg.sender_id === instId ? 'bg-slate-800 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
-                            {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
-                          </div>
-                          <div className="flex flex-col items-end shrink-0 text-[10px] text-slate-500 font-bold">
-                            {msg.sender_id === instId && unreadBy > 0 && <span className="text-[#002864] mb-0.5">{unreadBy}</span>}
-                            <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                        
+                        <div className={`flex flex-col max-w-[75%] ${isMe ? 'items-end' : 'items-start'}`}>
+                          {!isMe && (
+                            <span className="text-[12px] font-bold text-slate-600 mb-1 ml-1">{senderInfo?.name || '알수없음'}</span>
+                          )}
+                          <div className={`flex items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
+                            <div className={`px-4 py-2.5 rounded-2xl shadow-sm text-[14px] leading-relaxed break-words font-medium ${isMe ? 'bg-slate-800 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
+                              {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                            </div>
+                            <div className={`flex flex-col shrink-0 text-[10px] text-slate-500 font-bold ${isMe ? 'items-end' : 'items-start'}`}>
+                              {isMe && unreadBy > 0 && <span className="text-[#002864] mb-0.5">{unreadBy}</span>}
+                              <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
                           </div>
                         </div>
                       </div>
@@ -502,15 +506,17 @@ export default function HQWorkspacePage() {
                   })
                 }
 
+                {/* 💡 타이핑 인디케이터도 카카오톡 스타일로 맞춤 */}
                 {typingStaffName && (
                   <div className="flex justify-start w-full mb-1 mt-2">
-                    <div className="flex items-end gap-2 max-w-[75%]">
-                      <div className="relative w-8 h-8 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden shadow-sm">
-                        <span className="absolute z-0">T</span>
-                        {rooms.find(r => r.room_id === activeRoomId)?.displayAvatar && <img src={rooms.find(r => r.room_id === activeRoomId)?.displayAvatar} className="absolute w-full h-full object-cover z-10" alt="profile"/>}
-                      </div>
+                    <div className="relative w-9 h-9 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden shadow-sm mr-2">
+                      <span className="absolute z-0 font-bold text-[14px]">T</span>
+                      {rooms.find(r => r.room_id === activeRoomId)?.displayAvatar && <img src={rooms.find(r => r.room_id === activeRoomId)?.displayAvatar} className="absolute w-full h-full object-cover z-10" alt="profile"/>}
+                    </div>
+                    <div className="flex flex-col items-start max-w-[75%]">
+                      <span className="text-[12px] font-bold text-slate-600 mb-1 ml-1">{typingStaffName}</span>
                       <div className="px-4 py-2.5 rounded-2xl shadow-sm font-bold text-[13px] bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
-                        {typingStaffName}님이 메시지를 입력 중입니다...
+                        메시지를 입력 중입니다...
                       </div>
                     </div>
                   </div>
