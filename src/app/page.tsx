@@ -9,19 +9,17 @@ import SuperAdminModal from "@/components/auth/SuperAdminModal";
 export default function LoginPage() {
   const router = useRouter(); 
 
-  // 일반 로그인 상태 관리
   const [loginId, setLoginId] = useState("");
   const [loginPw, setLoginPw] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // 모달 상태 관리
   const [isSaModalOpen, setIsSaModalOpen] = useState(false);
 
   useEffect(() => {
     const clearSession = async () => {
       localStorage.clear(); 
       sessionStorage.clear(); 
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 쿠키 초기화
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       await supabase.auth.signOut(); 
     };
     clearSession();
@@ -36,9 +34,11 @@ export default function LoginPage() {
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear();
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 로그인 전 쿠키 초기화
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
 
-      const fakeEmail = `${loginId}@logica.com`;
+      // 💡 [수정] 입력된 아이디에서 숫자만 완벽하게 추출하여 비교
+      const cleanPhone = loginId.replace(/[^0-9]/g, '');
+      const fakeEmail = `${cleanPhone}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: fakeEmail,
@@ -51,16 +51,14 @@ export default function LoginPage() {
         return;
       }
 
-      // 🌟 [추가됨] 미들웨어가 읽을 수 있도록 수파베이스 토큰을 쿠키에 저장
       if (authData.session) {
         document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
       }
 
-      // 4. 인증 성공 후, DB에서 강사 추가 정보 가져오기
       const { data: instructorData, error: dbError } = await supabase
         .from('instructor')
         .select('*')
-        .eq('login_id', loginId)
+        .eq('login_id', cleanPhone)
         .single();
 
       if (dbError || !instructorData) {
@@ -69,19 +67,49 @@ export default function LoginPage() {
         return;
       }
 
+      // 💡 [핵심 해결] 3중 방어로 본사 계정을 완벽하게 색출합니다.
+      let isHQ = false;
+      const HQ_TENANT_ID = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc';
+
+      if (instructorData.tenant_id === HQ_TENANT_ID) {
+        isHQ = true;
+      } else if (instructorData.tenant_id) {
+        const { data: tenantData } = await supabase
+          .from('academy_tenant')
+          .select('tenant_type, name')
+          .eq('tenant_id', instructorData.tenant_id)
+          .maybeSingle();
+        
+        if (tenantData?.tenant_type?.toUpperCase() === 'HQ' || tenantData?.name?.includes('본사')) {
+          isHQ = true;
+        }
+      }
+
+      // 💡 본사이거나, 아예 소속이 없는 경우 완벽 차단
+      if (isHQ) {
+        alert("🏢 본사 임직원 계정은 학원(가맹점) 시스템에 접근할 수 없습니다.\n본사 전용 워크스페이스로 이동합니다.");
+        await supabase.auth.signOut();
+        router.replace('/hq-login');
+        return;
+      }
+      if (!instructorData.tenant_id) {
+        alert("🚫 소속 학원(테넌트)이 배정되지 않은 계정입니다. 본사 또는 원장님께 문의하세요.");
+        await supabase.auth.signOut();
+        return;
+      }
+
       alert(`로그인 성공! ${instructorData.name}님 환영합니다.`);
 
-      // 💡 [수정] 중복된 저장 코드 삭제 및 정확한 역할 저장 보장
       localStorage.setItem("logica_instructor_id", instructorData.instructor_id);
       localStorage.setItem("logica_instructor_name", instructorData.name);
       localStorage.setItem("logica_instructor_role", instructorData.role || "TEACHER");
       localStorage.setItem("logica_instructor_position", instructorData.position || "");
+      if (instructorData.tenant_id) localStorage.setItem("logica_tenant_id", instructorData.tenant_id);
       sessionStorage.setItem("just_logged_in", "true");
 
       const role = instructorData.role;
       const position = String(instructorData.position);
       
-      // 최고관리자 확인용 플래그
       const isSuperAdmin = role === 'SUPER_ADMIN' || position.includes('최고관리자') || position.includes('대장');
 
       if (isSuperAdmin) {
@@ -98,7 +126,7 @@ export default function LoginPage() {
     }
   };
 
-  // 클리닉 관리 전용 로그인
+  // 클리닉 관리(실장/원장) 전용 로그인
   const handleSupervisorLogin = async () => {
     if (!loginId || !loginPw) {
       alert("아이디와 비밀번호를 모두 입력해주세요.");
@@ -111,9 +139,10 @@ export default function LoginPage() {
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear(); 
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 로그인 전 쿠키 초기화
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
 
-      const fakeEmail = `${loginId}@logica.com`;
+      const cleanPhone = loginId.replace(/[^0-9]/g, '');
+      const fakeEmail = `${cleanPhone}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: fakeEmail,
@@ -133,12 +162,42 @@ export default function LoginPage() {
       const { data: instructorData, error: dbError } = await supabase
         .from('instructor')
         .select('*')
-        .eq('login_id', loginId)
+        .eq('login_id', cleanPhone)
         .single();
 
       if (dbError || !instructorData) {
         alert("강사 정보를 불러오는데 실패했습니다.");
         setIsLoading(false);
+        return;
+      }
+
+      // 💡 [핵심 해결] 클리닉 로그인 시에도 동일하게 3중 방어 적용
+      let isHQ = false;
+      const HQ_TENANT_ID = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc';
+
+      if (instructorData.tenant_id === HQ_TENANT_ID) {
+        isHQ = true;
+      } else if (instructorData.tenant_id) {
+        const { data: tenantData } = await supabase
+          .from('academy_tenant')
+          .select('tenant_type, name')
+          .eq('tenant_id', instructorData.tenant_id)
+          .maybeSingle();
+        
+        if (tenantData?.tenant_type?.toUpperCase() === 'HQ' || tenantData?.name?.includes('본사')) {
+          isHQ = true;
+        }
+      }
+
+      if (isHQ) {
+        alert("🏢 본사 임직원 계정은 학원(가맹점) 시스템에 접근할 수 없습니다.\n본사 전용 워크스페이스로 이동합니다.");
+        await supabase.auth.signOut();
+        router.replace('/hq-login');
+        return;
+      }
+      if (!instructorData.tenant_id) {
+        alert("🚫 소속 학원(테넌트)이 배정되지 않은 계정입니다. 본사 또는 원장님께 문의하세요.");
+        await supabase.auth.signOut();
         return;
       }
 
@@ -154,15 +213,16 @@ export default function LoginPage() {
         localStorage.setItem("logica_instructor_id", instructorData.instructor_id);
         localStorage.setItem("logica_instructor_name", instructorData.name);
         
-        // 💡 [수정] 무조건 ADMIN/실장으로 덮어쓰던 버그 수정 -> 본래 직급 유지
         localStorage.setItem("logica_instructor_role", instructorData.role || 'ADMIN');
         localStorage.setItem("logica_instructor_position", instructorData.position || '실장');
+        if (instructorData.tenant_id) localStorage.setItem("logica_tenant_id", instructorData.tenant_id);
         
         sessionStorage.setItem("just_logged_in", "true");
         
         router.replace('/supervisor'); 
       } else {
         alert(`[접근 불가] 현재 DB에서 가져온 직급: "${instructorData.position}"\n관리자(실장/원장)로 인식되지 않았습니다. Supabase DB에 공백이나 오타가 없는지 확인하세요.`);
+        await supabase.auth.signOut();
       }
     } catch (error) {
       console.error("로그인 에러:", error);
@@ -172,7 +232,6 @@ export default function LoginPage() {
     }
   };
 
-  // 폭죽 효과 및 모달 오픈
   const triggerSuperAdminLogin = async () => {
     try {
       const confettiModule = await import("canvas-confetti");
@@ -204,7 +263,6 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center relative bg-slate-50">
-      {/* 일반 로그인 박스 */}
       <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl border border-slate-200 z-10">
         <div className="text-center mb-8 flex flex-col items-center">
           <img
