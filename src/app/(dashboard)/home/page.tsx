@@ -21,6 +21,10 @@ export default function TeacherDashboardPage() {
   const [classStats, setClassStats] = useState({ avgScore: 0, hwRate: 0, bookName: "-", bookProgress: 0 });
   const [todoStats, setTodoStats] = useState({ grading: 0, clinic: 0 });
   
+  // 다가오는 일정/회의 및 시험 상태
+  const [upcomingSchedule, setUpcomingSchedule] = useState<{ type: string; title: string; time: string } | null>(null);
+  const [upcomingExam, setUpcomingExam] = useState<{ title: string; time: string } | null>(null);
+
   const [csRequests, setCsRequests] = useState<any[]>([]);
   const [memos, setMemos] = useState<any[]>([]);
 
@@ -42,12 +46,9 @@ export default function TeacherDashboardPage() {
 
     loadDashboardData(instId);
     
-    // 바탕 클릭 시 출결 드롭다운 닫기
     const closeMenu = (e: MouseEvent) => {
       const target = e.target as Element;
-      if (target.closest('.kebab-container')) {
-        return;
-      }
+      if (target.closest('.kebab-container')) return;
       setActiveAttMenu(null);
     };
 
@@ -99,8 +100,61 @@ export default function TeacherDashboardPage() {
       }
     }
 
+    // 🌟 회의 및 시험 일정 로드
+    fetchUpcomingSchedules();
     fetchMemos();
-    setTodoStats({ grading: Math.floor(Math.random() * 5) + 1, clinic: Math.floor(Math.random() * 3) });
+  };
+
+  // 🌟 [핵심] 다가오는 일정 및 시험을 로드하는 함수
+  const fetchUpcomingSchedules = async () => {
+    // 오늘 날짜 구하기 (KST 기준 YYYY-MM-DD)
+    const todayStr = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
+
+    try {
+      // 1. 임박한 입학테스트 (오늘 이후 가장 빠른 일정 1개)
+      const { data: exams } = await supabase
+        .from("admission_session")
+        .select("title, test_date, start_time")
+        .gte("test_date", todayStr)
+        .order("test_date", { ascending: true })
+        .order("start_time", { ascending: true })
+        .limit(1);
+
+      if (exams && exams.length > 0) {
+        const d = exams[0].test_date.split("-");
+        const t = exams[0].start_time ? exams[0].start_time.substring(0, 5) : "";
+        setUpcomingExam({
+          title: exams[0].title,
+          time: `${d[1]}.${d[2]} ${t}`
+        });
+      } else {
+        setUpcomingExam(null);
+      }
+
+      // 2. 🌟 임박한 회의록 연동 (오늘 날짜 이후 가장 빠른 회의 1개)
+      // ⚠️ 만약 실제 테이블이 meeting 이거나 컬럼이 다르면 아래 이름을 수정해주세요!
+      const { data: schedules } = await supabase
+        .from("meeting_log") // <--- 🚨 실제 사용중인 회의록 테이블명 (예: meeting, meeting_minutes 등)
+        .select("title, meeting_date, start_time") // <--- 🚨 실제 컬럼명 (제목, 날짜, 시간)
+        .gte("meeting_date", todayStr) // 생성일이 아닌 '회의 날짜' 기준!
+        .order("meeting_date", { ascending: true }) // 가장 가까운 미래 날짜부터 (오름차순 정렬)
+        .limit(1);
+
+      if (schedules && schedules.length > 0) {
+        const d = schedules[0].meeting_date.split("-");
+        const t = schedules[0].start_time ? schedules[0].start_time.substring(0, 5) : "";
+        setUpcomingSchedule({
+          type: "회의",
+          title: schedules[0].title, 
+          time: t ? `${d[1]}.${d[2]} ${t}` : `${d[1]}.${d[2]}`
+        });
+      } else {
+        setUpcomingSchedule(null);
+      }
+
+    } catch (e) {
+      console.error("일정 로드 오류:", e);
+    }
   };
 
   const fetchMemos = async () => {
@@ -125,7 +179,6 @@ export default function TeacherDashboardPage() {
       return;
     }
 
-    // 💡 [핵심 수정] consultation_log 테이블 조인 추가
     const { data: classStudents } = await supabase
       .from("student")
       .select("*, parent(*), exam_assignment(*), enrollment(class(name)), consultation_log(created_at)")
@@ -420,17 +473,37 @@ export default function TeacherDashboardPage() {
           </div>
         </div>
 
+        {/* 🌟 다가오는 주요 일정 영역 */}
         <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col justify-center hover:border-indigo-300 transition-colors h-[220px]">
-          <span className="text-sm font-bold text-slate-500 mb-4 shrink-0">🔥 오늘의 할 일</span>
+          <span className="text-sm font-bold text-slate-500 mb-4 shrink-0">📅 오늘의 주요 일정</span>
           <div className="flex flex-col gap-3">
-            <div onClick={() => router.push('/homework')} className="flex justify-between items-center bg-indigo-50 p-4 rounded-xl border border-indigo-100 cursor-pointer hover:bg-indigo-100 transition-colors">
-              <span className="text-xs font-bold text-indigo-600">✍️ 서술형 채점 대기</span>
-              <span className="text-base font-black text-indigo-700">{todoStats.grading}건</span>
+            
+            {/* 회의/일정 */}
+            <div className="flex flex-col justify-center bg-indigo-50 p-3 rounded-xl border border-indigo-100 transition-colors h-[68px]">
+              <span className="text-[10px] font-bold text-indigo-500 mb-1">🗣️ 진행 예정 회의</span>
+              {upcomingSchedule ? (
+                 <div className="flex items-center gap-2">
+                    <span className="text-xs font-black bg-white text-indigo-600 px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">{upcomingSchedule.time}</span>
+                    <span className="text-sm font-bold text-indigo-800 truncate leading-tight" title={upcomingSchedule.title}>{upcomingSchedule.title}</span>
+                 </div>
+              ) : (
+                 <span className="text-xs font-bold text-indigo-400">예정된 회의 일정이 없습니다.</span>
+              )}
             </div>
-            <div onClick={() => router.push('/makeup')} className="flex justify-between items-center bg-amber-50 p-4 rounded-xl border border-amber-100 cursor-pointer hover:bg-amber-100 transition-colors">
-              <span className="text-xs font-bold text-amber-600">🩺 오늘 보강/클리닉</span>
-              <span className="text-base font-black text-amber-700">{todoStats.clinic}명</span>
+
+            {/* 시험/테스트 */}
+            <div onClick={() => router.push('/admission')} className="flex flex-col justify-center bg-amber-50 p-3 rounded-xl border border-amber-100 cursor-pointer hover:bg-amber-100 transition-colors h-[68px]">
+              <span className="text-[10px] font-bold text-amber-500 mb-1">📝 임박한 입학테스트</span>
+              {upcomingExam ? (
+                 <div className="flex items-center gap-2">
+                    <span className="text-xs font-black bg-white text-amber-600 px-1.5 py-0.5 rounded border border-amber-200 shrink-0">{upcomingExam.time}</span>
+                    <span className="text-sm font-bold text-amber-800 truncate leading-tight" title={upcomingExam.title}>{upcomingExam.title}</span>
+                 </div>
+              ) : (
+                 <span className="text-xs font-bold text-amber-400">예정된 테스트가 없습니다.</span>
+              )}
             </div>
+
           </div>
         </div>
 
@@ -491,15 +564,12 @@ export default function TeacherDashboardPage() {
             <table className="w-full text-left border-collapse min-w-[800px]">
               <thead className="bg-white sticky top-0 shadow-sm z-10">
                 <tr>
-                  {/* 💡 [핵심] 이름 칸의 너비를 고정하고 간격을 줄임 */}
                   <th className="py-3 pl-4 pr-2 w-28 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">이름</th>
-                  {/* 💡 [핵심] 수강중 반 목록 칸의 좌측 패딩을 줄여 이름과 밀착시킴 */}
                   <th className="py-3 pl-0 pr-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider">수강중 반 목록</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학교</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학년</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학생 연락처</th>
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">학부모 연락처</th>
-                  {/* 💡 [핵심] 최근 성적 -> 최근 상담 타이틀 변경 */}
                   <th className="py-3 px-3 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-center">최근 상담</th>
                   <th className="py-3 px-4 text-[11px] font-extrabold text-slate-400 uppercase tracking-wider text-right">관리</th>
                 </tr>
@@ -513,12 +583,9 @@ export default function TeacherDashboardPage() {
                     const parentContact = s.parent?.phone || s.parent?.parent_contact || "-";
                     const classNames = s.enrollment?.map((e: any) => e.class?.name).filter(Boolean).join(", ") || "반 미배정";
 
-                    // 💡 [핵심] 상담 기록 추출 및 버튼 HTML 생성
                     let consultHtml = <span className="text-[11px] font-bold text-slate-300">기록없음</span>;
                     if (s.consultation_log && s.consultation_log.length > 0) {
-                      // 최신 순 정렬
                       const logs = [...s.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-                      // 날짜 포맷 (예: 25. 12. 31)
                       const recentDate = new Date(logs[0].created_at).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }).replace(/\.$/, '');
                       
                       consultHtml = (
@@ -533,7 +600,6 @@ export default function TeacherDashboardPage() {
 
                     return (
                       <tr key={s.student_id} className="hover:bg-blue-50/40 transition-colors border-b border-slate-100">
-                        {/* 💡 [핵심] 이름 칸 너비 적용 */}
                         <td className="py-3 pl-4 pr-2 w-28">
                           <div 
                             className="flex items-center gap-3 cursor-pointer group w-max"
@@ -547,13 +613,11 @@ export default function TeacherDashboardPage() {
                             </span>
                           </div>
                         </td>
-                        {/* 💡 [핵심] 수강중 반 목록 칸 패딩 조정 */}
                         <td className="py-3 pl-0 pr-3 text-[12px] font-bold text-slate-600 truncate max-w-[140px]" title={classNames}>{classNames}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-medium text-slate-500 truncate max-w-[80px]" title={schoolName}>{schoolName}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-bold text-slate-600 whitespace-nowrap">{gradeText}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-medium text-slate-500 whitespace-nowrap">{studentContact}</td>
                         <td className="py-3 px-3 text-center text-[12px] font-medium text-slate-500 whitespace-nowrap">{parentContact}</td>
-                        {/* 💡 [핵심] 렌더링 값 교체 */}
                         <td className="py-3 px-3 text-center whitespace-nowrap">{consultHtml}</td>
                         <td className="py-3 px-4 text-right">
                           <button onClick={() => window.open(`/student/${s.student_id}`, '_blank')} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 px-3 py-1.5 rounded-lg transition-colors shadow-sm whitespace-nowrap">리포트</button>
