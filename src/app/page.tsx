@@ -9,17 +9,19 @@ import SuperAdminModal from "@/components/auth/SuperAdminModal";
 export default function LoginPage() {
   const router = useRouter(); 
 
+  // 일반 로그인 상태 관리
   const [loginId, setLoginId] = useState("");
   const [loginPw, setLoginPw] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  // 모달 상태 관리
   const [isSaModalOpen, setIsSaModalOpen] = useState(false);
 
   useEffect(() => {
     const clearSession = async () => {
       localStorage.clear(); 
       sessionStorage.clear(); 
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 쿠키 초기화
       await supabase.auth.signOut(); 
     };
     clearSession();
@@ -34,9 +36,8 @@ export default function LoginPage() {
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear();
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 로그인 전 쿠키 초기화
 
-      // 💡 [핵심 해결] 숫자만 강제로 추출하던 로직 삭제! 입력한 아이디(loginId) 그대로를 사용합니다.
       const fakeEmail = `${loginId}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -50,11 +51,12 @@ export default function LoginPage() {
         return;
       }
 
+      // 🌟 [추가됨] 미들웨어가 읽을 수 있도록 수파베이스 토큰을 쿠키에 저장
       if (authData.session) {
         document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
       }
 
-      // 💡 [핵심 해결] 입력한 아이디(loginId) 그대로 DB에서 검색합니다.
+      // 4. 인증 성공 후, DB에서 강사 추가 정보 가져오기
       const { data: instructorData, error: dbError } = await supabase
         .from('instructor')
         .select('*')
@@ -67,7 +69,7 @@ export default function LoginPage() {
         return;
       }
 
-      // 본사(HQ) 계정 필터링 로직 (정상 작동)
+      // 본사(HQ) 계정 필터링 로직
       let isHQ = false;
       const HQ_TENANT_ID = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc';
 
@@ -79,7 +81,7 @@ export default function LoginPage() {
           .select('tenant_type, name')
           .eq('tenant_id', instructorData.tenant_id)
           .maybeSingle();
-        
+
         if (tenantData?.tenant_type?.toUpperCase() === 'HQ' || tenantData?.name?.includes('본사')) {
           isHQ = true;
         }
@@ -99,6 +101,7 @@ export default function LoginPage() {
 
       alert(`로그인 성공! ${instructorData.name}님 환영합니다.`);
 
+      // 💡 [수정] 중복된 저장 코드 삭제 및 정확한 역할 저장 보장
       localStorage.setItem("logica_instructor_id", instructorData.instructor_id);
       localStorage.setItem("logica_instructor_name", instructorData.name);
       localStorage.setItem("logica_instructor_role", instructorData.role || "TEACHER");
@@ -109,6 +112,7 @@ export default function LoginPage() {
       const role = instructorData.role;
       const position = String(instructorData.position);
       
+      // 최고관리자 확인용 플래그
       const isSuperAdmin = role === 'SUPER_ADMIN' || position.includes('최고관리자') || position.includes('대장');
 
       if (isSuperAdmin) {
@@ -125,7 +129,7 @@ export default function LoginPage() {
     }
   };
 
-  // 클리닉 관리(실장/원장) 전용 로그인
+  // 클리닉 관리 전용 로그인
   const handleSupervisorLogin = async () => {
     if (!loginId || !loginPw) {
       alert("아이디와 비밀번호를 모두 입력해주세요.");
@@ -138,9 +142,8 @@ export default function LoginPage() {
       await supabase.auth.signOut();
       localStorage.clear();
       sessionStorage.clear(); 
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 로그인 전 쿠키 초기화
 
-      // 💡 [핵심 해결] 관리자 로그인에서도 숫자만 추출하는 로직 원복
       const fakeEmail = `${loginId}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -181,7 +184,7 @@ export default function LoginPage() {
           .select('tenant_type, name')
           .eq('tenant_id', instructorData.tenant_id)
           .maybeSingle();
-        
+
         if (tenantData?.tenant_type?.toUpperCase() === 'HQ' || tenantData?.name?.includes('본사')) {
           isHQ = true;
         }
@@ -199,25 +202,26 @@ export default function LoginPage() {
         return;
       }
 
-      const isAdmin = instructorData.role === 'SUPER_ADMIN' || 
-                instructorData.role === 'ADMIN' || 
-                instructorData.role === 'MANAGER' || 
-                instructorData.role === 'PRINCIPAL' || 
-                String(instructorData.position).includes('최고관리자') || 
-                String(instructorData.position).includes('실장') || 
+      const isAdmin = instructorData.role === 'SUPER_ADMIN' ||
+                instructorData.role === 'ADMIN' ||
+                instructorData.role === 'MANAGER' ||
+                instructorData.role === 'PRINCIPAL' ||
+                String(instructorData.position).includes('최고관리자') ||
+                String(instructorData.position).includes('실장') ||
                 String(instructorData.position).includes('원장');
 
       if (isAdmin) {
         localStorage.setItem("logica_instructor_id", instructorData.instructor_id);
         localStorage.setItem("logica_instructor_name", instructorData.name);
-        
+
+        // 💡 [수정] 무조건 ADMIN/실장으로 덮어쓰던 버그 수정 -> 본래 직급 유지
         localStorage.setItem("logica_instructor_role", instructorData.role || 'ADMIN');
         localStorage.setItem("logica_instructor_position", instructorData.position || '실장');
         if (instructorData.tenant_id) localStorage.setItem("logica_tenant_id", instructorData.tenant_id);
-        
+
         sessionStorage.setItem("just_logged_in", "true");
-        
-        router.replace('/supervisor'); 
+
+        router.replace('/supervisor');
       } else {
         alert(`[접근 불가] 현재 DB에서 가져온 직급: "${instructorData.position}"\n관리자(실장/원장)로 인식되지 않았습니다. Supabase DB에 공백이나 오타가 없는지 확인하세요.`);
         await supabase.auth.signOut();
@@ -230,6 +234,7 @@ export default function LoginPage() {
     }
   };
 
+  // 폭죽 효과 및 모달 오픈
   const triggerSuperAdminLogin = async () => {
     try {
       const confettiModule = await import("canvas-confetti");
@@ -261,6 +266,7 @@ export default function LoginPage() {
 
   return (
     <div className="min-h-screen flex items-center justify-center relative bg-slate-50">
+      {/* 일반 로그인 박스 */}
       <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl border border-slate-200 z-10">
         <div className="text-center mb-8 flex flex-col items-center">
           <img

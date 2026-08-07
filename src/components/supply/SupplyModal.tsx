@@ -146,22 +146,36 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
     }
   };
 
+  // 💡 회의 안건 상정 로직 (Supabase 연동)
+  const submitAgenda = async () => {
+    try {
+      const primaryKey = reqData?.request_id || reqData?.id;
+      await supabase.from("agenda").insert({
+        title: `[비품신청] ${type}`,
+        content: content,
+        type: "비품",
+        source: "Supply",
+        source_id: primaryKey,
+        created_by: currentUser.instId
+      });
+      alert("해당 비품 신청건이 회의 안건으로 상정되었습니다.");
+    } catch (e) {
+      alert("안건 상정 실패");
+    }
+  };
+
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999] p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden h-[95vh] animate-[fadeIn_0.2s_ease-out]">
         
-        {/* 헤더 */}
         <div className="bg-[#002864] p-5 flex justify-between items-center shrink-0">
           <h2 className="text-white font-bold text-lg tracking-tight">📦 {reqData ? "비품 신청 상세 내용" : "새 비품 신청하기"}</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 transition-colors font-bold text-2xl leading-none">&times;</button>
         </div>
 
-        {/* 💡 컨테이너 영역 */}
         <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
-          
-          {/* 💡 상단 본문 영역 (50%) */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
             <div className="shrink-0">
               <label className="block text-xs font-bold text-slate-500 mb-1.5">분류 (태그) <span className="text-rose-500">*</span></label>
@@ -178,7 +192,6 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
               </select>
             </div>
 
-            {/* 💡 텍스트 에어리어가 남은 공간 꽉 채우기 */}
             <div className="flex flex-col flex-1 min-h-0">
               <label className="block text-xs font-bold text-slate-500 mb-1.5">신청 내용 (품목, 수량, 구매 링크 등) <span className="text-rose-500">*</span></label>
               <textarea 
@@ -191,7 +204,6 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
             </div>
           </div>
 
-          {/* 💡 하단 말꼬리 영역 (50%) */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-700 text-sm">💬 진행 상황 및 소통 노트</h3>
@@ -243,17 +255,21 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
           </div>
         </div>
 
-        {/* 푸터 영역 */}
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-          {reqData && (currentUser.isAdmin || String(reqData.author_id) === String(currentUser.instId)) ? (
-            <button onClick={handleDelete} className="px-5 py-2 bg-rose-50 text-rose-500 font-bold text-sm rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">신청서 완전 삭제</button>
-          ) : (
-            <div></div> 
-          )}
+          <div className="flex gap-2 items-center">
+            {reqData && (currentUser.isAdmin || String(reqData.author_id) === String(currentUser.instId)) && (
+              <button onClick={handleDelete} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">신청서 삭제</button>
+            )}
+            {reqData && (
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+                🎙️ 회의 안건 상정
+              </button>
+            )}
+          </div>
           
           <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-6 py-2.5 bg-[#002864] hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
+            <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
               {isSubmitting ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

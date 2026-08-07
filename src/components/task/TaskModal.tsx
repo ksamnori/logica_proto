@@ -136,6 +136,23 @@ export default function TaskModal({ isOpen, task, currentUser, onClose, onSucces
     } catch (e) { alert("삭제 실패"); }
   };
 
+  // 💡 회의 안건 상정 로직 (Supabase 연동)
+  const submitAgenda = async () => {
+    try {
+      await supabase.from("agenda").insert({
+        title: `[업무공유] ${modalData.memo_type}`,
+        content: modalData.content,
+        type: "업무",
+        source: "Task",
+        source_id: modalData.memo_id,
+        created_by: currentUser.instId
+      });
+      alert("해당 업무가 회의 안건으로 상정되었습니다.");
+    } catch (e) {
+      alert("안건 상정 실패");
+    }
+  };
+
   if (!isOpen || !modalData) return null;
 
   const isReadonly = modalData.memo_id && !currentUser.isAdmin && String(modalData.instructor_id) !== String(currentUser.instId);
@@ -144,16 +161,12 @@ export default function TaskModal({ isOpen, task, currentUser, onClose, onSucces
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-2xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         
-        {/* 헤더 */}
         <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
           <h2 className="text-lg font-bold tracking-tight">📌 업무 공유 / 상세 공지</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
         </div>
         
-        {/* 💡 컨테이너 영역: 스크롤 방지 및 높이 분배 */}
         <div className="flex-1 overflow-hidden p-6 bg-slate-50 flex flex-col gap-5">
-          
-          {/* 💡 상단 본문 영역 (50%) */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
             <div className="grid grid-cols-2 gap-4 shrink-0">
               <div className="col-span-1">
@@ -179,7 +192,6 @@ export default function TaskModal({ isOpen, task, currentUser, onClose, onSucces
               </div>
             </div>
 
-            {/* 💡 텍스트 에어리어가 남은 상단 공간을 꽉 채우게 만듦 */}
             <div className="flex flex-col flex-1 min-h-0">
               <label className="block text-xs font-bold text-slate-500 mb-1">본문 내용 작성 <span className="text-rose-500">*</span></label>
               <textarea 
@@ -190,7 +202,6 @@ export default function TaskModal({ isOpen, task, currentUser, onClose, onSucces
             </div>
           </div>
 
-          {/* 💡 하단 말꼬리 영역 (50%) */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-700 text-sm">💬 업무 처리 노트 및 소통 (말꼬리)</h3>
@@ -238,15 +249,21 @@ export default function TaskModal({ isOpen, task, currentUser, onClose, onSucces
           </div>
         </div>
         
-        {/* 푸터 영역 */}
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-          {modalData.memo_id && (currentUser.isAdmin || String(modalData.instructor_id) === String(currentUser.instId)) ? (
-            <button onClick={deleteTask} className="px-5 py-2 bg-rose-50 text-rose-500 font-bold text-sm rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">업무 완전 삭제</button>
-          ) : <div></div>}
+          <div className="flex gap-2 items-center">
+            {modalData.memo_id && (currentUser.isAdmin || String(modalData.instructor_id) === String(currentUser.instId)) && (
+              <button onClick={deleteTask} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">업무 삭제</button>
+            )}
+            {modalData.memo_id && (
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+                🎙️ 회의 안건 상정
+              </button>
+            )}
+          </div>
           
           <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={saveTask} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={saveTask} disabled={isSaving || isReadonly} className="px-5 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">
               {isSaving ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

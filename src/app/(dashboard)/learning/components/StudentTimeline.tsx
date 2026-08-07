@@ -19,7 +19,7 @@ interface StudentTimelineProps {
   handleSelectAllStudent: () => void;
   handleBulkCompleteStudent: () => void;
   handleBulkDeleteStudent: () => void;
-  handleGenerateIncorrectPrint: () => void; 
+  handleGenerateIncorrectPrint: () => void;
   isGeneratingPrint: boolean;
   formatDateLabel: (dateStr: string, includeTime?: boolean) => string;
   handleForceComplete: (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => void;
@@ -31,7 +31,7 @@ interface StudentTimelineProps {
 const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => {
   if (!id) return "분류 없음";
   if (categoryMap && categoryMap[id]) return categoryMap[id];
-  return id; 
+  return id;
 };
 
 const getDiffScore = (diff: string) => {
@@ -124,7 +124,7 @@ export default function StudentTimeline({
   handleBulkCompleteStudent, handleBulkDeleteStudent,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint
 }: StudentTimelineProps) {
-  
+
   const [modalTab, setModalTab] = useState<'TAXONOMY' | 'PERIOD' | 'SELECTED' | null>(null);
   const [isEngineRunning, setIsEngineRunning] = useState(false);
 
@@ -148,7 +148,7 @@ export default function StudentTimeline({
 
   const [categoryMap, setCategoryMap] = useState<Record<string, string>>({});
   const [allIncorrectRecords, setAllIncorrectRecords] = useState<any[]>([]);
-  
+
   const [isCalculating, setIsCalculating] = useState(false);
   const [matchedCache, setMatchedCache] = useState<string[]>([]);
 
@@ -218,10 +218,10 @@ export default function StudentTimeline({
     setIsTaxonomyLoading(true);
     try {
       const { data: statsData, error: statsErr } = await supabaseClient.rpc('get_taxonomy_stats', { p_student_id: currentView.studentId });
-      
+
       if (!statsErr && statsData) {
         const stats: Record<string, { total: number; correct: number; pending: number }> = {};
-        
+
         statsData.forEach((row: any) => {
           const parts = row.taxonomy_id.split('-');
           for (let i = 1; i <= Math.min(parts.length, 5); i++) {
@@ -302,7 +302,7 @@ export default function StudentTimeline({
   };
 
   const basePendingCount = getBasePendingCount();
-  
+
   let expectedFinalCount = 0;
   if (genMethod === 'SAME') {
     expectedFinalCount = basePendingCount;
@@ -330,7 +330,7 @@ export default function StudentTimeline({
           const targetWQs = allIncorrectRecords.filter(r => {
               const tax = Array.isArray(r.question_db) ? r.question_db[0]?.taxonomy_id : r.question_db?.taxonomy_id;
               if (!tax) return false;
-              return selArr.some(sel => tax.startsWith(sel)); 
+              return selArr.some(sel => tax.startsWith(sel));
           });
           uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
       } else if (modalTab === 'PERIOD') {
@@ -356,7 +356,7 @@ export default function StudentTimeline({
                 .eq('homework_id', hwId)
                 .eq('student_id', currentView.studentId)
                 .in('grading_code', ['X', 'TX', '☆', 'B']);
-                
+
               if (hwAns && hwAns.length > 0) {
                 const tqIds = hwAns.map(a => a.tq_id).filter(Boolean);
                 if (tqIds.length > 0) {
@@ -398,7 +398,7 @@ export default function StudentTimeline({
 
   const handleEditAndCreate = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다. 세팅을 확인해주세요.");
-    
+
     // 🌟 [추가됨] 뷰어 화면에서도 어떤 모달 탭에서 생성되었는지 알 수 있도록 서브타이틀 보관
     let subTitle = '맞춤 오답';
     if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
@@ -409,40 +409,40 @@ export default function StudentTimeline({
     sessionStorage.setItem('examQuestions', JSON.stringify(matchedCache));
     sessionStorage.setItem('examTitle', `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`);
     sessionStorage.setItem('examSubTitle', subTitle); // 뷰어 연동용 서브타이틀
-    
+
     sessionStorage.setItem('clinicTargetStudentId', currentView?.studentId);
     sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
     sessionStorage.setItem('isClinicMode', 'true');
-    
+
     window.location.href = '/exam/step2?source=clinic_incorrect';
   };
 
   const handleCreatePrint = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다.");
     setIsEngineRunning(true);
-    
+
     try {
       const instId = localStorage.getItem('logica_instructor_id');
       if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다. 다시 로그인 해주세요.");
 
       const examTitle = `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`;
-      
+
       // 🌟 [핵심 수정] 어떤 탭에서 생성했는지에 따라 서브 타이틀(배지)을 동적으로 변경!
       let subTitle = '맞춤 오답';
       if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
       else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
       else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
-      
+
       const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
         title: examTitle,
         sub_title: subTitle, // 💡 동적으로 변경된 꼬리표 삽입
-        exam_type: '오답프린트', 
+        exam_type: '오답프린트',
         total_questions: matchedCache.length,
         instructor_id: instId,
-        layout_settings: { 
-          column: 2, 
-          split: 4, 
-          titleMode: 'all', 
+        layout_settings: {
+          column: 2,
+          split: 4,
+          titleMode: 'all',
           template: 'basic1',
           numberColor: '#175b6a',
           titleColor: '#002864',
@@ -473,7 +473,7 @@ export default function StudentTimeline({
         student_id: currentView.studentId,
         task_type: '유형오답클리닉',
         question_id: qId,
-        status: '대기' 
+        status: '대기'
       }));
 
       const { error: taskErr } = await supabaseClient.from('clinic_task').insert(tasks);
@@ -481,7 +481,7 @@ export default function StudentTimeline({
 
       alert(`[출제 및 전송 완료! 🎉]\n조회된 ${matchedCache.length}개의 맞춤 문항이 '학습 타임라인'에 배부되었으며,\n학생의 클리닉 패드로 즉시 전송되었습니다!`);
       setModalTab(null);
-      
+
       setTimeout(() => {
         window.location.reload();
       }, 500);
@@ -540,7 +540,7 @@ export default function StudentTimeline({
       const stat = taxonomyStats[key] || { total: 0, correct: 0, pending: 0 };
       const rate = stat.total > 0 ? Math.round((stat.correct / stat.total) * 100) : 0;
       const isLeaf = Object.keys(node.children).length === 0;
-      
+
       const displayName = formatTaxonomyName(key, categoryMap);
 
       const progressBar = stat.total > 0 && (
@@ -588,7 +588,7 @@ export default function StudentTimeline({
     return (
       <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
         <div className="bg-white w-[1100px] h-[720px] max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-          
+
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
             <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
               {currentView?.studentName} 학생 맞춤 클리닉 출제
@@ -607,7 +607,7 @@ export default function StudentTimeline({
 
             <div className="flex-1 flex flex-col bg-white overflow-hidden relative">
               <div className="absolute inset-0 overflow-y-auto custom-scrollbar p-6">
-                
+
                 {modalTab === 'TAXONOMY' && (
                   <div className="space-y-2">
                     <div className="flex justify-between items-center mb-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200">
@@ -668,24 +668,24 @@ export default function StudentTimeline({
 
             <div className="w-[420px] bg-white border-l border-slate-200 flex flex-col shrink-0 z-10 shadow-[-4px_0_15px_rgba(0,0,0,0.02)]">
               <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
-                
+
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 text-[13px] font-bold text-slate-600 leading-loose shadow-sm break-keep">
-                  대상 문제의 <span className="text-sky-500 font-black">쌍둥이문제</span> 
-                  <select 
-                    value={twinCount} 
-                    onChange={e => { setTwinCount(Number(e.target.value)); setGenMethod('TWIN'); }} 
+                  대상 문제의 <span className="text-sky-500 font-black">쌍둥이문제</span>
+                  <select
+                    value={twinCount}
+                    onChange={e => { setTwinCount(Number(e.target.value)); setGenMethod('TWIN'); }}
                     className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-black cursor-pointer shadow-sm"
                   >
                     {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>개와 <span className="text-sky-500 font-black">유사문제</span> 
-                  <select 
-                    value={similarCount} 
-                    onChange={e => { setSimilarCount(Number(e.target.value)); setGenMethod('TWIN'); }} 
+                  </select>개와 <span className="text-sky-500 font-black">유사문제</span>
+                  <select
+                    value={similarCount}
+                    onChange={e => { setSimilarCount(Number(e.target.value)); setGenMethod('TWIN'); }}
                     className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-black cursor-pointer shadow-sm"
                   >
                     {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>개로 학습지를 만듭니다. 유사문제 난이도는 
-                  <select 
+                  </select>개로 학습지를 만듭니다. 유사문제 난이도는
+                  <select
                     value={difficultyOption}
                     onChange={e => { setDifficultyOption(e.target.value); setGenMethod('TWIN'); }}
                     className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-black cursor-pointer shadow-sm"
@@ -699,7 +699,7 @@ export default function StudentTimeline({
                     <input type="checkbox" checked={excludeOriginal} onChange={e => setExcludeOriginal(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-sky-500" />
                     <span className="text-[14px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">기존 출제 문제 제외</span>
                   </label>
-                  
+
                   <div className="flex items-center gap-3">
                     <label className="flex items-center gap-2 cursor-pointer group">
                       <input type="checkbox" checked={isMaxTypeLimitActive} onChange={(e) => setIsMaxTypeLimitActive(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-sky-500" />
@@ -729,7 +729,7 @@ export default function StudentTimeline({
                     )}
                   </div>
                 </div>
-                
+
                 <div className="flex gap-2 w-full mt-4">
                   <button onClick={handleEditAndCreate} disabled={matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-white border border-slate-300 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-slate-600 disabled:opacity-50">편집 후 만들기</button>
                   <button onClick={handleCreatePrint} disabled={isEngineRunning || matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-extrabold text-white disabled:opacity-50">바로 만들기</button>
@@ -762,28 +762,28 @@ export default function StudentTimeline({
 
               const isSelected = selectedBlocks.includes(item.id);
               const isCompleted = item.isCompleted;
-              
+
               let badgeColor = "bg-slate-100 text-slate-500";
               let typeLabel = "";
-              
+
               if (item.type === 'exam') { badgeColor = "bg-blue-100 text-blue-700 border-blue-200"; typeLabel = "📝 시험"; }
               else if (item.type.includes('hw')) { badgeColor = "bg-amber-100 text-amber-700 border-amber-200"; typeLabel = "📚 과제"; }
               else { badgeColor = "bg-emerald-100 text-emerald-700 border-emerald-200"; typeLabel = "🖨️ 오답프린트"; }
 
-              const rowBgClass = isSelected 
-                ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' 
-                : isCompleted 
-                  ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
+              const rowBgClass = isSelected
+                ? 'border-rose-400 bg-rose-50/30 shadow-rose-100'
+                : isCompleted
+                  ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80'
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
               return (
-                <div key={`${item.id}_${idx}`} onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])} 
+                <div key={`${item.id}_${idx}`} onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
                   className={`border-2 rounded-xl p-3 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}
                 >
                   <div className="flex items-center gap-3 w-1/2 min-w-0 shrink-0 flex-1">
                     <input type="checkbox" checked={isSelected} readOnly className="w-5 h-5 accent-rose-500 pointer-events-none shrink-0" />
                     <div className="w-[100px] shrink-0 text-[11px] font-bold text-slate-400 leading-tight truncate">
-                      {formatDateLabel(item.date, true)} 
+                      {formatDateLabel(item.date, true)}
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border shrink-0 whitespace-nowrap ${badgeColor}`}>{typeLabel}</span>
                     <div className="flex-1 font-extrabold text-[14px] truncate" title={item.title || '제목 없음'}>
@@ -793,12 +793,12 @@ export default function StudentTimeline({
 
                   <div className="flex items-center gap-3 shrink-0 justify-end w-[440px]">
                     <div className="text-[12px] font-bold text-slate-500 shrink-0 w-[60px] text-right whitespace-nowrap">총 {item.total || 0}문항</div>
-                    
+
                     <div className="flex items-center gap-1.5 shrink-0 w-[90px] justify-center">
                       <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 whitespace-nowrap">✅ {item.oCount || 0}</span>
                       <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 whitespace-nowrap">❌ {item.xCount || 0}</span>
                     </div>
-                    
+
                     <div className="flex items-center gap-1.5 shrink-0 w-[130px] justify-end">
                       <button onClick={(e) => handleForceComplete(e, item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : 'exam', item.realId, currentView.studentId)} className="text-[11px] font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-white border border-slate-200 px-2 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0">
                         ✅ 완료처리
@@ -807,13 +807,13 @@ export default function StudentTimeline({
                         {item.status || '미제출'}
                       </span>
                     </div>
-                    
+
                     <div className="flex items-center gap-2.5 shrink-0 border-l border-slate-300 pl-4 w-[120px] justify-end">
                       {item.type !== 'hw' && (
                         <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${item.masterId}&exam_id=${item.masterId}`, '_blank'); }} className="text-[14px] hover:text-blue-600 transition-colors shrink-0">✏️</button>
                       )}
                       <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print') handleDeletePrint(item.realId, item.masterId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0">🗑️</button>
-                      
+
                       <button onClick={(e) => { e.stopPropagation(); window.location.href = item.type.includes('hw') ? `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}` : `/exam/review?assignment_id=${item.realId}`; }} className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-3 py-1.5 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>
                   </div>

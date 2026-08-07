@@ -144,6 +144,24 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
     } catch (e) { alert("삭제 실패"); }
   };
 
+  // 💡 회의 안건 상정 로직 (Supabase 연동)
+  const submitAgenda = async () => {
+    try {
+      const studentName = students.find(s => s.student_id === modalData.student_id)?.name || "학생";
+      await supabase.from("agenda").insert({
+        title: `[CS요청] ${studentName} 학생 건`,
+        content: modalData.reason,
+        type: "CS",
+        source: "CS",
+        source_id: modalData.request_id,
+        created_by: currentUser.instId
+      });
+      alert("해당 CS 요청건이 회의 안건으로 상정되었습니다.");
+    } catch (e) {
+      alert("안건 상정 실패");
+    }
+  };
+
   if (!isOpen || !modalData) return null;
 
   const isReadonly = modalData.request_id && !currentUser.isAdmin && String(modalData.author_id) !== String(currentUser.instId);
@@ -152,16 +170,12 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-2xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         
-        {/* 헤더 */}
         <div className="bg-rose-600 p-5 text-white flex justify-between items-center shrink-0">
           <h2 className="text-lg font-bold tracking-tight">🚨 CS / 학부모 요청 상세</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
         </div>
         
-        {/* 💡 컨테이너 영역 */}
         <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
-          
-          {/* 💡 상단 본문 영역 (50%) */}
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
             <div className="grid grid-cols-2 gap-4 shrink-0">
               <div className="col-span-2 sm:col-span-1">
@@ -190,7 +204,6 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
               </div>
             </div>
 
-            {/* 💡 텍스트 에어리어가 남은 공간 꽉 채우기 */}
             <div className="flex flex-col flex-1 min-h-0">
               <label className="block text-xs font-bold text-slate-500 mb-1">요청 상세 내용 (사유) <span className="text-rose-500">*</span></label>
               <textarea 
@@ -233,7 +246,6 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
             </div>
           </div>
 
-          {/* 💡 하단 말꼬리 영역 (50%) */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-700 text-sm">💬 처리 상황 / 코멘트</h3>
@@ -281,15 +293,22 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
           </div>
         </div>
         
-        {/* 푸터 영역 */}
+        {/* 💡 푸터: 삭제 버튼 옆에 안건 상정 버튼을 나란히 배치 */}
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-          {modalData.request_id && (currentUser.isAdmin || String(modalData.author_id) === String(currentUser.instId)) ? (
-            <button onClick={deleteCS} className="px-5 py-2 bg-rose-50 text-rose-500 font-bold text-sm rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">요청 완전 삭제</button>
-          ) : <div></div>}
+          <div className="flex gap-2 items-center">
+            {modalData.request_id && (currentUser.isAdmin || String(modalData.author_id) === String(currentUser.instId)) && (
+              <button onClick={deleteCS} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">요청 삭제</button>
+            )}
+            {modalData.request_id && (
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+                🎙️ 회의 안건 상정
+              </button>
+            )}
+          </div>
           
           <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={saveCS} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-lg hover:bg-rose-700 transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={saveCS} disabled={isSaving || isReadonly} className="px-5 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-lg hover:bg-rose-700 transition-colors shadow-sm disabled:opacity-50">
               {isSaving ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

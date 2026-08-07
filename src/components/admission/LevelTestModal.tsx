@@ -1,4 +1,3 @@
-// src/components/admission/LevelTestModal.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -24,7 +23,6 @@ const formatKoreanGrade = (grade: any) => {
   return String(grade);
 };
 
-// 학생 명단 필터 정렬용 헬퍼 함수
 const getGradeOrder = (grade: any) => {
   if (!grade) return 999;
   if (typeof grade === 'string' && grade.includes('세')) return 0;
@@ -40,7 +38,6 @@ const formatTestDate = (val: any) => {
   return str; 
 };
 
-// 날짜를 '7월 31일' 형태로 보여주는 헬퍼 함수
 const formatKoreanDate = (dateStr: string) => {
   if (!dateStr) return "";
   const parts = dateStr.split("-");
@@ -48,7 +45,6 @@ const formatKoreanDate = (dateStr: string) => {
   return `${parseInt(parts[1], 10)}월 ${parseInt(parts[2], 10)}일`;
 };
 
-// 방 코드(LT52...)에서 학년을 추출하는 헬퍼 함수
 const extractGradeFromTitle = (title: string) => {
   const match = title.match(/^LT(\d{2})/);
   if (!match) return "";
@@ -71,6 +67,14 @@ const formatContact = (val: any) => {
     return `${numOnly.slice(0,3)}-${numOnly.slice(3,6)}-${numOnly.slice(6)}`;
   }
   return str;
+};
+
+// 🌟 [추가됨] 한국 시간(KST)으로 변환하는 헬퍼 함수
+const getKSTDateStr = (isoString?: string) => {
+  if (!isoString) return "";
+  const d = new Date(isoString);
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
 };
 
 interface LevelTestModalProps {
@@ -97,7 +101,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const [exams, setExams] = useState<any[]>([]);
   const [sessions, setSessions] = useState<any[]>([]);
 
-  // 💡 우측 상단 필터 및 정렬용 상태
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [sessionTimeFilter, setSessionTimeFilter] = useState(""); 
   const [sessionSortOrder, setSessionSortOrder] = useState<"asc" | "desc">("asc");
@@ -122,7 +125,9 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const [userRole, setUserRole] = useState("");
   const [hasAdminPermission, setHasAdminPermission] = useState(false);
 
-  // 배정된 학생 최상단 고정 및 학년별/검색어 필터 적용
+  // 오늘 날짜 계산 (새 등록생 판별용)
+  const todayKst = getKSTDateStr(new Date().toISOString());
+
   const filteredStudents = waitingStudents.filter(std => {
     const keyword = searchKeyword.trim().toLowerCase();
     const rawContact = std.contact ? std.contact.replace(/[^0-9]/g, "") : "";
@@ -148,7 +153,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     new Set(waitingStudents.map(s => formatTestDate(s.test_date) || "날짜없음"))
   ).sort();
 
-  // 날짜/시간 드롭다운 항목 생성
   const uniqueSessionDates = Array.from(
     new Set(sessions.map(s => s.test_date).filter(Boolean))
   ).sort();
@@ -157,7 +161,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     new Set(sessions.map(s => s.start_time ? s.start_time.substring(0, 5) : "").filter(Boolean))
   ).sort();
 
-  // 좌측 일정 리스트용 필터링
   const filteredLeftSessions = sessions.filter(s => leftDateFilter === "all" || s.test_date === leftDateFilter);
 
   useEffect(() => {
@@ -203,19 +206,15 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         const getScore = (str: string) => {
           if (!str) return 9999;
           let score = 0;
-          
           if (str.includes("세")) score -= 100;
           else if (str.includes("초")) score += 100;
           else if (str.includes("중")) score += 200;
           else if (str.includes("고")) score += 300;
           else score += 400;
-          
           const numMatch = str.match(/\d+/);
           if (numMatch) score += parseInt(numMatch[0], 10);
-          
           const subMatch = str.match(/\d+-(\d+)/);
           if (subMatch) score += parseInt(subMatch[1], 10) * 0.1;
-          
           return score;
         };
 
@@ -236,18 +235,12 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
       const sortedSessions = (data || []).sort((a, b) => {
          const dtA = new Date(`${a.test_date}T${a.start_time || '00:00:00'}`).getTime();
          const dtB = new Date(`${b.test_date}T${b.start_time || '00:00:00'}`).getTime();
-         
-         if (!isNaN(dtA) && !isNaN(dtB) && dtA !== dtB) {
-           return dtA - dtB;
-         }
-
+         if (!isNaN(dtA) && !isNaN(dtB) && dtA !== dtB) return dtA - dtB;
          const matchA = a.title.match(/LT(\d{2})/);
          const matchB = b.title.match(/LT(\d{2})/);
          const numA = matchA ? parseInt(matchA[1], 10) : 9999;
          const numB = matchB ? parseInt(matchB[1], 10) : 9999;
-         
          if (numA !== numB) return numA - numB;
-         
          return a.title.localeCompare(b.title);
       });
 
@@ -308,6 +301,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             school_name: st?.school_name || st?.school || "",
             contact: pPhone,
             test_date: "-",
+            created_at: a.created_at, // 🌟 배정된 학생의 등록일 유지
             isAssigned: true,
             displayResult, 
             source: 'assigned'
@@ -345,6 +339,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           school_name: s.school || s.school_name || "",
           contact: Array.isArray(s.parent) ? s.parent[0]?.phone : (s.parent?.phone || "번호없음"),
           test_date: s.created_at,
+          created_at: s.created_at, // 🌟 정식 등록생의 등록일 유지
           isAssigned: false,
           source: 'student'
         }));
@@ -658,7 +653,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         <div className="flex-1 overflow-hidden p-6 grid grid-cols-1 md:grid-cols-2 gap-6">
           
           {/* ==================================================== */}
-          {/* 1. 방 개설 영역 (좌측 상하 높이 압축) */}
+          {/* 1. 방 개설 영역 */}
           {/* ==================================================== */}
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col overflow-hidden relative">
             
@@ -791,7 +786,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
               <h3 className="font-bold">👨‍🎓 2. 지원자 배정 관리</h3>
             </div>
             
-            {/* 💡 우측 상단 필터 및 정렬 (시간/학년순 버튼 추가) */}
             <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0 flex flex-wrap gap-1.5 items-center">
               <select 
                 value={sessionDateFilter} 
@@ -934,6 +928,9 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                    ? <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 px-1 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
                    : <span className="text-[9px] bg-purple-100 text-purple-700 border border-purple-200 px-1 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
 
+                 // 🌟 [추가됨] 오늘 날짜와 등록일(created_at)을 KST 기준으로 비교
+                 const isTodayReg = std.created_at ? getKSTDateStr(std.created_at) === todayKst : false;
+
                  if (isAssigned) {
                    return (
                      <div key={stdId} className="flex items-center justify-between p-2.5 bg-white border-2 border-emerald-400 rounded-lg shadow-sm gap-2">
@@ -944,6 +941,8 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                              <span className="font-extrabold text-slate-800 truncate text-[13px]">{std.student_name}</span>
                              <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-1 py-0.5 rounded font-bold shrink-0">✅ 배정됨</span>
+                             {/* 🌟 오늘 등록한 학생의 이름 옆에 뱃지 표시 */}
+                             {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
                            </div>
                            <div className="text-[10px] text-slate-400 font-medium truncate flex items-center gap-1">
                              <span>🏫 {std.school_name || "미입력"}</span>
@@ -969,6 +968,8 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                              <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
                              <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              {sourceBadge}
+                             {/* 🌟 오늘 등록한 학생의 이름 옆에 뱃지 표시 */}
+                             {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
                            </div>
                            <div className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">
                              <span>🏫 {std.school_name || "-"}</span>

@@ -32,6 +32,8 @@ export const BOOK_TYPE_COLORS: Record<string, { pill: string; dot: string }> = {
   워크북: { pill: 'bg-amber-100 text-amber-700 border-amber-200', dot: 'bg-amber-500' },
   // exam_type='과제'/'과제프린트'로 개별 배정되어 round=2에 병합된 문항용(실제 교재가 아님).
   기타: { pill: 'bg-slate-200 text-slate-700 border-slate-300', dot: 'bg-slate-500' },
+  // exam_type='오답프린트'로 배정된 문항용 — 다른 배정과 구분되게 오답임을 바로 알 수 있는 빨간 배지.
+  오답: { pill: 'bg-rose-100 text-rose-700 border-rose-200', dot: 'bg-rose-500' },
 };
 
 export async function resolvePendingHomeworkQuestions(

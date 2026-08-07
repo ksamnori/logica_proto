@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { resolveTodaySession, closeSessionAtLimit, setActiveCall, clearActiveCall, setAway, clearAway } from '@/lib/clinicSession';
+import { resolveClassWeekType } from '@/lib/classRound';
 import { useClinicEndRequest } from '@/hooks/useClinicEndRequest';
 import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
@@ -34,6 +35,11 @@ export default function StudentPortal() {
     const [roundResults, setRoundResults] = useState<Record<string, any>>({});
     const [blockStates, setBlockStates] = useState<Record<string, any>>({});
     const [hwProgress, setHwProgress] = useState<Record<string, any>>({});
+    // 💡 [11번] 반별 홀/짝 회차(week_type)는 시험 클리닉이 "주간테스트"로 나갈지 "과제오답유사"로
+    // 나갈지를 결정하는데, startClinicBlock이 이 값을 전혀 읽지 않고 있었다 — 그래서 라운드1은
+    // week 파라미터를 아예 안 보내 항상 clinic/viewer의 기본값('odd'=주간테스트)으로 고정되어
+    // 있었고, resolveClassWeekType으로 관리되는 홀짝 전환은 실제로는 아무 효과가 없었다.
+    const [classWeekTypes, setClassWeekTypes] = useState<Record<string, string>>({});
     
     const [now, setNow] = useState(Date.now());
     const [timeUpModal, setTimeUpModal] = useState({ isOpen: false, icon: '⏰', title: '클리닉 시간이 종료되었습니다', desc: '오늘 배정된 클리닉 시간이 모두 지났어요.' });
@@ -186,9 +192,27 @@ export default function StudentPortal() {
             newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [] };
         });
 
-        const { data: cData } = await supabaseClient.from('class').select('class_id, name').in('name', classes);
+        const { data: cData } = await supabaseClient.from('class')
+            .select('class_id, name, week_type, week_type_updated_date, session_parity, class_schedule(day_of_week)')
+            .in('name', classes);
         const nameToId: any = {};
         cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; });
+
+        // 💡 [11번] ClassEditModal을 아무도 열지 않아도(=관리자가 안 봐도), 학생이 포탈에 들어올
+        // 때마다 지나간 회차만큼 자동으로 홀/짝을 갱신한다 — resolveClassWeekType은 idempotent라
+        // 여러 화면에서 동시에 호출해도 안전하다.
+        const newClassWeekTypes: Record<string, string> = {};
+        await Promise.all((cData || []).map(async (c: any) => {
+            const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
+            try {
+                const { weekType: wt } = await resolveClassWeekType(supabaseClient, {
+                    class_id: c.class_id, class_name: c.name, week_type: c.week_type,
+                    week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays
+                });
+                newClassWeekTypes[c.name] = wt;
+            } catch (e) { newClassWeekTypes[c.name] = c.week_type === 'even' ? 'even' : 'odd'; }
+        }));
+        setClassWeekTypes(newClassWeekTypes);
 
         const { data: examsData } = await supabaseClient.from('exam_assignment')
             .select('assignment_id, status, class_id, exam_master!inner(exam_type)')
@@ -417,6 +441,7 @@ export default function StudentPortal() {
         let testName = '';
         if (typeKey === 'exam') {
             testName = '시험';
+            params.append('week', classWeekTypes[className] === 'even' ? 'even' : 'odd');
             if (prog.examIds.length > 0) params.append('assignment_id', prog.examIds[0]);
         } else if (typeKey === 'hw') {
             testName = '과제';
@@ -441,17 +466,6 @@ export default function StudentPortal() {
         }
 
         router.push(`/clinic/viewer?${params.toString()}`);
-    };
-
-    const demoCompleteBlock = async (className: string, round: number) => {
-        await supabaseClient.from('clinic_round_result').upsert({ student_id: studentInfo.id, class_name: className, round, forced_done: true, completed_at: new Date().toISOString() });
-        setRoundResults((p: Record<string, any>) => ({ ...p, [`${className}::${round}`]: { correct: null, total: null, forced_done: true } }));
-        setBlockStates((prev: any) => {
-            const next = { ...prev };
-            const typeKey = round === 1 ? 'exam' : round === 2 ? 'hw' : 'print';
-            if (next[className]) next[className][typeKey] = '제출완료';
-            return next;
-        });
     };
 
     const renderCard = (typeKey: string, round: number, className: string) => {
@@ -490,7 +504,6 @@ export default function StudentPortal() {
                         <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>응시하기</button>
                     }
                 </div>
-                {!isDone && <button onClick={(e) => { e.stopPropagation(); demoCompleteBlock(className, round); }} className="absolute bottom-5 left-6 text-[12px] underline text-white/50 hover:text-white z-50 transition-colors">테스트 완료처리</button>}
             </div>
         );
     };

@@ -113,9 +113,12 @@ export default function GlobalList({
                   <div className="flex items-center gap-2.5 shrink-0 justify-end w-[380px]">
                     <div className="text-[11px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ}문항</div>
                     
-                    <div className="flex items-center gap-1.5 shrink-0 w-[80px] justify-center">
+                    <div className="flex items-center gap-1.5 shrink-0 w-[80px] flex-wrap justify-center">
                       <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 whitespace-nowrap">✅ {res.oCount || 0}</span>
                       <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 whitespace-nowrap">❌ {res.xCount || 0}</span>
+                      {/* 💡 [13번] 힌트/조교 호출 도움을 받아 푼 문항(TO/TX)이 있으면 별도로 표시 —
+                          안 그러면 도움받아 맞힌 문제도 그냥 ✅로만 보여 선생님이 구분할 수 없다. */}
+                      {res.helpedCount > 0 && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 whitespace-nowrap" title="힌트 또는 조교 호출 도움을 받아 푼 문항 수">🧑‍🏫 {res.helpedCount}</span>}
                     </div>
                     
                     <div className="flex items-center gap-1.5 shrink-0 w-[110px] justify-end">

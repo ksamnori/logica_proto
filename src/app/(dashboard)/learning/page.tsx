@@ -4,6 +4,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { CLINIC_ROOM, getKSTDateString } from "@/app/supervisor/supervisorUtils";
 
 import StudentDashboard from "./components/StudentDashboard";
 import GlobalList from "./components/GlobalList";
@@ -13,6 +14,19 @@ import LearningCalendar from "./components/LearningCalendar";
 const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강', '메이크업/보강', '기타'];
 
 const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
+
+// 💡 [13번] grading_code별 O/X 집계에 "도움받아 풀었는지"(TO/TX, 힌트·조교호출)까지 함께 세어
+// 반환한다. 정답/오답 분류는 ['O','a','b','c']=O, ['X','TX','☆','B','TO','RO']=X로 집계한다.
+// TO(도움받아 정답)와 RO(도움 없이 재도전해서 정답, clinic/viewer의 wasWrongBefore 케이스)는
+// 다른 채점 화면에서는 정답(O)과 동일하게 취급되지만, 학습관리 탭에서는 "혼자 힘으로 한 번에
+// 푼 게 아닌 문제"를 걸러내기 위해 의도적으로 오답(X) 쪽에 집계한다. helped 카운트는 도움
+// 여부(TO/TX)만 반영하고, RO는 도움을 받은 게 아니므로 helped에 포함하지 않는다.
+const tallyGrading = (counts: Record<string, { o: number; x: number; helped: number }>, key: any, code: string) => {
+  if (!counts[key]) counts[key] = { o: 0, x: 0, helped: 0 };
+  if (['O', 'a', 'b', 'c'].includes(code)) counts[key].o++;
+  else if (['X', 'TX', '☆', 'B', 'TO', 'RO'].includes(code)) counts[key].x++;
+  if (code === 'TO' || code === 'TX') counts[key].helped++;
+};
 
 interface StudentInfo {
   id: string;
@@ -76,9 +90,19 @@ export default function LearningPage() {
       const savedTab = (sessionStorage.getItem('logica_learning_tab') as TabType) || 'DASHBOARD';
       const savedViewStr = sessionStorage.getItem('logica_learning_view');
       let view: ViewState = { type: 'ALL', classId: '', className: '', studentId: '', studentName: '' };
-      
+
       if (savedViewStr) {
         try { view = JSON.parse(savedViewStr); } catch(e){}
+      }
+
+      // 💡 [8번] 슈퍼바이저 좌석 카드의 "🖨️ 오답프린트 생성" 링크는 /learning?studentId=...로
+      // 딥링크한다. 저장된 sessionStorage 뷰보다 URL의 studentId를 우선해서, 클리닉에서 방금
+      // 끝난 그 학생의 타임라인으로 바로 진입하게 한다. roster(allStudentsList)에서 진짜
+      // classId/className을 찾아 채운다 — 좌석 데이터에는 class 이름만 있고 class_id가 없다.
+      const urlStudentId = new URLSearchParams(window.location.search).get('studentId');
+      if (urlStudentId) {
+        const matched = allStudentsList.find(s => s.id === urlStudentId);
+        if (matched) view = { type: 'STUDENT', classId: matched.classId, className: matched.className, studentId: matched.id, studentName: matched.name };
       }
 
       setActiveTab(savedTab);
@@ -338,18 +362,12 @@ export default function LearningPage() {
         supabase.from('student_homework_answer').select('homework_id, grading_code, student_id').in('homework_id', hwIds).eq('student_id', studentId)
       ]);
 
-      const exCounts: any = {};
-      examAns?.forEach(a => {
-        if (!exCounts[a.exam_assignment_id]) exCounts[a.exam_assignment_id] = { o: 0, x: 0 };
-        if (['O', 'TO', 'a', 'b', 'c'].includes(a.grading_code)) exCounts[a.exam_assignment_id].o++;
-        else if (['X', 'TX', '☆', 'B'].includes(a.grading_code)) exCounts[a.exam_assignment_id].x++;
-      });
+      const exCounts: Record<string, { o: number; x: number; helped: number }> = {};
+      examAns?.forEach(a => tallyGrading(exCounts, a.exam_assignment_id, a.grading_code));
 
-      const hwCounts: any = {};
+      const hwCounts: Record<string, { o: number; x: number; helped: number }> = {};
       hwAns?.forEach(a => {
-        if (!hwCounts[a.homework_id]) hwCounts[a.homework_id] = { o: 0, x: 0 };
-        if (['O', 'TO', 'a', 'b', 'c'].includes(a.grading_code)) hwCounts[a.homework_id].o++;
-        else if (['X', 'TX', '☆', 'B'].includes(a.grading_code)) hwCounts[a.homework_id].x++;
+        tallyGrading(hwCounts, a.homework_id, a.grading_code);
       });
 
       let combined: any[] = [];
@@ -368,6 +386,7 @@ export default function LearningPage() {
           score: ex.total_score || 0,
           oCount: exCounts[ex.assignment_id]?.o || 0,
           xCount: exCounts[ex.assignment_id]?.x || 0,
+          helpedCount: exCounts[ex.assignment_id]?.helped || 0,
           isCompleted: ['제출완료', '채점완료', '완료'].includes(ex.status)
         });
       });
@@ -396,6 +415,7 @@ export default function LearningPage() {
           total: targetQs?.length || 0,
           oCount: hwCounts[hw.homework_id]?.o || 0,
           xCount: hwCounts[hw.homework_id]?.x || 0,
+          helpedCount: hwCounts[hw.homework_id]?.helped || 0,
           isCompleted: ['제출완료', '채점완료', '완료'].includes(res?.status)
         });
       });
@@ -436,13 +456,9 @@ export default function LearningPage() {
           if (data) {
             const assignIds = data.map(d => d.assignment_id);
             const { data: ans } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', assignIds);
-            const counts: any = {};
-            ans?.forEach(a => {
-              if(!counts[a.exam_assignment_id]) counts[a.exam_assignment_id] = {o:0, x:0};
-              if (['O', 'TO', 'a', 'b', 'c'].includes(a.grading_code)) counts[a.exam_assignment_id].o++;
-              else if (['X', 'TX', '☆', 'B'].includes(a.grading_code)) counts[a.exam_assignment_id].x++;
-            });
-            const enriched = data.map(d => ({ ...d, oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0 }));
+            const counts: Record<string, { o: number; x: number; helped: number }> = {};
+            ans?.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
+            const enriched = data.map(d => ({ ...d, oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0, helpedCount: counts[d.assignment_id]?.helped || 0 }));
             list = [...list, ...enriched];
           }
         }
@@ -453,13 +469,8 @@ export default function LearningPage() {
           const hwIds = allHws?.map(h => h.homework_id) || [];
           const { data: hAns } = await supabase.from('student_homework_answer').select('homework_id, student_id, grading_code').in('homework_id', hwIds).in('student_id', chunk);
           
-          const hCounts: any = {};
-          hAns?.forEach(a => {
-            const k = `${a.homework_id}_${a.student_id}`;
-            if(!hCounts[k]) hCounts[k] = {o:0, x:0};
-            if (['O', 'TO', 'a', 'b', 'c'].includes(a.grading_code)) hCounts[k].o++;
-            else if (['X', 'TX', '☆', 'B'].includes(a.grading_code)) hCounts[k].x++;
-          });
+          const hCounts: Record<string, { o: number; x: number; helped: number }> = {};
+          hAns?.forEach(a => tallyGrading(hCounts, `${a.homework_id}_${a.student_id}`, a.grading_code));
 
           const hwResultMap = new Map();
           hwData?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
@@ -474,7 +485,7 @@ export default function LearningPage() {
                 list.push({
                   is_exam_hw: false, homework_id: hw.homework_id, student_id: hw.target_student_id, class_id: hw.class_id, class_name: hw.class?.name || '반 미지정',
                   student: { name: getStudentName(hw.target_student_id) }, homework_assignment: hw, status: res?.status || '미제출', sort_date: hw.due_date || hw.created_at,
-                  oCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.x || 0, totalQ: totalQ
+                  oCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.x || 0, helpedCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.helped || 0, totalQ: totalQ
                 });
               }
             } else {
@@ -485,7 +496,7 @@ export default function LearningPage() {
                   list.push({
                     is_exam_hw: false, homework_id: hw.homework_id, student_id: sId, class_id: hw.class_id, class_name: hw.class?.name || '반 미지정',
                     student: { name: getStudentName(sId) }, homework_assignment: hw, status: res?.status || '미제출', sort_date: hw.due_date || hw.created_at,
-                    oCount: hCounts[`${hw.homework_id}_${sId}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${sId}`]?.x || 0, totalQ: totalQ
+                    oCount: hCounts[`${hw.homework_id}_${sId}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${sId}`]?.x || 0, helpedCount: hCounts[`${hw.homework_id}_${sId}`]?.helped || 0, totalQ: totalQ
                   });
                 }
               });
@@ -496,16 +507,12 @@ export default function LearningPage() {
           const exIds = examData?.map(e => e.assignment_id) || [];
           const { data: eAns } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', exIds);
           
-          const eCounts: any = {};
-          eAns?.forEach(a => {
-            if(!eCounts[a.exam_assignment_id]) eCounts[a.exam_assignment_id] = {o:0, x:0};
-            if (['O', 'TO', 'a', 'b', 'c'].includes(a.grading_code)) eCounts[a.exam_assignment_id].o++;
-            else if (['X', 'TX', '☆', 'B'].includes(a.grading_code)) eCounts[a.exam_assignment_id].x++;
-          });
+          const eCounts: Record<string, { o: number; x: number; helped: number }> = {};
+          eAns?.forEach(a => tallyGrading(eCounts, a.exam_assignment_id, a.grading_code));
 
           const formattedExamHws = (examData || []).map((e:any) => ({
-            ...e, is_exam_hw: true, sort_date: e.created_at, class_name: unwrap(e.class)?.name || '반 미지정', 
-            oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, totalQ: unwrap(e.exam_master)?.total_questions || 0
+            ...e, is_exam_hw: true, sort_date: e.created_at, class_name: unwrap(e.class)?.name || '반 미지정',
+            oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, helpedCount: eCounts[e.assignment_id]?.helped || 0, totalQ: unwrap(e.exam_master)?.total_questions || 0
           }));
           list = [...list, ...formattedExamHws];
         } 
@@ -781,6 +788,28 @@ export default function LearningPage() {
     } catch (e) { alert("삭제 실패"); }
   };
 
+  // 💡 [8번] 클리닉 화면(clinic/viewer)은 오답을 다 풀면 동결된 채, 이 학생 앞으로 새 '오답프린트'
+  // exam_assignment가 생기는지 5초마다 스스로 폴링해서 동결을 푼다(어느 화면에서 만들었든 감지됨).
+  // 여기서 추가로 즉시 release_to_portal을 브로드캐스트해서, 5초 기다리지 않고 바로 풀어준다.
+  // 이 페이지는 클리닉 실시간 채널을 상시 구독하고 있지 않으므로, 보낼 때만 짧게 구독→전송→정리한다.
+  const releaseStudentToPortal = async (studentId: string) => {
+    try {
+      const { data: session } = await supabase.from('clinic_session_state')
+        .select('seat').eq('student_id', studentId).eq('session_date', getKSTDateString())
+        .is('ended_at', null).not('seat', 'is', null).maybeSingle();
+      const seat = session?.seat;
+      if (!seat) return;
+
+      const channel = supabase.channel(CLINIC_ROOM);
+      await new Promise<void>((resolve) => {
+        channel.subscribe((status: string) => { if (status === 'SUBSCRIBED') resolve(); });
+        setTimeout(resolve, 2000); // 구독이 안 붙어도 2초 뒤엔 그냥 포기 — 학생 쪽 폴링이 어차피 백업이다.
+      });
+      channel.send({ type: 'broadcast', event: 'ta_action', payload: { seat, action: 'release_to_portal', timestamp: Date.now() } });
+      setTimeout(() => { supabase.removeChannel(channel); }, 500);
+    } catch (e) { console.error('release_to_portal 브로드캐스트 실패(학생 쪽 폴링으로 5초 내 자동 복구됨):', e); }
+  };
+
   const handleGenerateIncorrectPrint = async () => {
     if (selectedBlocks.length === 0) { alert('오답 프린트로 묶을 블록을 하나 이상 선택해주세요.'); return; }
     setIsGeneratingPrint(true);
@@ -796,7 +825,7 @@ export default function LearningPage() {
             .eq('exam_assignment_id', assignId)
             .in('grading_code', ['X', 'TX', '☆', 'B']);
           ans?.forEach(a => { if(a.question_id) targetQIds.push(a.question_id); });
-        } 
+        }
         else if (block.startsWith('hw_')) {
           const hwId = block.split('_')[1];
           const { data: hwAns } = await supabase.from('student_homework_answer')
@@ -804,7 +833,7 @@ export default function LearningPage() {
             .eq('homework_id', hwId)
             .eq('student_id', currentView.studentId)
             .in('grading_code', ['X', 'TX', '☆', 'B']);
-            
+
           if (hwAns && hwAns.length > 0) {
             const tqIds = hwAns.map(a => a.tq_id);
             const { data: tqs } = await supabase.from('textbook_question').select('question_id').in('tq_id', tqIds);
@@ -821,7 +850,7 @@ export default function LearningPage() {
           .eq('student_id', currentView.studentId)
           .is('resolved_at', null)
           .in('question_id', targetQIds);
-        
+
         targetQIds = records?.map(r => r.question_id) || [];
       }
 
@@ -1035,9 +1064,9 @@ export default function LearningPage() {
               currentView={currentView} activeTab={activeTab} dateFilter={dateFilter} setDateFilter={setDateFilter} 
               isLoading={isLoading} filteredTimeline={filteredTimeline} selectedBlocks={selectedBlocks} 
               setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
-              handleBulkCompleteStudent={handleBulkCompleteStudent} handleBulkDeleteStudent={handleBulkDeleteStudent} 
-              handleGenerateIncorrectPrint={handleGenerateIncorrectPrint} isGeneratingPrint={isGeneratingPrint} 
-              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
+              handleBulkCompleteStudent={handleBulkCompleteStudent} handleBulkDeleteStudent={handleBulkDeleteStudent}
+              handleGenerateIncorrectPrint={handleGenerateIncorrectPrint} isGeneratingPrint={isGeneratingPrint}
+              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete}
               handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
             />
           )}

@@ -49,7 +49,7 @@ export default function StudentKioskLogin() {
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [passwordInput, setPasswordInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
-
+  
   // 💡 [핵심] 어떠한 터치든 감지되면 즉시 전체화면으로 밀어넣는 전용 함수
   const ensureFullscreen = () => {
     if (typeof document !== "undefined" && !document.fullscreenElement) {
@@ -132,7 +132,7 @@ export default function StudentKioskLogin() {
   const handlePasswordLogin = async (pinToUse?: string) => {
     const finalPin = typeof pinToUse === 'string' ? pinToUse : passwordInput;
     if (!finalPin || finalPin.length < 4) return alert("비밀번호 4자리를 모두 입력해주세요.");
-    
+
     setIsProcessing(true);
     const result = await loginStudentAction(selectedStudent.student_id, finalPin);
     setIsProcessing(false);
@@ -141,9 +141,9 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_id", result.studentId);
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
-      
+
       // 이미 터치 시점에 전체화면이 적용되어 있으므로 바로 넘겨도 튕기지 않습니다!
-      router.push("/student/portal"); 
+      router.push("/student/portal");
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
       setPasswordInput(""); 
