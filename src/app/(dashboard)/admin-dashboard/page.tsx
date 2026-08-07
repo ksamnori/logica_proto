@@ -187,7 +187,12 @@ export default function AdminDashboardPage() {
   };
 
   const fetchInstructorStats = async () => {
+    // 💡 [핵심 해결] 조인 쿼리에 의존하지 않고, 본사(HQ)의 테넌트 ID를 별도로 확실하게 가져옵니다.
+    const { data: hqTenant } = await supabase.from('academy_tenant').select('tenant_id').eq('tenant_type', 'HQ').maybeSingle();
+    const hqTenantId = hqTenant?.tenant_id || 'd59395b0-8c9c-4dd3-9e25-ff569da98abc'; // 만약을 대비한 Fallback ID
+
     const [{ data: rawInsts }, { data: classes }, { data: students }, { data: enrolls }] = await Promise.all([
+      // 조인을 쓰지 않고 순수하게 instructor 테이블만 100% 호출합니다.
       supabase.from('instructor').select('*').eq('status', '재직'),
       supabase.from('class').select('*').neq('status', '종료'),
       supabase.from('student').select('*'),
@@ -200,11 +205,15 @@ export default function AdminDashboardPage() {
       if (pos.includes('전임')) return 3; if (pos.includes('파트')) return 4; return 99;
     };
 
-    const insts = (rawInsts || []).filter(i => !(i.position?.includes('조교'))).sort((a, b) => {
-      const rankA = getRoleRank(a.position), rankB = getRoleRank(b.position);
-      if (rankA !== rankB) return rankA - rankB;
-      return (b.name || '').localeCompare(a.name || '');
-    });
+    // 💡 [핵심 해결] 본사(HQ)의 tenant_id와 일치하는 직원은 목록에서 완벽하게 걸러냅니다!
+    const insts = (rawInsts || [])
+      .filter(i => i.tenant_id !== hqTenantId) // ⬅️ 본사 직원 차단 
+      .filter(i => !(i.position?.includes('조교')))
+      .sort((a, b) => {
+        const rankA = getRoleRank(a.position), rankB = getRoleRank(b.position);
+        if (rankA !== rankB) return rankA - rankB;
+        return (b.name || '').localeCompare(a.name || '');
+      });
 
     const stats = insts.map(inst => {
       const myClasses = (classes || []).filter(c => c.instructor_id === inst.instructor_id);
@@ -474,13 +483,11 @@ export default function AdminDashboardPage() {
                       <div className="font-extrabold text-[13px] text-slate-800 truncate leading-none mt-0.5">{inst.name} 선생님</div>
                       
                       <div className="flex items-center gap-1.5 shrink-0">
-                        {/* 💡 이달 입학/퇴휴원 정보를 총 인원 좌측으로 끌어올림 */}
                         <div className="flex gap-0.5 text-[9px] font-bold">
                           <span className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 shadow-sm flex items-center">입학 +{inst.newCnt}</span>
                           <span className="text-rose-500 bg-rose-50 px-1 py-0.5 rounded border border-rose-100 shadow-sm flex items-center">퇴원 -{inst.leftCnt}</span>
                         </div>
                         
-                        {/* 💡 세로선 구분 기호 및 총 인원 */}
                         <div className="text-right leading-none shrink-0 border-l border-slate-200 pl-1.5 flex items-baseline">
                           <span className="text-base font-black text-[#002864]">{inst.studentCount}</span><span className="text-[9px] font-bold text-slate-400 ml-0.5">명</span>
                         </div>
@@ -490,7 +497,6 @@ export default function AdminDashboardPage() {
                     {/* 하단: 담당 수강반 (독립 스크롤 활성화) */}
                     <div className="border-t border-slate-100 pt-1.5 flex flex-col flex-1 min-h-0">
                       <div className="text-[9px] font-bold text-slate-500 mb-1 flex items-center gap-1 shrink-0"><span>📚</span> 담당 수강반 ({inst.myClasses.length})</div>
-                      {/* 💡 max-h 제거, flex-1 min-h-0으로 박스 내부 꽉 채우며 독립 스크롤 구현 */}
                       <div className="flex flex-wrap gap-1 content-start flex-1 overflow-y-auto custom-scroll pr-1 pb-1 min-h-0">
                         {inst.myClasses.length === 0 ? <span className="text-[10px] text-slate-400 font-bold">배정된 반 없음</span> : 
                           inst.myClasses.map((c: any) => <span key={c.class_id} className="text-[9px] font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap">{c.name}</span>)
