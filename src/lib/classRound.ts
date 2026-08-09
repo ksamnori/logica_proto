@@ -25,7 +25,7 @@ export const getISOWeekKST = (base: Date = new Date()): number => {
 
 const DAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
 
-const addDaysKST = (dateStr: string, days: number) => {
+export const addDaysKST = (dateStr: string, days: number) => {
   const d = new Date(dateStr + 'T00:00:00+09:00');
   d.setUTCDate(d.getUTCDate() + days);
   return getKSTDateString(d);
@@ -137,3 +137,4 @@ export async function setClassExtraSession(supabase: any, classId: string, sessi
 export async function removeClassExtraSession(supabase: any, id: string) {
   return supabase.from('class_extra_session').delete().eq('id', id);
 }
+
