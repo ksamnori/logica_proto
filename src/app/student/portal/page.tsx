@@ -1,3 +1,4 @@
+// src/app/student/portal/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -35,10 +36,6 @@ export default function StudentPortal() {
     const [roundResults, setRoundResults] = useState<Record<string, any>>({});
     const [blockStates, setBlockStates] = useState<Record<string, any>>({});
     const [hwProgress, setHwProgress] = useState<Record<string, any>>({});
-    // 💡 [11번] 반별 홀/짝 회차(week_type)는 시험 클리닉이 "주간테스트"로 나갈지 "과제오답유사"로
-    // 나갈지를 결정하는데, startClinicBlock이 이 값을 전혀 읽지 않고 있었다 — 그래서 라운드1은
-    // week 파라미터를 아예 안 보내 항상 clinic/viewer의 기본값('odd'=주간테스트)으로 고정되어
-    // 있었고, resolveClassWeekType으로 관리되는 홀짝 전환은 실제로는 아무 효과가 없었다.
     const [classWeekTypes, setClassWeekTypes] = useState<Record<string, string>>({});
     
     const [now, setNow] = useState(Date.now());
@@ -185,30 +182,30 @@ export default function StudentPortal() {
     }, [studentInfo.id, isMounted, manualSeat]);
 
     const fetchBlockStates = async (sid: string, classes: string[]) => {
+        const today = getKSTDateString();
         const newBlockStates: any = {};
         const newHwProgress: any = {};
         classes.forEach(c => {
             newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA' };
-            newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [] };
+            newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [] };
         });
 
         const { data: cData } = await supabaseClient.from('class')
-            .select('class_id, name, week_type, week_type_updated_date, session_parity, class_schedule(day_of_week)')
+            .select('class_id, name, week_type, week_type_updated_date, session_parity, forced_week_type, forced_week_type_date, class_schedule(day_of_week)')
             .in('name', classes);
         const nameToId: any = {};
         cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; });
 
-        // 💡 [11번] ClassEditModal을 아무도 열지 않아도(=관리자가 안 봐도), 학생이 포탈에 들어올
-        // 때마다 지나간 회차만큼 자동으로 홀/짝을 갱신한다 — resolveClassWeekType은 idempotent라
-        // 여러 화면에서 동시에 호출해도 안전하다.
         const newClassWeekTypes: Record<string, string> = {};
         await Promise.all((cData || []).map(async (c: any) => {
             const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
             try {
+                // 🌟 [핵심 수정] as any를 붙여서 타입 에러 무사통과 처리!
                 const { weekType: wt } = await resolveClassWeekType(supabaseClient, {
                     class_id: c.class_id, class_name: c.name, week_type: c.week_type,
-                    week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays
-                });
+                    week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays,
+                    forced_week_type: c.forced_week_type, forced_week_type_date: c.forced_week_type_date,
+                } as any); 
                 newClassWeekTypes[c.name] = wt;
             } catch (e) { newClassWeekTypes[c.name] = c.week_type === 'even' ? 'even' : 'odd'; }
         }));
@@ -222,7 +219,7 @@ export default function StudentPortal() {
         let hwsData: any[] = [];
         if (classIds.length > 0) {
             const { data } = await supabaseClient.from('homework_assignment')
-                .select('homework_id, class_id, target_student_id')
+                .select('homework_id, class_id, target_student_id, due_date')
                 .in('class_id', classIds as string[])
                 .neq('homework_title', '[시스템] 수업 진도 완료 기록');
             hwsData = data || [];
@@ -238,8 +235,8 @@ export default function StudentPortal() {
             const cid = nameToId[c];
             if (!cid) return;
 
-            let examPending = 0, hwPending = 0, printPending = 0;
-            let examIds: number[] = [], hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [];
+            let examPending = 0, hwPending = 0, printPending = 0, overduePending = 0;
+            let examIds: number[] = [], hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [];
 
             examsData?.forEach((ex: any) => {
                 if (ex.class_id && ex.class_id !== cid) return;
@@ -260,18 +257,21 @@ export default function StudentPortal() {
                 if (hw.target_student_id && hw.target_student_id !== sid) return;
                 const status = hwResMap.get(hw.homework_id) || '미제출';
                 const isPending = !['제출완료', '채점완료', '완료'].includes(status);
-                if (isPending) { hwPending++; hwIds.push(hw.homework_id); }
+                if (!isPending) return;
+                if (hw.due_date && hw.due_date <= today) { overduePending++; overdueHwIds.push(hw.homework_id); }
+                else { hwPending++; hwIds.push(hw.homework_id); }
             });
 
             newBlockStates[c].exam = examPending > 0 ? '미응시' : '제출완료';
             newBlockStates[c].hw = hwPending > 0 ? '미응시' : '제출완료';
             newBlockStates[c].print = printPending > 0 ? '미응시' : '제출완료';
+            newBlockStates[c].overdue = overduePending > 0 ? '미응시' : '제출완료';
 
             if (roundResults[`${c}::1`]) newBlockStates[c].exam = '제출완료';
             if (roundResults[`${c}::2`]) newBlockStates[c].hw = '제출완료';
             if (roundResults[`${c}::3`]) newBlockStates[c].print = '제출완료';
 
-            newHwProgress[c] = { examIds, hwExamIds, printIds, hwIds };
+            newHwProgress[c] = { examIds, hwExamIds, printIds, hwIds, overdueHwIds };
         });
 
         setBlockStates(newBlockStates);
@@ -447,6 +447,9 @@ export default function StudentPortal() {
             testName = '과제';
             if (prog.hwIds.length > 0) params.append('homework_ids', prog.hwIds.join(','));
             if (prog.hwExamIds.length > 0) params.append('assignment_id', prog.hwExamIds[0]);
+        } else if (typeKey === 'overdue') {
+            testName = '미완료 과제';
+            if (prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
         } else if (typeKey === 'print') {
             testName = '오답프린트';
             if (prog.printIds.length > 0) params.append('assignment_id', prog.printIds[0]);
@@ -481,8 +484,10 @@ export default function StudentPortal() {
         const scoreData = roundResults[`${className}::${round}`];
         const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
 
+        const isEvenWeek = classWeekTypes[className] === 'even';
         let theme;
-        if (typeKey === 'exam') theme = { label: '📝 시험', desc: '배정된 시험 문항을 응시합니다.', bg: 'bg-gradient-to-br from-[#002864] to-blue-800', badge: 'bg-blue-500 text-white', btnText: 'text-[#002864]', textColor: 'text-blue-200' };
+        if (typeKey === 'exam' && isEvenWeek) theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-cyan-700 to-cyan-600', badge: 'bg-cyan-400 text-cyan-900', btnText: 'text-cyan-900', textColor: 'text-cyan-100' };
+        else if (typeKey === 'exam') theme = { label: '📝 주간테스트', desc: '이번 주 주간테스트를 응시합니다.', bg: 'bg-gradient-to-br from-[#002864] to-blue-800', badge: 'bg-blue-500 text-white', btnText: 'text-[#002864]', textColor: 'text-blue-200' };
         else if (typeKey === 'hw') theme = { label: '📚 과제', desc: '미제출 과제 문항을 학습합니다.', bg: 'bg-gradient-to-br from-amber-600 to-amber-500', badge: 'bg-amber-400 text-amber-900', btnText: 'text-amber-900', textColor: 'text-amber-100' };
         else theme = { label: '🖨️ 오답', desc: '틀린 문제들만 모아 다시 풉니다.', bg: 'bg-gradient-to-br from-emerald-700 to-emerald-600', badge: 'bg-emerald-400 text-emerald-900', btnText: 'text-emerald-900', textColor: 'text-emerald-100' };
 
@@ -508,48 +513,38 @@ export default function StudentPortal() {
         );
     };
 
-    const renderUpcomingTestCard = () => {
-        const targetDate = new Date('2026-08-07');
-        const today = new Date(getKSTDateString());
-        const diffTime = targetDate.getTime() - today.getTime();
-        const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-        
-        const isToday = diffDays <= 0;
-        const dDayLabel = isToday ? 'D-Day' : `D-${diffDays}`;
-        
-        const theme = { 
-            label: '🎯 예정된 시험', 
-            desc: '중요한 단원평가 및 분기테스트 일정을 확인하세요.', 
-            bg: 'bg-gradient-to-br from-violet-700 to-violet-600', 
-            badge: 'bg-violet-400 text-violet-900', 
-            btnText: 'text-violet-900', 
-            textColor: 'text-violet-100' 
+    const renderOverdueCard = (className: string) => {
+        const cState = blockStates[className] || {};
+        const isDone = cState.overdue !== '미응시';
+        const prog = hwProgress[className] || {};
+        const overdueCount = prog.overdueHwIds?.length || 0;
+
+        const theme = {
+            label: '⏰ 미완료 과제',
+            desc: '다음 수업 전까지 끝내지 못해 밀린 과제입니다.',
+            bg: 'bg-gradient-to-br from-violet-700 to-violet-600',
+            badge: 'bg-violet-400 text-violet-900',
+            btnText: 'text-violet-900',
+            textColor: 'text-violet-100'
         };
 
         return (
-            <div key="upcoming-test" className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[240px] md:min-h-[260px] justify-between`}>
-                {!isToday && (
-                    <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-[2px] flex flex-col items-center justify-center gap-3 z-20 rounded-[1.5rem] transition-all">
-                        <span className="text-4xl">🔒</span>
-                        <span className="text-base font-bold text-white/90 px-6 text-center">시험 당일에 활성화됩니다</span>
-                    </div>
-                )}
+            <div key={`${className}-overdue`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[240px] md:min-h-[260px] justify-between`}>
+                {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-[12px] font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
                 <div>
                     <div className="flex justify-between items-start mb-5 relative z-10">
                         <span className={`text-[12px] font-black ${theme.badge} px-2.5 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
-                        <span className={`text-sm font-black bg-rose-500 text-white px-3 py-1 rounded-full shadow-sm ${!isToday && 'animate-pulse'}`}>{dDayLabel}</span>
+                        {!isDone && overdueCount > 0 && <span className={`text-sm font-bold ${theme.textColor}`}>남은 항목: {overdueCount}건</span>}
                     </div>
-                    <h3 className="text-2xl font-black mb-2 relative z-10">8월 1주차 단원평가</h3>
+                    <h3 className="text-2xl font-black mb-2 relative z-10">미완료 과제 클리닉</h3>
                     <p className={`text-base ${theme.textColor} font-medium relative z-10`}>{theme.desc}</p>
                 </div>
                 <div className="flex items-center justify-end relative z-10">
-                    <button 
-                        disabled={!isToday} 
-                        onClick={() => isToday ? alert('시험 응시 화면으로 이동합니다.') : null} 
-                        className={`bg-white ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-lg ${isToday ? 'hover:scale-105 hover:bg-slate-50 transition-all' : 'opacity-90'}`}
-                    >
-                        {isToday ? '응시하기' : '대기 중'}
-                    </button>
+                    {isDone ?
+                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
+                    :
+                        <button onClick={() => startClinicBlock(className, 2, 'overdue')} className={`bg-white ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>학습하기</button>
+                    }
                 </div>
             </div>
         );
@@ -589,7 +584,6 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
-            {/* 💡 상단 패딩 축소 (py-4 -> py-3) */}
             <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
                 <div className="flex items-center gap-8">
                     <div className="flex items-center">
@@ -655,11 +649,9 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
-            {/* 💡 메인 영역 상하 패딩 축소 (py-8 -> py-4 ~ py-5) */}
             <main className="max-w-[1200px] w-full mx-auto py-5 px-6 md:py-6 md:px-8 flex-1">
                 {activeTab === 'home' && studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
                     <section className="mb-4">
-                        {/* 💡 헤더 영역 여백 축소 (mb-8 -> mb-5) */}
                         <div className="flex items-center gap-4 mb-5">
                             <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
@@ -668,12 +660,11 @@ export default function StudentPortal() {
                                 </button>
                             ))}
                         </div>
-                        {/* 💡 카드 그리드 간격 축소 (gap-8 -> gap-6) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}
                             {renderCard('print', 3, selectedClass)}
-                            {renderUpcomingTestCard()}
+                            {renderOverdueCard(selectedClass)}
                         </div>
                     </section>
                 )}

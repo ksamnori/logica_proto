@@ -29,34 +29,14 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
   const [meetingTimeStr, setMeetingTimeStr] = useState("10:00");
   
   const [isSyncGcal, setIsSyncGcal] = useState(true);
-  const [gcalId, setGcalId] = useState("primary");
 
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(selectedIds);
   const [showAddList, setShowAddList] = useState(false); 
 
   const selectedItems = agendas.filter(a => localSelectedIds.includes(a.id));
-  const unselectedAgendas = agendas.filter(a => !localSelectedIds.includes(a.id) && a.status !== '완료' && a.source !== 'Meeting');
-  const existingMeetings = agendas.filter(a => a.source === 'Meeting');
-
-  useEffect(() => {
-    const savedGcalId = localStorage.getItem("logica_gcal_id");
-    if (savedGcalId) setGcalId(savedGcalId);
-
-    if (typeof window !== 'undefined' && !(window as any).google) {
-      const script = document.createElement('script');
-      script.src = 'https://accounts.google.com/gsi/client';
-      script.async = true;
-      script.defer = true;
-      document.body.appendChild(script);
-    }
-  }, []);
-
-  const handleGcalIdChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value;
-    setGcalId(val);
-    localStorage.setItem("logica_gcal_id", val);
-  };
+  const unselectedAgendas = agendas.filter(a => !localSelectedIds.includes(a.id) && a.status !== '완료' && a.source !== 'Meeting' && !a.isExternal);
+  const existingMeetings = agendas.filter(a => a.source === 'Meeting' && !a.isExternal);
 
   const toggleInst = (id: string) => { setSelectedInstIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
   const toggleAllInsts = () => { if (selectedInstIds.length === instructors.length) setSelectedInstIds([]); else setSelectedInstIds(instructors.map(i => i.instructor_id)); };
@@ -91,10 +71,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
     } else { setMeetingTitle(""); }
   }, [mode, targetMeetingId, agendas, instructors]);
 
-  const stripHtml = (html: string) => {
-    if (!html) return "";
-    return html.replace(/<[^>]+>/g, ' ').trim();
-  };
+  const stripHtml = (html: string) => { if (!html) return ""; return html.replace(/<[^>]+>/g, ' ').trim(); };
 
   const insertAgendaContent = async (item: any) => {
     let commentsHtml = "";
@@ -129,41 +106,28 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
     setMeetingResult(prev => { const topSpace = (!prev || prev.trim() === '') ? '<p><br></p>' : ''; return prev + topSpace + htmlToInsert; });
   };
 
-  const syncToGoogleCalendar = async (meetingsArray: any[]) => {
-    return new Promise((resolve, reject) => {
-      try {
-        const client = (window as any).google.accounts.oauth2.initTokenClient({
-          client_id: '298035579944-bj0nter2ppgnetncqj6a8tgsr54ner0c.apps.googleusercontent.com', 
-          scope: 'https://www.googleapis.com/auth/calendar.events',
-          callback: async (response: any) => {
-            if (response.error !== undefined) { reject(response); return; }
-            try {
-              const targetCalId = gcalId.trim() || 'primary';
-              for (const m of meetingsArray) {
-                const startTime = new Date(m.meeting_date);
-                const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); 
-                const plainTextDesc = m.content ? stripHtml(m.content) : '내용 없음';
-
-                const event = {
-                  summary: `[Logica] ${m.title}`,
-                  description: `👥 참석자: ${m.attendees || '없음'}\n\n${plainTextDesc}`,
-                  start: { dateTime: startTime.toISOString(), timeZone: 'Asia/Seoul' },
-                  end: { dateTime: endTime.toISOString(), timeZone: 'Asia/Seoul' },
-                };
-
-                await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(targetCalId)}/events`, {
-                  method: 'POST',
-                  headers: { 'Authorization': 'Bearer ' + response.access_token, 'Content-Type': 'application/json' },
-                  body: JSON.stringify(event)
-                });
-              }
-              resolve(true);
-            } catch (err) { reject(err); }
-          },
-        });
-        client.requestAccessToken();
-      } catch (err) { reject(err); }
+  const syncToGoogleCalendarBackend = async (meetingsArray: any[]) => {
+    const events = meetingsArray.map(m => {
+      const startTime = new Date(m.meeting_date);
+      const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); 
+      const plainTextDesc = m.content ? stripHtml(m.content) : '내용 없음';
+      return {
+        summary: `[Logica] ${m.title}`,
+        description: `👥 참석자: ${m.attendees || '없음'}\n\n${plainTextDesc}`,
+        start: { dateTime: startTime.toISOString(), timeZone: 'Asia/Seoul' },
+        end: { dateTime: endTime.toISOString(), timeZone: 'Asia/Seoul' },
+      };
     });
+
+    const res = await fetch('/api/calendar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ events })
+    });
+    if (!res.ok) throw new Error("API Route 에러");
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error);
+    return data;
   };
 
   const handleCreateMeeting = async () => {
@@ -192,11 +156,10 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         };
 
         if (isSyncGcal) {
-          try { await syncToGoogleCalendar([newMeetingObj]); } 
-          catch (error) { if (!confirm("구글 캘린더 동기화에 실패했습니다. (권한 또는 ID 확인 필요)\nLogica 시스템에는 그래도 일정을 등록할까요?")) return; }
+          try { await syncToGoogleCalendarBackend([newMeetingObj]); } 
+          catch (error) { if (!confirm("백엔드 캘린더 동기화에 실패했습니다.\nLogica 시스템에는 그래도 일정을 등록할까요?")) return; }
         }
 
-        // 💡 에러 감지 패치 적용
         const { error } = await supabase.from("agenda").insert(newMeetingObj);
         if (error) throw error;
 
@@ -211,7 +174,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         const mergedIds = Array.from(new Set([...existingLinkedIds, ...localSelectedIds])).filter(Boolean);
         const hiddenLinkData = mergedIds.length > 0 ? `<div data-linked-ids="${mergedIds.join(',')}" style="display:none;"></div>` : '';
 
-        // 💡 에러 감지 패치 적용
         const { error } = await supabase.from("agenda").update({
           title: meetingTitle,
           content: meetingResult + hiddenLinkData, 
@@ -223,16 +185,12 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
       }
 
       if (localSelectedIds.length > 0) {
-        const { error: updErr } = await supabase.from('agenda').update({ status: '진행중' }).in('id', localSelectedIds);
-        if (updErr) console.error("상태 변경 에러:", updErr);
+        await supabase.from('agenda').update({ status: '진행중' }).in('id', localSelectedIds);
       }
 
       alert(mode === 'NEW' ? "새 회의록 결속이 완료되었습니다!" : "회의록이 성공적으로 저장(업데이트)되었습니다!");
       onSuccess(folder); 
-    } catch (e: any) { 
-      console.error(e);
-      alert(`회의록 저장/업데이트 실패: ${e.message || 'DB 에러'}`); 
-    }
+    } catch (e: any) { alert(`회의록 저장/업데이트 실패: ${e.message || 'DB 에러'}`); }
   };
 
   return (
@@ -248,15 +206,13 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
             <div className="h-[40%] flex flex-col p-3 border-b border-slate-200 bg-white shadow-sm">
               <div className="flex justify-between items-center mb-2 shrink-0">
                 <h3 className="text-[12px] font-black text-[#002864] flex items-center gap-1">👥 참석자 배정</h3>
-                <button onClick={toggleAllInsts} className="text-[9px] bg-slate-100 border border-slate-200 hover:bg-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-600 transition-colors">
-                  {selectedInstIds.length === instructors.length ? '전체 해제' : '전체 선택'}
-                </button>
+                <button onClick={toggleAllInsts} className="text-[9px] bg-slate-100 border border-slate-200 hover:bg-slate-200 px-1.5 py-0.5 rounded font-bold text-slate-600 transition-colors">전체 선택</button>
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll flex flex-col gap-0.5 pr-1">
                 {instructors.map(inst => (
                   <label key={inst.instructor_id} className="flex items-center gap-1.5 cursor-pointer hover:bg-slate-50 p-1 rounded transition-colors border border-transparent hover:border-slate-100">
                     <input type="checkbox" checked={selectedInstIds.includes(inst.instructor_id)} onChange={() => toggleInst(inst.instructor_id)} className="w-3.5 h-3.5 accent-[#002864]" />
-                    <span className="text-[11px] font-bold text-slate-700">{inst.name} <span className="text-[9px] text-slate-400 font-normal">{inst.position}</span></span>
+                    <span className="text-[11px] font-bold text-slate-700">{inst.name}</span>
                   </label>
                 ))}
               </div>
@@ -268,12 +224,10 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                 {selectedItems.map(item => (
                   <div key={item.id} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between gap-1.5 group hover:border-blue-300 transition-colors">
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                      <div className="text-[11px] font-bold text-slate-700 truncate" title={item.title}><span className="text-blue-500 mr-1">📌</span>{item.title}</div>
+                      <div className="text-[11px] font-bold text-slate-700 truncate"><span className="text-blue-500 mr-1">📌</span>{item.title}</div>
                       <div className="text-[9px] text-slate-400 truncate pl-4">{stripHtml(item.content)}</div>
                     </div>
-                    <button onClick={() => insertAgendaContent(item)} className="shrink-0 px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-[#002864] border border-blue-200 rounded text-[9px] font-black transition-colors flex items-center gap-0.5 opacity-90 hover:opacity-100" title="에디터에 삽입">
-                      <span>📥</span> 삽입
-                    </button>
+                    <button onClick={() => insertAgendaContent(item)} className="shrink-0 px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-[#002864] border border-blue-200 rounded text-[9px] font-black transition-colors">삽입</button>
                   </div>
                 ))}
               </div>
@@ -284,19 +238,15 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                 </button>
                 {showAddList && (
                   <div className="mt-1.5 h-32 overflow-y-auto custom-scroll space-y-1 bg-white p-1 border border-blue-100 rounded shadow-inner">
-                    {unselectedAgendas.length === 0 ? (
-                      <div className="text-[9px] text-slate-400 text-center py-2">가져올 안건이 없습니다.</div>
-                    ) : (
-                      unselectedAgendas.map(a => (
-                        <div key={a.id} className="flex justify-between items-center bg-slate-50 border border-slate-100 p-1.5 rounded text-[10px]">
-                          <div className="flex-1 min-w-0 flex flex-col justify-center mr-1">
-                            <span className="truncate text-slate-700 font-bold" title={a.title}>{a.title}</span>
-                            <span className="truncate text-[8px] text-slate-400 mt-0.5">{stripHtml(a.content)}</span>
-                          </div>
-                          <button onClick={() => setLocalSelectedIds([...localSelectedIds, a.id])} className="text-blue-600 font-black px-1.5 py-0.5 bg-white border border-blue-200 rounded shadow-sm hover:bg-blue-50 shrink-0">선택</button>
+                    {unselectedAgendas.map(a => (
+                      <div key={a.id} className="flex justify-between items-center bg-slate-50 border border-slate-100 p-1.5 rounded text-[10px]">
+                        <div className="flex-1 min-w-0 flex flex-col mr-1">
+                          <span className="truncate text-slate-700 font-bold">{a.title}</span>
+                          <span className="truncate text-[8px] text-slate-400">{stripHtml(a.content)}</span>
                         </div>
-                      ))
-                    )}
+                        <button onClick={() => setLocalSelectedIds([...localSelectedIds, a.id])} className="text-blue-600 font-black px-1.5 py-0.5 bg-white border border-blue-200 rounded shadow-sm hover:bg-blue-50 shrink-0">선택</button>
+                      </div>
+                    ))}
                   </div>
                 )}
               </div>
@@ -320,7 +270,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                 <label className="block text-[11px] font-bold text-blue-800 mb-1.5">어떤 회의에 이 안건들을 추가할까요?</label>
                 <select value={targetMeetingId} onChange={e => setTargetMeetingId(e.target.value)} className="w-full text-[12px] font-bold text-slate-700 border border-blue-200 rounded-lg p-2 focus:outline-none focus:border-blue-500 bg-white">
                   <option value="">-- 일정을 선택하세요 --</option>
-                  {existingMeetings.length === 0 && <option disabled>일정이 없습니다.</option>}
                   {existingMeetings.map(m => (
                     <option key={m.id} value={m.id}>
                       [{m.type}] {m.title} ({m.meeting_date ? new Date(m.meeting_date).toLocaleDateString() : '날짜 미정'})
@@ -352,17 +301,8 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                 <div className="flex-1 border-l border-slate-200 pl-3 flex flex-col justify-center gap-1.5">
                   <label className="flex items-center gap-1.5 text-[11px] font-black text-blue-600 cursor-pointer">
                     <input type="checkbox" checked={isSyncGcal} onChange={(e) => setIsSyncGcal(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
-                    📆 구글 캘린더 연동
+                    📆 백엔드 캘린더 연동 (API)
                   </label>
-                  {isSyncGcal && (
-                    <input 
-                      type="text" 
-                      value={gcalId} 
-                      onChange={handleGcalIdChange} 
-                      placeholder="공유 캘린더 ID (기본값: primary)" 
-                      className="w-full text-[10px] font-bold text-slate-500 border border-blue-200 rounded px-2 py-1 bg-white focus:outline-none focus:border-blue-500" 
-                    />
-                  )}
                 </div>
               )}
             </div>

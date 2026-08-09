@@ -6,12 +6,16 @@ import { supabase } from "@/lib/supabase";
 import NewAgendaModal from "@/components/minutes/NewAgendaModal";
 import BindMeetingModal from "@/components/minutes/BindMeetingModal";
 import ScheduleMeetingModal from "@/components/minutes/ScheduleMeetingModal";
+import AiRecordModal from "@/components/minutes/AiRecordModal";
 
 export default function MinutesPage() {
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "" });
   const [activeFolder, setActiveFolder] = useState("전체 안건");
   const [searchQuery, setSearchQuery] = useState("");
+  
   const [agendas, setAgendas] = useState<any[]>([]);
+  const [externalEvents, setExternalEvents] = useState<any[]>([]);
+
   const [instructors, setInstructors] = useState<any[]>([]);
   const [showResolved, setShowResolved] = useState(false); 
   
@@ -19,6 +23,7 @@ export default function MinutesPage() {
   const [isNewAgendaOpen, setIsNewAgendaModalOpen] = useState(false);
   const [isBindMeetingOpen, setIsBindMeetingOpen] = useState(false);
   const [isScheduleMeetingOpen, setIsScheduleMeetingOpen] = useState(false);
+  const [isAiRecordOpen, setIsAiRecordOpen] = useState(false);
   
   const [viewNote, setViewNote] = useState<any>(null); 
   const [meetingToEdit, setMeetingToEdit] = useState<any>(null);
@@ -32,6 +37,7 @@ export default function MinutesPage() {
     setCurrentUser({ instId, name });
 
     fetchAgendas();
+    fetchGoogleEvents();
     fetchInstructors();
 
     const channel = supabase.channel('agenda_realtime')
@@ -48,6 +54,32 @@ export default function MinutesPage() {
     setAgendas(data || []);
   };
 
+  const fetchGoogleEvents = async () => {
+    try {
+      const res = await fetch('/api/calendar');
+      const data = await res.json();
+      if (data.success && data.events) {
+        const external = data.events
+          .filter((ev: any) => !ev.summary?.startsWith('[Logica]'))
+          .map((ev: any) => ({
+            id: ev.id,
+            title: ev.summary || '(제목 없음)',
+            content: ev.description || '<p>상세 내용 없음 (구글 캘린더에서 작성됨)</p>',
+            type: '외부 일정', 
+            source: 'Meeting',
+            status: '대기중',
+            meeting_date: ev.start?.dateTime || ev.start?.date,
+            created_at: ev.created || new Date().toISOString(),
+            attendees: '구글 캘린더 외부 등록',
+            isExternal: true
+          }));
+        setExternalEvents(external);
+      }
+    } catch (e) {
+      console.error('구글 캘린더 로드 실패:', e);
+    }
+  };
+
   const fetchInstructors = async () => {
     try {
       const { data: insts } = await supabase.from('instructor').select('*').eq('status', '재직');
@@ -59,10 +91,13 @@ export default function MinutesPage() {
     } catch (error) { console.error("강사 목록 로드 에러"); }
   };
 
+  const allAgendas = [...agendas, ...externalEvents];
+
   const getMeetingTypeTheme = (type: string) => {
     if (type === '주간 회의') return { bg: 'bg-blue-50', border: 'border-blue-200', text: 'text-blue-800', dot: 'bg-blue-500' };
     if (type === '임시 회의') return { bg: 'bg-amber-50', border: 'border-amber-200', text: 'text-amber-800', dot: 'bg-amber-500' };
     if (type === '상담/면담') return { bg: 'bg-emerald-50', border: 'border-emerald-200', text: 'text-emerald-800', dot: 'bg-emerald-500' };
+    if (type === '외부 일정') return { bg: 'bg-purple-50', border: 'border-purple-200', text: 'text-purple-800', dot: 'bg-purple-500' };
     return { bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-800', dot: 'bg-slate-500' };
   };
 
@@ -72,11 +107,8 @@ export default function MinutesPage() {
     return { bg: 'bg-emerald-100', text: 'text-emerald-600', icon: '📝' }; 
   };
 
-  // 💡 폴더별 미완료 상태(대기중/진행중) 안건/일정 개수 계산기
   const getUnresolvedCount = (folder: string) => {
-    if (folder === '전체 안건') {
-      return agendas.filter(a => a.source !== 'Meeting' && a.status !== '완료').length;
-    }
+    if (folder === '전체 안건') return agendas.filter(a => a.source !== 'Meeting' && a.status !== '완료').length;
     return agendas.filter(a => a.type === folder && a.status !== '완료').length;
   };
 
@@ -86,7 +118,7 @@ export default function MinutesPage() {
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
-    const meetingsInMonth = agendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).getMonth() === month && new Date(a.meeting_date).getFullYear() === year);
+    const meetingsInMonth = allAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).getMonth() === month && new Date(a.meeting_date).getFullYear() === year);
 
     const days = [];
     for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="text-center py-0.5"></div>);
@@ -119,7 +151,6 @@ export default function MinutesPage() {
   let filteredAgendas = agendas.filter(a => {
     const matchSearch = (a.title && a.title.includes(searchQuery)) || (a.content && a.content.includes(searchQuery));
     if (!matchSearch) return false;
-
     if (activeFolder === '전체 안건') {
       if (a.source === 'Meeting') return false; 
       return showResolved ? true : (a.status === '미해결' || a.status === '진행중');
@@ -128,7 +159,6 @@ export default function MinutesPage() {
     }
   });
 
-  // 💡 회의록 폴더들은 무조건 '가장 빠른 회의 날짜(meeting_date)'가 맨 위로 오도록 오름차순 정렬
   if (activeFolder !== '전체 안건') {
     filteredAgendas.sort((a, b) => {
       const dateA = a.meeting_date ? new Date(a.meeting_date).getTime() : 0;
@@ -138,17 +168,13 @@ export default function MinutesPage() {
   }
 
   const isAllSelected = filteredAgendas.length > 0 && selectedIds.length === filteredAgendas.length;
-  const toggleSelectAll = () => {
-    if (isAllSelected) setSelectedIds([]);
-    else setSelectedIds(filteredAgendas.map(a => a.id));
-  };
-
-  const toggleSelect = (id: string) => {
-    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
-  };
+  const toggleSelectAll = () => { if (isAllSelected) setSelectedIds([]); else setSelectedIds(filteredAgendas.map(a => a.id)); };
+  const toggleSelect = (id: string) => { setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]); };
 
   const deleteAgenda = async (note: any, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (note.isExternal) return alert("구글 캘린더에서 직접 생성된 외부 일정은 로지카에서 삭제할 수 없습니다.\n구글 캘린더에서 직접 삭제해주세요.");
+    
     if (!confirm("이 기록을 완전히 삭제하시겠습니까?")) return;
     try {
       if (note.source === 'Meeting' && note.source_id) {
@@ -164,6 +190,7 @@ export default function MinutesPage() {
 
   const toggleStatus = async (note: any, e: React.MouseEvent) => {
     e.stopPropagation();
+    if (note.isExternal) return;
     let newStatus = '미해결';
     if (note.status === '미해결') newStatus = '진행중';
     else if (note.status === '진행중') newStatus = '완료';
@@ -197,66 +224,14 @@ export default function MinutesPage() {
         <head>
           <title>회의록 인쇄</title>
           <style>
-            /* 💡 [핵심] 상하 여백 25mm(넉넉하게), 좌우 여백 15mm로 실제 문서처럼 설정 */
-            @page { 
-              size: A4;
-              margin: 25mm 15mm; 
-            }
-            
-            /* body 자체 패딩은 없애서 @page 여백만 깔끔하게 적용되도록 수정 */
-            body { 
-              font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; 
-              color: #1e293b; 
-              line-height: 1.5; 
-              font-size: 9pt; 
-              padding: 0; 
-              margin: 0;
-            }
-            
-            h1 { 
-              color: #0f172a; 
-              border-bottom: 2px solid #cbd5e1; 
-              padding-bottom: 8px; 
-              font-size: 14pt; 
-              margin-top: 0; 
-              margin-bottom: 15px; 
-            }
-            
-            .participants { 
-              background: #f8fafc; 
-              padding: 8px 12px; 
-              border-radius: 4px; 
-              margin-bottom: 15px; 
-              font-size: 8.5pt; 
-              font-weight: bold; 
-              border: 1px solid #e2e8f0; 
-            }
-            
+            @page { size: A4; margin: 25mm 15mm; }
+            body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; color: #1e293b; line-height: 1.5; font-size: 9pt; padding: 0; margin: 0; }
+            h1 { color: #0f172a; border-bottom: 2px solid #cbd5e1; padding-bottom: 8px; font-size: 14pt; margin-top: 0; margin-bottom: 15px; }
+            .participants { background: #f8fafc; padding: 8px 12px; border-radius: 4px; margin-bottom: 15px; font-size: 8.5pt; font-weight: bold; border: 1px solid #e2e8f0; }
             .content-area { font-size: 9pt; }
-            
-            .agenda-block { 
-              border: 1px solid #cbd5e1; 
-              padding: 10px; 
-              border-radius: 4px; 
-              margin-bottom: 12px; 
-              background: white; 
-              page-break-inside: avoid; /* 박스 중간에 페이지가 잘리는 현상 방지 */
-            }
-            
-            .agenda-block h4 { 
-              font-size: 10pt; 
-              margin: 0 0 6px 0; 
-              color: #0f172a; 
-            }
-            
-            ul { 
-              margin-top: 4px; 
-              background: #f8fafc; 
-              padding: 6px 6px 6px 20px; 
-              border-radius: 4px; 
-              border: 1px solid #f1f5f9; 
-              font-size: 8pt; 
-            }
+            .agenda-block { border: 1px solid #cbd5e1; padding: 10px; border-radius: 4px; margin-bottom: 12px; background: white; page-break-inside: avoid; }
+            .agenda-block h4 { font-size: 10pt; margin: 0 0 6px 0; color: #0f172a; }
+            ul { margin-top: 4px; background: #f8fafc; padding: 6px 6px 6px 20px; border-radius: 4px; border: 1px solid #f1f5f9; font-size: 8pt; }
             li { margin-bottom: 3px; }
           </style>
         </head>
@@ -269,24 +244,30 @@ export default function MinutesPage() {
   };
 
   let displayMeetings = selectedDate 
-    ? agendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).toDateString() === selectedDate.toDateString())
-    : agendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date) >= new Date(new Date().setHours(0,0,0,0)));
+    ? allAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).toDateString() === selectedDate.toDateString())
+    : allAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date) >= new Date(new Date().setHours(0,0,0,0)));
 
   displayMeetings.sort((a,b) => new Date(a.meeting_date).getTime() - new Date(b.meeting_date).getTime());
   
   if (!selectedDate) {
-    displayMeetings = displayMeetings.slice(0, 5);
+    // 💡 다가오는 일정 5개에서 7개로 증가
+    displayMeetings = displayMeetings.slice(0, 7);
   }
 
   return (
     <div className="h-full flex flex-col font-pretendard">
       
-      <div className="pt-2 pb-3 px-2 shrink-0">
-        <h1 className="text-2xl font-black text-slate-800 tracking-tight font-lexend flex items-center gap-2">
-          Logica <span className="text-[#002864]">AI Minutes</span>
-          <span className="bg-blue-50 text-[#002864] border border-blue-200 text-[9px] px-1.5 py-0.5 rounded-full font-black ml-1 shadow-sm">Beta</span>
-        </h1>
-        <p className="text-slate-500 font-bold text-[11px] mt-0.5">인공지능 회의록 및 안건 관리 시스템</p>
+      <div className="pt-2 pb-3 px-2 shrink-0 flex justify-between items-center">
+        <div>
+          <h1 className="text-2xl font-black text-slate-800 tracking-tight font-lexend flex items-center gap-2">
+            Logica <span className="text-[#002864]">AI Minutes</span>
+            <span className="bg-blue-50 text-[#002864] border border-blue-200 text-[9px] px-1.5 py-0.5 rounded-full font-black ml-1 shadow-sm">Beta</span>
+          </h1>
+          <p className="text-slate-500 font-bold text-[11px] mt-0.5">인공지능 회의록 및 안건 관리 시스템</p>
+        </div>
+        <button onClick={fetchGoogleEvents} className="text-[10px] text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-1 rounded font-bold border border-blue-100 shadow-sm flex items-center gap-1 transition-colors">
+          🔄 캘린더 동기화
+        </button>
       </div>
 
       <div className="flex-1 flex bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm min-h-0 relative">
@@ -294,12 +275,21 @@ export default function MinutesPage() {
         <div className="w-[200px] lg:w-[240px] border-r border-slate-200 bg-slate-50/50 flex flex-col shrink-0">
           <div className="p-4 pb-2">
             <div className="flex gap-2">
-              <button className="flex-1 bg-white border border-slate-200 hover:border-[#002864] hover:shadow-md transition-all rounded-xl flex items-center justify-center py-3 group">
-                <div className="w-8 h-8 bg-slate-50 rounded-full flex items-center justify-center group-hover:bg-[#002864] transition-colors">
-                  <svg className="w-4 h-4 text-slate-400 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+              <button 
+                onClick={() => setIsAiRecordOpen(true)} 
+                className="flex-1 bg-white border border-slate-200 hover:border-rose-400 hover:shadow-md transition-all rounded-xl flex items-center justify-center py-3 group" 
+                title="AI 실시간 음성 녹음"
+              >
+                <div className="w-8 h-8 bg-rose-50 rounded-full flex items-center justify-center group-hover:bg-rose-500 transition-colors">
+                  <svg className="w-4 h-4 text-rose-500 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                 </div>
               </button>
-              <button onClick={() => setIsNewAgendaModalOpen(true)} className="flex-1 bg-white border border-slate-200 hover:border-[#002864] hover:shadow-md transition-all rounded-xl flex items-center justify-center py-3 group">
+
+              <button 
+                onClick={() => setIsNewAgendaModalOpen(true)} 
+                className="flex-1 bg-white border border-slate-200 hover:border-[#002864] hover:shadow-md transition-all rounded-xl flex items-center justify-center py-3 group"
+                title="새 안건 수동 작성"
+              >
                 <div className="w-8 h-8 bg-blue-50 rounded-full flex items-center justify-center group-hover:bg-[#002864] transition-colors">
                   <svg className="w-4 h-4 text-[#002864] group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                 </div>
@@ -309,7 +299,6 @@ export default function MinutesPage() {
 
           <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-1.5">
             <p className="px-3 py-1.5 text-[10px] font-black text-slate-400">내 노트북</p>
-            {/* 💡 각 폴더별로 미완료 안건/일정 개수를 뱃지로 표시합니다. */}
             {['전체 안건', '주간 회의', '임시 회의', '상담/면담'].map(folder => {
               const unresolvedCount = getUnresolvedCount(folder);
               return (
@@ -352,10 +341,10 @@ export default function MinutesPage() {
                   <div className="absolute -bottom-4 -right-4 w-16 h-16 bg-blue-900 rounded-full opacity-50 group-hover:scale-110 transition-transform"></div>
                   <span className="relative z-10 text-lg">📱</span>
                 </div>
-                <div className="bg-blue-50 border border-blue-100 text-[#002864] p-4 rounded-xl shadow-sm relative overflow-hidden h-24 flex flex-col justify-between group cursor-pointer hover:shadow-md transition-all">
-                  <div className="relative z-10"><h3 className="font-black text-xs">AI로 요점만 쏙쏙</h3></div>
+                <div onClick={() => setIsAiRecordOpen(true)} className="bg-blue-50 border border-blue-100 text-[#002864] p-4 rounded-xl shadow-sm relative overflow-hidden h-24 flex flex-col justify-between group cursor-pointer hover:shadow-md transition-all">
+                  <div className="relative z-10"><h3 className="font-black text-xs">AI 실시간 녹음 및 요약</h3></div>
                   <div className="absolute -top-4 -right-4 w-16 h-16 bg-blue-100 rounded-full opacity-50 group-hover:scale-110 transition-transform"></div>
-                  <span className="relative z-10 text-lg">✨</span>
+                  <span className="relative z-10 text-lg">🎙️</span>
                 </div>
                 <div className="bg-slate-800 text-white p-4 rounded-xl shadow-sm relative overflow-hidden h-24 flex flex-col justify-between group cursor-pointer hover:shadow-md transition-all">
                   <div className="relative z-10"><h3 className="font-black text-xs">안건 묶어서 회의록 생성</h3></div>
@@ -401,7 +390,7 @@ export default function MinutesPage() {
                       className={`flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border transition-all group ${isMeetingNote ? 'cursor-pointer hover:shadow-md hover:border-slate-300' : 'cursor-pointer hover:bg-slate-50'} ${isChecked ? 'border-[#002864] bg-blue-50/30 ring-1 ring-[#002864]' : 'border-slate-200 hover:border-slate-300'}`}
                     >
                       {!isMeetingNote && activeFolder === '전체 안건' && (
-                        <div className="shrink-0 flex items-center">
+                        <div className="shrink-0 flex items-center mt-1.5">
                           <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(note.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#002864] cursor-pointer" />
                         </div>
                       )}
@@ -470,7 +459,8 @@ export default function MinutesPage() {
           )}
         </div>
 
-        <div className="hidden xl:flex w-[260px] border-l border-slate-200 bg-slate-50/50 flex-col shrink-0 p-4">
+        {/* 💡 우측 캘린더 패널 너비 증가 (w-[260px] -> w-[300px]) */}
+        <div className="hidden xl:flex w-[300px] border-l border-slate-200 bg-slate-50/50 flex-col shrink-0 p-4">
           <div className="flex justify-between items-center mb-3">
             <div className="flex items-baseline gap-2">
               <h2 className="text-lg font-black text-slate-800 tracking-tighter">{calendarMonth.getFullYear()}.{calendarMonth.getMonth() + 1}</h2>
@@ -506,9 +496,12 @@ export default function MinutesPage() {
               ) : (
                 displayMeetings.map(m => {
                   const mDate = new Date(m.meeting_date);
-                  const theme = getMeetingTypeTheme(m.type);
+                  const theme = getMeetingTypeTheme(m.type); 
                   return (
-                    <div key={m.id} onClick={() => setViewNote(m)} className={`p-2.5 rounded-xl border shadow-sm cursor-pointer transition-colors group ${theme.bg} ${theme.border} hover:border-[#002864]`}>
+                    <div key={m.id} onClick={() => setViewNote(m)} className={`p-2.5 rounded-xl border shadow-sm cursor-pointer transition-colors group ${theme.bg} ${theme.border} hover:border-[#002864] relative`}>
+                      {m.isExternal && (
+                        <div className="absolute -top-2 -right-2 bg-purple-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black shadow-sm">Google</div>
+                      )}
                       <div className="flex justify-between items-start mb-0.5 gap-2">
                         <h4 className={`text-[12px] font-black line-clamp-1 group-hover:text-[#002864] ${theme.text}`}>{m.title}</h4>
                         <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded border bg-white opacity-80 ${theme.border} ${theme.text}`}>{m.type}</span>
@@ -542,6 +535,13 @@ export default function MinutesPage() {
       
       {isScheduleMeetingOpen && <ScheduleMeetingModal agendas={agendas} instructors={instructors} currentUser={currentUser} onClose={() => setIsScheduleMeetingOpen(false)} onSuccess={() => { fetchAgendas(); setIsScheduleMeetingOpen(false); setActiveFolder('주간 회의'); }} />}
 
+      {isAiRecordOpen && (
+        <AiRecordModal 
+          onClose={() => setIsAiRecordOpen(false)} 
+          onSuccess={() => { setIsAiRecordOpen(false); fetchAgendas(); }} 
+        />
+      )}
+
       {viewNote && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -551,12 +551,17 @@ export default function MinutesPage() {
             </div>
             
             <div id="meeting-print-area" className="p-5 bg-slate-50 flex-1 overflow-y-auto custom-scroll flex flex-col">
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col relative">
+                {viewNote.isExternal && (
+                  <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-[10px] px-2 py-1 rounded font-black border border-purple-200">
+                    🔄 구글 캘린더에서 등록됨
+                  </div>
+                )}
                 <div className="mb-4 pb-3 border-b border-slate-200">
                   <div className="flex justify-between items-start mb-2 print:hidden">
                     <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
                     <span className="text-[11px] font-bold text-slate-400">
-                      {viewNote.source === 'Meeting' && viewNote.meeting_date ? `회의 일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
+                      {viewNote.meeting_date ? `회의 일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
                     </span>
                   </div>
                   <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
@@ -572,16 +577,18 @@ export default function MinutesPage() {
             </div>
             
             <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-              <button onClick={() => alert("마이크 권한을 허용해주세요.\n회의 중 녹음된 음성은 AI가 자동 분석하여 요약본과 함께 본문에 추가합니다.")} className="px-3 py-2 bg-rose-50 text-rose-600 font-bold text-[12px] rounded-lg hover:bg-rose-100 transition-colors border border-rose-200 flex items-center gap-1.5">
+              <button 
+                onClick={() => { setViewNote(null); setIsAiRecordOpen(true); }} 
+                className="px-3 py-2 bg-rose-50 text-rose-600 font-bold text-[12px] rounded-lg hover:bg-rose-100 transition-colors border border-rose-200 flex items-center gap-1.5"
+              >
                 <span>🎙️</span> 실시간 녹음
               </button>
               <div className="flex gap-2">
-                {viewNote.source === 'Meeting' && (
+                {viewNote.source === 'Meeting' && !viewNote.isExternal && (
                   <button onClick={() => { setMeetingToEdit(viewNote); setViewNote(null); setIsBindMeetingOpen(true); }} className="px-4 py-2 bg-amber-50 text-amber-600 font-bold text-[12px] rounded-lg hover:bg-amber-100 transition-colors flex items-center gap-1.5 border border-amber-200">
                     <span>✏️</span> 상세 편집
                   </button>
                 )}
-                {/* 💡 복구 완료된 인쇄 버튼 */}
                 <button onClick={handlePrint} className="px-4 py-2 bg-blue-50 text-[#002864] font-bold text-[12px] rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1.5 border border-blue-200">
                   <span>🖨️</span> 인쇄하기
                 </button>

@@ -4,11 +4,12 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getISOWeekKST } from "@/lib/classRound";
+import { getISOWeekKST, getKSTDateString, addDaysKST } from "@/lib/classRound";
 
 // 분리된 컴포넌트 불러오기
 import ViewerHeader from "@/components/exam/ViewerHeader";
 import PublishPanel from "@/components/exam/PublishPanel";
+import WeekPickerCalendar from "@/components/exam/WeekPickerCalendar";
 
 const LOGO_FOOTER_LEFT_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_footer_left.png";
 const LOGO_FOOTER_RIGHT_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_footer_right.png";
@@ -18,6 +19,19 @@ const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
 const PALETTE_STORAGE_KEY = 'examViewerColorPalette';
 const DEFAULT_PALETTE = ['#2563eb', '#002864', '#14532d'];
+
+// 선택한 날짜가 속한 주(ISO 8601, 월~일 기준)를 "8월 1주차" 형식으로 표시.
+// ISO 8601 규칙: 그 주가 어느 "월"에 속하는지는 월요일이 아니라 그 주의 목요일이 포함된 달로 정한다
+// (getISOWeekKST가 연 단위 주차를 셀 때 목요일로 옮겨서 계산하는 것과 동일한 기준).
+// 같은 주가 두 달에 걸쳐 있을 수 있어(예: 6월 5주차 == 7월 1주차) 라벨이 겹칠 수 있음 — 의도된 동작.
+const getMonthWeekLabel = (dateStr: string) => {
+  const dayNum = new Date(dateStr + 'T00:00:00Z').getUTCDay() || 7; // 1(월)~7(일)
+  const thursday = addDaysKST(dateStr, 4 - dayNum);
+  const d = new Date(thursday + 'T00:00:00Z');
+  const month = d.getUTCMonth() + 1;
+  const weekOfMonth = Math.ceil(d.getUTCDate() / 7);
+  return `${month}월 ${weekOfMonth}주차`;
+};
 
 export default function ExamViewerPage() {
   const router = useRouter();
@@ -48,9 +62,11 @@ export default function ExamViewerPage() {
   // === 레이아웃 UI 상태 ===
   const [layoutType, setLayoutType] = useState("선택없음"); 
   const [testWeek, setTestWeek] = useState<number>(getISOWeekKST());
+  const [testDate, setTestDate] = useState<string>(getKSTDateString());
+  const [isWeekPopupOpen, setIsWeekPopupOpen] = useState(false);
+  // 배정 대상 학년은 PublishPanel(하단 "출제 및 배포 대상 관리")에서 고른다 — 여기서는
+  // exam_master 저장용으로 그 패널이 onWeeklyMetaChange로 알려주는 최신 값만 들고 있는다.
   const [weeklyTargetGrade, setWeeklyTargetGrade] = useState("");
-  const [gradeOptions, setGradeOptions] = useState<string[]>([]);
-  const [weeklyMatchedCount, setWeeklyMatchedCount] = useState<number | null>(null);
   const [template, setTemplate] = useState("basic1");
   const [titleMode, setTitleMode] = useState("all");
   const [columns, setColumns] = useState(2);
@@ -941,54 +957,13 @@ export default function ExamViewerPage() {
     localStorage.setItem(PALETTE_STORAGE_KEY, JSON.stringify(newPal));
   };
 
-  useEffect(() => {
-    if (layoutType !== '주간테스트') return;
-    (async () => {
-      const { data } = await supabase.from('class').select('class_id, target_grade').not('target_grade', 'is', null);
-      const options = Array.from(new Set((data || []).map((c: any) => c.target_grade).filter(Boolean))) as string[];
-      setGradeOptions(options);
-    })();
-  }, [layoutType]);
+  const handleWeeklyMetaChange = useCallback((grade: string) => {
+    setWeeklyTargetGrade(grade);
+  }, []);
 
-  useEffect(() => {
-    if (layoutType !== '주간테스트' || !weeklyTargetGrade) { setWeeklyMatchedCount(null); return; }
-    let cancelled = false;
-    (async () => {
-      const count = await countStudentsForGrade(weeklyTargetGrade);
-      if (!cancelled) setWeeklyMatchedCount(count);
-    })();
-    return () => { cancelled = true; };
-  }, [layoutType, weeklyTargetGrade]);
-
-  const fetchStudentsForGrade = async (targetGrade: string): Promise<string[]> => {
-    const { data: classes } = await supabase.from('class').select('class_id').eq('target_grade', targetGrade);
-    const classIds = (classes || []).map((c: any) => c.class_id);
-    if (classIds.length === 0) return [];
-
-    const [{ data: directStudents }, { data: enrolls }] = await Promise.all([
-      supabase.from('student').select('student_id, status').in('class_id', classIds),
-      supabase.from('enrollment').select('student_id, student(status)').in('class_id', classIds),
-    ]);
-
-    const studentMap = new Map<string, string>();
-    (directStudents || []).forEach((s: any) => studentMap.set(s.student_id, s.status));
-    (enrolls || []).forEach((e: any) => { if (e.student) studentMap.set(e.student_id, (e.student as any).status); });
-
-    return Array.from(studentMap.entries()).filter(([, status]) => status === '재원').map(([id]) => id);
-  };
-
-  const countStudentsForGrade = async (targetGrade: string) => (await fetchStudentsForGrade(targetGrade)).length;
-
-  const autoAssignWeeklyTest = async (examId: string) => {
-    if (layoutType !== '주간테스트' || !weeklyTargetGrade) return;
-    const studentIds = await fetchStudentsForGrade(weeklyTargetGrade);
-    if (studentIds.length === 0) return;
-
-    const { data: existing } = await supabase.from('exam_assignment').select('student_id').eq('exam_id', examId);
-    const existingIds = new Set((existing || []).map((e: any) => e.student_id));
-
-    const inserts = studentIds.filter(id => !existingIds.has(id)).map(id => ({ exam_id: examId, student_id: id, status: '미응시' }));
-    if (inserts.length > 0) await supabase.from('exam_assignment').insert(inserts);
+  const handleWeekDateSelect = (d: string) => {
+    setTestDate(d);
+    setTestWeek(getISOWeekKST(new Date(d + 'T00:00:00Z')));
   };
 
   const saveExam = async (skipNav: boolean = false): Promise<boolean> => {
@@ -1042,8 +1017,6 @@ export default function ExamViewerPage() {
         const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType, layout_settings: finalLayoutSettings, ...weeklyFields }).eq('exam_id', examId);
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
-
-      if (isWeeklyTest && examId && weeklyTargetGrade) await autoAssignWeeklyTest(examId);
 
       // ==========================================
       // 🌟 [추가됨] 클리닉 모드 감지 및 다이렉트 배부/전송 로직
@@ -1313,21 +1286,23 @@ export default function ExamViewerPage() {
                               </select>
                           </div>
                           {layoutType === '주간테스트' && (
-                              <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg space-y-3 pointer-events-none opacity-60 select-none">
-                                  <div className="flex items-center justify-between">
-                                      <span className="text-[11px] font-bold text-emerald-700">🎯 주간테스트 자동 배정 (사용 중지)</span>
-                                      <span className="text-[11px] font-black text-emerald-700">{weeklyMatchedCount ?? 0}명</span>
-                                  </div>
-                                  <div>
-                                      <label className="block text-[11px] font-bold text-slate-500 mb-1.5">주차 (ISO 달력 주차, 전원 공통)</label>
-                                      <input type="number" min={1} max={53} value={testWeek} onChange={e => setTestWeek(parseInt(e.target.value, 10) || 1)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
-                                  </div>
-                                  <div>
-                                      <label className="block text-[11px] font-bold text-slate-500 mb-1.5">배정 대상 학년 (class.target_grade 기준)</label>
-                                      <select value={weeklyTargetGrade} onChange={e => setWeeklyTargetGrade(e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none bg-slate-100">
-                                          <option value="">학년 선택</option>
-                                          {gradeOptions.map(g => <option key={g} value={g}>{g}</option>)}
-                                      </select>
+                              <div>
+                                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5">주차 (달력에서 날짜 선택 → ISO 주차 자동 계산, 전원 공통)</label>
+                                  <div className="flex items-center gap-2">
+                                      <span className="shrink-0 text-[11px] font-bold text-[#002864] bg-[#EEF6FF] border border-blue-100 rounded px-2 py-1.5">{getMonthWeekLabel(testDate)}</span>
+                                      <div className="relative flex-1">
+                                          <button type="button" onClick={() => setIsWeekPopupOpen(v => !v)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold text-left bg-white hover:bg-slate-50">
+                                              📅 주차 선택하기
+                                          </button>
+                                          {isWeekPopupOpen && (
+                                              <>
+                                                  <div className="fixed inset-0 z-40" onClick={() => setIsWeekPopupOpen(false)} />
+                                                  <div className="absolute z-50 mt-2 left-0 w-full">
+                                                      <WeekPickerCalendar selectedDate={testDate} onSelect={handleWeekDateSelect} />
+                                                  </div>
+                                              </>
+                                          )}
+                                      </div>
                                   </div>
                               </div>
                           )}
@@ -1336,11 +1311,14 @@ export default function ExamViewerPage() {
                   </div>
                </div>
 
-               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 */}
+               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 (주간테스트일 땐 학년 배정 UI도 여기 포함) */}
                <div className="w-full mb-8 mt-4">
-                  <PublishPanel 
-                    examId={savedExamId} 
-                    onPublishComplete={() => setIsExamDistributed(true)} 
+                  <PublishPanel
+                    examId={savedExamId}
+                    layoutType={layoutType}
+                    initialTargetGrade={weeklyTargetGrade}
+                    onWeeklyMetaChange={handleWeeklyMetaChange}
+                    onPublishComplete={() => setIsExamDistributed(true)}
                   />
                </div>
             </div>
