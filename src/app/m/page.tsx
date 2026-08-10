@@ -15,7 +15,6 @@ export default function MobileInstructorPortalPage() {
   const [phoneInput, setPhoneInput] = useState("");
   const [pwInput, setPwInput] = useState("");
   
-  // 🌟 [수정됨] 강사 정보 상태에 profileImageUrl 추가
   const [currentUser, setCurrentUser] = useState<{
     instId: string;
     name: string;
@@ -29,7 +28,7 @@ export default function MobileInstructorPortalPage() {
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   
-  // 🌟 [추가됨] 상세 기록 조회 모달 상태
+  // 상세 기록 조회 모달 상태
   const [viewNote, setViewNote] = useState<any>(null); 
   const [displayHtml, setDisplayHtml] = useState("");
 
@@ -84,7 +83,7 @@ export default function MobileInstructorPortalPage() {
     }
   }, [authState, currentUser.instId]);
 
-  // 🌟 [추가됨] 비밀 안건 상세 조회 복호화 로직
+  // 비밀 안건 상세 조회 복호화 로직
   useEffect(() => {
     if (viewNote) {
       const loadHtml = async () => {
@@ -205,7 +204,6 @@ export default function MobileInstructorPortalPage() {
   };
 
   const loadDashboard = async (id: string) => {
-    // 🌟 [핵심 변경] profile_image_url 데이터 함께 조회!
     const { data } = await supabase.from("instructor").select("name, department, role, position, chat_position, profile_image_url").eq("instructor_id", id).maybeSingle();
     if (data) {
       const isSuperLevel = data.role === 'SUPER_ADMIN' || data.role === 'ADMIN' || 
@@ -219,13 +217,12 @@ export default function MobileInstructorPortalPage() {
         dept: data.department || "강사",
         position: data.chat_position || data.position || "강사", 
         isSuperLevel,
-        profileImageUrl: data.profile_image_url || null // 🌟 프로필 이미지 저장
+        profileImageUrl: data.profile_image_url || null 
       });
       setAuthState("dashboard");
     }
   };
 
-  // 🌟 [추가됨] 이미지 URL 변환 헬퍼 함수
   const getProfileImageUrl = (path: string | null | undefined) => {
     if (!path || path.trim() === "") return null;
     if (path.startsWith("http")) return path;
@@ -313,7 +310,6 @@ export default function MobileInstructorPortalPage() {
     displayItems = displayItems.slice(0, 15);
   }
 
-  // 🌟 [추가됨] 리스트 아이템 클릭 시 권한 확인 및 모달 열기 로직
   const checkAccessAndOpen = (note: any) => {
     if (note.is_secret && !currentUser.isSuperLevel) {
       const isCreator = note.created_by === currentUser.instId;
@@ -400,7 +396,7 @@ export default function MobileInstructorPortalPage() {
         instructorName={currentUser.name} 
       />
 
-      {/* 🌟 [추가됨] 상세 기록 조회 모달 */}
+      {/* 🌟 상세 기록 조회 모달 */}
       {viewNote && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center sm:p-4">
           <div className="bg-white w-full h-[100dvh] sm:h-auto sm:max-h-[85vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -422,7 +418,7 @@ export default function MobileInstructorPortalPage() {
                   <div className="flex justify-between items-start mb-2">
                     <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
                     <span className="text-[11px] font-bold text-slate-400">
-                      {viewNote.meeting_date ? `회의 일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
+                      {viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
                     </span>
                   </div>
                   <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
@@ -479,7 +475,6 @@ export default function MobileInstructorPortalPage() {
                   <h1 className="text-lg font-black text-slate-800"><span className="text-[#002864]">{currentUser.name}</span> 선생님, 환영합니다!</h1>
                   <p className="text-[11px] text-slate-400 font-medium mt-1">오늘도 즐거운 하루 되세요.</p>
                 </div>
-                {/* 🌟 [수정됨] 프로필 이미지가 있으면 출력, 없으면 이름 첫 글자 출력 */}
                 <div className="w-12 h-12 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-black text-xl shrink-0 overflow-hidden shadow-sm border border-slate-100">
                   {currentUser.profileImageUrl ? (
                     <img src={getProfileImageUrl(currentUser.profileImageUrl) || ''} alt="profile" className="w-full h-full object-cover" />
@@ -522,15 +517,30 @@ export default function MobileInstructorPortalPage() {
                   </div>
                 ) : (
                   displayItems.map(item => {
-                    const isMeetingNote = item.source === 'Meeting';
-                    const theme = isMeetingNote 
-                      ? { bg: 'bg-[#002864]', text: 'text-white', icon: '📁', border: 'border-blue-900' }
-                      : getThemeColor(item.type, item.title);
+                    // 🌟 [핵심 변경] 구글 캘린더 일정과 회의록 시각적 분리 적용
+                    const isGoogleEvent = item.isExternal;
+                    const isMeetingNote = item.source === 'Meeting' && !isGoogleEvent;
+                    
+                    let theme;
+                    if (isGoogleEvent) {
+                      theme = { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📆', border: 'border-purple-200' };
+                    } else if (isMeetingNote) {
+                      theme = { bg: 'bg-[#002864]', text: 'text-white', icon: '📁', border: 'border-blue-900' };
+                    } else {
+                      theme = getThemeColor(item.type, item.title);
+                    }
                     
                     const itemDate = item.meeting_date ? new Date(item.meeting_date) : new Date(item.created_at);
 
+                    let badgeText = item.type;
+                    if (isGoogleEvent) badgeText = '구글 일정';
+                    else if (isMeetingNote) badgeText = '회의록';
+                    
+                    let badgeStyle = `${theme.bg} border-transparent ${theme.text}`;
+                    if (isMeetingNote) badgeStyle = 'bg-slate-100 border-slate-300 text-slate-600';
+                    if (isGoogleEvent) badgeStyle = 'bg-purple-100 border-purple-300 text-purple-700';
+
                     return (
-                      // 🌟 [추가됨] onClick 이벤트 연결 및 hover 이펙트, 커서 포인터 추가
                       <div 
                         key={item.id} 
                         onClick={() => checkAccessAndOpen(item)}
@@ -548,8 +558,8 @@ export default function MobileInstructorPortalPage() {
                             {item.is_secret ? "비밀 안건으로 보호됨" : stripHtml(item.content)}
                           </p>
                           <div className="flex items-center justify-between mt-auto">
-                            <span className={`px-1.5 py-0.5 text-[9px] font-black rounded border ${isMeetingNote ? 'bg-slate-100 border-slate-300 text-slate-600' : `${theme.bg} border-transparent ${theme.text}`}`}>
-                              {isMeetingNote ? '회의록' : item.type}
+                            <span className={`px-1.5 py-0.5 text-[9px] font-black rounded border ${badgeStyle}`}>
+                              {badgeText}
                             </span>
                             <span className="text-[10px] font-bold text-slate-400">
                               {itemDate.getMonth()+1}/{itemDate.getDate()} {itemDate.getHours()}:{String(itemDate.getMinutes()).padStart(2,'0')}

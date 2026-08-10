@@ -643,6 +643,17 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
         setAllInstructors(enrichedData);
 
+        // 🌟 [핵심 변경] 리스트 로드 시 내 소속 정보를 현재 DB 데이터와 100% 동기화시킵니다.
+        const me = enrichedData.find((i: any) => String(i.instructor_id) === String(instId));
+        let exactMyTenant = '소속 미지정';
+        let exactMyDept = '부서 미지정';
+        if (me) {
+          exactMyTenant = me.academy_tenant.name.trim();
+          exactMyDept = (me.department || '부서 미지정').trim();
+          setMyTenantName(exactMyTenant);
+          setMyDeptName(exactMyDept);
+        }
+
         const tSet = new Set<string>();
         const dSet = new Set<string>();
         enrichedData.forEach((inst: any) => {
@@ -792,7 +803,6 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     });
   });
 
-  // 🌟 [핵심 변경] 조직도 정렬 로직 완벽 보강 (띄어쓰기, 미지정 처리)
   const filteredInstructors = allInstructors.filter((inst: any) => (inst?.name || "").includes(staffSearchKeyword));
   const orgTree: Record<string, Record<string, any[]>> = {};
   
@@ -1039,17 +1049,19 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                   Object.keys(orgTree).sort((a, b) => {
                     const aTrim = a.trim();
                     const bTrim = b.trim();
+                    const myT = (myTenantName || '소속 미지정').trim();
+
+                    if (aTrim === bTrim) return 0;
                     
                     // 🌟 1순위: 내 지점 (소속 미지정 포함)
-                    const myT = (myTenantName || '소속 미지정').trim();
-                    if (aTrim === myT && bTrim !== myT) return -1;
-                    if (bTrim === myT && aTrim !== myT) return 1;
+                    if (aTrim === myT) return -1;
+                    if (bTrim === myT) return 1;
                     
                     // 🌟 2순위: 본사
-                    if (aTrim === '본사' && bTrim !== '본사') return -1;
-                    if (bTrim === '본사' && aTrim !== '본사') return 1;
+                    if (aTrim === '본사') return -1;
+                    if (bTrim === '본사') return 1;
                     
-                    return a.localeCompare(b);
+                    return aTrim.localeCompare(bTrim);
                   }).map(tenantName => {
                     const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
                     const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
@@ -1072,15 +1084,17 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                             {Object.keys(orgTree[tenantName]).sort((a, b) => {
                               const aTrim = a.trim();
                               const bTrim = b.trim();
+                              const myD = (myDeptName || '부서 미지정').trim();
+
+                              if (aTrim === bTrim) return 0;
                               
                               // 🌟 내 지점 안에서만 내 부서를 최상단으로 끌어올림
-                              const myD = (myDeptName || '부서 미지정').trim();
                               if (isMyTenant) {
-                                if (aTrim === myD && bTrim !== myD) return -1;
-                                if (bTrim === myD && aTrim !== myD) return 1;
+                                if (aTrim === myD) return -1;
+                                if (bTrim === myD) return 1;
                               }
                               
-                              return a.localeCompare(b);
+                              return aTrim.localeCompare(bTrim);
                             }).map(deptName => {
                               const deptId = `${tenantName}_${deptName}`;
                               const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
@@ -1102,8 +1116,17 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                                   {isDeptExpanded && (
                                     <div className="mt-1.5 ml-2 space-y-1.5">
                                       {[...deptMembers].sort((a: any, b: any) => {
+                                        // 🌟 1. 나 자신은 무조건 최상단
                                         if (a.instructor_id === instId) return -1;
                                         if (b.instructor_id === instId) return 1;
+                                        
+                                        // 🌟 2. 직급 순서 정렬
+                                        const posOrder: any = { '최고관리자': 1, '원장': 2, '부원장': 3, '실장': 4, '전임강사': 5, '파트강사': 6, '조교': 7 };
+                                        const orderA = posOrder[a.position] || 99;
+                                        const orderB = posOrder[b.position] || 99;
+                                        if (orderA !== orderB) return orderA - orderB;
+                                        
+                                        // 🌟 3. 마지막은 가나다순
                                         return a.name.localeCompare(b.name);
                                       }).map((inst: any) => {
                                         const isSelected = selectedInstIds.includes(inst.instructor_id);
