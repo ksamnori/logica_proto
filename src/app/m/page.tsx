@@ -146,18 +146,40 @@ export default function MobileInstructorPortalPage() {
       if (data.success && data.events) {
         const external = data.events
           .filter((ev: any) => !ev.summary?.startsWith('[Logica]'))
-          .map((ev: any) => ({
-            id: ev.id,
-            title: ev.summary || '(제목 없음)',
-            content: ev.description || '<p>상세 내용 없음</p>',
-            type: '외부 일정', 
-            source: 'Meeting',
-            status: '대기중',
-            meeting_date: ev.start?.dateTime || ev.start?.date,
-            created_at: ev.created || new Date().toISOString(),
-            attendees: '구글 캘린더',
-            isExternal: true
-          }));
+          .map((ev: any) => {
+            const startStr = ev.start?.dateTime || ev.start?.date;
+            let endStr = ev.end?.dateTime || ev.end?.date;
+            let isMultiDay = false;
+            
+            // 🌟 [핵심 로직] 종일 일정(시간 없이 날짜만 있는 경우)은 구글이 종료일을 하루 뒤로 넘겨서 줌 (보정 필요)
+            if (ev.end?.date) {
+               const eDate = new Date(ev.end.date);
+               eDate.setDate(eDate.getDate() - 1);
+               endStr = eDate.toISOString().split('T')[0];
+            }
+            
+            // 다일(연속된) 일정인지 파악
+            if (startStr && endStr) {
+               const s = new Date(startStr); s.setHours(0,0,0,0);
+               const e = new Date(endStr); e.setHours(0,0,0,0);
+               if (e.getTime() > s.getTime()) isMultiDay = true;
+            }
+
+            return {
+              id: ev.id,
+              title: ev.summary || '(제목 없음)',
+              content: ev.description || '<p>상세 내용 없음</p>',
+              type: '외부 일정', 
+              source: 'Meeting',
+              status: '대기중',
+              meeting_date: startStr,
+              end_date: endStr, // 종료일 저장
+              isMultiDay: isMultiDay, // 다일 일정 여부 저장
+              created_at: ev.created || new Date().toISOString(),
+              attendees: '구글 캘린더',
+              isExternal: true
+            };
+          });
         setExternalEvents(external);
       }
     } catch (e) { console.error('구글 캘린더 로드 실패:', e); }
@@ -252,31 +274,68 @@ export default function MobileInstructorPortalPage() {
 
   const allCombinedAgendas = [...agendas, ...externalEvents];
 
+  // 🌟 [핵심 기능] 달력 렌더링에 연속된 일정(Bar) 그리기 로직 탑재
   const renderCalendarDays = () => {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
-    const meetingsInMonth = allCombinedAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).getMonth() === month && new Date(a.meeting_date).getFullYear() === year);
-
     const days = [];
     for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="text-center py-0.5"></div>);
     
     for (let i = 1; i <= daysInMonth; i++) {
+      const currentDate = new Date(year, month, i);
       const isToday = new Date().getDate() === i && new Date().getMonth() === month && new Date().getFullYear() === year;
       const isSelected = selectedDate && selectedDate.getDate() === i && selectedDate.getMonth() === month && selectedDate.getFullYear() === year;
       
-      const dayMeetings = meetingsInMonth.filter(a => new Date(a.meeting_date).getDate() === i);
-      const dayTypes = Array.from(new Set(dayMeetings.map(a => a.type)));
+      // 이 날짜가 포함된 이벤트를 찾아냅니다 (연속된 일정 포함)
+      const dayEvents = allCombinedAgendas.filter(a => {
+        if (a.isMultiDay) {
+          const s = new Date(a.meeting_date); s.setHours(0,0,0,0);
+          const e = new Date(a.end_date); e.setHours(0,0,0,0);
+          return currentDate.getTime() >= s.getTime() && currentDate.getTime() <= e.getTime();
+        } else {
+          const d = a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at);
+          return d.getFullYear() === year && d.getMonth() === month && d.getDate() === i;
+        }
+      });
+
+      // 단일 일정들(점)
+      const normalEvents = dayEvents.filter(a => !a.isMultiDay);
+      const dayTypes = Array.from(new Set(normalEvents.map(a => a.type)));
       
+      // 연속된 일정들(Bar) - 첫 번째 연속 일정만 백그라운드로 칠함
+      const multiDayEvents = dayEvents.filter(a => a.isMultiDay);
+      let multiDayBg = null;
+      
+      if (multiDayEvents.length > 0) {
+        const ev = multiDayEvents[0];
+        const s = new Date(ev.meeting_date); s.setHours(0,0,0,0);
+        const e = new Date(ev.end_date); e.setHours(0,0,0,0);
+        
+        let positionClasses = "left-[-8px] right-[-8px]"; // 중간 날짜 (양쪽으로 쭉 뻗음)
+        if (currentDate.getTime() === s.getTime() && currentDate.getTime() === e.getTime()) {
+           positionClasses = "left-1 right-1 rounded-lg";
+        } else if (currentDate.getTime() === s.getTime()) {
+           positionClasses = "left-1 right-[-8px] rounded-l-full"; // 시작일 (왼쪽 둥글게)
+        } else if (currentDate.getTime() === e.getTime()) {
+           positionClasses = "left-[-8px] right-1 rounded-r-full"; // 종료일 (오른쪽 둥글게)
+        }
+        
+        // 보라색 배경 바 렌더링
+        multiDayBg = <div className={`absolute top-1/2 -translate-y-1/2 h-6 bg-purple-100 -z-10 ${positionClasses}`}></div>;
+      }
+
       days.push(
-        <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1.5 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-lg transition-colors">
-          <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
+        <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-lg transition-colors z-0">
+          {multiDayBg}
+          <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
-          {dayTypes.length > 0 && (
-            <div className="absolute bottom-0 flex gap-[2px]">
+          {/* 하단 점 표시 (다일 일정이 아닐 때만 노출하여 덜 지저분하게) */}
+          {dayTypes.length > 0 && !multiDayBg && (
+            <div className="absolute bottom-0.5 flex gap-[2px]">
               {dayTypes.map((type, idx) => (
                 <span key={idx} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : getMeetingTypeTheme(type as string).dot}`}></span>
               ))}
@@ -288,13 +347,22 @@ export default function MobileInstructorPortalPage() {
     return days;
   };
 
+  // 🌟 [핵심 변경] 리스트 아이템 필터링에 다일 일정 범위 로직 적용
   let displayItems = selectedDate 
     ? allCombinedAgendas.filter(a => {
-        const d = a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at);
-        return d.toDateString() === selectedDate.toDateString();
+        if (a.isMultiDay) {
+          const s = new Date(a.meeting_date); s.setHours(0,0,0,0);
+          const e = new Date(a.end_date); e.setHours(0,0,0,0);
+          const curr = new Date(selectedDate); curr.setHours(0,0,0,0);
+          return curr.getTime() >= s.getTime() && curr.getTime() <= e.getTime();
+        } else {
+          const d = a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at);
+          return d.toDateString() === selectedDate.toDateString();
+        }
       })
     : allCombinedAgendas.filter(a => {
-        const d = a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at);
+        // 다가오는 전체 일정의 경우, 이벤트의 끝나는 날짜가 오늘 이후인 것만 보여줌
+        const d = a.isMultiDay ? new Date(a.end_date) : (a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at));
         const today = new Date();
         today.setHours(0, 0, 0, 0); 
         return d.getTime() >= today.getTime();
@@ -323,7 +391,6 @@ export default function MobileInstructorPortalPage() {
     setViewNote(note);
   };
 
-  // 렌더링 - 로그인 화면
   const renderAuthSection = () => {
     return (
       <div className="flex-1 flex items-center justify-center p-4 h-full bg-slate-50">
@@ -360,7 +427,7 @@ export default function MobileInstructorPortalPage() {
   return (
     <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
       
-      {/* 🚨 앱 종료 확인 모달 */}
+      {/* 앱 종료 확인 모달 */}
       {isExitModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-[280px] rounded-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -376,7 +443,7 @@ export default function MobileInstructorPortalPage() {
         </div>
       )}
 
-      {/* 🚨 AI 회의록 녹음 모달 */}
+      {/* AI 회의록 녹음 모달 */}
       {isAiModalOpen && (
         <AiRecordModal 
           onClose={() => setIsAiModalOpen(false)} 
@@ -388,7 +455,7 @@ export default function MobileInstructorPortalPage() {
         />
       )}
 
-      {/* 🚨 정보수정 모달 */}
+      {/* 정보수정 모달 */}
       <ProfileModal 
         isOpen={isProfileModalOpen} 
         onClose={() => setIsProfileModalOpen(false)} 
@@ -396,7 +463,7 @@ export default function MobileInstructorPortalPage() {
         instructorName={currentUser.name} 
       />
 
-      {/* 🌟 상세 기록 조회 모달 */}
+      {/* 상세 기록 조회 모달 */}
       {viewNote && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center sm:p-4">
           <div className="bg-white w-full h-[100dvh] sm:h-auto sm:max-h-[85vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -418,7 +485,10 @@ export default function MobileInstructorPortalPage() {
                   <div className="flex justify-between items-start mb-2">
                     <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
                     <span className="text-[11px] font-bold text-slate-400">
-                      {viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
+                      {/* 🌟 다일 일정일 경우 조회창에서도 '시작일 ~ 종료일' 형식으로 표시 */}
+                      {viewNote.isExternal && viewNote.isMultiDay 
+                        ? `일정: ${new Date(viewNote.meeting_date).toLocaleDateString('ko-KR')} ~ ${new Date(viewNote.end_date).toLocaleDateString('ko-KR')}`
+                        : (viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`)}
                     </span>
                   </div>
                   <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
@@ -517,7 +587,6 @@ export default function MobileInstructorPortalPage() {
                   </div>
                 ) : (
                   displayItems.map(item => {
-                    // 🌟 [핵심 변경] 구글 캘린더 일정과 회의록 시각적 분리 적용
                     const isGoogleEvent = item.isExternal;
                     const isMeetingNote = item.source === 'Meeting' && !isGoogleEvent;
                     
@@ -539,6 +608,13 @@ export default function MobileInstructorPortalPage() {
                     let badgeStyle = `${theme.bg} border-transparent ${theme.text}`;
                     if (isMeetingNote) badgeStyle = 'bg-slate-100 border-slate-300 text-slate-600';
                     if (isGoogleEvent) badgeStyle = 'bg-purple-100 border-purple-300 text-purple-700';
+
+                    // 🌟 [핵심 변경] 다일 일정의 경우 리스트에서 기간 표시 ('8/10 ~ 8/12')
+                    let dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ${itemDate.getHours()}:${String(itemDate.getMinutes()).padStart(2,'0')}`;
+                    if (item.isMultiDay && item.end_date) {
+                      const eDate = new Date(item.end_date);
+                      dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ~ ${eDate.getMonth()+1}/${eDate.getDate()}`;
+                    }
 
                     return (
                       <div 
@@ -562,7 +638,7 @@ export default function MobileInstructorPortalPage() {
                               {badgeText}
                             </span>
                             <span className="text-[10px] font-bold text-slate-400">
-                              {itemDate.getMonth()+1}/{itemDate.getDate()} {itemDate.getHours()}:{String(itemDate.getMinutes()).padStart(2,'0')}
+                              {dateDisplay}
                             </span>
                           </div>
                         </div>

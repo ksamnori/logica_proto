@@ -94,23 +94,45 @@ export default function MinutesPage() {
 
   const fetchGoogleEvents = async () => {
     try {
-      const res = await fetch('/api/calendar');
+      const res = await fetch('/api/calendar', { cache: 'no-store' });
       const data = await res.json();
       if (data.success && data.events) {
         const external = data.events
           .filter((ev: any) => !ev.summary?.startsWith('[Logica]'))
-          .map((ev: any) => ({
-            id: ev.id,
-            title: ev.summary || '(제목 없음)',
-            content: ev.description || '<p>상세 내용 없음 (구글 캘린더에서 작성됨)</p>',
-            type: '외부 일정', 
-            source: 'Meeting',
-            status: '대기중',
-            meeting_date: ev.start?.dateTime || ev.start?.date,
-            created_at: ev.created || new Date().toISOString(),
-            attendees: '구글 캘린더 외부 등록',
-            isExternal: true
-          }));
+          .map((ev: any) => {
+            const startStr = ev.start?.dateTime || ev.start?.date;
+            let endStr = ev.end?.dateTime || ev.end?.date;
+            let isMultiDay = false;
+            
+            // 종일 일정(시간 없이 날짜만 있는 경우) 보정
+            if (ev.end?.date) {
+               const eDate = new Date(ev.end.date);
+               eDate.setDate(eDate.getDate() - 1);
+               endStr = eDate.toISOString().split('T')[0];
+            }
+            
+            // 다일(연속된) 일정인지 파악
+            if (startStr && endStr) {
+               const s = new Date(startStr); s.setHours(0,0,0,0);
+               const e = new Date(endStr); e.setHours(0,0,0,0);
+               if (e.getTime() > s.getTime()) isMultiDay = true;
+            }
+
+            return {
+              id: ev.id,
+              title: ev.summary || '(제목 없음)',
+              content: ev.description || '<p>상세 내용 없음</p>',
+              type: '외부 일정', 
+              source: 'Meeting',
+              status: '대기중',
+              meeting_date: startStr,
+              end_date: endStr,
+              isMultiDay: isMultiDay,
+              created_at: ev.created || new Date().toISOString(),
+              attendees: '구글 캘린더',
+              isExternal: true
+            };
+          });
         setExternalEvents(external);
       }
     } catch (e) {
@@ -188,10 +210,10 @@ export default function MinutesPage() {
   };
 
   const getThemeColor = (type: string, title: string) => {
-    if (type === '긴급' || (title && title.includes('긴급')) || type === 'CS') return { bg: 'bg-rose-100', text: 'text-rose-600', icon: '🚨' };
-    if (type === '일반' || type === '비품') return { bg: 'bg-blue-100', text: 'text-blue-600', icon: '📝' };
-    if (type === '기타') return { bg: 'bg-emerald-100', text: 'text-emerald-600', icon: '📌' };
-    return { bg: 'bg-slate-100', text: 'text-slate-600', icon: '📄' }; 
+    if (type === '긴급' || (title && title.includes('긴급')) || type === 'CS') return { bg: 'bg-rose-100', text: 'text-rose-600', icon: '🚨', border: 'border-rose-200' };
+    if (type === '일반' || type === '비품') return { bg: 'bg-blue-100', text: 'text-blue-600', icon: '📝', border: 'border-blue-200' };
+    if (type === '기타') return { bg: 'bg-emerald-100', text: 'text-emerald-600', icon: '📌', border: 'border-emerald-200' };
+    return { bg: 'bg-slate-100', text: 'text-slate-600', icon: '📄', border: 'border-slate-200' }; 
   };
 
   const getUnresolvedCount = (folder: string) => {
@@ -205,24 +227,58 @@ export default function MinutesPage() {
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     
-    const meetingsInMonth = allAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).getMonth() === month && new Date(a.meeting_date).getFullYear() === year);
-
     const days = [];
     for (let i = 0; i < firstDay; i++) days.push(<div key={`empty-${i}`} className="text-center py-0.5"></div>);
     
     for (let i = 1; i <= daysInMonth; i++) {
+      const currentDate = new Date(year, month, i);
       const isToday = new Date().getDate() === i && new Date().getMonth() === month && new Date().getFullYear() === year;
       const isSelected = selectedDate && selectedDate.getDate() === i && selectedDate.getMonth() === month && selectedDate.getFullYear() === year;
       
-      const dayMeetings = meetingsInMonth.filter(a => new Date(a.meeting_date).getDate() === i);
-      const dayTypes = Array.from(new Set(dayMeetings.map(a => a.type)));
+      const dayEvents = allAgendas.filter(a => {
+        if (a.source === 'Meeting') {
+          if (a.isMultiDay) {
+            const s = new Date(a.meeting_date); s.setHours(0,0,0,0);
+            const e = new Date(a.end_date); e.setHours(0,0,0,0);
+            return currentDate.getTime() >= s.getTime() && currentDate.getTime() <= e.getTime();
+          } else if (a.meeting_date) {
+            const d = new Date(a.meeting_date);
+            return d.getFullYear() === year && d.getMonth() === month && d.getDate() === i;
+          }
+        }
+        return false;
+      });
       
+      const normalEvents = dayEvents.filter(a => !a.isMultiDay);
+      const dayTypes = Array.from(new Set(normalEvents.map(a => a.type)));
+      
+      const multiDayEvents = dayEvents.filter(a => a.isMultiDay);
+      let multiDayBg = null;
+      
+      if (multiDayEvents.length > 0) {
+        const ev = multiDayEvents[0];
+        const s = new Date(ev.meeting_date); s.setHours(0,0,0,0);
+        const e = new Date(ev.end_date); e.setHours(0,0,0,0);
+        
+        let positionClasses = "left-[-8px] right-[-8px]";
+        if (currentDate.getTime() === s.getTime() && currentDate.getTime() === e.getTime()) {
+           positionClasses = "left-1 right-1 rounded-lg";
+        } else if (currentDate.getTime() === s.getTime()) {
+           positionClasses = "left-1 right-[-8px] rounded-l-full";
+        } else if (currentDate.getTime() === e.getTime()) {
+           positionClasses = "left-[-8px] right-1 rounded-r-full";
+        }
+        
+        multiDayBg = <div className={`absolute top-1/2 -translate-y-1/2 h-6 bg-purple-100 -z-10 ${positionClasses}`}></div>;
+      }
+
       days.push(
-        <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-full transition-colors">
-          <span className={`text-[11px] w-6 h-6 flex items-center justify-center rounded-full transition-colors ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
+        <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-full transition-colors z-0">
+          {multiDayBg}
+          <span className={`text-[11px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
-          {dayTypes.length > 0 && (
+          {dayTypes.length > 0 && !multiDayBg && (
             <div className="absolute bottom-0 flex gap-[2px]">
               {dayTypes.map((type, idx) => (
                 <span key={idx} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : getMeetingTypeTheme(type as string).dot}`}></span>
@@ -385,13 +441,34 @@ export default function MinutesPage() {
   };
 
   let displayMeetings = selectedDate 
-    ? allAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date).toDateString() === selectedDate.toDateString())
-    : allAgendas.filter(a => a.source === 'Meeting' && a.meeting_date && new Date(a.meeting_date) >= new Date(new Date().setHours(0,0,0,0)));
+    ? allAgendas.filter(a => {
+        if (a.source !== 'Meeting') return false;
+        if (a.isMultiDay) {
+          const s = new Date(a.meeting_date); s.setHours(0,0,0,0);
+          const e = new Date(a.end_date); e.setHours(0,0,0,0);
+          const curr = new Date(selectedDate); curr.setHours(0,0,0,0);
+          return curr.getTime() >= s.getTime() && curr.getTime() <= e.getTime();
+        } else if (a.meeting_date) {
+          return new Date(a.meeting_date).toDateString() === selectedDate.toDateString();
+        }
+        return false;
+      })
+    : allAgendas.filter(a => {
+        if (a.source !== 'Meeting') return false;
+        const d = a.isMultiDay ? new Date(a.end_date) : (a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at));
+        const today = new Date();
+        today.setHours(0, 0, 0, 0); 
+        return d.getTime() >= today.getTime();
+      });
 
-  displayMeetings.sort((a,b) => new Date(a.meeting_date).getTime() - new Date(b.meeting_date).getTime());
+  displayMeetings.sort((a,b) => {
+    const d1 = a.meeting_date ? new Date(a.meeting_date).getTime() : new Date(a.created_at).getTime();
+    const d2 = b.meeting_date ? new Date(b.meeting_date).getTime() : new Date(b.created_at).getTime();
+    return d1 - d2; // 다가오는 일정순 (오름차순)
+  });
   
   if (!selectedDate) {
-    displayMeetings = displayMeetings.slice(0, 7);
+    displayMeetings = displayMeetings.slice(0, 15);
   }
 
   return (
@@ -533,40 +610,63 @@ export default function MinutesPage() {
                    <div className="text-center py-20 text-slate-400 font-bold text-xs">표시할 기록이 없습니다.</div>
                 ) : (
                   filteredAgendas.map(note => {
-                    const theme = getThemeColor(note.type, note.title);
-                    const isChecked = selectedIds.includes(note.id);
-                    const isMeetingNote = note.source === 'Meeting';
+                    const isGoogleEvent = note.isExternal;
+                    const isMeetingNote = note.source === 'Meeting' && !isGoogleEvent;
                     
-                    // 🌟 [핵심 변경] 삭제 권한 판별 변수
+                    let theme;
+                    if (isGoogleEvent) {
+                      theme = { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📆', border: 'border-purple-200' };
+                    } else if (isMeetingNote) {
+                      theme = { bg: 'bg-[#002864]', text: 'text-white', icon: '📁', border: 'border-blue-900' };
+                    } else {
+                      theme = getThemeColor(note.type, note.title);
+                    }
+                    
+                    const isChecked = selectedIds.includes(note.id);
                     const canDelete = currentUser.isSuperLevel || note.created_by === currentUser.instId;
+
+                    let badgeText = note.type;
+                    if (isGoogleEvent) badgeText = '구글 일정';
+                    else if (isMeetingNote) badgeText = '회의록';
+                    
+                    let badgeStyle = `${theme.bg} border-transparent ${theme.text}`;
+                    if (isMeetingNote) badgeStyle = 'bg-slate-100 border-slate-300 text-slate-600';
+                    if (isGoogleEvent) badgeStyle = 'bg-purple-100 border-purple-300 text-purple-700';
+
+                    const itemDate = note.meeting_date ? new Date(note.meeting_date) : new Date(note.created_at);
+                    let dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ${itemDate.getHours()}:${String(itemDate.getMinutes()).padStart(2,'0')}`;
+                    if (note.isMultiDay && note.end_date) {
+                      const eDate = new Date(note.end_date);
+                      dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ~ ${eDate.getMonth()+1}/${eDate.getDate()}`;
+                    }
 
                     return (
                       <div 
                         key={note.id} 
-                        onClick={() => isMeetingNote ? checkAccessAndOpen(note) : toggleSelect(note.id)} 
-                        className={`flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border transition-all group ${isMeetingNote ? 'cursor-pointer hover:shadow-md hover:border-slate-300' : 'cursor-pointer hover:bg-slate-50'} ${isChecked ? 'border-[#002864] bg-blue-50/30 ring-1 ring-[#002864]' : 'border-slate-200 hover:border-slate-300'}`}
+                        onClick={() => isMeetingNote || isGoogleEvent ? checkAccessAndOpen(note) : toggleSelect(note.id)} 
+                        className={`flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border transition-all group ${isMeetingNote || isGoogleEvent ? 'cursor-pointer hover:shadow-md hover:border-slate-300' : 'cursor-pointer hover:bg-slate-50'} ${isChecked ? 'border-[#002864] bg-blue-50/30 ring-1 ring-[#002864]' : 'border-slate-200 hover:border-slate-300'}`}
                       >
-                        {!isMeetingNote && activeFolder === '전체 안건' && (
+                        {!isMeetingNote && !isGoogleEvent && activeFolder === '전체 안건' && (
                           <div className="shrink-0 flex items-center mt-1.5">
                             <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(note.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#002864] cursor-pointer" />
                           </div>
                         )}
 
-                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm text-sm ${isMeetingNote ? 'bg-[#002864] text-white' : `${theme.bg} border ${theme.bg.replace('100','200')}`}`}>
-                          {isMeetingNote ? '📁' : theme.icon}
+                        <div className={`w-8 h-8 rounded-full flex items-center justify-center shrink-0 shadow-sm text-sm ${theme.bg} ${theme.border} ${theme.text}`}>
+                          {theme.icon}
                         </div>
         
                         <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
                           <div className="flex items-center gap-2">
                             {note.is_secret && <span className="text-[10px]" title="비밀 회의록">🔒</span>}
                             <h4 
-                              onClick={(e) => { if(!isMeetingNote) { e.stopPropagation(); checkAccessAndOpen(note); } }} 
-                              className={`text-[13px] font-black truncate transition-colors ${!isMeetingNote && 'cursor-pointer hover:underline'} ${isChecked ? 'text-[#002864]' : 'text-slate-800'}`}
+                              onClick={(e) => { if(!isMeetingNote && !isGoogleEvent) { e.stopPropagation(); checkAccessAndOpen(note); } }} 
+                              className={`text-[13px] font-black truncate transition-colors ${(!isMeetingNote && !isGoogleEvent) ? 'cursor-pointer hover:underline' : ''} ${isChecked ? 'text-[#002864]' : 'text-slate-800'}`}
                             >
                               {note.title}
                             </h4>
-                            <span className={`px-1.5 py-0.5 text-[8px] font-black rounded text-nowrap border ${isMeetingNote ? 'bg-slate-100 border-slate-300 text-slate-600' : `${theme.bg} border-transparent ${theme.text}`}`}>
-                              {isMeetingNote ? '회의록' : note.type}
+                            <span className={`px-1.5 py-0.5 text-[8px] font-black rounded text-nowrap border ${badgeStyle}`}>
+                              {badgeText}
                             </span>
                             {isMeetingNote && note.attendees && (
                               <span className="text-[9px] font-bold text-[#002864] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 ml-1 truncate">
@@ -591,15 +691,12 @@ export default function MinutesPage() {
                             <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 text-right">
                               <span className="text-slate-500">✍️ {getInstructorName(note.created_by, note.isExternal)}</span>
                               <span className="text-slate-300">|</span>
-                              {isMeetingNote && note.meeting_date ? (
-                                <span className="text-[#002864]">일정: {new Date(note.meeting_date).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                              ) : (
-                                <span>생성: {new Date(note.created_at).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
-                              )}
+                              <span className={note.meeting_date ? "text-[#002864]" : ""}>
+                                 {note.meeting_date ? `일정: ${dateDisplay}` : `생성: ${dateDisplay}`}
+                              </span>
                             </div>
                           </div>
                           
-                          {/* 🌟 [핵심 변경] 삭제 권한이 없어도 공간 유지를 위해 흐릿한 회색 아이콘으로 보여줌 */}
                           <button 
                             onClick={(e) => {
                               if (canDelete) deleteAgenda(note, e);
@@ -666,10 +763,31 @@ export default function MinutesPage() {
               ) : (
                 displayMeetings.map(m => {
                   const mDate = new Date(m.meeting_date);
-                  const theme = getMeetingTypeTheme(m.type); 
+                  const isGoogleEvent = m.isExternal;
+                  const isMeetingNote = m.source === 'Meeting' && !isGoogleEvent;
+
+                  let theme;
+                  if (isGoogleEvent) {
+                    theme = { bg: 'bg-purple-50', text: 'text-purple-800', border: 'border-purple-200', dot: 'bg-purple-500' };
+                  } else {
+                    theme = getMeetingTypeTheme(m.type); 
+                  }
+
+                  let dateDisplay = `${mDate.getHours()}시 ${mDate.getMinutes() === 0 ? '00' : mDate.getMinutes()}분`;
+                  if (!selectedDate) {
+                     dateDisplay = `${mDate.getMonth()+1}/${mDate.getDate()} ${mDate.getHours()}:${String(mDate.getMinutes()).padStart(2,'0')}`;
+                  }
+                  if (m.isMultiDay && m.end_date) {
+                     const eDate = new Date(m.end_date);
+                     dateDisplay = `${mDate.getMonth()+1}/${mDate.getDate()} ~ ${eDate.getMonth()+1}/${eDate.getDate()}`;
+                  }
+
+                  let badgeText = m.type;
+                  if (isGoogleEvent) badgeText = '구글 일정';
+
                   return (
                     <div key={m.id} onClick={() => checkAccessAndOpen(m)} className={`p-2.5 rounded-xl border shadow-sm cursor-pointer transition-colors group ${theme.bg} ${theme.border} hover:border-[#002864] relative`}>
-                      {m.isExternal && (
+                      {isGoogleEvent && (
                         <div className="absolute -top-2 -right-2 bg-purple-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black shadow-sm">Google</div>
                       )}
                       <div className="flex justify-between items-start mb-0.5 gap-2">
@@ -677,11 +795,11 @@ export default function MinutesPage() {
                           {m.is_secret && <span className="text-[10px]">🔒</span>}
                           <h4 className={`text-[12px] font-black line-clamp-1 group-hover:text-[#002864] ${theme.text}`}>{m.title}</h4>
                         </div>
-                        <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded border bg-white opacity-80 ${theme.border} ${theme.text}`}>{m.type}</span>
+                        <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded border bg-white opacity-80 ${theme.border} ${theme.text}`}>{badgeText}</span>
                       </div>
                       <div className={`text-[10px] font-bold flex items-center gap-1 opacity-70 ${theme.text}`}>
                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                        {selectedDate ? `${mDate.getHours()}시 ${mDate.getMinutes() === 0 ? '00' : mDate.getMinutes()}분` : `${mDate.getMonth()+1}/${mDate.getDate()} ${mDate.getHours()}:${String(mDate.getMinutes()).padStart(2,'0')}`}
+                        {dateDisplay}
                       </div>
                     </div>
                   );
@@ -753,7 +871,10 @@ export default function MinutesPage() {
                       <div className="flex justify-between items-start mb-2 print:hidden">
                         <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
                         <span className="text-[11px] font-bold text-slate-400">
-                          {viewNote.meeting_date ? `회의 일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
+                          {/* 🌟 다일 일정 범위 표시 적용 */}
+                          {viewNote.isExternal && viewNote.isMultiDay 
+                            ? `일정: ${new Date(viewNote.meeting_date).toLocaleDateString('ko-KR')} ~ ${new Date(viewNote.end_date).toLocaleDateString('ko-KR')}`
+                            : (viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`)}
                         </span>
                       </div>
                       <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
