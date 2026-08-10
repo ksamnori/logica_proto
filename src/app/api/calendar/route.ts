@@ -50,11 +50,14 @@ export async function GET() {
     const calendar = google.calendar({ version: 'v3', auth });
     const targetCalId = process.env.TARGET_CALENDAR_ID;
 
-    // 오늘부터 다가오는 구글 캘린더 일정 최대 100개 긁어오기
+    // 🌟 [수정됨] 오늘 기준이 아니라 '3달 전'부터 가져오도록 시간 설정
+    const threeMonthsAgo = new Date();
+    threeMonthsAgo.setMonth(threeMonthsAgo.getMonth() - 3);
+
     const res = await calendar.events.list({
       calendarId: targetCalId,
-      timeMin: new Date().toISOString(),
-      maxResults: 100,
+      timeMin: threeMonthsAgo.toISOString(), // 👈 3개월 전 데이터부터 로드
+      maxResults: 300, // 👈 과거 일정까지 가져오므로 여유있게 최대 개수를 늘림
       singleEvents: true,
       orderBy: 'startTime',
     });
@@ -66,9 +69,7 @@ export async function GET() {
   }
 }
 
-// src/app/api/calendar/route.ts 파일의 기존 코드들을 건드리지 말고, 
-// 파일 맨 아래에 이 DELETE 함수 전체를 복사해서 붙여넣어 주세요!
-
+// 📌 [Logica -> 구글] 일정 삭제 (DELETE)
 export async function DELETE(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -81,8 +82,8 @@ export async function DELETE(request: Request) {
     const auth = getAuth();
     const calendar = google.calendar({ version: 'v3', auth });
     
-    // 환경 변수에 캘린더 ID가 설정되어 있으면 가져오고, 없으면 기본 캘린더 사용
-    const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+    // 🌟 [수정됨] POST, GET과 동일하게 TARGET_CALENDAR_ID 변수를 사용하도록 통일
+    const calendarId = process.env.TARGET_CALENDAR_ID || 'primary';
 
     // 1. 해당 제목을 가진 구글 캘린더 일정을 검색합니다.
     const res = await calendar.events.list({
