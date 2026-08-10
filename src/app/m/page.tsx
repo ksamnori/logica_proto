@@ -15,8 +15,8 @@ export default function MobileInstructorPortalPage() {
   const [phoneInput, setPhoneInput] = useState("");
   const [pwInput, setPwInput] = useState("");
   
-  // 강사 정보 상태
-  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", dept: "", isSuperLevel: false });
+  // 🌟 [수정됨] 강사 직책(position) 상태 추가
+  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", dept: "", position: "", isSuperLevel: false });
 
   // 모달 상태
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
@@ -89,7 +89,8 @@ export default function MobileInstructorPortalPage() {
 
   const fetchGoogleEvents = async () => {
     try {
-      const res = await fetch('/api/calendar');
+      // 🌟 [핵심 변경] 모바일 브라우저의 강력한 캐시를 뚫기 위해 'no-store' 강제 적용
+      const res = await fetch('/api/calendar', { cache: 'no-store' });
       const data = await res.json();
       if (data.success && data.events) {
         const external = data.events
@@ -152,7 +153,8 @@ export default function MobileInstructorPortalPage() {
   };
 
   const loadDashboard = async (id: string) => {
-    const { data } = await supabase.from("instructor").select("name, department, role, position").eq("instructor_id", id).maybeSingle();
+    // 🌟 [수정됨] 직책(position) 및 채팅직책(chat_position) 모두 불러오기
+    const { data } = await supabase.from("instructor").select("name, department, role, position, chat_position").eq("instructor_id", id).maybeSingle();
     if (data) {
       const isSuperLevel = data.role === 'SUPER_ADMIN' || data.role === 'ADMIN' || 
                            String(data.position).includes('최고관리자') || 
@@ -163,6 +165,7 @@ export default function MobileInstructorPortalPage() {
         instId: id,
         name: data.name || "선생님",
         dept: data.department || "강사",
+        position: data.chat_position || data.position || "강사", // 채팅직책 최우선, 없으면 일반직책
         isSuperLevel
       });
       setAuthState("dashboard");
@@ -182,7 +185,6 @@ export default function MobileInstructorPortalPage() {
     return { dot: 'bg-slate-500' };
   };
 
-  // 🌟 [수정됨] 모든 리턴 객체에 border 속성을 명시적으로 추가하여 타입 에러 해결!
   const getThemeColor = (type: string, title: string) => {
     if (type === '긴급' || (title && title.includes('긴급')) || type === 'CS') return { bg: 'bg-rose-100', text: 'text-rose-600', icon: '🚨', border: 'border-rose-200' };
     if (type === '일반' || type === '비품') return { bg: 'bg-blue-100', text: 'text-blue-600', icon: '📝', border: 'border-blue-200' };
@@ -287,7 +289,6 @@ export default function MobileInstructorPortalPage() {
   return (
     <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
       
-      {/* 🚨 앱 종료 확인 모달 */}
       {isExitModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-[280px] rounded-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -303,7 +304,6 @@ export default function MobileInstructorPortalPage() {
         </div>
       )}
 
-      {/* 🚨 AI 회의록 녹음 모달 탑재 */}
       {isAiModalOpen && (
         <AiRecordModal 
           onClose={() => setIsAiModalOpen(false)} 
@@ -315,7 +315,6 @@ export default function MobileInstructorPortalPage() {
         />
       )}
 
-      {/* 🚨 정보수정 모달 탑재 */}
       <ProfileModal 
         isOpen={isProfileModalOpen} 
         onClose={() => setIsProfileModalOpen(false)} 
@@ -329,7 +328,8 @@ export default function MobileInstructorPortalPage() {
           <header className="bg-[#002864] px-5 py-3.5 flex justify-between items-center shadow-md shrink-0 z-20">
             <div className="flex items-center gap-2">
               <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-4 sm:h-5 object-contain brightness-0 invert" alt="Logica" />
-              <span className="text-white font-black text-xs opacity-80 border-l border-white/30 pl-2">강사</span>
+              {/* 🌟 [핵심 변경] 강사의 실제 직책으로 자동 표시됩니다! */}
+              <span className="text-white font-black text-xs opacity-80 border-l border-white/30 pl-2">{currentUser.position || '강사'}</span>
             </div>
             <div className="flex items-center gap-1.5">
               <button onClick={() => setIsProfileModalOpen(true)} className="text-[11px] font-bold text-white bg-blue-800 hover:bg-blue-700 px-3 py-1.5 rounded-lg border border-blue-600 transition-colors shadow-sm">
@@ -359,6 +359,8 @@ export default function MobileInstructorPortalPage() {
                 <div className="flex justify-between items-center mb-3">
                   <h2 className="text-[13px] font-black text-[#002864]">{calendarMonth.getFullYear()}년 {calendarMonth.getMonth() + 1}월</h2>
                   <div className="flex items-center gap-1.5">
+                    {/* 🌟 캘린더 상단에도 수동 동기화 버튼 추가 */}
+                    <button onClick={fetchGoogleEvents} className="w-6 h-6 flex items-center justify-center bg-blue-50 hover:bg-blue-100 transition-colors rounded text-blue-600 font-bold border border-blue-200" title="구글 캘린더 동기화">🔄</button>
                     <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="w-6 h-6 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">◀</button>
                     <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-2 py-0.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white">오늘</button>
                     <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="w-6 h-6 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">▶</button>
@@ -373,9 +375,13 @@ export default function MobileInstructorPortalPage() {
               </div>
 
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between ml-1 mb-1">
+                <div className="flex items-center justify-between ml-1 mb-1 mt-6">
                   <h3 className="font-black text-[13px] text-slate-700">{selectedDate ? '선택한 날짜의 일정' : '다가오는 전체 일정'}</h3>
-                  <span className="text-[10px] font-bold text-slate-400">{displayItems.length}건</span>
+                  <div className="flex items-center gap-2">
+                    {/* 🌟 리스트 상단에도 수동 동기화 버튼 추가 */}
+                    <button onClick={fetchGoogleEvents} className="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded font-bold hover:bg-blue-100 transition-colors">🔄 동기화</button>
+                    <span className="text-[10px] font-bold text-slate-400">{displayItems.length}건</span>
+                  </div>
                 </div>
                 
                 {displayItems.length === 0 ? (
@@ -421,7 +427,7 @@ export default function MobileInstructorPortalPage() {
             </div>
           </main>
 
-          {/* 🌟 4. 플로팅챗 위젯에 마이크 클릭 이벤트 전달! */}
+          {/* 메신저/녹음 위젯 연동 */}
           {currentUser.instId && (
             <FloatingChat 
               instId={currentUser.instId} 
