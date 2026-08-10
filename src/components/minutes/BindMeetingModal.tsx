@@ -29,6 +29,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
   const [meetingTimeStr, setMeetingTimeStr] = useState("10:00");
   
   const [isSyncGcal, setIsSyncGcal] = useState(true);
+  const [isSecret, setIsSecret] = useState(false); 
 
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>(selectedIds);
@@ -56,6 +57,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         setFolder(target.type);
         const cleanContent = target.content ? target.content.replace(/<div data-linked-ids="[^"]*" style="display:none;"><\/div>/g, '') : "";
         setMeetingResult(cleanContent);
+        setIsSecret(target.is_secret || false); 
         
         if (target.meeting_date) {
           const d = new Date(target.meeting_date);
@@ -74,6 +76,9 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
   const stripHtml = (html: string) => { if (!html) return ""; return html.replace(/<[^>]+>/g, ' ').trim(); };
 
   const insertAgendaContent = async (item: any) => {
+    // 🌟 1. 비밀 안건 삽입 시 자동으로 회의록 자체를 '비밀 회의록'으로 승격!
+    if (item.is_secret) setIsSecret(true);
+
     let commentsHtml = "";
     if (item.source && item.source !== 'Manual') {
       let table = '', idCol = '';
@@ -90,16 +95,29 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         } catch(e) {}
       }
     }
-    if (!commentsHtml) commentsHtml = `<p style="color:#94a3b8; font-size:0.85em; margin-top:4px;">등록된 소통 기록이 없습니다.</p>`;
-
-    const htmlToInsert = `
-      <div class="agenda-block" style="border:1px solid #cbd5e1; padding:12px; border-radius:6px; margin-bottom:12px; background:white; page-break-inside: avoid;">
-        <h4 style="color:#002864; margin:0 0 8px 0; font-size:14px; font-weight:bold;">📌 ${item.title}</h4>
-        <div style="margin:0; color:#334155; line-height:1.4; font-size:12px;">${item.content}</div>
+    
+    // 🌟 2. 댓글이 없을 경우 빈 공간 아예 생성 안 함
+    let commentsSection = "";
+    if (commentsHtml) {
+      commentsSection = `
         <div style="margin-top:8px; border-top:1px dashed #e2e8f0; padding-top:8px;">
           <strong style="font-size:11px; color:#475569;">💬 소통 내역 (댓글):</strong>
           ${commentsHtml}
         </div>
+      `;
+    }
+
+    // 🌟 3. 비밀 안건은 실제 내용을 절대 에디터에 안 넣음 (가짜 플레이스홀더 박스 삽입)
+    let safeContent = item.content;
+    if (item.is_secret) {
+      safeContent = `<div class="secret-agenda-placeholder" data-agenda-id="${item.id}" style="color:#64748b; font-weight:bold; font-size:12px; background:#f1f5f9; padding:10px; border-radius:6px; border:1px solid #cbd5e1;">🔒 비밀 안건으로 보호되어 상세 내용이 표시되지 않습니다.<br/><span style="font-weight:normal; font-size:11px; margin-top:4px; display:inline-block;">(저장 후 실제 회의록을 열람할 때 참석자에게만 원본 내용이 복호화되어 표시됩니다)</span></div>`;
+    }
+
+    const htmlToInsert = `
+      <div class="agenda-block" style="border:1px solid #cbd5e1; padding:12px; border-radius:6px; margin-bottom:12px; background:white; page-break-inside: avoid;">
+        <h4 style="color:#002864; margin:0 0 8px 0; font-size:14px; font-weight:bold;">📌 ${item.title}</h4>
+        <div style="margin:0; color:#334155; line-height:1.4; font-size:12px;">${safeContent}</div>
+        ${commentsSection}
       </div>
       <p><br/></p>
     `;
@@ -152,10 +170,11 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
           status: "진행중", 
           created_by: currentUser.instId,
           attendees: participantNames,
-          meeting_date: meetingDateTime
+          meeting_date: meetingDateTime,
+          is_secret: isSecret 
         };
 
-        if (isSyncGcal) {
+        if (isSyncGcal && !isSecret) { 
           try { await syncToGoogleCalendarBackend([newMeetingObj]); } 
           catch (error) { if (!confirm("백엔드 캘린더 동기화에 실패했습니다.\nLogica 시스템에는 그래도 일정을 등록할까요?")) return; }
         }
@@ -165,6 +184,15 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
 
       } else {
         const targetMeeting = agendas.find(a => a.id === targetMeetingId);
+        
+        if (!targetMeeting.is_secret && isSecret) {
+          try {
+            await fetch(`/api/calendar?title=${encodeURIComponent('[Logica] ' + targetMeeting.title)}`, { method: 'DELETE' });
+          } catch (e) {
+            console.error('구글 캘린더 연동 해제(삭제) 실패:', e);
+          }
+        }
+
         let existingLinkedIds: string[] = [];
         if (targetMeeting.content) {
           const match = targetMeeting.content.match(/data-linked-ids="([^"]+)"/);
@@ -179,7 +207,8 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
           content: meetingResult + hiddenLinkData, 
           type: folder, 
           meeting_date: meetingDateTime,
-          attendees: participantNames
+          attendees: participantNames,
+          is_secret: isSecret
         }).eq('id', targetMeetingId);
         if (error) throw error;
       }
@@ -188,7 +217,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         await supabase.from('agenda').update({ status: '진행중' }).in('id', localSelectedIds);
       }
 
-      alert(mode === 'NEW' ? "새 회의록 결속이 완료되었습니다!" : "회의록이 성공적으로 저장(업데이트)되었습니다!");
+      alert(mode === 'NEW' ? "새 회의록 병합이 완료되었습니다!" : "회의록이 성공적으로 저장(업데이트)되었습니다!");
       onSuccess(folder); 
     } catch (e: any) { alert(`회의록 저장/업데이트 실패: ${e.message || 'DB 에러'}`); }
   };
@@ -197,7 +226,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-5xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         <div className="bg-[#002864] p-3 text-white flex justify-between items-center shrink-0">
-          <h2 className="font-black text-[13px] flex items-center gap-2">{meetingToEdit ? '✏️ 상세 일정 및 회의록 편집' : '✨ 여러 안건을 모아서 회의록 결속'}</h2>
+          <h2 className="font-black text-[13px] flex items-center gap-2">{meetingToEdit ? '✏️ 상세 일정 및 회의록 편집' : '✨ 여러 안건을 모아서 회의록 병합'}</h2>
           <button onClick={onClose} className="text-white hover:text-blue-200 text-xl font-bold leading-none">&times;</button>
         </div>
         
@@ -219,13 +248,16 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
             </div>
 
             <div className="flex-1 flex flex-col p-3 min-h-0">
-              <h3 className="text-[12px] font-black text-[#002864] mb-2 shrink-0 flex items-center gap-1">📌 결속/추가할 안건 ({selectedItems.length}개)</h3>
+              <h3 className="text-[12px] font-black text-[#002864] mb-2 shrink-0 flex items-center gap-1">📌 병합/추가할 안건 ({selectedItems.length}개)</h3>
               <div className="flex-1 overflow-y-auto custom-scroll space-y-1.5 pr-1">
                 {selectedItems.map(item => (
                   <div key={item.id} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between gap-1.5 group hover:border-blue-300 transition-colors">
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <div className="text-[11px] font-bold text-slate-700 truncate"><span className="text-blue-500 mr-1">📌</span>{item.title}</div>
-                      <div className="text-[9px] text-slate-400 truncate pl-4">{stripHtml(item.content)}</div>
+                      {/* 🌟 4. 좌측 리스트에서도 비밀 안건 내용은 감춤 */}
+                      <div className="text-[9px] text-slate-400 truncate pl-4">
+                        {item.is_secret ? "🔒 비밀 안건 (보호됨)" : stripHtml(item.content)}
+                      </div>
                     </div>
                     <button onClick={() => insertAgendaContent(item)} className="shrink-0 px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-[#002864] border border-blue-200 rounded text-[9px] font-black transition-colors">삽입</button>
                   </div>
@@ -242,7 +274,9 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                       <div key={a.id} className="flex justify-between items-center bg-slate-50 border border-slate-100 p-1.5 rounded text-[10px]">
                         <div className="flex-1 min-w-0 flex flex-col mr-1">
                           <span className="truncate text-slate-700 font-bold">{a.title}</span>
-                          <span className="truncate text-[8px] text-slate-400">{stripHtml(a.content)}</span>
+                          <span className="truncate text-[8px] text-slate-400">
+                            {a.is_secret ? "🔒 비밀 안건 (보호됨)" : stripHtml(a.content)}
+                          </span>
                         </div>
                         <button onClick={() => setLocalSelectedIds([...localSelectedIds, a.id])} className="text-blue-600 font-black px-1.5 py-0.5 bg-white border border-blue-200 rounded shadow-sm hover:bg-blue-50 shrink-0">선택</button>
                       </div>
@@ -257,7 +291,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
             {!meetingToEdit && (
               <div className="flex bg-slate-100 p-1 rounded-lg shrink-0 mb-4 border border-slate-200">
                 <button onClick={() => { setMode('NEW'); setTargetMeetingId(''); }} className={`flex-1 text-[11px] font-bold py-1.5 rounded-md transition-colors ${mode === 'NEW' ? 'bg-white text-[#002864] shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200'}`}>
-                  ✨ 새 회의 일정으로 결속
+                  ✨ 새 회의 일정으로 병합
                 </button>
                 <button onClick={() => setMode('EXISTING')} className={`flex-1 text-[11px] font-bold py-1.5 rounded-md transition-colors ${mode === 'EXISTING' ? 'bg-white text-[#002864] shadow-sm border border-slate-200' : 'text-slate-500 hover:bg-slate-200'}`}>
                   📌 기존 예정된 일정에 꽂아넣기
@@ -296,15 +330,21 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                 <label className="block text-[11px] font-bold text-slate-500 mb-1">시간 예약</label>
                 <input type="time" value={meetingTimeStr} onChange={e => setMeetingTimeStr(e.target.value)} className="w-full text-[12px] font-bold text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" />
               </div>
-
-              {mode === 'NEW' && (
-                <div className="flex-1 border-l border-slate-200 pl-3 flex flex-col justify-center gap-1.5">
-                  <label className="flex items-center gap-1.5 text-[11px] font-black text-blue-600 cursor-pointer">
-                    <input type="checkbox" checked={isSyncGcal} onChange={(e) => setIsSyncGcal(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
-                    📆 백엔드 캘린더 연동 (API)
+              
+              <div className="flex-1 border-l border-slate-200 pl-3 flex justify-end items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap justify-end">
+                  {mode === 'NEW' && (
+                    <label className="flex items-center gap-1.5 text-[11px] font-black text-blue-600 cursor-pointer hover:bg-blue-50 p-0.5 rounded transition-colors">
+                      <input type="checkbox" checked={isSyncGcal} onChange={(e) => setIsSyncGcal(e.target.checked)} disabled={isSecret} className="w-3.5 h-3.5 accent-blue-600 disabled:opacity-30 disabled:cursor-not-allowed" />
+                      📆 캘린더 연동
+                    </label>
+                  )}
+                  <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 cursor-pointer hover:bg-slate-200 p-0.5 rounded transition-colors">
+                    <input type="checkbox" checked={isSecret} onChange={(e) => setIsSecret(e.target.checked)} className="w-3.5 h-3.5 accent-slate-800" />
+                    🔒 비밀 회의록 (참석자만)
                   </label>
                 </div>
-              )}
+              </div>
             </div>
             
             <div className="mb-2 shrink-0">
@@ -322,11 +362,11 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         </div>
 
         <div className="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center shrink-0">
-          <span className="text-[10px] font-bold text-slate-500">결속/수정이 완료되면 우측 캘린더에 즉시 연동됩니다.</span>
+          <span className="text-[10px] font-bold text-slate-500">병합/수정이 완료되면 우측 캘린더에 즉시 연동됩니다.</span>
           <div className="flex gap-2">
             <button onClick={onClose} className="px-4 py-2 bg-white text-slate-600 border border-slate-300 font-bold text-[12px] rounded-lg hover:bg-slate-100 transition-colors shadow-sm">취소</button>
             <button onClick={handleCreateMeeting} className="px-4 py-2 bg-[#002864] text-white font-bold text-[12px] rounded-lg hover:bg-blue-900 transition-colors shadow-sm flex items-center gap-1.5">
-              <span>{mode === 'NEW' ? '✨' : '📌'}</span> {mode === 'NEW' ? '일정 생성 및 결속' : '변경 사항 저장 (업데이트)'}
+              <span>{mode === 'NEW' ? '✨' : '📌'}</span> {mode === 'NEW' ? '일정 생성 및 병합' : '변경 사항 저장 (업데이트)'}
             </button>
           </div>
         </div>

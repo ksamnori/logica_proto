@@ -65,3 +65,47 @@ export async function GET() {
     return NextResponse.json({ success: false, error: error.message }, { status: 500 });
   }
 }
+
+// src/app/api/calendar/route.ts 파일의 기존 코드들을 건드리지 말고, 
+// 파일 맨 아래에 이 DELETE 함수 전체를 복사해서 붙여넣어 주세요!
+
+export async function DELETE(request: Request) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const title = searchParams.get('title');
+
+    if (!title) {
+      return NextResponse.json({ success: false, error: 'Title is required' }, { status: 400 });
+    }
+
+    const auth = getAuth();
+    const calendar = google.calendar({ version: 'v3', auth });
+    
+    // 환경 변수에 캘린더 ID가 설정되어 있으면 가져오고, 없으면 기본 캘린더 사용
+    const calendarId = process.env.GOOGLE_CALENDAR_ID || 'primary';
+
+    // 1. 해당 제목을 가진 구글 캘린더 일정을 검색합니다.
+    const res = await calendar.events.list({
+      calendarId,
+      q: title,
+      singleEvents: true,
+    });
+
+    const events = res.data.items || [];
+    
+    // 2. 검색된 일치하는 일정을 일괄 삭제합니다 (보통 1개).
+    for (const event of events) {
+      if (event.id) {
+        await calendar.events.delete({
+          calendarId,
+          eventId: event.id,
+        });
+      }
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    console.error('Calendar Delete Error:', error);
+    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+  }
+}

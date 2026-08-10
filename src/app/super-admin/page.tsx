@@ -3,13 +3,11 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase"; // 🌟 권한(토큰)이 포함된 글로벌 인증 클라이언트!
+import { supabase } from "@/lib/supabase"; 
 
-// 환경 변수 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfwlmbwornivkrvoeqdh.supabase.co';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtmd2xtYndvcm5pdmtydm9lcWRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDUzNzQsImV4cCI6MjA5NTMyMTM3NH0.Kh9MPHzUxf9xLRYTH_UqoIhxOm4lybA_OL8Z60H9vqo';
 
-// 💡 신규 관리자 가입(signUp) 시에만 원장님 계정이 로그아웃되는 것을 막기 위한 익명 전용 클라이언트
 const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
 
 export default function AdminDashboardPage() {
@@ -41,7 +39,7 @@ export default function AdminDashboardPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editInst, setEditInst] = useState<any>({});
 
-  // 로그인한 관리자 이름 가져오기 및 권한 철통 검증
+  // 로그인한 관리자 이름 가져오기 및 권한 검증
   useEffect(() => {
     const instId = localStorage.getItem('logica_instructor_id');
     const role = localStorage.getItem('logica_instructor_role');
@@ -62,7 +60,6 @@ export default function AdminDashboardPage() {
     }
 
     const fetchAdminInfo = async () => {
-      // 💡 여기서부터 모두 인증 토큰이 실린 'supabase' 객체를 사용합니다.
       const { data, error } = await supabase
         .from('instructor')
         .select('position, name, role')
@@ -205,7 +202,6 @@ export default function AdminDashboardPage() {
     try {
       const fakeEmail = `${iLoginId}@logica.com`;
       
-      // 💡 계정 생성은 원장님이 로그아웃 되지 않도록 익명 클라이언트(supabaseAnon) 사용!
       const { data: authData, error: authError } = await supabaseAnon.auth.signUp({
         email: fakeEmail,
         password: iPw,
@@ -228,7 +224,6 @@ export default function AdminDashboardPage() {
          return;
       }
 
-      // 💡 정보 DB 저장은 권한이 보장된 글로벌 클라이언트(supabase) 사용!
       const { error: dbError } = await supabase.from('instructor').insert([{
         instructor_id: newUserId,
         login_id: iLoginId,
@@ -261,11 +256,23 @@ export default function AdminDashboardPage() {
   const loadInstructors = async () => {
     setIsLoadingInstructors(true);
     try {
-      const { data, error } = await supabase.from('instructor').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabase
+        .from('instructor')
+        .select('*, academy_tenant(tenant_type, name)')
+        .order('created_at', { ascending: false });
+        
       if (error) throw error;
 
+      // 🌟 [핵심 변경] 소속 지점명에 '본사'가 들어가거나 OR 직급(position)에 '본사'가 들어가면 제외!
+      const filteredData = (data || []).filter((inst: any) => {
+        const isHQ = inst.academy_tenant?.tenant_type === 'HQ' || 
+                     inst.academy_tenant?.name?.includes('본사') ||
+                     inst.position?.includes('본사'); // 👈 직급 필터링 조건 추가
+        return !isHQ;
+      });
+
       const posOrder: any = { '원장': 1, '실장': 2, '전임강사': 3, '파트강사': 4, '조교': 5 };
-      const sortedData = (data || []).sort((a, b) => {
+      const sortedData = filteredData.sort((a: any, b: any) => {
         let orderA = posOrder[a.position] || 99;
         let orderB = posOrder[b.position] || 99;
         if (orderA === orderB) return a.name.localeCompare(b.name);
@@ -293,7 +300,6 @@ export default function AdminDashboardPage() {
     else if (editInst.position === '실장') assignedRole = 'MANAGER';
 
     try {
-      // 💡 여기서 정상적으로 토큰을 가지고 DB 업데이트 호출
       const { error } = await supabase.from('instructor').update({
         name: editInst.name,
         position: editInst.position,
@@ -331,7 +337,6 @@ export default function AdminDashboardPage() {
         supabase.from('internal_chat_message').delete().eq('sender_id', id),
         supabase.from('internal_chat_member').delete().eq('instructor_id', id),
         supabase.from('individual_makeup').delete().eq('instructor_id', id),
-        // 💡 수정됨: 부적절한 컬럼명 수정 (processed_instructor_id)
         supabase.from('parent_request_log').update({ processed_instructor_id: null }).eq('processed_instructor_id', id),
         supabase.from('parent_request_log').delete().eq('author_id', id)
       ]);
@@ -349,7 +354,6 @@ export default function AdminDashboardPage() {
       
       await supabase.from('exam_master').delete().eq('instructor_id', id);
 
-      // 최종 강사 파괴
       const { error: deleteErr } = await supabase.from('instructor').delete().eq('instructor_id', id);
       if (deleteErr) throw deleteErr;
       
@@ -489,7 +493,7 @@ export default function AdminDashboardPage() {
             <div className="space-y-6 max-w-5xl mx-auto block">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
                 <div className="flex justify-between items-center mb-4 shrink-0">
-                  <h2 className="text-xl font-bold text-slate-800">등록된 관리자 목록</h2>
+                  <h2 className="text-xl font-bold text-slate-800">등록된 관리자 목록 (학원)</h2>
                   <button onClick={loadInstructors} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors">새로고침 ↻</button>
                 </div>
                 <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg">

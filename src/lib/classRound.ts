@@ -1,13 +1,16 @@
 // 반별 홀짝(week_type) 서버 상태 계산 + 회차(수업일) 경과 시 미완료 과제 이관.
 //
 // 핵심 규칙(사용자 확정):
-// - even/odd는 "주" 단위가 아니라 "실제 수업 횟수 2회마다 1번" 전환된다(기본 주2회든, 화목토 주3회든
-//   동일 — 달력 주 경계와 무관하게 세션을 연속으로 세어 2개씩 묶는다).
+// - even/odd(주간테스트 ↔ 과제오답유사)는 "주" 단위가 아니라 실제 수업 회차 기준으로, 회차가 하나
+//   지날 때마다 매번 번갈아 전환된다(기본 주2회든, 화목토 주3회든 동일 — 화 1회차=주간테스트,
+//   목 2회차=과제오답유사, 다음주 화 3회차=주간테스트... 처럼 한 회차씩 교대).
 // - 실제 수업 횟수에는 정규 class_schedule 요일뿐 아니라, 그 반에 잡힌 보강(class_extra_session)도 포함된다.
 // - "회차가 지나서 과제가 미완성으로 넘어가는" 것은 홀짝 전환과 무관하게 매 개별 수업일(회차)마다 일어난다.
 //
 // 필요 테이블/컬럼: class.week_type, class.week_type_updated_date(마지막으로 처리된 회차 날짜),
-// class.session_parity(현재 2회 쌍 중 1회를 지났는지), class_holiday, class_extra_session.
+// class_holiday, class_extra_session.
+// 💡 class.session_parity는 예전에 "2회 쌍" 단위로 전환하던 시절의 레거시 컬럼이다 — 이제 매 회차마다
+// 무조건 전환하므로 더 이상 의미가 없다. 스키마 변경 없이 그대로 두되 항상 false로만 기록한다.
 
 export const getKSTDateString = (base: Date = new Date()) =>
   new Date(base.getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
@@ -31,8 +34,12 @@ export const addDaysKST = (dateStr: string, days: number) => {
   return getKSTDateString(d);
 };
 
+// 💡 [버그 수정] 'T00:00:00+09:00'로 파싱한 뒤 getUTCDay()를 읽으면 그 순간의 UTC 날짜(=KST보다
+// 9시간 이른, 즉 하루 전날)의 요일이 나온다 — 그래서 화요일을 월요일로, 목요일을 수요일로 착각해
+// scheduleDays 매칭이 통째로 하루 밀렸다(회차/휴일 판정이 실제 요일보다 하루 어긋남). 오프셋 변환 없이
+// 그 날짜 문자열 자체를 UTC 자정으로 취급해야(getISOWeekKST와 동일한 방식) 정확한 요일이 나온다.
 const dayLabelOf = (dateStr: string) => {
-  const d = new Date(dateStr + 'T00:00:00+09:00');
+  const d = new Date(dateStr + 'T00:00:00Z');
   return DAY_LABELS[d.getUTCDay()];
 };
 
@@ -41,19 +48,24 @@ export type ClassRoundInput = {
   class_name: string;
   week_type: string | null;
   week_type_updated_date: string | null; // 마지막으로 처리된 회차(수업일) 날짜
-  session_parity: boolean | null; // true = 현재 2회 쌍 중 1회를 이미 지남(다음 회차에 전환됨)
+  session_parity: boolean | null; // 💡 레거시(더 이상 사용 안 함) — 항상 false로만 기록됨
   scheduleDays: string[]; // class_schedule.day_of_week 값들 ('월'..'일')
+  // 💡 미래 날짜 예약 강제 배정. anchor(week_type_updated_date)는 건드리지 않고 별도로 들고 있다가,
+  // 아래 순회가 실제로 이 날짜에 도달했을 때만(정상적인 회차 처리 도중) odd/even을 이 값으로
+  // 덮어쓴다 — 그래야 예약 시점과 적용 시점 사이의 실제 회차들이 스킵되지 않는다.
+  forced_week_type?: string | null;
+  forced_week_type_date?: string | null;
 };
 
 export type ClassRoundResult = { weekType: string; transitioned: boolean };
 
 // 학생/관리자 화면 로드 시 호출. 마지막으로 처리된 회차 다음날부터 오늘까지 실제 수업일
-// (정규 요일 - 휴일 + 보강일)을 순회하며, 매 회차마다 미완료 과제를 이관하고, 회차 2개마다
-// 1번씩 odd/even을 뒤집는다. 여러 번 호출해도 안전(idempotent).
+// (정규 요일 - 휴일 + 보강일)을 순회하며, 매 회차마다 미완료 과제를 이관하고 odd/even을
+// 한 회차씩 번갈아 뒤집는다(화 1회차=주간테스트, 목 2회차=과제오답유사, 다음주 화 3회차=
+// 주간테스트...). 여러 번 호출해도 안전(idempotent).
 export async function resolveClassWeekType(supabase: any, input: ClassRoundInput): Promise<ClassRoundResult> {
   const today = getKSTDateString();
   let weekType = input.week_type === 'even' ? 'even' : 'odd';
-  let parity = !!input.session_parity;
   let lastDate = input.week_type_updated_date;
 
   if (!lastDate) {
@@ -73,6 +85,7 @@ export async function resolveClassWeekType(supabase: any, input: ClassRoundInput
 
   let cursor = lastDate;
   let changed = false;
+  let forcedApplied = false;
 
   while (cursor < today) {
     cursor = addDaysKST(cursor, 1);
@@ -80,13 +93,14 @@ export async function resolveClassWeekType(supabase: any, input: ClassRoundInput
     const isExtraSession = extraSet.has(cursor);
     if (!isRegularSession && !isExtraSession) continue; // 휴일/보강 없는 날은 회차가 아니므로 건너뜀
 
-    // 회차가 하나 지났다 — 홀짝 전환 여부와 무관하게 그 회차의 미완료 과제를 항상 이관한다.
+    // 회차가 하나 지났다 — 미완료 과제를 이관하고, 그 회차마다 무조건 odd/even을 뒤집는다.
     await migrateIncompleteForClassRound(supabase, input.class_id, cursor);
-
-    if (!parity) {
-      parity = true; // 2회 쌍의 첫 번째 회차 — 아직 전환 안 함
+    if (input.forced_week_type_date && cursor === input.forced_week_type_date && input.forced_week_type) {
+      // 💡 이 회차가 예약해둔 강제 배정 날짜다 — 토글 대신 예약된 타입으로 못박고, 예약은 소진됐으니
+      // 이후 회차부터는 다시 정상적으로(이 타입에서 시작해) 한 회차씩 번갈아 진행된다.
+      weekType = input.forced_week_type === 'even' ? 'even' : 'odd';
+      forcedApplied = true;
     } else {
-      parity = false; // 2회 쌍의 두 번째 회차 — 전환
       weekType = weekType === 'odd' ? 'even' : 'odd';
     }
     lastDate = cursor;
@@ -94,7 +108,9 @@ export async function resolveClassWeekType(supabase: any, input: ClassRoundInput
   }
 
   if (changed) {
-    await supabase.from('class').update({ week_type: weekType, week_type_updated_date: lastDate, session_parity: parity }).eq('class_id', input.class_id);
+    const update: Record<string, any> = { week_type: weekType, week_type_updated_date: lastDate, session_parity: false };
+    if (forcedApplied) { update.forced_week_type = null; update.forced_week_type_date = null; }
+    await supabase.from('class').update(update).eq('class_id', input.class_id);
   }
 
   return { weekType, transitioned: changed };
@@ -137,4 +153,3 @@ export async function setClassExtraSession(supabase: any, classId: string, sessi
 export async function removeClassExtraSession(supabase: any, id: string) {
   return supabase.from('class_extra_session').delete().eq('id', id);
 }
-

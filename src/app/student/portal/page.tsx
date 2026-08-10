@@ -1,4 +1,3 @@
-// src/app/student/portal/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -36,6 +35,10 @@ export default function StudentPortal() {
     const [roundResults, setRoundResults] = useState<Record<string, any>>({});
     const [blockStates, setBlockStates] = useState<Record<string, any>>({});
     const [hwProgress, setHwProgress] = useState<Record<string, any>>({});
+    // 💡 [11번] 반별 홀/짝 회차(week_type)는 시험 클리닉이 "주간테스트"로 나갈지 "과제오답유사"로
+    // 나갈지를 결정하는데, startClinicBlock이 이 값을 전혀 읽지 않고 있었다 — 그래서 라운드1은
+    // week 파라미터를 아예 안 보내 항상 clinic/viewer의 기본값('odd'=주간테스트)으로 고정되어
+    // 있었고, resolveClassWeekType으로 관리되는 홀짝 전환은 실제로는 아무 효과가 없었다.
     const [classWeekTypes, setClassWeekTypes] = useState<Record<string, string>>({});
     
     const [now, setNow] = useState(Date.now());
@@ -196,16 +199,18 @@ export default function StudentPortal() {
         const nameToId: any = {};
         cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; });
 
+        // 💡 [11번] ClassEditModal을 아무도 열지 않아도(=관리자가 안 봐도), 학생이 포탈에 들어올
+        // 때마다 지나간 회차만큼 자동으로 홀/짝을 갱신한다 — resolveClassWeekType은 idempotent라
+        // 여러 화면에서 동시에 호출해도 안전하다.
         const newClassWeekTypes: Record<string, string> = {};
         await Promise.all((cData || []).map(async (c: any) => {
             const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
             try {
-                // 🌟 [핵심 수정] as any를 붙여서 타입 에러 무사통과 처리!
                 const { weekType: wt } = await resolveClassWeekType(supabaseClient, {
                     class_id: c.class_id, class_name: c.name, week_type: c.week_type,
                     week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays,
                     forced_week_type: c.forced_week_type, forced_week_type_date: c.forced_week_type_date,
-                } as any); 
+                });
                 newClassWeekTypes[c.name] = wt;
             } catch (e) { newClassWeekTypes[c.name] = c.week_type === 'even' ? 'even' : 'odd'; }
         }));
@@ -258,6 +263,9 @@ export default function StudentPortal() {
                 const status = hwResMap.get(hw.homework_id) || '미제출';
                 const isPending = !['제출완료', '채점완료', '완료'].includes(status);
                 if (!isPending) return;
+                // 💡 지난 회차(수업일)를 넘긴 채 남은 과제는 classRound.ts의 migrateIncompleteForClassRound가
+                // due_date를 그 회차 날짜로 당겨둔다 — 그래서 due_date가 오늘 이하로 내려와 있으면
+                // "다음 수업이 이미 찾아온" 미완료 과제로 분류해 별도 박스로 옮긴다.
                 if (hw.due_date && hw.due_date <= today) { overduePending++; overdueHwIds.push(hw.homework_id); }
                 else { hwPending++; hwIds.push(hw.homework_id); }
             });
@@ -484,6 +492,9 @@ export default function StudentPortal() {
         const scoreData = roundResults[`${className}::${round}`];
         const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
 
+        // 💡 라운드1(exam)은 반의 홀/짝 회차에 따라 실제로 완전히 다른 내용(주간테스트 ↔
+        // 과제오답유사)을 내보내는데(fetchWeeklyTest), 예전엔 두 경우 모두 같은 파란 "📝 시험" 박스로
+        // 보여서 학생이 오늘 뭘 풀게 될지 미리 구분할 수 없었다. 홀/짝별로 색/이름을 나눈다.
         const isEvenWeek = classWeekTypes[className] === 'even';
         let theme;
         if (typeKey === 'exam' && isEvenWeek) theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-cyan-700 to-cyan-600', badge: 'bg-cyan-400 text-cyan-900', btnText: 'text-cyan-900', textColor: 'text-cyan-100' };
@@ -513,6 +524,9 @@ export default function StudentPortal() {
         );
     };
 
+    // 💡 예전엔 이 자리가 하드코딩된 "예정된 시험" D-Day 목업이었다. 실제로는 다음 수업 회차가
+    // 지날 때까지 못 끝낸 과제(classRound.ts의 migrateIncompleteForClassRound가 due_date를
+    // 그 회차 날짜로 당겨 표시해 둔 것)를 보여줘야 해서, hwProgress의 overdueHwIds를 그대로 쓴다.
     const renderOverdueCard = (className: string) => {
         const cState = blockStates[className] || {};
         const isDone = cState.overdue !== '미응시';
@@ -584,6 +598,7 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
+            {/* 💡 상단 패딩 축소 (py-4 -> py-3) */}
             <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
                 <div className="flex items-center gap-8">
                     <div className="flex items-center">
@@ -649,9 +664,11 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
+            {/* 💡 메인 영역 상하 패딩 축소 (py-8 -> py-4 ~ py-5) */}
             <main className="max-w-[1200px] w-full mx-auto py-5 px-6 md:py-6 md:px-8 flex-1">
                 {activeTab === 'home' && studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
                     <section className="mb-4">
+                        {/* 💡 헤더 영역 여백 축소 (mb-8 -> mb-5) */}
                         <div className="flex items-center gap-4 mb-5">
                             <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
@@ -660,6 +677,7 @@ export default function StudentPortal() {
                                 </button>
                             ))}
                         </div>
+                        {/* 💡 카드 그리드 간격 축소 (gap-8 -> gap-6) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}

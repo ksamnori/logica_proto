@@ -26,6 +26,7 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringWeeks, setRecurringWeeks] = useState(4);
   const [isSyncGcal, setIsSyncGcal] = useState(true);
+  const [isSecret, setIsSecret] = useState(false); // 🌟 비밀 회의록 추가!
 
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>([]);
@@ -129,15 +130,16 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
         status: "대기중", 
         created_by: currentUser.instId,
         meeting_date: currentMeetingDate.toISOString(), 
-        attendees: participantNames 
+        attendees: participantNames,
+        is_secret: isSecret // 🌟 DB에 비밀 회의록 속성 저장
       });
     }
 
-    if (isSyncGcal) {
+    if (isSyncGcal && !isSecret) { // 🌟 비밀 회의록이면 외부 노출 방지를 위해 강제로 구글 캘린더 제외
       try { 
         await syncToGoogleCalendarBackend(meetingsToInsert); 
       } catch (error) { 
-        if (!confirm("백엔드 캘린더 동기화에 실패했습니다. (원장님 권한 확인 필요)\nLogica 시스템에는 그대로 일정을 등록할까요?")) return; 
+        if (!confirm("백엔드 캘린더 동기화에 실패했습니다. (원장님 권한 확인 필요)\nLogica 시스템에는 그래도 일정을 등록할까요?")) return; 
       }
     }
 
@@ -148,7 +150,7 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
       if (localSelectedIds.length > 0) {
         await supabase.from('agenda').update({ status: '진행중' }).in('id', localSelectedIds);
       }
-      alert(`성공적으로 ${totalRuns}개의 일정이 등록${isSyncGcal ? ' 및 동기화' : ''}되었습니다!`);
+      alert(`성공적으로 ${totalRuns}개의 일정이 등록${isSyncGcal && !isSecret ? ' 및 동기화' : ''}되었습니다!`);
       onSuccess();
     } catch (e: any) { alert(`일정 등록 실패: ${e.message || 'DB 에러'}`); }
   };
@@ -163,7 +165,6 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
         
         <div className="flex-1 flex overflow-hidden">
           <div className="w-[300px] border-r border-slate-200 bg-slate-50 flex flex-col shrink-0">
-            {/* 💡 참석자 배정칸 높이 축소 (h-[35%] -> h-[25%]) */}
             <div className="h-[25%] flex flex-col p-3 border-b border-slate-200 bg-white shadow-sm">
               <div className="flex justify-between items-center mb-2 shrink-0">
                 <h3 className="text-[12px] font-black text-[#002864] flex items-center gap-1">👥 참석자 배정</h3>
@@ -181,7 +182,6 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
 
             <div className="flex-1 flex flex-col p-3 min-h-0">
               <h3 className="text-[12px] font-black text-[#002864] mb-2 shrink-0 flex items-center gap-1">📚 이전 회의록 (템플릿)</h3>
-              {/* 💡 이전 회의록(템플릿) 영역 높이 확장 (h-[100px] -> h-[180px]) */}
               <div className="h-[180px] overflow-y-auto custom-scroll space-y-1.5 pr-1 border-b border-slate-200 pb-2 mb-2">
                 {pastMeetings.map(item => (
                   <div key={item.id} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex flex-col gap-1.5 group hover:border-blue-300 transition-colors">
@@ -244,9 +244,9 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
                 <input type="time" value={meetingTimeStr} onChange={e => setMeetingTimeStr(e.target.value)} className="w-full text-[12px] font-bold text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" />
               </div>
               
-              {/* 💡 캘린더 연동 체크박스 그룹화 및 우측 끝으로 정렬 (justify-end 추가) */}
+              {/* 🌟 캘린더 연동 및 비밀 회의록 옵션 */}
               <div className="flex-1 border-l border-slate-200 pl-3 flex justify-end items-center gap-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-3 flex-wrap justify-end">
                   <label className="flex items-center gap-1 text-[11px] font-bold text-[#002864] cursor-pointer">
                     <input type="checkbox" checked={isRecurring} onChange={(e) => setIsRecurring(e.target.checked)} className="w-3.5 h-3.5 accent-[#002864]" />
                     매주 반복
@@ -258,10 +258,18 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
                       <option value={12}>12주</option>
                     </select>
                   )}
-                  <div className="w-px h-4 bg-slate-300 mx-1"></div> {/* 시각적 분리선 추가 */}
-                  <label className="flex items-center gap-1.5 text-[11px] font-black text-blue-600 cursor-pointer">
-                    <input type="checkbox" checked={isSyncGcal} onChange={(e) => setIsSyncGcal(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+                  <div className="w-px h-4 bg-slate-300 mx-1"></div>
+                  
+                  {/* 🌟 비밀 회의록일 경우 외부 연동은 자동 비활성화(disabled) */}
+                  <label className="flex items-center gap-1.5 text-[11px] font-black text-blue-600 cursor-pointer hover:bg-blue-50 p-0.5 rounded transition-colors">
+                    <input type="checkbox" checked={isSyncGcal} onChange={(e) => setIsSyncGcal(e.target.checked)} disabled={isSecret} className="w-3.5 h-3.5 accent-blue-600 disabled:opacity-30 disabled:cursor-not-allowed" />
                     📆 캘린더 연동
+                  </label>
+
+                  {/* 🌟 비밀 회의록 옵션 */}
+                  <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 cursor-pointer hover:bg-slate-200 p-0.5 rounded transition-colors">
+                    <input type="checkbox" checked={isSecret} onChange={(e) => setIsSecret(e.target.checked)} className="w-3.5 h-3.5 accent-slate-800" />
+                    🔒 비밀 회의록 (참석자만)
                   </label>
                 </div>
               </div>
