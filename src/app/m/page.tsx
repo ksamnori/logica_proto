@@ -190,35 +190,60 @@ export default function MobileInstructorPortalPage() {
     setPhoneInput(formatted);
   };
 
+  // 🌟 [핵심 변경] 모바일 로그인 보안 강화 (비밀번호 검증 로직 추가)
   const loginInstructor = async () => {
     if (!phoneInput || !pwInput) return alert("연락처와 비밀번호를 모두 입력해주세요.");
 
     try {
+      // 1. 휴대폰 번호 포맷팅
       const rawPhone = phoneInput.replace(/[^0-9]/g, "");
       const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
-      const { data, error } = await supabase
+      // 2. DB에서 연락처로 강사 정보 및 login_id 조회
+      const { data: instData, error: instError } = await supabase
         .from("instructor")
-        .select("instructor_id, name, department, status, role, position")
+        .select("login_id, instructor_id, name, department, status, role, position")
         .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone}`)
         .maybeSingle();
 
-      if (error || !data) return alert("등록된 강사 정보가 없거나 비밀번호가 일치하지 않습니다.");
-      if (data.status === "퇴사") return alert("퇴사 처리된 계정입니다.");
+      if (instError || !instData) return alert("등록된 강사 정보가 없습니다.");
+      if (instData.status === "퇴사") return alert("퇴사 처리된 계정입니다.");
 
-      sessionStorage.setItem("logica_instructor_id", data.instructor_id);
-      localStorage.setItem("logica_instructor_name", data.name);
-      localStorage.setItem("logica_instructor_role", data.role || "");
-      localStorage.setItem("logica_instructor_position", data.position || "");
+      // 3. Supabase Auth 시스템을 통해 진짜 비밀번호 검증 수행
+      const fakeEmail = `${instData.login_id}@logica.com`;
+      const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        email: fakeEmail,
+        password: pwInput,
+      });
+
+      // 비밀번호 불일치 시 차단
+      if (authError) {
+        return alert("비밀번호가 일치하지 않습니다.");
+      }
+
+      // 4. 인증 통과 시 쿠키에 보안 토큰 저장 (미들웨어 및 API용)
+      if (authData.session) {
+        document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
+      }
+
+      // 5. 세션스토리지 셋팅 후 대시보드 로드
+      sessionStorage.setItem("logica_instructor_id", instData.instructor_id);
+      localStorage.setItem("logica_instructor_name", instData.name);
+      localStorage.setItem("logica_instructor_role", instData.role || "");
+      localStorage.setItem("logica_instructor_position", instData.position || "");
       
-      loadDashboard(data.instructor_id);
-    } catch (err) { alert("로그인 중 오류가 발생했습니다."); }
+      loadDashboard(instData.instructor_id);
+    } catch (err) { 
+      alert("로그인 중 오류가 발생했습니다."); 
+    }
   };
 
-  const logout = () => {
+  const logout = async () => {
     if (confirm("로그아웃 하시겠습니까?")) {
+      await supabase.auth.signOut();
       sessionStorage.clear();
       localStorage.removeItem("logica_instructor_name");
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 쿠키 삭제
       window.location.reload();
     }
   };
@@ -259,7 +284,7 @@ export default function MobileInstructorPortalPage() {
     if (type === '주간 회의') return { dot: 'bg-blue-500' };
     if (type === '임시 회의') return { dot: 'bg-amber-500' };
     if (type === '상담/면담') return { dot: 'bg-emerald-500' };
-    if (type === '외부 일정') return { dot: 'bg-purple-500' }; // 보라색 점 테마 반환
+    if (type === '외부 일정') return { dot: 'bg-purple-500' }; 
     return { dot: 'bg-slate-500' };
   };
 
@@ -297,10 +322,9 @@ export default function MobileInstructorPortalPage() {
         }
       });
 
-      // 🌟 [핵심 변경] 시스템 회의 뿐만 아니라 구글 캘린더 단일 일정(isExternal)도 점을 찍도록 포함시킵니다!
       const dotEvents = dayEvents.filter(a => {
         if (a.isMultiDay) return false;
-        if (a.isExternal) return true; // 구글 캘린더 단일 일정 (보라색 점)
+        if (a.isExternal) return true; 
         return a.source === 'Meeting' && ['주간 회의', '임시 회의', '상담/면담'].includes(a.type);
       });
       const dayTypes = Array.from(new Set(dotEvents.map(a => a.type)));
