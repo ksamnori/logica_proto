@@ -39,27 +39,40 @@ export default function AdminDashboardPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editInst, setEditInst] = useState<any>({});
 
-  // 로그인한 관리자 이름 가져오기 및 권한 검증
+  // 🌟 [핵심 변경] TypeScript null 에러 방지를 위해 강제로 string("") 처리
   useEffect(() => {
-    const instId = localStorage.getItem('logica_instructor_id');
-    const role = localStorage.getItem('logica_instructor_role');
-    const position = localStorage.getItem('logica_instructor_position');
+    const checkSuperAdminAccess = async () => {
+      // localStorage가 null을 반환할 수 있으므로 무조건 string이 되도록 빈 문자열 추가
+      let instId = localStorage.getItem('logica_instructor_id') || sessionStorage.getItem('logica_instructor_id') || "";
 
-    if (!instId) {
-      alert('접근 권한이 없습니다. 다시 로그인해주세요.');
-      window.location.href = '/';
-      return;
-    }
+      if (!instId) {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.user?.email) {
+          const extractedLoginId = session.user.email.split('@')[0];
+          const { data: inst } = await supabase
+            .from('instructor')
+            .select('instructor_id, role, position, name')
+            .eq('login_id', extractedLoginId)
+            .maybeSingle();
+            
+          if (inst) {
+            instId = inst.instructor_id || ""; // 여기서도 무조건 string 유지
+            
+            // TypeScript 에러 해결: instId가 null이 아닌 빈 문자열이 보장되므로 에러 없음
+            localStorage.setItem('logica_instructor_id', instId);
+            localStorage.setItem('logica_instructor_name', inst.name || '관리자');
+            localStorage.setItem('logica_instructor_role', inst.role || 'SUPER_ADMIN');
+            localStorage.setItem('logica_instructor_position', inst.position || '최고관리자');
+          }
+        }
+      }
 
-    const isSuperAdminLocal = role === 'SUPER_ADMIN' || role === 'ADMIN' || String(position).includes('최고관리자') || String(position).includes('원장');
-    
-    if (!isSuperAdminLocal) {
-      alert('⛔ 접근 거부: 최고관리자 전용 페이지입니다. 일반 강사는 접근할 수 없습니다.');
-      window.location.href = '/admin-dashboard'; 
-      return;
-    }
+      if (!instId) {
+        alert('접근 권한이 없습니다. 다시 로그인해주세요.');
+        window.location.href = '/';
+        return;
+      }
 
-    const fetchAdminInfo = async () => {
       const { data, error } = await supabase
         .from('instructor')
         .select('position, name, role')
@@ -70,15 +83,19 @@ export default function AdminDashboardPage() {
         const isRealSuperAdmin = data.role === 'SUPER_ADMIN' || data.role === 'ADMIN' || String(data.position).includes('최고관리자') || String(data.position).includes('원장');
         
         if (!isRealSuperAdmin) {
-          alert('⛔ 비정상적인 접근입니다. 관리자 권한이 부족합니다.');
+          alert('⛔ 비정상적인 접근입니다. 최고관리자 권한이 부족합니다.');
           window.location.href = '/admin-dashboard';
           return;
         }
         
         setAdminProfileName(`${data.name} ${data.position || '관리자'}님`);
+      } else {
+        alert('강사 정보를 확인할 수 없습니다. 다시 로그인해주세요.');
+        window.location.href = '/';
       }
     };
-    fetchAdminInfo();
+
+    checkSuperAdminAccess();
   }, []);
 
   useEffect(() => {
@@ -263,11 +280,10 @@ export default function AdminDashboardPage() {
         
       if (error) throw error;
 
-      // 🌟 [핵심 변경] 소속 지점명에 '본사'가 들어가거나 OR 직급(position)에 '본사'가 들어가면 제외!
       const filteredData = (data || []).filter((inst: any) => {
         const isHQ = inst.academy_tenant?.tenant_type === 'HQ' || 
                      inst.academy_tenant?.name?.includes('본사') ||
-                     inst.position?.includes('본사'); // 👈 직급 필터링 조건 추가
+                     inst.position?.includes('본사'); 
         return !isHQ;
       });
 
