@@ -15,12 +15,23 @@ export default function MobileInstructorPortalPage() {
   const [phoneInput, setPhoneInput] = useState("");
   const [pwInput, setPwInput] = useState("");
   
-  // 🌟 [수정됨] 강사 직책(position) 상태 추가
-  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", dept: "", position: "", isSuperLevel: false });
+  // 🌟 [수정됨] 강사 정보 상태에 profileImageUrl 추가
+  const [currentUser, setCurrentUser] = useState<{
+    instId: string;
+    name: string;
+    dept: string;
+    position: string;
+    isSuperLevel: boolean;
+    profileImageUrl: string | null;
+  }>({ instId: "", name: "", dept: "", position: "", isSuperLevel: false, profileImageUrl: null });
 
   // 모달 상태
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
+  
+  // 🌟 [추가됨] 상세 기록 조회 모달 상태
+  const [viewNote, setViewNote] = useState<any>(null); 
+  const [displayHtml, setDisplayHtml] = useState("");
 
   // 안건 및 캘린더 상태
   const [agendas, setAgendas] = useState<any[]>([]);
@@ -73,6 +84,48 @@ export default function MobileInstructorPortalPage() {
     }
   }, [authState, currentUser.instId]);
 
+  // 🌟 [추가됨] 비밀 안건 상세 조회 복호화 로직
+  useEffect(() => {
+    if (viewNote) {
+      const loadHtml = async () => {
+        if (!viewNote.content) {
+          setDisplayHtml("");
+          return;
+        }
+        let html = viewNote.content;
+        
+        if (html.includes('secret-agenda-placeholder')) {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(html, 'text/html');
+          const blocks = doc.querySelectorAll('.secret-agenda-placeholder');
+          const ids: string[] = [];
+          blocks.forEach(b => {
+            const id = b.getAttribute('data-agenda-id');
+            if (id) ids.push(id);
+          });
+          
+          if (ids.length > 0) {
+            const { data } = await supabase.from('agenda').select('id, content').in('id', ids);
+            if (data) {
+              blocks.forEach(b => {
+                const id = b.getAttribute('data-agenda-id');
+                const agenda = data.find((a: any) => a.id === id);
+                if (agenda) {
+                  b.innerHTML = agenda.content;
+                  b.setAttribute('style', 'margin:0; color:#334155; line-height:1.4; font-size:12px;');
+                  b.classList.remove('secret-agenda-placeholder');
+                }
+              });
+              html = doc.body.innerHTML;
+            }
+          }
+        }
+        setDisplayHtml(html);
+      };
+      loadHtml();
+    }
+  }, [viewNote]);
+
   const fetchAgendas = async () => {
     const { data } = await supabase.from('agenda').select('*').order('created_at', { ascending: false });
     if (data) {
@@ -89,7 +142,6 @@ export default function MobileInstructorPortalPage() {
 
   const fetchGoogleEvents = async () => {
     try {
-      // 🌟 [핵심 변경] 모바일 브라우저의 강력한 캐시를 뚫기 위해 'no-store' 강제 적용
       const res = await fetch('/api/calendar', { cache: 'no-store' });
       const data = await res.json();
       if (data.success && data.events) {
@@ -153,8 +205,8 @@ export default function MobileInstructorPortalPage() {
   };
 
   const loadDashboard = async (id: string) => {
-    // 🌟 [수정됨] 직책(position) 및 채팅직책(chat_position) 모두 불러오기
-    const { data } = await supabase.from("instructor").select("name, department, role, position, chat_position").eq("instructor_id", id).maybeSingle();
+    // 🌟 [핵심 변경] profile_image_url 데이터 함께 조회!
+    const { data } = await supabase.from("instructor").select("name, department, role, position, chat_position, profile_image_url").eq("instructor_id", id).maybeSingle();
     if (data) {
       const isSuperLevel = data.role === 'SUPER_ADMIN' || data.role === 'ADMIN' || 
                            String(data.position).includes('최고관리자') || 
@@ -165,11 +217,20 @@ export default function MobileInstructorPortalPage() {
         instId: id,
         name: data.name || "선생님",
         dept: data.department || "강사",
-        position: data.chat_position || data.position || "강사", // 채팅직책 최우선, 없으면 일반직책
-        isSuperLevel
+        position: data.chat_position || data.position || "강사", 
+        isSuperLevel,
+        profileImageUrl: data.profile_image_url || null // 🌟 프로필 이미지 저장
       });
       setAuthState("dashboard");
     }
+  };
+
+  // 🌟 [추가됨] 이미지 URL 변환 헬퍼 함수
+  const getProfileImageUrl = (path: string | null | undefined) => {
+    if (!path || path.trim() === "") return null;
+    if (path.startsWith("http")) return path;
+    const { data } = supabase.storage.from("system_images").getPublicUrl(path);
+    return data.publicUrl;
   };
 
   const stripHtml = (html: string) => {
@@ -252,6 +313,20 @@ export default function MobileInstructorPortalPage() {
     displayItems = displayItems.slice(0, 15);
   }
 
+  // 🌟 [추가됨] 리스트 아이템 클릭 시 권한 확인 및 모달 열기 로직
+  const checkAccessAndOpen = (note: any) => {
+    if (note.is_secret && !currentUser.isSuperLevel) {
+      const isCreator = note.created_by === currentUser.instId;
+      const isAttendee = note.attendees && note.attendees.split(',').map((n: string) => n.trim()).includes(currentUser.name);
+      
+      if (!isCreator && !isAttendee) {
+        alert("🔒 비밀 회의록입니다. 회의 참석자만 열람할 수 있습니다.");
+        return;
+      }
+    }
+    setViewNote(note);
+  };
+
   // 렌더링 - 로그인 화면
   const renderAuthSection = () => {
     return (
@@ -289,6 +364,7 @@ export default function MobileInstructorPortalPage() {
   return (
     <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
       
+      {/* 🚨 앱 종료 확인 모달 */}
       {isExitModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-[280px] rounded-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -304,6 +380,7 @@ export default function MobileInstructorPortalPage() {
         </div>
       )}
 
+      {/* 🚨 AI 회의록 녹음 모달 */}
       {isAiModalOpen && (
         <AiRecordModal 
           onClose={() => setIsAiModalOpen(false)} 
@@ -315,6 +392,7 @@ export default function MobileInstructorPortalPage() {
         />
       )}
 
+      {/* 🚨 정보수정 모달 */}
       <ProfileModal 
         isOpen={isProfileModalOpen} 
         onClose={() => setIsProfileModalOpen(false)} 
@@ -322,13 +400,64 @@ export default function MobileInstructorPortalPage() {
         instructorName={currentUser.name} 
       />
 
+      {/* 🌟 [추가됨] 상세 기록 조회 모달 */}
+      {viewNote && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center sm:p-4">
+          <div className="bg-white w-full h-[100dvh] sm:h-auto sm:max-h-[85vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+              <h2 className="font-bold text-[15px] flex items-center gap-2">
+                📄 상세 기록 조회 {viewNote.is_secret && <span className="text-amber-300 ml-1 text-xs">🔒 비밀 회의록</span>}
+              </h2>
+              <button onClick={() => setViewNote(null)} className="text-white hover:text-rose-400 text-2xl font-bold leading-none">&times;</button>
+            </div>
+            
+            <div className="p-5 bg-slate-50 flex-1 overflow-y-auto custom-scroll flex flex-col">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col relative">
+                {viewNote.isExternal && (
+                  <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-[10px] px-2 py-1 rounded font-black border border-purple-200">
+                    🔄 구글 캘린더에서 등록됨
+                  </div>
+                )}
+                <div className="mb-4 pb-3 border-b border-slate-200">
+                  <div className="flex justify-between items-start mb-2">
+                    <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
+                    <span className="text-[11px] font-bold text-slate-400">
+                      {viewNote.meeting_date ? `회의 일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`}
+                    </span>
+                  </div>
+                  <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
+                  
+                  {viewNote.attendees && (
+                    <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 text-[12px] font-bold text-[#002864] mb-2">
+                      👥 참석자: {viewNote.attendees}
+                    </div>
+                  )}
+                </div>
+                <div className="prose prose-sm max-w-none text-slate-700 font-medium text-[13px] leading-relaxed" dangerouslySetInnerHTML={{ __html: displayHtml }}></div>
+              </div>
+            </div>
+            
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
+              <button 
+                onClick={() => { setViewNote(null); setIsAiModalOpen(true); }} 
+                className="px-4 py-2.5 bg-rose-50 text-rose-600 font-bold text-[13px] rounded-xl hover:bg-rose-100 transition-colors border border-rose-200 flex items-center gap-1.5 shadow-sm"
+              >
+                <span>🎙️</span> 실시간 녹음
+              </button>
+              <button onClick={() => setViewNote(null)} className="px-6 py-2.5 bg-slate-800 text-white font-bold text-[13px] rounded-xl hover:bg-slate-900 transition-colors shadow-sm">
+                닫기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {authState === "dashboard" ? (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
           
           <header className="bg-[#002864] px-5 py-3.5 flex justify-between items-center shadow-md shrink-0 z-20">
             <div className="flex items-center gap-2">
               <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-4 sm:h-5 object-contain brightness-0 invert" alt="Logica" />
-              {/* 🌟 [핵심 변경] 강사의 실제 직책으로 자동 표시됩니다! */}
               <span className="text-white font-black text-xs opacity-80 border-l border-white/30 pl-2">{currentUser.position || '강사'}</span>
             </div>
             <div className="flex items-center gap-1.5">
@@ -350,8 +479,13 @@ export default function MobileInstructorPortalPage() {
                   <h1 className="text-lg font-black text-slate-800"><span className="text-[#002864]">{currentUser.name}</span> 선생님, 환영합니다!</h1>
                   <p className="text-[11px] text-slate-400 font-medium mt-1">오늘도 즐거운 하루 되세요.</p>
                 </div>
-                <div className="w-12 h-12 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-black text-xl shrink-0">
-                  {currentUser.name.charAt(0)}
+                {/* 🌟 [수정됨] 프로필 이미지가 있으면 출력, 없으면 이름 첫 글자 출력 */}
+                <div className="w-12 h-12 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-black text-xl shrink-0 overflow-hidden shadow-sm border border-slate-100">
+                  {currentUser.profileImageUrl ? (
+                    <img src={getProfileImageUrl(currentUser.profileImageUrl) || ''} alt="profile" className="w-full h-full object-cover" />
+                  ) : (
+                    currentUser.name.charAt(0)
+                  )}
                 </div>
               </div>
 
@@ -359,7 +493,6 @@ export default function MobileInstructorPortalPage() {
                 <div className="flex justify-between items-center mb-3">
                   <h2 className="text-[13px] font-black text-[#002864]">{calendarMonth.getFullYear()}년 {calendarMonth.getMonth() + 1}월</h2>
                   <div className="flex items-center gap-1.5">
-                    {/* 🌟 캘린더 상단에도 수동 동기화 버튼 추가 */}
                     <button onClick={fetchGoogleEvents} className="w-6 h-6 flex items-center justify-center bg-blue-50 hover:bg-blue-100 transition-colors rounded text-blue-600 font-bold border border-blue-200" title="구글 캘린더 동기화">🔄</button>
                     <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="w-6 h-6 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">◀</button>
                     <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-2 py-0.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white">오늘</button>
@@ -378,7 +511,6 @@ export default function MobileInstructorPortalPage() {
                 <div className="flex items-center justify-between ml-1 mb-1 mt-6">
                   <h3 className="font-black text-[13px] text-slate-700">{selectedDate ? '선택한 날짜의 일정' : '다가오는 전체 일정'}</h3>
                   <div className="flex items-center gap-2">
-                    {/* 🌟 리스트 상단에도 수동 동기화 버튼 추가 */}
                     <button onClick={fetchGoogleEvents} className="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded font-bold hover:bg-blue-100 transition-colors">🔄 동기화</button>
                     <span className="text-[10px] font-bold text-slate-400">{displayItems.length}건</span>
                   </div>
@@ -398,7 +530,12 @@ export default function MobileInstructorPortalPage() {
                     const itemDate = item.meeting_date ? new Date(item.meeting_date) : new Date(item.created_at);
 
                     return (
-                      <div key={item.id} className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex items-start gap-3">
+                      // 🌟 [추가됨] onClick 이벤트 연결 및 hover 이펙트, 커서 포인터 추가
+                      <div 
+                        key={item.id} 
+                        onClick={() => checkAccessAndOpen(item)}
+                        className="bg-white p-3.5 rounded-2xl border border-slate-200 shadow-sm flex items-start gap-3 cursor-pointer hover:bg-slate-50 transition-colors active:scale-[0.98]"
+                      >
                         <div className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 shadow-sm text-base ${theme.bg} ${theme.text} ${theme.border}`}>
                           {theme.icon}
                         </div>
