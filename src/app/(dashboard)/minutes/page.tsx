@@ -278,8 +278,9 @@ export default function MinutesPage() {
           <span className={`text-[11px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
-          {dayTypes.length > 0 && !multiDayBg && (
-            <div className="absolute bottom-0 flex gap-[2px]">
+          {/* 🌟 [핵심 변경] 바(Bar)가 있어도 단일 일정 점이 가려지지 않고 z-10으로 보이도록 조건 해제 */}
+          {dayTypes.length > 0 && (
+            <div className="absolute bottom-0 flex gap-[2px] z-10">
               {dayTypes.map((type, idx) => (
                 <span key={idx} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : getMeetingTypeTheme(type as string).dot}`}></span>
               ))}
@@ -464,7 +465,7 @@ export default function MinutesPage() {
   displayMeetings.sort((a,b) => {
     const d1 = a.meeting_date ? new Date(a.meeting_date).getTime() : new Date(a.created_at).getTime();
     const d2 = b.meeting_date ? new Date(b.meeting_date).getTime() : new Date(b.created_at).getTime();
-    return d1 - d2; // 다가오는 일정순 (오름차순)
+    return d1 - d2; 
   });
   
   if (!selectedDate) {
@@ -871,7 +872,6 @@ export default function MinutesPage() {
                       <div className="flex justify-between items-start mb-2 print:hidden">
                         <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
                         <span className="text-[11px] font-bold text-slate-400">
-                          {/* 🌟 다일 일정 범위 표시 적용 */}
                           {viewNote.isExternal && viewNote.isMultiDay 
                             ? `일정: ${new Date(viewNote.meeting_date).toLocaleDateString('ko-KR')} ~ ${new Date(viewNote.end_date).toLocaleDateString('ko-KR')}`
                             : (viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`)}

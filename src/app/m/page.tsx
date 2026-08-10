@@ -151,14 +151,12 @@ export default function MobileInstructorPortalPage() {
             let endStr = ev.end?.dateTime || ev.end?.date;
             let isMultiDay = false;
             
-            // 🌟 [핵심 로직] 종일 일정(시간 없이 날짜만 있는 경우)은 구글이 종료일을 하루 뒤로 넘겨서 줌 (보정 필요)
             if (ev.end?.date) {
                const eDate = new Date(ev.end.date);
                eDate.setDate(eDate.getDate() - 1);
                endStr = eDate.toISOString().split('T')[0];
             }
             
-            // 다일(연속된) 일정인지 파악
             if (startStr && endStr) {
                const s = new Date(startStr); s.setHours(0,0,0,0);
                const e = new Date(endStr); e.setHours(0,0,0,0);
@@ -173,8 +171,8 @@ export default function MobileInstructorPortalPage() {
               source: 'Meeting',
               status: '대기중',
               meeting_date: startStr,
-              end_date: endStr, // 종료일 저장
-              isMultiDay: isMultiDay, // 다일 일정 여부 저장
+              end_date: endStr, 
+              isMultiDay: isMultiDay, 
               created_at: ev.created || new Date().toISOString(),
               attendees: '구글 캘린더',
               isExternal: true
@@ -261,7 +259,7 @@ export default function MobileInstructorPortalPage() {
     if (type === '주간 회의') return { dot: 'bg-blue-500' };
     if (type === '임시 회의') return { dot: 'bg-amber-500' };
     if (type === '상담/면담') return { dot: 'bg-emerald-500' };
-    if (type === '외부 일정') return { dot: 'bg-purple-500' };
+    if (type === '외부 일정') return { dot: 'bg-purple-500' }; // 보라색 점 테마 반환
     return { dot: 'bg-slate-500' };
   };
 
@@ -274,7 +272,6 @@ export default function MobileInstructorPortalPage() {
 
   const allCombinedAgendas = [...agendas, ...externalEvents];
 
-  // 🌟 [핵심 기능] 달력 렌더링에 연속된 일정(Bar) 그리기 로직 탑재
   const renderCalendarDays = () => {
     const year = calendarMonth.getFullYear();
     const month = calendarMonth.getMonth();
@@ -289,7 +286,6 @@ export default function MobileInstructorPortalPage() {
       const isToday = new Date().getDate() === i && new Date().getMonth() === month && new Date().getFullYear() === year;
       const isSelected = selectedDate && selectedDate.getDate() === i && selectedDate.getMonth() === month && selectedDate.getFullYear() === year;
       
-      // 이 날짜가 포함된 이벤트를 찾아냅니다 (연속된 일정 포함)
       const dayEvents = allCombinedAgendas.filter(a => {
         if (a.isMultiDay) {
           const s = new Date(a.meeting_date); s.setHours(0,0,0,0);
@@ -301,11 +297,14 @@ export default function MobileInstructorPortalPage() {
         }
       });
 
-      // 단일 일정들(점)
-      const normalEvents = dayEvents.filter(a => !a.isMultiDay);
-      const dayTypes = Array.from(new Set(normalEvents.map(a => a.type)));
+      // 🌟 [핵심 변경] 시스템 회의 뿐만 아니라 구글 캘린더 단일 일정(isExternal)도 점을 찍도록 포함시킵니다!
+      const dotEvents = dayEvents.filter(a => {
+        if (a.isMultiDay) return false;
+        if (a.isExternal) return true; // 구글 캘린더 단일 일정 (보라색 점)
+        return a.source === 'Meeting' && ['주간 회의', '임시 회의', '상담/면담'].includes(a.type);
+      });
+      const dayTypes = Array.from(new Set(dotEvents.map(a => a.type)));
       
-      // 연속된 일정들(Bar) - 첫 번째 연속 일정만 백그라운드로 칠함
       const multiDayEvents = dayEvents.filter(a => a.isMultiDay);
       let multiDayBg = null;
       
@@ -314,28 +313,27 @@ export default function MobileInstructorPortalPage() {
         const s = new Date(ev.meeting_date); s.setHours(0,0,0,0);
         const e = new Date(ev.end_date); e.setHours(0,0,0,0);
         
-        let positionClasses = "left-[-8px] right-[-8px]"; // 중간 날짜 (양쪽으로 쭉 뻗음)
+        let positionClasses = "left-[-8px] right-[-8px]"; 
         if (currentDate.getTime() === s.getTime() && currentDate.getTime() === e.getTime()) {
            positionClasses = "left-1 right-1 rounded-lg";
         } else if (currentDate.getTime() === s.getTime()) {
-           positionClasses = "left-1 right-[-8px] rounded-l-full"; // 시작일 (왼쪽 둥글게)
+           positionClasses = "left-1 right-[-8px] rounded-l-full"; 
         } else if (currentDate.getTime() === e.getTime()) {
-           positionClasses = "left-[-8px] right-1 rounded-r-full"; // 종료일 (오른쪽 둥글게)
+           positionClasses = "left-[-8px] right-1 rounded-r-full"; 
         }
         
-        // 보라색 배경 바 렌더링
         multiDayBg = <div className={`absolute top-1/2 -translate-y-1/2 h-6 bg-purple-100 -z-10 ${positionClasses}`}></div>;
       }
 
       days.push(
-        <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-lg transition-colors z-0">
+        <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1.5 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-lg transition-colors z-0">
           {multiDayBg}
           <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
-          {/* 하단 점 표시 (다일 일정이 아닐 때만 노출하여 덜 지저분하게) */}
-          {dayTypes.length > 0 && !multiDayBg && (
-            <div className="absolute bottom-0.5 flex gap-[2px]">
+          {/* 점 표시 */}
+          {dayTypes.length > 0 && (
+            <div className="absolute bottom-0 flex gap-[2px] z-10">
               {dayTypes.map((type, idx) => (
                 <span key={idx} className={`w-1 h-1 rounded-full ${isSelected ? 'bg-white' : getMeetingTypeTheme(type as string).dot}`}></span>
               ))}
@@ -347,7 +345,6 @@ export default function MobileInstructorPortalPage() {
     return days;
   };
 
-  // 🌟 [핵심 변경] 리스트 아이템 필터링에 다일 일정 범위 로직 적용
   let displayItems = selectedDate 
     ? allCombinedAgendas.filter(a => {
         if (a.isMultiDay) {
@@ -361,7 +358,6 @@ export default function MobileInstructorPortalPage() {
         }
       })
     : allCombinedAgendas.filter(a => {
-        // 다가오는 전체 일정의 경우, 이벤트의 끝나는 날짜가 오늘 이후인 것만 보여줌
         const d = a.isMultiDay ? new Date(a.end_date) : (a.meeting_date ? new Date(a.meeting_date) : new Date(a.created_at));
         const today = new Date();
         today.setHours(0, 0, 0, 0); 
@@ -485,7 +481,6 @@ export default function MobileInstructorPortalPage() {
                   <div className="flex justify-between items-start mb-2">
                     <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
                     <span className="text-[11px] font-bold text-slate-400">
-                      {/* 🌟 다일 일정일 경우 조회창에서도 '시작일 ~ 종료일' 형식으로 표시 */}
                       {viewNote.isExternal && viewNote.isMultiDay 
                         ? `일정: ${new Date(viewNote.meeting_date).toLocaleDateString('ko-KR')} ~ ${new Date(viewNote.end_date).toLocaleDateString('ko-KR')}`
                         : (viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`)}
@@ -609,7 +604,6 @@ export default function MobileInstructorPortalPage() {
                     if (isMeetingNote) badgeStyle = 'bg-slate-100 border-slate-300 text-slate-600';
                     if (isGoogleEvent) badgeStyle = 'bg-purple-100 border-purple-300 text-purple-700';
 
-                    // 🌟 [핵심 변경] 다일 일정의 경우 리스트에서 기간 표시 ('8/10 ~ 8/12')
                     let dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ${itemDate.getHours()}:${String(itemDate.getMinutes()).padStart(2,'0')}`;
                     if (item.isMultiDay && item.end_date) {
                       const eDate = new Date(item.end_date);
