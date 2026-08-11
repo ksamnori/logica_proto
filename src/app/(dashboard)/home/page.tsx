@@ -9,7 +9,6 @@ import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 export default function TeacherDashboardPage() {
   const router = useRouter();
 
-  // 🌟 [안전장치 추가] 화면 렌더링 전 권한을 검사하기 위한 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isSuperLevel: false });
@@ -76,7 +75,6 @@ export default function TeacherDashboardPage() {
     }
   }, [selectedClassId]);
 
-  // 🌟 [핵심 변경] 흰 화면(Crash) 방지용 완벽한 권한 검증 로직
   const loadPermissions = async (role: string, tId: string, isGodMode: boolean) => {
     let fetchedMenus: string[] = [];
     
@@ -92,17 +90,14 @@ export default function TeacherDashboardPage() {
           .eq('role_name', role)
           .maybeSingle();
 
-        // data 자체가 안전하게 있는지, allowed_menus 배열이 실제로 존재하는지 꼼꼼히 체크
         if (data && Array.isArray(data.allowed_menus)) {
           setAllowedMenus(data.allowed_menus);
           fetchedMenus = data.allowed_menus;
         } else {
-          // DB에 데이터가 없거나 배열이 아닌 경우 빈 배열로 처리하여 차단
           setAllowedMenus([]);
           fetchedMenus = [];
         }
       } catch (err) {
-        // 서버 에러 시 크래시 방지
         console.error("권한 로딩 에러:", err);
       }
     }
@@ -111,13 +106,10 @@ export default function TeacherDashboardPage() {
     const canAccessAdmission = fetchedMenus.includes("ALL") || fetchedMenus.includes("/admission");
 
     if (canAccessHome) {
-      // 1단계: 홈 권한이 있으면 정상적으로 홈 렌더링
       setIsAuthorized(true);
     } else if (canAccessAdmission) {
-      // 2단계: 홈 권한은 없지만 진단평가 권한만 있는 경우 (조교/파트 등)
       router.replace("/admission");
     } else {
-      // 3단계: 둘 다 없으면 완벽 차단
       setIsAuthorized(false);
     }
   };
@@ -466,7 +458,6 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
-  // 🌟 [안전장치 추가] 권한 확인 전에는 로딩 UI 표출 (흰 화면 아님)
   if (isAuthorized === null) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
@@ -478,7 +469,6 @@ export default function TeacherDashboardPage() {
     );
   }
 
-  // 🌟 [안전장치 추가] 권한이 완전히 없는 경우 접근 통제 화면 표출
   if (isAuthorized === false) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50 p-4">
@@ -808,8 +798,11 @@ export default function TeacherDashboardPage() {
                            {(isPresent || isLate) && !student.checkOut && (
                               <button onClick={() => handleAttAction(student, 'ENDED')} className="px-3 py-1 bg-slate-700 text-white text-[10px] font-extrabold rounded-md shadow-sm hover:bg-slate-900 transition-colors">종료</button>
                            )}
+                           {/* 🌟 수정된 종료 완료 뱃지 */}
                            {student.checkOut && !isEarlyLeave && (
-                              <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-1 rounded-md font-extrabold border border-slate-200">종료됨 {timeOutStr}</span>
+                              <span className="text-[10px] bg-slate-800 text-white px-2.5 py-1 rounded-md font-black shadow-sm flex items-center gap-1">
+                                <span className="text-emerald-400">✓</span> 종료됨 <span className="text-slate-300 font-bold ml-0.5">{timeOutStr}</span>
+                              </span>
                            )}
                         </div>
                       </div>

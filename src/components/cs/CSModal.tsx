@@ -33,7 +33,7 @@ export default function CSModal({
   // 🌟 세부 권한 상태
   const [canDeletePost, setCanDeletePost] = useState(false);
   const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
-  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
+  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
@@ -50,7 +50,7 @@ export default function CSModal({
       if (adminFlag) {
         setCanDeletePost(true);
         setCanDeleteOthersComment(true);
-        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
+        setCanSubmitAgenda(true);
       } else if (tId) {
         const { data } = await supabase
           .from('tenant_role_permissions')
@@ -62,7 +62,7 @@ export default function CSModal({
         if (data && data.allowed_menus) {
           setCanDeletePost(data.allowed_menus.includes('action_delete_cs'));
           setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
-          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_cs_agenda')); // 🌟 안건 상정 권한 확인
+          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_cs_agenda'));
         } else {
           setCanDeletePost(false);
           setCanDeleteOthersComment(false);
@@ -118,17 +118,19 @@ export default function CSModal({
     const updatedComments = [...comments, newComment];
 
     try {
-      await supabase.from("parent_request_log").update({ 
+      const { error } = await supabase.from("parent_request_log").update({ 
         comments: updatedComments,
         updated_at: currentTimeISO,
         last_updater_name: currentUser.name
       }).eq("request_id", modalData.request_id);
 
+      if (error) throw error; // 🌟 에러 던지기
+
       setComments(updatedComments);
       setCommentInput("");
       onSuccess(); 
-    } catch (e) {
-      alert("댓글 등록에 실패했습니다.");
+    } catch (e: any) {
+      alert("댓글 등록 실패: " + e.message);
     }
   };
 
@@ -137,16 +139,18 @@ export default function CSModal({
     const updatedComments = comments.filter(c => c.id !== commentId);
     
     try {
-      await supabase.from("parent_request_log").update({ 
+      const { error } = await supabase.from("parent_request_log").update({ 
         comments: updatedComments,
         updated_at: new Date().toISOString(),
         last_updater_name: currentUser.name
       }).eq("request_id", modalData.request_id);
       
+      if (error) throw error;
+
       setComments(updatedComments);
       onSuccess();
-    } catch (e) {
-      alert("댓글 삭제 실패");
+    } catch (e: any) {
+      alert("댓글 삭제 실패: " + e.message);
     }
   };
 
@@ -154,6 +158,7 @@ export default function CSModal({
     if (!modalData.student_id || !modalData.reason?.trim()) return alert("학생과 상세 내용은 필수 항목입니다.");
 
     const myTenantId = localStorage.getItem("logica_tenant_id");
+    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId; // 🌟 본사 오류 방지
 
     setIsSaving(true);
     const currentTimeISO = new Date().toISOString();
@@ -173,21 +178,23 @@ export default function CSModal({
 
     try {
       if (modalData.request_id) {
-        await supabase.from("parent_request_log").update(payload).eq("request_id", modalData.request_id);
+        const { error } = await supabase.from("parent_request_log").update(payload).eq("request_id", modalData.request_id);
+        if (error) throw error; // 🌟 확실한 에러 검증
         alert("성공적으로 저장되었습니다.");
       } else {
-        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
+        if (!validTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
         
         payload.author_id = currentUser.instId;
         payload.created_at = currentTimeISO;
-        payload.tenant_id = myTenantId; 
-        await supabase.from("parent_request_log").insert([payload]);
+        payload.tenant_id = validTenantId; 
+        const { error } = await supabase.from("parent_request_log").insert([payload]);
+        if (error) throw error; // 🌟 확실한 에러 검증
         alert("CS 기록이 등록되었습니다.");
       }
       onSuccess();
       onClose();
-    } catch (e) { 
-      alert("저장 실패"); 
+    } catch (e: any) { 
+      alert("저장 실패: " + (e.message || "서버 통신 오류")); 
     } finally {
       setIsSaving(false);
     }
@@ -196,31 +203,34 @@ export default function CSModal({
   const deleteCS = async () => {
     if (!confirm("⚠️ 이 CS 요청 기록을 완전히 삭제하시겠습니까?\n댓글 및 처리 내역이 모두 사라집니다.")) return;
     try {
-      await supabase.from("parent_request_log").delete().eq("request_id", modalData.request_id);
+      const { error } = await supabase.from("parent_request_log").delete().eq("request_id", modalData.request_id);
+      if (error) throw error;
       alert("삭제되었습니다.");
       onSuccess();
       onClose();
-    } catch (e) { alert("삭제 실패"); }
+    } catch (e: any) { alert("삭제 실패: " + e.message); }
   };
 
   const submitAgenda = async () => {
     const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
+    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId;
+    if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
 
     try {
       const studentName = students.find(s => s.student_id === modalData.student_id)?.name || "학생";
-      await supabase.from("agenda").insert({
+      const { error } = await supabase.from("agenda").insert({
         title: `[CS요청] ${studentName} 학생 건`,
         content: modalData.reason,
         type: "CS",
         source: "CS",
         source_id: modalData.request_id,
         created_by: currentUser.instId,
-        tenant_id: myTenantId 
+        tenant_id: validTenantId 
       });
+      if (error) throw error;
       alert("해당 CS 요청건이 회의 안건으로 상정되었습니다.");
-    } catch (e) {
-      alert("안건 상정 실패");
+    } catch (e: any) {
+      alert("안건 상정 실패: " + e.message);
     }
   };
 
@@ -365,7 +375,7 @@ export default function CSModal({
               <button onClick={deleteCS} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">요청 삭제</button>
             )}
             
-            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
+            {/* 🌟 안건 상정 권한 적용 */}
             {modalData.request_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
               <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정

@@ -48,6 +48,11 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
       setPosition({ x: 0, y: 0 });
       setZoom(1);
 
+      // 🌟 [유령 데이터 방지 1] DB 조회 전 입력란 초기화 (브라우저 자동완성 찌꺼기 제거)
+      setProfileForm({
+        phone: "", password: "", chatPosition: "", autoActive: false, chatStart: "", chatEnd: "", autoMsg: ""
+      });
+
       supabase.from("instructor").select("*").eq("instructor_id", instId).single().then(({ data }) => {
         if (data) {
           setProfileForm({
@@ -188,7 +193,8 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
           <button onClick={onClose} className="text-white hover:text-rose-400 text-2xl font-bold transition-colors leading-none">&times;</button>
         </div>
         
-        <div className="p-6 space-y-3 overflow-y-auto custom-scroll">
+        {/* 🌟 [유령 데이터 방지 2] 폼 엘리먼트를 명시적으로 선언하고 자동완성을 강력하게 차단합니다 */}
+        <form autoComplete="off" onSubmit={(e) => { e.preventDefault(); saveProfile(); }} className="p-6 space-y-3 overflow-y-auto custom-scroll flex-1">
           
           <div className="flex flex-col items-center justify-center mb-4 pb-4 border-b border-slate-100">
             {!imageSrc ? (
@@ -239,9 +245,9 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">이름 (변경불가)</label>
-            <input type="text" value={instructorName} readOnly className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 bg-slate-100 outline-none" />
+            {/* 🌟 [유령 데이터 방지 3] 브라우저가 다른 텍스트를 채우지 못하도록 속성 추가 */}
+            <input type="text" value={instructorName} readOnly autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 bg-slate-100 outline-none" />
           </div>
-          {/* 💡 [추가] 내 직책(채팅용) 입력란 추가 */}
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">내 직책 (채팅 표시용)</label>
             <input 
@@ -249,16 +255,18 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
               value={profileForm.chatPosition} 
               onChange={e => setProfileForm({...profileForm, chatPosition: e.target.value})} 
               placeholder={isHQ ? "예: 팀장, 주임, 연구원" : "예: 원장, 강사"} 
+              autoComplete="none" data-lpignore="true"
               className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm" 
             />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
-            <input type="text" value={profileForm.phone} maxLength={13} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} placeholder="010-0000-0000" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm" />
+            <input type="text" value={profileForm.phone} maxLength={13} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} autoComplete="none" data-lpignore="true" placeholder="010-0000-0000" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 변경 (선택)</label>
-            <input type="password" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} placeholder="변경할 경우에만 입력하세요 (최소 6자리)" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm placeholder-slate-300" />
+            {/* 🌟 [유령 데이터 방지 4] 비밀번호 필드는 반드시 new-password를 선언하여 강제 개입을 차단! */}
+            <input type="password" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} autoComplete="new-password" data-lpignore="true" placeholder="변경할 경우에만 입력하세요 (최소 6자리)" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm placeholder-slate-300" />
           </div>
 
           <hr className="border-slate-200 my-4" />
@@ -281,11 +289,13 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
             <label className="block text-xs font-bold text-slate-500 mb-1">{isHQ ? "부재중 메시지 내용" : "자동응답 메시지 내용"}</label>
             <textarea rows={2} value={profileForm.autoMsg} onChange={e => setProfileForm({...profileForm, autoMsg: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-[11px] focus:outline-none focus:border-[#002864] resize-none custom-scroll" placeholder={isHQ ? "현재 본사 업무 시간이 아닙니다. 내일 확인 후 답변드리겠습니다." : "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다."}></textarea>
           </div>
-        </div>
+          
+          <button type="submit" className="hidden"></button>
+        </form>
 
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-sm">닫기</button>
-          <button onClick={saveProfile} disabled={isSavingProfile} className="px-4 py-2 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm text-sm disabled:opacity-50">
+          <button type="button" onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-sm">닫기</button>
+          <button type="button" onClick={saveProfile} disabled={isSavingProfile} className="px-4 py-2 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm text-sm disabled:opacity-50">
             {isSavingProfile ? "저장 중..." : "정보 저장"}
           </button>
         </div>

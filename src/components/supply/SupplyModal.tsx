@@ -29,7 +29,7 @@ export default function SupplyModal({
   // 🌟 세부 권한 상태
   const [canDeletePost, setCanDeletePost] = useState(false);
   const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
-  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
+  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +46,7 @@ export default function SupplyModal({
       if (adminFlag) {
         setCanDeletePost(true);
         setCanDeleteOthersComment(true);
-        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
+        setCanSubmitAgenda(true);
       } else if (tId) {
         const { data } = await supabase
           .from('tenant_role_permissions')
@@ -58,7 +58,7 @@ export default function SupplyModal({
         if (data && data.allowed_menus) {
           setCanDeletePost(data.allowed_menus.includes('action_delete_supply'));
           setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
-          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_supply_agenda')); // 🌟 안건 상정 권한 확인
+          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_supply_agenda'));
         } else {
           setCanDeletePost(false);
           setCanDeleteOthersComment(false);
@@ -92,6 +92,7 @@ export default function SupplyModal({
     if (!content.trim()) return alert("신청 내용을 입력해주세요.");
     
     const myTenantId = localStorage.getItem("logica_tenant_id");
+    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId; // 🌟 본사 오류 방지
 
     setIsSubmitting(true);
     
@@ -107,9 +108,9 @@ export default function SupplyModal({
           last_updater_name: currentUser.name
         }).eq("request_id", primaryKey);
         
-        if (error) throw error;
+        if (error) throw error; // 🌟 강력한 에러 검증
       } else {
-        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSubmitting(false); return; }
+        if (!validTenantId) { alert("소속 지점 정보가 없습니다."); setIsSubmitting(false); return; }
 
         const { error } = await supabase.from("supply_request").insert({
           request_type: type,
@@ -120,16 +121,16 @@ export default function SupplyModal({
           created_at: currentTimeISO,
           updated_at: currentTimeISO,
           last_updater_name: currentUser.name,
-          tenant_id: myTenantId 
+          tenant_id: validTenantId 
         });
         
-        if (error) throw error;
+        if (error) throw error; // 🌟 강력한 에러 검증
       }
       
       onSuccess();
       onClose();
     } catch (e: any) {
-      alert(`오류 발생: ${e.message}`);
+      alert(`저장 실패: ${e.message}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -154,17 +155,19 @@ export default function SupplyModal({
     const primaryKey = reqData.request_id || reqData.id;
     
     try {
-      await supabase.from("supply_request").update({ 
+      const { error } = await supabase.from("supply_request").update({ 
         comments: updatedComments,
         updated_at: currentTimeISO,
         last_updater_name: currentUser.name
       }).eq("request_id", primaryKey);
       
+      if (error) throw error;
+
       reqData.comments = updatedComments; 
       setCommentInput("");
       onSuccess(); 
-    } catch (e) {
-      alert("댓글 등록에 실패했습니다.");
+    } catch (e: any) {
+      alert("댓글 등록 실패: " + e.message);
     }
   };
 
@@ -174,16 +177,18 @@ export default function SupplyModal({
     const primaryKey = reqData.request_id || reqData.id;
 
     try {
-      await supabase.from("supply_request").update({ 
+      const { error } = await supabase.from("supply_request").update({ 
         comments: updatedComments,
         updated_at: new Date().toISOString(),
         last_updater_name: currentUser.name
       }).eq("request_id", primaryKey);
       
+      if (error) throw error;
+
       reqData.comments = updatedComments;
       onSuccess();
-    } catch (e) {
-      alert("댓글 삭제 실패");
+    } catch (e: any) {
+      alert("댓글 삭제 실패: " + e.message);
     }
   };
 
@@ -191,32 +196,35 @@ export default function SupplyModal({
     if (!confirm("⚠️ 정말 이 신청 내역을 삭제하시겠습니까?")) return;
     const primaryKey = reqData.request_id || reqData.id;
     try {
-      await supabase.from("supply_request").delete().eq("request_id", primaryKey);
+      const { error } = await supabase.from("supply_request").delete().eq("request_id", primaryKey);
+      if (error) throw error;
       onSuccess();
       onClose();
-    } catch (e) {
-      alert("삭제 실패");
+    } catch (e: any) {
+      alert("삭제 실패: " + e.message);
     }
   };
 
   const submitAgenda = async () => {
     const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
+    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId;
+    if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
 
     try {
       const primaryKey = reqData?.request_id || reqData?.id;
-      await supabase.from("agenda").insert({
+      const { error } = await supabase.from("agenda").insert({
         title: `[비품신청] ${type}`,
         content: content,
         type: "비품",
         source: "Supply",
         source_id: primaryKey,
         created_by: currentUser.instId,
-        tenant_id: myTenantId 
+        tenant_id: validTenantId 
       });
+      if (error) throw error;
       alert("해당 비품 신청건이 회의 안건으로 상정되었습니다.");
-    } catch (e) {
-      alert("안건 상정 실패");
+    } catch (e: any) {
+      alert("안건 상정 실패: " + e.message);
     }
   };
 
@@ -317,13 +325,12 @@ export default function SupplyModal({
 
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
           <div className="flex gap-2 items-center">
-            {/* 🌟 [수정] 원장, 작성자 본인, 또는 '신청서 삭제 권한'이 있는 사람만 삭제 가능 */}
-            {!!reqData && (isSuperAdminOrAdmin || canDeletePost || String(reqData.author_id) === String(currentUser.instId)) && (
+            {reqData && (isSuperAdminOrAdmin || canDeletePost || String(reqData.author_id) === String(currentUser.instId)) && (
               <button onClick={handleDelete} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">신청서 삭제</button>
             )}
             
-            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
-            {!!reqData && (isSuperAdminOrAdmin || canSubmitAgenda) && (
+            {/* 🌟 안건 상정 권한 적용 */}
+            {reqData && (isSuperAdminOrAdmin || canSubmitAgenda) && (
               <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정
               </button>

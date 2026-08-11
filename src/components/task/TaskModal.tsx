@@ -25,11 +25,9 @@ export default function TaskModal({
   const [isSaving, setIsSaving] = useState(false);
   
   const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
-  
-  // 🌟 세부 권한 상태
   const [canDeletePost, setCanDeletePost] = useState(false);
   const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
-  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
+  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); 
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,7 +44,7 @@ export default function TaskModal({
       if (adminFlag) {
         setCanDeletePost(true);
         setCanDeleteOthersComment(true);
-        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
+        setCanSubmitAgenda(true);
       } else if (tId) {
         const { data } = await supabase
           .from('tenant_role_permissions')
@@ -58,7 +56,7 @@ export default function TaskModal({
         if (data && data.allowed_menus) {
           setCanDeletePost(data.allowed_menus.includes('action_delete_task'));
           setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
-          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_task_agenda')); // 🌟 안건 상정 권한 확인
+          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_task_agenda'));
         } else {
           setCanDeletePost(false);
           setCanDeleteOthersComment(false);
@@ -106,17 +104,19 @@ export default function TaskModal({
     const updatedComments = [...comments, newComment];
 
     try {
-      await supabase.from("instructor_memo").update({ 
+      const { error } = await supabase.from("instructor_memo").update({ 
         comments: updatedComments,
         updated_at: currentTimeISO,
         last_updater_name: currentUser.name
       }).eq("memo_id", modalData.memo_id);
 
+      if (error) throw error;
+
       setComments(updatedComments);
       setCommentInput("");
       onSuccess(); 
-    } catch (e) {
-      alert("댓글 등록에 실패했습니다.");
+    } catch (e: any) {
+      alert("댓글 등록 실패: " + e.message);
     }
   };
 
@@ -125,23 +125,23 @@ export default function TaskModal({
     const updatedComments = comments.filter(c => c.id !== commentId);
     
     try {
-      await supabase.from("instructor_memo").update({ 
+      const { error } = await supabase.from("instructor_memo").update({ 
         comments: updatedComments,
         updated_at: new Date().toISOString(),
         last_updater_name: currentUser.name
       }).eq("memo_id", modalData.memo_id);
       
+      if (error) throw error;
+
       setComments(updatedComments);
       onSuccess();
-    } catch (e) {
-      alert("댓글 삭제 실패");
+    } catch (e: any) {
+      alert("댓글 삭제 실패: " + e.message);
     }
   };
 
   const saveTask = async () => {
     if (!modalData.content?.trim()) return alert("본문 내용을 입력해주세요.");
-
-    const myTenantId = localStorage.getItem("logica_tenant_id");
 
     setIsSaving(true);
     const currentTimeISO = new Date().toISOString();
@@ -157,22 +157,23 @@ export default function TaskModal({
 
     try {
       if (modalData.memo_id) {
-        await supabase.from("instructor_memo").update(payload).eq("memo_id", modalData.memo_id);
+        const { error } = await supabase.from("instructor_memo").update(payload).eq("memo_id", modalData.memo_id);
+        if (error) throw error; 
         alert("성공적으로 저장되었습니다.");
       } else {
-        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
-        
+        // 🚨 [수정] DB에 아직 tenant_id 컬럼이 없으므로 payload에서 완전히 제거
         payload.instructor_id = currentUser.instId;
         payload.author_name = currentUser.name;
         payload.created_at = currentTimeISO;
-        payload.tenant_id = myTenantId; 
-        await supabase.from("instructor_memo").insert([payload]);
+        
+        const { error } = await supabase.from("instructor_memo").insert([payload]);
+        if (error) throw error; 
         alert("업무(공지)가 등록되었습니다.");
       }
       onSuccess();
       onClose();
-    } catch (e) { 
-      alert("저장 실패"); 
+    } catch (e: any) { 
+      alert("저장 실패: " + (e.message || "서버 통신 오류")); 
     } finally {
       setIsSaving(false);
     }
@@ -181,30 +182,34 @@ export default function TaskModal({
   const deleteTask = async () => {
     if (!confirm("⚠️ 이 업무/공지 기록을 완전히 삭제하시겠습니까?\n댓글 등 모든 내역이 사라집니다.")) return;
     try {
-      await supabase.from("instructor_memo").delete().eq("memo_id", modalData.memo_id);
+      const { error } = await supabase.from("instructor_memo").delete().eq("memo_id", modalData.memo_id);
+      if (error) throw error;
       alert("삭제되었습니다.");
       onSuccess();
       onClose();
-    } catch (e) { alert("삭제 실패"); }
+    } catch (e: any) { alert("삭제 실패: " + e.message); }
   };
 
   const submitAgenda = async () => {
     const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
+    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId;
+    if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
 
     try {
-      await supabase.from("agenda").insert({
+      // agenda 테이블에는 tenant_id가 존재하므로 정상 삽입
+      const { error } = await supabase.from("agenda").insert({
         title: `[업무공유] ${modalData.memo_type}`,
         content: modalData.content,
         type: "업무",
         source: "Task",
         source_id: modalData.memo_id,
         created_by: currentUser.instId,
-        tenant_id: myTenantId
+        tenant_id: validTenantId
       });
+      if (error) throw error;
       alert("해당 업무가 회의 안건으로 상정되었습니다.");
-    } catch (e) {
-      alert("안건 상정 실패");
+    } catch (e: any) {
+      alert("안건 상정 실패: " + e.message);
     }
   };
 
@@ -270,7 +275,6 @@ export default function TaskModal({
               ) : (
                 comments.map(cmt => {
                   const isMe = cmt.authorName === currentUser.name;
-                  // 🌟 [수정] 원장, 작성자 본인, 또는 '타인 댓글 삭제 권한'이 있는 사람만 지울 수 있음
                   const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
                   
                   return (
@@ -311,13 +315,11 @@ export default function TaskModal({
         
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
           <div className="flex gap-2 items-center">
-            {/* 🌟 [수정] 원장, 작성자 본인, 또는 '업무 삭제 권한'이 있는 사람만 삭제 가능 */}
-            {!!modalData.memo_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.instructor_id) === String(currentUser.instId)) && (
+            {modalData.memo_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.instructor_id) === String(currentUser.instId)) && (
               <button onClick={deleteTask} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">업무 삭제</button>
             )}
             
-            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
-            {!!modalData.memo_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
+            {modalData.memo_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
               <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정
               </button>

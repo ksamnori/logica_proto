@@ -9,9 +9,7 @@ import TaskModal from "@/components/task/TaskModal";
 export default function TaskBoardPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-
   const [tasks, setTasks] = useState<any[]>([]);
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
   const [isLoading, setIsLoading] = useState(true);
@@ -21,15 +19,14 @@ export default function TaskBoardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any>(null);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      const isGodMode = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
+                        ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
       
       if (isGodMode) {
         setIsAuthorized(true);
@@ -49,7 +46,6 @@ export default function TaskBoardPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 업무 공유 보드 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/task"))) {
         alert("⛔ 업무 공유 보드에 접근할 권한이 없습니다.");
         router.replace("/home");
@@ -98,19 +94,28 @@ export default function TaskBoardPage() {
 
   const fetchTasks = async () => {
     setIsLoading(true);
-    const tenantId = localStorage.getItem("logica_tenant_id");
 
     try {
-      let query = supabase.from("instructor_memo").select("*").order("created_at", { ascending: false }).limit(1000);
+      // 🚨 [수정] instructor_memo 에는 아직 tenant_id가 없으므로 필터링 없이 모두 호출합니다.
+      const { data, error } = await supabase
+        .from("instructor_memo")
+        .select("*")
+        .order("created_at", { ascending: false })
+        .limit(1000);
       
-      // 🌟 [보안 강화] 내 지점 데이터만 불러오도록 격리
-      if (tenantId && tenantId !== 'hq') {
-         query = query.eq("tenant_id", tenantId);
+      if (error) {
+        console.error("데이터 조회 오류:", error);
+        setTasks([]);
+        return;
       }
 
-      const { data } = await query;
       setTasks(data || []);
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+    } catch (e) { 
+      console.error(e); 
+      setTasks([]);
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const handleDragStart = (e: React.DragEvent, memoId: string) => {
@@ -159,7 +164,7 @@ export default function TaskBoardPage() {
         memo_type: targetTask.memo_type
       }).eq("memo_id", memoId);
     } catch (err) {
-      alert("상태 변경 실패");
+      alert("상태 변경에 실패했습니다.");
       fetchTasks(); 
     }
   };
@@ -174,7 +179,7 @@ export default function TaskBoardPage() {
     setSelectedTask(null);
   };
 
-  const todos = useMemo(() => tasks.filter(t => !t.status || t.status === "할일"), [tasks]);
+  const todos = useMemo(() => tasks.filter(t => !t.status || t.status === "할일" || t.status === "대기"), [tasks]);
   const inProgress = useMemo(() => tasks.filter(t => t.status === "진행중"), [tasks]);
   const dones = useMemo(() => tasks.filter(t => t.status === "완료"), [tasks]);
 
@@ -186,7 +191,11 @@ export default function TaskBoardPage() {
 
   const statsCounts = useMemo(() => {
     const counts = { "긴급공지": 0, "일반공지": 0, "학생인계": 0, "행정요청": 0 };
-    statsTasks.forEach(t => { if (counts[t.memo_type as keyof typeof counts] !== undefined) counts[t.memo_type as keyof typeof counts]++; });
+    statsTasks.forEach(t => { 
+      if (counts[t.memo_type as keyof typeof counts] !== undefined) {
+        counts[t.memo_type as keyof typeof counts]++; 
+      }
+    });
     return counts;
   }, [statsTasks]);
 
@@ -243,12 +252,12 @@ export default function TaskBoardPage() {
     );
   };
 
-  if (isAuthorized === null) {
+  if (isAuthorized === null || isLoading) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
           <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
-          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+          <span className="text-slate-500 font-bold text-sm">업무 보드 데이터를 불러오는 중입니다...</span>
         </div>
       </div>
     );
@@ -322,10 +331,10 @@ export default function TaskBoardPage() {
             </div>
             <div className="p-3 border-b border-slate-100 shrink-0">
               <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
-                <div className="bg-rose-50 p-2 rounded border border-rose-100 flex justify-between shadow-sm"><span className="text-rose-600">긴급공지</span><span>{statsCounts["긴급공지"]}건</span></div>
-                <div className="bg-emerald-50 p-2 rounded border border-emerald-100 flex justify-between shadow-sm"><span className="text-emerald-600">일반공지</span><span>{statsCounts["일반공지"]}건</span></div>
-                <div className="bg-blue-50 p-2 rounded border border-blue-100 flex justify-between shadow-sm"><span className="text-blue-600">학생인계</span><span>{statsCounts["학생인계"]}건</span></div>
-                <div className="bg-purple-50 p-2 rounded border border-purple-100 flex justify-between shadow-sm"><span className="text-purple-600">행정요청</span><span>{statsCounts["행정요청"]}건</span></div>
+                <div className="bg-rose-50 p-2 rounded border border-rose-100 flex justify-between shadow-sm"><span className="text-rose-600">긴급공지</span><span>{statsCounts["긴급공지"] || 0}건</span></div>
+                <div className="bg-emerald-50 p-2 rounded border border-emerald-100 flex justify-between shadow-sm"><span className="text-emerald-600">일반공지</span><span>{statsCounts["일반공지"] || 0}건</span></div>
+                <div className="bg-blue-50 p-2 rounded border border-blue-100 flex justify-between shadow-sm"><span className="text-blue-600">학생인계</span><span>{statsCounts["학생인계"] || 0}건</span></div>
+                <div className="bg-purple-50 p-2 rounded border border-purple-100 flex justify-between shadow-sm"><span className="text-purple-600">행정요청</span><span>{statsCounts["행정요청"] || 0}건</span></div>
               </div>
             </div>
             <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 shrink-0">

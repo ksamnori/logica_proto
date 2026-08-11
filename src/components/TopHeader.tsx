@@ -115,7 +115,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   const loadNotifications = useCallback(async () => {
     if (!currentUid) return;
 
-    // 💡 권한 로직을 실시간으로 확인 (관리자는 모든 CS 확인 가능)
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
@@ -128,7 +127,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     const res = await getSecureNotifications(clearedTime);
     let allNotis = res.success && res.notiData ? res.notiData : [];
 
-    // 1. 업무 보드의 '긴급공지' (완료 제외) - 모두에게 보임
     const { data: urgentMemos } = await supabase
       .from("instructor_memo")
       .select("memo_id, author_name, content, created_at, updated_at, status")
@@ -147,13 +145,11 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       allNotis = [...allNotis, ...memoNotis];
     }
 
-    // 2. 💡 학부모 요청(CS) 로드 (관리자: 모두 / 일반: 본인 배정건만)
     let csQuery = supabase
       .from("parent_request_log")
       .select("request_id, request_type, reason, created_at, updated_at, status, student(name)")
       .or(`created_at.gt.${clearedIso},updated_at.gt.${clearedIso}`);
 
-    // 관리자가 아니면 '내게 배정된 CS'만 필터링
     if (!isAdmin) {
       csQuery = csQuery.eq("processed_instructor_id", currentUid);
     }
@@ -175,7 +171,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       allNotis = [...allNotis, ...csNotis];
     }
 
-    // 시간순 정렬 및 반영
     allNotis.sort((a, b) => b.time.getTime() - a.time.getTime());
     setNotifications(allNotis);
     
@@ -230,6 +225,13 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       setImageSrc(null);
       setPosition({ x: 0, y: 0 });
       setZoom(1);
+
+      // 🌟 [유령 데이터 방지 1] DB 조회를 기다리는 동안 이전 잔재나 브라우저 자동완성이 끼어들지 못하게 초기화
+      setEditName("");
+      setEditPhone("");
+      setEditEmail("");
+      setNewPassword("");
+      setConfirmPassword("");
 
       const { data } = await supabase
         .from('instructor')
@@ -464,7 +466,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
               <button onClick={() => { setIsProfileModalOpen(false); setNewPassword(""); setConfirmPassword(""); }} className="text-blue-200 hover:text-white text-2xl leading-none transition-colors">&times;</button>
             </div>
             
-            <form onSubmit={handleSaveProfile} className="p-6 flex-1 overflow-y-auto custom-scroll space-y-6">
+            {/* 🌟 [유령 데이터 방지 2] form 속성에 autoComplete="off" 추가하여 브라우저의 오지랖 원천 차단 */}
+            <form onSubmit={handleSaveProfile} autoComplete="off" className="p-6 flex-1 overflow-y-auto custom-scroll space-y-6">
               
               <div className="flex flex-col items-center border-b border-slate-100 pb-6">
                 <h3 className="text-sm font-black text-slate-800 mb-4 w-full text-left">프로필 사진</h3>
@@ -543,15 +546,18 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 <h3 className="text-sm font-black text-slate-800">기본 정보</h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
-                  <input type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" />
+                  {/* 🌟 [유령 데이터 방지 3] autoComplete="none" 및 data-lpignore="true" 추가 */}
+                  <input type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
-                  <input type="text" value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="010-0000-0000" />
+                  {/* 🌟 [유령 데이터 방지 3] */}
+                  <input type="text" value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="010-0000-0000" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이메일</label>
-                  <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="email@example.com" />
+                  {/* 🌟 [유령 데이터 방지 3] */}
+                  <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="email@example.com" />
                 </div>
               </div>
 
@@ -559,10 +565,13 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 <h3 className="text-sm font-black text-slate-800">비밀번호 변경 <span className="text-xs font-normal text-slate-400 ml-1">(선택 사항)</span></h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호</label>
+                  {/* 🌟 [유령 데이터 방지 4] 비밀번호 필드에는 반드시 new-password 지정 */}
                   <input 
                     type="password" 
                     value={newPassword} 
                     onChange={(e) => setNewPassword(e.target.value)} 
+                    autoComplete="new-password"
+                    data-lpignore="true"
                     className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" 
                     placeholder="변경할 경우에만 입력 (최소 6자리)" 
                   />
@@ -570,11 +579,14 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 {newPassword && (
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호 확인</label>
+                    {/* 🌟 [유령 데이터 방지 4] */}
                     <input 
                       type="password" 
                       required={!!newPassword}
                       value={confirmPassword} 
                       onChange={(e) => setConfirmPassword(e.target.value)} 
+                      autoComplete="new-password"
+                      data-lpignore="true"
                       className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" 
                       placeholder="다시 한번 입력" 
                     />
