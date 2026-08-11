@@ -2,9 +2,15 @@
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 export default function AcademyInfoPage() {
+  const router = useRouter();
+
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", role: "", tenantId: "" });
   const [isHQ, setIsHQ] = useState(false);
   
@@ -44,9 +50,52 @@ export default function AcademyInfoPage() {
     });
   };
 
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
-    initializeAndLoad();
-  }, []);
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 학원 정보 관리 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/academy-info"))) {
+        alert("⛔ 학원 정보 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
+
+  // 권한이 통과되었을 때만 데이터를 불러옵니다.
+  useEffect(() => {
+    if (isAuthorized) {
+      initializeAndLoad();
+    }
+  }, [isAuthorized]);
 
   const initializeAndLoad = async () => {
     setIsLoading(true);
@@ -221,7 +270,6 @@ export default function AcademyInfoPage() {
     setZoom(prev => Math.min(Math.max(0.5, prev - e.deltaY * 0.005), 3));
   };
 
-  // 🌟 [수정됨] 화면에 보이는 그대로 1픽셀 오차 없이 잘라내는 완벽한 크롭 공식
   const generateCrop = () => {
     if (!imageRef.current) return;
     const img = imageRef.current;
@@ -232,18 +280,15 @@ export default function AcademyInfoPage() {
     canvas.width = 800;
     canvas.height = 450;
     
-    // UI 크롭 영역(480x270)과 최종 이미지(800x450)의 비율
     const scale = 800 / 480; 
 
     ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
     ctx.save();
-    // 캔버스 중심 이동 후 줌/팬 적용
     ctx.translate(canvas.width / 2 + pan.x * scale, canvas.height / 2 + pan.y * scale);
     ctx.scale(zoom * scale, zoom * scale);
 
-    // 원본 이미지의 비율에 맞춰서 기준 Height를 270px로 잡음 (CSS height: 100% 와 동일)
     const drawH = 270;
     const drawW = 270 * (img.naturalWidth / img.naturalHeight);
 
@@ -316,6 +361,22 @@ export default function AcademyInfoPage() {
       alert("정보 업데이트 중 오류가 발생했습니다.");
     }
   };
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 원천 차단
+  if (isAuthorized === null) {
+    return (
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (isAuthorized === false) {
+    return null; 
+  }
 
   if (isLoading) {
     return <div className="p-8 text-slate-500 font-bold">권한 및 지점 정보를 확인하는 중입니다...</div>;
@@ -414,7 +475,6 @@ export default function AcademyInfoPage() {
           <div className="flex-1 overflow-y-auto custom-scroll p-6 lg:p-8 bg-slate-50/30">
             <div className="max-w-4xl mx-auto space-y-6 pb-10">
               
-              {/* 🌟 [NEW] 꽉 찬 가로형 배너 레이아웃으로 변경된 대표 이미지 섹션 */}
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-2">
                   <h3 className="text-sm font-black text-slate-800">대표 이미지 (로고 및 전경)</h3>
@@ -427,7 +487,6 @@ export default function AcademyInfoPage() {
                 </div>
                 
                 <div className="flex flex-col gap-4">
-                  {/* 🌟 와이드 16:9 배너 형태로 박스를 꽉 채웁니다 */}
                   <div className="w-full aspect-[21/9] sm:aspect-[16/9] lg:aspect-[21/9] bg-slate-100 rounded-xl border border-slate-200 overflow-hidden relative shadow-inner flex items-center justify-center group">
                     {previewUrl ? (
                       <img src={previewUrl} alt="Academy Logo" className="w-full h-full object-cover" />
@@ -438,7 +497,6 @@ export default function AcademyInfoPage() {
                       </div>
                     )}
                     
-                    {/* 마우스 오버 시 편집 유도 오버레이 */}
                     {isEditing && (
                       <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer backdrop-blur-[2px]" onClick={() => fileInputRef.current?.click()}>
                         <span className="text-white text-sm font-bold bg-black/70 px-5 py-2.5 rounded-xl flex items-center gap-2 shadow-lg">
@@ -464,7 +522,6 @@ export default function AcademyInfoPage() {
                 </div>
               </div>
 
-              {/* 기본 정보 섹션 */}
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                 <h3 className="text-sm font-black text-slate-800 mb-4 border-b border-slate-100 pb-2">기본 정보</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
@@ -479,7 +536,6 @@ export default function AcademyInfoPage() {
                 </div>
               </div>
 
-              {/* 운영 정보 섹션 */}
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                 <h3 className="text-sm font-black text-slate-800 mb-4 border-b border-slate-100 pb-2">운영 정보</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-5">

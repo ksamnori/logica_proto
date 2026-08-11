@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useState, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 // 분리된 모달 컴포넌트 불러오기
@@ -24,6 +25,11 @@ const safeParseIds = (raw: any): number[] => {
 };
 
 export default function ProgressPage() {
+  const router = useRouter();
+
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   // === 기본 데이터 상태 ===
   const [classes, setClasses] = useState<any[]>([]);
   const [textbooks, setTextbooks] = useState<any[]>([]);
@@ -62,10 +68,53 @@ export default function ProgressPage() {
   // 💡 [핵심 1] 다중 클릭 동시성(Race Condition) 방지를 위한 대기열(Queue) 변수
   const actionQueue = useRef<Promise<void>>(Promise.resolve());
 
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
-    fetchInitialClasses();
-    loadMathJax();
-  }, []);
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 진도 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/progress"))) {
+        alert("⛔ 진도 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
+
+  // 권한이 통과되었을 때만 초기 데이터를 페칭합니다.
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchInitialClasses();
+      loadMathJax();
+    }
+  }, [isAuthorized]);
 
   useEffect(() => {
     if (!selectedClassId) return;
@@ -111,11 +160,18 @@ export default function ProgressPage() {
     const instId = localStorage.getItem("logica_instructor_id") || "";
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
+    const tId = localStorage.getItem("logica_tenant_id") || "";
     
     // 최고관리자, SUPER_ADMIN 권한 조건 완벽 포괄
     const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || pos.includes("최고관리자") || pos.includes("원장") || pos.includes("실장");
 
     let query = supabase.from("class").select("class_id, name, level_name").order("name");
+    
+    // 🌟 [보안 강화] 타 지점 클래스가 안 보이도록 격리
+    if (tId && tId !== 'hq') {
+      query = query.eq('tenant_id', tId);
+    }
+
     if (!isAdmin && instId) query = query.eq("instructor_id", instId);
     
     const { data } = await query;
@@ -255,7 +311,6 @@ export default function ProgressPage() {
     }
   };
 
-  // 1. [완전 개편] 철저한 "개인 중심" 당일 과제 통합 로직
   const assignHomeworkToStudents = async (targetStudentIds: string[], mainIds: number[], wbIds: number[], titleStr: string) => {
     try {
         const allTqIds = [...mainIds, ...wbIds];
@@ -269,16 +324,14 @@ export default function ProgressPage() {
         const startOfTodayKST = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
         const endOfTodayKST = new Date(`${dateStr}T23:59:59.999+09:00`).toISOString();
 
-        // 💡 7명이면 7번, 1명이면 1번. 철저하게 "개별 학생" 단위로 병렬 처리합니다.
         await Promise.all(targetStudentIds.map(async (sId) => {
             try {
                 const studentName = students.find(s => s.id === sId)?.name || '학생';
 
-                // [핵심 1] 오늘 이 학생(sId)에게 배부된 과제 묶음이 있는지 확인합니다.
                 const { data: existing, error: existErr } = await supabase.from('homework_assignment')
                     .select('homework_id, target_questions, homework_title')
                     .eq('class_id', selectedClassId)
-                    .eq('target_student_id', sId) // 철저한 개인 격리
+                    .eq('target_student_id', sId) 
                     .neq('homework_title', '[시스템] 수업 진도 완료 기록')
                     .gte('created_at', startOfTodayKST)
                     .lte('created_at', endOfTodayKST)
@@ -290,13 +343,11 @@ export default function ProgressPage() {
                 let hwId: number;
 
                 if (existing && existing.length > 0) {
-                    // [상황 A] 이미 오늘 만들어진 과제 묶음이 있음 -> 기존 묶음에 문항을 합산(Merge)
                     hwId = existing[0].homework_id;
                     const prevQs = safeParseIds(existing[0].target_questions);
-                    const newQs = Array.from(new Set([...prevQs, ...allTqIds])); // 중복 방지 합산
+                    const newQs = Array.from(new Set([...prevQs, ...allTqIds])); 
 
                     let updatedTitle = existing[0].homework_title || '';
-                    // 본교재만 있다가 워크북이 추가되거나 하면 이름을 "통합 과제"로 업그레이드
                     if (!updatedTitle.includes('통합')) {
                         if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
                             updatedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
@@ -307,7 +358,6 @@ export default function ProgressPage() {
                         .update({ target_questions: newQs, homework_title: updatedTitle })
                         .eq('homework_id', hwId);
                 } else {
-                    // [상황 B] 오늘 처음 나가는 과제임 -> 새로운 묶음(방) 생성
                     let expectedTitle = `[${studentName}] ${titleStr} (${dateStr})`;
                     if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
 
@@ -315,7 +365,7 @@ export default function ProgressPage() {
                         book_id: Number(selectedBookId),
                         target_questions: allTqIds,
                         class_id: selectedClassId,
-                        target_student_id: sId, // 철저한 개인 격리
+                        target_student_id: sId, 
                         due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
                         homework_title: expectedTitle
                     }).select();
@@ -325,7 +375,6 @@ export default function ProgressPage() {
                     hwId = hwData[0].homework_id;
                 }
 
-                // [핵심 2] 해당 과제 방에 대한 학생의 결과(채점용) 테이블 레코드 확인 및 생성
                 const { data: res } = await supabase.from('student_homework_result')
                     .select('hw_result_id')
                     .eq('homework_id', hwId)
@@ -346,19 +395,17 @@ export default function ProgressPage() {
     }
   };
 
-  // 2. [완전 개편] 진도 완료 기록 역시 철저한 "개인 단위" 처리
   const markProgressAsCompleteInDB = async (tq_ids: number[], targetStudentIds: string[]) => {
     try {
       if (!tq_ids.length || !selectedBookId || !targetStudentIds.length) return;
 
       await Promise.all(targetStudentIds.map(async (sId) => {
         try {
-          // 이 학생만의 진도 완료 기록용 숨김 방(Assignment)이 있는지 확인
           const { data: existing } = await supabase.from('homework_assignment')
             .select('homework_id')
             .eq('class_id', selectedClassId)
             .eq('book_id', Number(selectedBookId))
-            .eq('target_student_id', sId) // 철저한 개인 격리
+            .eq('target_student_id', sId) 
             .eq('homework_title', '[시스템] 수업 진도 완료 기록')
             .limit(1);
 
@@ -372,7 +419,7 @@ export default function ProgressPage() {
               due_date: '2099-12-31', 
               homework_title: '[시스템] 수업 진도 완료 기록', 
               class_id: selectedClassId, 
-              target_student_id: sId // 철저한 개인 격리
+              target_student_id: sId 
             }).select();
             
             if (insErr) throw insErr;
@@ -380,7 +427,6 @@ export default function ProgressPage() {
             hwId = ins[0].homework_id;
           }
 
-          // 해당 진도 완료 방에 문항 추가
           const { data: res } = await supabase.from('student_homework_result')
             .select('hw_result_id, completed_tq_ids')
             .eq('homework_id', hwId)
@@ -462,7 +508,6 @@ export default function ProgressPage() {
   };
 
   const applyActionToIds = async (actionType: string, mainIds: number[], wbIds: number[]) => {
-    // 1. 화면(UI) 상태는 클릭 즉시 바로 업데이트 (반응성 보장)
     const newMap = { ...statusMap };
     const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
 
@@ -494,7 +539,6 @@ export default function ProgressPage() {
     if (actionType === 'MAIN_HW_AND_WB_HW') tMsg = `과제 배부가 완료되었습니다!`;
     showToast(tMsg);
 
-    // 2. 🌟 [핵심 2] 실제 DB 서버 전송 작업은 대기열(Queue)에 줄을 세워서 순차적으로 실행
     actionQueue.current = actionQueue.current.then(async () => {
       await cancelProgressForIds([...mainIds, ...wbIds], targets);
       
@@ -596,6 +640,15 @@ export default function ProgressPage() {
       </span>
     );
   };
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-100 overflow-hidden relative p-4 sm:p-8 gap-6">

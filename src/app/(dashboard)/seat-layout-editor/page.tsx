@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useEffect, useRef, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { createPortal } from "react-dom";
 import { supabase, CLINIC_ROOM } from "@/lib/supabase";
 import { getActiveSeatLayout, saveSeatLayout } from "@/app/actions/clinicSeatLayout";
@@ -13,6 +14,11 @@ const GRID_SIZE = 20;
 const EDITOR_ID_KEY = "logica_seat_editor_client_id";
 
 export default function SeatLayoutEditorPage() {
+    const router = useRouter();
+
+    // 🌟 [보안 로직 추가] 권한 확인 상태
+    const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
     const [layout, setLayout] = useState<SeatLayout | null>(null);
     const [seats, setSeats] = useState<Seat[]>([]);
     const [loading, setLoading] = useState(true);
@@ -50,7 +56,50 @@ export default function SeatLayoutEditorPage() {
         setCanvasH(clampCanvasSize(l.canvasHeight));
     }, []);
 
+    // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
     useEffect(() => {
+        const checkAccess = async () => {
+            const role = localStorage.getItem("logica_instructor_role") || "";
+            const pos = localStorage.getItem("logica_instructor_position") || "";
+            const tId = localStorage.getItem("logica_tenant_id") || "";
+            
+            const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                              pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+            
+            if (isGodMode) {
+                setIsAuthorized(true);
+                return;
+            }
+
+            if (!tId || !role) {
+                alert("권한 정보가 없습니다.");
+                router.replace("/home");
+                return;
+            }
+
+            const { data } = await supabase
+                .from('tenant_role_permissions')
+                .select('allowed_menus')
+                .eq('tenant_id', tId)
+                .eq('role_name', role)
+                .maybeSingle();
+
+            // 좌석 배치도 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
+            if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/seat-layout-editor"))) {
+                alert("⛔ 좌석 배치도 편집 페이지에 접근할 권한이 없습니다.");
+                router.replace("/home");
+            } else {
+                setIsAuthorized(true);
+            }
+        };
+
+        checkAccess();
+    }, [router]);
+
+    // 🌟 권한이 확인된 후에만 데이터를 불러오고 소켓 연결을 시작합니다.
+    useEffect(() => {
+        if (!isAuthorized) return;
+
         let saved = localStorage.getItem(EDITOR_ID_KEY);
         if (!saved) {
             saved = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -63,7 +112,6 @@ export default function SeatLayoutEditorPage() {
             setLoading(false);
         });
 
-        // 🌟 [핵심 보안 추가] 좌석 배치도 라이브 소통 방(Channel) 역시 지점별로 분리해야 합니다.
         const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
         const channelName = `${CLINIC_ROOM}_${myTenantId}`;
 
@@ -90,7 +138,7 @@ export default function SeatLayoutEditorPage() {
                 supabase.removeChannel(channelRef.current);
             }
         };
-    }, []);
+    }, [isAuthorized, applyLayoutState]);
 
     const enterEditMode = () => {
         if (clinicOccupied) return;
@@ -203,8 +251,6 @@ export default function SeatLayoutEditorPage() {
 
     const doSave = async (): Promise<boolean> => {
         setSaving(true);
-        // 🌟 [추가됨] 서버액션(saveSeatLayout)은 이미 쿠키에서 tenant_id를 꺼내 쓰도록 개조해 두었으므로
-        // 여기서는 그냥 호출만 하면 알아서 내 지점의 좌석표로 저장됩니다!
         const res = await saveSeatLayout(seats, canvasW, canvasH, seatW, seatH, editorClientIdRef.current);
         setSaving(false);
         
@@ -222,6 +268,15 @@ export default function SeatLayoutEditorPage() {
         const ok = await doSave();
         if (ok) alert('좌석 배치가 저장되었습니다.');
     };
+
+    // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 원천 차단
+    if (isAuthorized === null) {
+        return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+    }
+    
+    if (isAuthorized === false) {
+        return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    }
 
     if (loading) {
         return <div className="p-8 text-slate-400 text-sm">불러오는 중...</div>;

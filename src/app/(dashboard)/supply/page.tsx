@@ -1,343 +1,341 @@
-// src/components/supply/SupplyModal.tsx
+// src/app/(dashboard)/supply/page.tsx
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import SupplyModal from "@/components/supply/SupplyModal";
 
-interface SupplyModalProps {
-  isOpen: boolean;
-  reqData: any; 
-  currentUser: { instId: string; name: string; isAdmin: boolean };
-  onClose: () => void;
-  onSuccess: () => void;
-}
+export default function SupplyBoardPage() {
+  const router = useRouter();
 
-export default function SupplyModal({ 
-  isOpen, 
-  reqData, 
-  currentUser, 
-  onClose, 
-  onSuccess 
-}: SupplyModalProps) {
-  const [type, setType] = useState("사무용품");
-  const [content, setContent] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [commentInput, setCommentInput] = useState("");
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  const [requests, setRequests] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
+  const [isLoading, setIsLoading] = useState(true);
+  const [statsMonth, setStatsMonth] = useState("");
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   
-  const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
-  
-  // 🌟 세부 권한 상태
-  const [canDeletePost, setCanDeletePost] = useState(false);
-  const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
-  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedReq, setSelectedReq] = useState<any>(null);
 
-  const commentEndRef = useRef<HTMLDivElement>(null);
-
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
   useEffect(() => {
-    const checkPerms = async () => {
+    const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
-      const tId = localStorage.getItem("logica_tenant_id");
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
 
-      const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
-                        ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
-      setIsSuperAdminOrAdmin(adminFlag);
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
 
-      if (adminFlag) {
-        setCanDeletePost(true);
-        setCanDeleteOthersComment(true);
-        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
-      } else if (tId) {
-        const { data } = await supabase
-          .from('tenant_role_permissions')
-          .select('allowed_menus')
-          .eq('tenant_id', tId)
-          .eq('role_name', role)
-          .maybeSingle();
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
 
-        if (data && data.allowed_menus) {
-          setCanDeletePost(data.allowed_menus.includes('action_delete_supply'));
-          setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
-          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_supply_agenda')); // 🌟 안건 상정 권한 확인
-        } else {
-          setCanDeletePost(false);
-          setCanDeleteOthersComment(false);
-          setCanSubmitAgenda(false);
-        }
+      // 비품 신청 메뉴 접근 권한이 없다면 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/supply"))) {
+        alert("⛔ 비품 신청 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
       }
     };
 
-    if (isOpen) {
-      checkPerms();
-      if (reqData) {
-        setType(reqData.request_type || "사무용품");
-        setContent(reqData.content || "");
-      } else {
-        setType("사무용품");
-        setContent("");
-      }
-      setCommentInput("");
-    }
-  }, [isOpen, reqData]);
-
-  const isReadonly = reqData && !isSuperAdminOrAdmin && String(reqData.author_id) !== String(currentUser.instId);
+    checkAccess();
+  }, [router]);
 
   useEffect(() => {
-    if (commentEndRef.current) {
-      commentEndRef.current.scrollIntoView({ behavior: "smooth" });
+    if (isAuthorized) {
+      const instId = localStorage.getItem("logica_instructor_id") || "";
+      const name = localStorage.getItem("logica_instructor_name") || "관리자";
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      
+      const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
+                      ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
+      
+      setCurrentUser({ instId, name, isAdmin });
+      const now = new Date();
+      setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+      fetchRequests();
     }
-  }, [reqData?.comments]);
+  }, [isAuthorized]);
 
-  const handleSubmit = async () => {
-    if (!content.trim()) return alert("신청 내용을 입력해주세요.");
-    
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-
-    setIsSubmitting(true);
-    
-    const currentTimeISO = new Date().toISOString();
-    const primaryKey = reqData?.request_id || reqData?.id; 
+  const fetchRequests = async () => {
+    setIsLoading(true);
+    const tenantId = localStorage.getItem("logica_tenant_id");
 
     try {
-      if (reqData) {
-        const { error } = await supabase.from("supply_request").update({
-          request_type: type,
-          content,
-          updated_at: currentTimeISO,
-          last_updater_name: currentUser.name
-        }).eq("request_id", primaryKey);
-        
-        if (error) throw error;
-      } else {
-        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSubmitting(false); return; }
-
-        const { error } = await supabase.from("supply_request").insert({
-          request_type: type,
-          content,
-          status: "대기",
-          author_id: currentUser.instId,
-          author_name: currentUser.name,
-          created_at: currentTimeISO,
-          updated_at: currentTimeISO,
-          last_updater_name: currentUser.name,
-          tenant_id: myTenantId 
-        });
-        
-        if (error) throw error;
+      let query = supabase.from("supply_request").select("*").order("created_at", { ascending: false }).limit(1000);
+      
+      // 🌟 [보안 강화] 내 지점 데이터만 불러오도록 격리
+      if (tenantId && tenantId !== 'hq') {
+         query = query.eq("tenant_id", tenantId);
       }
-      
-      onSuccess();
-      onClose();
-    } catch (e: any) {
-      alert(`오류 발생: ${e.message}`);
-    } finally {
-      setIsSubmitting(false);
-    }
+
+      const { data } = await query;
+      setRequests(data || []);
+    } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  const handleAddComment = async () => {
-    if (!commentInput.trim() || !reqData) return;
-    
-    const now = new Date();
-    const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const currentTimeISO = now.toISOString();
-
-    const newComment = {
-      id: Date.now(),
-      text: commentInput.trim(),
-      authorId: currentUser.instId,
-      authorName: currentUser.name,
-      createdAt: dateStr
-    };
-    
-    const updatedComments = [...(reqData.comments || []), newComment];
-    const primaryKey = reqData.request_id || reqData.id;
-    
-    try {
-      await supabase.from("supply_request").update({ 
-        comments: updatedComments,
-        updated_at: currentTimeISO,
-        last_updater_name: currentUser.name
-      }).eq("request_id", primaryKey);
-      
-      reqData.comments = updatedComments; 
-      setCommentInput("");
-      onSuccess(); 
-    } catch (e) {
-      alert("댓글 등록에 실패했습니다.");
-    }
+  const handleDragStart = (e: React.DragEvent, reqId: string) => {
+    e.dataTransfer.setData("reqId", reqId);
+    setTimeout(() => { (e.target as HTMLElement).style.opacity = '0.5'; }, 0);
   };
 
-  const handleDeleteComment = async (commentId: number) => {
-    if (!confirm("이 댓글을 삭제하시겠습니까?")) return;
-    const updatedComments = reqData.comments.filter((c: any) => c.id !== commentId);
-    const primaryKey = reqData.request_id || reqData.id;
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDragOverCol(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, colName: string) => {
+    e.preventDefault();
+    if (dragOverCol !== colName) setDragOverCol(colName);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCol(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+    e.preventDefault();
+    setDragOverCol(null);
+    const reqId = e.dataTransfer.getData("reqId");
+    if (!reqId) return;
+
+    setRequests(prev => prev.map(r => r.request_id?.toString() === reqId || r.id?.toString() === reqId ? { ...r, status: newStatus } : r));
 
     try {
       await supabase.from("supply_request").update({ 
-        comments: updatedComments,
+        status: newStatus,
         updated_at: new Date().toISOString(),
-        last_updater_name: currentUser.name
-      }).eq("request_id", primaryKey);
-      
-      reqData.comments = updatedComments;
-      onSuccess();
-    } catch (e) {
-      alert("댓글 삭제 실패");
+        last_updater_name: currentUser.name 
+      }).eq("request_id", reqId);
+    } catch (err) {
+      alert("상태 변경 실패");
+      fetchRequests(); 
     }
   };
 
-  const handleDelete = async () => {
-    if (!confirm("⚠️ 정말 이 신청 내역을 삭제하시겠습니까?")) return;
-    const primaryKey = reqData.request_id || reqData.id;
-    try {
-      await supabase.from("supply_request").delete().eq("request_id", primaryKey);
-      onSuccess();
-      onClose();
-    } catch (e) {
-      alert("삭제 실패");
-    }
+  const openModal = (req: any | null = null) => {
+    setSelectedReq(req);
+    setIsModalOpen(true);
   };
 
-  const submitAgenda = async () => {
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
-
-    try {
-      const primaryKey = reqData?.request_id || reqData?.id;
-      await supabase.from("agenda").insert({
-        title: `[비품신청] ${type}`,
-        content: content,
-        type: "비품",
-        source: "Supply",
-        source_id: primaryKey,
-        created_by: currentUser.instId,
-        tenant_id: myTenantId 
-      });
-      alert("해당 비품 신청건이 회의 안건으로 상정되었습니다.");
-    } catch (e) {
-      alert("안건 상정 실패");
-    }
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedReq(null);
   };
 
-  if (!isOpen) return null;
+  const todos = useMemo(() => requests.filter(r => !r.status || r.status === "대기"), [requests]);
+  const inProgress = useMemo(() => requests.filter(r => r.status === "진행중"), [requests]);
+  const dones = useMemo(() => requests.filter(r => r.status === "완료"), [requests]);
+
+  const statsReqs = useMemo(() => requests.filter(r => {
+    if (!r.created_at || !statsMonth) return false;
+    const d = new Date(r.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === statsMonth;
+  }), [requests, statsMonth]);
+
+  const statsCounts = useMemo(() => {
+    const counts = { "사무용품": 0, "교재/도서": 0, "비품/장비": 0, "기타": 0 };
+    statsReqs.forEach(r => { if (counts[r.request_type as keyof typeof counts] !== undefined) counts[r.request_type as keyof typeof counts]++; });
+    return counts;
+  }, [statsReqs]);
+
+  const archivedDones = useMemo(() => statsReqs.filter(r => r.status === "완료"), [statsReqs]);
+
+  const renderCard = (req: any) => {
+    const createdDateStr = new Date(req.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const updatedDateStr = req.updated_at ? new Date(req.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : createdDateStr;
+    const updaterName = req.last_updater_name || req.author_name || "알수없음";
+
+    let typeColor = "text-slate-600 bg-slate-100 border-slate-200";
+    if (req.request_type === "비품/장비") typeColor = "text-rose-600 bg-rose-50 border-rose-200";
+    else if (req.request_type === "교재/도서") typeColor = "text-blue-600 bg-blue-50 border-blue-200";
+    else if (req.request_type === "사무용품") typeColor = "text-emerald-600 bg-emerald-50 border-emerald-200";
+
+    const cmts = req.comments || [];
+    const canDrag = currentUser.isAdmin || String(req.author_id) === String(currentUser.instId);
+
+    return (
+      <div 
+        key={req.request_id || req.id} 
+        draggable={canDrag} 
+        onDragStart={canDrag ? (e) => handleDragStart(e, req.request_id || req.id) : undefined} 
+        onDragEnd={canDrag ? handleDragEnd : undefined}
+        onClick={() => openModal(req)} 
+        className={`task-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
+      >
+        <div className="flex justify-between items-start mb-1">
+          <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type || "기타"}</span>
+        </div>
+        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep line-clamp-3">
+          {req.content || req.title}
+        </div>
+        {cmts.length > 0 && (
+          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
+            {cmts.slice(-2).map((c: any) => (
+              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
+          <div className="flex justify-between items-center text-[10px] font-bold">
+            <span className="text-slate-500">최종 수정: {updaterName}</span>
+            <span className="text-slate-400">{updatedDateStr}</span>
+          </div>
+          <div className="flex justify-between items-center text-[10px] font-bold">
+            <span className="text-blue-500">작성: {req.author_name}</span>
+            <span className="text-slate-400">{createdDateStr}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (isAuthorized === null) {
+    return (
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (isAuthorized === false) {
+    return null; 
+  }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999] p-4">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden h-[95vh] animate-[fadeIn_0.2s_ease-out]">
-        
-        <div className="bg-[#002864] p-5 flex justify-between items-center shrink-0">
-          <h2 className="text-white font-bold text-lg tracking-tight">📦 {reqData ? "비품 신청 상세 내용" : "새 비품 신청하기"}</h2>
-          <button onClick={onClose} className="text-white hover:text-rose-400 transition-colors font-bold text-2xl leading-none">&times;</button>
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
+      <div className="flex justify-between items-end shrink-0">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">📦 비품 신청 보드</h2>
+          <p className="text-sm font-bold text-slate-400 mt-1">학원 내 필요한 비품, 교재, 장비를 신청하고 처리 상태를 관리하세요.</p>
+        </div>
+      </div>
+
+      <div className="flex-1 flex gap-6 overflow-hidden pb-2">
+        <div className="flex-1 min-w-[250px] bg-slate-100/50 border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-slate-100 border-b border-slate-200 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-slate-700">🛒 대기 중 (Requested)</h3>
+            <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">{todos.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "대기" ? "bg-slate-200 border-2 border-dashed border-slate-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "대기")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "대기")}
+          >
+            {todos.map(renderCard)}
+          </div>
         </div>
 
-        <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
-          
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
-            <div className="shrink-0">
-              <label className="block text-xs font-bold text-slate-500 mb-1.5">분류 (태그) <span className="text-rose-500">*</span></label>
-              <select 
-                value={type} 
-                onChange={(e) => setType(e.target.value)} 
-                disabled={isReadonly}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#002864] disabled:opacity-70"
-              >
-                <option value="사무용품">📌 사무용품</option>
-                <option value="교재/도서">📚 교재/도서</option>
-                <option value="비품/장비">🖥️ 비품/장비</option>
-                <option value="기타">기타</option>
-              </select>
-            </div>
-
-            <div className="flex flex-col flex-1 min-h-0">
-              <label className="block text-xs font-bold text-slate-500 mb-1.5">신청 내용 (품목, 수량, 구매 링크 등) <span className="text-rose-500">*</span></label>
-              <textarea 
-                value={content} 
-                onChange={(e) => setContent(e.target.value)} 
-                disabled={isReadonly}
-                placeholder="예: A4 용지 2박스 주문 부탁드립니다. (링크: ...)"
-                className="flex-1 w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#002864] resize-none custom-scroll disabled:opacity-70"
-              />
-            </div>
+        <div className="flex-1 min-w-[250px] bg-blue-50/30 border border-blue-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-blue-50 border-b border-blue-100 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-blue-700">🚚 구매/진행 중 (In Progress)</h3>
+            <span className="bg-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
           </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "진행중" ? "bg-blue-100/50 border-2 border-dashed border-blue-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "진행중")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "진행중")}
+          >
+            {inProgress.map(renderCard)}
+          </div>
+        </div>
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
-            <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-slate-700 text-sm">💬 진행 상황 및 소통 노트</h3>
-              <span className="text-[10px] font-bold text-slate-500">모든 작업자가 기록을 남길 수 있습니다.</span>
+        <div className="flex-1 min-w-[250px] bg-emerald-50/30 border border-emerald-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-emerald-50 border-b border-emerald-100 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-emerald-700">✅ 완료/지급 (Done)</h3>
+            <span className="bg-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{dones.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "완료" ? "bg-emerald-100/50 border-2 border-dashed border-emerald-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "완료")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "완료")}
+          >
+            {dones.map(renderCard)}
+          </div>
+        </div>
+
+        <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-hidden">
+          <button onClick={() => openModal()} className="w-full bg-[#002864] hover:bg-blue-900 text-white px-5 py-3.5 rounded-xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+            새 비품 신청하기
+          </button>
+
+          <div className="flex-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
+            <div className="p-4 bg-slate-800 text-white shrink-0 flex justify-between items-center rounded-t-2xl">
+              <h3 className="font-black text-sm">📊 분류별 통계 및 보관함</h3>
             </div>
-            
-            <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
-              {(!reqData || !reqData.comments || reqData.comments.length === 0) ? (
-                <div className="flex-1 flex items-center justify-center text-slate-400 font-bold text-xs h-full">아직 등록된 진행 상황 노트가 없습니다.</div>
+            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] shadow-sm cursor-pointer" />
+            </div>
+            <div className="p-3 border-b border-slate-100 shrink-0">
+              <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
+                <div className="bg-emerald-50 p-2 rounded border border-emerald-100 flex justify-between shadow-sm"><span className="text-emerald-600">사무용품</span><span>{statsCounts["사무용품"]}건</span></div>
+                <div className="bg-blue-50 p-2 rounded border border-blue-100 flex justify-between shadow-sm"><span className="text-blue-600">교재/도서</span><span>{statsCounts["교재/도서"]}건</span></div>
+                <div className="bg-rose-50 p-2 rounded border border-rose-100 flex justify-between shadow-sm"><span className="text-rose-600">비품/장비</span><span>{statsCounts["비품/장비"]}건</span></div>
+                <div className="bg-purple-50 p-2 rounded border border-purple-100 flex justify-between shadow-sm"><span className="text-purple-600">기타</span><span>{statsCounts["기타"]}건</span></div>
+              </div>
+            </div>
+            <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 shrink-0">
+              <span className="text-xs font-bold text-slate-500">해당 월 완료된 신청 목록</span>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50 space-y-2">
+              {archivedDones.length === 0 ? (
+                <div className="text-center py-10 text-slate-400 font-bold text-xs">해당 월에 완료된<br/>신청 내역이 없습니다.</div>
               ) : (
-                reqData.comments.map((c: any) => {
-                  const isMe = c.authorName === currentUser.name;
-                  const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
-                  
+                archivedDones.map(req => {
+                  const dateStr = new Date(req.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+                  let typeColor = "text-slate-600 bg-slate-200 border-slate-300";
+                  if (req.request_type === "비품/장비") typeColor = "text-rose-600 bg-rose-100 border-rose-200";
+                  else if (req.request_type === "교재/도서") typeColor = "text-blue-600 bg-blue-100 border-blue-200";
+                  else if (req.request_type === "사무용품") typeColor = "text-emerald-600 bg-emerald-100 border-emerald-200";
+
                   return (
-                    <div key={c.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
-                      <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
-                        {canDelete && (
-                          <button onClick={() => handleDeleteComment(c.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
-                        )}
-                        <span className="text-[10px] text-slate-500 font-bold">
-                          {c.authorName} <span className="font-normal opacity-70 ml-1">{c.createdAt}</span>
-                        </span>
+                    <div key={req.request_id || req.id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-slate-400 transition-colors" onClick={() => openModal(req)}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{req.request_type || "기타"}</span>
+                        <span className="text-[10px] font-bold text-slate-400">{dateStr}</span>
                       </div>
-                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-blue-100 text-[#002864] border-blue-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
-                        {c.text}
-                      </div>
+                      <div className="text-xs font-bold text-slate-700 leading-snug line-clamp-2">{req.content || req.title}</div>
                     </div>
                   );
                 })
               )}
-              <div ref={commentEndRef} />
             </div>
-
-            {reqData && (
-              <div className="bg-white p-3 border-t border-slate-200 flex gap-2 items-end shrink-0">
-                <textarea 
-                  value={commentInput} 
-                  onChange={(e) => {
-                    setCommentInput(e.target.value);
-                    e.target.style.height = 'auto';
-                    e.target.style.height = (e.target.scrollHeight) + 'px';
-                  }}
-                  onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
-                  rows={1}
-                  placeholder="진행 상황이나 전달할 메모를 남겨주세요." 
-                  className="flex-1 bg-slate-100 px-3 py-2 border border-transparent rounded-lg text-sm font-medium focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[80px] custom-scroll" 
-                />
-                <button onClick={handleAddComment} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors shrink-0">기록 남기기</button>
-              </div>
-            )}
           </div>
         </div>
-
-        <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-          <div className="flex gap-2 items-center">
-            {reqData && (isSuperAdminOrAdmin || canDeletePost || String(reqData.author_id) === String(currentUser.instId)) && (
-              <button onClick={handleDelete} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">신청서 삭제</button>
-            )}
-            
-            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
-            {reqData && (isSuperAdminOrAdmin || canSubmitAgenda) && (
-              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
-                🎙️ 회의 안건 상정
-              </button>
-            )}
-          </div>
-          
-          <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-6 py-2.5 bg-[#002864] hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
-              {isSubmitting ? "저장 중..." : "변경사항 저장"}
-            </button>
-          </div>
-        </div>
-
       </div>
+
+      <SupplyModal 
+        isOpen={isModalOpen} 
+        reqData={selectedReq} 
+        currentUser={currentUser} 
+        onClose={closeModal} 
+        onSuccess={fetchRequests} 
+      />
     </div>
   );
 }

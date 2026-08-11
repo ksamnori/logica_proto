@@ -9,7 +9,7 @@ import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 export default function TeacherDashboardPage() {
   const router = useRouter();
 
-  // 🌟 [추가됨] 화면 렌더링 전 권한을 검사하기 위한 상태
+  // 🌟 [안전장치 추가] 화면 렌더링 전 권한을 검사하기 위한 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isSuperLevel: false });
@@ -76,7 +76,7 @@ export default function TeacherDashboardPage() {
     }
   }, [selectedClassId]);
 
-  // 🌟 [핵심 변경] 원장님이 요청하신 정통적인 폭포수(Waterfall) 권한 검사 로직
+  // 🌟 [핵심 변경] 흰 화면(Crash) 방지용 완벽한 권한 검증 로직
   const loadPermissions = async (role: string, tId: string, isGodMode: boolean) => {
     let fetchedMenus: string[] = [];
     
@@ -84,38 +84,40 @@ export default function TeacherDashboardPage() {
       setAllowedMenus(["ALL"]);
       fetchedMenus = ["ALL"];
     } else if (tId && role) {
-      const { data } = await supabase
-        .from('tenant_role_permissions')
-        .select('allowed_menus')
-        .eq('tenant_id', tId)
-        .eq('role_name', role)
-        .maybeSingle();
+      try {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
 
-      if (data && data.allowed_menus) {
-        setAllowedMenus(data.allowed_menus);
-        fetchedMenus = data.allowed_menus;
-      } else {
-        // 권한 데이터가 없으면 기본값 세팅
-        const defaultMenus = ['/home', '/student', '/class', '/learning', '/progress', '/makeup', '/minutes', '/task', '/cs', '/supply', '/exam-list', '/admission'];
-        setAllowedMenus(defaultMenus);
-        fetchedMenus = defaultMenus;
+        // data 자체가 안전하게 있는지, allowed_menus 배열이 실제로 존재하는지 꼼꼼히 체크
+        if (data && Array.isArray(data.allowed_menus)) {
+          setAllowedMenus(data.allowed_menus);
+          fetchedMenus = data.allowed_menus;
+        } else {
+          // DB에 데이터가 없거나 배열이 아닌 경우 빈 배열로 처리하여 차단
+          setAllowedMenus([]);
+          fetchedMenus = [];
+        }
+      } catch (err) {
+        // 서버 에러 시 크래시 방지
+        console.error("권한 로딩 에러:", err);
       }
     }
 
     const canAccessHome = fetchedMenus.includes("ALL") || fetchedMenus.includes("/home");
     const canAccessAdmission = fetchedMenus.includes("ALL") || fetchedMenus.includes("/admission");
 
-    // 1단계: 홈 대시보드 권한이 있으면 화면을 렌더링합니다.
     if (canAccessHome) {
+      // 1단계: 홈 권한이 있으면 정상적으로 홈 렌더링
       setIsAuthorized(true);
-    } 
-    // 2단계: 홈 권한은 없지만 진단평가 권한이 있다면 진단평가로 튕겨냅니다.
-    else if (canAccessAdmission) {
-      router.push("/admission");
-    } 
-    // 3단계: 아무 권한도 없다면 접속을 완전히 차단합니다.
-    else {
-      alert("⛔ 시스템 접근 권한이 없습니다. 최고관리자에게 문의하세요.");
+    } else if (canAccessAdmission) {
+      // 2단계: 홈 권한은 없지만 진단평가 권한만 있는 경우 (조교/파트 등)
+      router.replace("/admission");
+    } else {
+      // 3단계: 둘 다 없으면 완벽 차단
       setIsAuthorized(false);
     }
   };
@@ -136,7 +138,7 @@ export default function TeacherDashboardPage() {
       let idxA = order.indexOf(a.level_name); let idxB = order.indexOf(b.level_name);
       if (idxA === -1) idxA = 999; if (idxB === -1) idxB = 999;
       if (idxA !== idxB) return idxA - idxB;
-      return a.name.localeCompare(b.name);
+      return (a.name || "").localeCompare(b.name || "");
     });
 
     setMyClasses(sortedClasses);
@@ -246,7 +248,7 @@ export default function TeacherDashboardPage() {
       if (idx % 5 !== 0) hwSubmitCount++; 
     });
 
-    setStudents((classStudents || []).sort((a: any, b: any) => a.name.localeCompare(b.name)));
+    setStudents((classStudents || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
 
     const avgScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : 0;
     const hwRate = (classStudents || []).length > 0 ? Math.round((hwSubmitCount / (classStudents || []).length) * 100) : 0;
@@ -296,7 +298,7 @@ export default function TeacherDashboardPage() {
       };
     });
 
-    setAttStudents(mappedAtt.sort((a: any, b: any) => a.name.localeCompare(b.name)));
+    setAttStudents(mappedAtt.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
   };
 
   const attSummary = useMemo(() => {
@@ -464,18 +466,32 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
+  // 🌟 [안전장치 추가] 권한 확인 전에는 로딩 UI 표출 (흰 화면 아님)
   if (isAuthorized === null) {
-    return <div className="p-8 text-slate-500 font-bold flex items-center justify-center h-full">보안 권한을 확인하는 중입니다...</div>;
+    return (
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+        </div>
+      </div>
+    );
   }
-  
+
+  // 🌟 [안전장치 추가] 권한이 완전히 없는 경우 접근 통제 화면 표출
   if (isAuthorized === false) {
     return (
-      <div className="h-full flex flex-col font-pretendard bg-slate-50 p-8 items-center justify-center">
-        <div className="bg-white p-10 rounded-2xl shadow-sm border border-slate-200 text-center max-w-md">
-          <div className="text-4xl mb-4">⛔</div>
-          <h2 className="text-lg font-black text-rose-600 mb-2">접근 권한이 없습니다.</h2>
-          <p className="text-sm font-medium text-slate-500">현재 선생님의 계정에는 허가된 메뉴가 없습니다.<br/>최고관리자에게 권한 부여를 요청해주세요.</p>
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50 p-4">
+        <div className="bg-white p-10 rounded-2xl shadow-xl border border-slate-200 text-center max-w-md w-full">
+          <div className="text-5xl mb-4">⛔</div>
+          <h2 className="text-xl font-black text-rose-600 mb-2">접근 권한이 제한되었습니다</h2>
+          <p className="text-sm font-medium text-slate-500 leading-relaxed">
+            현재 로그인하신 계정으로는 어떠한 메뉴에도 접근할 수 없습니다.<br/>
+            최고관리자 또는 원장님께 <strong>메뉴 접근 권한 부여</strong>를 요청해 주세요.
+          </p>
+          <button onClick={() => router.replace("/")} className="mt-8 px-6 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200 transition-colors w-full">
+            로그인 화면으로 돌아가기
+          </button>
         </div>
       </div>
     );
@@ -810,7 +826,7 @@ export default function TeacherDashboardPage() {
 
       <AgendaSidebar currentUser={currentUser} tenantId={tenantId} hasAccess={hasAccess} />
 
-      {/* 수동 설정 모달 및 공지 모달 */}
+      {/* 수동 설정 모달 */}
       {manualModalData && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">

@@ -50,6 +50,9 @@ type TabType = 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT';
 export default function LearningPage() {
   const router = useRouter();
 
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
 
   const [groupedClasses, setGroupedClasses] = useState<Record<string, ClassInfo[]>>({});
@@ -75,9 +78,52 @@ export default function LearningPage() {
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
   useEffect(() => {
-    fetchBaseData();
-  }, []);
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 학습/평가(learning) 메뉴 접근 권한이 없다면 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/learning"))) {
+        alert("⛔ 학습 및 평가 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
+
+  // 권한이 통과되었을 때만 기본 데이터를 불러옵니다.
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchBaseData();
+    }
+  }, [isAuthorized]);
 
   useEffect(() => {
     if (allStudentsList.length > 0) {
@@ -195,9 +241,16 @@ export default function LearningPage() {
       const instId = localStorage.getItem('logica_instructor_id');
       const role = localStorage.getItem('logica_instructor_role') || '';
       const pos = localStorage.getItem('logica_instructor_position') || '';
+      const tenantId = localStorage.getItem('logica_tenant_id') || '';
       const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('원장') || pos.includes('실장') || pos.includes('최고관리자');
 
       let classQuery = supabase.from('class').select('class_id, name, level_name').order('name');
+      
+      // 🌟 [보안 강화] 타 지점의 클래스가 렌더링되지 않도록 격리
+      if (tenantId && tenantId !== 'hq') {
+        classQuery = classQuery.eq('tenant_id', tenantId);
+      }
+
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const { data: classes } = await classQuery;
@@ -865,7 +918,6 @@ export default function LearningPage() {
 
       alert(`🎉 오답 프린트가 완성되었습니다! (총 ${targetQIds.length}문항)\n\n오답 관리 탭이나 문제지 보관함에서 확인 가능합니다.`);
       setSelectedBlocks([]);
-      // 💡 여기서 handleMainTabClick 대신 직접 상태 변경 (콜백 지옥 방지)
       setDateFilter('ALL');
       
     } catch (e: any) {
@@ -927,6 +979,22 @@ export default function LearningPage() {
     if (includeTime) return `${dt} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     return dt;
   };
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 렌더링 차단 (흰 화면 아님)
+  if (isAuthorized === null) {
+    return (
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (isAuthorized === false) {
+    return null; 
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative">
@@ -1023,23 +1091,23 @@ export default function LearningPage() {
           {currentView.type === 'GLOBAL_LIST' && (
             <GlobalList 
               activeTab={activeTab} globalList={globalList} isLoading={isLoading} 
-              globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={() => {}} 
-              handleBulkCompleteGlobal={() => {}} handleBulkDeleteGlobal={() => {}} 
-              handleViewChange={handleViewChange} toggleGlobalSelection={() => {}} 
-              formatDateLabel={formatDateLabel} handleForceComplete={() => {}} 
-              handleDeleteExam={() => {}} handleDeleteHomework={() => {}} handleDeletePrint={() => {}} 
+              globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
+              handleBulkCompleteGlobal={handleBulkCompleteGlobal} handleBulkDeleteGlobal={handleBulkDeleteGlobal} 
+              handleViewChange={handleViewChange} toggleGlobalSelection={toggleGlobalSelection} 
+              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
+              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
             />
           )}
 
           {currentView.type === 'STUDENT' && (
             <StudentTimeline 
               currentView={currentView} activeTab={activeTab} dateFilter={dateFilter} setDateFilter={setDateFilter} 
-              isLoading={isLoading} filteredTimeline={timelineData} selectedBlocks={selectedBlocks} 
-              setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={() => {}} 
-              handleBulkCompleteStudent={() => {}} handleBulkDeleteStudent={() => {}}
+              isLoading={isLoading} filteredTimeline={filteredTimeline} selectedBlocks={selectedBlocks} 
+              setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
+              handleBulkCompleteStudent={handleBulkCompleteStudent} handleBulkDeleteStudent={handleBulkDeleteStudent}
               handleGenerateIncorrectPrint={handleGenerateIncorrectPrint} isGeneratingPrint={isGeneratingPrint}
-              formatDateLabel={formatDateLabel} handleForceComplete={() => {}}
-              handleDeleteExam={() => {}} handleDeleteHomework={() => {}} handleDeletePrint={() => {}} 
+              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete}
+              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
             />
           )}
         </div>

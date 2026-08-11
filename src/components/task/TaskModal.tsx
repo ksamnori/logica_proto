@@ -25,9 +25,11 @@ export default function TaskModal({
   const [isSaving, setIsSaving] = useState(false);
   
   const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
-  // 🌟 [추가] 세부 삭제 권한 상태
+  
+  // 🌟 세부 권한 상태
   const [canDeletePost, setCanDeletePost] = useState(false);
   const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
+  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
@@ -44,6 +46,7 @@ export default function TaskModal({
       if (adminFlag) {
         setCanDeletePost(true);
         setCanDeleteOthersComment(true);
+        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
       } else if (tId) {
         const { data } = await supabase
           .from('tenant_role_permissions')
@@ -53,12 +56,13 @@ export default function TaskModal({
           .maybeSingle();
 
         if (data && data.allowed_menus) {
-          // 🌟 [추가] DB에서 업무 삭제 및 타인 댓글 삭제 권한 확인
           setCanDeletePost(data.allowed_menus.includes('action_delete_task'));
           setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
+          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_task_agenda')); // 🌟 안건 상정 권한 확인
         } else {
           setCanDeletePost(false);
           setCanDeleteOthersComment(false);
+          setCanSubmitAgenda(false);
         }
       }
     };
@@ -206,7 +210,7 @@ export default function TaskModal({
 
   if (!isOpen || !modalData) return null;
 
-  const isReadonly = modalData.memo_id && !isSuperAdminOrAdmin && String(modalData.instructor_id) !== String(currentUser.instId);
+  const isReadonly = Boolean(modalData.memo_id) && !isSuperAdminOrAdmin && String(modalData.instructor_id) !== String(currentUser.instId);
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
@@ -308,10 +312,12 @@ export default function TaskModal({
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
           <div className="flex gap-2 items-center">
             {/* 🌟 [수정] 원장, 작성자 본인, 또는 '업무 삭제 권한'이 있는 사람만 삭제 가능 */}
-            {modalData.memo_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.instructor_id) === String(currentUser.instId)) && (
+            {!!modalData.memo_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.instructor_id) === String(currentUser.instId)) && (
               <button onClick={deleteTask} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">업무 삭제</button>
             )}
-            {modalData.memo_id && (
+            
+            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
+            {!!modalData.memo_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
               <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정
               </button>

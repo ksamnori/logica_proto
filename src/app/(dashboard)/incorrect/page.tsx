@@ -7,7 +7,6 @@ import { supabase } from "@/lib/supabase";
 
 const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강', '메이크업/보강', '기타'];
 
-// 💡 1. 명확한 타입(Interface) 정의로 스파게티 코드 방지 및 유지보수성 향상
 interface StudentInfo {
   id: string;
   name: string;
@@ -32,6 +31,9 @@ interface ViewState {
 export default function IncorrectPage() {
   const router = useRouter();
 
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   // === 데이터 상태 ===
   const [groupedClasses, setGroupedClasses] = useState<Record<string, ClassInfo[]>>({});
   const [allStudentsList, setAllStudentsList] = useState<StudentInfo[]>([]);
@@ -49,20 +51,70 @@ export default function IncorrectPage() {
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
-    fetchAllData();
-  }, []);
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
 
-  // 💡 2. 데이터 Fetch 로직 통합 (내 학생들을 먼저 찾고, 그 학생들의 오답 기록만 안전하게 가져옴)
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 오답 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/incorrect"))) {
+        alert("⛔ 오답 노트 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
+
+  // 권한이 통과되었을 때만 초기 데이터를 페칭합니다.
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchAllData();
+    }
+  }, [isAuthorized]);
+
   const fetchAllData = async () => {
     setIsLoading(true);
     try {
       const instId = localStorage.getItem('logica_instructor_id');
       const role = localStorage.getItem('logica_instructor_role') || '';
       const pos = localStorage.getItem('logica_instructor_position') || '';
-      const isAdmin = ['ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('원장') || pos.includes('실장');
+      const tenantId = localStorage.getItem('logica_tenant_id') || '';
+
+      const isAdmin = ['ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('원장') || pos.includes('실장') || pos.includes('최고관리자');
 
       let classQuery = supabase.from('class').select('class_id, name, level_name').order('name');
+      
+      // 🌟 [보안 강화] 타 지점의 클래스가 렌더링되지 않도록 격리
+      if (tenantId && tenantId !== 'hq') {
+        classQuery = classQuery.eq('tenant_id', tenantId);
+      }
+      
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const { data: classes } = await classQuery;
@@ -80,7 +132,7 @@ export default function IncorrectPage() {
         .in('class_id', classIds);
 
       enrollments?.forEach((e: any) => {
-        if (e.student) {
+        if (e.student && e.student.status === '재원') {
           if (!studentsByClass[e.class_id]) studentsByClass[e.class_id] = [];
           const studentName = Array.isArray(e.student) ? e.student[0]?.name : e.student.name;
           const studentObj = { 
@@ -112,7 +164,6 @@ export default function IncorrectPage() {
       setGroupedClasses(groups);
       setAllStudentsList(allStudents);
 
-      // 💡 [최적화 & 보안] 전체 DB가 아닌 '내 학생들'의 오답 기록만 200명씩 끊어서 안전하게 가져옴
       const studentIds = allStudents.map(s => s.id);
       let fetchedStats: any[] = [];
       const chunkSize = 200;
@@ -136,7 +187,6 @@ export default function IncorrectPage() {
 
   const fetchSpecificStudentIncorrectData = async (studentId: string) => {
     setIsLoading(true);
-    // 💡 다른 학생 클릭 시 이전 학생의 잔상이 보이지 않도록 초기화
     setStudentPrints([]); 
     setStudentRecords([]);
     
@@ -211,11 +261,10 @@ export default function IncorrectPage() {
       await supabase.from('student_incorrect_record').delete().eq('record_id', recordId);
       alert("오답 기록 및 관련 클리닉 내역이 삭제되었습니다.");
       fetchSpecificStudentIncorrectData(currentView.studentId);
-      fetchAllData(); // 삭제 후 전체 통계 리프레시
+      fetchAllData(); 
     } catch (e) { alert("삭제 실패"); }
   };
 
-  // 💡 3. [핵심 최적화] O(N²) 루프 제거 -> 해시맵(Map) 자료구조를 통한 O(1) 캐싱
   const studentStatsMap = useMemo(() => {
     const map: Record<string, { pending: number; done: number }> = {};
     incorrectStats.forEach(e => {
@@ -227,7 +276,6 @@ export default function IncorrectPage() {
   }, [incorrectStats]);
 
   const renderStudentCard = (s: StudentInfo, cName: string, showClassNameBadge = false) => {
-    // 미리 계산해둔 Map에서 값을 쏙 빼오기만 합니다. (초고속 연산)
     const { pending = 0, done = 0 } = studentStatsMap[s.id] || { pending: 0, done: 0 };
 
     if (isFilterActive && pending === 0) return null;
@@ -250,6 +298,22 @@ export default function IncorrectPage() {
       </div>
     );
   };
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 렌더링 차단 (흰 화면 아님)
+  if (isAuthorized === null) {
+    return (
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#ea580c] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (isAuthorized === false) {
+    return null; 
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
@@ -338,7 +402,6 @@ export default function IncorrectPage() {
                   const classList = groupedClasses[lvl];
                   if (!classList || classList.length === 0) return null;
                   
-                  // O(1) Map 참조로 속도 획기적 개선
                   const visibleClasses = classList.filter(c => c.students.some(s => !isFilterActive || (studentStatsMap[s.id]?.pending || 0) > 0));
                   if (visibleClasses.length === 0) return null;
 

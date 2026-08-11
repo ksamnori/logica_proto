@@ -4,34 +4,23 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getISOWeekKST, getKSTDateString, addDaysKST } from "@/lib/classRound";
+import { getISOWeekKST, getKSTDateString } from "@/lib/classRound";
 
-// 분리된 컴포넌트 불러오기
+// === 컴포넌트 불러오기 ===
 import ViewerHeader from "@/components/exam/ViewerHeader";
-import PublishPanel from "@/components/exam/PublishPanel";
-import WeekPickerCalendar from "@/components/exam/WeekPickerCalendar";
+import ViewerSidebar from "@/components/exam/ViewerSidebar";
+import ViewerToolbar from "@/components/exam/ViewerToolbar";
 
-const LOGO_FOOTER_LEFT_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_footer_left.png";
-const LOGO_FOOTER_RIGHT_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_footer_right.png";
-const ADMISSION_HEADER_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logo_entrance.png";
+// === 유틸리티 함수 불러오기 ===
+import {
+  ADMISSION_HEADER_URL, LOGO_FOOTER_LEFT_URL, LOGO_FOOTER_RIGHT_URL,
+  formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml, generateColHtml
+} from "@/utils/examRenderUtils";
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
 const PALETTE_STORAGE_KEY = 'examViewerColorPalette';
 const DEFAULT_PALETTE = ['#2563eb', '#002864', '#14532d'];
-
-// 선택한 날짜가 속한 주(ISO 8601, 월~일 기준)를 "8월 1주차" 형식으로 표시.
-// ISO 8601 규칙: 그 주가 어느 "월"에 속하는지는 월요일이 아니라 그 주의 목요일이 포함된 달로 정한다
-// (getISOWeekKST가 연 단위 주차를 셀 때 목요일로 옮겨서 계산하는 것과 동일한 기준).
-// 같은 주가 두 달에 걸쳐 있을 수 있어(예: 6월 5주차 == 7월 1주차) 라벨이 겹칠 수 있음 — 의도된 동작.
-const getMonthWeekLabel = (dateStr: string) => {
-  const dayNum = new Date(dateStr + 'T00:00:00Z').getUTCDay() || 7; // 1(월)~7(일)
-  const thursday = addDaysKST(dateStr, 4 - dayNum);
-  const d = new Date(thursday + 'T00:00:00Z');
-  const month = d.getUTCMonth() + 1;
-  const weekOfMonth = Math.ceil(d.getUTCDate() / 7);
-  return `${month}월 ${weekOfMonth}주차`;
-};
 
 export default function ExamViewerPage() {
   const router = useRouter();
@@ -55,7 +44,6 @@ export default function ExamViewerPage() {
   const rebuildExamIdRef = useRef<string | null>(null);
   const currentExamIdRef = useRef<string | null>(null);
   
-  // PublishPanel에 넘길 React State
   const [savedExamId, setSavedExamId] = useState<string | null>(null);
   const [isExamDistributed, setIsExamDistributed] = useState<boolean>(false);
 
@@ -64,8 +52,6 @@ export default function ExamViewerPage() {
   const [testWeek, setTestWeek] = useState<number>(getISOWeekKST());
   const [testDate, setTestDate] = useState<string>(getKSTDateString());
   const [isWeekPopupOpen, setIsWeekPopupOpen] = useState(false);
-  // 배정 대상 학년은 PublishPanel(하단 "출제 및 배포 대상 관리")에서 고른다 — 여기서는
-  // exam_master 저장용으로 그 패널이 onWeeklyMetaChange로 알려주는 최신 값만 들고 있는다.
   const [weeklyTargetGrade, setWeeklyTargetGrade] = useState("");
   const [template, setTemplate] = useState("basic1");
   const [titleMode, setTitleMode] = useState("all");
@@ -251,7 +237,6 @@ export default function ExamViewerPage() {
 
         title = sessionStorage.getItem('examTitle') || '새로운 테스트';
 
-        // 🌟 [핵심 수정] 클리닉 모드(맞춤 오답)에서 넘어왔을 경우 양식을 '오답프린트'로 강제 고정!
         if (sessionStorage.getItem('isClinicMode') === 'true') {
           lType = '오답프린트';
         } else {
@@ -267,7 +252,6 @@ export default function ExamViewerPage() {
           if (origExam) {
             title = duplicateExamId ? (origExam.title + ' (복제본)') : origExam.title;
             badge = origExam.sub_title || '';
-            // 클리닉 모드가 아닐 때만 기존 양식을 덮어씀
             if (sessionStorage.getItem('isClinicMode') !== 'true') {
               lType = origExam.exam_type || '선택없음';
             }
@@ -362,126 +346,6 @@ export default function ExamViewerPage() {
     }
   };
 
-  const formatExamDate = (isoStr: string) => {
-    if (!isoStr) return '';
-    const parts = isoStr.split('-');
-    if (parts.length !== 3) return '';
-    return `${parts[0]}.${parts[1]}.${parts[2]}`;
-  };
-
-  const buildHeaderHtml = (badge: string, title: string, showTitle: boolean, currTmpl: string, eDate: string) => {
-    if (currTmpl === 'basic2') {
-      const courseBadge = badge ? `<div class="font-bold text-[14px] px-3 py-1.5 rounded-md shadow-sm bg-slate-200 shrink-0" style="color: var(--color-title);">${badge}</div>` : '';
-      if (!showTitle) {
-          return `<div class="flex justify-end items-center border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">${courseBadge}</div>`;
-      }
-      const yearText = eDate ? `${eDate.split('-')[0]}년` : '';
-      const yearHtml = yearText ? `<div class="text-[14px] font-bold text-slate-500 whitespace-nowrap shrink-0">${yearText}</div>` : '';
-      return `
-          <div class="flex justify-between items-end border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
-              <div class="h-[80px] flex items-center gap-4 overflow-hidden" style="max-width: 70%;">
-                  <img src="${LOGO_FOOTER_LEFT_URL}" class="h-9 object-contain shrink-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-lg shrink-0\\'>LOGICA</span>'">
-                  <h1 class="text-[22px] font-bold whitespace-nowrap overflow-hidden text-ellipsis translate-y-1" style="color: var(--color-title);">${title}</h1>
-                  ${yearHtml}
-              </div>
-              ${courseBadge}
-          </div>`;
-    }
-
-    const courseBadge = badge ? `<div class="font-bold text-[14px] px-3 py-1.5 rounded-md shadow-sm bg-slate-200" style="color: var(--color-title);">${badge}</div>` : '';
-    const dateHtml = eDate ? `<div class="text-[13px] font-bold" style="color: var(--color-line);">${formatExamDate(eDate)}</div>` : '';
-    const topRightStack = (dateHtml || courseBadge) ? `<div class="flex flex-col items-end gap-1">${dateHtml}${courseBadge}</div>` : '';
-    
-    if (!showTitle) {
-      return `<div class="flex justify-end items-center border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">${topRightStack}</div>`;
-    }
-    return `
-        <div class="flex justify-between items-end border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
-            <div class="h-[80px] flex items-end overflow-hidden pb-1" style="max-width: 70%;">
-                <h1 class="text-[26px] font-bold whitespace-nowrap overflow-hidden text-ellipsis w-full" style="color: var(--color-title);">${title}</h1>
-            </div>
-            <div class="mt-4">${topRightStack}</div>
-        </div>`;
-  };
-
-  const buildFooterHtml = (badge: string, pageIndex: number, totalPages: number, title: string, currTmpl: string, eDate: string) => {
-    if (currTmpl === 'basic2') {
-      const displayPageNum = `${pageIndex + 1} / ${totalPages}`;
-      return `
-          <div class="border-t-[2px] pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20" style="border-top-color: var(--color-line);">
-              <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
-              <div class="absolute right-0 bottom-0 flex justify-end items-end pointer-events-none">
-                  <div class="text-[13px] text-slate-500 font-bold whitespace-nowrap text-right tracking-widest">${displayPageNum}</div>
-              </div>
-          </div>`;
-    }
-
-    return `
-        <div class="border-t-[2px] pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20" style="border-top-color: var(--color-line);">
-            <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
-            <div class="absolute right-0 bottom-0 flex justify-end items-end pointer-events-none">
-                <div class="text-[14px] text-slate-400 font-bold whitespace-nowrap text-right tracking-widest">${pageIndex + 1} / ${totalPages}</div>
-            </div>
-        </div>`;
-  };
-
-  const getCleanUrl = (url: string) => {
-    if (!url || url === 'null') return '';
-    let validUrl = url;
-    if (typeof validUrl === 'string' && validUrl.trim().startsWith('[')) { try { validUrl = JSON.parse(validUrl)[0]; } catch(e){} }
-    if (validUrl && !validUrl.startsWith('http') && !validUrl.startsWith('data:image')) {
-        validUrl = `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/question_images/${validUrl.replace(/^\/+/, '')}`;
-    }
-    return validUrl;
-  };
-
-  const formatQText = (str: string) => {
-    if (!str) return ''; str = String(str);
-    str = str.replace(/</g, ' &lt; ').replace(/>/g, ' &gt; ').replace(/\n/g, '<br>');
-    str = str.replace(/<br>\s*,\s*<br>/g, ', ').replace(/<br>\s*,/g, ', ').replace(/,\s*<br>/g, ', ');
-    while (/\\text\s*\{\s*\\text\s*\{/.test(str)) { str = str.replace(/\\text\s*\{\s*\\text\s*\{([^{}]+)\}\s*\}/g, '\\text{$1}'); }
-    str = str.replace(/\\text\s*\{([^{}]*[가-힣]+[^{}]*)\}/g, '$1');
-    str = str.replace(/\\bigcirc/g, '\\circ').replace(/\^{?[○◯]}?/g, '^{\\circ}').replace(/([0-9]+)\s*[○◯]/g, '$1^{\\circ}');
-    str = str.replace(/[◀◁]\s*\|?\s*[▶▷]/g, '□').replace(/◁\|▷/g, '□').replace(/◀\|▶/g, '□');
-    str = str.replace(/\\overset\s*\{\s*([^}]+)\s*\}\s*\{\s*\\square\s*\}/g, ' $1 ').replace(/\\overset\s*\{\s*([^}]+)\s*\}\s*\{\s*□\s*\}/g, ' $1 '); 
-    return str;
-  };
-
-  const generateGroupBlock = (g: any) => {
-    let subHtml = '';
-    g.questions.forEach((q: any, sIdx: number) => {
-        let safeImgUrl = String(q.image_url || '').trim();
-        let imgHtml = '';
-        if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-            imgHtml = `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
-        }
-        const prefix = g.questions.length > 1 ? `<span class="font-extrabold text-black mr-1">(${q.sub_num || sIdx + 1})</span>` : '';
-        subHtml += `
-            <div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}">
-                <div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(q.question)}</div>
-                ${imgHtml}
-            </div>`;
-    });
-    return `
-        <div class="flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
-            <div class="flex items-start w-full min-w-0">
-                <div class="flex flex-col items-center mr-3 shrink-0 min-w-[36px]">
-                    <span style="font-family: 'CJU_Medium', sans-serif !important; color: var(--color-num);" class="text-[42px] leading-[0.85] tracking-tighter">${g.displayNum}</span>
-                </div>
-                <div class="flex flex-col w-full min-w-0 pt-[2px]">${subHtml}</div>
-            </div>
-        </div>`;
-  };
-
-  const generateColHtml = (colGroups: any[]) => {
-    if (!colGroups || colGroups.length === 0) return `<div class="w-full min-w-0"></div>`;
-    const n = colGroups.length;
-    let colHtml = `<div class="w-full min-w-0" data-col-count="${n}" style="display:grid; grid-template-rows: repeat(${n}, 1fr); gap: 15mm; height:100%; position:relative; overflow: hidden;">`;
-    colGroups.forEach(g => { colHtml += generateGroupBlock(g); });
-    colHtml += '</div>';
-    return colHtml;
-  };
-
   const shrinkOverflowingMath = (scopeEl: HTMLElement) => {
     scopeEl.querySelectorAll('mjx-container').forEach((mjx: any) => {
         mjx.style.zoom = ''; 
@@ -503,7 +367,21 @@ export default function ExamViewerPage() {
     groups.forEach((g, idx) => {
         const wrap = document.createElement('div');
         wrap.id = `measure-${idx}`;
-        wrap.innerHTML = generateGroupBlock(g);
+        wrap.innerHTML = `<div class="flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
+          <div class="flex items-start w-full min-w-0">
+              <div class="flex flex-col items-center mr-3 shrink-0 min-w-[36px]">
+                  <span style="font-family: 'CJU_Medium', sans-serif !important; color: var(--color-num);" class="text-[42px] leading-[0.85] tracking-tighter">${g.displayNum}</span>
+              </div>
+              <div class="flex flex-col w-full min-w-0 pt-[2px]">
+                ${g.questions.map((q: any, sIdx: number) => {
+                  let safeImgUrl = String(q.image_url || '').trim();
+                  let imgHtml = safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null' ? `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>` : '';
+                  const prefix = g.questions.length > 1 ? `<span class="font-extrabold text-black mr-1">(${q.sub_num || sIdx + 1})</span>` : '';
+                  return `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(q.question)}</div>${imgHtml}</div>`;
+                }).join('')}
+              </div>
+          </div>
+      </div>`;
         probe.appendChild(wrap);
     });
 
@@ -549,7 +427,6 @@ export default function ExamViewerPage() {
 
   const waitForFonts = async (currentArgs: [number, number, string, string, string, string, string]) => {
     const timeout = (ms: number) => new Promise((resolve) => setTimeout(() => resolve('timeout'), ms));
-
     const checkOne = (label: string, spec: string) => document.fonts.load(spec).then(() => 'ok').catch(() => 'fail');
 
     const fontsReady = Promise.all([
@@ -893,22 +770,6 @@ export default function ExamViewerPage() {
     if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
   };
 
-  const getNextTuesdayWeekString = () => {
-    const today = new Date();
-    const currentDay = today.getDay();
-    let daysUntilNextTuesday = (2 - currentDay + 7) % 7;
-    if (daysUntilNextTuesday === 0) daysUntilNextTuesday = 7;
-
-    const nextTuesday = new Date(today);
-    nextTuesday.setDate(today.getDate() + daysUntilNextTuesday);
-
-    const month = nextTuesday.getMonth() + 1;
-    const date = nextTuesday.getDate();
-    const weekOfMonth = Math.ceil(date / 7);
-
-    return `${month}월 ${weekOfMonth}주차`;
-  };
-
   const handleSettingChange = (field: string, val: any) => {
     hasUnsavedChangesRef.current = true;
     
@@ -931,7 +792,7 @@ export default function ExamViewerPage() {
 
       let newExamTitle = examTitle;
       if (val === '주간테스트') {
-        newExamTitle = getNextTuesdayWeekString();
+        newExamTitle = getISOWeekKST(new Date(testDate + 'T00:00:00Z')) + "주차 평가";
         setExamTitle(newExamTitle);
       }
 
@@ -966,10 +827,13 @@ export default function ExamViewerPage() {
     setTestWeek(getISOWeekKST(new Date(d + 'T00:00:00Z')));
   };
 
+  // 🌟 [핵심 해결] 시험지 저장 시 tenant_id 누락 문제 완벽 조치!
   const saveExam = async (skipNav: boolean = false): Promise<boolean> => {
     setIsSaving(true);
     try {
       const instId = localStorage.getItem('logica_instructor_id');
+      const myTenantId = localStorage.getItem('logica_tenant_id'); // 🌟 여기 추가!!
+      
       if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다.");
       if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
 
@@ -988,19 +852,24 @@ export default function ExamViewerPage() {
             total_questions: examStateRef.current?.groups.length || 0, instructor_id: instId,
             major_grade: sessionStorage.getItem('majorGrade') || null, avg_difficulty: sessionStorage.getItem('avgDifficulty') || null,
             scope_start: sessionStorage.getItem('scopeStart') || null, scope_end: sessionStorage.getItem('scopeEnd') || null,
-            layout_settings: finalLayoutSettings, ...weeklyFields
+            layout_settings: finalLayoutSettings, 
+            tenant_id: myTenantId, // 🌟 업데이트 시에도 tenant_id 강제 기록
+            ...weeklyFields
           }).eq('exam_id', rebuildExamIdRef.current);
           if (rebuildErr) throw new Error(`시험지 저장 실패: ${rebuildErr.message}`);
           examId = rebuildExamIdRef.current;
           const { error: delErr } = await supabase.from('exam_item').delete().eq('exam_id', examId);
           if (delErr) throw new Error(`기존 문항 삭제 실패: ${delErr.message}`);
         } else {
+          // 🌟 Insert 시 tenant_id가 함께 저장되므로 리스트에서 무조건 보입니다!
           const { data, error: insertErr } = await supabase.from('exam_master').insert({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType,
             total_questions: examStateRef.current?.groups.length || 0, instructor_id: instId,
             major_grade: sessionStorage.getItem('majorGrade') || null, avg_difficulty: sessionStorage.getItem('avgDifficulty') || null,
             scope_start: sessionStorage.getItem('scopeStart') || null, scope_end: sessionStorage.getItem('scopeEnd') || null,
-            layout_settings: finalLayoutSettings, ...weeklyFields
+            layout_settings: finalLayoutSettings, 
+            tenant_id: myTenantId, // 🌟 누락 해결!
+            ...weeklyFields
           }).select().single();
           if (insertErr || !data) throw new Error(`시험지 생성 실패: ${insertErr?.message || '알 수 없는 오류'}`);
           examId = data.exam_id;
@@ -1018,9 +887,6 @@ export default function ExamViewerPage() {
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
 
-      // ==========================================
-      // 🌟 [추가됨] 클리닉 모드 감지 및 다이렉트 배부/전송 로직
-      // ==========================================
       let isClinicRouted = false;
 
       if (sessionStorage.getItem('isClinicMode') === 'true' && examId) {
@@ -1029,7 +895,6 @@ export default function ExamViewerPage() {
         
         if (clinicStudentId) {
           try {
-            // 1. 학생 타임라인 노출을 위한 시험지 배부
             await supabase.from('exam_assignment').insert({
               exam_id: examId,
               student_id: clinicStudentId,
@@ -1037,7 +902,6 @@ export default function ExamViewerPage() {
               status: '미응시'
             });
 
-            // 2. 학생 패드로 즉시 클리닉 문제 전송
             const tasks: any[] = [];
             examStateRef.current?.groups.forEach((g: any) => {
               g.questions.forEach((q: any) => {
@@ -1054,7 +918,6 @@ export default function ExamViewerPage() {
               await supabase.from('clinic_task').insert(tasks);
             }
 
-            // 3. 세션스토리지 청소
             sessionStorage.removeItem('clinicTargetStudentId');
             sessionStorage.removeItem('clinicTargetClassId');
             sessionStorage.removeItem('isClinicMode');
@@ -1162,7 +1025,6 @@ export default function ExamViewerPage() {
         `}} />
       )}
 
-      {/* 헤더 컴포넌트 호출 */}
       <ViewerHeader 
         isExamDistributed={isExamDistributed} 
         isNewExam={isNewExamRef.current} 
@@ -1171,173 +1033,39 @@ export default function ExamViewerPage() {
       />
 
       <div className="content-row flex flex-1 min-h-0 relative">
-        <aside className={`no-print shrink-0 h-full bg-slate-50 border-slate-300 transition-all duration-500 ease-in-out z-20 overflow-hidden flex flex-col border-r ${isSidebarFolded ? 'w-0 opacity-0 border-r-0' : 'w-[720px] opacity-100'}`}>
-          <div className="w-[720px] h-full flex flex-col">
-            
-            <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0 sticky top-0 z-10">
-                <span className="font-extrabold text-slate-800 text-lg flex items-center gap-2">⚙️ 설정 및 배포 관리</span>
-                <button onClick={() => setIsSidebarFolded(true)} className="text-slate-400 hover:text-[#002864] text-xs font-bold flex items-center gap-1 transition-colors">
-                    ◀ 설정 접기
-                </button>
-            </div>
+        <ViewerSidebar 
+          isSidebarFolded={isSidebarFolded}
+          setIsSidebarFolded={setIsSidebarFolded}
+          isAdmissionLock={isAdmissionLock}
+          titleMode={titleMode}
+          template={template}
+          colorNum={colorNum}
+          colorTitle={colorTitle}
+          colorLine={colorLine}
+          palette={palette}
+          columns={columns}
+          splits={splits}
+          examTitle={examTitle}
+          displayBadge={displayBadge}
+          examDate={examDate}
+          layoutType={layoutType}
+          testDate={testDate}
+          isWeekPopupOpen={isWeekPopupOpen}
+          setIsWeekPopupOpen={setIsWeekPopupOpen}
+          savedExamId={savedExamId}
+          weeklyTargetGrade={weeklyTargetGrade}
+          isSaving={isSaving}
+          isGeneratingPdf={isGeneratingPdf}
+          handleSettingChange={handleSettingChange}
+          savePalette={savePalette}
+          handleWeekDateSelect={handleWeekDateSelect}
+          handleWeeklyMetaChange={handleWeeklyMetaChange}
+          setIsExamDistributed={setIsExamDistributed}
+          saveExam={saveExam}
+          handlePrint={handlePrint}
+          downloadPdfViaServer={downloadPdfViaServer}
+        />
 
-            <div className="flex-1 overflow-y-auto custom-scrollbar p-4 flex flex-col gap-4 items-start">
-               <div className="w-full flex gap-4 items-stretch">
-                  
-                  {/* 왼쪽 단: 템플릿 및 레이아웃 설정 */}
-                  <div className="w-1/2 flex flex-col">
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col gap-4">
-                      <h3 className="font-bold text-slate-700 border-b pb-2 flex items-center gap-1.5 text-[13px] shrink-0">🎨 템플릿 및 레이아웃 설정</h3>
-                      
-                      <div className="flex flex-col gap-4">
-                          <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">제목 표시 모드</label>
-                              <div className="flex gap-2">
-                                  <button onClick={() => handleSettingChange('titleMode', 'first')} className={`flex-1 px-2 py-1.5 rounded border font-bold text-[11px] ${titleMode === 'first' ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500 hover:bg-slate-50'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>첫 장만 표시</button>
-                                  <button onClick={() => handleSettingChange('titleMode', 'all')} className={`flex-1 px-2 py-1.5 rounded border font-bold text-[11px] ${titleMode === 'all' ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500 hover:bg-slate-50'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>전체 표시</button>
-                              </div>
-                          </div>
-                          <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">디자인 템플릿</label>
-                              <select value={isAdmissionLock ? '입학테스트' : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold text-slate-700 bg-white focus:outline-none focus:border-[#002864] ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
-                                  <option value="basic1">기본1 (좌측 여백 활용)</option>
-                                  <option value="basic2">기본2 (슬림 헤더, 하단 라벨)</option>
-                                  {isAdmissionLock && <option value="입학테스트">입학테스트 전용</option>}
-                              </select>
-                          </div>
-                          <div className={isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">색상 설정 (미리보기 즉시 반영)</label>
-                              <div className="space-y-2 border border-slate-100 p-2 rounded bg-slate-50/50">
-                                  <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-1.5"><span className="text-[11px] text-slate-600 font-bold">번호 색상</span>
-                                          <div className="flex gap-1">{palette.map((p,i) => <button key={i} onClick={() => handleSettingChange('colorNum', p)} onContextMenu={(e) => savePalette(colorNum, i, e)} className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{background:p}}/>)}</div>
-                                      </div>
-                                      <input type="color" value={colorNum} onChange={e => handleSettingChange('colorNum', e.target.value)} className="w-6 h-5 rounded cursor-pointer p-0 border-0" />
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-1.5"><span className="text-[11px] text-slate-600 font-bold">제목 색상</span>
-                                          <div className="flex gap-1">{palette.map((p,i) => <button key={i} onClick={() => handleSettingChange('colorTitle', p)} onContextMenu={(e) => savePalette(colorTitle, i, e)} className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{background:p}}/>)}</div>
-                                      </div>
-                                      <input type="color" value={colorTitle} onChange={e => handleSettingChange('colorTitle', e.target.value)} className="w-6 h-5 rounded cursor-pointer p-0 border-0" />
-                                  </div>
-                                  <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-1.5"><span className="text-[11px] text-slate-600 font-bold">라인 색상</span>
-                                          <div className="flex gap-1">{palette.map((p,i) => <button key={i} onClick={() => handleSettingChange('colorLine', p)} onContextMenu={(e) => savePalette(colorLine, i, e)} className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{background:p}}/>)}</div>
-                                      </div>
-                                      <input type="color" value={colorLine} onChange={e => handleSettingChange('colorLine', e.target.value)} className="w-6 h-5 rounded cursor-pointer p-0 border-0" />
-                                  </div>
-                              </div>
-                          </div>
-                          <div className="flex gap-4">
-                              <div className="flex-1">
-                                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5">단 구성</label>
-                                  <div className="flex gap-1">
-                                      <button onClick={() => handleSettingChange('column', 1)} className={`flex-1 py-1.5 rounded border font-bold text-[11px] ${columns === 1 ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>1단</button>
-                                      <button onClick={() => handleSettingChange('column', 2)} className={`flex-1 py-1.5 rounded border font-bold text-[11px] ${columns === 2 ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>2단</button>
-                                  </div>
-                              </div>
-                              <div className="flex-1">
-                                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5">분할 설정</label>
-                                  <div className="flex gap-1">
-                                      {[2,4,6].map(num => (
-                                        <button key={num} onClick={() => handleSettingChange('split', num)} className={`flex-1 py-1.5 rounded border font-bold text-[11px] ${splits === num ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num}</button>
-                                      ))}
-                                  </div>
-                              </div>
-                          </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* 오른쪽 단: 시험지 메타 수정 */}
-                  <div className="w-1/2 flex flex-col">
-                    <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col gap-4">
-                      <h3 className="font-bold text-slate-700 border-b pb-2 flex items-center gap-1.5 text-[13px] shrink-0">✏️ 시험지 메타 수정</h3>
-                      
-                      <div className="flex-1 flex flex-col gap-4">
-                          <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">시험지 제목</label>
-                              <input type="text" value={examTitle} onChange={e => handleSettingChange('examTitle', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
-                          </div>
-                          <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">학년 / 과정 표기</label>
-                              <input type="text" value={displayBadge} onChange={e => handleSettingChange('displayBadge', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
-                          </div>
-                          <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">날짜</label>
-                              <div className="flex flex-col gap-2">
-                                  <input type="date" value={examDate} onChange={e => handleSettingChange('examDate', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
-                                  <div className="flex gap-2">
-                                      <button onClick={() => handleSettingChange('examDate', new Date().toISOString().split('T')[0])} className="flex-1 py-1 bg-slate-50 border border-slate-200 rounded font-bold text-[11px] text-slate-600 hover:bg-slate-100 transition-colors">오늘 날짜</button>
-                                      <button onClick={() => handleSettingChange('examDate', '')} className="flex-1 py-1 bg-slate-50 border border-slate-200 rounded font-bold text-[11px] text-slate-400 hover:bg-slate-100 transition-colors">지우기</button>
-                                  </div>
-                              </div>
-                          </div>
-                          <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">프린트 양식</label>
-                              <select value={layoutType} onChange={e => handleSettingChange('layoutType', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none">
-                                  <option value="선택없음">선택없음</option>
-                                  <option value="과제프린트">과제프린트</option>
-                                  <option value="오답프린트">오답프린트</option>
-                                  <option value="주간테스트">주간테스트</option>
-                                  <option value="중간평가">중간평가</option>
-                                  <option value="분기평가">분기평가</option>
-                                  <option value="입학테스트">입학테스트</option>
-                              </select>
-                          </div>
-                          {layoutType === '주간테스트' && (
-                              <div>
-                                  <label className="block text-[11px] font-bold text-slate-500 mb-1.5">주차 (달력에서 날짜 선택 → ISO 주차 자동 계산, 전원 공통)</label>
-                                  <div className="flex items-center gap-2">
-                                      <span className="shrink-0 text-[11px] font-bold text-[#002864] bg-[#EEF6FF] border border-blue-100 rounded px-2 py-1.5">{getMonthWeekLabel(testDate)}</span>
-                                      <div className="relative flex-1">
-                                          <button type="button" onClick={() => setIsWeekPopupOpen(v => !v)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold text-left bg-white hover:bg-slate-50">
-                                              📅 주차 선택하기
-                                          </button>
-                                          {isWeekPopupOpen && (
-                                              <>
-                                                  <div className="fixed inset-0 z-40" onClick={() => setIsWeekPopupOpen(false)} />
-                                                  <div className="absolute z-50 mt-2 left-0 w-full">
-                                                      <WeekPickerCalendar selectedDate={testDate} onSelect={handleWeekDateSelect} />
-                                                  </div>
-                                              </>
-                                          )}
-                                      </div>
-                                  </div>
-                              </div>
-                          )}
-                      </div>
-                    </div>
-                  </div>
-               </div>
-
-               {/* 하단 전체 너비: 분리된 배포 관리 패널 호출 (주간테스트일 땐 학년 배정 UI도 여기 포함) */}
-               <div className="w-full mb-8 mt-4">
-                  <PublishPanel
-                    examId={savedExamId}
-                    layoutType={layoutType}
-                    initialTargetGrade={weeklyTargetGrade}
-                    onWeeklyMetaChange={handleWeeklyMetaChange}
-                    onPublishComplete={() => setIsExamDistributed(true)}
-                  />
-               </div>
-            </div>
-
-            <div className="p-4 bg-white border-t border-slate-200 shrink-0 flex gap-2">
-              <button onClick={() => saveExam(false)} disabled={isSaving} className="flex-1 bg-slate-600 hover:bg-slate-700 text-white py-2 rounded-lg font-bold text-[13px] shadow-sm transition-colors flex justify-center items-center gap-1.5 disabled:opacity-50">
-                <span>💾</span> {isSaving ? "저장 중..." : "저장"}
-              </button>
-              <button onClick={handlePrint} disabled={isSaving} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-[13px] shadow-sm transition-colors flex justify-center items-center gap-1.5 disabled:opacity-50">
-                <span>🖨️</span> 인쇄
-              </button>
-              <button onClick={downloadPdfViaServer} disabled={isSaving || isGeneratingPdf} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white py-2 rounded-lg font-bold text-[13px] shadow-sm transition-colors flex justify-center items-center gap-1.5 disabled:opacity-50">
-                <span>⬇️</span> {isGeneratingPdf ? "추출 중..." : "PDF"}
-              </button>
-            </div>
-          </div>
-        </aside>
-
-        {/* 중앙 미리보기 영역 */}
         <main 
           id="preview-viewport" 
           className="flex-1 h-full flex flex-col overflow-hidden relative z-0" 
@@ -1361,49 +1089,30 @@ export default function ExamViewerPage() {
               </div>
           </div>
 
-          <div className="no-print flex items-center gap-3 py-3 px-6 bg-white border-t border-slate-200 w-full justify-center shrink-0">
-              <button onClick={() => handlePageStep(-1)} className="px-4 py-1.5 rounded-lg border border-slate-300 font-bold text-sm text-slate-600 hover:bg-slate-50">◀ 이전</button>
-              <input
-                type="text"
-                inputMode="numeric"
-                pattern="[0-9]*"
-                value={pageInputValue}
-                onChange={e => setPageInputValue(e.target.value.replace(/[^0-9]/g, ''))}
-                onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
-                onBlur={() => { if (pageInputValue) handlePageMove(parseInt(pageInputValue)); }}
-                className="w-16 text-center border border-slate-300 rounded-lg py-1.5 font-bold text-sm"
-              />
-              <span className="text-slate-400 font-bold text-sm">/ {totalPages} 페이지</span>
-              <button onClick={() => handlePageStep(1)} className="px-4 py-1.5 rounded-lg border border-slate-300 font-bold text-sm text-slate-600 hover:bg-slate-50">다음 ▶</button>
-              
-              <div className="w-px h-5 bg-slate-200 mx-1"></div>
-              
-              <div className="flex items-center gap-1 bg-slate-50 rounded-lg border border-slate-200 p-0.5 select-none">
-                  <button 
-                    onMouseDown={() => startZoom(-0.01)} onMouseUp={stopZoom} onMouseLeave={stopZoom} onTouchStart={() => startZoom(-0.01)} onTouchEnd={stopZoom}
-                    className="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700 font-bold transition-colors text-lg leading-none pb-0.5"
-                  >-</button>
-                  <span className="text-slate-600 font-bold text-[11px] w-12 text-center">🔍 {Math.round(zoomFactor * 100)}%</span>
-                  <button 
-                    onMouseDown={() => startZoom(0.01)} onMouseUp={stopZoom} onMouseLeave={stopZoom} onTouchStart={() => startZoom(0.01)} onTouchEnd={stopZoom}
-                    className="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700 font-bold transition-colors text-lg leading-none pb-0.5"
-                  >+</button>
-              </div>
-
-              <button onClick={() => {
-                const prevScale = currentScaleRef.current || 1;
-                const w = previewWrapperRef.current;
-                const anchorX = w ? (w.scrollLeft + w.clientWidth / 2) / prevScale : 0;
-                const anchorY = w ? (w.scrollTop + w.clientHeight / 2) / prevScale : 0;
-                setZoomFactor(1);
-                updatePreviewViewport(1);
-                if (w) {
-                  const newScale = currentScaleRef.current || 1;
-                  w.scrollLeft = anchorX * newScale - w.clientWidth / 2;
-                  w.scrollTop = anchorY * newScale - w.clientHeight / 2;
-                }
-              }} className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-[11px] text-slate-500 hover:bg-slate-50">초기화</button>
-          </div>
+          <ViewerToolbar 
+            currentPage={currentPage}
+            totalPages={totalPages}
+            pageInputValue={pageInputValue}
+            setPageInputValue={setPageInputValue}
+            handlePageMove={handlePageMove}
+            handlePageStep={handlePageStep}
+            zoomFactor={zoomFactor}
+            startZoom={startZoom}
+            stopZoom={stopZoom}
+            resetZoom={() => {
+              const prevScale = currentScaleRef.current || 1;
+              const w = previewWrapperRef.current;
+              const anchorX = w ? (w.scrollLeft + w.clientWidth / 2) / prevScale : 0;
+              const anchorY = w ? (w.scrollTop + w.clientHeight / 2) / prevScale : 0;
+              setZoomFactor(1);
+              updatePreviewViewport(1);
+              if (w) {
+                const newScale = currentScaleRef.current || 1;
+                w.scrollLeft = anchorX * newScale - w.clientWidth / 2;
+                w.scrollTop = anchorY * newScale - w.clientHeight / 2;
+              }
+            }}
+          />
         </main>
       </div>
 

@@ -91,8 +91,33 @@ export default function Sidebar() {
     let customLabel = active ? 'font-black' : 'font-bold';
     let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
 
-    // 🌟 [특정 메뉴 커스텀 스타일링]
-    if (path === '/academy-info') {
+    // 🌟 [특정 메뉴 컬러 트렌디 커스텀]
+    if (path === '/home') {
+      // 신뢰와 안정의 Logica 네이비
+      customBg = active ? 'bg-[#002864] border-[#001f4d] text-white shadow-md' : 'bg-blue-50/50 border-blue-100 text-[#002864] hover:bg-blue-100 hover:border-blue-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-blue-200 font-medium' : 'text-blue-400 font-medium';
+    } else if (path === '/learning') {
+      // 성장과 피드백의 에메랄드
+      customBg = active ? 'bg-emerald-500 border-emerald-600 text-white shadow-md' : 'bg-emerald-50/50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-emerald-100 font-medium' : 'text-emerald-500 font-medium';
+    } else if (path === '/exam-list') {
+      // 학구적이고 세련된 바이올렛
+      customBg = active ? 'bg-violet-500 border-violet-600 text-white shadow-md' : 'bg-violet-50/50 border-violet-100 text-violet-700 hover:bg-violet-100 hover:border-violet-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-violet-100 font-medium' : 'text-violet-400 font-medium';
+    } else if (path === '/minutes') {
+      // 미래지향적 스마트 스카이 블루
+      customBg = active ? 'bg-sky-500 border-sky-600 text-white shadow-md' : 'bg-sky-50/50 border-sky-100 text-sky-700 hover:bg-sky-100 hover:border-sky-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-sky-100 font-medium' : 'text-sky-500 font-medium';
+    } else if (path === '/admin-dashboard') {
+      // 데스크의 활력을 띠는 앰버/오렌지
+      customBg = active ? 'bg-orange-500 border-orange-600 text-white shadow-md' : 'bg-orange-50/50 border-orange-100 text-orange-700 hover:bg-orange-100 hover:border-orange-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-orange-100 font-medium' : 'text-orange-400 font-medium';
+    } else if (path === '/academy-info') {
       // 짙은 녹색 배경 + 흰 글씨
       customBg = active ? 'bg-[#1f2d26] border-[#1f2d26] text-white shadow-md' : 'bg-[#2e4036] border-[#2e4036] text-white hover:bg-[#24332b] hover:border-[#24332b] shadow-sm';
       customLabel = 'font-black';
@@ -188,9 +213,9 @@ export default function Sidebar() {
             </div>
             <div className="grid grid-cols-2 gap-2 px-3">
               <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
-              <MenuItem path="/permission" label="권한 관리" /> {/* 🌟 커스텀 붉은색 적용됨 */}
+              <MenuItem path="/permission" label="권한 관리" />
               <MenuItem path="/instructor" label="강사 관리" />
-              <MenuItem path="/academy-info" label="LOGICA 학원 정보" full /> {/* 🌟 커스텀 녹색 적용됨 */}
+              <MenuItem path="/academy-info" label="LOGICA 학원 정보" full />
             </div>
           </div>
         )}

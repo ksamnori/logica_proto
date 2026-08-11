@@ -113,7 +113,7 @@ export default function LoginPage() {
       const isSuperAdmin = role === 'SUPER_ADMIN' || position.includes('최고관리자') || position.includes('대장');
 
       // 🌟 [핵심 변경] 로그인 성공 후 모두 정상적으로 /home 으로 보냅니다!
-      // 권한 검사 및 진단평가 페이지로의 토스는 /home 페이지 내부의 로직이 담당하게 됩니다.
+      // 권한 검사 및 타 페이지로의 튕겨내기는 /home 페이지 내부의 로직이 담당합니다.
       if (isSuperAdmin) {
         router.replace("/admin-dashboard"); 
       } else {

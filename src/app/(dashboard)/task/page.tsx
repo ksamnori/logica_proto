@@ -1,335 +1,364 @@
-// src/components/task/TaskModal.tsx
+// src/app/(dashboard)/task/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import TaskModal from "@/components/task/TaskModal";
 
-interface TaskModalProps {
-  isOpen: boolean;
-  task: any | null;
-  currentUser: { instId: string; name: string; isAdmin: boolean };
-  onClose: () => void;
-  onSuccess: () => void;
-}
+export default function TaskBoardPage() {
+  const router = useRouter();
 
-export default function TaskModal({ 
-  isOpen, 
-  task, 
-  currentUser, 
-  onClose, 
-  onSuccess 
-}: TaskModalProps) {
-  const [modalData, setModalData] = useState<any>(null);
-  const [comments, setComments] = useState<any[]>([]);
-  const [commentInput, setCommentInput] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
+  const [tasks, setTasks] = useState<any[]>([]);
+  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
+  const [isLoading, setIsLoading] = useState(true);
+  const [statsMonth, setStatsMonth] = useState("");
+  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
   
-  const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
-  
-  // 🌟 세부 권한 상태
-  const [canDeletePost, setCanDeletePost] = useState(false);
-  const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
-  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
+  const [isModalOpen, setIsModalOpen] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<any>(null);
 
-  const commentEndRef = useRef<HTMLDivElement>(null);
-
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
   useEffect(() => {
-    const checkPerms = async () => {
+    const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
-      const tId = localStorage.getItem("logica_tenant_id");
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
 
-      const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
-                        ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
-      setIsSuperAdminOrAdmin(adminFlag);
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
 
-      if (adminFlag) {
-        setCanDeletePost(true);
-        setCanDeleteOthersComment(true);
-        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
-      } else if (tId) {
-        const { data } = await supabase
-          .from('tenant_role_permissions')
-          .select('allowed_menus')
-          .eq('tenant_id', tId)
-          .eq('role_name', role)
-          .maybeSingle();
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
 
-        if (data && data.allowed_menus) {
-          setCanDeletePost(data.allowed_menus.includes('action_delete_task'));
-          setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
-          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_task_agenda')); // 🌟 안건 상정 권한 확인
-        } else {
-          setCanDeletePost(false);
-          setCanDeleteOthersComment(false);
-          setCanSubmitAgenda(false);
-        }
+      // 업무 공유 보드 메뉴 접근 권한이 없다면 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/task"))) {
+        alert("⛔ 업무 공유 보드에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
       }
     };
 
-    if (isOpen) {
-      checkPerms();
-      if (task) {
-        setModalData({ ...task });
-        setComments(task.comments || []);
-      } else {
-        setModalData({ memo_id: "", memo_type: "일반공지", content: "", status: "할일" });
-        setComments([]);
-      }
-      setCommentInput("");
-    }
-  }, [isOpen, task]);
+    checkAccess();
+  }, [router]);
 
   useEffect(() => {
-    if (commentEndRef.current) {
-      commentEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [comments]);
-
-  const handleModalChange = (field: string, value: string) => {
-    setModalData((prev: any) => ({ ...prev, [field]: value }));
-  };
-
-  const handleAddComment = async () => {
-    if (!commentInput.trim() || !modalData?.memo_id) return;
-    const now = new Date();
-    const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const currentTimeISO = now.toISOString();
-
-    const newComment = { 
-      id: Date.now(), 
-      authorName: currentUser.name, 
-      text: commentInput.trim(), 
-      createdAt: dateStr 
-    };
-
-    const updatedComments = [...comments, newComment];
-
-    try {
-      await supabase.from("instructor_memo").update({ 
-        comments: updatedComments,
-        updated_at: currentTimeISO,
-        last_updater_name: currentUser.name
-      }).eq("memo_id", modalData.memo_id);
-
-      setComments(updatedComments);
-      setCommentInput("");
-      onSuccess(); 
-    } catch (e) {
-      alert("댓글 등록에 실패했습니다.");
-    }
-  };
-
-  const handleDeleteComment = async (commentId: number) => {
-    if (!confirm("이 댓글을 삭제하시겠습니까?")) return;
-    const updatedComments = comments.filter(c => c.id !== commentId);
-    
-    try {
-      await supabase.from("instructor_memo").update({ 
-        comments: updatedComments,
-        updated_at: new Date().toISOString(),
-        last_updater_name: currentUser.name
-      }).eq("memo_id", modalData.memo_id);
+    if (isAuthorized) {
+      const instId = localStorage.getItem("logica_instructor_id") || "";
+      const name = localStorage.getItem("logica_instructor_name") || "관리자";
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
       
-      setComments(updatedComments);
-      onSuccess();
-    } catch (e) {
-      alert("댓글 삭제 실패");
+      const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
+                      ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
+      
+      setCurrentUser({ instId, name, isAdmin });
+      const now = new Date();
+      setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
+      fetchTasks();
+
+      const tenantId = localStorage.getItem("logica_tenant_id");
+      const channel = supabase.channel(`task_board_realtime_${tenantId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_memo' }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setTasks(prev => {
+              if (prev.find(t => t.memo_id === payload.new.memo_id)) return prev;
+              return [payload.new, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setTasks(prev => prev.map(t => t.memo_id === payload.new.memo_id ? { ...t, ...payload.new } : t));
+          } else if (payload.eventType === 'DELETE') {
+            setTasks(prev => prev.filter(t => t.memo_id !== payload.old.memo_id));
+          }
+        })
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
     }
-  };
+  }, [isAuthorized]);
 
-  const saveTask = async () => {
-    if (!modalData.content?.trim()) return alert("본문 내용을 입력해주세요.");
-
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-
-    setIsSaving(true);
-    const currentTimeISO = new Date().toISOString();
-
-    const payload: any = {
-      memo_type: modalData.memo_type,
-      content: modalData.content,
-      status: modalData.status,
-      comments: comments,
-      updated_at: currentTimeISO,
-      last_updater_name: currentUser.name
-    };
+  const fetchTasks = async () => {
+    setIsLoading(true);
+    const tenantId = localStorage.getItem("logica_tenant_id");
 
     try {
-      if (modalData.memo_id) {
-        await supabase.from("instructor_memo").update(payload).eq("memo_id", modalData.memo_id);
-        alert("성공적으로 저장되었습니다.");
-      } else {
-        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
-        
-        payload.instructor_id = currentUser.instId;
-        payload.author_name = currentUser.name;
-        payload.created_at = currentTimeISO;
-        payload.tenant_id = myTenantId; 
-        await supabase.from("instructor_memo").insert([payload]);
-        alert("업무(공지)가 등록되었습니다.");
+      let query = supabase.from("instructor_memo").select("*").order("created_at", { ascending: false }).limit(1000);
+      
+      // 🌟 [보안 강화] 내 지점 데이터만 불러오도록 격리
+      if (tenantId && tenantId !== 'hq') {
+         query = query.eq("tenant_id", tenantId);
       }
-      onSuccess();
-      onClose();
-    } catch (e) { 
-      alert("저장 실패"); 
-    } finally {
-      setIsSaving(false);
+
+      const { data } = await query;
+      setTasks(data || []);
+    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+  };
+
+  const handleDragStart = (e: React.DragEvent, memoId: string) => {
+    e.dataTransfer.setData("memoId", memoId);
+    setTimeout(() => { (e.target as HTMLElement).style.opacity = '0.5'; }, 0);
+  };
+
+  const handleDragEnd = (e: React.DragEvent) => {
+    (e.target as HTMLElement).style.opacity = '1';
+    setDragOverCol(null);
+  };
+
+  const handleDragOver = (e: React.DragEvent, colName: string) => {
+    e.preventDefault();
+    if (dragOverCol !== colName) setDragOverCol(colName);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOverCol(null);
+  };
+
+  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
+    e.preventDefault();
+    setDragOverCol(null);
+    const memoId = e.dataTransfer.getData("memoId");
+    if (!memoId) return;
+
+    const targetTask = tasks.find(t => t.memo_id.toString() === memoId);
+    if (!targetTask) return;
+
+    const now = new Date().toISOString();
+
+    setTasks(prev => prev.map(t => t.memo_id.toString() === memoId ? { 
+      ...t, 
+      status: newStatus,
+      updated_at: now,
+      last_updater_name: currentUser.name
+    } : t));
+
+    try {
+      await supabase.from("instructor_memo").update({ 
+        status: newStatus,
+        updated_at: now,
+        last_updater_name: currentUser.name,
+        memo_type: targetTask.memo_type
+      }).eq("memo_id", memoId);
+    } catch (err) {
+      alert("상태 변경 실패");
+      fetchTasks(); 
     }
   };
 
-  const deleteTask = async () => {
-    if (!confirm("⚠️ 이 업무/공지 기록을 완전히 삭제하시겠습니까?\n댓글 등 모든 내역이 사라집니다.")) return;
-    try {
-      await supabase.from("instructor_memo").delete().eq("memo_id", modalData.memo_id);
-      alert("삭제되었습니다.");
-      onSuccess();
-      onClose();
-    } catch (e) { alert("삭제 실패"); }
+  const openModal = (task: any | null = null) => {
+    setSelectedTask(task);
+    setIsModalOpen(true);
   };
 
-  const submitAgenda = async () => {
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
-
-    try {
-      await supabase.from("agenda").insert({
-        title: `[업무공유] ${modalData.memo_type}`,
-        content: modalData.content,
-        type: "업무",
-        source: "Task",
-        source_id: modalData.memo_id,
-        created_by: currentUser.instId,
-        tenant_id: myTenantId
-      });
-      alert("해당 업무가 회의 안건으로 상정되었습니다.");
-    } catch (e) {
-      alert("안건 상정 실패");
-    }
+  const closeModal = () => {
+    setIsModalOpen(false);
+    setSelectedTask(null);
   };
 
-  if (!isOpen || !modalData) return null;
+  const todos = useMemo(() => tasks.filter(t => !t.status || t.status === "할일"), [tasks]);
+  const inProgress = useMemo(() => tasks.filter(t => t.status === "진행중"), [tasks]);
+  const dones = useMemo(() => tasks.filter(t => t.status === "완료"), [tasks]);
 
-  const isReadonly = modalData.memo_id && !isSuperAdminOrAdmin && String(modalData.instructor_id) !== String(currentUser.instId);
+  const statsTasks = useMemo(() => tasks.filter(t => {
+    if (!t.created_at || !statsMonth) return false;
+    const d = new Date(t.created_at);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === statsMonth;
+  }), [tasks, statsMonth]);
+
+  const statsCounts = useMemo(() => {
+    const counts = { "긴급공지": 0, "일반공지": 0, "학생인계": 0, "행정요청": 0 };
+    statsTasks.forEach(t => { if (counts[t.memo_type as keyof typeof counts] !== undefined) counts[t.memo_type as keyof typeof counts]++; });
+    return counts;
+  }, [statsTasks]);
+
+  const archivedDones = useMemo(() => statsTasks.filter(t => t.status === "완료"), [statsTasks]);
+
+  const renderCard = (task: any) => {
+    const createdDateStr = new Date(task.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    const updatedDateStr = task.updated_at ? new Date(task.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : createdDateStr;
+    const updaterName = task.last_updater_name || task.author_name || "알수없음";
+
+    let typeColor = "text-slate-600 bg-slate-100 border-slate-200";
+    if (task.memo_type === "긴급공지") typeColor = "text-rose-600 bg-rose-50 border-rose-200";
+    else if (task.memo_type === "학생인계") typeColor = "text-blue-600 bg-blue-50 border-blue-200";
+    else if (task.memo_type === "일반공지") typeColor = "text-emerald-600 bg-emerald-50 border-emerald-200";
+
+    const cmts = task.comments || [];
+    const canDrag = currentUser.isAdmin || String(task.instructor_id) === String(currentUser.instId);
+
+    return (
+      <div 
+        key={task.memo_id} 
+        draggable={canDrag} 
+        onDragStart={canDrag ? (e) => handleDragStart(e, task.memo_id) : undefined} 
+        onDragEnd={canDrag ? handleDragEnd : undefined}
+        onClick={() => openModal(task)} 
+        className={`task-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
+      >
+        <div className="flex justify-between items-start mb-1">
+          <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{task.memo_type}</span>
+        </div>
+        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep line-clamp-3">
+          {task.content}
+        </div>
+        {cmts.length > 0 && (
+          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
+            {cmts.slice(-2).map((c: any) => (
+              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
+          <div className="flex justify-between items-center text-[10px] font-bold">
+            <span className="text-slate-500">최종 수정: {updaterName}</span>
+            <span className="text-slate-400">{updatedDateStr}</span>
+          </div>
+          <div className="flex justify-between items-center text-[10px] font-bold">
+            <span className="text-blue-500">작성: {task.author_name}</span>
+            <span className="text-slate-400">{createdDateStr}</span>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  if (isAuthorized === null) {
+    return (
+      <div className="flex w-full h-screen items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-4">
+          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
+        </div>
+      </div>
+    );
+  }
+  
+  if (isAuthorized === false) {
+    return null; 
+  }
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-      <div className="bg-white w-full max-w-2xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-        
-        <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
-          <h2 className="text-lg font-bold tracking-tight">📌 업무 공유 / 상세 공지</h2>
-          <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
+      <div className="flex justify-between items-end shrink-0">
+        <div>
+          <h2 className="text-xl font-bold text-slate-800">📌 업무 공유 보드</h2>
+          <p className="text-sm font-bold text-slate-400 mt-1">드래그 앤 드롭으로 진행 상태를 변경하고, 업무 카드를 클릭하여 세부 내용 확인 및 소통을 진행하세요.</p>
         </div>
-        
-        <div className="flex-1 overflow-hidden p-6 bg-slate-50 flex flex-col gap-5">
-          
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
-            <div className="grid grid-cols-2 gap-4 shrink-0">
-              <div className="col-span-1">
-                <label className="block text-xs font-bold text-slate-500 mb-1">분류 (태그) <span className="text-rose-500">*</span></label>
-                <select 
-                  value={modalData.memo_type} onChange={(e) => handleModalChange("memo_type", e.target.value)}
-                  disabled={isReadonly}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-[#002864] bg-slate-50 disabled:opacity-70"
-                >
-                  <option value="긴급공지">🚨 긴급공지</option>
-                  <option value="일반공지">📢 일반공지</option>
-                  <option value="학생인계">🤝 학생인계</option>
-                  <option value="행정요청">📝 행정요청</option>
-                </select>
-              </div>
-              <div className="col-span-1">
-                <label className="block text-xs font-bold text-slate-500 mb-1">진행 상태</label>
-                <select value={modalData.status} onChange={(e) => handleModalChange("status", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-black text-sm focus:outline-none focus:border-[#002864] bg-white">
-                  <option value="할일" className="text-slate-600">할 일 (To-Do)</option>
-                  <option value="진행중" className="text-blue-600">진행 중</option>
-                  <option value="완료" className="text-emerald-600">완료됨</option>
-                </select>
-              </div>
-            </div>
+      </div>
 
-            <div className="flex flex-col flex-1 min-h-0">
-              <label className="block text-xs font-bold text-slate-500 mb-1">본문 내용 작성 <span className="text-rose-500">*</span></label>
-              <textarea 
-                value={modalData.content} onChange={(e) => handleModalChange("content", e.target.value)} 
-                disabled={isReadonly}
-                className="flex-1 w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-sm focus:outline-none focus:border-[#002864] resize-none custom-scroll disabled:opacity-70" placeholder="내용을 입력하세요."
-              ></textarea>
-            </div>
+      <div className="flex-1 flex gap-6 overflow-hidden pb-2">
+        <div className="flex-1 min-w-[250px] bg-slate-100/50 border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-slate-100 border-b border-slate-200 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-slate-700">📑 할 일 (To-Do)</h3>
+            <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">{todos.length}</span>
           </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "할일" ? "bg-slate-200 border-2 border-dashed border-slate-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "할일")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "할일")}
+          >
+            {todos.map(renderCard)}
+          </div>
+        </div>
 
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
-            <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
-              <h3 className="font-bold text-slate-700 text-sm">💬 업무 처리 노트 및 소통 (말꼬리)</h3>
-              <span className="text-[10px] font-bold text-slate-500">모든 작업자가 기록을 남길 수 있습니다.</span>
+        <div className="flex-1 min-w-[250px] bg-blue-50/30 border border-blue-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-blue-50 border-b border-blue-100 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-blue-700">🚀 진행 중 (In Progress)</h3>
+            <span className="bg-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "진행중" ? "bg-blue-100/50 border-2 border-dashed border-blue-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "진행중")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "진행중")}
+          >
+            {inProgress.map(renderCard)}
+          </div>
+        </div>
+
+        <div className="flex-1 min-w-[250px] bg-emerald-50/30 border border-emerald-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
+          <div className="p-4 bg-emerald-50 border-b border-emerald-100 shrink-0 flex justify-between items-center rounded-t-2xl">
+            <h3 className="font-black text-emerald-700">✅ 완료 (Done)</h3>
+            <span className="bg-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{dones.length}</span>
+          </div>
+          <div 
+            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "완료" ? "bg-emerald-100/50 border-2 border-dashed border-emerald-400" : ""}`}
+            onDragOver={(e) => handleDragOver(e, "완료")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "완료")}
+          >
+            {dones.map(renderCard)}
+          </div>
+        </div>
+
+        <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-hidden">
+          <button onClick={() => openModal()} className="w-full bg-[#002864] hover:bg-blue-900 text-white px-5 py-3.5 rounded-xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+            새 업무 공유 작성하기
+          </button>
+
+          <div className="flex-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
+            <div className="p-4 bg-slate-800 text-white shrink-0 flex justify-between items-center rounded-t-2xl">
+              <h3 className="font-black text-sm">📊 분류별 통계 및 보관함</h3>
             </div>
-            
-            <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
-              {comments.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center text-slate-400 font-bold text-xs h-full">아직 등록된 소통 노트가 없습니다.</div>
+            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] shadow-sm cursor-pointer" />
+            </div>
+            <div className="p-3 border-b border-slate-100 shrink-0">
+              <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
+                <div className="bg-rose-50 p-2 rounded border border-rose-100 flex justify-between shadow-sm"><span className="text-rose-600">긴급공지</span><span>{statsCounts["긴급공지"]}건</span></div>
+                <div className="bg-emerald-50 p-2 rounded border border-emerald-100 flex justify-between shadow-sm"><span className="text-emerald-600">일반공지</span><span>{statsCounts["일반공지"]}건</span></div>
+                <div className="bg-blue-50 p-2 rounded border border-blue-100 flex justify-between shadow-sm"><span className="text-blue-600">학생인계</span><span>{statsCounts["학생인계"]}건</span></div>
+                <div className="bg-purple-50 p-2 rounded border border-purple-100 flex justify-between shadow-sm"><span className="text-purple-600">행정요청</span><span>{statsCounts["행정요청"]}건</span></div>
+              </div>
+            </div>
+            <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 shrink-0">
+              <span className="text-xs font-bold text-slate-500">해당 월 완료된 업무 목록</span>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50 space-y-2">
+              {archivedDones.length === 0 ? (
+                <div className="text-center py-10 text-slate-400 font-bold text-xs">해당 월에 완료된<br/>업무 내역이 없습니다.</div>
               ) : (
-                comments.map(cmt => {
-                  const isMe = cmt.authorName === currentUser.name;
-                  const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
-                  
+                archivedDones.map(t => {
+                  const dateStr = new Date(t.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
+                  let typeColor = "text-slate-600 bg-slate-200 border-slate-300";
+                  if (t.memo_type === "긴급공지") typeColor = "text-rose-600 bg-rose-100 border-rose-200";
+                  else if (t.memo_type === "학생인계") typeColor = "text-blue-600 bg-blue-100 border-blue-200";
+                  else if (t.memo_type === "일반공지") typeColor = "text-emerald-600 bg-emerald-100 border-emerald-200";
+
                   return (
-                    <div key={cmt.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
-                      <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
-                        {canDelete && (
-                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
-                        )}
-                        <span className="text-[10px] text-slate-500 font-bold">
-                          {cmt.authorName} <span className="font-normal opacity-70 ml-1">{cmt.createdAt}</span>
-                        </span>
+                    <div key={t.memo_id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-slate-400 transition-colors" onClick={() => openModal(t)}>
+                      <div className="flex justify-between items-start mb-2">
+                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{t.memo_type}</span>
+                        <span className="text-[10px] font-bold text-slate-400">{dateStr}</span>
                       </div>
-                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-blue-100 text-[#002864] border-blue-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
-                        {cmt.text}
-                      </div>
+                      <div className="text-xs font-bold text-slate-700 leading-snug line-clamp-2">{t.content}</div>
                     </div>
                   );
                 })
               )}
-              <div ref={commentEndRef} />
             </div>
-
-            <div className="bg-white p-3 border-t border-slate-200 flex gap-2 items-end shrink-0">
-              <textarea 
-                value={commentInput} 
-                onChange={(e) => {
-                  setCommentInput(e.target.value);
-                  e.target.style.height = 'auto';
-                  e.target.style.height = (e.target.scrollHeight) + 'px';
-                }}
-                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
-                rows={1} className="flex-1 bg-slate-100 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[80px] custom-scroll" placeholder="진행 상황이나 피드백 메모를 남겨주세요."
-              ></textarea>
-              <button onClick={handleAddComment} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors shrink-0">기록 남기기</button>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
-          <div className="flex gap-2 items-center">
-            {modalData.memo_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.instructor_id) === String(currentUser.instId)) && (
-              <button onClick={deleteTask} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">업무 삭제</button>
-            )}
-            
-            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
-            {modalData.memo_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
-              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
-                🎙️ 회의 안건 상정
-              </button>
-            )}
-          </div>
-          
-          <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={saveTask} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">
-              {isSaving ? "저장 중..." : "변경사항 저장"}
-            </button>
           </div>
         </div>
       </div>
+
+      <TaskModal isOpen={isModalOpen} task={selectedTask} currentUser={currentUser} onClose={closeModal} onSuccess={fetchTasks} />
     </div>
   );
 }
