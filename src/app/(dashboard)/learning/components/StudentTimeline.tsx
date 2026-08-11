@@ -1,7 +1,8 @@
+// src/app/(dashboard)/learning/components/StudentTimeline.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { createClient } from "@supabase/supabase-js";
+import React, { useState, useEffect } from 'react';
+import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -34,17 +35,6 @@ const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => 
   return id;
 };
 
-const getDiffScore = (diff: string) => {
-  if (!diff) return 3;
-  if (diff.includes('최상')) return 5;
-  if (diff.includes('상')) return 4;
-  if (diff.includes('중')) return 3;
-  if (diff.includes('하')) return 2;
-  if (diff.includes('최하')) return 1;
-  return 3;
-};
-
-// 한국 시간(KST) 기준으로 날짜를 정확히 자르는 헬퍼 함수
 const getLocalDateStr = (isoString: string) => {
   if (!isoString) return "";
   const d = new Date(isoString);
@@ -52,7 +42,6 @@ const getLocalDateStr = (isoString: string) => {
   return kst.toISOString().split('T')[0];
 };
 
-// 슬림해진 220px 사이즈 인라인 캘린더
 const InlineCalendar = ({ label, dateValue, onDateChange, colorTheme }: { label: string, dateValue: string, onDateChange: (d: string) => void, colorTheme: 'blue' | 'red' }) => {
   const [currentMonth, setCurrentMonth] = useState(new Date(dateValue));
 
@@ -399,7 +388,6 @@ export default function StudentTimeline({
   const handleEditAndCreate = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다. 세팅을 확인해주세요.");
 
-    // 🌟 [추가됨] 뷰어 화면에서도 어떤 모달 탭에서 생성되었는지 알 수 있도록 서브타이틀 보관
     let subTitle = '맞춤 오답';
     if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
     else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
@@ -408,7 +396,7 @@ export default function StudentTimeline({
     sessionStorage.setItem('restoreExamQuestions', '1');
     sessionStorage.setItem('examQuestions', JSON.stringify(matchedCache));
     sessionStorage.setItem('examTitle', `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`);
-    sessionStorage.setItem('examSubTitle', subTitle); // 뷰어 연동용 서브타이틀
+    sessionStorage.setItem('examSubTitle', subTitle); 
 
     sessionStorage.setItem('clinicTargetStudentId', currentView?.studentId);
     sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
@@ -419,6 +407,11 @@ export default function StudentTimeline({
 
   const handleCreatePrint = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다.");
+    
+    // 🌟 [추가됨] 학생 탭 내부 모달에서도 꼬리표 챙기기!
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) throw new Error("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsEngineRunning(true);
 
     try {
@@ -427,18 +420,19 @@ export default function StudentTimeline({
 
       const examTitle = `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`;
 
-      // 🌟 [핵심 수정] 어떤 탭에서 생성했는지에 따라 서브 타이틀(배지)을 동적으로 변경!
       let subTitle = '맞춤 오답';
       if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
       else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
       else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
 
+      // 🌟 [핵심 변경] 오답 프린트 생성 시 꼬리표 부착!
       const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
         title: examTitle,
-        sub_title: subTitle, // 💡 동적으로 변경된 꼬리표 삽입
+        sub_title: subTitle,
         exam_type: '오답프린트',
         total_questions: matchedCache.length,
         instructor_id: instId,
+        tenant_id: myTenantId, // 👈 꼬리표 추가!
         layout_settings: {
           column: 2,
           split: 4,
@@ -568,7 +562,7 @@ export default function StudentTimeline({
       return (
         <details key={key} open={depth <= 2} className={depth === 1 ? "mb-2" : "mb-1 pl-1 ml-2 border-l border-slate-200"}>
           <summary className={`cursor-pointer flex items-center py-1.5 transition-colors select-none group ${depth === 1 ? "bg-slate-50 hover:bg-slate-100 px-3 rounded-lg border border-slate-200 shadow-sm" : "hover:bg-slate-50 px-2 rounded-md"}`}>
-            <svg className="w-4 h-4 text-slate-400 group-hover:text-[#002864] transition-transform details-arrow shrink-0 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+            <svg className="w-4 h-4 text-slate-400 group-hover:text-[#002864] transition-transform details-arrow shrink-0 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7-7"></path></svg>
             <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer mr-2" />
             <span className={`flex-1 truncate min-w-0 ${depth === 1 ? "text-[14px] font-extrabold text-[#002864]" : "text-[13px] font-bold text-slate-700"}`} title={displayName}>{displayName}</span>
             {stat.pending > 0 && <span className="ml-2 text-[10px] font-extrabold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}

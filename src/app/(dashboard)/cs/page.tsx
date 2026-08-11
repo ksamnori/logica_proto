@@ -1,334 +1,386 @@
-// src/app/(dashboard)/cs/page.tsx
+// src/components/cs/CSModal.tsx
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
-import CSModal from "@/components/cs/CSModal";
 
-export default function CSBoardPage() {
-  const [requests, setRequests] = useState<any[]>([]);
-  const [students, setStudents] = useState<any[]>([]);
-  const [instructors, setInstructors] = useState<any[]>([]);
-  const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
-  const [isLoading, setIsLoading] = useState(true);
-  const [statsMonth, setStatsMonth] = useState("");
-  const [dragOverCol, setDragOverCol] = useState<string | null>(null);
+interface CSModalProps {
+  isOpen: boolean;
+  reqData: any | null;
+  currentUser: { instId: string; name: string; isAdmin: boolean };
+  students: any[];
+  instructors: any[];
+  onClose: () => void;
+  onSuccess: () => void;
+}
 
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [selectedReq, setSelectedReq] = useState<any>(null);
+export default function CSModal({ 
+  isOpen, 
+  reqData, 
+  currentUser, 
+  students, 
+  instructors, 
+  onClose, 
+  onSuccess 
+}: CSModalProps) {
+  const [modalData, setModalData] = useState<any>(null);
+  const [comments, setComments] = useState<any[]>([]);
+  const [commentInput, setCommentInput] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
+  
+  const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
+  
+  // 🌟 세부 권한 상태
+  const [canDeletePost, setCanDeletePost] = useState(false);
+  const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
+  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한 추가
+
+  const commentEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const instId = localStorage.getItem("logica_instructor_id") || "";
-    const name = localStorage.getItem("logica_instructor_name") || "관리자";
-    const role = localStorage.getItem("logica_instructor_role") || "";
-    const pos = localStorage.getItem("logica_instructor_position") || "";
-    
-    const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
-                    ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
-    
-    setCurrentUser({ instId, name, isAdmin });
-    const now = new Date();
-    setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
-    fetchInitialData(instId, isAdmin);
+    const checkPerms = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id");
 
-    // 💡 1. 완벽한 리얼타임(Real-time) CS 보드 구축 (추가, 변경, 삭제 시 모든 사용자 화면 즉각 반영)
-    const channel = supabase.channel('cs_board_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, (payload) => {
-        if (payload.eventType === 'INSERT') {
-          // 관계 데이터(학생이름 등)가 필요하므로 INSERT 시엔 데이터를 재호출
-          fetchInitialData(instId, isAdmin);
-        } else if (payload.eventType === 'UPDATE') {
-          setRequests(prev => prev.map(r => r.request_id === payload.new.request_id ? { ...r, ...payload.new } : r));
-        } else if (payload.eventType === 'DELETE') {
-          setRequests(prev => prev.filter(r => r.request_id !== payload.old.request_id));
+      const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
+                        ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
+      setIsSuperAdminOrAdmin(adminFlag);
+
+      if (adminFlag) {
+        setCanDeletePost(true);
+        setCanDeleteOthersComment(true);
+        setCanSubmitAgenda(true); // 🌟 최고관리자 무조건 허용
+      } else if (tId) {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
+
+        if (data && data.allowed_menus) {
+          setCanDeletePost(data.allowed_menus.includes('action_delete_cs'));
+          setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
+          setCanSubmitAgenda(data.allowed_menus.includes('action_submit_cs_agenda')); // 🌟 안건 상정 권한 확인
+        } else {
+          setCanDeletePost(false);
+          setCanDeleteOthersComment(false);
+          setCanSubmitAgenda(false);
         }
-      })
-      .subscribe();
-
-    return () => { supabase.removeChannel(channel); };
-  }, []);
-
-  const fetchInitialData = async (instId: string, isAdmin: boolean) => {
-    setIsLoading(true);
-    try {
-      const [instRes, stuRes] = await Promise.all([
-        supabase.from("instructor").select("instructor_id, name, position").eq("status", "재직"),
-        supabase.from("student").select("student_id, name, grade").eq("status", "재원").order("name")
-      ]);
-      if (instRes.data) setInstructors(instRes.data);
-      if (stuRes.data) setStudents(stuRes.data);
-
-      let query = supabase.from("parent_request_log").select("*, student(name), author:instructor!parent_request_log_author_id_fkey(name)");
-
-      if (!isAdmin) {
-        const { data: myClasses } = await supabase.from("class").select("class_id").eq("instructor_id", instId);
-        const myClassIds = myClasses ? myClasses.map(c => c.class_id) : [];
-        const { data: enrolls } = await supabase.from("enrollment").select("student_id").in("class_id", myClassIds);
-        const myStudentIds = enrolls ? Array.from(new Set(enrolls.map(e => e.student_id))) : [];
-
-        let orStr = `processed_instructor_id.eq.${instId},author_id.eq.${instId}`;
-        if (myStudentIds.length > 0) orStr += `,student_id.in.(${myStudentIds.join(',')})`;
-        query = query.or(orStr);
       }
+    };
 
-      const { data } = await query.order("created_at", { ascending: false }).limit(1000);
-      
-      const filteredRequests = (data || []).filter((req: any) => {
-        if (req.is_private) {
-          if (isAdmin) return true;
-          if (String(req.author_id) === String(instId)) return true;
-          if (String(req.processed_instructor_id) === String(instId)) return true;
-          return false;
-        }
-        return true;
-      });
+    if (isOpen) {
+      checkPerms();
+      if (reqData) {
+        setModalData({ ...reqData });
+        setComments(reqData.comments || []);
+      } else {
+        setModalData({ 
+          request_id: "", 
+          student_id: "", 
+          request_type: "상담/기타", 
+          reason: "", 
+          processed_instructor_id: currentUser.instId, 
+          status: "대기", 
+          is_private: false 
+        });
+        setComments([]);
+      }
+      setCommentInput("");
+    }
+  }, [isOpen, reqData, currentUser]);
 
-      setRequests(filteredRequests);
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+  useEffect(() => {
+    if (commentEndRef.current) {
+      commentEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [comments]);
+
+  const handleModalChange = (field: string, value: any) => {
+    setModalData((prev: any) => ({ ...prev, [field]: value }));
   };
 
-  const handleDragStart = (e: React.DragEvent, reqId: string) => {
-    e.dataTransfer.setData("reqId", reqId);
-    setTimeout(() => { (e.target as HTMLElement).style.opacity = '0.5'; }, 0);
-  };
+  const handleAddComment = async () => {
+    if (!commentInput.trim() || !modalData?.request_id) return;
+    const now = new Date();
+    const dateStr = `${now.getMonth() + 1}/${now.getDate()} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const currentTimeISO = now.toISOString();
 
-  const handleDragEnd = (e: React.DragEvent) => {
-    (e.target as HTMLElement).style.opacity = '1';
-    setDragOverCol(null);
-  };
+    const newComment = { 
+      id: Date.now(), 
+      authorName: currentUser.name, 
+      text: commentInput.trim(), 
+      createdAt: dateStr 
+    };
 
-  const handleDragOver = (e: React.DragEvent, colName: string) => {
-    e.preventDefault();
-    if (dragOverCol !== colName) setDragOverCol(colName);
-  };
-
-  const handleDragLeave = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOverCol(null);
-  };
-
-  // 💡 2. 낙관적 UI 업데이트 및 시간 정보 로컬 갱신
-  const handleDrop = async (e: React.DragEvent, newStatus: string) => {
-    e.preventDefault();
-    setDragOverCol(null);
-    const reqId = e.dataTransfer.getData("reqId");
-    if (!reqId) return;
-
-    const now = new Date().toISOString();
-
-    setRequests(prev => prev.map(r => r.request_id.toString() === reqId ? { 
-      ...r, 
-      status: newStatus,
-      updated_at: now,
-      last_updater_name: currentUser.name 
-    } : r));
+    const updatedComments = [...comments, newComment];
 
     try {
       await supabase.from("parent_request_log").update({ 
-        status: newStatus,
-        updated_at: now,
-        last_updater_name: currentUser.name 
-      }).eq("request_id", reqId);
-    } catch (err) {
-      alert("상태 변경 실패");
-      fetchInitialData(currentUser.instId, currentUser.isAdmin); 
+        comments: updatedComments,
+        updated_at: currentTimeISO,
+        last_updater_name: currentUser.name
+      }).eq("request_id", modalData.request_id);
+
+      setComments(updatedComments);
+      setCommentInput("");
+      onSuccess(); 
+    } catch (e) {
+      alert("댓글 등록에 실패했습니다.");
     }
   };
 
-  const openModal = (req: any | null = null) => {
-    setSelectedReq(req);
-    setIsModalOpen(true);
-  };
-
-  const closeModal = () => {
-    setIsModalOpen(false);
-    setSelectedReq(null);
-  };
-
-  const waits = useMemo(() => requests.filter(r => !r.status || r.status === "대기"), [requests]);
-  const inProgress = useMemo(() => requests.filter(r => r.status === "처리중"), [requests]);
-  const dones = useMemo(() => requests.filter(r => r.status === "완료"), [requests]);
-
-  const statsReqs = useMemo(() => requests.filter(r => {
-    if (!r.created_at || !statsMonth) return false;
-    const d = new Date(r.created_at);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}` === statsMonth;
-  }), [requests, statsMonth]);
-
-  const statsCounts = useMemo(() => {
-    const counts = { "결석/보강": 0, "상담/기타": 0, "수납/행정": 0, "퇴원요청": 0 };
-    statsReqs.forEach(r => { if (counts[r.request_type as keyof typeof counts] !== undefined) counts[r.request_type as keyof typeof counts]++; });
-    return counts;
-  }, [statsReqs]);
-
-  const archivedDones = useMemo(() => statsReqs.filter(r => r.status === "완료"), [statsReqs]);
-
-  const renderCard = (req: any) => {
-    const sName = req.student?.name || "알수없음";
-    const authorName = req.author?.name || "알수없음";
-    const createdDateStr = new Date(req.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
-    const updatedDateStr = req.updated_at ? new Date(req.updated_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : createdDateStr;
-    const updaterName = req.last_updater_name || authorName || "알수없음";
+  const handleDeleteComment = async (commentId: number) => {
+    if (!confirm("이 댓글을 삭제하시겠습니까?")) return;
+    const updatedComments = comments.filter(c => c.id !== commentId);
     
-    let typeColor = "text-slate-600 bg-slate-100 border-slate-200";
-    if (req.request_type.includes("결석") || req.request_type.includes("퇴원")) typeColor = "text-rose-600 bg-rose-50 border-rose-200";
-    
-    let assigneeName = "미지정";
-    if (req.processed_instructor_id) {
-      const found = instructors.find(i => i.instructor_id === req.processed_instructor_id);
-      if (found) assigneeName = found.name;
+    try {
+      await supabase.from("parent_request_log").update({ 
+        comments: updatedComments,
+        updated_at: new Date().toISOString(),
+        last_updater_name: currentUser.name
+      }).eq("request_id", modalData.request_id);
+      
+      setComments(updatedComments);
+      onSuccess();
+    } catch (e) {
+      alert("댓글 삭제 실패");
     }
-
-    const cmts = req.comments || [];
-    
-    const canDrag = currentUser.isAdmin || String(req.author_id) === String(currentUser.instId) || String(req.processed_instructor_id) === String(currentUser.instId);
-
-    return (
-      <div 
-        key={req.request_id} 
-        draggable={canDrag} 
-        onDragStart={canDrag ? (e) => handleDragStart(e, req.request_id) : undefined} 
-        onDragEnd={canDrag ? handleDragEnd : undefined}
-        onClick={() => openModal(req)} 
-        className={`req-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
-      >
-        <div className="flex justify-between items-start mb-1">
-          <div>
-            <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type}</span>
-            {req.is_private && <span className="bg-slate-700 text-white px-1.5 py-0.5 rounded shadow-sm border border-slate-800 ml-1 text-[10px] font-bold">🔒 비공개</span>}
-          </div>
-        </div>
-        <h4 className="font-extrabold text-sm text-[#002864]">{sName} 학생</h4>
-        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep bg-slate-50 p-2 rounded-lg border border-slate-100 line-clamp-3">
-          {req.reason}
-        </div>
-        {cmts.length > 0 && (
-          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
-            {cmts.slice(-2).map((c: any) => (
-              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
-                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="text-[10px] font-bold text-slate-500 mb-1.5 mt-1">
-          담당: <span className={assigneeName === "미지정" ? "text-rose-400" : "text-[#002864]"}>{assigneeName}</span>
-        </div>
-        <div className="flex flex-col pt-2 border-t border-slate-100 gap-1.5">
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-slate-500">최종 수정: {updaterName}</span>
-            <span className="text-slate-400">{updatedDateStr}</span>
-          </div>
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-blue-500">작성: {authorName}</span>
-            <span className="text-slate-400">{createdDateStr}</span>
-          </div>
-        </div>
-      </div>
-    );
   };
+
+  const saveCS = async () => {
+    if (!modalData.student_id || !modalData.reason?.trim()) return alert("학생과 상세 내용은 필수 항목입니다.");
+
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+
+    setIsSaving(true);
+    const currentTimeISO = new Date().toISOString();
+
+    const payload: any = {
+      student_id: modalData.student_id,
+      request_type: modalData.request_type,
+      reason: modalData.reason,
+      processed_instructor_id: modalData.processed_instructor_id || null,
+      status: modalData.status,
+      is_private: modalData.is_private,
+      target_date: currentTimeISO.split('T')[0],
+      comments: comments,
+      updated_at: currentTimeISO,
+      last_updater_name: currentUser.name
+    };
+
+    try {
+      if (modalData.request_id) {
+        await supabase.from("parent_request_log").update(payload).eq("request_id", modalData.request_id);
+        alert("성공적으로 저장되었습니다.");
+      } else {
+        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
+        
+        payload.author_id = currentUser.instId;
+        payload.created_at = currentTimeISO;
+        payload.tenant_id = myTenantId; 
+        await supabase.from("parent_request_log").insert([payload]);
+        alert("CS 기록이 등록되었습니다.");
+      }
+      onSuccess();
+      onClose();
+    } catch (e) { 
+      alert("저장 실패"); 
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const deleteCS = async () => {
+    if (!confirm("⚠️ 이 CS 요청 기록을 완전히 삭제하시겠습니까?\n댓글 및 처리 내역이 모두 사라집니다.")) return;
+    try {
+      await supabase.from("parent_request_log").delete().eq("request_id", modalData.request_id);
+      alert("삭제되었습니다.");
+      onSuccess();
+      onClose();
+    } catch (e) { alert("삭제 실패"); }
+  };
+
+  const submitAgenda = async () => {
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
+
+    try {
+      const studentName = students.find(s => s.student_id === modalData.student_id)?.name || "학생";
+      await supabase.from("agenda").insert({
+        title: `[CS요청] ${studentName} 학생 건`,
+        content: modalData.reason,
+        type: "CS",
+        source: "CS",
+        source_id: modalData.request_id,
+        created_by: currentUser.instId,
+        tenant_id: myTenantId 
+      });
+      alert("해당 CS 요청건이 회의 안건으로 상정되었습니다.");
+    } catch (e) {
+      alert("안건 상정 실패");
+    }
+  };
+
+  if (!isOpen || !modalData) return null;
+
+  const isReadonly = modalData.request_id && !isSuperAdminOrAdmin && String(modalData.author_id) !== String(currentUser.instId);
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
-      <div className="flex justify-between items-end shrink-0">
-        <div>
-          <h2 className="text-xl font-bold text-slate-800">🚨 학부모 요청 및 CS 관리 (Kanban)</h2>
-          <p className="text-sm font-bold text-slate-400 mt-1">드래그 앤 드롭으로 요청 처리 상태를 변경하고, CS 카드를 클릭하여 세부 내용 확인 및 담당자 간 소통을 진행하세요.</p>
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+      <div className="bg-white w-full max-w-2xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+        
+        <div className="bg-rose-600 p-5 text-white flex justify-between items-center shrink-0">
+          <h2 className="text-lg font-bold tracking-tight">🚨 CS / 학부모 요청 상세</h2>
+          <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
         </div>
-      </div>
-
-      <div className="flex-1 flex gap-6 overflow-hidden pb-2">
-        <div className="flex-1 min-w-[250px] bg-rose-50/50 border border-rose-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
-          <div className="p-4 bg-rose-50 border-b border-rose-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-rose-700">🚨 대기 중 (미처리)</h3>
-            <span className="bg-rose-200 text-rose-700 text-xs px-2 py-0.5 rounded-full font-bold">{waits.length}</span>
-          </div>
-          <div 
-            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "대기" ? "bg-rose-100/50 border-2 border-dashed border-rose-300" : ""}`}
-            onDragOver={(e) => handleDragOver(e, "대기")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "대기")}
-          >
-            {waits.map(renderCard)}
-          </div>
-        </div>
-
-        <div className="flex-1 min-w-[250px] bg-amber-50/50 border border-amber-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
-          <div className="p-4 bg-amber-50 border-b border-amber-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-amber-700">⏳ 처리 중 (진행)</h3>
-            <span className="bg-amber-200 text-amber-700 text-xs px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
-          </div>
-          <div 
-            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "처리중" ? "bg-amber-100/50 border-2 border-dashed border-amber-300" : ""}`}
-            onDragOver={(e) => handleDragOver(e, "처리중")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "처리중")}
-          >
-            {inProgress.map(renderCard)}
-          </div>
-        </div>
-
-        <div className="flex-1 min-w-[250px] bg-emerald-50/50 border border-emerald-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
-          <div className="p-4 bg-emerald-50 border-b border-emerald-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-emerald-700">✅ 처리 완료</h3>
-            <span className="bg-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{dones.length}</span>
-          </div>
-          <div 
-            className={`flex-1 p-3 overflow-y-auto custom-scroll space-y-3 transition-colors ${dragOverCol === "완료" ? "bg-emerald-100/50 border-2 border-dashed border-emerald-300" : ""}`}
-            onDragOver={(e) => handleDragOver(e, "완료")} onDragLeave={handleDragLeave} onDrop={(e) => handleDrop(e, "완료")}
-          >
-            {dones.map(renderCard)}
-          </div>
-        </div>
-
-        <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-hidden">
-          <button onClick={() => openModal()} className="w-full bg-rose-500 hover:bg-rose-600 text-white px-5 py-3.5 rounded-xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-            새 CS 요청 등록하기
-          </button>
-
-          <div className="flex-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
-            <div className="p-4 bg-slate-800 text-white shrink-0 flex justify-between items-center rounded-t-2xl">
-              <h3 className="font-black text-sm">📊 유형별 통계 및 보관함</h3>
-            </div>
-            <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
-              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] shadow-sm cursor-pointer" />
-            </div>
-            <div className="p-3 border-b border-slate-100 shrink-0">
-              <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
-                <div className="bg-rose-50 p-2 rounded border border-rose-100 flex justify-between shadow-sm"><span className="text-rose-600">결석/보강</span><span>{statsCounts["결석/보강"]}건</span></div>
-                <div className="bg-slate-50 p-2 rounded border border-slate-200 flex justify-between shadow-sm"><span className="text-slate-600">상담/기타</span><span>{statsCounts["상담/기타"]}건</span></div>
-                <div className="bg-blue-50 p-2 rounded border border-blue-100 flex justify-between shadow-sm"><span className="text-blue-600">수납/행정</span><span>{statsCounts["수납/행정"]}건</span></div>
-                <div className="bg-purple-50 p-2 rounded border border-purple-100 flex justify-between shadow-sm"><span className="text-purple-600">퇴원요청</span><span>{statsCounts["퇴원요청"]}건</span></div>
+        
+        <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
+          
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
+            <div className="grid grid-cols-2 gap-4 shrink-0">
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-500 mb-1">대상 학생 <span className="text-rose-500">*</span></label>
+                <select 
+                  value={modalData.student_id} onChange={(e) => handleModalChange("student_id", e.target.value)}
+                  disabled={isReadonly}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-slate-50 disabled:opacity-70"
+                >
+                  <option value="">학생 선택</option>
+                  {students.map(s => <option key={s.student_id} value={s.student_id}>{s.name} ({s.grade || '-'})</option>)}
+                </select>
+              </div>
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-500 mb-1">요청 분류 (유형) <span className="text-rose-500">*</span></label>
+                <select 
+                  value={modalData.request_type} onChange={(e) => handleModalChange("request_type", e.target.value)}
+                  disabled={isReadonly}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-slate-50 disabled:opacity-70"
+                >
+                  <option value="결석/보강">결석/보강</option>
+                  <option value="상담/기타">상담/기타</option>
+                  <option value="수납/행정">수납/행정</option>
+                  <option value="퇴원요청">퇴원요청</option>
+                </select>
               </div>
             </div>
-            <div className="bg-slate-100 px-3 py-2 border-b border-slate-200 shrink-0">
-              <span className="text-xs font-bold text-slate-500">해당 월 완료된 CS 목록</span>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50 space-y-2">
-              {archivedDones.length === 0 ? (
-                <div className="text-center py-10 text-slate-400 font-bold text-xs">해당 월에 완료된<br/>CS 내역이 없습니다.</div>
-              ) : (
-                archivedDones.map(req => {
-                  const sName = req.student?.name || "알수없음";
-                  const dateStr = new Date(req.created_at).toLocaleDateString("ko-KR", { month: "short", day: "numeric" });
-                  let typeColor = "text-slate-600 bg-slate-200 border-slate-300";
-                  if (req.request_type.includes("결석") || req.request_type.includes("퇴원")) typeColor = "text-rose-600 bg-rose-100 border-rose-200";
 
+            <div className="flex flex-col flex-1 min-h-0">
+              <label className="block text-xs font-bold text-slate-500 mb-1">요청 상세 내용 (사유) <span className="text-rose-500">*</span></label>
+              <textarea 
+                value={modalData.reason} onChange={(e) => handleModalChange("reason", e.target.value)}
+                disabled={isReadonly}
+                className="flex-1 w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-sm focus:outline-none focus:border-rose-600 resize-none custom-scroll disabled:opacity-70" placeholder="학부모님의 요청 사항을 입력해주세요."
+              ></textarea>
+            </div>
+            
+            <div className="border-t border-slate-100 pt-3 grid grid-cols-2 lg:grid-cols-3 gap-4 items-end shrink-0">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">처리 담당자 배정</label>
+                <select 
+                  value={modalData.processed_instructor_id || ""} onChange={(e) => handleModalChange("processed_instructor_id", e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-white"
+                >
+                  <option value="">지정 안 함</option>
+                  {instructors.map(i => <option key={i.instructor_id} value={i.instructor_id}>{i.name} {i.position || '선생님'}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">진행 상태</label>
+                <select value={modalData.status} onChange={(e) => handleModalChange("status", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-black text-sm focus:outline-none focus:border-rose-600 bg-white">
+                  <option value="대기" className="text-rose-600">대기 (미처리)</option>
+                  <option value="처리중" className="text-amber-600">처리 중</option>
+                  <option value="완료" className="text-emerald-600">완료됨</option>
+                </select>
+              </div>
+              <div className="col-span-2 lg:col-span-1 flex items-center h-[38px]">
+                <label className="relative inline-flex items-center cursor-pointer group">
+                  <input 
+                    type="checkbox" checked={modalData.is_private} onChange={(e) => handleModalChange("is_private", e.target.checked)}
+                    disabled={isReadonly}
+                    className="sr-only peer" 
+                  />
+                  <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-slate-800"></div>
+                  <span className="ml-2 text-xs font-bold text-slate-600 group-hover:text-slate-800 transition-colors">🔒 비공개 <span className="text-[10px] font-normal text-slate-400">(권한자 전용)</span></span>
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
+            <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-slate-700 text-sm">💬 처리 상황 / 코멘트</h3>
+              <span className="text-[10px] font-bold text-slate-500">권한이 있는 작업자가 기록을 남길 수 있습니다.</span>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
+              {comments.length === 0 ? (
+                <div className="flex-1 flex items-center justify-center text-slate-400 font-bold text-xs h-full">아직 등록된 코멘트가 없습니다.</div>
+              ) : (
+                comments.map(cmt => {
+                  const isMe = cmt.authorName === currentUser.name;
+                  const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
+                  
                   return (
-                    <div key={req.request_id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-slate-400 transition-colors" onClick={() => openModal(req)}>
-                      <div className="flex justify-between items-start mb-1">
-                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{req.request_type}</span>
-                        <span className="text-[10px] font-bold text-slate-400">{dateStr}</span>
+                    <div key={cmt.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
+                      <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
+                        {canDelete && (
+                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
+                        )}
+                        <span className="text-[10px] text-slate-500 font-bold">
+                          {cmt.authorName} <span className="font-normal opacity-70 ml-1">{cmt.createdAt}</span>
+                        </span>
                       </div>
-                      <h4 className="font-bold text-xs text-[#002864] mb-1">{sName} 학생</h4>
-                      <div className="text-[11px] font-medium text-slate-600 leading-snug line-clamp-2">{req.reason}</div>
+                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-rose-100 text-rose-800 border-rose-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
+                        {cmt.text}
+                      </div>
                     </div>
                   );
                 })
               )}
+              <div ref={commentEndRef} />
+            </div>
+
+            <div className="bg-white p-3 border-t border-slate-200 flex gap-2 items-end shrink-0">
+              <textarea 
+                value={commentInput} 
+                onChange={(e) => {
+                  setCommentInput(e.target.value);
+                  e.target.style.height = 'auto';
+                  e.target.style.height = (e.target.scrollHeight) + 'px';
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
+                rows={1} className="flex-1 bg-slate-100 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-rose-600 resize-none max-h-[80px] custom-scroll" placeholder="처리 과정이나 결과, 전달할 메모를 남겨주세요."
+              ></textarea>
+              <button onClick={handleAddComment} className="bg-rose-600 hover:bg-rose-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors shrink-0">기록 남기기</button>
             </div>
           </div>
         </div>
+        
+        <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
+          <div className="flex gap-2 items-center">
+            {modalData.request_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.author_id) === String(currentUser.instId)) && (
+              <button onClick={deleteCS} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">요청 삭제</button>
+            )}
+            
+            {/* 🌟 [수정] 권한이 있는 경우에만 '회의 안건 상정' 버튼 노출 */}
+            {modalData.request_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+                🎙️ 회의 안건 상정
+              </button>
+            )}
+          </div>
+          
+          <div className="flex gap-2 justify-end">
+            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={saveCS} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-lg hover:bg-rose-700 transition-colors shadow-sm disabled:opacity-50">
+              {isSaving ? "저장 중..." : "변경사항 저장"}
+            </button>
+          </div>
+        </div>
       </div>
-
-      <CSModal isOpen={isModalOpen} reqData={selectedReq} currentUser={currentUser} students={students} instructors={instructors} onClose={closeModal} onSuccess={() => fetchInitialData(currentUser.instId, currentUser.isAdmin)} />
     </div>
   );
 }

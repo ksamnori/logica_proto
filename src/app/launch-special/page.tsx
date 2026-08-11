@@ -9,7 +9,8 @@ const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 export default function LaunchSpecialClassPage() {
   const [form, setForm] = useState({
     levelCode: "SS", course: "", daysCode: "", period: "", ym: "",
-    name: "", targetGrade: "", instructorId: "", status: "예정"
+    name: "", targetGrade: "", instructorId: "", status: "예정",
+    capacity: 15 // 🌟 특강반 기본 정원 15명
   });
   
   const [schedules, setSchedules] = useState(
@@ -24,7 +25,15 @@ export default function LaunchSpecialClassPage() {
   useEffect(() => { fetchInstructors(); }, []);
 
   const fetchInstructors = async () => {
-    const { data } = await supabase.from("instructor").select("instructor_id, name, position").eq("status", "재직");
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    
+    let query = supabase.from("instructor").select("instructor_id, name, position").eq("status", "재직");
+    
+    if (myTenantId) {
+      query = query.eq("tenant_id", myTenantId);
+    }
+    
+    const { data } = await query;
     setInstructors(data || []);
   };
 
@@ -50,7 +59,7 @@ export default function LaunchSpecialClassPage() {
   };
 
   const registerClass = async () => {
-    const { levelCode, course, daysCode, period, ym, name, targetGrade, instructorId, status } = form;
+    const { levelCode, course, daysCode, period, ym, name, targetGrade, instructorId, status, capacity } = form;
     const checkedSchedules = schedules.filter(s => s.checked);
 
     if (!course || !daysCode || !period || !ym || !name || !instructorId || checkedSchedules.length === 0) {
@@ -59,6 +68,11 @@ export default function LaunchSpecialClassPage() {
 
     for (const s of checkedSchedules) {
       if (!s.start_time) return alert(`${s.day}요일의 시작 시간을 입력해주세요!`);
+    }
+
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) {
+      return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
     }
 
     setIsSubmitting(true);
@@ -77,8 +91,15 @@ export default function LaunchSpecialClassPage() {
       const levelName = { SS: "특강", WS: "특강", MU: "메이크업", LE: "메이크업" }[levelCode] || "특강";
 
       const { data: newClass, error: classErr } = await supabase.from('class').insert([{
-        code: finalCode, name: name.trim(), level_name: levelName, target_grade: targetGrade || null,
-        schedule_days: checkedSchedules.map(s => s.day).join(', '), instructor_id: instructorId, status: status
+        code: finalCode, 
+        name: name.trim(), 
+        level_name: levelName, 
+        target_grade: targetGrade || null,
+        schedule_days: checkedSchedules.map(s => s.day).join(', '), 
+        instructor_id: instructorId, 
+        status: status,
+        capacity: capacity, // 🌟 DB 저장 항목에 추가
+        tenant_id: myTenantId
       }]).select().single();
 
       if (classErr) throw classErr;
@@ -185,10 +206,20 @@ export default function LaunchSpecialClassPage() {
                 </div>
               </div>
 
-              <div className="col-span-2">
+              <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">반 상태</label>
                 <select value={form.status} onChange={e => setForm({...form, status: e.target.value})} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600">
                   <option value="예정">📅 개강 예정</option><option value="진행중">🟢 진행 중</option><option value="종료">🔴 종료됨</option>
+                </select>
+              </div>
+              
+              {/* 🌟 정원 선택 드롭다운 추가 */}
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">정원 (명)</label>
+                <select value={form.capacity} onChange={e => setForm({...form, capacity: Number(e.target.value)})} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600 font-bold">
+                  {[...Array(30)].map((_, i) => (
+                    <option key={i+1} value={i+1}>{i+1}명</option>
+                  ))}
                 </select>
               </div>
             </div>

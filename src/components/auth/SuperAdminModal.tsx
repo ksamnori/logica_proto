@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState } from "react";
-import { useRouter } from "next/navigation"; // 💡 Next.js 라우터 추가
+import { useRouter } from "next/navigation"; 
 import { supabase } from "@/lib/supabase";
 
 interface SuperAdminModalProps {
@@ -11,7 +11,7 @@ interface SuperAdminModalProps {
 }
 
 export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProps) {
-  const router = useRouter(); // 💡 라우터 객체 생성
+  const router = useRouter(); 
   const [adminId, setAdminId] = useState("");
   const [adminPw, setAdminPw] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -25,9 +25,8 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
     try {
       await supabase.auth.signOut();
       localStorage.clear();
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 이전 쿠키 초기화
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       
-      // 1. Supabase Auth로 인증 (가짜 이메일 트릭)
       const fakeEmail = `${adminId}@logica.com`;
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: fakeEmail,
@@ -40,12 +39,10 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
         return;
       }
 
-      // 🌟 2. 미들웨어가 읽을 수 있도록 수파베이스 토큰을 쿠키에 저장! (필수)
       if (authData.session) {
         document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
       }
 
-      // 3. 인증 성공 후 DB에서 직급/권한 확인
       const { data: adminData, error: dbError } = await supabase
         .from("instructor")
         .select("*")
@@ -58,7 +55,6 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
         return;
       }
 
-      // 4. 최고관리자 권한인지 깐깐하게 체크
       const isSuperAdmin = adminData.role === 'SUPER_ADMIN' || String(adminData.position).includes('최고관리자');
 
       if (isSuperAdmin) {
@@ -66,11 +62,15 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
         localStorage.setItem("logica_instructor_name", adminData.name);
         localStorage.setItem("logica_instructor_role", adminData.role || "SUPER_ADMIN");
         localStorage.setItem("logica_instructor_position", adminData.position || "최고관리자");
+        
+        // 🌟 [추가됨] 최고관리자도 시스템 이용을 위해 소속 지점(본사 등) 꼬리표를 챙겨야 합니다!
+        if (adminData.tenant_id) {
+          localStorage.setItem("logica_tenant_id", adminData.tenant_id);
+        }
+
         sessionStorage.setItem("just_logged_in", "true");
 
         alert("👑 최고관리자님, 환영합니다. 모든 시스템 접근이 허가되었습니다.");
-        
-        // 💡 5. window.location.href 대신 Next.js 라우터를 사용하여 통제실로 직행
         router.replace("/super-admin"); 
       } else {
         alert("이 계정은 최고관리자(SUPER_ADMIN) 권한이 없습니다.");

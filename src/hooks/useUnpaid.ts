@@ -25,7 +25,6 @@ export function useUnpaid() {
     setIsLoading(true);
     setSelectedIds([]);
     try {
-      // 1. 미납 청구서 로드 (💡 학부모 번호를 함께 가져오도록 쿼리 수정)
       const { data: bills, error } = await supabase
         .from('academy_billing')
         .select('*, student(name, phone, parent(phone)), class(name)')
@@ -35,7 +34,6 @@ export function useUnpaid() {
       if (error) throw error;
       setUnpaidData(bills || []);
 
-      // 2. 알림 발송 기록 로드 (💡 OOM 방지를 위해 최근 6개월 데이터만 로드하도록 최적화)
       const sixMonthsAgo = new Date();
       sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
 
@@ -120,8 +118,6 @@ export function useUnpaid() {
     try {
       const payloads = targets.map((item: any) => {
         const studentName = item.student?.name || '학생';
-        
-        // 💡 학부모 연락처 최우선, 없으면 학생 연락처 사용
         const studentContact = item.student?.parent?.phone || item.student?.phone || '01000000000';
         
         const msg = smsTemplate
@@ -136,6 +132,8 @@ export function useUnpaid() {
           sentAt = new Date().toISOString();
         }
 
+        // 💡 알림(Notification) 테이블은 전 지점 공용으로 쏴주는 테이블이라 tenant_id 꼬리표가 따로 없습니다.
+        // 따라서 기존대로 보내기만 하면 됩니다.
         return {
           receiver_phone: studentContact, 
           noti_type: 'UNPAID_ALERT',

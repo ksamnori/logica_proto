@@ -4,7 +4,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
-// 💡 선생님 프로필 이미지 URL 변환 헬퍼 함수 추가
 const getProfileImageUrl = (path: string | null | undefined) => {
   if (!path || path.trim() === "") return null;
   if (path.startsWith("http")) return path;
@@ -19,7 +18,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const [chatRooms, setChatRooms] = useState<any[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeStaffName, setActiveStaffName] = useState("");
-  // 💡 선택된 채팅방 선생님의 프로필 이미지 상태 추가
   const [activeStaffAvatar, setActiveStaffAvatar] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [chatInput, setChatInput] = useState("");
@@ -134,20 +132,39 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   const loadAvailableStaff = async () => {
     try {
-      const { data: sData } = await supabase.from("student").select("enrollment(class(instructor_id))").eq("parent_id", parentId);
+      // 🌟 [핵심 변경] 학생을 조회할 때 'tenant_id(소속 지점)'도 함께 가져옵니다.
+      const { data: sData } = await supabase.from("student").select("tenant_id, enrollment(class(instructor_id))").eq("parent_id", parentId);
+      
       let instructorIds = new Set<string>();
-      sData?.forEach((s: any) => { s.enrollment?.forEach((e: any) => { if (e.class?.instructor_id) instructorIds.add(e.class.instructor_id); }); });
+      let tenantIds = new Set<string>(); // 자녀가 다니는 학원 지점들
+
+      sData?.forEach((s: any) => { 
+        if (s.tenant_id) tenantIds.add(s.tenant_id);
+        s.enrollment?.forEach((e: any) => { 
+          if (e.class?.instructor_id) instructorIds.add(e.class.instructor_id); 
+        }); 
+      });
+
+      // 소속된 학원이 아예 없으면 빈 리스트 반환
+      if (tenantIds.size === 0) return setStaffList([]);
+
       let orQuery = "position.ilike.%실장%,role.eq.MANAGER,role.eq.ADMIN";
       if (instructorIds.size > 0) orQuery += `,instructor_id.in.(${Array.from(instructorIds).join(",")})`;
-      // 💡 profile_image_url 도 함께 불러옵니다 (* 로 불러오므로 포함됨)
-      const { data } = await supabase.from("instructor").select("*").eq("status", "재직").or(orQuery);
+      
+      // 🌟 [핵심 변경] "내 아이가 다니는 지점(tenantIds)"에 소속된 선생님/관리자만 불러오도록 필터 추가!
+      const { data } = await supabase
+        .from("instructor")
+        .select("*")
+        .eq("status", "재직")
+        .in("tenant_id", Array.from(tenantIds)) // 👈 서초/부산 가맹점 원장님 노출 차단 방어막
+        .or(orQuery);
+        
       setStaffList(data || []);
     } catch (e) { console.error(e); }
   };
 
   const loadChatRooms = async () => {
     try {
-      // 💡 profile_image_url 필드 추가
       const { data } = await supabase.from("chat_room")
         .select("room_id, instructor_id, instructor(name, position, profile_image_url), chat_message(message_id, content, created_at, sender_type, is_read)")
         .eq("parent_id", parentId).order("created_at", { ascending: false });
@@ -165,6 +182,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       const { data: existing } = await supabase.from("chat_room").select("room_id").eq("instructor_id", instructorId).eq("parent_id", parentId).maybeSingle();
       let roomId = existing?.room_id;
       if (!roomId) {
+        // 💡 채팅방(chat_room)이나 채팅메시지(chat_message)는 부모님과 지점 선생님을 1:1로 이어주는 테이블이므로, 선생님의 tenant_id에 자연스럽게 귀속되어 꼬리표를 붙일 필요가 없습니다.
         const { data: newRoom } = await supabase.from("chat_room").insert({ instructor_id: instructorId, parent_id: parentId }).select().single();
         roomId = newRoom?.room_id;
       }
@@ -189,7 +207,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         if (payload.payload?.sender_type === "instructor") {
           setIsTyping(true); 
           clearTimeout(typingTimerRef.current); 
-          // 💡 유지 시간을 3초(3000ms)로 연장
           typingTimerRef.current = setTimeout(() => setIsTyping(false), 3000);
         }
       }).subscribe();
@@ -279,7 +296,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                       <div key={staff.instructor_id} onClick={() => createOrOpenRoom(staff.instructor_id, `${staff.name} ${staff.position || '선생님'}`, avatarUrl)} className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 w-14">
                         <div className="relative w-11 h-11 rounded-full bg-[#002864]/5 border border-[#002864]/10 flex items-center justify-center text-[#002864] text-lg font-black group-hover:bg-[#002864] group-hover:text-white transition-colors shadow-sm overflow-hidden">
                           <span className="absolute z-0">{staff.name.substring(1) || staff.name}</span>
-                          {/* 💡 상단 목록 실제 이미지 출력 */}
                           {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                         </div>
                         <span className="text-[10px] font-bold text-slate-700 truncate w-full text-center group-hover:text-[#002864] mt-0.5">{staff.name}</span>
@@ -305,7 +321,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                           <div className="relative w-10 h-10 bg-slate-100 rounded-full flex justify-center items-center text-slate-600 font-bold shrink-0 border border-slate-200 text-lg overflow-hidden">
                             <span className="absolute z-0">👨‍🏫</span>
-                            {/* 💡 채팅 목록 실제 이미지 출력 */}
                             {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                           </div>
                           <div className="flex flex-col min-w-0 flex-1">
@@ -338,7 +353,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                       {msg.sender_type !== "parent" && (
                         <div className="relative w-7 h-7 rounded-full bg-slate-200 border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs overflow-hidden">
                           <span className="absolute z-0">👨‍🏫</span>
-                          {/* 💡 말풍선 옆 선생님 실제 이미지 출력 */}
                           {activeStaffAvatar && <img src={activeStaffAvatar} className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                         </div>
                       )}
@@ -360,7 +374,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <div className="flex items-end gap-1.5 max-w-[85%]">
                     <div className="relative w-7 h-7 rounded-full bg-slate-200 border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs overflow-hidden">
                       <span className="absolute z-0">👨‍🏫</span>
-                      {/* 💡 입력 중 상태에서도 실제 이미지 출력 */}
                       {activeStaffAvatar && <img src={activeStaffAvatar} className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                     </div>
                     <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">

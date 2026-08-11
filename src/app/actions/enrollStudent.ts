@@ -2,12 +2,17 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
 
-// 환경변수 에러 방지 처리 (보안이 보장된 서버 환경에서만 실행됨)
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 );
+
+async function getTenantId() {
+  const cookieStore = await cookies();
+  return cookieStore.get("logica_tenant_id")?.value;
+}
 
 export async function registerStudentAction(data: {
   name: string;
@@ -21,9 +26,11 @@ export async function registerStudentAction(data: {
   const { name, password, studentContact, parentContact, school, grade, status } = data;
 
   try {
+    const secureTenantId = await getTenantId();
+    if (!secureTenantId) throw new Error("인증 정보(쿠키)가 없습니다. 다시 로그인 해주세요.");
+
     let finalParentId = null;
 
-    // 1. 학부모 정보 확인 및 생성 (서버 환경)
     if (parentContact) {
       const { data: existingParent, error: fetchError } = await supabaseAdmin
         .from("parent")
@@ -47,7 +54,6 @@ export async function registerStudentAction(data: {
       }
     }
 
-    // 2. 학생 연락처 (ID) 중복 검사 및 꼬리표(Suffix) 부착 로직
     let finalContact = studentContact;
     const { data: existingContacts, error: searchError } = await supabaseAdmin
       .from("student")
@@ -80,7 +86,6 @@ export async function registerStudentAction(data: {
       }
     }
 
-    // 3. 학생 데이터 최종 INSERT
     const { error: studentError } = await supabaseAdmin.from("student").insert([
       {
         name: name.trim(),
@@ -90,6 +95,7 @@ export async function registerStudentAction(data: {
         password_hash: password.trim(),
         status: status,
         parent_id: finalParentId,
+        tenant_id: secureTenantId, 
       },
     ]);
 

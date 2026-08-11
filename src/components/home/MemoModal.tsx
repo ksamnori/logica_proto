@@ -23,13 +23,19 @@ export default function MemoModal({ isOpen, currentUser, onClose, onSuccess }: M
 
   const saveMemo = async () => {
     if (!memoData.content.trim()) return alert("내용을 입력해주세요.");
+    
+    // 🌟 [추가됨] 빠른 공지를 등록할 때 소속 지점 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsSaving(true);
     try {
       await supabase.from("instructor_memo").insert({
         instructor_id: currentUser.instId, 
         author_name: currentUser.name, 
         memo_type: memoData.type, 
-        content: memoData.content
+        content: memoData.content,
+        tenant_id: myTenantId // 🌟 [추가됨] 꼬리표 부착!
       });
       alert("공지가 등록되었습니다.");
       onSuccess();

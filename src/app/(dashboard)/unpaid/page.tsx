@@ -1,17 +1,73 @@
 // src/app/(dashboard)/unpaid/page.tsx
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import { useUnpaid } from "@/hooks/useUnpaid";
 import UnpaidAutoModal from "@/components/unpaid/UnpaidAutoModal";
 
 export default function UnpaidPage() {
+  const router = useRouter();
+
+  // 🌟 [보안 로직 추가] 권한 및 소속 지점 확인 상태 (민감 정보 페이지 철통 보안)
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   const [isAutoOpen, setIsAutoOpen] = useState(false);
   
   // 훅에서 비즈니스 로직과 상태를 모두 가져옵니다.
   const unpaid = useUnpaid();
   const sortedData = unpaid.getSortedData();
   const smsBytes = unpaid.getSmsBytes();
+
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
+  useEffect(() => {
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 미납 관리 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/unpaid"))) {
+        alert("⛔ 미납 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 원천 차단
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 overflow-hidden relative">

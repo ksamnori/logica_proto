@@ -14,7 +14,6 @@ export default function AdminDashboardPage() {
   const [adminProfileName, setAdminProfileName] = useState("관리자님");
   const [activeTab, setActiveTab] = useState("student");
 
-  // 학생 폼 상태
   const [sName, setSName] = useState("");
   const [sPw, setSPw] = useState("");
   const [sContact, setSContact] = useState("");
@@ -24,25 +23,21 @@ export default function AdminDashboardPage() {
   const [sStatus, setSStatus] = useState("입학테스트");
   const [isStudentSubmitting, setIsStudentSubmitting] = useState(false);
 
-  // 관리자(강사) 폼 상태
   const [iLoginId, setILoginId] = useState("");
   const [iPw, setIPw] = useState("");
   const [iName, setIName] = useState("");
-  const [iPosition, setIPosition] = useState("원장");
+  const [iPosition, setIPosition] = useState("전임강사"); // 기본값 변경
   const [iEmail, setIEmail] = useState("");
   const [iPhone, setIPhone] = useState("");
   const [isInstructorSubmitting, setIsInstructorSubmitting] = useState(false);
 
-  // 강사 목록 및 모달 상태
   const [instructors, setInstructors] = useState<any[]>([]);
   const [isLoadingInstructors, setIsLoadingInstructors] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editInst, setEditInst] = useState<any>({});
 
-  // 🌟 [핵심 변경] TypeScript null 에러 방지를 위해 강제로 string("") 처리
   useEffect(() => {
     const checkSuperAdminAccess = async () => {
-      // localStorage가 null을 반환할 수 있으므로 무조건 string이 되도록 빈 문자열 추가
       let instId = localStorage.getItem('logica_instructor_id') || sessionStorage.getItem('logica_instructor_id') || "";
 
       if (!instId) {
@@ -56,9 +51,8 @@ export default function AdminDashboardPage() {
             .maybeSingle();
             
           if (inst) {
-            instId = inst.instructor_id || ""; // 여기서도 무조건 string 유지
+            instId = inst.instructor_id || ""; 
             
-            // TypeScript 에러 해결: instId가 null이 아닌 빈 문자열이 보장되므로 에러 없음
             localStorage.setItem('logica_instructor_id', instId);
             localStorage.setItem('logica_instructor_name', inst.name || '관리자');
             localStorage.setItem('logica_instructor_role', inst.role || 'SUPER_ADMIN');
@@ -129,6 +123,9 @@ export default function AdminDashboardPage() {
   const registerStudent = async () => {
     if (!sName || !sContact || !sPw) return alert("이름, 학생 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
     if (sContact.length < 12) return alert("올바른 연락처 형식을 입력해주세요. (예: 010-1234-5678)");
+    
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
 
     setIsStudentSubmitting(true);
 
@@ -191,7 +188,8 @@ export default function AdminDashboardPage() {
           phone: finalContact,
           password_hash: sPw,
           status: sStatus,
-          parent_id: finalParentId
+          parent_id: finalParentId,
+          tenant_id: myTenantId 
         }]);
 
       if (studentError) throw studentError;
@@ -209,12 +207,19 @@ export default function AdminDashboardPage() {
   const registerInstructor = async () => {
     if (!iLoginId || !iPw || !iName) return alert("로그인 ID, 비밀번호, 이름은 필수입니다!");
     if (iPw.length < 6) return alert("비밀번호는 최소 6자리 이상이어야 합니다.");
+    
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
 
     setIsInstructorSubmitting(true);
 
+    // 🌟 [핵심 변경] 신규 직급 체계에 맞춘 Role 매핑 로직
     let assignedRole = 'TEACHER';
     if (iPosition === '원장') assignedRole = 'ADMIN';
+    else if (iPosition === '부원장') assignedRole = 'VICE_ADMIN';
     else if (iPosition === '실장') assignedRole = 'MANAGER';
+    else if (iPosition === '파트강사') assignedRole = 'PART_TEACHER';
+    else if (iPosition === '조교') assignedRole = 'TA';
 
     try {
       const fakeEmail = `${iLoginId}@logica.com`;
@@ -249,7 +254,8 @@ export default function AdminDashboardPage() {
         role: assignedRole,
         email: iEmail || null,
         phone: iPhone || null,
-        status: '재직'
+        status: '재직',
+        tenant_id: myTenantId
       }]);
 
       if (dbError) {
@@ -287,7 +293,8 @@ export default function AdminDashboardPage() {
         return !isHQ;
       });
 
-      const posOrder: any = { '원장': 1, '실장': 2, '전임강사': 3, '파트강사': 4, '조교': 5 };
+      // 🌟 [핵심 변경] 새 직급 체계 기반 정렬 로직 (원장 -> 부원장 -> 실장 -> 전임 -> 파트 -> 조교)
+      const posOrder: any = { '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6 };
       const sortedData = filteredData.sort((a: any, b: any) => {
         let orderA = posOrder[a.position] || 99;
         let orderB = posOrder[b.position] || 99;
@@ -311,9 +318,13 @@ export default function AdminDashboardPage() {
   const saveInstructorEdit = async () => {
     if (!editInst.name) return alert('이름은 필수입니다.');
 
+    // 🌟 [핵심 변경] 수정 시에도 새 체계에 맞춘 Role 업데이트
     let assignedRole = 'TEACHER';
     if (editInst.position === '원장') assignedRole = 'ADMIN';
+    else if (editInst.position === '부원장') assignedRole = 'VICE_ADMIN';
     else if (editInst.position === '실장') assignedRole = 'MANAGER';
+    else if (editInst.position === '파트강사') assignedRole = 'PART_TEACHER';
+    else if (editInst.position === '조교') assignedRole = 'TA';
 
     try {
       const { error } = await supabase.from('instructor').update({
@@ -480,7 +491,9 @@ export default function AdminDashboardPage() {
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">직급 *</label>
                     <select value={iPosition} onChange={(e) => setIPosition(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]">
+                      {/* 🌟 [추가] 부원장 등 신규 직급 리스트 업데이트 */}
                       <option value="원장">원장</option>
+                      <option value="부원장">부원장</option>
                       <option value="실장">실장</option>
                       <option value="전임강사">전임강사</option>
                       <option value="파트강사">파트강사</option>
@@ -577,7 +590,13 @@ export default function AdminDashboardPage() {
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">직급</label>
                   <select value={editInst.position || '파트강사'} onChange={(e) => setEditInst({...editInst, position: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
-                    <option value="원장">원장</option><option value="실장">실장</option><option value="전임강사">전임강사</option><option value="파트강사">파트강사</option><option value="조교">조교</option>
+                    {/* 🌟 [추가] 모달 드롭다운에도 동일하게 추가 */}
+                    <option value="원장">원장</option>
+                    <option value="부원장">부원장</option>
+                    <option value="실장">실장</option>
+                    <option value="전임강사">전임강사</option>
+                    <option value="파트강사">파트강사</option>
+                    <option value="조교">조교</option>
                   </select>
                 </div>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={editInst.phone || ''} onChange={handlePhoneChange((val: string) => setEditInst({...editInst, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>

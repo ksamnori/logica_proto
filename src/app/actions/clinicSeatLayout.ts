@@ -2,78 +2,112 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { Seat, SeatLayout, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H, buildDefaultSeats, renumberSeats } from "@/lib/clinicSeatLayout";
+import { cookies } from "next/headers";
+import { SeatLayout, Seat } from "@/lib/clinicSeatLayout";
 
-// 💡 admission.ts와 동일한 패턴: 서버 액션에서만 service_role 키를 사용해 RLS 없이 관리한다.
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+const supabaseAdmin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL || "",
+  process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+);
 
-const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
-  auth: { autoRefreshToken: false, persistSession: false }
-});
-
-function rowToLayout(row: any): SeatLayout {
-    return {
-        id: row.id,
-        canvasWidth: row.canvas_width,
-        canvasHeight: row.canvas_height,
-        seatWidth: row.seat_width ?? DEFAULT_SEAT_CARD_W,
-        seatHeight: row.seat_height ?? DEFAULT_SEAT_CARD_H,
-        seats: row.seats,
-        updatedAt: row.updated_at,
-        updatedBy: row.updated_by,
-    };
+async function getTenantId() {
+  const cookieStore = await cookies();
+  return cookieStore.get("logica_tenant_id")?.value;
 }
 
-// 현재 활성 좌석 배치를 가져온다. 아직 한 번도 저장된 적이 없으면(테이블은 있으나 행이 없으면)
-// 기존 6x10 그리드와 동일한 기본 배치를 그 자리에서 만들어 반환한다(저장은 하지 않음).
 export async function getActiveSeatLayout(): Promise<SeatLayout> {
-    const { data, error } = await supabaseAdmin
-        .from('clinic_seat_layout')
-        .select('*')
-        .eq('is_active', true)
-        .maybeSingle();
+  const tenantId = await getTenantId();
+  if (!tenantId) throw new Error("인증 정보(쿠키)가 없거나 지점이 할당되지 않았습니다. 다시 로그인해주세요.");
 
-    if (error || !data) {
-        return {
-            id: '', canvasWidth: DEFAULT_CANVAS_W, canvasHeight: DEFAULT_CANVAS_H,
-            seatWidth: DEFAULT_SEAT_CARD_W, seatHeight: DEFAULT_SEAT_CARD_H,
-            seats: buildDefaultSeats(), updatedAt: new Date().toISOString(), updatedBy: null,
-        };
-    }
-    return rowToLayout(data);
+  const { data, error } = await supabaseAdmin
+    .from('clinic_seat_layout')
+    .select('*')
+    .eq('is_active', true)
+    .eq('tenant_id', tenantId)
+    .order('updated_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("좌석 배치 로드 에러:", error);
+    throw new Error("좌석 배치를 불러오는 중 오류가 발생했습니다.");
+  }
+
+  if (data) {
+    return {
+      id: data.id,
+      canvasWidth: data.canvas_width,
+      canvasHeight: data.canvas_height,
+      seatWidth: data.seat_width,
+      seatHeight: data.seat_height,
+      seats: data.seats as Seat[],
+      updatedAt: data.updated_at,       // 🌟 [추가] 타입스크립트가 찾던 속성 1
+      updatedBy: data.updated_by || ""  // 🌟 [추가] 타입스크립트가 찾던 속성 2
+    };
+  }
+
+  return {
+    id: "",
+    canvasWidth: 1600,
+    canvasHeight: 900,
+    seatWidth: 140,
+    seatHeight: 80,
+    seats: [],
+    updatedAt: new Date().toISOString(), // 🌟 [추가] 빈 데이터일 때도 시간 부여
+    updatedBy: ""                        // 🌟 [추가] 빈 데이터일 때도 작성자 빈칸 부여
+  };
 }
 
-// 좌석 배치를 저장한다. 저장 직전 reading-order로 번호를 재계산해(가/감 후 번호가 항상 1..N으로
-// 이어지도록) 일관성을 보장한다. 기존 활성 행이 있으면 그대로 갱신(단일 활성 배치 방식).
-export async function saveSeatLayout(seats: Seat[], canvasWidth: number, canvasHeight: number, seatWidth: number, seatHeight: number, updatedBy: string | null): Promise<{ success: boolean; message?: string; layout?: SeatLayout }> {
-    try {
-        const renumbered = renumberSeats(seats, canvasHeight);
+export async function saveSeatLayout(
+  seats: Seat[],
+  canvasWidth: number,
+  canvasHeight: number,
+  seatWidth: number,
+  seatHeight: number,
+  editorClientId: string
+) {
+  const tenantId = await getTenantId();
+  if (!tenantId) return { success: false, message: "지점 인증 정보가 없습니다. 다시 로그인해주세요." };
 
-        const { data: existing } = await supabaseAdmin
-            .from('clinic_seat_layout')
-            .select('id')
-            .eq('is_active', true)
-            .maybeSingle();
+  try {
+    await supabaseAdmin
+      .from('clinic_seat_layout')
+      .update({ is_active: false })
+      .eq('is_active', true)
+      .eq('tenant_id', tenantId);
 
-        const payload = {
-            canvas_width: canvasWidth,
-            canvas_height: canvasHeight,
-            seat_width: seatWidth,
-            seat_height: seatHeight,
-            seats: renumbered,
-            is_active: true,
-            updated_at: new Date().toISOString(),
-            updated_by: updatedBy,
-        };
+    const { data, error } = await supabaseAdmin
+      .from('clinic_seat_layout')
+      .insert({
+        canvas_width: canvasWidth,
+        canvas_height: canvasHeight,
+        seat_width: seatWidth,
+        seat_height: seatHeight,
+        seats: seats,
+        is_active: true,
+        updated_by: editorClientId,
+        tenant_id: tenantId 
+      })
+      .select()
+      .single();
 
-        const { data, error } = existing
-            ? await supabaseAdmin.from('clinic_seat_layout').update(payload).eq('id', existing.id).select().single()
-            : await supabaseAdmin.from('clinic_seat_layout').insert(payload).select().single();
+    if (error) throw error;
 
-        if (error) throw new Error(error.message);
-        return { success: true, layout: rowToLayout(data) };
-    } catch (error: any) {
-        return { success: false, message: error.message };
-    }
+    return {
+      success: true,
+      layout: {
+        id: data.id,
+        canvasWidth: data.canvas_width,
+        canvasHeight: data.canvas_height,
+        seatWidth: data.seat_width,
+        seatHeight: data.seat_height,
+        seats: data.seats as Seat[],
+        updatedAt: data.updated_at,      // 🌟 [추가] 리턴할 때 누락 방지
+        updatedBy: data.updated_by || "" // 🌟 [추가] 리턴할 때 누락 방지
+      }
+    };
+  } catch (e: any) {
+    console.error("좌석 저장 에러:", e);
+    return { success: false, message: e.message };
+  }
 }

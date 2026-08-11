@@ -11,41 +11,63 @@ export default function Sidebar() {
   const pathname = usePathname();
   
   const [strictSuperAdmin, setStrictSuperAdmin] = useState(false);
+  const [isPrincipal, setIsPrincipal] = useState(false); 
   const [isManager, setIsManager] = useState(false);
-  
-  // 현재 소속 학원명 상태
   const [tenantName, setTenantName] = useState<string>("로딩중...");
+  
+  const [displayRole, setDisplayRole] = useState<string>("TEACHER"); 
+  
+  const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
+  const [isLoadingPerms, setIsLoadingPerms] = useState(true);
 
   useEffect(() => {
-    const role = localStorage.getItem('logica_instructor_role') || '';
+    const role = localStorage.getItem('logica_instructor_role') || 'TEACHER';
     const pos = localStorage.getItem('logica_instructor_position') || '';
     
+    setDisplayRole(role);
+
     const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자') || pos.includes('대장');
-    const isMgr = role === 'PRINCIPAL' || role === 'MANAGER' || pos.includes('원장') || pos.includes('실장');
+    const isPrin = role === 'ADMIN' || pos.includes('원장'); 
+    const isMgr = role === 'MANAGER' || pos.includes('실장');
     
     setStrictSuperAdmin(isSA);
-    setIsManager(isMgr || isSA);
+    setIsPrincipal(isPrin);
+    setIsManager(isMgr || isPrin || isSA);
 
-    const fetchTenantName = async () => {
+    const fetchData = async () => {
       const tId = localStorage.getItem('logica_tenant_id');
+      
       if (tId) {
         const { data } = await supabase.from('academy_tenant').select('name').eq('tenant_id', tId).maybeSingle();
-        if (data && data.name) {
-          setTenantName(data.name);
-        } else {
-          setTenantName("지점 미배정");
-        }
+        setTenantName(data?.name || "지점 미배정");
       } else {
         setTenantName("지점 미배정");
       }
+
+      if (!(isSA || isPrin) && tId) {
+        const { data: permData } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
+
+        if (permData && permData.allowed_menus) {
+          setAllowedMenus(permData.allowed_menus);
+        } else {
+          setAllowedMenus(['/home', '/student', '/class', '/learning', '/progress', '/makeup', '/minutes', '/task', '/cs', '/supply', '/exam-list', '/admission']);
+        }
+      }
+      setIsLoadingPerms(false);
     };
-    fetchTenantName();
+
+    fetchData();
   }, []);
 
   const canAccess = (path: string) => {
-    if (strictSuperAdmin) return true;
-    if (path === "/admission" || path === "/task" || path === "/supply" || path === "/cs" || path === "/minutes") return true;
-    return false;
+    if (strictSuperAdmin || isPrincipal) return true; 
+    if (isLoadingPerms) return false; 
+    return allowedMenus.includes(path);
   };
 
   const MenuItem = ({ path, label, desc, full = false }: { path: string, label: string, desc?: string, full?: boolean }) => {
@@ -56,17 +78,34 @@ export default function Sidebar() {
     
     if (disabled) {
       return (
-        <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`}>
+        <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`} title="접근 권한이 없습니다">
           <span className="text-[13px] font-bold truncate">{label}</span>
           {desc && <span className="text-[10px] font-medium mt-0.5">{desc}</span>}
+          <span className="absolute top-1 right-2 text-[8px] font-black text-slate-300">🔒</span>
         </div>
       );
     }
     
+    // 🌟 기본 메뉴 스타일
+    let customBg = active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
+    let customLabel = active ? 'font-black' : 'font-bold';
+    let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
+
+    // 🌟 [특정 메뉴 커스텀 스타일링]
+    if (path === '/academy-info') {
+      // 짙은 녹색 배경 + 흰 글씨
+      customBg = active ? 'bg-[#1f2d26] border-[#1f2d26] text-white shadow-md' : 'bg-[#2e4036] border-[#2e4036] text-white hover:bg-[#24332b] hover:border-[#24332b] shadow-sm';
+      customLabel = 'font-black';
+      customDesc = 'text-emerald-200 font-medium';
+    } else if (path === '/permission') {
+      // 옅은 붉은색 배경 + 붉은 글씨
+      customBg = active ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 shadow-sm';
+    }
+
     return (
-      <Link href={path} className={`${baseClass} ${active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm'}`}>
-        <span className={`text-[13px] truncate tracking-tight ${active ? 'font-black' : 'font-bold'}`}>{label}</span>
-        {desc && <span className={`text-[10px] truncate tracking-tight mt-0.5 ${active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium'}`}>{desc}</span>}
+      <Link href={path} className={`${baseClass} ${customBg}`}>
+        <span className={`text-[13px] truncate tracking-tight ${customLabel}`}>{label}</span>
+        {desc && <span className={`text-[10px] truncate tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
       </Link>
     );
   };
@@ -77,7 +116,7 @@ export default function Sidebar() {
         <span className="text-[13px]">{icon}</span>
         <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">{title}</p>
       </div>
-      <div className="grid grid-cols-2 gap-2 px-3">
+      <div className="grid grid-cols-2 gap-2 px-3 relative">
         {children}
       </div>
     </div>
@@ -86,7 +125,6 @@ export default function Sidebar() {
   return (
     <aside className="print:hidden w-[280px] bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20 h-full relative">
       
-      {/* 🌟 [수정됨] 글씨 잘림 방지를 위해 텍스트 컨테이너에 flex-1 min-w-0 적용 및 텍스트 래핑 제어 */}
       <div onClick={() => canAccess("/home") ? router.push("/home") : router.push("/admission")} className="h-24 flex items-center px-6 border-b border-slate-100 shrink-0 cursor-pointer group hover:bg-slate-50 transition-colors gap-3.5">
         <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-9 object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
         
@@ -95,7 +133,7 @@ export default function Sidebar() {
             {tenantName}
           </span>
           <span className="text-[10px] font-bold text-slate-400 uppercase leading-none tracking-wider whitespace-nowrap">
-            {strictSuperAdmin ? "Super Admin" : "Teacher"}
+            {strictSuperAdmin ? "Super Admin" : displayRole.replace('_', ' ')}
           </span>
         </div>
       </div>
@@ -127,7 +165,6 @@ export default function Sidebar() {
           <MenuItem path="/admission" label="진단평가 관리" />
         </MenuSection>
 
-        {/* 데스크 전용 메뉴 */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🏢</span>
@@ -142,18 +179,18 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* 최고관리자 전용 메뉴 */}
-        {strictSuperAdmin && (
+        {(strictSuperAdmin || isPrincipal) && (
           <div className="mb-6">
             <div className="px-4 flex items-center gap-1.5 mb-3">
               <span className="text-[13px]">👑</span>
-              <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">최고관리자 전용</p>
+              <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">원장·최고관리자 전용</p>
               <span className="text-[9px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-black border border-indigo-200 ml-1">ADMIN</span>
             </div>
             <div className="grid grid-cols-2 gap-2 px-3">
               <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
-              <MenuItem path="/permission" label="권한 관리" />
-              <MenuItem path="/academy-info" label="학원 정보" />
+              <MenuItem path="/permission" label="권한 관리" /> {/* 🌟 커스텀 붉은색 적용됨 */}
+              <MenuItem path="/instructor" label="강사 관리" />
+              <MenuItem path="/academy-info" label="LOGICA 학원 정보" full /> {/* 🌟 커스텀 녹색 적용됨 */}
             </div>
           </div>
         )}

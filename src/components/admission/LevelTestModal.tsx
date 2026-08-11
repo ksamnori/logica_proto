@@ -1,3 +1,4 @@
+// src/components/admission/LevelTestModal.tsx
 "use client";
 
 import React, { useEffect, useState } from "react";
@@ -69,7 +70,6 @@ const formatContact = (val: any) => {
   return str;
 };
 
-// 🌟 [추가됨] 한국 시간(KST)으로 변환하는 헬퍼 함수
 const getKSTDateStr = (isoString?: string) => {
   if (!isoString) return "";
   const d = new Date(isoString);
@@ -125,7 +125,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const [userRole, setUserRole] = useState("");
   const [hasAdminPermission, setHasAdminPermission] = useState(false);
 
-  // 오늘 날짜 계산 (새 등록생 판별용)
   const todayKst = getKSTDateStr(new Date().toISOString());
 
   const filteredStudents = waitingStudents.filter(std => {
@@ -301,7 +300,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             school_name: st?.school_name || st?.school || "",
             contact: pPhone,
             test_date: "-",
-            created_at: a.created_at, // 🌟 배정된 학생의 등록일 유지
+            created_at: a.created_at, 
             isAssigned: true,
             displayResult, 
             source: 'assigned'
@@ -339,7 +338,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           school_name: s.school || s.school_name || "",
           contact: Array.isArray(s.parent) ? s.parent[0]?.phone : (s.parent?.phone || "번호없음"),
           test_date: s.created_at,
-          created_at: s.created_at, // 🌟 정식 등록생의 등록일 유지
+          created_at: s.created_at, 
           isAssigned: false,
           source: 'student'
         }));
@@ -391,6 +390,10 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     if (!hasAdminPermission) return alert("저장 권한이 없습니다."); 
     if (!testDate || !testHour || !testMinute || !examId) return alert("시험지, 날짜, 시작 시간은 필수입니다!");
     
+    // 🌟 [추가됨] 방을 개설할 때 소속 지점 꼬리표를 챙깁니다.
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
+
     setIsLoading(true);
     const finalTime = `${testHour}:${testMinute}`;
     const dateTime = new Date(`${testDate}T${finalTime}:00+09:00`);
@@ -419,7 +422,13 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         if (exErr) console.warn("섀도 방 생성 실패 (무시 가능):", exErr);
 
         const { error } = await supabase.from("admission_session").insert([{
-          title: previewName, test_date: testDate, start_time: finalTime + ":00", exam_id: examId, session_comment: comment || null, status: "모집중"
+          title: previewName, 
+          test_date: testDate, 
+          start_time: finalTime + ":00", 
+          exam_id: examId, 
+          session_comment: comment || null, 
+          status: "모집중",
+          tenant_id: myTenantId // 🌟 [추가됨] 방 개설 시 꼬리표 부착!
         }]);
         if (error) throw error;
 
@@ -527,6 +536,10 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
 
         if (tempErr || !tempStudents) throw new Error("대기생 정보를 불러올 수 없습니다.");
 
+        // 🌟 [추가됨] 임시생을 진짜 DB로 넣을 때 꼬리표 부착 (AssignModal과 동일한 구조의 방어선)
+        const myTenantId = localStorage.getItem("logica_tenant_id");
+        if (!myTenantId) throw new Error("소속 지점 정보가 없습니다.");
+
         for (const temp of tempStudents) {
           const rawPhone = temp.contact ? temp.contact.replace(/[^0-9]/g, "") : null;
           let parentId = null;
@@ -547,7 +560,8 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             school_name: temp.school_name,
             school: temp.school_name, 
             parent_id: parentId,
-            status: "입학테스트"
+            status: "입학테스트",
+            tenant_id: myTenantId // 🌟 꼬리표 부착!
           }).select().single();
 
           if (sErr) throw new Error(`[${temp.student_name}] 등록 실패: ${sErr.message}`);
@@ -928,7 +942,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                    ? <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 px-1 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
                    : <span className="text-[9px] bg-purple-100 text-purple-700 border border-purple-200 px-1 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
 
-                 // 🌟 [추가됨] 오늘 날짜와 등록일(created_at)을 KST 기준으로 비교
                  const isTodayReg = std.created_at ? getKSTDateStr(std.created_at) === todayKst : false;
 
                  if (isAssigned) {
@@ -941,7 +954,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                              <span className="font-extrabold text-slate-800 truncate text-[13px]">{std.student_name}</span>
                              <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-1 py-0.5 rounded font-bold shrink-0">✅ 배정됨</span>
-                             {/* 🌟 오늘 등록한 학생의 이름 옆에 뱃지 표시 */}
                              {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
                            </div>
                            <div className="text-[10px] text-slate-400 font-medium truncate flex items-center gap-1">
@@ -968,7 +980,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                              <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
                              <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              {sourceBadge}
-                             {/* 🌟 오늘 등록한 학생의 이름 옆에 뱃지 표시 */}
                              {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
                            </div>
                            <div className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">

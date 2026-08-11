@@ -76,6 +76,9 @@ const formatDateTimeDisplay = (dtString: string) => {
 export default function AdmissionPage() {
   const router = useRouter();
 
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
   const [applications, setApplications] = useState<any[]>([]);
@@ -95,7 +98,6 @@ export default function AdmissionPage() {
   const [filterGrade, setFilterGrade] = useState("ALL");
   const [searchKeyword, setSearchKeyword] = useState("");
   
-  // 💡 [추가] 정렬 기준을 복합적으로 관리할 수 있는 상태들
   const [primarySort, setPrimarySort] = useState<"date" | "grade">("date");
   const [dateSortOrder, setDateSortOrder] = useState<"desc" | "asc">("desc");
   const [gradeSortOrder, setGradeSortOrder] = useState<"asc" | "desc">("asc");
@@ -103,6 +105,45 @@ export default function AdmissionPage() {
   const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
 
   const appsScrollRef = useRef<HTMLDivElement>(null);
+
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
+  useEffect(() => {
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/admission"))) {
+        alert("⛔ 진단평가 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
 
   useEffect(() => {
     const savedDt = sessionStorage.getItem('logica_adm_filter_dt');
@@ -235,18 +276,23 @@ export default function AdmissionPage() {
     }
   };
 
+  // 권한이 통과되었을 때만 데이터 페칭을 시작하도록 방어
   useEffect(() => {
-    fetchSessions();
-  }, [refreshTrigger]);
+    if (isAuthorized) {
+      fetchSessions();
+    }
+  }, [refreshTrigger, isAuthorized]);
 
   useEffect(() => {
-    if (selectedSession?.admission_session_id) {
-      fetchApplications(selectedSession.admission_session_id, selectedSession.exam_id);
-    } else {
-      setApplications([]);
-      setShadowMap({});
+    if (isAuthorized) {
+      if (selectedSession?.admission_session_id) {
+        fetchApplications(selectedSession.admission_session_id, selectedSession.exam_id);
+      } else {
+        setApplications([]);
+        setShadowMap({});
+      }
     }
-  }, [selectedSession?.admission_session_id, selectedSession?.exam_id, refreshTrigger]);
+  }, [selectedSession?.admission_session_id, selectedSession?.exam_id, refreshTrigger, isAuthorized]);
 
   useEffect(() => {
     if (!isLoadingApps && appsScrollRef.current) {
@@ -308,7 +354,6 @@ export default function AdmissionPage() {
       return matchDate && matchGrade && matchKeyword;
     });
 
-    // 💡 [추가] 일자 우선 정렬 vs 학년 우선 정렬 선택 적용
     return filtered.sort((a, b) => {
       const dateA = a.test_date || "";
       const dateB = b.test_date || "";
@@ -439,6 +484,15 @@ export default function AdmissionPage() {
     }
   };
 
+  // 🌟 권한 확인이 끝나지 않았거나 권한이 없으면 렌더링하지 않음
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
+
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
       
@@ -509,7 +563,6 @@ export default function AdmissionPage() {
                 <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full ml-1">{filteredSessions.length}건</span>
               </h3>
               
-              {/* 💡 [추가] 일자 정렬 버튼 */}
               <button 
                 onClick={() => {
                   if (primarySort === "date") setDateSortOrder(prev => prev === "desc" ? "asc" : "desc");
@@ -521,7 +574,6 @@ export default function AdmissionPage() {
                 {dateSortOrder === "desc" ? "🔻 최신순" : "🔺 과거순"}
               </button>
 
-              {/* 💡 [추가] 학년 정렬 버튼 */}
               <button 
                 onClick={() => {
                   if (primarySort === "grade") setGradeSortOrder(prev => prev === "asc" ? "desc" : "asc");

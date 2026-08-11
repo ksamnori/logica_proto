@@ -171,7 +171,6 @@ export default function LevelTestPage() {
     setExamId(val);
     const ex = exams.find(x => String(x.exam_id) === val);
     if (ex) {
-      // 💡 [수정] 시험지 제목과 부제목(과정/학년)을 조합하여 자동완성
       setComment(ex.sub_title ? `${ex.title} [${ex.sub_title}]` : ex.title);
     } else {
       setComment("");
@@ -192,7 +191,6 @@ export default function LevelTestPage() {
     setComment(s.session_comment || "");
     setTestDate(s.test_date || "");
     
-    // 💡 저장된 시간(HH:MM)을 불러와 시/분으로 쪼개기
     const timeStr = s.start_time?.substring(0, 5) || "";
     if (timeStr) {
       const [h, m] = timeStr.split(":");
@@ -212,8 +210,11 @@ export default function LevelTestPage() {
   const saveSession = async () => {
     if (!testDate || !testHour || !testMinute || !examId) return alert("시험지, 날짜, 시작 시간은 필수입니다!");
     
+    // 🌟 [추가됨] 테스트 방을 개설할 때 소속 지점 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsLoading(true);
-    // 💡 분리된 시/분을 하나로 결합
     const finalTime = `${testHour}:${testMinute}`;
     const dateTime = new Date(`${testDate}T${finalTime}:00+09:00`);
 
@@ -249,13 +250,15 @@ export default function LevelTestPage() {
         }]);
         if (exErr) console.warn("섀도 방 생성 실패 (무시 가능):", exErr);
 
+        // 🌟 [수정됨] 새 테스트 방 생성 시 지점 꼬리표 부착
         const { error } = await supabase.from("admission_session").insert([{
           title: previewName,
           test_date: testDate,
           start_time: finalTime + ":00",
           exam_id: examId, 
           session_comment: comment || null,
-          status: "모집중"
+          status: "모집중",
+          tenant_id: myTenantId // 👈 꼬리표 추가!
         }]);
         if (error) throw error;
 

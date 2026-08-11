@@ -13,6 +13,9 @@ import GradingModal from "@/components/exam/GradingModal";
 export default function ExamListPage() {
   const router = useRouter();
 
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   // === 메인 데이터 상태 ===
   const [exams, setExams] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -26,18 +29,63 @@ export default function ExamListPage() {
   const [publishModal, setPublishModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
   const [gradingModal, setGradingModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
 
-  // === 최고관리자(SUPER_ADMIN) 여부 상태 ===
+  // === 권한(SUPER_ADMIN 및 삭제 권한) 여부 상태 ===
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [canDeleteExam, setCanDeleteExam] = useState(false);
 
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
-    // 마운트 시 권한 체크: '원장'도 제외하고 오직 'SUPER_ADMIN', '최고관리자'만 허용
-    const role = localStorage.getItem("logica_instructor_role") || "";
-    const pos = localStorage.getItem("logica_instructor_position") || "";
-    const isSuper = role.toUpperCase() === "SUPER_ADMIN" || pos.includes("최고관리자");
-    setIsSuperAdmin(isSuper);
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      setIsSuperAdmin(isGodMode);
 
-    loadExams();
-  }, []);
+      if (isGodMode) {
+        setIsAuthorized(true);
+        setCanDeleteExam(true); // 최고관리자급은 삭제 무조건 허용
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 시험지 관리 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/exam-list"))) {
+        alert("⛔ 문제지 보관함에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+        // 🌟 [핵심] 삭제 권한이 메뉴 리스트(allowed_menus)에 포함되어 있는지 확인
+        if (data.allowed_menus.includes('action_delete_exam')) {
+          setCanDeleteExam(true);
+        }
+      }
+    };
+
+    checkAccess();
+  }, [router]);
+
+  // 권한이 통과되었을 때만 데이터를 불러옵니다.
+  useEffect(() => {
+    if (isAuthorized) {
+      loadExams();
+    }
+  }, [isAuthorized]);
 
   const formatDate = (dateString: string) => {
     if (!dateString) return '-';
@@ -47,9 +95,16 @@ export default function ExamListPage() {
 
   const loadExams = async () => {
     setIsLoading(true);
+    const tenantId = localStorage.getItem("logica_tenant_id");
     const result = await getExamsAction();
+    
     if (result.success) {
-      setExams(result.data);
+      // 🚨 [보안 강화] 혹시 모를 타 지점 데이터 유출을 막기 위해 내 지점(tenant_id)의 시험지만 렌더링되도록 격리!
+      let fetchedExams = result.data || [];
+      if (tenantId && tenantId !== 'hq') {
+         fetchedExams = fetchedExams.filter((e: any) => !e.tenant_id || e.tenant_id === tenantId);
+      }
+      setExams(fetchedExams);
     } else {
       alert(result.message);
     }
@@ -83,6 +138,12 @@ export default function ExamListPage() {
   };
 
   const deleteExam = async (examId: string, examType: string, assignCount: number) => {
+    // 🌟 [이중 보안] 혹시라도 버튼이 노출되었을 경우를 대비해 함수 내부에서 다시 한번 컷!
+    if (!isSuperAdmin && !canDeleteExam) {
+      alert("⛔ 출제된 문제지를 삭제할 권한이 없습니다.\n(원장님이 부여한 삭제 권한이 필요합니다.)");
+      return;
+    }
+
     if (!confirm("⚠️ 이 문제지를 정말 삭제하시겠습니까?\n(삭제하면 복구할 수 없습니다.)")) return;
     
     if (examType === '오답프린트') {
@@ -144,6 +205,15 @@ export default function ExamListPage() {
     sessionStorage.removeItem('editExamId');
     router.push(`/exam/step2?duplicate_exam_id=${examId}`);
   };
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
@@ -252,7 +322,6 @@ export default function ExamListPage() {
                               </button>
                             )
                           ) : (
-                            // 💡 [수정됨] 60px에서 76px로 크기 통일! 앞줄이 완벽히 일치하게 됩니다.
                             <button onClick={() => editExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-slate-50 text-slate-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-slate-300">
                               수정
                             </button>
@@ -262,9 +331,12 @@ export default function ExamListPage() {
                             복제후수정
                           </button>
                           
-                          <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
-                            삭제
-                          </button>
+                          {/* 🌟 [수정] 삭제 권한이 없으면 삭제 버튼 자체를 렌더링하지 않음 */}
+                          {canDeleteExam && (
+                            <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
+                              삭제
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>

@@ -76,7 +76,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
   const stripHtml = (html: string) => { if (!html) return ""; return html.replace(/<[^>]+>/g, ' ').trim(); };
 
   const insertAgendaContent = async (item: any) => {
-    // 🌟 1. 비밀 안건 삽입 시 자동으로 회의록 자체를 '비밀 회의록'으로 승격!
     if (item.is_secret) setIsSecret(true);
 
     let commentsHtml = "";
@@ -96,7 +95,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
       }
     }
     
-    // 🌟 2. 댓글이 없을 경우 빈 공간 아예 생성 안 함
     let commentsSection = "";
     if (commentsHtml) {
       commentsSection = `
@@ -107,7 +105,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
       `;
     }
 
-    // 🌟 3. 비밀 안건은 실제 내용을 절대 에디터에 안 넣음 (가짜 플레이스홀더 박스 삽입)
     let safeContent = item.content;
     if (item.is_secret) {
       safeContent = `<div class="secret-agenda-placeholder" data-agenda-id="${item.id}" style="color:#64748b; font-weight:bold; font-size:12px; background:#f1f5f9; padding:10px; border-radius:6px; border:1px solid #cbd5e1;">🔒 비밀 안건으로 보호되어 상세 내용이 표시되지 않습니다.<br/><span style="font-weight:normal; font-size:11px; margin-top:4px; display:inline-block;">(저장 후 실제 회의록을 열람할 때 참석자에게만 원본 내용이 복호화되어 표시됩니다)</span></div>`;
@@ -155,6 +152,10 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
     const participantNames = selectedInstIds.map(id => instructors.find(i => i.instructor_id === id)?.name).join(', ');
     const meetingDateTime = new Date(`${meetingDateStr}T${meetingTimeStr}:00`).toISOString();
 
+    // 🌟 [추가됨] 병합 회의록 생성 전 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     try {
       if (mode === 'NEW') {
         const meetingId = crypto.randomUUID();
@@ -171,7 +172,8 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
           created_by: currentUser.instId,
           attendees: participantNames,
           meeting_date: meetingDateTime,
-          is_secret: isSecret 
+          is_secret: isSecret,
+          tenant_id: myTenantId // 🌟 [추가됨] 병합 회의록에도 꼬리표 부착!
         };
 
         if (isSyncGcal && !isSecret) { 
@@ -202,6 +204,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         const mergedIds = Array.from(new Set([...existingLinkedIds, ...localSelectedIds])).filter(Boolean);
         const hiddenLinkData = mergedIds.length > 0 ? `<div data-linked-ids="${mergedIds.join(',')}" style="display:none;"></div>` : '';
 
+        // 수정 시에는 이미 tenant_id가 있으므로 추가 불필요
         const { error } = await supabase.from("agenda").update({
           title: meetingTitle,
           content: meetingResult + hiddenLinkData, 
@@ -254,7 +257,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
                   <div key={item.id} className="bg-white p-2 rounded-lg border border-slate-200 shadow-sm flex items-center justify-between gap-1.5 group hover:border-blue-300 transition-colors">
                     <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <div className="text-[11px] font-bold text-slate-700 truncate"><span className="text-blue-500 mr-1">📌</span>{item.title}</div>
-                      {/* 🌟 4. 좌측 리스트에서도 비밀 안건 내용은 감춤 */}
                       <div className="text-[9px] text-slate-400 truncate pl-4">
                         {item.is_secret ? "🔒 비밀 안건 (보호됨)" : stripHtml(item.content)}
                       </div>

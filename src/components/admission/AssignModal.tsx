@@ -13,7 +13,6 @@ interface AssignModalProps {
   getGradeOrder: (g: any) => number;
 }
 
-// 💡 ISO 시간 문자열 변환 (접수일자 출력용)
 const formatDateTime = (isoString: string) => {
   if (!isoString) return "-";
   const d = new Date(isoString);
@@ -25,7 +24,6 @@ const formatDateTime = (isoString: string) => {
   return `${yy}.${MM}.${dd} ${hh}:${mm}`;
 };
 
-// 💡 LevelTestModal과 동일한 날짜 추출 로직 이식 (T 분리 및 8자리 숫자 처리)
 const formatTestDate = (val: any) => {
   if (!val) return "";
   const str = String(val).trim();
@@ -34,7 +32,6 @@ const formatTestDate = (val: any) => {
   return str; 
 };
 
-// 💡 직관적인 학년 포맷터
 const formatKoreanGrade = (grade: any) => {
   if (!grade) return '-';
   if (String(grade) === "7") return "7세";
@@ -51,7 +48,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
   const [waitingStudents, setWaitingStudents] = useState<any[]>([]);
   const [selectedWaitingIds, setSelectedWaitingIds] = useState<string[]>([]);
   
-  // 💡 필터 상태: 시간 필터 제거하고 날짜 필터(filterDate) 하나만 사용
   const [filterGrade, setFilterGrade] = useState("all");
   const [filterDate, setFilterDate] = useState("all");
   const [searchKeyword, setSearchKeyword] = useState("");
@@ -73,7 +69,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
       const { data: apps } = await supabase.from('admission_application').select('student_id').eq('admission_session_id', session.admission_session_id);
       const assignedIds = apps ? apps.map(a => a.student_id) : [];
       
-      // 1. 폼제출 (임시 대기생) 로드
       const { data: tempStus } = await supabase
         .from("temp_admission_applicants")
         .select("*")
@@ -85,12 +80,11 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
         grade: s.grade || "미입력",
         school_name: s.school_name || "",
         contact: s.contact,
-        test_date: s.test_date, // 💡 raw 데이터 그대로 저장
+        test_date: s.test_date, 
         created_at: s.created_at,
         source: 'temp'
       }));
       
-      // 2. 신규생 (정식 대기생) 로드
       const { data: formalStus } = await supabase
         .from('student')
         .select('student_id, name, grade, school, school_name, created_at, test_date, parent(phone)')
@@ -105,7 +99,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           grade: s.grade || "미입력",
           school_name: s.school_name || s.school || "",
           contact: Array.isArray(s.parent) ? s.parent[0]?.phone : (s.parent?.phone || "번호없음"),
-          test_date: s.test_date, // 💡 raw 데이터 그대로 저장
+          test_date: s.test_date, 
           created_at: s.created_at,
           source: 'student'
         }));
@@ -114,15 +108,11 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
     } catch (e: any) { alert(`오류 발생: ${e.message}`); }
   };
 
-  // 💡 LevelTestModal과 동일한 날짜 필터링 로직 적용
   const filteredWaiting = useMemo(() => {
     return waitingStudents.filter(s => {
       const matchGrade = filterGrade === 'all' || formatKoreanGrade(s.grade) === filterGrade;
-      
-      // formatTestDate를 이용해 YYYY-MM-DD 형태의 문자열로 비교
       const dateVal = formatTestDate(s.test_date) || "날짜없음";
       const matchDate = filterDate === 'all' || dateVal === filterDate;
-      
       const keyword = searchKeyword.toLowerCase().trim();
       const school = s.school_name || "";
       const phone = s.contact || "";
@@ -136,7 +126,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
     });
   }, [waitingStudents, filterGrade, filterDate, searchKeyword]);
 
-  // 💡 Select 박스용 날짜 추출 (중복 제거 및 정렬)
   const uniqueGrades = Array.from(new Set(waitingStudents.map(s => formatKoreanGrade(s.grade)).filter(Boolean))).sort((a, b) => getGradeOrder(a) - getGradeOrder(b));
   const uniqueDates = Array.from(
     new Set(waitingStudents.map(s => formatTestDate(s.test_date) || "날짜없음").filter(d => d !== "날짜없음"))
@@ -157,6 +146,11 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
 
   const submitAssign = async () => {
     if (selectedWaitingIds.length === 0) return alert("배정할 학생을 최소 1명 선택해주세요.");
+    
+    // 🌟 [추가됨] 배정 전 내 지점 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsSubmitting(true);
     
     try {
@@ -185,13 +179,15 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
             }
           }
 
+          // 🌟 [추가됨] 임시 학생을 정식 학생 DB에 넣을 때 꼬리표 부착!
           const { data: newStudent, error: sErr } = await supabase.from("student").insert({
             name: temp.student_name,
             grade: temp.grade || "미입력",
             school_name: temp.school_name,
             school: temp.school_name,
             parent_id: parentId,
-            status: "입학테스트"
+            status: "입학테스트",
+            tenant_id: myTenantId // 👈 꼬리표 부착
           }).select().single();
 
           if (sErr) throw new Error(`[${temp.student_name}] 등록 실패: ${sErr.message}`);
@@ -251,7 +247,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           <button onClick={onClose} className="text-slate-300 hover:text-white transition-colors text-2xl leading-none">&times;</button>
         </div>
         
-        {/* 💡 3단 필터 영역 (학년 + 희망날짜 + 검색어) */}
         <div className="p-3 bg-white border-b border-slate-200 flex gap-2 shrink-0 relative z-10 flex-wrap">
           <select 
             value={filterGrade} 
@@ -262,7 +257,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g}</option>)}
           </select>
 
-          {/* LevelTestModal과 동일한 날짜 필터 셀렉트 */}
           <select 
             value={filterDate} 
             onChange={(e) => setFilterDate(e.target.value)} 
@@ -284,7 +278,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           </div>
         </div>
 
-        {/* 요약 및 전체선택 바 */}
         <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0">
           <span className="text-sm font-bold text-slate-700">
             검색된 대기생: <span className="text-[#002864]">{filteredWaiting.length}</span>명
@@ -295,7 +288,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           </label>
         </div>
 
-        {/* 대기생 리스트 */}
         <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50">
           <div className="space-y-2">
             {filteredWaiting.length === 0 ? (
@@ -339,7 +331,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           </div>
         </div>
 
-        {/* 하단 배정 버튼 */}
         <div className="p-4 bg-white border-t border-slate-200 shrink-0">
           <button 
             onClick={submitAssign} 

@@ -5,10 +5,8 @@ import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Chart from "chart.js/auto";
+import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 
-// ==========================================
-// 보안 강화를 위한 인라인 헬퍼 컴포넌트 (XSS 방어)
-// ==========================================
 const ClassVacancyBadge = ({ vacancy }: { vacancy: number }) => {
   if (vacancy <= 0) return <span className="text-[9px] font-black text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded shadow-sm">마감</span>;
   if (vacancy <= 2) return <span className="text-[9px] font-black text-amber-500 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded shadow-sm">마감 임박</span>;
@@ -26,8 +24,12 @@ const NotiStatusBadge = ({ status }: { status: string }) => {
 export default function AdminDashboardPage() {
   const router = useRouter();
 
-  // === 상태 관리 ===
+  // 🌟 [보안 로직 추가] 권한 확인 상태 (운영 대시보드 철통 보안)
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자" });
+  const [tenantId, setTenantId] = useState("hq");
+  
   const [todayString, setTodayString] = useState("데이터를 불러오는 중입니다...");
   const [thisMonthStr, setThisMonthStr] = useState("");
   const [firstDayOfMonth, setFirstDayOfMonth] = useState("");
@@ -45,7 +47,6 @@ export default function AdminDashboardPage() {
   const [admissions, setAdmissions] = useState<any[]>([]);
   const [liveFeeds, setLiveFeeds] = useState<any[]>([]);
 
-  // === 모달 상태 ===
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
   const [memoData, setMemoData] = useState({ type: "일반공지", content: "" });
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
@@ -56,27 +57,70 @@ export default function AdminDashboardPage() {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null);
 
-  // === 초기 세팅 ===
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
-    const instId = localStorage.getItem('logica_instructor_id') || "1";
-    const name = localStorage.getItem('logica_instructor_name') || "관리자";
-    setCurrentUser({ instId, name });
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
 
-    const today = new Date();
-    const days = ['일', '월', '화', '수', '목', '금', '토'];
-    setTodayString(`${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일 (${days[today.getDay()]}) 실시간 요약 지표`);
-    setThisMonthStr(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
-    setTodayIso(today.toISOString().split('T')[0]);
-    setFirstDayOfMonth(new Date(today.getFullYear(), today.getMonth(), 1).toISOString());
-  }, []);
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 운영 대시보드 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/admin-dashboard"))) {
+        alert("⛔ 운영 대시보드(KPI/통계)에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
 
   useEffect(() => {
-    if (thisMonthStr && firstDayOfMonth) {
+    if (isAuthorized) {
+      const instId = localStorage.getItem('logica_instructor_id') || "1";
+      const name = localStorage.getItem('logica_instructor_name') || "관리자";
+      const tId = localStorage.getItem("logica_tenant_id") || "hq"; 
+      
+      setCurrentUser({ instId, name });
+      setTenantId(tId);
+
+      const today = new Date();
+      const days = ['일', '월', '화', '수', '목', '금', '토'];
+      setTodayString(`${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일 (${days[today.getDay()]}) 실시간 요약 지표`);
+      setThisMonthStr(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}`);
+      setTodayIso(today.toISOString().split('T')[0]);
+      setFirstDayOfMonth(new Date(today.getFullYear(), today.getMonth(), 1).toISOString());
+    }
+  }, [isAuthorized]);
+
+  useEffect(() => {
+    if (isAuthorized && thisMonthStr && firstDayOfMonth) {
       loadDashboardData();
     }
-  }, [thisMonthStr, firstDayOfMonth]);
+  }, [isAuthorized, thisMonthStr, firstDayOfMonth]);
 
-  // === 차트 렌더링 ===
   useEffect(() => {
     if (levelCounts && chartRef.current) {
       if (chartInstance.current) chartInstance.current.destroy();
@@ -117,9 +161,6 @@ export default function AdminDashboardPage() {
     }
   }, [levelCounts]);
 
-  // ==========================================
-  // 데이터 Fetching 로직
-  // ==========================================
   const loadDashboardData = async () => {
     await Promise.allSettled([
       fetchKPIStudents(), fetchKPIBilling(), fetchKPIAdmission(),
@@ -128,8 +169,13 @@ export default function AdminDashboardPage() {
     ]);
   };
 
+  // 🌟 [보안 및 격리 강화] 모든 fetch 함수에 tenant_id 필터링을 강제 적용합니다.
   const fetchKPIStudents = async () => {
-    const { data } = await supabase.from('student').select('*');
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from('student').select('*');
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+
+    const { data } = await query;
     let enrolled = 0, newM = 0, leftM = 0;
     data?.forEach(s => {
       if (s.status === '재원') {
@@ -143,7 +189,11 @@ export default function AdminDashboardPage() {
   };
 
   const fetchKPIBilling = async () => {
-    const { data } = await supabase.from('academy_billing').select('*').eq('billing_month', thisMonthStr);
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from('academy_billing').select('*').eq('billing_month', thisMonthStr);
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+
+    const { data } = await query;
     let paidAmt = 0, unpaidAmt = 0;
     data?.forEach(b => {
       const amt = parseInt(b.amount) || 0;
@@ -155,59 +205,94 @@ export default function AdminDashboardPage() {
   };
 
   const fetchKPIAdmission = async () => {
+    const tId = localStorage.getItem("logica_tenant_id");
+    
+    // 대기생 수 조회 (tenant_id 적용)
+    let stuQuery = supabase.from('student').select('*').eq('status', '입학테스트');
+    if (tId && tId !== 'hq') stuQuery = stuQuery.eq('tenant_id', tId);
+    const { data: students } = await stuQuery;
+    
+    // 이달의 합격자 수 조회
     const { data: apps } = await supabase.from('admission_application').select('*').gte('created_at', firstDayOfMonth);
     const passedCount = apps?.filter(a => ['합격'].includes(a.test_result || a.status || a.application_status)).length || 0;
-    const { data: students } = await supabase.from('student').select('*').eq('status', '입학테스트');
+    
     setKpi(prev => ({ ...prev, passedStu: passedCount, waitingStu: students?.length || 0 }));
   };
 
   const fetchCSRequests = async () => {
-    const { data } = await supabase.from('parent_request_log')
-      .select('*, student(name)')
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from('parent_request_log')
+      .select('*, student!inner(name, tenant_id)')
       .neq('status', '완료') 
       .order('created_at', { ascending: false })
       .limit(15);
+      
+    if (tId && tId !== 'hq') query = query.eq('student.tenant_id', tId);
+    
+    const { data } = await query;
     setCsRequests(data || []);
     setKpi(prev => ({ ...prev, csCount: data?.length || 0 }));
   };
 
   const fetchMemos = async () => {
-    const { data } = await supabase.from('instructor_memo').select('*').neq('status', '완료').order('created_at', { ascending: false }).limit(20);
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from('instructor_memo').select('*').neq('status', '완료').order('created_at', { ascending: false }).limit(20);
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+    
+    const { data } = await query;
     setMemos(data || []);
   };
 
   const fetchAdmissions = async () => {
-    const { data } = await supabase.from('admission_session').select('*, admission_application(*)').gte('test_date', todayIso).order('test_date', { ascending: true }).limit(5);
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from('admission_session').select('*, admission_application(*)').gte('test_date', todayIso).order('test_date', { ascending: true }).limit(5);
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+
+    const { data } = await query;
     setAdmissions(data || []);
   };
 
   const fetchLiveFeeds = async () => {
-    const { data } = await supabase.from('notification_log').select('*').order('created_at', { ascending: false }).limit(15);
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from('notification_log').select('*').order('created_at', { ascending: false }).limit(20);
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+
+    const { data } = await query;
     setLiveFeeds(data || []);
   };
 
   const fetchInstructorStats = async () => {
-    // 💡 [핵심 해결] 조인 쿼리에 의존하지 않고, 본사(HQ)의 테넌트 ID를 별도로 확실하게 가져옵니다.
-    const { data: hqTenant } = await supabase.from('academy_tenant').select('tenant_id').eq('tenant_type', 'HQ').maybeSingle();
-    const hqTenantId = hqTenant?.tenant_id || 'd59395b0-8c9c-4dd3-9e25-ff569da98abc'; // 만약을 대비한 Fallback ID
+    const tId = localStorage.getItem("logica_tenant_id");
+    const hqTenantId = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc'; 
+
+    let instQuery = supabase.from('instructor').select('*').eq('status', '재직');
+    let classQuery = supabase.from('class').select('*').eq('status', '진행중');
+    let stuQuery = supabase.from('student').select('*');
+    let enrollQuery = supabase.from('enrollment').select('*');
+
+    if (tId && tId !== 'hq') {
+      instQuery = instQuery.eq('tenant_id', tId);
+      classQuery = classQuery.eq('tenant_id', tId);
+      stuQuery = stuQuery.eq('tenant_id', tId);
+    }
 
     const [{ data: rawInsts }, { data: classes }, { data: students }, { data: enrolls }] = await Promise.all([
-      // 조인을 쓰지 않고 순수하게 instructor 테이블만 100% 호출합니다.
-      supabase.from('instructor').select('*').eq('status', '재직'),
-      supabase.from('class').select('*').neq('status', '종료'),
-      supabase.from('student').select('*'),
-      supabase.from('enrollment').select('*')
+      instQuery, classQuery, stuQuery, enrollQuery
     ]);
 
     const getRoleRank = (pos: string) => {
       if (!pos) return 99;
-      if (pos.includes('원장')) return 1; if (pos.includes('실장')) return 2;
-      if (pos.includes('전임')) return 3; if (pos.includes('파트')) return 4; return 99;
+      if (pos.includes('원장') && !pos.includes('부원장')) return 1; 
+      if (pos.includes('부원장')) return 2;
+      if (pos.includes('실장')) return 3;
+      if (pos.includes('전임')) return 4; 
+      if (pos.includes('파트')) return 5; 
+      if (pos.includes('조교')) return 6;
+      return 99;
     };
 
-    // 💡 [핵심 해결] 본사(HQ)의 tenant_id와 일치하는 직원은 목록에서 완벽하게 걸러냅니다!
     const insts = (rawInsts || [])
-      .filter(i => i.tenant_id !== hqTenantId) // ⬅️ 본사 직원 차단 
+      .filter(i => i.tenant_id !== hqTenantId) 
       .filter(i => !(i.position?.includes('조교')))
       .sort((a, b) => {
         const rankA = getRoleRank(a.position), rankB = getRoleRank(b.position);
@@ -238,10 +323,19 @@ export default function AdminDashboardPage() {
   };
 
   const fetchClassMonitoring = async () => {
+    const tId = localStorage.getItem("logica_tenant_id");
+
+    let classQuery = supabase.from('class').select('*, instructor(*), class_schedule(*)').eq('status', '진행중');
+    let stuQuery = supabase.from('student').select('student_id, status');
+    let enrollQuery = supabase.from('enrollment').select('*');
+
+    if (tId && tId !== 'hq') {
+      classQuery = classQuery.eq('tenant_id', tId);
+      stuQuery = stuQuery.eq('tenant_id', tId);
+    }
+
     const [{ data: classes }, { data: students }, { data: enrolls }] = await Promise.all([
-      supabase.from('class').select('*, instructor(*), class_schedule(*)').neq('status', '종료'),
-      supabase.from('student').select('student_id, status'), 
-      supabase.from('enrollment').select('*')
+      classQuery, stuQuery, enrollQuery
     ]);
 
     const activeStudentIds = new Set(
@@ -255,7 +349,9 @@ export default function AdminDashboardPage() {
           sCount++;
         }
       });
-      const capacity = 12, vacancy = capacity - sCount, fillRate = Math.min(100, Math.round((sCount / capacity) * 100));
+      const capacity = c.capacity || 12;
+      const vacancy = Math.max(0, capacity - sCount);
+      const fillRate = Math.min(100, Math.round((sCount / capacity) * 100));
       return { ...c, sCount, capacity, vacancy, fillRate };
     }).sort((a, b) => b.vacancy - a.vacancy);
     
@@ -273,9 +369,6 @@ export default function AdminDashboardPage() {
     setLevelCounts(lvCounts);
   };
 
-  // ==========================================
-  // 모달 제어 함수
-  // ==========================================
   const openClassModal = async (classItem: any) => {
     setClassModalData({ ...classItem, instructorName: classItem.instructor?.name || '미정' });
 
@@ -299,8 +392,17 @@ export default function AdminDashboardPage() {
 
   const saveMemo = async () => {
     if (!memoData.content.trim()) return alert("내용을 입력해주세요.");
+    
+    if (!tenantId) return alert("소속 지점 정보가 없습니다.");
+
     try {
-      await supabase.from('instructor_memo').insert({ instructor_id: currentUser.instId, author_name: currentUser.name, memo_type: memoData.type, content: memoData.content });
+      await supabase.from('instructor_memo').insert({ 
+        instructor_id: currentUser.instId, 
+        author_name: currentUser.name, 
+        memo_type: memoData.type, 
+        content: memoData.content,
+        tenant_id: tenantId
+      });
       setIsMemoModalOpen(false);
       setMemoData({ type: "일반공지", content: "" });
       fetchMemos();
@@ -315,229 +417,138 @@ export default function AdminDashboardPage() {
     } catch (err) { alert("삭제 실패"); }
   };
 
-  // ==========================================
-  // 화면 렌더링
-  // ==========================================
+  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 원천 차단
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
+
   return (
-    <div className="flex flex-col h-full bg-slate-50 relative z-0 -mx-8 -mt-4">
-      {/* 1. 수퍼 어드민 전용 다크 헤더 */}
-      <header className="bg-gradient-to-br from-[#0f172a] to-[#1e1b4b] text-white pt-8 pb-20 px-8 shrink-0 relative z-0">
-        <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
-        <div className="relative z-10 flex justify-between items-center ml-6">
-          <div>
-            <h1 className="text-3xl font-black tracking-tight font-lexend flex items-center gap-3">
-              <span>Logica Super Admin</span>
-              <span className="bg-blue-500/30 text-blue-200 text-xs px-2 py-1 rounded font-bold border border-blue-400/30 font-pretendard shadow-sm">
-                최고 관리자 통제실
-              </span>
-            </h1>
-            <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">{todayString}</p>
-          </div>
-        </div>
-      </header>
-
-      {/* 2. 메인 컨텐츠 영역 */}
-      <main className="flex-1 overflow-y-auto custom-scroll px-8 pb-10 -mt-14 relative z-10 bg-transparent">
-        
-        {/* KPI 5구역 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 mb-6 px-6">
-          <div onClick={() => router.push('/student')} className="bg-white rounded-2xl p-6 border border-slate-200/60 shadow-lg relative overflow-hidden group hover:border-[#002864] transition-colors cursor-pointer h-64 flex flex-col">
-            <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-blue-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-            <div className="flex-1">
-              <div className="flex justify-between items-start mb-2 relative z-10">
-                <span className="text-sm font-bold text-slate-500">전체 재원생 수</span>
-                <span className="bg-blue-100 text-[#002864] text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-sm">LIVE</span>
-              </div>
-              <div className="flex items-end gap-2 relative z-10 mt-1">
-                <span className="text-4xl font-black text-[#002864]">{kpi.totalStu}</span>
-                <span className="text-sm font-bold text-slate-400 mb-1">명</span>
-              </div>
-            </div>
-            <div className="pt-4 border-t border-slate-100 flex gap-2 text-[11px] font-bold relative z-10 shrink-0">
-              <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded shadow-sm border border-emerald-100 flex-1 text-center">이달 신규 +{kpi.newStu}</span>
-              <span className="text-rose-500 bg-rose-50 px-2 py-1 rounded shadow-sm border border-rose-100 flex-1 text-center">퇴원 -{kpi.leftStu}</span>
+    <div className="flex w-full h-full bg-slate-50 overflow-hidden font-pretendard">
+      
+      <div className="flex-1 flex flex-col h-full overflow-y-auto custom-scroll relative z-0 -mx-8 -mt-4">
+        <header className="bg-gradient-to-br from-[#0f172a] to-[#1e1b4b] text-white pt-8 pb-20 px-8 shrink-0 relative z-0">
+          <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
+          <div className="relative z-10 flex justify-between items-center ml-6">
+            <div>
+              <h1 className="text-3xl font-black tracking-tight font-lexend flex items-center gap-3">
+                <span>Logica Super Admin</span>
+                <span className="bg-blue-500/30 text-blue-200 text-xs px-2 py-1 rounded font-bold border border-blue-400/30 font-pretendard shadow-sm">
+                  최고 관리자 통제실
+                </span>
+              </h1>
+              <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">{todayString}</p>
             </div>
           </div>
+        </header>
 
-          <div onClick={() => router.push('/billing')} className="bg-white rounded-2xl p-6 border border-blue-200 shadow-lg relative overflow-hidden group cursor-pointer h-64 flex flex-col">
-             <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-sky-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-             <div className="flex-1">
-               <div className="flex justify-between items-start mb-2 relative z-10">
-                 <span className="text-sm font-bold text-slate-500">{new Date().getMonth() + 1}월 수납률</span>
-               </div>
-               <div className="flex items-end gap-1.5 relative z-10 mt-1 mb-3">
-                 <span className="text-4xl font-black tracking-tighter text-[#002864]">{kpi.payRate}</span>
-                 <span className="text-xl font-bold text-slate-400 mb-1">%</span>
-               </div>
-               <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden relative z-10">
-                 <div className={`h-full rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
-               </div>
-             </div>
-             <div className="flex justify-between text-[11px] font-bold text-slate-500 relative z-10 pt-4 border-t border-slate-100 shrink-0">
-               <span>수납: <span className="text-slate-800 text-xs">{kpi.paidAmt.toLocaleString()}</span></span>
-               <span className="text-rose-400">미납: <span className="text-rose-500 text-xs">{kpi.unpaidAmt.toLocaleString()}</span></span>
-             </div>
-           </div>
-
-          <div onClick={() => router.push('/admission')} className="bg-white rounded-2xl p-6 border border-slate-200/60 shadow-lg relative overflow-hidden group hover:border-amber-400 transition-colors cursor-pointer h-64 flex flex-col">
-            <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-amber-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-            <div className="flex-1">
-              <div className="flex justify-between items-start mb-2 relative z-10">
-                <span className="text-sm font-bold text-slate-500">입학테스트 대기생</span>
-                <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shadow-sm">잠재 고객</span>
-              </div>
-              <div className="flex items-end gap-2 relative z-10 mt-1">
-                <span className="text-4xl font-black text-amber-500">{kpi.waitingStu}</span>
-                <span className="text-sm font-bold text-slate-400 mb-1">명</span>
-              </div>
-            </div>
-            <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-[11px] font-bold relative z-10 shrink-0">
-              <span className="text-slate-500">이번 달 입학 승인</span>
-              <span className="text-slate-800"><span className="font-black text-amber-600 text-sm">{kpi.passedStu}</span> 명</span>
-            </div>
-          </div>
-
-          <div onClick={() => router.push('/cs')} className="bg-white rounded-2xl p-5 border border-rose-100 shadow-lg relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
-            <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
-            <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
-              <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">🚨 학부모 요청</span>
-              <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">{kpi.csCount}건 미결</span>
-            </div>
-            <div className="flex-1 flex flex-col gap-2 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
-              {csRequests.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">미처리 요청이 없습니다. 🎉</div> : 
-                csRequests.map(r => {
-                  const isProcessing = r.status === '처리중';
-                  return (
-                    <div key={r.request_id} className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 shadow-sm">
-                      <span className={`px-1 py-0.5 rounded text-[9px] shrink-0 ${isProcessing ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-200 text-rose-700 border border-rose-300'}`}>
-                        {isProcessing ? '처리중' : '대기'}
-                      </span>
-                      <span className="truncate flex-1"><span className="text-rose-600 mr-1">{r.student?.name || '알수없음'}:</span>{r.reason}</span>
-                    </div>
-                  );
-                })
-              }
-            </div>
-          </div>
-
-          <div className="bg-white rounded-2xl p-5 border border-purple-100 shadow-lg relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
-            <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
-              <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
-              <button onClick={(e) => { e.stopPropagation(); setIsMemoModalOpen(true); }} className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1.5 rounded font-bold transition-colors border border-blue-200 shadow-sm">+ 작성</button>
-            </div>
-            <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
-              {memos.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">등록된 공지/업무가 없습니다.</div> :
-                memos.map(m => {
-                  let typeColor = 'text-slate-600 bg-slate-100 border-slate-200'; 
-                  if (m.memo_type === '긴급공지') typeColor = 'text-rose-600 bg-rose-100 border-rose-200';
-                  else if (m.memo_type === '학생인계') typeColor = 'text-blue-600 bg-blue-100 border-blue-200';
-                  else if (m.memo_type === '일반공지') typeColor = 'text-emerald-600 bg-emerald-100 border-emerald-200';
-                  return (
-                    <div key={m.memo_id} className="shrink-0 flex flex-col border-b border-slate-100 pb-2 mb-1 last:border-0 hover:bg-slate-50/50 p-1 rounded transition-colors group">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border`}>{m.memo_type}</span>
-                        <div className="flex items-center">
-                          <span className="text-[9px] font-bold text-slate-400">{m.author_name}</span>
-                          {String(m.instructor_id) === currentUser.instId && <button onClick={(e) => { e.stopPropagation(); deleteMemo(m.memo_id); }} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-rose-500 font-bold ml-2">×</button>}
-                        </div>
-                      </div>
-                      <span className="text-[11px] font-bold text-slate-700 leading-snug whitespace-pre-wrap">{m.content}</span>
-                    </div>
-                  );
-                })
-              }
-            </div>
-          </div>
-        </div>
-
-        {/* Section 2: 강사별 성과 지표 */}
-        <div className="mb-6">
-          <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white rounded-t-2xl border shadow-sm relative z-10">
-            <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">👨‍🏫 강사별 운영 및 원생 관리 성과</h3>
-            <span className="text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-2 py-1 rounded shadow-sm">실시간 자동 분류</span>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3 p-5 bg-transparent border border-t-0 border-slate-200 rounded-b-2xl shadow-sm">
-            {instructorsStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">강사 데이터를 불러오는 중입니다...</div> : 
-              instructorsStats.map(inst => (
-                <div key={inst.instructor_id} onClick={() => router.push(`/instructor/${inst.instructor_id}`)} className="border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow bg-white hover:border-[#002864] flex cursor-pointer gap-2.5 h-[110px]">
-                  
-                  {/* 왼쪽: 사진을 꽉 채워서 크게 배치 */}
-                  <div className="w-[72px] bg-gradient-to-br from-[#002864] to-blue-500 rounded-lg shadow-inner overflow-hidden flex-shrink-0 border border-slate-200 relative h-full">
-                    {inst.profile_image_url ? (
-                      <img 
-                        src={inst.profile_image_url.startsWith('http') ? inst.profile_image_url : `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/${inst.profile_image_url}`} 
-                        className="absolute inset-0 w-full h-full object-cover" 
-                        alt="profile"
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex items-center justify-center text-2xl font-black text-blue-200">
-                        {inst.name?.charAt(0) || 'T'}
-                      </div>
-                    )}
-                  </div>
-                  
-                  {/* 오른쪽: 모든 텍스트 정보를 이곳에 배치 */}
-                  <div className="flex-1 flex flex-col min-w-0 h-full">
-                    {/* 상단: 이름 + 입퇴원 성과 + 총 인원 한 줄 배치 */}
-                    <div className="flex justify-between items-center mb-1.5 gap-1 shrink-0">
-                      <div className="font-extrabold text-[13px] text-slate-800 truncate leading-none mt-0.5">{inst.name} 선생님</div>
-                      
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <div className="flex gap-0.5 text-[9px] font-bold">
-                          <span className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 shadow-sm flex items-center">입학 +{inst.newCnt}</span>
-                          <span className="text-rose-500 bg-rose-50 px-1 py-0.5 rounded border border-rose-100 shadow-sm flex items-center">퇴원 -{inst.leftCnt}</span>
-                        </div>
-                        
-                        <div className="text-right leading-none shrink-0 border-l border-slate-200 pl-1.5 flex items-baseline">
-                          <span className="text-base font-black text-[#002864]">{inst.studentCount}</span><span className="text-[9px] font-bold text-slate-400 ml-0.5">명</span>
-                        </div>
-                      </div>
-                    </div>
-                    
-                    {/* 하단: 담당 수강반 (독립 스크롤 활성화) */}
-                    <div className="border-t border-slate-100 pt-1.5 flex flex-col flex-1 min-h-0">
-                      <div className="text-[9px] font-bold text-slate-500 mb-1 flex items-center gap-1 shrink-0"><span>📚</span> 담당 수강반 ({inst.myClasses.length})</div>
-                      <div className="flex flex-wrap gap-1 content-start flex-1 overflow-y-auto custom-scroll pr-1 pb-1 min-h-0">
-                        {inst.myClasses.length === 0 ? <span className="text-[10px] text-slate-400 font-bold">배정된 반 없음</span> : 
-                          inst.myClasses.map((c: any) => <span key={c.class_id} className="text-[9px] font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap">{c.name}</span>)
-                        }
-                      </div>
-                    </div>
-                  </div>
+        <main className="flex-1 overflow-visible px-8 pb-10 -mt-14 relative z-10 bg-transparent">
+          
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 mb-6 px-6">
+            <div onClick={() => router.push('/student')} className="bg-white rounded-2xl p-6 border border-slate-200/60 shadow-lg relative overflow-hidden group hover:border-[#002864] transition-colors cursor-pointer h-64 flex flex-col">
+              <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-blue-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+              <div className="flex-1">
+                <div className="flex justify-between items-start mb-2 relative z-10">
+                  <span className="text-sm font-bold text-slate-500">전체 재원생 수</span>
+                  <span className="bg-blue-100 text-[#002864] text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-sm">LIVE</span>
                 </div>
-              ))
-            }
-          </div>
-        </div>
-
-        {/* Section 3: 수강반 결원 모니터링 & 레벨 분포 */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-          <div className="lg:col-span-2 bg-transparent rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
-            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white shrink-0 rounded-t-2xl">
-              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🏫 수강반 결원 모니터링 <span className="text-xs font-normal text-slate-400">(목표 정원 12명 기준)</span></h3>
-              <span className="text-[10px] font-bold text-rose-500 bg-rose-50 border border-rose-100 px-2 py-1 rounded shadow-sm">결원이 많은 순 (모집 시급) 정렬</span>
+                <div className="flex items-end gap-2 relative z-10 mt-1">
+                  <span className="text-4xl font-black text-[#002864]">{kpi.totalStu}</span>
+                  <span className="text-sm font-bold text-slate-400 mb-1">명</span>
+                </div>
+              </div>
+              <div className="pt-4 border-t border-slate-100 flex gap-2 text-[11px] font-bold relative z-10 shrink-0">
+                <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded shadow-sm border border-emerald-100 flex-1 text-center">이달 신규 +{kpi.newStu}</span>
+                <span className="text-rose-500 bg-rose-50 px-2 py-1 rounded shadow-sm border border-rose-100 flex-1 text-center">퇴원 -{kpi.leftStu}</span>
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-transparent border-t-0 border-slate-200">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {classStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">운영 중인 반이 없습니다.</div> : 
-                  classStats.map(c => {
-                    const bgClass = c.vacancy > 2 ? 'bg-blue-50/20 border-blue-200' : 'bg-white border-slate-200';
-                    const barColor = c.vacancy <= 0 ? 'bg-rose-400' : c.vacancy <= 2 ? 'bg-amber-400' : 'bg-[#002864]';
+
+            <div onClick={() => router.push('/billing')} className="bg-white rounded-2xl p-6 border border-blue-200 shadow-lg relative overflow-hidden group cursor-pointer h-64 flex flex-col">
+               <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-sky-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+               <div className="flex-1">
+                 <div className="flex justify-between items-start mb-2 relative z-10">
+                   <span className="text-sm font-bold text-slate-500">{new Date().getMonth() + 1}월 수납률</span>
+                 </div>
+                 <div className="flex items-end gap-1.5 relative z-10 mt-1 mb-3">
+                   <span className="text-4xl font-black tracking-tighter text-[#002864]">{kpi.payRate}</span>
+                   <span className="text-xl font-bold text-slate-400 mb-1">%</span>
+                 </div>
+                 <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden relative z-10">
+                   <div className={`h-full rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
+                 </div>
+               </div>
+               <div className="flex justify-between text-[11px] font-bold text-slate-500 relative z-10 pt-4 border-t border-slate-100 shrink-0">
+                 <span>수납: <span className="text-slate-800 text-xs">{kpi.paidAmt.toLocaleString()}</span></span>
+                 <span className="text-rose-400">미납: <span className="text-rose-500 text-xs">{kpi.unpaidAmt.toLocaleString()}</span></span>
+               </div>
+             </div>
+
+            <div onClick={() => router.push('/admission')} className="bg-white rounded-2xl p-6 border border-slate-200/60 shadow-lg relative overflow-hidden group hover:border-amber-400 transition-colors cursor-pointer h-64 flex flex-col">
+              <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-amber-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
+              <div className="flex-1">
+                <div className="flex justify-between items-start mb-2 relative z-10">
+                  <span className="text-sm font-bold text-slate-500">입학테스트 대기생</span>
+                  <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shadow-sm">잠재 고객</span>
+                </div>
+                <div className="flex items-end gap-2 relative z-10 mt-1">
+                  <span className="text-4xl font-black text-amber-500">{kpi.waitingStu}</span>
+                  <span className="text-sm font-bold text-slate-400 mb-1">명</span>
+                </div>
+              </div>
+              <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-[11px] font-bold relative z-10 shrink-0">
+                <span className="text-slate-500">이번 달 입학 승인</span>
+                <span className="text-slate-800"><span className="font-black text-amber-600 text-sm">{kpi.passedStu}</span> 명</span>
+              </div>
+            </div>
+
+            <div onClick={() => router.push('/cs')} className="bg-white rounded-2xl p-5 border border-rose-100 shadow-lg relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
+              <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
+              <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
+                <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">🚨 학부모 요청</span>
+                <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">{kpi.csCount}건 미결</span>
+              </div>
+              <div className="flex-1 flex flex-col gap-2 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
+                {csRequests.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">미처리 요청이 없습니다. 🎉</div> : 
+                  csRequests.map(r => {
+                    const isProcessing = r.status === '처리중';
                     return (
-                      <div key={c.class_id} onClick={() => openClassModal(c)} className={`p-3 border rounded-xl hover:shadow-md transition-all cursor-pointer flex flex-col justify-between ${bgClass}`}>
-                        <div className="flex justify-between items-start mb-2 gap-1">
-                          <span className="text-[11px] font-extrabold text-slate-700 truncate" title={c.name}>{c.name}</span>
-                          <ClassVacancyBadge vacancy={c.vacancy} />
-                        </div>
-                        <div>
-                          <div className="flex justify-between items-end mb-1">
-                            <span className="text-[10px] font-bold text-slate-400">{c.instructor?.name || '미정'} 선생님</span>
-                            <span className="text-sm font-black text-[#002864]">{c.sCount}<span className="text-[9px] text-slate-400 font-bold ml-0.5">/ {c.capacity}명</span></span>
+                      <div key={r.request_id} className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 shadow-sm">
+                        <span className={`px-1 py-0.5 rounded text-[9px] shrink-0 ${isProcessing ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-200 text-rose-700 border border-rose-300'}`}>
+                          {isProcessing ? '처리중' : '대기'}
+                        </span>
+                        <span className="truncate flex-1"><span className="text-rose-600 mr-1">{r.student?.name || '알수없음'}:</span>{r.reason}</span>
+                      </div>
+                    );
+                  })
+                }
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-5 border border-purple-100 shadow-lg relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
+              <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
+                <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
+                <button onClick={(e) => { e.stopPropagation(); setIsMemoModalOpen(true); }} className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1.5 rounded font-bold transition-colors border border-blue-200 shadow-sm">+ 작성</button>
+              </div>
+              <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
+                {memos.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">등록된 공지/업무가 없습니다.</div> :
+                  memos.map(m => {
+                    let typeColor = 'text-slate-600 bg-slate-100 border-slate-200'; 
+                    if (m.memo_type === '긴급공지') typeColor = 'text-rose-600 bg-rose-100 border-rose-200';
+                    else if (m.memo_type === '학생인계') typeColor = 'text-blue-600 bg-blue-100 border-blue-200';
+                    else if (m.memo_type === '일반공지') typeColor = 'text-emerald-600 bg-emerald-100 border-emerald-200';
+                    return (
+                      <div key={m.memo_id} className="shrink-0 flex flex-col border-b border-slate-100 pb-2 mb-1 last:border-0 hover:bg-slate-50/50 p-1 rounded transition-colors group">
+                        <div className="flex items-center justify-between mb-1">
+                          <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border`}>{m.memo_type}</span>
+                          <div className="flex items-center">
+                            <span className="text-[9px] font-bold text-slate-400">{m.author_name}</span>
+                            {String(m.instructor_id) === currentUser.instId && <button onClick={(e) => { e.stopPropagation(); deleteMemo(m.memo_id); }} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-rose-500 font-bold ml-2">×</button>}
                           </div>
-                          <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner mt-1">
-                            <div className={`${barColor} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${c.fillRate}%` }}></div>
-                          </div>
                         </div>
+                        <span className="text-[11px] font-bold text-slate-700 leading-snug whitespace-pre-wrap">{m.content}</span>
                       </div>
                     );
                   })
@@ -546,85 +557,182 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden h-[380px]">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
-              <h3 className="text-sm font-extrabold text-slate-800">📊 레벨별 수강 비중 <span className="text-xs font-normal text-slate-500">(총 수강 건수)</span></h3>
+          <div className="mb-6">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white rounded-t-2xl border shadow-sm relative z-10">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">👨‍🏫 강사별 운영 및 원생 관리 성과</h3>
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 border border-slate-200 px-2 py-1 rounded shadow-sm">실시간 자동 분류</span>
             </div>
-            <div className="flex-1 p-5 flex flex-col items-center justify-center relative bg-white">
-              <div className="absolute inset-0 p-5 pb-8 flex items-center justify-center">
-                <canvas id="levelChart" ref={chartRef}></canvas>
-              </div>
-              {(!levelCounts || Object.values(levelCounts).reduce((a:any,b:any)=>a+b,0) === 0) && (
-                <div className="z-10 text-xs font-bold text-slate-400 bg-white/80 p-2 rounded">재원생 데이터가 없습니다.</div>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* Section 4: 다가오는 입학 & 알림 피드 */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[400px]">
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 bg-amber-50/30 flex justify-between items-center shrink-0">
-              <h2 className="font-extrabold text-slate-800 text-sm flex items-center gap-2"><span className="text-amber-500">📝</span> 다가오는 입학테스트 예약</h2>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 bg-white">
-              {admissions.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-xs">예정된 입학테스트 일정이 없습니다.</div> :
-                admissions.map(a => (
-                  <div key={a.admission_session_id} onClick={() => router.push('/admission')} className="bg-white border border-slate-200 rounded-lg p-3.5 hover:shadow-md transition-shadow cursor-pointer hover:border-amber-300 flex justify-between items-center group">
-                    <div className="min-w-0 flex-1">
-                      <h4 className="text-[13px] font-black text-slate-800 mb-1 group-hover:text-amber-600 transition-colors truncate">{a.title}</h4>
-                      <div className="text-[11px] font-bold text-slate-500">🗓️ {a.test_date} {a.start_time?.substring(0,5)}</div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-5 bg-transparent border border-t-0 border-slate-200 rounded-b-2xl shadow-sm">
+              {instructorsStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">강사 데이터를 불러오는 중입니다...</div> : 
+                instructorsStats.map(inst => (
+                  <div key={inst.instructor_id} onClick={() => router.push(`/instructor/${inst.instructor_id}`)} className="border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow bg-white hover:border-[#002864] flex cursor-pointer gap-2.5 h-[110px]">
+                    
+                    <div className="w-[72px] bg-gradient-to-br from-[#002864] to-blue-500 rounded-lg shadow-inner overflow-hidden flex-shrink-0 border border-slate-200 relative h-full">
+                      {inst.profile_image_url ? (
+                        <img 
+                          src={inst.profile_image_url.startsWith('http') ? inst.profile_image_url : `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/${inst.profile_image_url}`} 
+                          className="absolute inset-0 w-full h-full object-cover" 
+                          alt="profile"
+                        />
+                      ) : (
+                        <div className="absolute inset-0 flex items-center justify-center text-2xl font-black text-blue-200">
+                          {inst.name?.charAt(0) || 'T'}
+                        </div>
+                      )}
                     </div>
-                    <div className="shrink-0 ml-3">
-                      <span className="bg-amber-50 text-amber-600 text-[11px] font-black px-2.5 py-1 rounded-lg border border-amber-100 shadow-sm">{a.admission_application?.length || 0}명 대기</span>
+                    
+                    <div className="flex-1 flex flex-col min-w-0 h-full">
+                      <div className="flex justify-between items-center mb-1.5 gap-1 shrink-0">
+                        <div className="font-extrabold text-[13px] text-slate-800 truncate leading-none mt-0.5">{inst.name} 선생님</div>
+                        
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          <div className="flex gap-0.5 text-[9px] font-bold">
+                            <span className="text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-100 shadow-sm flex items-center">입학 +{inst.newCnt}</span>
+                            <span className="text-rose-500 bg-rose-50 px-1 py-0.5 rounded border border-rose-100 shadow-sm flex items-center">퇴원 -{inst.leftCnt}</span>
+                          </div>
+                          
+                          <div className="text-right leading-none shrink-0 border-l border-slate-200 pl-1.5 flex items-baseline">
+                            <span className="text-base font-black text-[#002864]">{inst.studentCount}</span><span className="text-[9px] font-bold text-slate-400 ml-0.5">명</span>
+                          </div>
+                        </div>
+                      </div>
+                      
+                      <div className="border-t border-slate-100 pt-1.5 flex flex-col flex-1 min-h-0">
+                        <div className="text-[9px] font-bold text-slate-500 mb-1 flex items-center gap-1 shrink-0"><span>📚</span> 담당 수강반 ({inst.myClasses.length})</div>
+                        <div className="flex flex-wrap gap-1 content-start flex-1 overflow-y-auto custom-scroll pr-1 pb-1 min-h-0">
+                          {inst.myClasses.length === 0 ? <span className="text-[10px] text-slate-400 font-bold">배정된 반 없음</span> : 
+                            inst.myClasses.map((c: any) => <span key={c.class_id} className="text-[9px] font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap">{c.name}</span>)
+                          }
+                        </div>
+                      </div>
                     </div>
                   </div>
                 ))
               }
             </div>
-            <div className="p-3 border-t border-slate-100 bg-slate-50 shrink-0 text-center">
-              <button onClick={() => router.push('/admission')} className="text-xs font-bold text-slate-500 hover:text-[#002864] transition-colors">입학 테스트 대시보드로 이동 →</button>
-            </div>
           </div>
 
-          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
-            <div className="px-5 py-4 border-b border-slate-100 bg-blue-50/30 flex justify-between items-center shrink-0">
-              <h2 className="font-extrabold text-slate-800 text-sm flex items-center gap-2"><span className="text-blue-500">📡</span> 최근 알림톡 발송 피드</h2>
-            </div>
-            <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 bg-white">
-              {liveFeeds.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-xs">발송 내역이 없습니다.</div> :
-                liveFeeds.map((log) => {
-                  let typeColor = 'text-blue-500 bg-blue-50 border-blue-100';
-                  if (log.noti_type?.includes('BILLING') || log.noti_type?.includes('UNPAID')) typeColor = 'text-rose-500 bg-rose-50 border-rose-100';
-
-                  const tDate = log.sent_at ? new Date(log.sent_at) : new Date(log.created_at);
-                  const timeStr = `${tDate.getMonth()+1}/${tDate.getDate()} ${String(tDate.getHours()).padStart(2,'0')}:${String(tDate.getMinutes()).padStart(2,'0')}`;
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div className="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
+              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                  💬 단체 알림톡 발송 
+                  <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">서류 심사 중</span>
+                </h3>
+              </div>
+              <div className="flex-1 p-6 flex flex-col gap-4 bg-white opacity-90 relative">
+                  <div className="absolute inset-0 z-10 flex flex-col items-center justify-center backdrop-blur-sm bg-white/40">
+                    <span className="text-5xl mb-4 drop-shadow-md">⏳</span>
+                    <p className="text-slate-800 font-black text-xl mb-1 drop-shadow-sm">카카오톡 비즈니스 채널 연동 대기 중</p>
+                    <p className="text-slate-600 font-bold text-sm bg-white/80 px-3 py-1 rounded-md shadow-sm">제출하신 채널 서류가 심사 중입니다. 카카오 승인 후 발송 기능이 활성화됩니다.</p>
+                  </div>
                   
-                  return (
-                    <div key={log.noti_log_id} className="p-2.5 bg-white border border-slate-200 rounded-lg flex items-center justify-between gap-3 hover:bg-slate-50 hover:border-slate-300 transition-colors shadow-sm">
-                      <div className="flex-1 min-w-0 flex items-center gap-2">
-                        <span className="text-[9px] font-bold text-slate-400 shrink-0 w-12 text-right">{timeStr}</span>
-                        <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded border ${typeColor} shrink-0`}>{log.noti_type || '안내'}</span>
-                        <p className="text-[11px] font-bold text-slate-600 truncate flex-1" title={log.message_content}>{log.message_content}</p>
-                      </div>
-                      <div className="shrink-0 flex items-center gap-2">
-                        <span className="text-[9px] font-black text-slate-300">**{(log.receiver_phone || log.receiver_contact || '0000').slice(-4)}</span>
-                        <NotiStatusBadge status={log.status} />
-                      </div>
-                    </div>
-                  );
-                })
-              }
+                  <div className="pointer-events-none opacity-40">
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">발송 대상 선택</label>
+                    <select className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-600 bg-slate-50 mb-4">
+                      <option>전체 재원생 학부모</option>
+                      <option>특정 반 선택...</option>
+                    </select>
+                  </div>
+                  <div className="flex-1 flex flex-col min-h-0 pointer-events-none opacity-40">
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">메시지 내용</label>
+                    <textarea className="w-full flex-1 border border-slate-300 rounded-lg p-3 text-sm font-medium text-slate-600 bg-slate-50 resize-none" placeholder="발송할 알림톡 내용을 입력하세요..."></textarea>
+                  </div>
+                  <div className="flex justify-end shrink-0 pointer-events-none opacity-40 mt-4">
+                     <button className="px-8 py-3 bg-[#fef01b] text-[#3a2929] font-black rounded-xl shadow-sm">카카오톡 발송하기</button>
+                  </div>
+              </div>
             </div>
-            <div className="p-3 border-t border-slate-100 bg-slate-50 shrink-0 text-center">
-              <span className="text-[10px] font-bold text-slate-400">발송 내역은 실시간으로 자동 갱신됩니다.</span>
+
+            <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
+              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 알림톡/문자 발송 피드</h3>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-2">
+                {liveFeeds.length === 0 ? (
+                  <div className="text-center py-10 text-slate-400 font-bold text-sm">최근 발송 내역이 없습니다.</div>
+                ) : (
+                  liveFeeds.map((feed, idx) => {
+                    const timeStr = new Date(feed.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                    return (
+                      <div key={idx} className="bg-slate-50 p-3 rounded-xl border border-slate-100 flex flex-col gap-1.5 hover:bg-slate-100 transition-colors">
+                         <div className="flex items-center justify-between">
+                           <NotiStatusBadge status={feed.status || '성공'} />
+                           <span className="text-[10px] font-bold text-slate-400">{timeStr}</span>
+                         </div>
+                         <div className="flex items-center gap-1.5">
+                           <span className="text-[11px] font-black text-slate-700">{feed.target_name || feed.student_name || '학부모'}</span>
+                           <span className="text-[10px] font-bold text-slate-400 truncate">{feed.target_phone || feed.phone || ''}</span>
+                         </div>
+                         <p className="text-[11px] font-medium text-slate-600 truncate">{feed.message || feed.content || '알림톡 발송 완료'}</p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
           </div>
-        </div>
 
-      </main>
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <div className="lg:col-span-2 bg-transparent rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
+              <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white shrink-0 rounded-t-2xl">
+                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🏫 수강반 결원 모니터링 <span className="text-xs font-normal text-slate-400">(목표 정원 기준)</span></h3>
+                <span className="text-[10px] font-bold text-rose-500 bg-rose-50 border border-rose-100 px-2 py-1 rounded shadow-sm">결원이 많은 순 (모집 시급) 정렬</span>
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-transparent border-t-0 border-slate-200">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {classStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">운영 중인 반이 없습니다.</div> : 
+                    classStats.map(c => {
+                      const bgClass = c.vacancy > 2 ? 'bg-blue-50/20 border-blue-200' : 'bg-white border-slate-200';
+                      const barColor = c.vacancy <= 0 ? 'bg-rose-400' : c.vacancy <= 2 ? 'bg-amber-400' : 'bg-[#002864]';
+                      return (
+                        <div key={c.class_id} onClick={() => openClassModal(c)} className={`p-3 border rounded-xl hover:shadow-md transition-all cursor-pointer flex flex-col justify-between ${bgClass}`}>
+                          <div className="flex justify-between items-start mb-2 gap-1">
+                            <span className="text-[11px] font-extrabold text-slate-700 truncate" title={c.name}>{c.name}</span>
+                            <ClassVacancyBadge vacancy={c.vacancy} />
+                          </div>
+                          <div>
+                            <div className="flex justify-between items-end mb-1">
+                              <span className="text-[10px] font-bold text-slate-400">{c.instructor?.name || '미정'} 선생님</span>
+                              <span className="text-sm font-black text-[#002864]">{c.sCount}<span className="text-[9px] text-slate-400 font-bold ml-0.5">/ {c.capacity}명</span></span>
+                            </div>
+                            <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner mt-1">
+                              <div className={`${barColor} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${c.fillRate}%` }}></div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })
+                  }
+                </div>
+              </div>
+            </div>
 
-      {/* 5. 공지 작성 팝업 모달 */}
+            <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden h-[380px]">
+              <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
+                <h3 className="text-sm font-extrabold text-slate-800">📊 레벨별 수강 비중 <span className="text-xs font-normal text-slate-500">(총 수강 건수)</span></h3>
+              </div>
+              <div className="flex-1 p-5 flex flex-col items-center justify-center relative bg-white">
+                <div className="absolute inset-0 p-5 pb-8 flex items-center justify-center">
+                  <canvas id="levelChart" ref={chartRef}></canvas>
+                </div>
+                {(!levelCounts || Object.values(levelCounts).reduce((a:any,b:any)=>a+b,0) === 0) && (
+                  <div className="z-10 text-xs font-bold text-slate-400 bg-white/80 p-2 rounded">재원생 데이터가 없습니다.</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+        </main>
+      </div>
+
+      <AgendaSidebar 
+        currentUser={{ instId: currentUser.instId, name: currentUser.name, isSuperLevel: true }} 
+        tenantId={tenantId} 
+        hasAccess={() => true} 
+      />
+
+      {/* 수동 설정 모달 및 공지 모달 */}
       {isMemoModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -655,7 +763,6 @@ export default function AdminDashboardPage() {
         </div>
       )}
 
-      {/* 6. 수강반 상세 정보 팝업 모달 */}
       {isClassModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -718,7 +825,6 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
-              {/* 학생 리스트 */}
               <div className="flex justify-between items-end mb-3 border-b border-slate-200 pb-2">
                 <h3 className="font-bold text-slate-800">👨‍🎓 수강 학생 리스트</h3>
               </div>

@@ -5,71 +5,34 @@ import { clearActiveCall, clearActiveRecheck } from "@/lib/clinicSession";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { SEAT_LAYOUT_UPDATED_EVENT, formatSeatLabel, Seat, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
 
-// ==========================================
-// 상수 및 환경 설정 (보안 강화)
-// ==========================================
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const CLINIC_ROOM = "logica-clinic-room";
 
-// 좌석 표기: 좌석 배치 에디터의 번호(1..N)를 그대로 쓴다("A-01" 같은 영화관식 표기는 폐기).
 export const formatSeat = formatSeatLabel;
 
 const SEAT_POLL_INTERVAL_MS = 3000;
-// 💡 자정 이후(00시~09시 KST)에는 UTC 날짜와 KST 날짜가 어긋나 세션을 못 찾는 버그가 있었음 — 항상 KST 기준으로 통일
 const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
 const TA_NAME_STORAGE_KEY = 'logica_ta_name';
 const TA_CLIENT_ID_STORAGE_KEY = 'logica_ta_client_id';
 
-// ==========================================
-// 타입 정의
-// ==========================================
 export type StudentStatus = "idle" | "call" | "hint" | "away" | "submitted";
 
 export interface StudentData {
-  name: string;
-  classes: string[];
-  status: StudentStatus;
-  studentId?: string;
-  sessionId?: string;
-  lastUpdatedAt: number;
-  missingSince?: number | null;
-  calls?: Record<string, number>;
-  score?: number;
+  name: string; classes: string[]; status: StudentStatus; studentId?: string; sessionId?: string;
+  lastUpdatedAt: number; missingSince?: number | null; calls?: Record<string, number>; score?: number;
 }
 
 export interface CallData {
-  seat: string;
-  studentId?: string;
-  qNum: number;
-  name: string;
-  classes: string[];
-  questionText: string;
-  imageUrl: string;
-  options: string[] | null;
-  answer: string;
-  explanation: string;
-  source: string;
-  calledAt: number;
+  seat: string; studentId?: string; qNum: number; name: string; classes: string[];
+  questionText: string; imageUrl: string; options: string[] | null; answer: string; explanation: string; source: string; calledAt: number;
 }
 
 export interface RecheckData {
-  seat: string;
-  studentId?: string;
-  uid: string;
-  qNum: number;
-  name: string;
-  classes: string[];
-  questionText: string;
-  correctAnswer: string;
-  imageDataUrl: string;
-  recognizedText: string;
-  aiExplanation: string;
-  aiConfidence: number | null;
-  requestedAt: number;
+  seat: string; studentId?: string; uid: string; qNum: number; name: string; classes: string[];
+  questionText: string; correctAnswer: string; imageDataUrl: string; recognizedText: string; aiExplanation: string; aiConfidence: number | null; requestedAt: number;
 }
 
-// 싱글톤 패턴으로 Supabase 클라이언트 생성
 const getSupabaseClient = () => {
     if (typeof window === 'undefined') return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     if (!(window as any)._supabaseInstance) (window as any)._supabaseInstance = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
@@ -78,12 +41,10 @@ const getSupabaseClient = () => {
 const supabaseClient = getSupabaseClient();
 
 export function useTaHandheld() {
-  // === 인증 및 세션 상태 ===
   const [taName, setTaName] = useState<string>("");
   const [taClientId, setTaClientId] = useState<string>("");
   const [taJoinedAt, setTaJoinedAt] = useState<number>(0);
   
-  // === UI & 렌더링 상태 ===
   const [isConnected, setIsConnected] = useState(false);
   const [gridSnapshot, setGridSnapshot] = useState<Record<string, StudentData>>({});
   const [callsSnapshot, setCallsSnapshot] = useState<Record<string, CallData>>({});
@@ -100,55 +61,26 @@ export function useTaHandheld() {
   const [seatHeight, setSeatHeight] = useState(DEFAULT_SEAT_CARD_H);
   const [editorLocked, setEditorLocked] = useState(false);
   
-  // 💡 [최적화] 경과 시간 계산용 가벼운 Tick 상태
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
 
-  // === 컨트롤 & 선택 상태 ===
   const [selectedCallKey, setSelectedCallKey] = useState<string | null>(null);
   const [markState, setMarkState] = useState<Record<string, 'hint' | 'skip' | null>>({});
 
-  // === 모달 상태 ===
   const [nameModalOpen, setNameModalOpen] = useState(false);
   const [isFirstTime, setIsFirstTime] = useState(false);
   const [tempNameInput, setTempNameInput] = useState("");
   const [exitModalOpen, setExitModalOpen] = useState(false);
 
-  // === 실시간 동기화용 Mutable Refs ===
   const activeStudentsRef = useRef<Record<string, StudentData>>({});
   const callsRef = useRef<Record<string, CallData>>({});
   const rechecksRef = useRef<Record<string, RecheckData>>({});
   const clinicChannelRef = useRef<any>(null);
-  // 💡 connectClinicChannel은 이름 변경뿐 아니라 React StrictMode의 개발 모드 이펙트 이중 실행,
-  // Fast Refresh 등으로 짧은 시간 안에 두 번 이상 호출될 수 있다. 각 호출이 독립적으로
-  // "removeChannel → 새 channel() 생성 → subscribe()"를 실행하면, 뒤 호출의 removeChannel이
-  // 아직 안 끝난 사이에 앞 호출이 이미 새 채널을 만들어 구독해버려서 — supabase-js가 같은
-  // topic 이름의 채널을 재사용하는 탓에 — "이미 subscribe된 채널에 .on()을 또 붙이려 한다"는
-  // 에러가 났다. 모든 호출을 이 프라미스 체인 하나로 직렬화해서, 항상 이전 연결 시도가
-  // (성공/실패 상관없이) 완전히 끝난 뒤에만 다음 연결을 시작하게 한다.
   const connectChainRef = useRef<Promise<void>>(Promise.resolve());
-  // 💡 fetchSeatsFromDB는 여러 개의 await를 거치는 비동기 함수라, 이전 호출이 아직 끝나기 전에
-  // 폴링 인터벌이 다음 호출을 또 시작하면 두 실행이 겹칠 수 있다. 늦게 시작한(=더 오래된 DB
-  // 스냅샷을 읽은) 호출이 나중에 끝나면 activeStudentsRef를 오래된 값으로 덮어써서, 방금 옮긴
-  // 좌석이 잠깐 되돌아갔다가 다시 사라지는 등 호출/재확인 요청이 깜빡이며 유실될 수 있었다.
   const isFetchingSeatsRef = useRef(false);
-  // 💡 위 가드가 "영원히 true로 고정"되면(네트워크 요청이 완료도 실패도 안 하고 멈추는 경우 등)
-  // 폴링이 통째로 멈춰버린다 — 실제로 겪었다(에러도 안 나고, 한 번 멈추면 계속 옛 좌석에 고정됨).
-  // 가드를 세운 시각을 같이 기록해, 너무 오래(정상적인 쿼리 소요 시간을 한참 넘게) 걸리면
-  // 스스로 풀고 다시 시도하게 한다.
   const fetchingSeatsStartedAtRef = useRef(0);
-  // 💡 computeAssignment는 syncFromPresence(useCallback, deps=[taClientId]) 안에서 호출되는데,
-  // 그 메모이제이션 때문에 allSeats state를 직접 읽으면 좌석 배치가 바뀌어도 옛 좌표를 참조할 수
-  // 있다. 항상 최신 좌표를 보장하기 위해 ref로 따로 들고 있는다(다른 *Ref들과 동일한 패턴).
   const allSeatObjsRef = useRef<Seat[]>([]);
-  // 💡 [sticky 배정] 직전에 계산된 좌석→조교 배정을 기억해뒀다가, 다음 계산 때 "아직 유효한
-  // 배정(좌석이 여전히 점유 중이고 담당 조교도 여전히 접속 중)"은 그대로 유지한다. 조교 수가
-  // 바뀔 때마다 전체를 처음부터 다시 나누면 이미 익숙해진 담당 구역이 매번 흔들리므로, 새로
-  // 생긴/담당자가 사라진 좌석만 최소한으로 재배정하기 위함이다.
   const prevAssignmentRef = useRef<Record<string, string>>({});
 
-  // ==========================================
-  // 유틸리티 및 초기화
-  // ==========================================
   useEffect(() => {
     let savedName = localStorage.getItem(TA_NAME_STORAGE_KEY) || "";
     let savedClientId = localStorage.getItem(TA_CLIENT_ID_STORAGE_KEY);
@@ -182,23 +114,10 @@ export function useTaHandheld() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taName, taClientId]);
 
-  // 💡 좌석 현황은 realtime presence가 아니라 DB(clinic_session_state)를 기준으로 판단한다.
-  // presence는 접속이 끊기면 즉시 사라지는 반면, 학생은 하루 종일 같은 물리적 좌석을 유지해야
-  // 하므로(포털에서 다음 라운드를 고르는 동안 등) DB에 좌석이 실제로 비워질 때(조교/수퍼바이저의
-  // 강제퇴실)만 사라지는 게 맞다. 주기적으로 폴링해서 activeStudentsRef를 갱신한다.
-  // 💡 [버그 수정] 예전엔 1초 틱 하나 안에서 `Date.now() % N < 1000`으로 "이번 틱에 할지 말지"를
-  // 가늠했는데, setInterval의 실제 발화 시각은 시간이 지나며 조금씩 밀릴 수 있어서(다른 무거운
-  //작업, 백그라운드 탭 스로틀링 등) 이 나머지 연산이 매번 그 좁은 창을 벗어나면 fetchSeatsFromDB가
-  // 에러 하나 없이 영원히 다시 안 불리는 경우가 실제로 있었다(좌석 이동이 계속 반영 안 되는 원인).
-  // 서로 다른 주기는 독립적인 setInterval로 분리해, 한쪽이 밀려도 다른 쪽 스케줄에 영향이 없게 한다.
   useEffect(() => {
     const tickInterval = setInterval(() => setCurrentTime(Date.now()), 1000);
     const presenceInterval = setInterval(() => { if (clinicChannelRef.current) syncFromPresenceRef.current(); }, 2000);
 
-    // 💡 setInterval(fn, N)은 "fn을 N마다 실행 시도"할 뿐, fn 자체가 멈추거나 씹혀도 인터벌은 계속
-    // 살아있는 것처럼 보일 수 있어 디버깅이 어려웠다(에러 하나 없이 좌석 갱신만 영원히 멈춤).
-    // 대신 매번 자기 완료 시점에 다음 실행을 직접 예약하는 setTimeout 체인을 쓴다 — 이러면
-    // "돌고는 있는데 fetchSeatsFromDB만 조용히 안 불린다"는 상태 자체가 구조적으로 불가능하다.
     let cancelled = false;
     let seatTimer: ReturnType<typeof setTimeout> | null = null;
     const scheduleNextSeatFetch = () => {
@@ -243,21 +162,8 @@ export function useTaHandheld() {
     });
   }, [taName, taClientId, taJoinedAt]);
 
-  // 💡 scheduleGhostRecheck는 useCallback(fn, [])로 마운트 시 딱 한 번만 만들어지는데,
-  // 그 안에서 부르는 syncFromPresence()를 직접 참조하면 그 마운트 시점(taClientId가 아직
-  // 빈 문자열이던 때)의 오래된 버전에 영원히 고정된다. syncFromPresenceRef를 매 렌더마다
-  // 최신 함수로 갱신해서, 이 인터벌이 항상 최신 taClientId를 참조하는 버전을 호출하도록 한다.
   const syncFromPresenceRef = useRef<() => void>(() => {});
 
-  // ==========================================
-  // 실시간 동기화 로직
-  // ==========================================
-
-  // 점유 좌석들의 실제 좌표(x,y)를 기준으로 balanced k-d tree 방식으로 재귀 분할한다.
-  // 매번 더 넓게 퍼진 축(가로/세로)을 골라 그 축으로 정렬 후 인원 비율대로 잘라, 자유배치된
-  // 방(그리드가 아닌 형태)에서도 조교별 담당 구역이 물리적으로 뭉친 사각형에 가깝게 나오게 한다.
-  // (예전엔 좌석 "번호" 순으로만 등분해서, 번호 순서가 실제 동선과 다르면 한 조교가 방 이곳저곳
-  // 흩어진 자리를 담당하는 문제가 있었다.)
   const spatialPartition = (seats: Seat[], k: number): Seat[][] => {
     if (k <= 1) return [seats];
     if (seats.length === 0) return Array.from({ length: k }, () => []);
@@ -271,24 +177,11 @@ export function useTaHandheld() {
     return [...spatialPartition(sorted.slice(0, cut), left), ...spatialPartition(sorted.slice(cut), right)];
   };
 
-  // 좌석 배정(어느 조교가 어느 좌석을 담당하는지)만 계산한다 — 좌석에 누가 앉아있는지 자체는
-  // fetchSeatsFromDB가 activeStudentsRef를 채워서 결정하고, 여기서는 그 결과(현재 점유된 좌석
-  // 목록)를 그대로 받아 조교 인원수에 맞게, 물리적 위치 기준으로 나눈다.
-  //
-  // 💡 [sticky] 매번 처음부터 다시 나누지 않는다. ①직전 배정 중 아직 유효한 것(좌석이 여전히
-  // 점유 중 + 담당 조교가 여전히 접속 중)은 그대로 둔다. ②새로 생겼거나 담당자를 잃은 좌석만,
-  // 각 조교가 "지금" 담당 중인 좌석들의 중심점(centroid)에 가장 가까운 조교에게 배정한다.
-  // ③그 결과 인원수 편차가 2 이상 벌어지면, 가장 많이 맡은 조교의 좌석 중 대상 조교(가장 적게
-  // 맡은 조교) 중심점에서 가장 가까운 것부터 하나씩 넘겨 편차를 1 이하로 좁힌다. 조교가 아예
-  // 처음 배정되는 상황(직전 배정이 하나도 없음)에는 기준으로 삼을 중심점이 없으므로, 이 경우에만
-  // 좌석 번호 상관없이 전체를 spatialPartition으로 새로 나눈다(사실상 부팅 단계).
   const computeAssignment = (taMetas: any[], occupiedSeats: string[]) => {
     const tas = [...taMetas].sort((a, b) => (a.joined_at - b.joined_at) || (a.clientId < b.clientId ? -1 : a.clientId > b.clientId ? 1 : 0));
     const N = tas.length;
     if (N === 0 || occupiedSeats.length === 0) { prevAssignmentRef.current = {}; return {}; }
 
-    // 배치 정보가 없는 좌석(레이아웃과 어긋난 경우 등 예외 상황)은 번호를 좌표처럼 써서
-    // 최소한 번호 순서라도 유지되도록 폴백한다.
     const seatByNumber = new Map(allSeatObjsRef.current.map(s => [String(s.number), s] as const));
     const seatObj = (num: string): Seat => seatByNumber.get(num) || { id: num, number: Number(num), x: Number(num), y: 0 };
 
@@ -302,7 +195,6 @@ export function useTaHandheld() {
 
     let map: Record<string, string>;
     if (Object.keys(sticky).length === 0) {
-      // 부팅 단계(직전 배정 없음) — 기준 삼을 중심점이 없으니 전체를 공간 분할로 새로 나눈다.
       map = {};
       const groups = spatialPartition(occupiedSeats.map(seatObj), N);
       tas.forEach((ta, i) => { (groups[i] || []).forEach(s => { map[String(s.number)] = ta.clientId; }); });
@@ -328,8 +220,6 @@ export function useTaHandheld() {
         map[String(s.number)] = bestTa;
       });
 
-      // 편차가 2 이상이면 최다 담당 조교 → 최소 담당 조교로, 그 조교 중심점에서 가장 가까운
-      // 좌석부터 하나씩 넘긴다(최소한의 이동으로 균형을 맞춘다).
       let guard = 0;
       while (guard++ < occupiedSeats.length * N) {
         const counts = new Map(tas.map(t => [t.clientId, 0]));
@@ -354,9 +244,6 @@ export function useTaHandheld() {
     return map;
   };
 
-  // 💡 좌석 현황(누가 어느 좌석에 앉아있는지)은 realtime presence가 아니라 DB를 기준으로
-  // 판단한다. 여기서는 오직 "지금 접속해있는 조교가 몇 명인지, 각자 어떤 요청을 처리 중인지"만
-  // presence로 파악해서, DB가 알려준 점유 좌석 목록을 조교 수만큼 나눠 배정한다.
   const syncFromPresence = useCallback(() => {
     if (!clinicChannelRef.current) return;
     const state = clinicChannelRef.current.presenceState();
@@ -394,14 +281,7 @@ export function useTaHandheld() {
     });
   }, [taClientId]);
 
-  // DB(clinic_session_state)에서 오늘 좌석이 배정된 학생 목록을 가져와 activeStudentsRef를
-  // 갱신한다. 기존에 진행 중이던 호출/힌트/자리비움 등의 상태(status, calls)는 그대로 보존하고,
-  // 이름/반/좌석 배정 여부만 DB 기준으로 새로고침한다.
   const fetchSeatsFromDB = useCallback(async () => {
-    // 💡 이전 호출이 아직 안 끝났으면 건너뛴다 — 겹쳐서 실행되면 늦게 시작한(더 오래된 DB
-    // 스냅샷을 읽은) 호출이 나중에 끝나면서 activeStudentsRef를 옛 좌석으로 되돌려버릴 수 있다.
-    // 다만 이 가드가 영원히 true로 고정되면(네트워크 요청이 끝내 완료도 실패도 안 하고 멈추는
-    // 경우 등) 폴링이 통째로 멈춰버리므로, 정상 소요 시간을 한참 넘겼으면 스스로 풀고 진행한다.
     const STUCK_GUARD_MS = 10000;
     if (isFetchingSeatsRef.current) {
       if (Date.now() - fetchingSeatsStartedAtRef.current < STUCK_GUARD_MS) return;
@@ -420,9 +300,6 @@ export function useTaHandheld() {
 
   const fetchSeatsFromDBBody = async () => {
     const todayStr = getKSTDateString();
-    // 💡 [버그 수정] ended_at 필터가 없어서, 이미 끝난(종료 처리된) 세션인데도 seat 컬럼이
-    // 비워지지 않은 옛 행이 있으면(경합 상황 등으로 실제 발생 가능) 그 옛 좌석이 "최신"으로
-    // 잘못 뽑혀 좀비 호출/좀비 좌석으로 계속 남는 원인이 됐다. 종료되지 않은 세션만 대상으로 한다.
     const { data: sessions, error } = await supabaseClient
       .from('clinic_session_state')
       .select('id, student_id, seat, session_no, active_calls, active_rechecks, away_since')
@@ -431,8 +308,6 @@ export function useTaHandheld() {
       .not('seat', 'is', null);
     if (error) return;
 
-    // 💡 재이용으로 하루에 여러 세션이 생길 수 있으므로, 혹시 옛 세션의 seat가 아직 안 비워졌더라도
-    // 학생별로 가장 최신(session_no가 큰) 세션의 좌석만 신뢰한다.
     const latestByStudent = new Map<string, any>();
     (sessions || []).filter((r: any) => r.seat).forEach((r: any) => {
       const prev = latestByStudent.get(r.student_id);
@@ -457,9 +332,6 @@ export function useTaHandheld() {
       });
     }
 
-    // 💡 [버그 수정] 좌석 이동을 studentId로 추적한다. 예전엔 prev를 "같은 좌석 키"로만 찾아서,
-    // 학생 좌석이 바뀌면(수퍼바이저/조교가 옮기거나 재배정) 옛 좌석의 상태(calls 등)를 통째로
-    // 잃어버렸고, 그 결과 아래 "유령 정리" 로직이 진행 중이던 호출/재확인 요청까지 조용히 지워버렸다.
     const oldSeatByStudentId: Record<string, string> = {};
     Object.keys(activeStudentsRef.current).forEach(seat => {
       const sid = activeStudentsRef.current[seat].studentId;
@@ -475,9 +347,6 @@ export function useTaHandheld() {
       const calls = { ...(prev?.calls || {}) };
       let status = prev?.status || 'idle';
 
-      // 💡 호출/재확인/자리비움은 broadcast 순간에 열려있던 화면에만 전달되므로, 이 화면이 방금
-      // 열렸거나 그 broadcast를 놓쳤다면 DB(active_calls/active_rechecks/away_since)에서 다시
-      // 읽어와 이미 진행 중인 요청을 복원한다 — 수퍼바이저 화면과 동일한 자가복구 패턴.
       const dbCalls = row.active_calls || {};
       Object.keys(dbCalls).forEach(qNumKey => {
         const key = `${row.seat}::${qNumKey}`;
@@ -492,7 +361,6 @@ export function useTaHandheld() {
         calls[qNumKey] = callsRef.current[key].calledAt;
         status = 'call';
       });
-      // DB에서 이미 사라진 호출은 로컬에서도 정리한다(다른 화면에서 처리 완료된 경우).
       Object.keys(calls).forEach(qNumKey => {
         if (dbCalls[qNumKey]) return;
         delete calls[qNumKey];
@@ -545,14 +413,12 @@ export function useTaHandheld() {
       if (sid) newSeatByStudentId[sid] = seat;
     });
 
-    // 좌석이 바뀐 학생의 호출/재확인 요청은 studentId로 찾아 새 좌석 키로 옮겨 그대로 유지하고,
-    // 정말로 좌석 자체가 사라진(=강제퇴실 등) 경우에만 정리한다.
     const migrateOrPrune = <T extends { seat: string; studentId?: string; qNum?: number; uid?: string }>(
       ref: Record<string, T>, buildKey: (seat: string, entry: T) => string
     ) => {
       Object.keys(ref).forEach(key => {
         const entry = ref[key];
-        if (newActive[entry.seat]) return; // 좌석 그대로 유지 중
+        if (newActive[entry.seat]) return; 
         const newSeat = entry.studentId ? newSeatByStudentId[entry.studentId] : undefined;
         if (newSeat) {
           const newKey = buildKey(newSeat, entry);
@@ -581,11 +447,6 @@ export function useTaHandheld() {
 
   useEffect(() => { syncFromPresenceRef.current = syncFromPresence; });
 
-  // 💡 [버그 수정] activeStudentsRef는 3초 주기 DB 폴링(fetchSeatsFromDB)으로만 갱신되는데,
-  // 예전엔 payload.seat가 그 시점에 activeStudentsRef에 없으면(막 배정된 좌석에서 곧바로
-  // 호출/재확인 등을 보낸 경우 등) 액션 자체를 조용히 버렸다 — 에러도 로그도 없이 사라졌다.
-  // 1) 먼저 studentId로 한 번 더 찾아본다(수퍼바이저 화면은 이미 이렇게 하고 있다).
-  // 2) 그래도 못 찾으면, 폴링을 기다리지 않고 DB를 즉시 한 번 더 확인한 뒤 한 번만 재시도한다.
   const handleStudentAction = useCallback((payload: any, isRetry = false) => {
     const { seat: broadcastSeat, action, data } = payload;
     const seat = activeStudentsRef.current[broadcastSeat]
@@ -593,16 +454,12 @@ export function useTaHandheld() {
       : Object.keys(activeStudentsRef.current).find(s => activeStudentsRef.current[s].studentId === data?.studentId);
 
     if (!seat && action !== 'depart') {
-      if (isRetry) return; // 즉시 재조회까지 실패하면 포기한다(그 사이 실제로 퇴실했을 수 있음).
+      if (isRetry) return; 
       fetchSeatsFromDBRef.current().then(() => handleStudentActionRef.current(payload, true));
       return;
     }
 
     if (action === 'depart') {
-      // 💡 좌석 점유는 DB(clinic_session_state) 기준이므로, 학생이 탭을 닫아 'depart'
-      // 신호가 와도 좌석 자체는 지우지 않는다(하루 종일 같은 좌석을 유지). 진행 중이던
-      // 호출/자리비움 등 실시간 상태만 idle로 되돌린다. 실제 퇴실 처리는 TA/수퍼바이저의
-      // 강제퇴실(DB에서 seat를 null로)을 fetchSeatsFromDB가 감지했을 때 이루어진다.
       if (activeStudentsRef.current[seat]) activeStudentsRef.current[seat].status = 'idle';
       flushState(); return;
     }
@@ -656,8 +513,6 @@ export function useTaHandheld() {
       if (Object.keys(activeStudentsRef.current[seat]?.calls || {}).length === 0) activeStudentsRef.current[seat].status = 'idle';
       flushState();
     } else if (action === 'force_checkout') {
-      // 💡 [버그 수정] callsRef만 정리하고 rechecksRef는 안 지웠었다 — 다른 화면(수퍼바이저 등)에서
-      // 강제퇴실시키면 이미 사라진 학생의 재확인 요청이 조교 Pad 목록에 고아 상태로 계속 남아있었다.
       Object.keys(callsRef.current).forEach(key => {
         if (callsRef.current[key].seat === seat) { delete callsRef.current[key]; setMarkState(prev=>{const n={...prev}; delete n[key]; return n;}); setSelectedCallKey(prev=>prev===key?null:prev); }
       });
@@ -681,8 +536,6 @@ export function useTaHandheld() {
     }
   }, [flushState]);
 
-  // connectClinicChannel이 이름 변경 등으로 여러 번 호출될 수 있으므로, 그때마다 등록되는
-  // .on() 콜백도 항상 최신 handleStudentAction/handleTaActionFromOtherScreen을 참조하도록 ref로 감싼다.
   const handleStudentActionRef = useRef(handleStudentAction);
   useEffect(() => { handleStudentActionRef.current = handleStudentAction; });
   const handleTaActionFromOtherScreenRef = useRef(handleTaActionFromOtherScreen);
@@ -694,9 +547,6 @@ export function useTaHandheld() {
       setAllSeats(sorted.map(s => String(s.number)));
       setAllSeatObjs(sorted);
       allSeatObjsRef.current = sorted;
-      // 좌석 배치가 바뀌면(에디터 저장) 좌석 번호가 reading-order로 재계산되어, 예전 sticky
-      // 배정이 가리키던 번호가 물리적으로 다른 자리를 뜻하게 될 수 있다 — 다음 계산에서
-      // 부팅 단계(spatialPartition)로 다시 시작하도록 비운다.
       prevAssignmentRef.current = {};
       setCanvasWidth(layout.canvasWidth);
       setCanvasHeight(layout.canvasHeight);
@@ -708,17 +558,17 @@ export function useTaHandheld() {
   useEffect(() => { loadAllSeats(); }, [loadAllSeats]);
 
   const connectClinicChannel = () => {
-    // 💡 이름 변경(연필 아이콘) 등으로 이 함수가 재호출될 때, 이전 채널을 unsubscribe()만 하고
-    // 바로 새 채널을 만들면 supabase-js가 "아직 목록에서 안 지워진, 이미 subscribe된" 옛 채널
-    // 객체를 그대로 재사용해서 .on() 추가 시 에러가 난다(포털→뷰어 전환에서 겪은 것과 동일 버그).
-    // removeChannel이 완전히 끝나길 기다린 뒤에 새 채널을 만든다. 이 함수 자체가 겹쳐 호출되는
-    // 문제는 connectChainRef가 직렬화해서 막는다.
     connectChainRef.current = connectChainRef.current.then(async () => {
       if (clinicChannelRef.current) {
         await supabaseClient.removeChannel(clinicChannelRef.current);
         clinicChannelRef.current = null;
       }
-      clinicChannelRef.current = supabaseClient.channel(CLINIC_ROOM);
+      
+      // 🌟 [보안 패치 유지] 조교(TA)도 소속 지점의 클리닉 방으로 연결
+      const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+      const channelName = `${CLINIC_ROOM}_${myTenantId}`;
+      
+      clinicChannelRef.current = supabaseClient.channel(channelName);
       clinicChannelRef.current
         .on('presence', { event: 'sync' }, () => syncFromPresenceRef.current())
         .on('broadcast', { event: 'student_action' }, ({ payload }: any) => handleStudentActionRef.current(payload))
@@ -731,9 +581,6 @@ export function useTaHandheld() {
     }).catch(err => console.error('클리닉 채널 연결 오류:', err));
   };
 
-  // ==========================================
-  // 노출할 액션 함수들
-  // ==========================================
   const commitTaName = () => {
     const val = tempNameInput.trim();
     if (!val) return;
@@ -779,9 +626,6 @@ export function useTaHandheld() {
   };
 
   const handleExit = () => {
-    // 💡 presence에서 이 조교를 즉시 빼서, 다른 화면(수퍼바이저 등)에서 조교 수가 실제로
-    // 하나 줄어든 것으로 보이게 한다. 이름/기기 식별자도 완전히 비워서 다음 사람이 들어올 때
-    // 이전 조교와 섞이지 않는 완전히 새 신원으로 시작하게 한다.
     if (clinicChannelRef.current) clinicChannelRef.current.untrack().catch(() => {});
     localStorage.removeItem(TA_NAME_STORAGE_KEY);
     const freshClientId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;

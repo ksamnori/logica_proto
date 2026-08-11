@@ -102,7 +102,6 @@ export function useSupervisorData() {
         setActiveStudents({ ...newStudents });
     }, []);
 
-    // 💡 로그 생성 및 삭제를 더욱 안전하고 강력하게 개선했습니다. (Race Condition 방지)
     const appendLog = useCallback((borderClass: string, badgeBg: string, badgeText: string, title: string | React.ReactNode, subtitle: string | React.ReactNode, type?: string, data?: any) => {
         const logId = `log-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
         const persistUntilResolved = !!type && PERSIST_UNTIL_RESOLVED_TYPES.includes(type);
@@ -235,6 +234,7 @@ export function useSupervisorData() {
         return () => clearInterval(interval);
     }, [isAuthorized, leftTab, fetchClinicRecords]);
 
+    // 🌟 [핵심 복구 완료!] 실수로 지워졌던 아코디언 토글 함수 원상복구
     const toggleRecordExpand = useCallback((studentId: string) => {
         setExpandedRecords(prev => ({ ...prev, [studentId]: !prev[studentId] }));
     }, []);
@@ -449,7 +449,11 @@ export function useSupervisorData() {
     useEffect(() => {
         if (!isAuthorized) return;
         
-        const channel = supabaseClient.channel(CLINIC_ROOM);
+        // 🌟 [핵심 보안 패치 유지] 실시간 채널 방 이름에 지점 꼬리표를 붙입니다!
+        const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+        const channelName = `${CLINIC_ROOM}_${myTenantId}`;
+        
+        const channel = supabaseClient.channel(channelName);
         channelRef.current = channel;
 
         channel
@@ -466,7 +470,6 @@ export function useSupervisorData() {
                         delete st[activeSeat];
                     }
                 } else if (st[activeSeat]) {
-                    // 💡 [핵심 수정] update_activity 이벤트가 발생할 때 드디어 라이브 로그(appendLog)를 남기도록 추가했습니다!
                     if (action === 'update_activity') { 
                         st[activeSeat].activity = data.activity; 
                         appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });

@@ -26,7 +26,7 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
   const [isRecurring, setIsRecurring] = useState(false);
   const [recurringWeeks, setRecurringWeeks] = useState(4);
   const [isSyncGcal, setIsSyncGcal] = useState(true);
-  const [isSecret, setIsSecret] = useState(false); // 🌟 비밀 회의록 추가!
+  const [isSecret, setIsSecret] = useState(false); 
 
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [localSelectedIds, setLocalSelectedIds] = useState<string[]>([]);
@@ -108,6 +108,10 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
     if (!meetingTitle.trim()) return alert("회의록/일정 제목을 입력해주세요.");
     if (!meetingDateStr || !meetingTimeStr) return alert("날짜와 시간을 지정해주세요.");
 
+    // 🌟 [추가됨] 새 회의 일정 등록 전 소속 지점 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     const participantNames = selectedInstIds.map(id => instructors.find(i => i.instructor_id === id)?.name).join(', ');
     const baseDate = new Date(`${meetingDateStr}T${meetingTimeStr}:00`);
     const hiddenLinkData = localSelectedIds.length > 0 ? `<div data-linked-ids="${localSelectedIds.join(',')}" style="display:none;"></div>` : '';
@@ -131,11 +135,12 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
         created_by: currentUser.instId,
         meeting_date: currentMeetingDate.toISOString(), 
         attendees: participantNames,
-        is_secret: isSecret // 🌟 DB에 비밀 회의록 속성 저장
+        is_secret: isSecret,
+        tenant_id: myTenantId // 🌟 [추가됨] 모든 회의록/일정에 꼬리표 부착!
       });
     }
 
-    if (isSyncGcal && !isSecret) { // 🌟 비밀 회의록이면 외부 노출 방지를 위해 강제로 구글 캘린더 제외
+    if (isSyncGcal && !isSecret) { 
       try { 
         await syncToGoogleCalendarBackend(meetingsToInsert); 
       } catch (error) { 
@@ -244,7 +249,6 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
                 <input type="time" value={meetingTimeStr} onChange={e => setMeetingTimeStr(e.target.value)} className="w-full text-[12px] font-bold text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" />
               </div>
               
-              {/* 🌟 캘린더 연동 및 비밀 회의록 옵션 */}
               <div className="flex-1 border-l border-slate-200 pl-3 flex justify-end items-center gap-3">
                 <div className="flex items-center gap-3 flex-wrap justify-end">
                   <label className="flex items-center gap-1 text-[11px] font-bold text-[#002864] cursor-pointer">
@@ -260,13 +264,11 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
                   )}
                   <div className="w-px h-4 bg-slate-300 mx-1"></div>
                   
-                  {/* 🌟 비밀 회의록일 경우 외부 연동은 자동 비활성화(disabled) */}
                   <label className="flex items-center gap-1.5 text-[11px] font-black text-blue-600 cursor-pointer hover:bg-blue-50 p-0.5 rounded transition-colors">
                     <input type="checkbox" checked={isSyncGcal} onChange={(e) => setIsSyncGcal(e.target.checked)} disabled={isSecret} className="w-3.5 h-3.5 accent-blue-600 disabled:opacity-30 disabled:cursor-not-allowed" />
                     📆 캘린더 연동
                   </label>
 
-                  {/* 🌟 비밀 회의록 옵션 */}
                   <label className="flex items-center gap-1.5 text-[11px] font-black text-slate-700 cursor-pointer hover:bg-slate-200 p-0.5 rounded transition-colors">
                     <input type="checkbox" checked={isSecret} onChange={(e) => setIsSecret(e.target.checked)} className="w-3.5 h-3.5 accent-slate-800" />
                     🔒 비밀 회의록 (참석자만)

@@ -23,10 +23,22 @@ export function BillingModal({ isOpen, studentId, enrollments, allClasses, onClo
 
   const submitBilling = async () => {
     if (!billForm.month || !billForm.dueDate || !billForm.classId || !billForm.amount) return alert("모든 항목을 입력해주세요.");
+    
+    // 🌟 [추가됨] 청구서 발행 전 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsSaving(true);
     try {
+      // 🌟 [수정됨] 청구서 데이터에 tenant_id 꼬리표 부착
       await supabase.from("academy_billing").insert({
-        student_id: studentId, class_id: billForm.classId, billing_month: billForm.month, amount: parseInt(billForm.amount), due_date: billForm.dueDate, status: "미납"
+        student_id: studentId, 
+        class_id: billForm.classId, 
+        billing_month: billForm.month, 
+        amount: parseInt(billForm.amount), 
+        due_date: billForm.dueDate, 
+        status: "미납",
+        tenant_id: myTenantId // 👈 꼬리표 부착!
       });
       onSuccess();
       onClose();
@@ -94,11 +106,20 @@ export function PaymentModal({ isOpen, payFormInit, onClose, onSuccess }: any) {
   }, [isOpen, payFormInit]);
 
   const submitPayment = async () => {
+    // 🌟 [추가됨] 결제 처리 전 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsSaving(true);
     try {
       await supabase.from("academy_billing").update({ status: "완납" }).eq("billing_id", payForm.billingId);
+      // 🌟 [수정됨] 결제 내역(payment_history) 저장 시 tenant_id 꼬리표 부착!
       await supabase.from("payment_history").insert({
-        billing_id: payForm.billingId, payment_method: payForm.method, paid_amount: payForm.amount, transaction_key: `MANUAL_PAY_${Date.now()}`
+        billing_id: payForm.billingId, 
+        payment_method: payForm.method, 
+        paid_amount: payForm.amount, 
+        transaction_key: `MANUAL_PAY_${Date.now()}`,
+        tenant_id: myTenantId // 👈 꼬리표 부착!
       });
       onSuccess();
       onClose();

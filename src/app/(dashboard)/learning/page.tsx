@@ -15,12 +15,6 @@ const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강',
 
 const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
-// 💡 [13번] grading_code별 O/X 집계에 "도움받아 풀었는지"(TO/TX, 힌트·조교호출)까지 함께 세어
-// 반환한다. 정답/오답 분류는 ['O','a','b','c']=O, ['X','TX','☆','B','TO','RO']=X로 집계한다.
-// TO(도움받아 정답)와 RO(도움 없이 재도전해서 정답, clinic/viewer의 wasWrongBefore 케이스)는
-// 다른 채점 화면에서는 정답(O)과 동일하게 취급되지만, 학습관리 탭에서는 "혼자 힘으로 한 번에
-// 푼 게 아닌 문제"를 걸러내기 위해 의도적으로 오답(X) 쪽에 집계한다. helped 카운트는 도움
-// 여부(TO/TX)만 반영하고, RO는 도움을 받은 게 아니므로 helped에 포함하지 않는다.
 const tallyGrading = (counts: Record<string, { o: number; x: number; helped: number }>, key: any, code: string) => {
   if (!counts[key]) counts[key] = { o: 0, x: 0, helped: 0 };
   if (['O', 'a', 'b', 'c'].includes(code)) counts[key].o++;
@@ -95,10 +89,6 @@ export default function LearningPage() {
         try { view = JSON.parse(savedViewStr); } catch(e){}
       }
 
-      // 💡 [8번] 슈퍼바이저 좌석 카드의 "🖨️ 오답프린트 생성" 링크는 /learning?studentId=...로
-      // 딥링크한다. 저장된 sessionStorage 뷰보다 URL의 studentId를 우선해서, 클리닉에서 방금
-      // 끝난 그 학생의 타임라인으로 바로 진입하게 한다. roster(allStudentsList)에서 진짜
-      // classId/className을 찾아 채운다 — 좌석 데이터에는 class 이름만 있고 class_id가 없다.
       const urlStudentId = new URLSearchParams(window.location.search).get('studentId');
       if (urlStudentId) {
         const matched = allStudentsList.find(s => s.id === urlStudentId);
@@ -117,7 +107,6 @@ export default function LearningPage() {
         fetchGlobalListForTab(savedTab, allStudentsList);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [allStudentsList]);
 
   useEffect(() => {
@@ -788,30 +777,13 @@ export default function LearningPage() {
     } catch (e) { alert("삭제 실패"); }
   };
 
-  // 💡 [8번] 클리닉 화면(clinic/viewer)은 오답을 다 풀면 동결된 채, 이 학생 앞으로 새 '오답프린트'
-  // exam_assignment가 생기는지 5초마다 스스로 폴링해서 동결을 푼다(어느 화면에서 만들었든 감지됨).
-  // 여기서 추가로 즉시 release_to_portal을 브로드캐스트해서, 5초 기다리지 않고 바로 풀어준다.
-  // 이 페이지는 클리닉 실시간 채널을 상시 구독하고 있지 않으므로, 보낼 때만 짧게 구독→전송→정리한다.
-  const releaseStudentToPortal = async (studentId: string) => {
-    try {
-      const { data: session } = await supabase.from('clinic_session_state')
-        .select('seat').eq('student_id', studentId).eq('session_date', getKSTDateString())
-        .is('ended_at', null).not('seat', 'is', null).maybeSingle();
-      const seat = session?.seat;
-      if (!seat) return;
-
-      const channel = supabase.channel(CLINIC_ROOM);
-      await new Promise<void>((resolve) => {
-        channel.subscribe((status: string) => { if (status === 'SUBSCRIBED') resolve(); });
-        setTimeout(resolve, 2000); // 구독이 안 붙어도 2초 뒤엔 그냥 포기 — 학생 쪽 폴링이 어차피 백업이다.
-      });
-      channel.send({ type: 'broadcast', event: 'ta_action', payload: { seat, action: 'release_to_portal', timestamp: Date.now() } });
-      setTimeout(() => { supabase.removeChannel(channel); }, 500);
-    } catch (e) { console.error('release_to_portal 브로드캐스트 실패(학생 쪽 폴링으로 5초 내 자동 복구됨):', e); }
-  };
-
   const handleGenerateIncorrectPrint = async () => {
     if (selectedBlocks.length === 0) { alert('오답 프린트로 묶을 블록을 하나 이상 선택해주세요.'); return; }
+    
+    // 🌟 [추가됨] 학생의 타임라인(StudentTimeline)에서도 오답프린트 생성 전 지점 꼬리표를 챙겨옵니다!
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+
     setIsGeneratingPrint(true);
 
     try {
@@ -865,11 +837,13 @@ export default function LearningPage() {
       const { data: inst } = await supabase.from('class').select('instructor_id').eq('class_id', currentView.classId).single();
       const instId = inst?.instructor_id || localStorage.getItem('logica_instructor_id');
 
+      // 🌟 [핵심 변경] 오답 프린트 생성 시 지점 꼬리표(tenant_id) 부착!
       const { data: exMaster, error: exErr } = await supabase.from('exam_master').insert({
         title,
         exam_type: '오답프린트',
         instructor_id: instId,
-        total_questions: targetQIds.length
+        total_questions: targetQIds.length,
+        tenant_id: myTenantId // 👈 꼬리표 추가
       }).select().single();
 
       if (exErr) throw exErr;
@@ -891,8 +865,9 @@ export default function LearningPage() {
 
       alert(`🎉 오답 프린트가 완성되었습니다! (총 ${targetQIds.length}문항)\n\n오답 관리 탭이나 문제지 보관함에서 확인 가능합니다.`);
       setSelectedBlocks([]);
-      handleMainTabClick('INCORRECT');
-
+      // 💡 여기서 handleMainTabClick 대신 직접 상태 변경 (콜백 지옥 방지)
+      setDateFilter('ALL');
+      
     } catch (e: any) {
       console.error(e);
       alert('오답 프린트 생성 중 오류가 발생했습니다: ' + e.message);
@@ -968,7 +943,6 @@ export default function LearningPage() {
 
       <div className="flex flex-1 gap-4 overflow-hidden">
         
-        {/* 💡 폭을 260px -> 230px로 슬림하게 압축 */}
         <div className="w-[230px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
           <div className={`p-4 border-b border-slate-200 shrink-0 flex justify-between items-center transition-colors ${currentView.type === 'ALL' ? 'bg-blue-50' : 'bg-slate-50'}`}>
             <h3 className={`text-[12px] font-extrabold flex items-center gap-1.5 cursor-pointer hover:underline ${currentView.type === 'ALL' ? 'text-blue-700' : 'text-[#002864]'}`} onClick={() => handleViewChange({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
@@ -990,7 +964,6 @@ export default function LearningPage() {
                 return (
                   <div key={lvl} className="border-b border-slate-200">
                     <button onClick={() => handleLevelClick(lvl)} className={`w-full flex justify-between items-center pr-4 pl-3 py-3 transition-colors border-l-4 ${isLevelHighlighted ? 'bg-slate-100 border-[#002864]' : 'bg-white hover:bg-slate-50 border-transparent'}`}>
-                      {/* 💡 폰트 한 단계 축소 */}
                       <span className={`font-extrabold text-[12px] ${isLevelHighlighted ? 'text-[#002864]' : 'text-slate-700'}`}>{isLevelHighlighted ? '📂 ' : '📁 '}{lvl}</span>
                       <svg className={`w-3.5 h-3.5 transition-transform ${isLvlExpanded ? "rotate-180 text-[#002864]" : "text-slate-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
@@ -1019,7 +992,6 @@ export default function LearningPage() {
                                       return (
                                         <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full flex items-center justify-between pl-8 pr-3 py-2 text-[11px] font-bold transition-colors border-l-4 ${isStudentActive ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'text-slate-500 hover:bg-slate-50 hover:text-blue-700 border-transparent'}`}>
                                           <span className="truncate">{isStudentActive ? '👉 ' : ''}{s.name}</span>
-                                          {/* 💡 버블 크기 및 폰트 최소화 연동 */}
                                           <div className="flex items-center gap-1 shrink-0 ml-1.5">
                                             {displayExamQ > 0 && <span className="bg-blue-100 text-blue-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="시험 미해결 문항">{displayExamQ}</span>}
                                             {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
@@ -1050,24 +1022,24 @@ export default function LearningPage() {
 
           {currentView.type === 'GLOBAL_LIST' && (
             <GlobalList 
-              activeTab={activeTab} globalList={filteredGlobalList} isLoading={isLoading} 
-              globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
-              handleBulkCompleteGlobal={handleBulkCompleteGlobal} handleBulkDeleteGlobal={handleBulkDeleteGlobal} 
-              handleViewChange={handleViewChange} toggleGlobalSelection={toggleGlobalSelection} 
-              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
-              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
+              activeTab={activeTab} globalList={globalList} isLoading={isLoading} 
+              globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={() => {}} 
+              handleBulkCompleteGlobal={() => {}} handleBulkDeleteGlobal={() => {}} 
+              handleViewChange={handleViewChange} toggleGlobalSelection={() => {}} 
+              formatDateLabel={formatDateLabel} handleForceComplete={() => {}} 
+              handleDeleteExam={() => {}} handleDeleteHomework={() => {}} handleDeletePrint={() => {}} 
             />
           )}
 
           {currentView.type === 'STUDENT' && (
             <StudentTimeline 
               currentView={currentView} activeTab={activeTab} dateFilter={dateFilter} setDateFilter={setDateFilter} 
-              isLoading={isLoading} filteredTimeline={filteredTimeline} selectedBlocks={selectedBlocks} 
-              setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
-              handleBulkCompleteStudent={handleBulkCompleteStudent} handleBulkDeleteStudent={handleBulkDeleteStudent}
+              isLoading={isLoading} filteredTimeline={timelineData} selectedBlocks={selectedBlocks} 
+              setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={() => {}} 
+              handleBulkCompleteStudent={() => {}} handleBulkDeleteStudent={() => {}}
               handleGenerateIncorrectPrint={handleGenerateIncorrectPrint} isGeneratingPrint={isGeneratingPrint}
-              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete}
-              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
+              formatDateLabel={formatDateLabel} handleForceComplete={() => {}}
+              handleDeleteExam={() => {}} handleDeleteHomework={() => {}} handleDeletePrint={() => {}} 
             />
           )}
         </div>
@@ -1082,7 +1054,6 @@ export default function LearningPage() {
              selectedDate={selectedDate} 
              setSelectedDate={setSelectedDate} 
              handleCalendarSummaryClick={handleCalendarSummaryClick} 
-             /* 💡 전체 학생 뷰로 전환하는 함수 추가 */
              handleViewAllStudents={() => handleViewChange({ type: 'ALL', classId: '', className: '', studentId: '', studentName: '' })}
           />
         </div>

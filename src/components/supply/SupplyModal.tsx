@@ -12,18 +12,59 @@ interface SupplyModalProps {
   onSuccess: () => void;
 }
 
-export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onSuccess }: SupplyModalProps) {
+export default function SupplyModal({ 
+  isOpen, 
+  reqData, 
+  currentUser, 
+  onClose, 
+  onSuccess 
+}: SupplyModalProps) {
   const [type, setType] = useState("사무용품");
   const [content, setContent] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [commentInput, setCommentInput] = useState("");
+  
+  const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
+  // 🌟 [추가] 세부 삭제 권한 상태
+  const [canDeletePost, setCanDeletePost] = useState(false);
+  const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
-  const isReadonly = reqData && !currentUser.isAdmin && String(reqData.author_id) !== String(currentUser.instId);
-
   useEffect(() => {
+    const checkPerms = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id");
+
+      const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
+                        ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
+      setIsSuperAdminOrAdmin(adminFlag);
+
+      if (adminFlag) {
+        setCanDeletePost(true);
+        setCanDeleteOthersComment(true);
+      } else if (tId) {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
+
+        if (data && data.allowed_menus) {
+          // 🌟 [추가] DB에서 비품 신청 삭제 및 타인 댓글 삭제 권한 확인
+          setCanDeletePost(data.allowed_menus.includes('action_delete_supply'));
+          setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
+        } else {
+          setCanDeletePost(false);
+          setCanDeleteOthersComment(false);
+        }
+      }
+    };
+
     if (isOpen) {
+      checkPerms();
       if (reqData) {
         setType(reqData.request_type || "사무용품");
         setContent(reqData.content || "");
@@ -35,6 +76,8 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
     }
   }, [isOpen, reqData]);
 
+  const isReadonly = reqData && !isSuperAdminOrAdmin && String(reqData.author_id) !== String(currentUser.instId);
+
   useEffect(() => {
     if (commentEndRef.current) {
       commentEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -43,6 +86,9 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
 
   const handleSubmit = async () => {
     if (!content.trim()) return alert("신청 내용을 입력해주세요.");
+    
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+
     setIsSubmitting(true);
     
     const currentTimeISO = new Date().toISOString();
@@ -59,6 +105,8 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
         
         if (error) throw error;
       } else {
+        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSubmitting(false); return; }
+
         const { error } = await supabase.from("supply_request").insert({
           request_type: type,
           content,
@@ -67,7 +115,8 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
           author_name: currentUser.name,
           created_at: currentTimeISO,
           updated_at: currentTimeISO,
-          last_updater_name: currentUser.name
+          last_updater_name: currentUser.name,
+          tenant_id: myTenantId 
         });
         
         if (error) throw error;
@@ -146,8 +195,10 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
     }
   };
 
-  // 💡 회의 안건 상정 로직 (Supabase 연동)
   const submitAgenda = async () => {
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
+
     try {
       const primaryKey = reqData?.request_id || reqData?.id;
       await supabase.from("agenda").insert({
@@ -156,7 +207,8 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
         type: "비품",
         source: "Supply",
         source_id: primaryKey,
-        created_by: currentUser.instId
+        created_by: currentUser.instId,
+        tenant_id: myTenantId 
       });
       alert("해당 비품 신청건이 회의 안건으로 상정되었습니다.");
     } catch (e) {
@@ -176,6 +228,7 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
         </div>
 
         <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
+          
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
             <div className="shrink-0">
               <label className="block text-xs font-bold text-slate-500 mb-1.5">분류 (태그) <span className="text-rose-500">*</span></label>
@@ -216,11 +269,15 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
               ) : (
                 reqData.comments.map((c: any) => {
                   const isMe = c.authorName === currentUser.name;
-                  const canDelete = isMe || currentUser.isAdmin; 
+                  // 🌟 [수정] 원장, 작성자 본인, 또는 '타인 댓글 삭제 권한'이 있는 사람만 지울 수 있음
+                  const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
+                  
                   return (
                     <div key={c.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
                       <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
-                        {canDelete && <button onClick={() => handleDeleteComment(c.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>}
+                        {canDelete && (
+                          <button onClick={() => handleDeleteComment(c.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
+                        )}
                         <span className="text-[10px] text-slate-500 font-bold">
                           {c.authorName} <span className="font-normal opacity-70 ml-1">{c.createdAt}</span>
                         </span>
@@ -257,7 +314,8 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
 
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
           <div className="flex gap-2 items-center">
-            {reqData && (currentUser.isAdmin || String(reqData.author_id) === String(currentUser.instId)) && (
+            {/* 🌟 [수정] 원장, 작성자 본인, 또는 '신청서 삭제 권한'이 있는 사람만 삭제 가능 */}
+            {reqData && (isSuperAdminOrAdmin || canDeletePost || String(reqData.author_id) === String(currentUser.instId)) && (
               <button onClick={handleDelete} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">신청서 삭제</button>
             )}
             {reqData && (
@@ -268,8 +326,8 @@ export default function SupplyModal({ isOpen, reqData, currentUser, onClose, onS
           </div>
           
           <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
+            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-6 py-2.5 bg-[#002864] hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
               {isSubmitting ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

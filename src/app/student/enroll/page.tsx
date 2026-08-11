@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import { registerStudentAction } from "@/app/actions/enrollStudent"; // 💡 서버 액션 임포트
+import { registerStudentAction } from "@/app/actions/enrollStudent"; 
 
 function StudentEnrollContent() {
   const searchParams = useSearchParams();
@@ -19,9 +19,16 @@ function StudentEnrollContent() {
     school: "",
     grade: "초1",
     status: isAdmission ? "입학테스트" : "재원",
+    tenant_id: "", // 🌟 [추가] 꼬리표를 달 공간 마련
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 🌟 [추가] 페이지가 켜질 때 내 소속 학원(tenant_id)을 확인해서 폼에 몰래 넣어둡니다.
+  useEffect(() => {
+    const myTenantId = localStorage.getItem("logica_tenant_id") || "";
+    setFormData(prev => ({ ...prev, tenant_id: myTenantId }));
+  }, []);
 
   // === UI 텍스트 동적 렌더링 ===
   const headerTitle = isAdmission ? "📝 로지카 입학 대기생 등록" : "👨‍🎓 로지카 신규 학생 등록";
@@ -48,7 +55,7 @@ function StudentEnrollContent() {
   // DB 등록 처리 로직 (서버 액션 호출)
   // ==========================================
   const registerStudent = async () => {
-    const { name, password, studentContact, parentContact, school, grade, status } = formData;
+    const { name, password, studentContact, parentContact, school, grade, status, tenant_id } = formData;
 
     if (!name || !studentContact || !password) {
       alert("이름, 학생 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
@@ -60,10 +67,15 @@ function StudentEnrollContent() {
       return;
     }
 
+    if (!tenant_id) {
+      alert("소속 지점(학원) 정보가 없습니다. 다시 로그인 해주세요.");
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
-      // 💡 클라이언트에서 직접 DB를 만지지 않고 서버 액션에 데이터를 위임합니다.
+      // 💡 클라이언트에서 준비한 꼬리표(tenant_id)가 포함된 formData를 서버 액션으로 전송!
       const result = await registerStudentAction(formData);
 
       if (result.success) {
@@ -81,7 +93,7 @@ function StudentEnrollContent() {
         } catch (e) {}
         localStorage.setItem("logica_refresh_signal", JSON.stringify({ target: "student", time: Date.now() }));
 
-        // 입력 폼 초기화 (학년, 상태는 유지)
+        // 입력 폼 초기화 (학년, 상태, tenant_id는 유지)
         setFormData((prev) => ({
           ...prev,
           name: "",

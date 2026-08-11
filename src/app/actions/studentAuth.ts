@@ -3,7 +3,6 @@
 
 import { createClient } from "@supabase/supabase-js";
 
-// 환경변수 에러 방지 처리
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
@@ -13,7 +12,6 @@ export async function searchStudentsByDigits(code: string) {
   if (!code || code.length !== 4) return { success: false, data: [] };
 
   try {
-    // 1. 넓은 범위로 포함된 번호를 검색 (학생 및 학부모 폰번호 모두)
     const { data: studentMatch } = await supabaseAdmin
       .from("student")
       .select("student_id, name, grade, phone, parent(phone), enrollment(class(name))")
@@ -27,7 +25,6 @@ export async function searchStudentsByDigits(code: string) {
     const merged = [...(studentMatch || []), ...(parentMatch || [])];
     const uniqueMap = new Map();
 
-    // 2. 검색된 데이터 중 꼬리표(-1, -2)를 떼고 4자리로 끝나는지 완벽히 일치 검증
     merged.forEach((item: any) => {
       const extractCleanDigits = (phoneStr: string) => {
         if (!phoneStr) return "";
@@ -49,7 +46,6 @@ export async function searchStudentsByDigits(code: string) {
       const isStudentMatch = sPhoneCleaned.endsWith(code);
       const isParentMatch = pPhoneCleaned.endsWith(code);
 
-      // 💡 보안: 화면 표시에 필요한 최소한의 데이터만 반환 (전화번호 원본 및 해시 제외)
       if (isStudentMatch || isParentMatch) {
         const classNames = (item.enrollment || [])
           .map((e: any) => e.class?.name)
@@ -66,7 +62,6 @@ export async function searchStudentsByDigits(code: string) {
 
     const matches = Array.from(uniqueMap.values());
     
-    // 학년별 정렬 가중치 적용
     const GRADE_ORDER: Record<string, number> = { '고3': 1, '고2': 2, '고1': 3, '중3': 4, '중2': 5, '중1': 6, '초6': 7, '초5': 8, '초4': 9, '초3': 10, '초2': 11, '초1': 12 };
     matches.sort((a, b) => (GRADE_ORDER[a.grade] || 99) - (GRADE_ORDER[b.grade] || 99));
 
@@ -80,16 +75,22 @@ export async function loginStudentAction(studentId: string, passwordInput: strin
   try {
     const { data, error } = await supabaseAdmin
       .from("student")
-      .select("student_id, name, phone, password_hash")
+      // 🌟 [핵심] 학생 로그인 시 DB에서 내 소속 지점(tenant_id)도 챙겨옵니다!
+      .select("student_id, name, phone, password_hash, tenant_id")
       .eq("student_id", studentId)
       .maybeSingle();
 
     if (error || !data) return { success: false, message: "학생 정보를 찾을 수 없습니다." };
     
-    // 💡 보안: 서버 내에서만 비밀번호를 대조
     if (data.password_hash !== passwordInput) return { success: false, message: "비밀번호가 다릅니다." };
     
-    return { success: true, studentId: data.student_id, name: data.name, phone: data.phone };
+    return { 
+      success: true, 
+      studentId: data.student_id, 
+      name: data.name, 
+      phone: data.phone, 
+      tenant_id: data.tenant_id // 🌟 학생 꼬리표 반환!
+    };
   } catch (err) {
     return { success: false, message: "서버 통신 오류" };
   }

@@ -14,23 +14,73 @@ interface CSModalProps {
   onSuccess: () => void;
 }
 
-export default function CSModal({ isOpen, reqData, currentUser, students, instructors, onClose, onSuccess }: CSModalProps) {
+export default function CSModal({ 
+  isOpen, 
+  reqData, 
+  currentUser, 
+  students, 
+  instructors, 
+  onClose, 
+  onSuccess 
+}: CSModalProps) {
   const [modalData, setModalData] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  
+  const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
+  // 🌟 [추가] 세부 삭제 권한 상태
+  const [canDeletePost, setCanDeletePost] = useState(false);
+  const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    const checkPerms = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id");
+
+      const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
+                        ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
+      setIsSuperAdminOrAdmin(adminFlag);
+
+      if (adminFlag) {
+        setCanDeletePost(true);
+        setCanDeleteOthersComment(true);
+      } else if (tId) {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
+
+        if (data && data.allowed_menus) {
+          // 🌟 [추가] DB에서 CS 삭제 및 타인 댓글 삭제 권한 확인
+          setCanDeletePost(data.allowed_menus.includes('action_delete_cs'));
+          setCanDeleteOthersComment(data.allowed_menus.includes('action_delete_others_comment'));
+        } else {
+          setCanDeletePost(false);
+          setCanDeleteOthersComment(false);
+        }
+      }
+    };
+
     if (isOpen) {
+      checkPerms();
       if (reqData) {
         setModalData({ ...reqData });
         setComments(reqData.comments || []);
       } else {
         setModalData({ 
-          request_id: "", student_id: "", request_type: "상담/기타", reason: "", 
-          processed_instructor_id: currentUser.instId, status: "대기", is_private: false 
+          request_id: "", 
+          student_id: "", 
+          request_type: "상담/기타", 
+          reason: "", 
+          processed_instructor_id: currentUser.instId, 
+          status: "대기", 
+          is_private: false 
         });
         setComments([]);
       }
@@ -99,6 +149,8 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
   const saveCS = async () => {
     if (!modalData.student_id || !modalData.reason?.trim()) return alert("학생과 상세 내용은 필수 항목입니다.");
 
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+
     setIsSaving(true);
     const currentTimeISO = new Date().toISOString();
 
@@ -120,8 +172,11 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
         await supabase.from("parent_request_log").update(payload).eq("request_id", modalData.request_id);
         alert("성공적으로 저장되었습니다.");
       } else {
+        if (!myTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
+        
         payload.author_id = currentUser.instId;
         payload.created_at = currentTimeISO;
+        payload.tenant_id = myTenantId; 
         await supabase.from("parent_request_log").insert([payload]);
         alert("CS 기록이 등록되었습니다.");
       }
@@ -144,8 +199,10 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
     } catch (e) { alert("삭제 실패"); }
   };
 
-  // 💡 회의 안건 상정 로직 (Supabase 연동)
   const submitAgenda = async () => {
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
+
     try {
       const studentName = students.find(s => s.student_id === modalData.student_id)?.name || "학생";
       await supabase.from("agenda").insert({
@@ -154,7 +211,8 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
         type: "CS",
         source: "CS",
         source_id: modalData.request_id,
-        created_by: currentUser.instId
+        created_by: currentUser.instId,
+        tenant_id: myTenantId 
       });
       alert("해당 CS 요청건이 회의 안건으로 상정되었습니다.");
     } catch (e) {
@@ -164,7 +222,7 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
 
   if (!isOpen || !modalData) return null;
 
-  const isReadonly = modalData.request_id && !currentUser.isAdmin && String(modalData.author_id) !== String(currentUser.instId);
+  const isReadonly = modalData.request_id && !isSuperAdminOrAdmin && String(modalData.author_id) !== String(currentUser.instId);
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
@@ -176,6 +234,7 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
         </div>
         
         <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
+          
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
             <div className="grid grid-cols-2 gap-4 shrink-0">
               <div className="col-span-2 sm:col-span-1">
@@ -258,11 +317,15 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
               ) : (
                 comments.map(cmt => {
                   const isMe = cmt.authorName === currentUser.name;
-                  const canDelete = isMe || currentUser.isAdmin; 
+                  // 🌟 [수정] 원장, 작성자 본인, 또는 '타인 댓글 삭제 권한'이 있는 사람만 지울 수 있음
+                  const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
+                  
                   return (
                     <div key={cmt.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
                       <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
-                        {canDelete && <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>}
+                        {canDelete && (
+                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
+                        )}
                         <span className="text-[10px] text-slate-500 font-bold">
                           {cmt.authorName} <span className="font-normal opacity-70 ml-1">{cmt.createdAt}</span>
                         </span>
@@ -293,10 +356,10 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
           </div>
         </div>
         
-        {/* 💡 푸터: 삭제 버튼 옆에 안건 상정 버튼을 나란히 배치 */}
         <div className="p-4 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
           <div className="flex gap-2 items-center">
-            {modalData.request_id && (currentUser.isAdmin || String(modalData.author_id) === String(currentUser.instId)) && (
+            {/* 🌟 [수정] 원장, 작성자 본인, 또는 '요청 삭제 권한'이 있는 사람만 삭제 가능 */}
+            {modalData.request_id && (isSuperAdminOrAdmin || canDeletePost || String(modalData.author_id) === String(currentUser.instId)) && (
               <button onClick={deleteCS} className="px-4 py-2.5 bg-rose-50 text-rose-500 font-bold text-[13px] rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent">요청 삭제</button>
             )}
             {modalData.request_id && (
@@ -307,8 +370,8 @@ export default function CSModal({ isOpen, reqData, currentUser, students, instru
           </div>
           
           <div className="flex gap-2 justify-end">
-            <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={saveCS} disabled={isSaving || isReadonly} className="px-5 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-lg hover:bg-rose-700 transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={saveCS} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-rose-600 text-white font-bold text-sm rounded-lg hover:bg-rose-700 transition-colors shadow-sm disabled:opacity-50">
               {isSaving ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

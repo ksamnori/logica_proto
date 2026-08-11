@@ -123,7 +123,6 @@ export function useBilling() {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement("a");
     link.href = URL.createObjectURL(blob);
-    // 💡 저장되는 파일명을 요청하신 대로 변경했습니다.
     link.download = `업로드용_대량청구_${filterMonth}.csv`;
     link.click();
   };
@@ -131,6 +130,10 @@ export function useBilling() {
   const executeAction = async (targetKanbanStatus: string, action: string) => {
     const targets = selectedKeys.map(k => billingData.find(d => d.key === k)).filter(d => d && d.kanban_status === targetKanbanStatus);
     if (targets.length === 0) return alert("해당 영역에서 체크된 카드가 없습니다.");
+
+    // 🌟 [추가됨] 데이터를 저장/발행하기 전에 내 소속 지점 꼬리표 챙기기!
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
 
     const msgs: any = {
       'issue': "선택한 청구서를 발행하시겠습니까?", 'issue_send': "선택 청구서를 발행하고 즉시 알림톡을 발송하시겠습니까?", 'cancel_issue': "선택한 청구서의 발행을 취소하시겠습니까?",
@@ -144,7 +147,17 @@ export function useBilling() {
 
     try {
       if (action === 'issue' || action === 'issue_send') {
-        const ins = targets.map((t: any) => ({ student_id: t.student_id, class_id: t.class_id, billing_month: filterMonth, amount: t.final_amount, discount_amount: t.discount_amount, due_date: due, status: '청구' }));
+        // 🌟 [수정됨] 청구서 발행 시 tenant_id 부착!
+        const ins = targets.map((t: any) => ({ 
+          student_id: t.student_id, 
+          class_id: t.class_id, 
+          billing_month: filterMonth, 
+          amount: t.final_amount, 
+          discount_amount: t.discount_amount, 
+          due_date: due, 
+          status: '청구',
+          tenant_id: myTenantId // 👈 꼬리표 부착!
+        }));
         const { data: bData } = await supabase.from('academy_billing').insert(ins).select();
         
         if (action === 'issue_send' && bData) {
@@ -169,7 +182,14 @@ export function useBilling() {
         if (!method) return;
         const ids = targets.map((t: any) => t.billing_id);
         await supabase.from('academy_billing').update({ status: '완납' }).in('billing_id', ids);
-        const hists = targets.map((t: any, idx) => ({ billing_id: t.billing_id, payment_method: method, paid_amount: t.final_amount, transaction_key: `BATCH_${Date.now()}_${idx}` }));
+        // 🌟 [수정됨] 결제 완료(payment_history) 데이터 생성 시 tenant_id 부착!
+        const hists = targets.map((t: any, idx) => ({ 
+          billing_id: t.billing_id, 
+          payment_method: method, 
+          paid_amount: t.final_amount, 
+          transaction_key: `BATCH_${Date.now()}_${idx}`,
+          tenant_id: myTenantId // 👈 결제 내역 꼬리표 부착!
+        }));
         await supabase.from('payment_history').insert(hists);
       }
       else if (action === 'mark_unpaid') {
@@ -183,6 +203,10 @@ export function useBilling() {
   };
 
   const saveDiscount = async (discItem: any, discAmount: number) => {
+    // 🌟 [추가됨] 할인액을 적용하여 새 청구서를 만들 때 꼬리표 챙기기
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    if (!myTenantId) { alert("소속 지점 정보가 없습니다."); return false; }
+
     const finalAmt = Math.max(0, discItem.base_fee - discAmount);
     const [y, m] = filterMonth.split('-');
     const due = `${filterMonth}-${new Date(parseInt(y), parseInt(m), 0).getDate()}`;
@@ -191,7 +215,17 @@ export function useBilling() {
       if (discItem.is_issued) {
         await supabase.from('academy_billing').update({ discount_amount: discAmount, amount: finalAmt }).eq('billing_id', discItem.billing_id);
       } else {
-        await supabase.from('academy_billing').insert({ student_id: discItem.student_id, class_id: discItem.class_id, billing_month: filterMonth, amount: finalAmt, discount_amount: discAmount, due_date: due, status: '청구' });
+        // 🌟 [수정됨] 할인 적용 후 새로 청구서 발행 시 꼬리표 부착!
+        await supabase.from('academy_billing').insert({ 
+          student_id: discItem.student_id, 
+          class_id: discItem.class_id, 
+          billing_month: filterMonth, 
+          amount: finalAmt, 
+          discount_amount: discAmount, 
+          due_date: due, 
+          status: '청구',
+          tenant_id: myTenantId // 👈 꼬리표 부착
+        });
       }
       loadBillingData();
       return true;

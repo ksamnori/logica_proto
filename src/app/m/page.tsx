@@ -11,7 +11,6 @@ export default function MobileInstructorPortalPage() {
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
   const [authState, setAuthState] = useState<"login" | "dashboard">("login");
   
-  // 로그인 상태 관리
   const [phoneInput, setPhoneInput] = useState("");
   const [pwInput, setPwInput] = useState("");
   
@@ -24,21 +23,17 @@ export default function MobileInstructorPortalPage() {
     profileImageUrl: string | null;
   }>({ instId: "", name: "", dept: "", position: "", isSuperLevel: false, profileImageUrl: null });
 
-  // 모달 상태
   const [isAiModalOpen, setIsAiModalOpen] = useState(false);
   const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   
-  // 상세 기록 조회 모달 상태
   const [viewNote, setViewNote] = useState<any>(null); 
   const [displayHtml, setDisplayHtml] = useState("");
 
-  // 안건 및 캘린더 상태
   const [agendas, setAgendas] = useState<any[]>([]);
   const [externalEvents, setExternalEvents] = useState<any[]>([]);
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  // 모바일 뒤로가기 방어 로직
   const isExitModalOpenRef = useRef(isExitModalOpen);
   isExitModalOpenRef.current = isExitModalOpen;
   const authStateRef = useRef(authState);
@@ -62,13 +57,11 @@ export default function MobileInstructorPortalPage() {
     return () => { window.removeEventListener("popstate", handlePopState); };
   }, []);
 
-  // 초기 세션 확인
   useEffect(() => {
     const savedInstId = sessionStorage.getItem("logica_instructor_id");
     if (savedInstId) loadDashboard(savedInstId);
   }, []);
 
-  // 대시보드 데이터 로드 (안건 및 캘린더)
   useEffect(() => {
     if (authState === "dashboard" && currentUser.instId) {
       fetchAgendas();
@@ -83,7 +76,6 @@ export default function MobileInstructorPortalPage() {
     }
   }, [authState, currentUser.instId]);
 
-  // 비밀 안건 상세 조회 복호화 로직
   useEffect(() => {
     if (viewNote) {
       const loadHtml = async () => {
@@ -190,47 +182,46 @@ export default function MobileInstructorPortalPage() {
     setPhoneInput(formatted);
   };
 
-  // 🌟 [핵심 변경] 모바일 로그인 보안 강화 (비밀번호 검증 로직 추가)
   const loginInstructor = async () => {
     if (!phoneInput || !pwInput) return alert("연락처와 비밀번호를 모두 입력해주세요.");
 
     try {
-      // 1. 휴대폰 번호 포맷팅
       const rawPhone = phoneInput.replace(/[^0-9]/g, "");
       const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
-      // 2. DB에서 연락처로 강사 정보 및 login_id 조회
+      // 🌟 [추가됨] DB에서 내 소속 지점(tenant_id)도 챙겨옵니다!
       const { data: instData, error: instError } = await supabase
         .from("instructor")
-        .select("login_id, instructor_id, name, department, status, role, position")
+        .select("login_id, instructor_id, name, department, status, role, position, tenant_id")
         .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone}`)
         .maybeSingle();
 
       if (instError || !instData) return alert("등록된 강사 정보가 없습니다.");
       if (instData.status === "퇴사") return alert("퇴사 처리된 계정입니다.");
 
-      // 3. Supabase Auth 시스템을 통해 진짜 비밀번호 검증 수행
       const fakeEmail = `${instData.login_id}@logica.com`;
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
         email: fakeEmail,
         password: pwInput,
       });
 
-      // 비밀번호 불일치 시 차단
       if (authError) {
         return alert("비밀번호가 일치하지 않습니다.");
       }
 
-      // 4. 인증 통과 시 쿠키에 보안 토큰 저장 (미들웨어 및 API용)
       if (authData.session) {
         document.cookie = `sb-access-token=${authData.session.access_token}; path=/; max-age=86400;`;
       }
 
-      // 5. 세션스토리지 셋팅 후 대시보드 로드
       sessionStorage.setItem("logica_instructor_id", instData.instructor_id);
       localStorage.setItem("logica_instructor_name", instData.name);
       localStorage.setItem("logica_instructor_role", instData.role || "");
       localStorage.setItem("logica_instructor_position", instData.position || "");
+      
+      // 🌟 [추가됨] 브라우저에 소속 지점 저장 (채팅 위젯 등이 사용할 수 있도록)
+      if (instData.tenant_id) {
+        localStorage.setItem("logica_tenant_id", instData.tenant_id);
+      }
       
       loadDashboard(instData.instructor_id);
     } catch (err) { 
@@ -243,7 +234,8 @@ export default function MobileInstructorPortalPage() {
       await supabase.auth.signOut();
       sessionStorage.clear();
       localStorage.removeItem("logica_instructor_name");
-      document.cookie = "sb-access-token=; path=/; max-age=0;"; // 쿠키 삭제
+      localStorage.removeItem("logica_tenant_id"); // 🌟 안전하게 꼬리표 삭제
+      document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       window.location.reload();
     }
   };
@@ -355,7 +347,6 @@ export default function MobileInstructorPortalPage() {
           <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
-          {/* 점 표시 */}
           {dayTypes.length > 0 && (
             <div className="absolute bottom-0 flex gap-[2px] z-10">
               {dayTypes.map((type, idx) => (
@@ -447,7 +438,6 @@ export default function MobileInstructorPortalPage() {
   return (
     <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
       
-      {/* 앱 종료 확인 모달 */}
       {isExitModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-[280px] rounded-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -463,7 +453,6 @@ export default function MobileInstructorPortalPage() {
         </div>
       )}
 
-      {/* AI 회의록 녹음 모달 */}
       {isAiModalOpen && (
         <AiRecordModal 
           onClose={() => setIsAiModalOpen(false)} 
@@ -475,7 +464,6 @@ export default function MobileInstructorPortalPage() {
         />
       )}
 
-      {/* 정보수정 모달 */}
       <ProfileModal 
         isOpen={isProfileModalOpen} 
         onClose={() => setIsProfileModalOpen(false)} 
@@ -483,7 +471,6 @@ export default function MobileInstructorPortalPage() {
         instructorName={currentUser.name} 
       />
 
-      {/* 상세 기록 조회 모달 */}
       {viewNote && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center sm:p-4">
           <div className="bg-white w-full h-[100dvh] sm:h-auto sm:max-h-[85vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -668,7 +655,6 @@ export default function MobileInstructorPortalPage() {
             </div>
           </main>
 
-          {/* 메신저/녹음 위젯 연동 */}
           {currentUser.instId && (
             <FloatingChat 
               instId={currentUser.instId} 

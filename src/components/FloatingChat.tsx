@@ -4,7 +4,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
-// 🌟 개별 포스트잇 위젯 컴포넌트
 function DraggableMemo({ 
   memo, 
   onUpdate, 
@@ -168,6 +167,10 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const [memos, setMemos] = useState<any[]>([]);
   const [highestZ, setHighestZ] = useState(9900);
 
+  // 🌟 [핵심 추가] 권한 제어를 위한 상태 변수
+  const [canUseChat, setCanUseChat] = useState(false);
+  const [canUseMemo, setCanUseMemo] = useState(false);
+
   const activeRoomIdRef = useRef<string | null>(null);
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
 
@@ -223,9 +226,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     
     if (Math.abs(e.clientX - iconDrag.current.clickX) < 5 && Math.abs(e.clientY - iconDrag.current.clickY) < 5) {
       const target = iconDrag.current.targetNode as HTMLElement;
-      if (target && target.closest('.memo-btn')) {
+      if (target && target.closest('.memo-btn') && canUseMemo) {
         createMemo();
-      } else if (target && target.closest('.chat-btn')) {
+      } else if (target && target.closest('.chat-btn') && canUseChat) {
         if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); setActiveStaffRoomId(null); setStaffChatView("list"); }
         setIsChatOpen(!isChatOpen);
       } else if (target && target.closest('.mic-btn')) {
@@ -308,6 +311,37 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   useEffect(() => {
     if (!instId) return;
+
+    // 🌟 [권한 체크 함수] 시작
+    const checkPerms = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id");
+
+      const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자');
+      const isPrin = role === 'ADMIN' || pos.includes('원장');
+
+      if (isSA || isPrin) {
+        setCanUseChat(true);
+        setCanUseMemo(true);
+        return;
+      }
+
+      if (tId) {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
+
+        if (data && data.allowed_menus) {
+          setCanUseChat(data.allowed_menus.includes('action_use_chat'));
+          setCanUseMemo(data.allowed_menus.includes('action_use_memo'));
+        }
+      }
+    };
+    checkPerms();
 
     const checkHQStatus = async () => {
       const { data: me } = await supabase.from('instructor').select('tenant_id, department').eq('instructor_id', instId).maybeSingle();
@@ -643,7 +677,6 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
         setAllInstructors(enrichedData);
 
-        // 🌟 [핵심 변경] 리스트 로드 시 내 소속 정보를 현재 DB 데이터와 100% 동기화시킵니다.
         const me = enrichedData.find((i: any) => String(i.instructor_id) === String(instId));
         let exactMyTenant = '소속 미지정';
         let exactMyDept = '부서 미지정';
@@ -675,6 +708,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   };
 
   const handleCreateOrOpenStaffRoom = async (targetInstId: string, targetName: string, targetPos?: string) => {
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+
     try {
       if (targetInstId === instId) {
         const { data: myRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
@@ -691,7 +726,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
            }
         }
         const titleWithPos = `${targetName} (나)`;
-        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
+        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId, tenant_id: myTenantId }).select().single();
         if (roomError) throw roomError;
         if (newRoom) {
           await supabase.from('internal_chat_member').insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
@@ -712,7 +747,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
       if (!roomId) {
         const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
-        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId }).select().single();
+        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId, tenant_id: myTenantId }).select().single();
         if (roomError) throw roomError;
         if (newRoom) {
           roomId = newRoom.room_id;
@@ -725,6 +760,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   const handleStartGroupChat = async () => {
     if (selectedInstIds.length === 0) return;
+    
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+
     if (selectedInstIds.length === 1) {
       const target = allInstructors.find((i: any) => i.instructor_id === selectedInstIds[0]);
       if (target) await handleCreateOrOpenStaffRoom(target.instructor_id, target.name, target.chat_position || target.position);
@@ -734,7 +772,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     if (!roomName) return;
 
     try {
-      const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId }).select().single();
+      const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId, tenant_id: myTenantId }).select().single();
       const membersToInsert = selectedInstIds.map(id => ({ room_id: newRoom.room_id, instructor_id: id }));
       if (!selectedInstIds.includes(instId)) membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
       
@@ -821,7 +859,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   return (
     <>
-      {memos.map(memo => (
+      {/* 🌟 [권한 적용] 메모 사용 권한이 있을 때만 렌더링 */}
+      {canUseMemo && memos.map(memo => (
         <DraggableMemo 
           key={memo.memo_id} 
           memo={memo} 
@@ -849,479 +888,482 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
           </button>
         )}
 
-        <button
-          className="memo-btn w-12 h-12 bg-amber-400 text-amber-900 rounded-full shadow-[0_4px_15px_rgba(251,191,36,0.5)] flex items-center justify-center hover:bg-amber-500 hover:scale-105 transition-all"
-          title="새 메모(포스트잇) 추가"
-        >
-          <svg className="w-6 h-6 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
-        </button>
+        {/* 🌟 [권한 적용] 메모 사용 권한이 있을 때만 버튼 렌더링 */}
+        {canUseMemo && (
+          <button
+            className="memo-btn w-12 h-12 bg-amber-400 text-amber-900 rounded-full shadow-[0_4px_15px_rgba(251,191,36,0.5)] flex items-center justify-center hover:bg-amber-500 hover:scale-105 transition-all"
+            title="새 메모(포스트잇) 추가"
+          >
+            <svg className="w-6 h-6 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+          </button>
+        )}
 
-        <button
-          className="chat-btn w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors relative"
-          title="메신저 열기"
-        >
-          <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-          {unreadCount + staffUnreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount + staffUnreadCount > 99 ? '99+' : unreadCount + staffUnreadCount}</span>}
-        </button>
+        {/* 🌟 [권한 적용] 채팅 사용 권한이 있을 때만 버튼 렌더링 */}
+        {canUseChat && (
+          <button
+            className="chat-btn w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors relative"
+            title="메신저 열기"
+          >
+            <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+            {unreadCount + staffUnreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount + staffUnreadCount > 99 ? '99+' : unreadCount + staffUnreadCount}</span>}
+          </button>
+        )}
       </div>
 
-      <div 
-        ref={panelRef}
-        className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[680px] max-h-[85vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
-        style={{ transform: `scale(${isChatOpen ? 1 : 0.95})`, transformOrigin: 'bottom right' }}
-      >
-        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none select-none">
-          <div className="px-5 py-3.5 flex justify-between items-center">
-            <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> Logica 메신저</h3>
-            <div className="flex gap-1.5 items-center z-10 relative">
-              <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveStaffRoomId(null); }} className="text-blue-200 hover:text-white transition-colors p-1.5 relative">
-                <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-              </button>
+      {/* 🌟 [권한 적용] 채팅 사용 권한이 있을 때만 패널 렌더링 */}
+      {canUseChat && (
+        <div 
+          ref={panelRef}
+          className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[680px] max-h-[85vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          style={{ transform: `scale(${isChatOpen ? 1 : 0.95})`, transformOrigin: 'bottom right' }}
+        >
+          <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none select-none">
+            <div className="px-5 py-3.5 flex justify-between items-center">
+              <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> Logica 메신저</h3>
+              <div className="flex gap-1.5 items-center z-10 relative">
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveStaffRoomId(null); }} className="text-blue-200 hover:text-white transition-colors p-1.5 relative">
+                  <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+              </div>
             </div>
-          </div>
-          
-          <div className="flex px-3">
-            <button 
-              onPointerDown={(e) => e.stopPropagation()} 
-              onClick={() => { 
-                if (activeTab === "staff") { staffChatView === "list" ? showNewStaffChatView() : setStaffChatView("list"); } else { setActiveTab("staff"); setStaffChatView("list"); }
-                setActiveStaffRoomId(null); 
-                loadStaffRooms(); 
-              }}
-              className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" || isHQ ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
-            >
-              👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
-            </button>
-
-            {!isHQ && (
+            
+            <div className="flex px-3">
               <button 
                 onPointerDown={(e) => e.stopPropagation()} 
                 onClick={() => { 
-                  if (activeTab === "parent") { activeChatView === "list" ? showNewChatView() : setActiveChatView("list"); } else { setActiveTab("parent"); setActiveChatView("list"); }
-                  setActiveRoomId(null); 
-                  loadChatRooms(); 
+                  if (activeTab === "staff") { staffChatView === "list" ? showNewStaffChatView() : setStaffChatView("list"); } else { setActiveTab("staff"); setStaffChatView("list"); }
+                  setActiveStaffRoomId(null); 
+                  loadStaffRooms(); 
                 }}
-                className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "parent" ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
+                className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" || isHQ ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
               >
-                👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
+                👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
               </button>
-            )}
-          </div>
-        </div>
 
-        {activeTab === "parent" && !isHQ ? (
-          activeChatView === "new" ? (
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50 relative">
-              <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
-                <button onClick={() => { setActiveChatView("list"); loadChatRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="학생 이름 검색 (재원생)" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#002864]" />
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2">
-                {Object.keys(groupedParents).length === 0 ? (
-                  <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
-                ) : (
-                  Object.keys(groupedParents).sort().map((className, idx) => {
-                    const students = groupedParents[className];
-                    const isExpanded = searchKeyword.length > 0 || expandedClasses.includes(className);
-                    return (
-                      <div key={idx} className="mb-2.5">
-                        <button onClick={() => setExpandedClasses(prev => prev.includes(className) ? prev.filter(c => c !== className) : [...prev, className])} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors border border-slate-200 shadow-sm">
-                          <span>🏷️ {className} <span className="text-[11px] text-slate-500 font-normal ml-1.5">({students.length}명)</span></span>
-                          <svg className={`w-4 h-4 text-slate-400 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                        </button>
-                        {isExpanded && (
-                          <div className="mt-2">
-                            {students.map((s: any) => (
-                              <div key={s.student_id} onClick={() => handleCreateOrOpenRoom(s.parent_id, s.name)} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:border-blue-400 cursor-pointer transition-all flex items-center justify-between mb-2 last:mb-0 ml-2">
-                                <div>
-                                  <div className="font-bold text-slate-700 text-sm">{s.name} 학생 학부모님</div>
-                                  <div className="text-[11px] text-slate-400 font-bold mt-0.5">{s.parent?.phone || '번호없음'}</div>
-                                </div>
-                                <button className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-100 transition-colors">대화 시작</button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })
-                )}
-              </div>
+              {!isHQ && (
+                <button 
+                  onPointerDown={(e) => e.stopPropagation()} 
+                  onClick={() => { 
+                    if (activeTab === "parent") { activeChatView === "list" ? showNewChatView() : setActiveChatView("list"); } else { setActiveTab("parent"); setActiveChatView("list"); }
+                    setActiveRoomId(null); 
+                    loadChatRooms(); 
+                  }}
+                  className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "parent" ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
+                >
+                  👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
+                </button>
+              )}
             </div>
-          ) : activeChatView === "list" ? (
-            <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50">
-              <div className="space-y-2">
-                {chatRooms.length === 0 ? (
-                  <div className="text-center py-10 flex flex-col items-center gap-3">
-                    <span className="text-slate-400 font-bold text-sm">개설된 상담방이 없습니다.</span>
-                    <button onClick={showNewChatView} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-4 py-2.5 rounded-lg shadow-md text-xs transition-colors">+ 새 채팅방 개설하기</button>
-                  </div>
+          </div>
+
+          {activeTab === "parent" && !isHQ ? (
+            activeChatView === "new" ? (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50 relative">
+                <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
+                  <button onClick={() => { setActiveChatView("list"); loadChatRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                  <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="학생 이름 검색 (재원생)" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#002864]" />
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2">
+                  {Object.keys(groupedParents).length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
+                  ) : (
+                    Object.keys(groupedParents).sort().map((className, idx) => {
+                      const students = groupedParents[className];
+                      const isExpanded = searchKeyword.length > 0 || expandedClasses.includes(className);
+                      return (
+                        <div key={idx} className="mb-2.5">
+                          <button onClick={() => setExpandedClasses(prev => prev.includes(className) ? prev.filter(c => c !== className) : [...prev, className])} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors border border-slate-200 shadow-sm">
+                            <span>🏷️ {className} <span className="text-[11px] text-slate-500 font-normal ml-1.5">({students.length}명)</span></span>
+                            <svg className={`w-4 h-4 text-slate-400 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                          </button>
+                          {isExpanded && (
+                            <div className="mt-2">
+                              {students.map((s: any) => (
+                                <div key={s.student_id} onClick={() => handleCreateOrOpenRoom(s.parent_id, s.name)} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:border-blue-400 cursor-pointer transition-all flex items-center justify-between mb-2 last:mb-0 ml-2">
+                                  <div>
+                                    <div className="font-bold text-slate-700 text-sm">{s.name} 학생 학부모님</div>
+                                    <div className="text-[11px] text-slate-400 font-bold mt-0.5">{s.parent?.phone || '번호없음'}</div>
+                                  </div>
+                                  <button className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-100 transition-colors">대화 시작</button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : activeChatView === "list" ? (
+              <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50">
+                <div className="space-y-2">
+                  {chatRooms.length === 0 ? (
+                    <div className="text-center py-10 flex flex-col items-center gap-3">
+                      <span className="text-slate-400 font-bold text-sm">개설된 상담방이 없습니다.</span>
+                      <button onClick={showNewChatView} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-4 py-2.5 rounded-lg shadow-md text-xs transition-colors">+ 새 채팅방 개설하기</button>
+                    </div>
+                  ) : (
+                    chatRooms.map(r => {
+                      const phone = r.parent?.phone || '번호없음';
+                      const pName = `${r.parent?.student?.[0]?.name || '알 수 없는'} 학부모님`;
+                      let previewText = r.chat_message?.length > 0 ? r.chat_message[0].content : '대화 내역이 없습니다.';
+                      if (previewText.length > 18) previewText = previewText.substring(0, 18) + '...';
+
+                      return (
+                        <div key={r.room_id} onClick={() => openChatRoom(r.room_id, pName)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-400 transition-all flex items-center justify-between cursor-pointer mb-2 group">
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            <div className="w-10 h-10 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-bold shrink-0 relative">P{r.unreadCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>}</div>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className="font-bold text-slate-700 text-sm truncate">{pName}</span>
+                              <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${r.unreadCount > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate`}>{previewText}</span>{r.unreadCount > 0 && <div className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{r.unreadCount > 99 ? '99+' : r.unreadCount}</div>}</div>
+                            </div>
+                          </div>
+                          <button onClick={(e) => deleteChatRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#b2c7d9]">
+                <div className="bg-white/90 backdrop-blur px-3 py-2 border-b border-slate-200 flex items-center gap-2 shrink-0 shadow-sm z-10 sticky top-0">
+                  <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                  </button>
+                  <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeParentName}</span><span className="text-[10px] font-bold text-emerald-600">실시간 연결됨</span></div>
+                </div>
+                
+                <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
+                  {chatMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10 bg-white/50 p-4 rounded-xl mx-4">대화 내역이 없습니다.</div> :
+                    chatMessages.map(msg => (
+                      <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_type === "parent" ? "justify-start" : "justify-end"}`}>
+                        {msg.sender_type === "parent" && (
+                          <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
+                        )}
+                        
+                        <div className={`flex flex-col max-w-[85%] ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
+                          {msg.sender_type === "parent" && (
+                            <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
+                          )}
+                          
+                          <div className={`flex items-end gap-1.5 ${msg.sender_type !== "parent" ? "flex-row-reverse" : "flex-row"}`}>
+                            <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type !== "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
+                              {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                            </div>
+                            <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
+                              {msg.sender_type !== 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
+                              <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  }
+
+                  {isTyping && (
+                    <div className="flex justify-start w-full mb-1">
+                      <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
+                      <div className="flex flex-col items-start max-w-[85%]">
+                        <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
+                        <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
+                          메시지를 입력 중입니다...
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className="bg-white p-3 border-t flex items-end gap-2">
+                  <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "instructor" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
+                  <button onClick={sendMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
+                </div>
+              </div>
+            )
+          ) : (
+            staffChatView === "new" ? (
+              <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
+                <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
+                  <button onClick={() => { setStaffChatView("list"); loadStaffRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                  <input type="text" value={staffSearchKeyword} onChange={e => setStaffSearchKeyword(e.target.value)} placeholder="이름 또는 부서 검색" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400" />
+                </div>
+                <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-3 pb-16">
+                  {filteredInstructors.length === 0 ? (
+                    <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
+                  ) : (
+                    Object.keys(orgTree).sort((a, b) => {
+                      const aTrim = a.trim();
+                      const bTrim = b.trim();
+                      const myT = (myTenantName || '소속 미지정').trim();
+
+                      if (aTrim === bTrim) return 0;
+                      
+                      if (aTrim === myT) return -1;
+                      if (bTrim === myT) return 1;
+                      
+                      if (aTrim === '본사') return -1;
+                      if (bTrim === '본사') return 1;
+                      
+                      return aTrim.localeCompare(bTrim);
+                    }).map(tenantName => {
+                      const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
+                      const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
+                      
+                      const myT = (myTenantName || '소속 미지정').trim();
+                      const isMyTenant = tenantName.trim() === myT;
+                      
+                      return (
+                        <div key={tenantName} className="mb-2">
+                          <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
+                            <span className="flex items-center">
+                              🏢 {tenantName} 
+                              {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] rounded font-black">내 지점</span>}
+                              <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span>
+                            </span>
+                            <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                          </button>
+                          {isTenantExpanded && (
+                            <div className="mt-1.5 ml-2 border-l-2 border-slate-200 pl-2 space-y-2">
+                              {Object.keys(orgTree[tenantName]).sort((a, b) => {
+                                const aTrim = a.trim();
+                                const bTrim = b.trim();
+                                const myD = (myDeptName || '부서 미지정').trim();
+
+                                if (aTrim === bTrim) return 0;
+                                
+                                if (isMyTenant) {
+                                  if (aTrim === myD) return -1;
+                                  if (bTrim === myD) return 1;
+                                }
+                                
+                                return aTrim.localeCompare(bTrim);
+                              }).map(deptName => {
+                                const deptId = `${tenantName}_${deptName}`;
+                                const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
+                                const deptMembers = orgTree[tenantName][deptName];
+                                
+                                const myD = (myDeptName || '부서 미지정').trim();
+                                const isMyDept = isMyTenant && deptName.trim() === myD;
+                                
+                                return (
+                                  <div key={deptId} className="mb-1">
+                                    <button onClick={() => toggleDept(deptId)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-[12px] flex justify-between items-center transition-colors">
+                                      <span className="flex items-center">
+                                        📁 {deptName} 
+                                        {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] rounded font-black">내 부서</span>}
+                                        <span className="text-[10px] font-normal ml-1">({deptMembers.length}명)</span>
+                                      </span>
+                                      <svg className={`w-3.5 h-3.5 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    </button>
+                                    {isDeptExpanded && (
+                                      <div className="mt-1.5 ml-2 space-y-1.5">
+                                        {[...deptMembers].sort((a: any, b: any) => {
+                                          if (a.instructor_id === instId) return -1;
+                                          if (b.instructor_id === instId) return 1;
+                                          
+                                          const posOrder: any = { '최고관리자': 1, '원장': 2, '부원장': 3, '실장': 4, '전임강사': 5, '파트강사': 6, '조교': 7 };
+                                          const orderA = posOrder[a.position] || 99;
+                                          const orderB = posOrder[b.position] || 99;
+                                          if (orderA !== orderB) return orderA - orderB;
+                                          
+                                          return a.name.localeCompare(b.name);
+                                        }).map((inst: any) => {
+                                          const isSelected = selectedInstIds.includes(inst.instructor_id);
+                                          const avatarUrl = getProfileImageUrl(inst.profile_image_url);
+                                          const isMe = inst.instructor_id === instId;
+
+                                          return (
+                                            <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-2.5 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-500 bg-slate-100' : 'border-slate-200 hover:border-slate-400'}`}>
+                                              <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
+                                                {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                                              </div>
+                                              <div className="relative w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[11px] shrink-0 overflow-hidden">
+                                                <span className="absolute z-0">T</span>
+                                                {avatarUrl && (
+                                                  <img 
+                                                    src={avatarUrl} 
+                                                    alt="profile" 
+                                                    className="absolute w-full h-full object-cover z-10" 
+                                                    onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                                                  />
+                                                )}
+                                              </div>
+                                              <div className="flex-1 flex flex-col">
+                                                <div className="font-bold text-slate-700 text-sm flex items-center">
+                                                  {inst.name}
+                                                  {isMe && <span className="ml-1 px-1.5 py-0.5 bg-[#002864] text-white text-[9px] rounded font-bold">나</span>}
+                                                </div>
+                                                <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '강사'}</div>
+                                              </div>
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })
+                  )}
+                </div>
+                <div className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-slate-200 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20">
+                  <button 
+                    onClick={handleStartGroupChat}
+                    disabled={selectedInstIds.length === 0}
+                    className={`w-full py-3 rounded-xl font-bold text-[14px] transition-colors ${selectedInstIds.length > 0 ? 'bg-slate-700 text-white hover:bg-slate-800' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
+                  >
+                    {selectedInstIds.length > 0 ? `${selectedInstIds.length}명과 대화 시작` : '대화 상대를 선택하세요'}
+                  </button>
+                </div>
+              </div>
+            ) : staffChatView === "list" ? (
+              <div className="flex-1 overflow-y-auto p-3 bg-slate-50">
+                {staffRooms.length === 0 ? (
+                   <div className="text-center py-10 flex flex-col items-center gap-3">
+                     <span className="text-slate-400 font-bold text-sm">참여중인 대화방이 없습니다.</span>
+                     <button onClick={showNewStaffChatView} className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-colors">+ 조직도 열기</button>
+                   </div>
                 ) : (
-                  chatRooms.map(r => {
-                    const phone = r.parent?.phone || '번호없음';
-                    const pName = `${r.parent?.student?.[0]?.name || '알 수 없는'} 학부모님`;
-                    let previewText = r.chat_message?.length > 0 ? r.chat_message[0].content : '대화 내역이 없습니다.';
+                  staffRooms.map((r, idx) => {
+                    let previewText = r.latestMsg ? r.latestMsg.content : '대화 내역이 없습니다.';
                     if (previewText.length > 18) previewText = previewText.substring(0, 18) + '...';
 
                     return (
-                      <div key={r.room_id} onClick={() => openChatRoom(r.room_id, pName)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-blue-400 transition-all flex items-center justify-between cursor-pointer mb-2 group">
-                        <div className="flex items-center gap-3 flex-1 min-w-0">
-                          <div className="w-10 h-10 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-bold shrink-0 relative">P{r.unreadCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>}</div>
-                          <div className="flex flex-col min-w-0 flex-1">
-                            <span className="font-bold text-slate-700 text-sm truncate">{pName}</span>
-                            <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${r.unreadCount > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate`}>{previewText}</span>{r.unreadCount > 0 && <div className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{r.unreadCount > 99 ? '99+' : r.unreadCount}</div>}</div>
-                          </div>
-                        </div>
-                        <button onClick={(e) => deleteChatRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
-                      </div>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#b2c7d9]">
-              <div className="bg-white/90 backdrop-blur px-3 py-2 border-b border-slate-200 flex items-center gap-2 shrink-0 shadow-sm z-10 sticky top-0">
-                <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
-                </button>
-                <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeParentName}</span><span className="text-[10px] font-bold text-emerald-600">실시간 연결됨</span></div>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
-                {chatMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10 bg-white/50 p-4 rounded-xl mx-4">대화 내역이 없습니다.</div> :
-                  chatMessages.map(msg => (
-                    <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_type === "parent" ? "justify-start" : "justify-end"}`}>
-                      {msg.sender_type === "parent" && (
-                        <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
-                      )}
-                      
-                      <div className={`flex flex-col max-w-[85%] ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
-                        {msg.sender_type === "parent" && (
-                          <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
-                        )}
-                        
-                        <div className={`flex items-end gap-1.5 ${msg.sender_type !== "parent" ? "flex-row-reverse" : "flex-row"}`}>
-                          <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type !== "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
-                            {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
-                          </div>
-                          <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
-                            {msg.sender_type !== 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
-                            <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                }
-
-                {isTyping && (
-                  <div className="flex justify-start w-full mb-1">
-                    <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
-                    <div className="flex flex-col items-start max-w-[85%]">
-                      <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
-                      <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
-                        메시지를 입력 중입니다...
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                <div ref={messagesEndRef} />
-              </div>
-              <div className="bg-white p-3 border-t flex items-end gap-2">
-                <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "instructor" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
-                <button onClick={sendMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
-              </div>
-            </div>
-          )
-        ) : (
-          staffChatView === "new" ? (
-            <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
-              <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
-                <button onClick={() => { setStaffChatView("list"); loadStaffRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                <input type="text" value={staffSearchKeyword} onChange={e => setStaffSearchKeyword(e.target.value)} placeholder="이름 또는 부서 검색" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-slate-400" />
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-3 pb-16">
-                {filteredInstructors.length === 0 ? (
-                  <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
-                ) : (
-                  Object.keys(orgTree).sort((a, b) => {
-                    const aTrim = a.trim();
-                    const bTrim = b.trim();
-                    const myT = (myTenantName || '소속 미지정').trim();
-
-                    if (aTrim === bTrim) return 0;
-                    
-                    // 🌟 1순위: 내 지점 (소속 미지정 포함)
-                    if (aTrim === myT) return -1;
-                    if (bTrim === myT) return 1;
-                    
-                    // 🌟 2순위: 본사
-                    if (aTrim === '본사') return -1;
-                    if (bTrim === '본사') return 1;
-                    
-                    return aTrim.localeCompare(bTrim);
-                  }).map(tenantName => {
-                    const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
-                    const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
-                    
-                    const myT = (myTenantName || '소속 미지정').trim();
-                    const isMyTenant = tenantName.trim() === myT;
-                    
-                    return (
-                      <div key={tenantName} className="mb-2">
-                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
-                          <span className="flex items-center">
-                            🏢 {tenantName} 
-                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] rounded font-black">내 지점</span>}
-                            <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span>
-                          </span>
-                          <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                        </button>
-                        {isTenantExpanded && (
-                          <div className="mt-1.5 ml-2 border-l-2 border-slate-200 pl-2 space-y-2">
-                            {Object.keys(orgTree[tenantName]).sort((a, b) => {
-                              const aTrim = a.trim();
-                              const bTrim = b.trim();
-                              const myD = (myDeptName || '부서 미지정').trim();
-
-                              if (aTrim === bTrim) return 0;
-                              
-                              // 🌟 내 지점 안에서만 내 부서를 최상단으로 끌어올림
-                              if (isMyTenant) {
-                                if (aTrim === myD) return -1;
-                                if (bTrim === myD) return 1;
-                              }
-                              
-                              return aTrim.localeCompare(bTrim);
-                            }).map(deptName => {
-                              const deptId = `${tenantName}_${deptName}`;
-                              const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
-                              const deptMembers = orgTree[tenantName][deptName];
-                              
-                              const myD = (myDeptName || '부서 미지정').trim();
-                              const isMyDept = isMyTenant && deptName.trim() === myD;
-                              
-                              return (
-                                <div key={deptId} className="mb-1">
-                                  <button onClick={() => toggleDept(deptId)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-[12px] flex justify-between items-center transition-colors">
-                                    <span className="flex items-center">
-                                      📁 {deptName} 
-                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] rounded font-black">내 부서</span>}
-                                      <span className="text-[10px] font-normal ml-1">({deptMembers.length}명)</span>
-                                    </span>
-                                    <svg className={`w-3.5 h-3.5 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                  </button>
-                                  {isDeptExpanded && (
-                                    <div className="mt-1.5 ml-2 space-y-1.5">
-                                      {[...deptMembers].sort((a: any, b: any) => {
-                                        // 🌟 1. 나 자신은 무조건 최상단
-                                        if (a.instructor_id === instId) return -1;
-                                        if (b.instructor_id === instId) return 1;
-                                        
-                                        // 🌟 2. 직급 순서 정렬
-                                        const posOrder: any = { '최고관리자': 1, '원장': 2, '부원장': 3, '실장': 4, '전임강사': 5, '파트강사': 6, '조교': 7 };
-                                        const orderA = posOrder[a.position] || 99;
-                                        const orderB = posOrder[b.position] || 99;
-                                        if (orderA !== orderB) return orderA - orderB;
-                                        
-                                        // 🌟 3. 마지막은 가나다순
-                                        return a.name.localeCompare(b.name);
-                                      }).map((inst: any) => {
-                                        const isSelected = selectedInstIds.includes(inst.instructor_id);
-                                        const avatarUrl = getProfileImageUrl(inst.profile_image_url);
-                                        const isMe = inst.instructor_id === instId;
-
-                                        return (
-                                          <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-2.5 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-500 bg-slate-100' : 'border-slate-200 hover:border-slate-400'}`}>
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
-                                              {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                                            </div>
-                                            <div className="relative w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[11px] shrink-0 overflow-hidden">
-                                              <span className="absolute z-0">T</span>
-                                              {avatarUrl && (
-                                                <img 
-                                                  src={avatarUrl} 
-                                                  alt="profile" 
-                                                  className="absolute w-full h-full object-cover z-10" 
-                                                  onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                                                />
-                                              )}
-                                            </div>
-                                            <div className="flex-1 flex flex-col">
-                                              <div className="font-bold text-slate-700 text-sm flex items-center">
-                                                {inst.name}
-                                                {isMe && <span className="ml-1 px-1.5 py-0.5 bg-[#002864] text-white text-[9px] rounded font-bold">나</span>}
-                                              </div>
-                                              <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '강사'}</div>
-                                            </div>
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
-                )}
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 p-3 bg-white border-t border-slate-200 shadow-[0_-5px_15px_rgba(0,0,0,0.05)] z-20">
-                <button 
-                  onClick={handleStartGroupChat}
-                  disabled={selectedInstIds.length === 0}
-                  className={`w-full py-3 rounded-xl font-bold text-[14px] transition-colors ${selectedInstIds.length > 0 ? 'bg-slate-700 text-white hover:bg-slate-800' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}
-                >
-                  {selectedInstIds.length > 0 ? `${selectedInstIds.length}명과 대화 시작` : '대화 상대를 선택하세요'}
-                </button>
-              </div>
-            </div>
-          ) : staffChatView === "list" ? (
-            <div className="flex-1 overflow-y-auto p-3 bg-slate-50">
-              {staffRooms.length === 0 ? (
-                 <div className="text-center py-10 flex flex-col items-center gap-3">
-                   <span className="text-slate-400 font-bold text-sm">참여중인 대화방이 없습니다.</span>
-                   <button onClick={showNewStaffChatView} className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-colors">+ 조직도 열기</button>
-                 </div>
-              ) : (
-                staffRooms.map((r, idx) => {
-                  let previewText = r.latestMsg ? r.latestMsg.content : '대화 내역이 없습니다.';
-                  if (previewText.length > 18) previewText = previewText.substring(0, 18) + '...';
-
-                  return (
-                    <div key={idx} onClick={() => openStaffChatRoom(r.room_id, r.displayTitle)} className="bg-white p-3 rounded-xl border shadow-sm hover:border-slate-400 flex items-center gap-3 cursor-pointer mb-2 group">
-                      <div className="relative shrink-0 w-10 h-10">
-                        <div className="relative w-full h-full bg-slate-200 rounded-full flex justify-center items-center text-slate-600 font-bold overflow-hidden">
-                          <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
-                          {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && (
-                            <img 
-                              src={r.displayAvatar} 
-                              alt="profile" 
-                              className="absolute w-full h-full object-cover z-10" 
-                              onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                            />
-                          )}
-                        </div>
-                        {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full border-2 border-white flex items-center justify-center z-20">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
-                      </div>
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <span className="font-bold text-slate-700 text-sm truncate">{r.displayTitle}</span>
-                        <div className="flex justify-between items-center mt-0.5">
-                          <span className={`text-[11.5px] ${r.unreadCount > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate`}>{previewText}</span>
-                        </div>
-                      </div>
-                      
-                      <button onClick={(e) => deleteStaffChatRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
-                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
-          ) : (
-            <div className="flex-1 flex flex-col min-h-0 relative bg-[#f1f3f5]">
-              <div className="bg-white px-3 py-2 border-b flex items-center gap-2 z-10 sticky top-0">
-                <button onClick={() => { setStaffChatView("list"); setActiveStaffRoomId(null); loadStaffRooms(); }} className="p-1.5 text-slate-500 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                <span className="font-bold text-slate-800 text-[13px]">{activeStaffRoomName}</span>
-              </div>
-              <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
-                {staffMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10">메시지가 없습니다.</div> :
-                  staffMessages.map(msg => {
-                    const unreadBy = staffRoomMembers.filter(m => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
-                    const senderInfo = staffRoomMembers.find(m => m.instructor_id === msg.sender_id)?.instructor;
-                    const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
-
-                    return (
-                      <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_id === instId ? 'justify-end' : 'justify-start'}`}>
-                        {msg.sender_id !== instId && (
-                          <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
-                            <span className="absolute z-0 font-bold">T</span>
-                            {avatarUrl && (
+                      <div key={idx} onClick={() => openStaffChatRoom(r.room_id, r.displayTitle)} className="bg-white p-3 rounded-xl border shadow-sm hover:border-slate-400 flex items-center gap-3 cursor-pointer mb-2 group">
+                        <div className="relative shrink-0 w-10 h-10">
+                          <div className="relative w-full h-full bg-slate-200 rounded-full flex justify-center items-center text-slate-600 font-bold overflow-hidden">
+                            <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
+                            {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && (
                               <img 
-                                src={avatarUrl} 
+                                src={r.displayAvatar} 
                                 alt="profile" 
                                 className="absolute w-full h-full object-cover z-10" 
                                 onError={(e) => { e.currentTarget.style.display = 'none'; }} 
                               />
                             )}
                           </div>
-                        )}
-                        <div className={`flex flex-col max-w-[85%] ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
+                          {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full border-2 border-white flex items-center justify-center z-20">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
+                        </div>
+                        <div className="flex flex-col min-w-0 flex-1">
+                          <span className="font-bold text-slate-700 text-sm truncate">{r.displayTitle}</span>
+                          <div className="flex justify-between items-center mt-0.5">
+                            <span className={`text-[11.5px] ${r.unreadCount > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate`}>{previewText}</span>
+                          </div>
+                        </div>
+                        
+                        <button onClick={(e) => deleteStaffChatRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+            ) : (
+              <div className="flex-1 flex flex-col min-h-0 relative bg-[#f1f3f5]">
+                <div className="bg-white px-3 py-2 border-b flex items-center gap-2 z-10 sticky top-0">
+                  <button onClick={() => { setStaffChatView("list"); setActiveStaffRoomId(null); loadStaffRooms(); }} className="p-1.5 text-slate-500 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
+                  <span className="font-bold text-slate-800 text-[13px]">{activeStaffRoomName}</span>
+                </div>
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+                  {staffMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10">메시지가 없습니다.</div> :
+                    staffMessages.map(msg => {
+                      const unreadBy = staffRoomMembers.filter(m => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
+                      const senderInfo = staffRoomMembers.find(m => m.instructor_id === msg.sender_id)?.instructor;
+                      const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
+
+                      return (
+                        <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_id === instId ? 'justify-end' : 'justify-start'}`}>
                           {msg.sender_id !== instId && (
-                            <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">
-                              {senderInfo?.name || '알수없음'} 
-                              <span className="font-normal text-[10px] text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
-                            </span>
-                          )}
-                          
-                          <div className={`flex items-end gap-1.5 ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row'}`}>
-                            <div className={`px-3.5 py-2 rounded-2xl shadow-sm text-[13px] ${msg.sender_id === instId ? 'bg-slate-700 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
-                              {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                            <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
+                              <span className="absolute z-0 font-bold">T</span>
+                              {avatarUrl && (
+                                <img 
+                                  src={avatarUrl} 
+                                  alt="profile" 
+                                  className="absolute w-full h-full object-cover z-10" 
+                                  onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                                />
+                              )}
                             </div>
-                            <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
-                              {msg.sender_id === instId && unreadBy > 0 && <span className="text-slate-600 font-bold mb-0.5">{unreadBy}</span>}
-                              <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                          )}
+                          <div className={`flex flex-col max-w-[85%] ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
+                            {msg.sender_id !== instId && (
+                              <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">
+                                {senderInfo?.name || '알수없음'} 
+                                <span className="font-normal text-[10px] text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
+                              </span>
+                            )}
+                            
+                            <div className={`flex items-end gap-1.5 ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row'}`}>
+                              <div className={`px-3.5 py-2 rounded-2xl shadow-sm text-[13px] ${msg.sender_id === instId ? 'bg-slate-700 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
+                                {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                              </div>
+                              <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
+                                {msg.sender_id === instId && unreadBy > 0 && <span className="text-slate-600 font-bold mb-0.5">{unreadBy}</span>}
+                                <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
-                      </div>
-                    )
-                  })
-                }
+                      )
+                    })
+                  }
 
-                {typingStaffName && (
-                  <div className="flex justify-start w-full mb-1">
-                    <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
-                      <span className="absolute z-0">T</span>
-                      {staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar && (
-                        <img 
-                          src={staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar} 
-                          alt="profile" 
-                          className="absolute w-full h-full object-cover z-10" 
-                          onError={(e) => { e.currentTarget.style.display = 'none'; }} 
-                        />
-                      )}
-                    </div>
-                    <div className="flex flex-col items-start max-w-[85%]">
-                      <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">{typingStaffName}</span>
-                      <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
-                        메시지를 입력 중입니다...
+                  {typingStaffName && (
+                    <div className="flex justify-start w-full mb-1">
+                      <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
+                        <span className="absolute z-0">T</span>
+                        {staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar && (
+                          <img 
+                            src={staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar} 
+                            alt="profile" 
+                            className="absolute w-full h-full object-cover z-10" 
+                            onError={(e) => { e.currentTarget.style.display = 'none'; }} 
+                          />
+                        )}
+                      </div>
+                      <div className="flex flex-col items-start max-w-[85%]">
+                        <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">{typingStaffName}</span>
+                        <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
+                          메시지를 입력 중입니다...
+                        </div>
                       </div>
                     </div>
-                  </div>
-                )}
+                  )}
 
-                <div ref={messagesEndRef} />
+                  <div ref={messagesEndRef} />
+                </div>
+                <div className="bg-white p-3 border-t flex items-end gap-2">
+                  <textarea 
+                    rows={1} 
+                    value={staffChatInput} 
+                    onChange={e => { 
+                      setStaffChatInput(e.target.value); 
+                      const myName = localStorage.getItem("logica_instructor_name") || "선생님";
+                      activeStaffChannelRef.current?.send({ 
+                        type: "broadcast", 
+                        event: "typing", 
+                        payload: { sender_id: instId, sender_name: myName } 
+                      }); 
+                    }} 
+                    onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendStaffMsg(); }}} 
+                    className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] resize-none focus:outline-none" 
+                    placeholder="선생님 메시지 입력..." 
+                  />
+                  <button onClick={sendStaffMsg} className="p-2.5 bg-slate-700 text-white rounded-xl hover:bg-slate-800"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
+                </div>
               </div>
-              <div className="bg-white p-3 border-t flex items-end gap-2">
-                <textarea 
-                  rows={1} 
-                  value={staffChatInput} 
-                  onChange={e => { 
-                    setStaffChatInput(e.target.value); 
-                    const myName = localStorage.getItem("logica_instructor_name") || "선생님";
-                    activeStaffChannelRef.current?.send({ 
-                      type: "broadcast", 
-                      event: "typing", 
-                      payload: { sender_id: instId, sender_name: myName } 
-                    }); 
-                  }} 
-                  onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendStaffMsg(); }}} 
-                  className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] resize-none focus:outline-none" 
-                  placeholder="선생님 메시지 입력..." 
-                />
-                <button onClick={sendStaffMsg} className="p-2.5 bg-slate-700 text-white rounded-xl hover:bg-slate-800"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
-              </div>
-            </div>
-          )
-        )}
-      </div>
+            )
+          )}
+        </div>
+      )}
     </>
   );
 }

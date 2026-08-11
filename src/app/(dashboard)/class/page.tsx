@@ -2,10 +2,16 @@
 "use client";
 
 import { useEffect, useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import ClassEditModal from "@/components/class/ClassEditModal";
 
 export default function ClassPage() {
+  const router = useRouter();
+
+  // 🌟 [보안 로직 추가] 권한 확인 상태
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   // === 데이터 상태 ===
   const [classes, setClasses] = useState<any[]>([]);
   const [instructors, setInstructors] = useState<any[]>([]);
@@ -21,43 +27,110 @@ export default function ClassPage() {
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState<any>(null);
 
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
-    // 권한 세팅
-    const instId = localStorage.getItem("logica_instructor_id") || "";
-    const name = localStorage.getItem("logica_instructor_name") || "관리자";
-    const role = localStorage.getItem("logica_instructor_role") || "";
-    const pos = localStorage.getItem("logica_instructor_position") || "";
-    const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || pos.includes("최고관리자") || pos.includes("대장") || pos.includes("원장") || pos.includes("실장");
-    setCurrentUser({ instId, name, isAdmin });
+    const checkAccess = async () => {
+      const instId = localStorage.getItem("logica_instructor_id") || "";
+      const name = localStorage.getItem("logica_instructor_name") || "관리자";
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      const isAdmin = isGodMode || role === 'MANAGER' || role === 'PRINCIPAL' || pos.includes('실장');
+      setCurrentUser({ instId, name, isAdmin });
 
-    fetchInstructors();
-    fetchClasses();
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
 
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === "logica_refresh_signal") fetchClasses();
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 반 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/class"))) {
+        alert("⛔ 반 관리 페이지에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
     };
-    window.addEventListener("storage", handleStorageChange);
-    (window as any).refreshClasses = fetchClasses;
 
-    return () => {
-      window.removeEventListener("storage", handleStorageChange);
-      delete (window as any).refreshClasses;
-    };
-  }, []);
+    checkAccess();
+  }, [router]);
+
+  // 권한이 통과되었을 때만 데이터 페칭 및 이벤트를 등록합니다.
+  useEffect(() => {
+    if (isAuthorized) {
+      fetchInstructors();
+      fetchClasses();
+
+      const handleStorageChange = (e: StorageEvent) => {
+        if (e.key === "logica_refresh_signal") fetchClasses();
+      };
+      window.addEventListener("storage", handleStorageChange);
+      (window as any).refreshClasses = fetchClasses;
+
+      return () => {
+        window.removeEventListener("storage", handleStorageChange);
+        delete (window as any).refreshClasses;
+      };
+    }
+  }, [isAuthorized]);
 
   const fetchInstructors = async () => {
-    const { data } = await supabase.from("instructor").select("instructor_id, name").eq("status", "재직");
+    const tenantId = localStorage.getItem("logica_tenant_id");
+    
+    // 🚨 [보안 강화] tenantId가 없으면 아예 조회를 차단합니다. (타 지점 데이터 유출 원천 봉쇄)
+    if (!tenantId) {
+      setInstructors([]);
+      return;
+    }
+
+    // 🌟 오직 내 지점(tenant_id)에 속한 강사만 가져오도록 강제 못박기!
+    const { data } = await supabase
+      .from("instructor")
+      .select("instructor_id, name")
+      .eq("status", "재직")
+      .eq("tenant_id", tenantId);
+      
     setInstructors(data || []);
   };
 
   const fetchClasses = async () => {
     setIsLoading(true);
-    const { data, error } = await supabase.from("class").select("*, instructor(name), enrollment(student_id), class_schedule(*)");
+    const tenantId = localStorage.getItem("logica_tenant_id");
+    
+    // 🚨 [보안 강화] tenantId가 없으면 타 지점 반이 뜨는 것을 원천 차단!
+    if (!tenantId) {
+      setClasses([]);
+      setIsLoading(false);
+      return;
+    }
+    
+    // 🌟 오직 내 지점(tenant_id)에 속한 반만 가져오도록 강제 못박기!
+    const { data, error } = await supabase
+      .from("class")
+      .select("*, instructor(name), enrollment(student_id), class_schedule(*)")
+      .eq("tenant_id", tenantId);
+
     if (!error && data) setClasses(data);
     setIsLoading(false);
   };
 
-  // 💡 [핵심 성능 개선] useEffect 제거 및 useMemo 도입으로 리렌더링 버그 차단
   const filteredClasses = useMemo(() => {
     let result = classes.filter((c) => {
       let matchLevel = false;
@@ -93,6 +166,15 @@ export default function ClassPage() {
     setIsEditModalOpen(false);
     setSelectedClass(null);
   };
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 overflow-hidden relative">

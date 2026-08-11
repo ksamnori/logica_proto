@@ -29,12 +29,30 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
 
   const submitConsultLog = async () => {
     if (!consultForm.content.trim()) return alert("상담 내용을 입력해주세요.");
+    
+    // 🌟 [추가됨] 새 상담 기록 작성 시 소속 지점 꼬리표를 챙깁니다.
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+
     setIsSaving(true);
     try {
       if (consultForm.logId) {
+        // 기존 데이터 수정 시에는 RLS가 알아서 막아주므로 tenant_id를 다시 넣을 필요가 없습니다.
         await supabase.from("consultation_log").update({ consultation_type: consultForm.type, contact_method: consultForm.method, content: consultForm.content }).eq("log_id", consultForm.logId);
       } else {
-        await supabase.from("consultation_log").insert({ student_id: studentId, instructor_id: instId, consultation_type: consultForm.type, contact_method: consultForm.method, content: consultForm.content });
+        if (!myTenantId) {
+           alert("소속 지점 정보가 없어 저장할 수 없습니다. 새로고침 해주세요.");
+           setIsSaving(false);
+           return;
+        }
+        // 🌟 [추가됨] INSERT 할 때 tenant_id 꼬리표 부착!
+        await supabase.from("consultation_log").insert({ 
+            student_id: studentId, 
+            instructor_id: instId, 
+            consultation_type: consultForm.type, 
+            contact_method: consultForm.method, 
+            content: consultForm.content,
+            tenant_id: myTenantId // 👈 꼬리표 추가!
+        });
       }
       onSuccess();
       onClose();

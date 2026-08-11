@@ -1,11 +1,18 @@
 // src/app/(dashboard)/billing/page.tsx
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 import { useBilling } from "@/hooks/useBilling";
 import BillingAutoModal from "@/components/billing/BillingAutoModal";
 
 export default function BillingPage() {
+  const router = useRouter();
+
+  // 🌟 [보안 로직 추가] 권한 및 소속 지점 확인 상태 (1급 기밀 페이지 철통 보안)
+  const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+
   // 💡 [변경됨] 기본 뷰 모드를 'kanban'에서 'list'로 변경
   const [viewMode, setViewMode] = useState<"list" | "kanban">("list");
   const [isAutoOpen, setIsAutoOpen] = useState(false);
@@ -15,6 +22,46 @@ export default function BillingPage() {
   const [discAmount, setDiscAmount] = useState<number | "">("");
 
   const billing = useBilling();
+
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
+  useEffect(() => {
+    const checkAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      
+      if (isGodMode) {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!tId || !role) {
+         alert("권한 정보가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      // 수납/청구 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
+      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/billing"))) {
+        alert("⛔ 수납/청구 페이지(매출 정보)에 접근할 권한이 없습니다.");
+        router.replace("/home");
+      } else {
+        setIsAuthorized(true);
+      }
+    };
+
+    checkAccess();
+  }, [router]);
 
   const toggleItem = (key: string) => billing.setSelectedKeys(prev => prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]);
   const toggleColumnAll = (kanbanStatus: string, checked: boolean) => {
@@ -29,6 +76,15 @@ export default function BillingPage() {
     { id: '발송됨', title: '발송된 청구서', color: 'amber', items: billing.billingData.filter(d => d.kanban_status === "발송됨"), actions: [{ label: '납부 처리', code: 'pay' }, { label: '미납 처리', code: 'mark_unpaid' }, { label: '발행 취소', code: 'cancel_issue', isDanger: true }] },
     { id: '납부완료', title: '납부완료 내역', color: 'emerald', items: billing.billingData.filter(d => d.kanban_status === "납부완료"), actions: [{ label: '완전 삭제 (DB)', code: 'delete', isDanger: true }] },
   ];
+
+  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 원천 차단
+  if (isAuthorized === null) {
+    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  }
+  
+  if (isAuthorized === false) {
+    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+  }
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-6 overflow-hidden relative">
@@ -187,7 +243,7 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* 5. 자동 발송 예약 모달 (독립 컴포넌트) */}
+      {/* 5. 자동 발송 예약 모달 */}
       <BillingAutoModal isOpen={isAutoOpen} onClose={() => setIsAutoOpen(false)} classes={billing.classes} students={billing.students} />
     </div>
   );

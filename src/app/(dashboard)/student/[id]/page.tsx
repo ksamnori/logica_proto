@@ -5,7 +5,6 @@ import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-// 💡 분리된 모달 컴포넌트 임포트
 import StudentEditModal from "@/components/student/StudentEditModal";
 import ConsultModal from "@/components/student/ConsultModal";
 import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
@@ -17,15 +16,12 @@ export default function StudentDetailPage() {
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
 
-  // === 탭 관리 ===
   const [activeTab, setActiveTab] = useState<"info" | "consult" | "attend" | "hw" | "exam" | "clinic" | "billing">("info");
 
-  // === 핵심 데이터 상태 ===
   const [student, setStudent] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
   const [allClasses, setAllClasses] = useState<any[]>([]);
   
-  // === 각 탭별 리스트 데이터 ===
   const [consultLogs, setConsultLogs] = useState<any[]>([]);
   const [attendances, setAttendances] = useState<any[]>([]);
   const [hwList, setHwList] = useState<any[]>([]);
@@ -33,7 +29,6 @@ export default function StudentDetailPage() {
   const [clinicList, setClinicList] = useState<any[]>([]);
   const [billingList, setBillingList] = useState<any[]>([]);
 
-  // === 모달 상태 ===
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
@@ -42,11 +37,42 @@ export default function StudentDetailPage() {
   const [selectedConsultLog, setSelectedConsultLog] = useState<any>(null);
   const [payFormInit, setPayFormInit] = useState<any>(null);
 
-  // === 폼 상태 (출결/달력) ===
   const [calYear, setCalYear] = useState(new Date().getFullYear());
   const [calMonth, setCalMonth] = useState(new Date().getMonth());
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [attendForm, setAttendForm] = useState({ id: "", status: "출석", lateMin: 0, remark: "" });
+
+  // 🌟 [핵심 변경] 사용자가 가진 세부 동작 권한을 저장할 상태 추가
+  const [allowedActions, setAllowedActions] = useState<string[]>([]);
+
+  // 🌟 권한 로드 함수
+  const loadPermissions = async () => {
+    const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
+    const pos = localStorage.getItem("logica_instructor_position") || "";
+    const tId = localStorage.getItem("logica_tenant_id");
+
+    const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자');
+    const isPrin = role === 'ADMIN' || pos.includes('원장');
+
+    if (isSA || isPrin) {
+      // 최고관리자, 원장은 무조건 모든 권한 프리패스
+      setAllowedActions(["action_view_consult", "action_view_exam", "action_view_clinic", "action_edit_attend"]);
+      return;
+    }
+
+    if (tId) {
+      const { data } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .maybeSingle();
+
+      if (data && data.allowed_menus) {
+        setAllowedActions(data.allowed_menus);
+      }
+    }
+  };
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -58,21 +84,18 @@ export default function StudentDetailPage() {
       setCurrentUser({ instId, name, isAdmin });
     }
     if (studentId) {
+      loadPermissions(); // 🌟 데이터 부를 때 내 권한도 같이 세팅!
       loadInitialData();
       loadClasses();
     }
   }, [studentId]);
 
-  // 탭 변경 시 데이터 로드
   useEffect(() => {
     if (activeTab === "consult") loadConsultLogs();
     if (activeTab === "attend") loadAttendance();
     if (activeTab === "billing") loadBillings();
   }, [activeTab, calYear, calMonth]);
 
-  // ==========================================
-  // [1] 데이터 로드
-  // ==========================================
   const loadInitialData = async () => {
     try {
       const { data: stuData } = await supabase.from("student").select("*, parent(*)").eq("student_id", studentId).single();
@@ -98,8 +121,46 @@ export default function StudentDetailPage() {
   };
 
   const loadConsultLogs = async () => {
-    const { data } = await supabase.from("consultation_log").select("*, instructor(name)").eq("student_id", studentId).order("created_at", { ascending: false }).limit(200);
-    setConsultLogs(data || []);
+    try {
+      const { data: regularLogs } = await supabase
+        .from("consultation_log")
+        .select("*, instructor(name)")
+        .eq("student_id", studentId)
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      const { data: admissionLogs } = await supabase
+        .from("admission_application")
+        .select("application_id, counseling_memo, test_result, created_at, admission_session(title)")
+        .eq("student_id", studentId)
+        .not("counseling_memo", "is", null);
+
+      const formattedAdmissionLogs = (admissionLogs || [])
+        .filter((app: any) => app.counseling_memo && app.counseling_memo.trim() !== "")
+        .map((app: any) => {
+          const sessionTitle = Array.isArray(app.admission_session) 
+            ? app.admission_session[0]?.title 
+            : app.admission_session?.title;
+
+          return {
+            log_id: `admission_${app.application_id}`,
+            consultation_type: "입학 상담",
+            contact_method: "방문/테스트",
+            content: `[테스트 내역: ${sessionTitle || '미상'}]\n[테스트 결과: ${app.test_result}]\n\n${app.counseling_memo}`,
+            created_at: app.created_at,
+            instructor: { name: "입학 담당" },
+            is_admission: true
+          };
+        });
+
+      const combinedLogs = [...(regularLogs || []), ...formattedAdmissionLogs].sort((a, b) => {
+        return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+      });
+
+      setConsultLogs(combinedLogs);
+    } catch (error) {
+      console.error("상담 내역 로딩 에러:", error);
+    }
   };
 
   const loadAttendance = async () => {
@@ -146,9 +207,6 @@ export default function StudentDetailPage() {
     loadConsultLogs();
   };
 
-  // ==========================================
-  // [4] 출결 달력 및 폼 로직
-  // ==========================================
   const handleDateClick = (dateStr: string) => {
     setSelectedDate(dateStr);
     const record = attendances.find(a => a.attendance_date === dateStr);
@@ -180,9 +238,6 @@ export default function StudentDetailPage() {
     } catch (e) { alert("저장 실패"); }
   };
 
-  // ==========================================
-  // 렌더링 헬퍼 함수들
-  // ==========================================
   const getEnrolledClassNames = () => {
     return enrollments.length > 0 ? enrollments.map(e => e.class?.name).join(", ") : "미배정";
   };
@@ -221,11 +276,21 @@ export default function StudentDetailPage() {
 
   if (!student) return <div className="p-10 text-center font-bold text-slate-500">데이터를 불러오는 중입니다...</div>;
 
+  // 🌟 [핵심 변경] 권한이 있는 경우에만 탭 배열에 포함되도록 동적 구성
+  const TABS = [
+    { id: 'info', name: '학생 상세 정보 및 수강반' },
+    ...(allowedActions.includes('action_view_consult') ? [{ id: 'consult', name: '상담 기록' }] : []),
+    { id: 'attend', name: '출결 기록' },
+    { id: 'hw', name: '과제 현황' },
+    ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '시험 성적' }] : []),
+    ...(allowedActions.includes('action_view_clinic') ? [{ id: 'clinic', name: '클리닉 분석' }] : []),
+    { id: 'billing', name: '수납/청구' }
+  ];
+
   return (
-    <div className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full relative overflow-y-auto custom-scroll p-4 sm:p-8">
+    <div className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full relative overflow-y-auto custom-scroll p-4 pt-20 sm:p-8 sm:pt-24">
       <div className="max-w-[1200px] w-full mx-auto space-y-6 pb-20">
         
-        {/* 상단 프로필 헤더 */}
         <div className="flex justify-between items-start bg-white p-8 rounded-3xl border border-slate-200 shadow-sm relative overflow-hidden shrink-0">
           <div className="absolute top-0 right-0 w-64 h-full bg-gradient-to-l from-blue-50 to-transparent"></div>
           <div className="flex items-center gap-6 relative z-10">
@@ -247,20 +312,17 @@ export default function StudentDetailPage() {
             </div>
           </div>
           <div className="relative z-10 flex gap-3">
-            <button onClick={() => setIsEditModalOpen(true)} className="px-5 py-2.5 bg-white border border-slate-300 text-slate-600 font-bold rounded-xl shadow-sm hover:bg-slate-50 transition-colors flex items-center gap-2 text-sm">
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
+            <button onClick={() => setIsEditModalOpen(true)} className="px-5 py-2.5 bg-[#002864] text-white font-bold rounded-xl shadow-md hover:bg-blue-900 transition-colors flex items-center gap-2 text-sm">
+              <svg className="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
               정보 수정
             </button>
           </div>
         </div>
 
-        {/* 탭 네비게이션 & 콘텐츠 컨테이너 */}
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
           <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50/50 px-2 pt-2 custom-scroll shrink-0">
-            {[
-              { id: 'info', name: '학생 상세 정보 및 수강반' }, { id: 'consult', name: '상담 기록' }, { id: 'attend', name: '출결 기록' },
-              { id: 'hw', name: '과제 현황' }, { id: 'exam', name: '시험 성적' }, { id: 'clinic', name: '클리닉 분석' }, { id: 'billing', name: '수납/청구' }
-            ].map(tab => (
+            {/* 🌟 권한에 따라 필터링된 탭만 렌더링 */}
+            {TABS.map(tab => (
               <button 
                 key={tab.id} onClick={() => setActiveTab(tab.id as any)}
                 className={`px-6 py-3.5 font-bold text-sm whitespace-nowrap border-b-2 transition-colors ${activeTab === tab.id ? 'text-[#002864] border-[#002864]' : 'text-slate-500 border-transparent hover:text-slate-800 hover:bg-slate-100'}`}
@@ -272,18 +334,19 @@ export default function StudentDetailPage() {
 
           <div className="p-8 bg-white flex-1 relative overflow-hidden">
             
-            {/* 탭 1: 상세 정보 */}
             {activeTab === "info" && (
               <div className="space-y-8 animate-[fadeIn_0.3s_ease-out]">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2"><span className="w-1.5 h-4 bg-[#0ea5e9] rounded-full"></span>학생 기본 정보</h3>
                   <div className="grid grid-cols-12 gap-6 bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                    <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={student.name} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
-                    <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">상태</label><input type="text" value={student.status} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={student.name} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">성별</label><input type="text" value={student.gender || "미입력"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-blue-700 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">상태</label><input type="text" value={student.status} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
                     <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">학교</label><input type="text" value={student.school || ""} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
                     <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">학년</label><input type="text" value={student.grade || ""} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
-                    <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={student.phone || ""} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
-                    <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">배정 클래스</label><input type="text" value={getEnrolledClassNames()} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none truncate" /></div>
+                    
+                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={student.phone || ""} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-8"><label className="block text-xs font-bold text-slate-500 mb-1">배정 클래스</label><input type="text" value={getEnrolledClassNames()} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none truncate" /></div>
                   </div>
                 </div>
                 <div>
@@ -297,7 +360,6 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-            {/* 탭 2: 상담 기록 */}
             {activeTab === "consult" && (
               <div className="space-y-4 animate-[fadeIn_0.3s_ease-out] h-full flex flex-col">
                 <div className="flex justify-between items-center mb-2 border-b border-slate-100 pb-4 shrink-0">
@@ -309,23 +371,27 @@ export default function StudentDetailPage() {
                 <div className="flex-1 overflow-y-auto custom-scroll space-y-4 pb-10">
                   {consultLogs.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold border border-dashed border-slate-300 rounded-xl bg-slate-50">등록된 상담 기록이 없습니다.</div> : 
                     consultLogs.map((log, idx) => (
-                      <div key={log.log_id || log.id || idx} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden group">
-                        <div className="absolute top-0 left-0 w-1.5 h-full bg-indigo-400"></div>
+                      <div key={log.log_id || log.id || idx} className={`bg-white p-5 rounded-2xl border shadow-sm relative overflow-hidden group ${log.is_admission ? 'border-amber-200' : 'border-slate-200'}`}>
+                        <div className={`absolute top-0 left-0 w-1.5 h-full ${log.is_admission ? 'bg-amber-400' : 'bg-indigo-400'}`}></div>
                         <div className="flex justify-between items-start mb-3 pl-2">
                           <div className="flex items-center gap-3">
-                            <span className={`text-xs font-black px-2.5 py-1 rounded border ${log.contact_method === '채널톡' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-indigo-50 text-indigo-600 border-indigo-100'}`}>{log.contact_method}</span>
+                            <span className={`text-xs font-black px-2.5 py-1 rounded border ${log.is_admission ? 'bg-amber-100 text-amber-700 border-amber-200' : (log.contact_method === '채널톡' ? 'bg-yellow-100 text-yellow-700 border-yellow-200' : 'bg-indigo-50 text-indigo-600 border-indigo-100')}`}>{log.contact_method}</span>
                             <span className="font-bold text-slate-800">{log.consultation_type}</span>
                           </div>
                           <div className="flex items-center gap-2">
                             <span className="text-xs font-bold text-slate-400">{new Date(log.created_at).toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute:'2-digit' })}</span>
                             <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 ml-2">
-                              <button onClick={() => { setSelectedConsultLog(log); setIsConsultModalOpen(true); }} className="text-xs text-slate-400 hover:text-blue-600 font-bold px-2 py-1 rounded bg-slate-50 hover:bg-blue-50 transition-colors">수정</button>
-                              <button onClick={() => deleteConsultLog(log.log_id)} className="text-xs text-slate-400 hover:text-rose-600 font-bold px-2 py-1 rounded bg-slate-50 hover:bg-rose-50 transition-colors">삭제</button>
+                              {!log.is_admission && (
+                                <>
+                                  <button onClick={() => { setSelectedConsultLog(log); setIsConsultModalOpen(true); }} className="text-xs text-slate-400 hover:text-blue-600 font-bold px-2 py-1 rounded bg-slate-50 hover:bg-blue-50 transition-colors">수정</button>
+                                  <button onClick={() => deleteConsultLog(log.log_id)} className="text-xs text-slate-400 hover:text-rose-600 font-bold px-2 py-1 rounded bg-slate-50 hover:bg-rose-50 transition-colors">삭제</button>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
                         <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line mb-3 pl-2">{log.content}</p>
-                        <div className="text-[11px] font-bold text-slate-400 text-right">기록자: {log.instructor?.name || '알 수 없음'} 선생님</div>
+                        <div className="text-[11px] font-bold text-slate-400 text-right">기록자: {log.instructor?.name || '알 수 없음'} {log.is_admission ? '' : '선생님'}</div>
                       </div>
                     ))
                   }
@@ -333,7 +399,6 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-            {/* 탭 3: 출결 기록 */}
             {activeTab === "attend" && (
               <div className="grid grid-cols-12 gap-8 h-full animate-[fadeIn_0.3s_ease-out]">
                 <div className="col-span-12 lg:col-span-7 flex flex-col">
@@ -366,27 +431,41 @@ export default function StudentDetailPage() {
                       <div className="flex flex-col h-full">
                         <h3 className="font-extrabold text-slate-700 text-lg mb-6 pb-4 border-b border-slate-200">{selectedDate.split('-')[0]}년 {parseInt(selectedDate.split('-')[1])}월 {parseInt(selectedDate.split('-')[2])}일 출결</h3>
                         <div className="space-y-5 flex-1">
-                          <div>
-                            <label className="block text-sm font-bold text-slate-600 mb-2">출결 상태</label>
-                            <select value={attendForm.status} onChange={e => setAttendForm({...attendForm, status: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 font-bold text-slate-800 focus:border-[#002864] focus:outline-none focus:ring-2 focus:ring-blue-100">
-                              <option value="출석">🟢 출석</option><option value="지각">🟡 지각</option><option value="조퇴">🟠 조퇴</option><option value="결석">🔴 결석</option>
-                            </select>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-bold text-slate-600 mb-2">지각/조퇴 시간 (분)</label>
-                            <div className="flex items-center gap-2">
-                              <input type="number" min="0" value={attendForm.lateMin} onChange={e => setAttendForm({...attendForm, lateMin: parseInt(e.target.value)||0})} className="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 font-bold text-slate-800 focus:border-[#002864] focus:outline-none" />
-                              <span className="font-bold text-slate-500">분</span>
+                          
+                          {/* 🌟 [핵심 변경] 권한이 있으면 수정 폼을, 없으면 안내 메시지만 보여줍니다. */}
+                          {allowedActions.includes('action_edit_attend') ? (
+                            <>
+                              <div>
+                                <label className="block text-sm font-bold text-slate-600 mb-2">출결 상태</label>
+                                <select value={attendForm.status} onChange={e => setAttendForm({...attendForm, status: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 font-bold text-slate-800 focus:border-[#002864] focus:outline-none focus:ring-2 focus:ring-blue-100">
+                                  <option value="출석">🟢 출석</option><option value="지각">🟡 지각</option><option value="조퇴">🟠 조퇴</option><option value="결석">🔴 결석</option>
+                                </select>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-bold text-slate-600 mb-2">지각/조퇴 시간 (분)</label>
+                                <div className="flex items-center gap-2">
+                                  <input type="number" min="0" value={attendForm.lateMin} onChange={e => setAttendForm({...attendForm, lateMin: parseInt(e.target.value)||0})} className="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 font-bold text-slate-800 focus:border-[#002864] focus:outline-none" />
+                                  <span className="font-bold text-slate-500">분</span>
+                                </div>
+                              </div>
+                              <div>
+                                <label className="block text-sm font-bold text-slate-600 mb-2">비고 (선생님 메모)</label>
+                                <textarea rows={3} value={attendForm.remark} onChange={e => setAttendForm({...attendForm, remark: e.target.value})} placeholder="예: 병원 진료 후 늦게 등원함" className="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 text-sm focus:border-[#002864] focus:outline-none resize-none"></textarea>
+                              </div>
+                            </>
+                          ) : (
+                            <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-sm text-center pt-10">
+                              <svg className="w-10 h-10 text-slate-300 mb-3 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"></path></svg>
+                              출결 기록을 수정할 권한이 없습니다.<br/>열람만 가능합니다.
                             </div>
-                          </div>
-                          <div>
-                            <label className="block text-sm font-bold text-slate-600 mb-2">비고 (선생님 메모)</label>
-                            <textarea rows={3} value={attendForm.remark} onChange={e => setAttendForm({...attendForm, remark: e.target.value})} placeholder="예: 병원 진료 후 늦게 등원함" className="w-full bg-white border border-slate-300 rounded-lg px-4 py-3 text-sm focus:border-[#002864] focus:outline-none resize-none"></textarea>
-                          </div>
+                          )}
                         </div>
-                        <div className="mt-4 shrink-0">
-                          <button onClick={saveAttendance} className="w-full py-3.5 bg-[#002864] text-white font-bold rounded-xl shadow-md hover:bg-blue-900 transition-colors text-sm">기록 저장하기</button>
-                        </div>
+                        
+                        {allowedActions.includes('action_edit_attend') && (
+                          <div className="mt-4 shrink-0">
+                            <button onClick={saveAttendance} className="w-full py-3.5 bg-[#002864] text-white font-bold rounded-xl shadow-md hover:bg-blue-900 transition-colors text-sm">기록 저장하기</button>
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-sm text-center pt-20">
@@ -399,7 +478,6 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-            {/* 탭 4: 과제 현황 */}
             {activeTab === "hw" && (
               <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
                 <h3 className="font-extrabold text-slate-700 mb-4">제출 및 채점 현황</h3>
@@ -427,7 +505,6 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-            {/* 탭 5: 시험 성적 */}
             {activeTab === "exam" && (
               <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
                 <h3 className="font-extrabold text-slate-700 mb-4">테스트 결과</h3>
@@ -447,7 +524,6 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-            {/* 탭 6: 클리닉 분석 */}
             {activeTab === "clinic" && (
               <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
                 <h3 className="font-extrabold text-slate-700 mb-4">누적 오답 및 유사 문제 배부 내역</h3>
@@ -467,7 +543,6 @@ export default function StudentDetailPage() {
               </div>
             )}
 
-            {/* 탭 7: 수납/청구 */}
             {activeTab === "billing" && (() => {
               let total = 0, paid = 0, unpaid = 0;
               billingList.forEach(b => {
@@ -528,7 +603,6 @@ export default function StudentDetailPage() {
           </div>
         </div>
         
-        {/* 위험: 삭제 버튼 (권한 방어 완료) */}
         {currentUser.isAdmin && (
           <div className="flex justify-end pt-4">
             <button onClick={deleteStudentData} className="text-xs font-bold text-rose-400 hover:text-rose-600 underline px-2 py-1">학생 데이터 완전 삭제 (위험)</button>
@@ -536,10 +610,6 @@ export default function StudentDetailPage() {
         )}
       </div>
 
-      {/* ========================================== */}
-      {/* 분리된 모달 컴포넌트 호출 */}
-      {/* ========================================== */}
-      
       <StudentEditModal 
         isOpen={isEditModalOpen} 
         studentId={studentId} 
