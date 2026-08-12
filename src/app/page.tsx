@@ -8,11 +8,14 @@ import { supabase } from "@/lib/supabase";
 export default function LoginPage() {
   const router = useRouter(); 
 
+  // 🌟 [수정] 다시 loginId로 되돌려서 전화번호/아이디 입력을 받습니다.
   const [loginId, setLoginId] = useState("");
   const [loginPw, setLoginPw] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   
   const [isPwModalOpen, setIsPwModalOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [isResetting, setIsResetting] = useState(false);
   
   const [showAdminChoice, setShowAdminChoice] = useState(false);
   const [adminProfileName, setAdminProfileName] = useState("");
@@ -30,6 +33,11 @@ export default function LoginPage() {
   
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!loginId) {
+      alert("아이디 또는 이메일을 입력해주세요.");
+      return;
+    }
+    
     setIsLoading(true);
 
     try {
@@ -39,6 +47,7 @@ export default function LoginPage() {
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       document.cookie = "logica_tenant_id=; path=/; max-age=0;"; 
 
+      // 🌟 [하이브리드 로직] @가 없으면 예전처럼 @logica.com을 붙이고, 있으면 진짜 이메일로 씁니다!
       const targetEmail = loginId.includes('@') ? loginId : `${loginId}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -47,7 +56,7 @@ export default function LoginPage() {
       });
 
       if (authError) {
-        alert("아이디 또는 비밀번호가 틀렸습니다.");
+        alert("계정 정보 또는 비밀번호가 틀렸습니다.");
         setIsLoading(false);
         return;
       }
@@ -80,7 +89,7 @@ export default function LoginPage() {
       
       const isSuperAdmin = role === 'SUPER_ADMIN' || position.includes('최고관리자') || position.includes('대장');
       const isPrincipal = ['ADMIN', 'VICE_ADMIN', 'MANAGER'].includes(role) || 
-                          ['원장', '부원장', '실장'].some(p => position.includes(p));
+                          ['원장', '부원장', '실장'].some((p: string) => position.includes(p));
 
       let isHQ = false;
       const HQ_TENANT_ID = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc';
@@ -158,6 +167,7 @@ export default function LoginPage() {
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       document.cookie = "logica_tenant_id=; path=/; max-age=0;"; 
 
+      // 🌟 [하이브리드 로직] 클리닉 관리 로그인에도 똑같이 적용!
       const targetEmail = loginId.includes('@') ? loginId : `${loginId}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -166,7 +176,7 @@ export default function LoginPage() {
       });
 
       if (authError) {
-        alert("아이디 또는 비밀번호가 틀렸습니다.");
+        alert("계정 정보 또는 비밀번호가 틀렸습니다.");
         setIsLoading(false);
         return;
       }
@@ -237,7 +247,8 @@ export default function LoginPage() {
                 String(instructorData.position).includes('최고관리자') ||
                 String(instructorData.position).includes('원장') ||
                 String(instructorData.position).includes('부원장') ||
-                String(instructorData.position).includes('실장');
+                String(instructorData.position).includes('실장') ||
+                String(instructorData.position).includes('대장'); 
 
       if (isAdmin) {
         localStorage.setItem("logica_instructor_id", instructorData.instructor_id);
@@ -271,6 +282,31 @@ export default function LoginPage() {
     }
   };
 
+  const handlePasswordResetRequest = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail || !resetEmail.includes('@')) {
+      alert("정확한 이메일 주소를 입력해주세요.");
+      return;
+    }
+    
+    setIsResetting(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail, {
+        redirectTo: `${window.location.origin}/update-password`, 
+      });
+
+      if (error) throw error;
+      
+      alert(`✉️ [${resetEmail}]로 비밀번호 재설정 링크가 발송되었습니다.\n이메일함을 확인해주세요!`);
+      setIsPwModalOpen(false);
+      setResetEmail("");
+    } catch (error: any) {
+      alert("이메일 발송에 실패했습니다. 가입된 이메일이 맞는지 확인해주세요.\n(에러: " + error.message + ")");
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center relative bg-slate-50">
       <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl border border-slate-200 z-10">
@@ -293,7 +329,8 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">로그인 ID (연락처)</label>
+            {/* 🌟 [수정] 안내 문구를 아이디 또는 이메일로 변경 */}
+            <label className="block text-sm font-bold text-slate-700 mb-1">로그인 ID 또는 이메일</label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -302,12 +339,12 @@ export default function LoginPage() {
               </span>
               <input
                 type="text"
-                maxLength={40}
+                maxLength={60}
                 required
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] font-medium"
-                placeholder="아이디 또는 이메일 입력"
+                placeholder="전화번호, ID, 이메일"
               />
             </div>
           </div>
@@ -452,30 +489,39 @@ export default function LoginPage() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-              <h2 className="text-lg font-black text-slate-800 flex items-center gap-2"><span>🔑</span> 비밀번호 찾기 안내</h2>
+              <h2 className="text-lg font-black text-slate-800 flex items-center gap-2"><span>🔑</span> 비밀번호 초기화</h2>
               <button onClick={() => setIsPwModalOpen(false)} className="text-slate-400 hover:text-rose-400 text-2xl font-bold leading-none transition-colors">&times;</button>
             </div>
             
-            <div className="p-6 bg-white flex flex-col items-center text-center space-y-4">
-              <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mb-2">
-                <span className="text-3xl">🛡️</span>
+            <form onSubmit={handlePasswordResetRequest} className="p-6 bg-white flex flex-col space-y-4">
+              <div className="text-center mb-2">
+                <div className="w-14 h-14 bg-indigo-50 text-indigo-500 rounded-full flex items-center justify-center mb-3 mx-auto text-2xl">
+                  ✉️
+                </div>
+                <h3 className="font-bold text-slate-700 text-[14px] leading-relaxed">
+                  가입하신 이메일 계정을 입력하시면<br/>비밀번호 재설정 링크를 보내드립니다.
+                </h3>
               </div>
-              <h3 className="font-bold text-slate-700 text-[15px] leading-relaxed">
-                현재 시스템 보안 정책상<br/>이메일을 통한 비밀번호 재설정이<br/>제한되어 있습니다.
-              </h3>
-              <p className="text-[12px] font-medium text-slate-500 bg-slate-50 p-4 rounded-xl border border-slate-100 w-full leading-relaxed break-keep">
-                비밀번호를 분실하신 경우, 당황하지 마시고 <b className="text-rose-500">학원 원장님(최고 관리자)</b>께 문의해 주시면 즉시 안전하게 비밀번호를 초기화 해드립니다.
-              </p>
-            </div>
+              
+              <div>
+                <input
+                  type="email"
+                  required
+                  value={resetEmail}
+                  onChange={(e) => setResetEmail(e.target.value)}
+                  className="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 font-medium text-sm"
+                  placeholder="가입된 이메일 계정 입력"
+                />
+              </div>
 
-            <div className="p-4 bg-slate-50 border-t border-slate-100 shrink-0">
               <button 
-                onClick={() => setIsPwModalOpen(false)} 
-                className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold py-3 rounded-xl shadow-sm transition-colors text-sm"
+                type="submit"
+                disabled={isResetting}
+                className="w-full bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white font-bold py-3.5 rounded-xl shadow-sm transition-colors text-sm mt-2"
               >
-                확인했습니다
+                {isResetting ? "메일 발송 중... ⏳" : "재설정 링크 받기"}
               </button>
-            </div>
+            </form>
           </div>
         </div>
       )}

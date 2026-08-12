@@ -53,12 +53,12 @@ export default function AdminDashboardPage() {
   const [sStatus, setSStatus] = useState("입학테스트");
   const [isStudentSubmitting, setIsStudentSubmitting] = useState(false);
 
+  // 🌟 [수정] 불필요한 iLoginId 삭제 (이메일로 통합)
   const [iTenantId, setITenantId] = useState("");
-  const [iLoginId, setILoginId] = useState("");
+  const [iEmail, setIEmail] = useState("");
   const [iPw, setIPw] = useState("");
   const [iName, setIName] = useState("");
   const [iPosition, setIPosition] = useState("전임강사"); 
-  const [iEmail, setIEmail] = useState("");
   const [iPhone, setIPhone] = useState("");
   const [isInstructorSubmitting, setIsInstructorSubmitting] = useState(false);
 
@@ -73,7 +73,6 @@ export default function AdminDashboardPage() {
 
       if (!instId) {
         const { data: { session } } = await supabase.auth.getSession();
-        // 🌟 [핵심 변경] 이메일 파싱 방식을 버리고, UID(session.user.id)로 직접 정확하게 찾습니다!
         if (session?.user?.id) {
           const { data: inst } = await supabase
             .from('instructor')
@@ -141,7 +140,6 @@ export default function AdminDashboardPage() {
     }
   }, [activeTab]);
 
-  // 🌟 [타입 에러 해결] setState이든, 커스텀 함수든 모두 문자열을 받는 함수로 통일하여 에러 해결
   const handlePhoneChange = (setter: (val: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value.replace(/[^0-9]/g, '');
     let res = '';
@@ -248,7 +246,8 @@ export default function AdminDashboardPage() {
 
   const registerInstructor = async () => {
     if (!iTenantId) return alert("소속 지점을 선택해주세요!");
-    if (!iLoginId || !iPw || !iName) return alert("로그인 ID, 비밀번호, 이름은 필수입니다!");
+    if (!iEmail || !iPw || !iName) return alert("이메일, 비밀번호, 이름은 필수입니다!");
+    if (!iEmail.includes('@')) return alert("올바른 이메일 형식을 입력해주세요.");
     if (iPw.length < 6) return alert("비밀번호는 최소 6자리 이상이어야 합니다.");
 
     setIsInstructorSubmitting(true);
@@ -263,16 +262,15 @@ export default function AdminDashboardPage() {
     else if (iPosition === '테스트/체험') assignedRole = 'GUEST';
 
     try {
-      const fakeEmail = `${iLoginId}@logica.com`;
-      
+      // 🌟 [핵심 변경] 진짜 이메일로 Auth 계정을 생성합니다.
       const { data: authData, error: authError } = await supabaseAnon.auth.signUp({
-        email: fakeEmail,
+        email: iEmail,
         password: iPw,
       });
 
       if (authError) {
         if (authError.message.includes('User already registered')) {
-          alert("❌ 이미 사용 중인 로그인 ID입니다. 다른 ID를 입력해 주세요.");
+          alert("❌ 이미 사용 중인 이메일입니다. 다른 이메일을 입력해 주세요.");
         } else {
           alert(`❌ Auth 계정 생성 실패: ${authError.message}`);
         }
@@ -287,28 +285,31 @@ export default function AdminDashboardPage() {
          return;
       }
 
+      // DB 호환성을 위해 이메일의 @ 앞부분을 login_id에 임시 보관하되, 메인 인증은 이메일로 동작합니다.
+      const fallbackLoginId = iEmail.split('@')[0];
+
       const { error: dbError } = await supabase.from('instructor').insert([{
         instructor_id: newUserId,
-        login_id: iLoginId,
+        login_id: fallbackLoginId, 
         name: iName,
         position: iPosition,
         role: assignedRole,
-        email: iEmail || null,
+        email: iEmail,
         phone: iPhone || null,
         status: '재직',
         tenant_id: iTenantId 
       }]);
 
       if (dbError) {
-        if (dbError.code === '23505') alert("❌ DB 에러: 이미 존재하는 ID 또는 이메일입니다.");
+        if (dbError.code === '23505') alert("❌ DB 에러: 이미 존재하는 계정 정보입니다.");
         else alert(`❌ DB 등록 에러: ${dbError.message}`);
         setIsInstructorSubmitting(false);
         return;
       }
       
-      alert(`🎉 [${iName}] 선생님(${iPosition}) 등록 성공!\n이제 아이디(${fakeEmail})와 설정하신 비밀번호로 로그인 가능합니다.`);
+      alert(`🎉 [${iName}] 선생님(${iPosition}) 등록 성공!\n이제 가입하신 이메일(${iEmail})과 설정하신 비밀번호로 로그인 가능합니다.`);
       
-      setILoginId(""); setIPw(""); setIName(""); setIEmail(""); setIPhone("");
+      setIEmail(""); setIPw(""); setIName(""); setIPhone("");
     } catch (error) {
       console.error(error);
       alert("등록 중 알 수 없는 에러가 발생했습니다.");
@@ -542,7 +543,8 @@ export default function AdminDashboardPage() {
                     </select>
                   </div>
 
-                  <div><label className="block text-sm font-bold text-slate-700 mb-1">로그인 ID (영어/숫자) *</label><input type="text" value={iLoginId} onChange={(e) => setILoginId(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="예: admin123" /></div>
+                  {/* 🌟 [핵심 변경] 로그인 ID 입력칸을 이메일로 변경 완료 */}
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">로그인 이메일 계정 *</label><input type="email" value={iEmail} onChange={(e) => setIEmail(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="email@example.com" /></div>
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">초기 비밀번호 (6자리 이상) *</label><input type="password" value={iPw} onChange={(e) => setIPw(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="비밀번호 입력" /></div>
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">이름 *</label><input type="text" value={iName} onChange={(e) => setIName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="예: 김로지" /></div>
                   <div>
@@ -557,11 +559,10 @@ export default function AdminDashboardPage() {
                       <option value="테스트/체험">테스트/체험 (GUEST)</option>
                     </select>
                   </div>
-                  <div><label className="block text-sm font-bold text-slate-700 mb-1">실제 이메일 (선택)</label><input type="email" value={iEmail} onChange={(e) => setIEmail(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="email@example.com" /></div>
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">연락처</label><input type="text" value={iPhone} onChange={handlePhoneChange(setIPhone)} maxLength={13} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="010-0000-0000" /></div>
                 </div>
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs font-bold text-blue-800">
-                  💡 선생님 계정은 입력한 <b>로그인 ID @logica.com</b> 형식으로 자동 생성되어 완벽한 보안 로그인 체계를 갖춥니다. 
+                  💡 등록된 이메일 계정을 통해 <b>비밀번호 찾기(재설정 메일 발송)</b> 기능이 지원됩니다. 실제 사용하는 이메일을 입력해주세요.
                 </div>
                 <button 
                   onClick={registerInstructor} 
@@ -588,7 +589,7 @@ export default function AdminDashboardPage() {
                       <tr>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">지점</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이름</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">로그인 ID</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이메일 계정</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">직급</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">연락처</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-center text-slate-500">상태</th>
@@ -605,7 +606,7 @@ export default function AdminDashboardPage() {
                           <tr key={inst.instructor_id} className={inst.status === '퇴사' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-blue-50/50 transition-colors'}>
                             <td className="py-3 px-4 font-bold text-slate-600">{inst.academy_tenant?.name || '-'}</td>
                             <td className="py-3 px-4 font-bold text-[#002864]">{inst.name}</td>
-                            <td className="py-3 px-4 text-slate-500 font-mono text-xs">{inst.login_id}</td>
+                            <td className="py-3 px-4 text-slate-500 font-mono text-xs">{inst.email || inst.login_id}</td>
                             <td className="py-3 px-4 font-bold text-slate-700">
                               {inst.position === '테스트/체험' ? <span className="text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 text-xs">체험용 GUEST</span> : inst.position}
                             </td>
@@ -675,7 +676,7 @@ export default function AdminDashboardPage() {
                   </select>
                 </div>
               </div>
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">이메일</label><input type="email" value={editInst.email || ''} onChange={(e) => setEditInst({...editInst, email: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">이메일 계정</label><input type="email" value={editInst.email || ''} onChange={(e) => setEditInst({...editInst, email: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
             </div>
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end gap-3">
               <button onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 bg-slate-100 font-bold text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">취소</button>
