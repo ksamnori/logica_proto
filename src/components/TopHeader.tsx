@@ -6,6 +6,34 @@ import { useRouter, usePathname } from "next/navigation";
 import { getSecureNotifications } from "@/app/actions/profile";
 import { supabase } from "@/lib/supabase";
 
+// 🌟 [정석 타입 정의] 알림 데이터 구조 선언
+interface MemoData {
+  memo_id: string;
+  author_name: string;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  status: string;
+}
+
+interface CSData {
+  request_id: string;
+  request_type: string;
+  reason: string;
+  created_at: string;
+  updated_at: string;
+  status: string;
+  student?: { name: string } | { name: string }[];
+}
+
+interface NotificationItem {
+  id: string;
+  title: string;
+  time: Date;
+  content: string;
+  link: string;
+}
+
 function DigitalClock() {
   const [time, setTime] = useState<Date | null>(null);
   useEffect(() => {
@@ -36,7 +64,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   const pathname = usePathname();
 
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(true);
-  const [notifications, setNotifications] = useState<any[]>([]);
+  const [notifications, setNotifications] = useState<NotificationItem[]>([]);
   const [isNotiOpen, setIsNotiOpen] = useState(false);
   const [unreadNotiCount, setUnreadNotiCount] = useState(0);
 
@@ -96,7 +124,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
         setCurrentName((prev) => prev !== instructorData.name ? instructorData.name : prev);
       }
       
-      const dbImg = instructorData.profile_img_url || instructorData.profile_image;
+      // 🌟 [핵심 변경] DB 컬럼명 오타 수정 완료! (profile_img_url -> profile_image_url)
+      const dbImg = instructorData.profile_image_url || instructorData.profile_image;
       if (dbImg && dbImg !== "null" && dbImg !== "undefined") {
         setCurrentProfileImg((prevImg) => {
           if (prevImg !== dbImg) {
@@ -118,14 +147,14 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
-                    ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
+                    ["최고관리자", "대장", "원장", "실장"].some((p: string) => pos.includes(p));
 
     const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
     const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
     const clearedIso = new Date(clearedTime).toISOString();
 
     const res = await getSecureNotifications(clearedTime);
-    let allNotis = res.success && res.notiData ? res.notiData : [];
+    let allNotis: NotificationItem[] = res.success && res.notiData ? res.notiData : [];
 
     const { data: urgentMemos } = await supabase
       .from("instructor_memo")
@@ -134,8 +163,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       .or(`created_at.gt.${clearedIso},updated_at.gt.${clearedIso}`);
 
     if (urgentMemos && urgentMemos.length > 0) {
-      const activeMemos = urgentMemos.filter(m => m.status !== "완료");
-      const memoNotis = activeMemos.map(m => ({
+      const activeMemos = urgentMemos.filter((m: MemoData) => m.status !== "완료");
+      const memoNotis: NotificationItem[] = activeMemos.map((m: MemoData) => ({
         id: `memo_${m.memo_id}`,
         title: `🚨 긴급공지 (${m.author_name})`,
         time: new Date(m.updated_at || m.created_at), 
@@ -157,8 +186,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     const { data: csLogs } = await csQuery;
 
     if (csLogs && csLogs.length > 0) {
-      const activeCS = csLogs.filter(c => c.status !== "완료");
-      const csNotis = activeCS.map((c: any) => {
+      const activeCS = csLogs.filter((c: CSData) => c.status !== "완료");
+      const csNotis: NotificationItem[] = activeCS.map((c: CSData) => {
         const sName = Array.isArray(c.student) ? c.student[0]?.name : c.student?.name;
         return {
           id: `cs_${c.request_id}`,
@@ -171,10 +200,10 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       allNotis = [...allNotis, ...csNotis];
     }
 
-    allNotis.sort((a, b) => b.time.getTime() - a.time.getTime());
+    allNotis.sort((a: NotificationItem, b: NotificationItem) => b.time.getTime() - a.time.getTime());
     setNotifications(allNotis);
     
-    setUnreadNotiCount(prev => allNotis.length);
+    setUnreadNotiCount(allNotis.length);
   }, [currentUid]);
 
   useEffect(() => {
@@ -355,7 +384,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           name: editName, 
           phone: editPhone, 
           email: editEmail, 
-          profile_img_url: newImgUrl,
+          profile_image_url: newImgUrl, // 🌟 여기서도 오타 수정 완료
           profile_image: newImgUrl 
         })
         .eq('instructor_id', currentUid);
@@ -396,7 +425,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
   return (
     <>
-      {/* 🌟 TopHeader 전체에 allow-guest-interaction 추가 */}
       <div className={`absolute top-5 right-8 z-[60] flex items-center bg-white/90 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.08)] border border-slate-200 rounded-full transition-all duration-500 ease-out allow-guest-interaction ${isHeaderExpanded ? 'pr-6 pl-2 py-2' : 'px-2 py-2'}`}>
         <button onClick={() => setIsHeaderExpanded(!isHeaderExpanded)} className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
           <svg className={`w-5 h-5 transition-transform duration-500 ${isHeaderExpanded ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
@@ -415,7 +443,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
               </div>
               <div className="max-h-[400px] overflow-y-auto custom-scroll p-2 flex flex-col gap-2 bg-white">
                 {notifications.length === 0 ? <div className="text-center py-8 text-xs font-bold text-slate-400">새로운 알림이 없습니다.</div> :
-                  notifications.map((n, idx) => (
+                  notifications.map((n: NotificationItem, idx: number) => (
                     <div key={idx} onClick={() => { setIsNotiOpen(false); router.push(n.link); }} className="p-3 border bg-slate-50 text-slate-600 border-slate-200 rounded-lg cursor-pointer hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start mb-1">
                         <span className="text-[11px] font-extrabold">{n.title}</span>
@@ -463,7 +491,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-[#002864] shrink-0">
               <h2 className="text-lg font-bold text-white">⚙️ 내 정보 수정</h2>
-              {/* 🌟 닫기 버튼에 allow-guest-interaction 추가 */}
               <button onClick={() => { setIsProfileModalOpen(false); setNewPassword(""); setConfirmPassword(""); }} className="text-blue-200 hover:text-white text-2xl leading-none transition-colors allow-guest-interaction px-2">&times;</button>
             </div>
             

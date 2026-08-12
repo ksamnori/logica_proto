@@ -10,12 +10,38 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGci
 
 const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
 
+// 🌟 [정석 타입 정의]
+interface TenantRecord {
+  tenant_id: string;
+  name: string;
+}
+
+interface StudentPhoneRecord {
+  phone: string;
+}
+
+interface ExamMasterRecord {
+  exam_id: string;
+}
+
+interface InstructorRecord {
+  instructor_id: string;
+  login_id?: string;
+  name: string;
+  position: string;
+  role?: string;
+  phone?: string;
+  email?: string;
+  status?: string;
+  tenant_id?: string;
+  academy_tenant?: { tenant_type: string; name: string };
+}
+
 export default function AdminDashboardPage() {
   const [adminProfileName, setAdminProfileName] = useState("관리자님");
   const [activeTab, setActiveTab] = useState("student");
 
-  // 🌟 [지점 목록 상태 추가]
-  const [tenants, setTenants] = useState<any[]>([]);
+  const [tenants, setTenants] = useState<TenantRecord[]>([]);
 
   const [sTenantId, setSTenantId] = useState("");
   const [sName, setSName] = useState("");
@@ -36,10 +62,10 @@ export default function AdminDashboardPage() {
   const [iPhone, setIPhone] = useState("");
   const [isInstructorSubmitting, setIsInstructorSubmitting] = useState(false);
 
-  const [instructors, setInstructors] = useState<any[]>([]);
+  const [instructors, setInstructors] = useState<InstructorRecord[]>([]);
   const [isLoadingInstructors, setIsLoadingInstructors] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
-  const [editInst, setEditInst] = useState<any>({});
+  const [editInst, setEditInst] = useState<Partial<InstructorRecord>>({});
 
   useEffect(() => {
     const checkSuperAdminAccess = async () => {
@@ -47,12 +73,12 @@ export default function AdminDashboardPage() {
 
       if (!instId) {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user?.email) {
-          const extractedLoginId = session.user.email.split('@')[0];
+        // 🌟 [핵심 변경] 이메일 파싱 방식을 버리고, UID(session.user.id)로 직접 정확하게 찾습니다!
+        if (session?.user?.id) {
           const { data: inst } = await supabase
             .from('instructor')
             .select('instructor_id, role, position, name')
-            .eq('login_id', extractedLoginId)
+            .eq('instructor_id', session.user.id)
             .maybeSingle();
             
           if (inst) {
@@ -88,7 +114,7 @@ export default function AdminDashboardPage() {
         }
         
         setAdminProfileName(`${data.name} ${data.position || '관리자'}님`);
-        fetchTenants(); // 권한 확인 후 지점 목록 로드
+        fetchTenants(); 
       } else {
         alert('강사 정보를 확인할 수 없습니다. 다시 로그인해주세요.');
         window.location.href = '/';
@@ -98,13 +124,11 @@ export default function AdminDashboardPage() {
     checkSuperAdminAccess();
   }, []);
 
-  // 🌟 [지점 목록 불러오기]
   const fetchTenants = async () => {
     const { data } = await supabase.from('academy_tenant').select('*').eq('status', 'ACTIVE');
     if (data && data.length > 0) {
       setTenants(data);
-      // 대치 본원이 있으면 기본값으로, 없으면 첫 번째 지점 선택
-      const daechi = data.find(t => t.name.includes('대치'));
+      const daechi = data.find((t: TenantRecord) => t.name.includes('대치'));
       const defaultId = daechi ? daechi.tenant_id : data[0].tenant_id;
       setSTenantId(defaultId);
       setITenantId(defaultId);
@@ -117,7 +141,8 @@ export default function AdminDashboardPage() {
     }
   }, [activeTab]);
 
-  const handlePhoneChange = (setter: any) => (e: any) => {
+  // 🌟 [타입 에러 해결] setState이든, 커스텀 함수든 모두 문자열을 받는 함수로 통일하여 에러 해결
+  const handlePhoneChange = (setter: (val: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value.replace(/[^0-9]/g, '');
     let res = '';
     if (val.length < 4) res = val;
@@ -179,7 +204,7 @@ export default function AdminDashboardPage() {
         let maxSuffix = 0;
         let hasExactMatch = false;
 
-        existingContacts.forEach(s => {
+        existingContacts.forEach((s: StudentPhoneRecord) => {
           if (s.phone === sContact) hasExactMatch = true;
           else {
             const suffixStr = s.phone.replace(sContact + '-', '');
@@ -206,7 +231,7 @@ export default function AdminDashboardPage() {
           password_hash: sPw,
           status: sStatus,
           parent_id: finalParentId,
-          tenant_id: sTenantId // 🌟 선택한 지점 ID 부여
+          tenant_id: sTenantId 
         }]);
 
       if (studentError) throw studentError;
@@ -235,7 +260,7 @@ export default function AdminDashboardPage() {
     else if (iPosition === '전임강사') assignedRole = 'TEACHER';
     else if (iPosition === '파트강사') assignedRole = 'PART_TEACHER';
     else if (iPosition === '조교') assignedRole = 'TA';
-    else if (iPosition === '테스트/체험') assignedRole = 'GUEST'; // 🌟 GUEST 계정 권한 부여
+    else if (iPosition === '테스트/체험') assignedRole = 'GUEST';
 
     try {
       const fakeEmail = `${iLoginId}@logica.com`;
@@ -271,7 +296,7 @@ export default function AdminDashboardPage() {
         email: iEmail || null,
         phone: iPhone || null,
         status: '재직',
-        tenant_id: iTenantId // 🌟 선택한 지점 ID 부여
+        tenant_id: iTenantId 
       }]);
 
       if (dbError) {
@@ -302,9 +327,15 @@ export default function AdminDashboardPage() {
         
       if (error) throw error;
 
-      // 슈퍼어드민은 모든 지점(본사 포함)의 사람을 다 통제할 수 있어야 하므로 필터 제거
-      const posOrder: any = { '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6, '테스트/체험': 7 };
-      const sortedData = (data || []).sort((a: any, b: any) => {
+      const filteredData = (data as InstructorRecord[] || []).filter((inst) => {
+        const isHQ = inst.academy_tenant?.tenant_type === 'HQ' || 
+                     inst.academy_tenant?.name?.includes('본사') ||
+                     inst.position?.includes('본사'); 
+        return !isHQ;
+      });
+
+      const posOrder: Record<string, number> = { '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6, '테스트/체험': 7 };
+      const sortedData = filteredData.sort((a, b) => {
         let orderA = posOrder[a.position] || 99;
         let orderB = posOrder[b.position] || 99;
         if (orderA === orderB) return a.name.localeCompare(b.name);
@@ -319,7 +350,7 @@ export default function AdminDashboardPage() {
     }
   };
 
-  const openEditModal = (inst: any) => {
+  const openEditModal = (inst: InstructorRecord) => {
     setEditInst(inst);
     setIsEditModalOpen(true);
   };
@@ -383,7 +414,7 @@ export default function AdminDashboardPage() {
       const { data: exams } = await supabase.from('exam_master').select('exam_id').eq('instructor_id', id);
       
       if (exams && exams.length > 0) {
-        const examIds = exams.map(e => e.exam_id);
+        const examIds = (exams as ExamMasterRecord[]).map(e => e.exam_id);
         await Promise.all([
           supabase.from('exam_assignment').delete().in('exam_id', examIds),
           supabase.from('exam_assignment').delete().in('exam_paper_id', examIds),
@@ -523,7 +554,6 @@ export default function AdminDashboardPage() {
                       <option value="전임강사">전임강사</option>
                       <option value="파트강사">파트강사</option>
                       <option value="조교">조교</option>
-                      {/* 🌟 체험용 계정 생성 옵션 추가 */}
                       <option value="테스트/체험">테스트/체험 (GUEST)</option>
                     </select>
                   </div>
@@ -556,7 +586,6 @@ export default function AdminDashboardPage() {
                   <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
                     <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <tr>
-                        {/* 🌟 지점(Tenant) 구분 컬럼 추가 */}
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">지점</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이름</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">로그인 ID</th>
@@ -618,7 +647,6 @@ export default function AdminDashboardPage() {
             </div>
             <div className="p-6 bg-slate-50 space-y-4">
               <div className="grid grid-cols-2 gap-4">
-                {/* 🌟 모달에서도 소속 지점 수정 가능 */}
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-500 mb-1">소속 지점</label>
                   <select value={editInst.tenant_id || ""} onChange={(e) => setEditInst({...editInst, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">

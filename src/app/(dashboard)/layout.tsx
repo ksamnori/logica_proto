@@ -3,20 +3,27 @@
 
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase"; // 🌟 수파베이스 임포트 추가
+import { supabase } from "@/lib/supabase"; 
 import FloatingChat from "@/components/FloatingChat";
 import Sidebar from "@/components/Sidebar";
 import TopHeader from "@/components/TopHeader";
 import ProfileModal from "@/components/ProfileModal";
 
+// 🌟 [정석 타입 정의] 레이아웃에서 관리하는 상태 규격을 엄격하게 지정합니다.
+interface LayoutData {
+  instId: string;
+  name: string;
+  profileImgUrl: string;
+  isSuperAdmin: boolean;
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   
-  const [layoutData, setLayoutData] = useState({ instId: "", name: "", profileImgUrl: "", isSuperAdmin: false });
+  const [layoutData, setLayoutData] = useState<LayoutData>({ instId: "", name: "", profileImgUrl: "", isSuperAdmin: false });
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
   useEffect(() => {
-    // 🌟 서버 액션 대신 수파베이스를 통해 직접 인증 상태와 DB 정보를 가져옵니다.
     const fetchLayoutData = async () => {
       // 1. 수파베이스 로그인 세션 확인
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -26,15 +33,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         return; 
       }
 
-      // 2. 이메일에서 로그인 ID 추출 (fakeEmail 방식)
-      const loginId = user.email?.split('@')[0];
-      
-      if (loginId) {
+      // 🌟 [핵심 해결] 이메일 자르기 꼼수를 버리고, 정확한 고유 UID(user.id)로 강사를 검색합니다!
+      if (user.id) {
         // 3. DB에서 강사 정보 실시간으로 가져오기
         const { data: instructor } = await supabase
           .from('instructor')
           .select('*')
-          .eq('login_id', loginId)
+          .eq('instructor_id', user.id) // 👈 login_id 대신 instructor_id 로 완벽 매칭!
           .single();
 
         if (instructor) {
@@ -46,12 +51,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
             ['ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role) ||
             pos.includes('원장') || 
             pos.includes('실장') ||
+            pos.includes('대장') ||
             pos.includes('최고관리자');
 
           setLayoutData({
             instId: instructor.instructor_id,
             name: instructor.name,
-            profileImgUrl: instructor.profile_image_url || "",
+            // 🌟 [추가 수정] DB 컬럼명 오타 (profile_image_url) 반영
+            profileImgUrl: instructor.profile_image_url || instructor.profile_image || "",
             isSuperAdmin: isSuperAdmin
           });
         }
@@ -63,12 +70,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   const handleLogout = async () => {
     if (confirm("로그아웃 하시겠습니까?")) {
-      // 🌟 [수정됨] 옛날 쿠키 대신 수파베이스 쿠키(sb-access-token) 삭제
       document.cookie = "sb-access-token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
       localStorage.clear();
       sessionStorage.clear();
       
-      await supabase.auth.signOut(); // 수파베이스 로그아웃 처리
+      await supabase.auth.signOut(); 
       router.push("/");
     }
   };
@@ -106,7 +112,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         />
       )}
 
-      {/* 우측 하단 플로팅 챗 */}
+      {/* 🌟 이제 instId를 완벽하게 불러오므로 플로팅 챗이 무조건 나타납니다! */}
       {layoutData.instId && <FloatingChat instId={layoutData.instId} />}
     </div>
   );

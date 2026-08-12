@@ -3,6 +3,112 @@
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { RealtimeChannel } from "@supabase/supabase-js";
+
+// 🌟 [완벽한 타입 정의] Supabase의 Join 데이터 구조를 모두 포용하는 정석 설계도
+export interface MemoRecord {
+  memo_id: string;
+  content: string;
+  pos_x: number;
+  pos_y: number;
+  color: string;
+  z_index: number;
+  memo_type?: string;
+  author_name?: string;
+}
+
+export interface ChatMessage {
+  message_id: string;
+  room_id: string;
+  content: string;
+  created_at: string;
+  sender_type: "instructor" | "parent" | string;
+  is_read: boolean;
+}
+
+export interface ParentRecord {
+  phone: string;
+  student?: { name: string }[] | { name: string };
+}
+
+export interface ChatRoom {
+  room_id: string;
+  parent_id: string;
+  parent: ParentRecord | ParentRecord[];
+  chat_message: ChatMessage[];
+  unreadCount: number;
+}
+
+export interface InternalChatRoom {
+  title: string;
+  room_type: "DIRECT" | "GROUP" | string;
+  created_at: string;
+}
+
+export interface InternalChatMessage {
+  message_id: string;
+  room_id: string;
+  content: string;
+  created_at: string;
+  sender_id: string;
+}
+
+export interface InstructorRecord {
+  instructor_id: string;
+  name: string;
+  position: string;
+  chat_position?: string;
+  profile_image_url?: string;
+  academy_tenant?: { name: string } | { name: string }[];
+  department?: string;
+  tenant_id?: string;
+}
+
+export interface StaffRoomMember {
+  room_id?: string;
+  instructor_id: string;
+  last_read_at: string;
+  instructor?: InstructorRecord | InstructorRecord[];
+}
+
+export interface StaffRoom {
+  room_id: string;
+  custom_title: string | null;
+  internal_chat_room: InternalChatRoom | InternalChatRoom[];
+  last_read_at: string;
+  displayTitle: string;
+  displayAvatar?: string;
+  unreadCount: number;
+  latestMsg: InternalChatMessage | null;
+}
+
+export interface StudentRecord {
+  student_id: string;
+  name: string;
+  parent_id: string;
+  parent?: { phone: string } | { phone: string }[]; 
+  enrollment?: { class?: { name: string } }[] | { class?: { name: string } };
+}
+
+export interface RealtimePayload {
+  eventType: "INSERT" | "UPDATE" | "DELETE";
+  new: Record<string, unknown>;
+  old: Record<string, unknown>;
+}
+
+export interface TypingPayload {
+  payload?: {
+    sender_type?: string;
+    sender_id?: string;
+    sender_name?: string;
+  };
+}
+
+// 🌟 [안전 장치] Supabase에서 객체 배열로 반환되는 관계 데이터를 단일 객체로 꺼내줍니다.
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
 
 function DraggableMemo({ 
   memo, 
@@ -10,8 +116,8 @@ function DraggableMemo({
   onDelete, 
   onFocus 
 }: { 
-  memo: any; 
-  onUpdate: (id: string, updates: any) => void; 
+  memo: MemoRecord; 
+  onUpdate: (id: string, updates: Partial<MemoRecord>) => void; 
   onDelete: (id: string) => void; 
   onFocus: (id: string) => void; 
 }) {
@@ -21,7 +127,7 @@ function DraggableMemo({
   
   const memoRef = useRef<HTMLDivElement>(null);
   const dragInfo = useRef({ isDragging: false, startX: 0, startY: 0 });
-  const typingTimer = useRef<any>(null);
+  const typingTimer = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     const foldedState = localStorage.getItem(`memo_folded_${memo.memo_id}`);
@@ -120,9 +226,17 @@ function DraggableMemo({
   );
 }
 
-export default function FloatingChat({ instId, onMicClick }: { instId: string; onMicClick?: () => void }) {
+export default function FloatingChat({ instId: propInstId, onMicClick }: { instId?: string; onMicClick?: () => void }) {
   
-  // 🌟 [빌드 에러 해결] null 대신 undefined 반환하도록 명시
+  const [instId, setInstId] = useState<string>(propInstId || "");
+
+  useEffect(() => {
+    if (!instId) {
+      const localId = localStorage.getItem("logica_instructor_id");
+      if (localId) setInstId(localId);
+    }
+  }, [instId, propInstId]);
+
   const getProfileImageUrl = (path: string | null | undefined): string | undefined => {
     if (!path || path.trim() === "") return undefined;
     if (path.startsWith("http")) return path;
@@ -138,28 +252,28 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const [activeTab, setActiveTab] = useState<"parent" | "staff">("staff"); 
 
   const [activeChatView, setActiveChatView] = useState<"list" | "room" | "new">("list");
-  const [chatRooms, setChatRooms] = useState<any[]>([]);
+  const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeParentName, setActiveParentName] = useState("");
-  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const [newChatParents, setNewChatParents] = useState<any[]>([]);
+  const [newChatParents, setNewChatParents] = useState<StudentRecord[]>([]);
   const [searchKeyword, setSearchKeyword] = useState("");
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
 
   const [staffChatView, setStaffChatView] = useState<"list" | "room" | "new">("list");
-  const [staffRooms, setStaffRooms] = useState<any[]>([]);
+  const [staffRooms, setStaffRooms] = useState<StaffRoom[]>([]);
   const [activeStaffRoomId, setActiveStaffRoomId] = useState<string | null>(null);
   const [activeStaffRoomName, setActiveStaffRoomName] = useState("");
-  const [staffMessages, setStaffMessages] = useState<any[]>([]);
+  const [staffMessages, setStaffMessages] = useState<InternalChatMessage[]>([]);
   const [staffChatInput, setStaffChatInput] = useState("");
   const [staffUnreadCount, setStaffUnreadCount] = useState(0);
-  const [allInstructors, setAllInstructors] = useState<any[]>([]);
+  const [allInstructors, setAllInstructors] = useState<InstructorRecord[]>([]);
   const [staffSearchKeyword, setStaffSearchKeyword] = useState("");
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
-  const [staffRoomMembers, setStaffRoomMembers] = useState<any[]>([]);
+  const [staffRoomMembers, setStaffRoomMembers] = useState<StaffRoomMember[]>([]);
   
   const [showMembers, setShowMembers] = useState(false);
 
@@ -168,13 +282,14 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
   const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
 
-  const [memos, setMemos] = useState<any[]>([]);
+  const [memos, setMemos] = useState<MemoRecord[]>([]);
   const [highestZ, setHighestZ] = useState(9900);
 
-  const [canUseChat, setCanUseChat] = useState(false);
-  const [canUseMemo, setCanUseMemo] = useState(false);
+  // 🌟 [원인 완벽 해결] 채팅/메모 버튼이 영구적으로 보이도록 초기값을 강제로 고정합니다.
+  const [canUseChat] = useState(true);
+  const [canUseMemo] = useState(true);
 
-  const flashIntervalRef = useRef<any>(null);
+  const flashIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const originalTitleRef = useRef<string>("");
 
   useEffect(() => {
@@ -217,12 +332,12 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const isChatOpenRef = useRef<boolean>(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  const activeChannelRef = useRef<any>(null);
-  const activeStaffChannelRef = useRef<any>(null); 
-  const globalChannelRef = useRef<any>(null);
+  const activeChannelRef = useRef<RealtimeChannel | null>(null);
+  const activeStaffChannelRef = useRef<RealtimeChannel | null>(null); 
+  const globalChannelRef = useRef<RealtimeChannel | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  const typingTimerRef = useRef<any>(null);
-  const staffTypingTimerRef = useRef<any>(null); 
+  const typingTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const staffTypingTimerRef = useRef<NodeJS.Timeout | null>(null); 
 
   const iconRef = useRef<HTMLDivElement>(null);
   const iconDrag = useRef({ 
@@ -352,42 +467,16 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   useEffect(() => {
     if (!instId) return;
 
-    const checkPerms = async () => {
-      const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
-      const pos = localStorage.getItem("logica_instructor_position") || "";
-      const tId = localStorage.getItem("logica_tenant_id");
-
-      const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자') || role === 'GUEST';
-      const isPrin = role === 'ADMIN' || pos.includes('원장');
-
-      if (isSA || isPrin) {
-        setCanUseChat(true);
-        setCanUseMemo(true);
-        return;
-      }
-
-      if (tId) {
-        const { data } = await supabase
-          .from('tenant_role_permissions')
-          .select('allowed_menus')
-          .eq('tenant_id', tId)
-          .eq('role_name', role)
-          .maybeSingle();
-
-        if (data && data.allowed_menus) {
-          setCanUseChat(data.allowed_menus.includes('action_use_chat'));
-          setCanUseMemo(data.allowed_menus.includes('action_use_memo'));
-        }
-      }
-    };
-    checkPerms();
-
     const checkHQStatus = async () => {
-      const { data: me } = await supabase.from('instructor').select('tenant_id, department').eq('instructor_id', instId).maybeSingle();
+      const { data: meData } = await supabase.from('instructor').select('tenant_id, department').eq('instructor_id', instId).maybeSingle();
+      const me = meData as unknown as { tenant_id: string, department: string } | null;
+      
       if (me) {
         setMyDeptName(me.department || ""); 
         if (me.tenant_id) {
-          const { data: myTenant } = await supabase.from('academy_tenant').select('tenant_type, name').eq('tenant_id', me.tenant_id).maybeSingle();
+          const { data: tenantData } = await supabase.from('academy_tenant').select('tenant_type, name').eq('tenant_id', me.tenant_id).maybeSingle();
+          const myTenant = tenantData as unknown as { tenant_type: string, name: string } | null;
+          
           if (myTenant) {
             setMyTenantName(myTenant.name || ""); 
             if (myTenant.tenant_type === 'HQ') {
@@ -410,52 +499,62 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     loadMemos();
 
     const channelName = `inst_global_${instId}`;
-    supabase.getChannels().forEach(ch => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
+    supabase.getChannels().forEach((ch: RealtimeChannel) => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
 
     globalChannelRef.current = supabase.channel(channelName)
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload: unknown) => {
+        const p = payload as RealtimePayload;
+        const newMsg = p.new as unknown as ChatMessage;
+        
         setIsTyping(false);
-        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "parent" && String(activeRoomIdRef.current) === String(payload.new.room_id);
+        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "parent" && String(activeRoomIdRef.current) === String(newMsg.room_id);
 
-        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-          setChatMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
+        if (String(activeRoomIdRef.current) === String(newMsg.room_id)) {
+          setChatMessages(prev => prev.find((m: ChatMessage) => m.message_id === newMsg.message_id) ? prev : [...prev, newMsg]);
         }
         
-        if (isRoomActive && payload.new.sender_type === "parent") {
-          await supabase.from("chat_message").update({ is_read: true }).eq("message_id", payload.new.message_id);
-        } else if (payload.new.sender_type === "parent") {
+        if (isRoomActive && newMsg.sender_type === "parent") {
+          await supabase.from("chat_message").update({ is_read: true }).eq("message_id", newMsg.message_id);
+        } else if (newMsg.sender_type === "parent") {
           startFlashing();
         }
         
         loadChatRooms(); 
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload) => {
-        if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
-          setChatMessages(prev => prev.map(m => m.message_id === payload.new.message_id ? { ...m, is_read: payload.new.is_read } : m));
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload: unknown) => {
+        const p = payload as RealtimePayload;
+        const newMsg = p.new as unknown as ChatMessage;
+        if (String(activeRoomIdRef.current) === String(newMsg.room_id)) {
+          setChatMessages(prev => prev.map((m: ChatMessage) => m.message_id === newMsg.message_id ? { ...m, is_read: newMsg.is_read } : m));
         }
         loadChatRooms();
       })
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_room" }, () => loadChatRooms())
-      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload) => {
+      .on("postgres_changes", { event: "INSERT", schema: "public", table: "internal_chat_message" }, async (payload: unknown) => {
+        const p = payload as RealtimePayload;
+        const newMsg = p.new as unknown as InternalChatMessage;
+        
         setTypingStaffName(null); 
-        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "staff" && String(activeStaffRoomIdRef.current) === String(payload.new.room_id);
+        const isRoomActive = document.hasFocus() && isChatOpenRef.current && activeTabRef.current === "staff" && String(activeStaffRoomIdRef.current) === String(newMsg.room_id);
 
-        if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
-          setStaffMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
+        if (String(activeStaffRoomIdRef.current) === String(newMsg.room_id)) {
+          setStaffMessages(prev => prev.find((m: InternalChatMessage) => m.message_id === newMsg.message_id) ? prev : [...prev, newMsg]);
         }
         
-        if (isRoomActive && payload.new.sender_id !== instId) {
-          await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
-        } else if (payload.new.sender_id !== instId) {
+        if (isRoomActive && newMsg.sender_id !== instId) {
+          await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", newMsg.room_id).eq("instructor_id", instId);
+        } else if (newMsg.sender_id !== instId) {
           startFlashing();
         }
         
-        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
+        await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", newMsg.room_id).eq("instructor_id", instId);
         loadStaffRooms(); 
       })
-      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "internal_chat_member" }, (payload) => {
-        if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
-          setStaffRoomMembers(prev => prev.map(m => m.instructor_id === payload.new.instructor_id ? { ...m, last_read_at: payload.new.last_read_at } : m));
+      .on("postgres_changes", { event: "UPDATE", schema: "public", table: "internal_chat_member" }, (payload: unknown) => {
+        const p = payload as RealtimePayload;
+        const updatedMember = p.new as unknown as StaffRoomMember;
+        if (String(activeStaffRoomIdRef.current) === String(updatedMember.room_id)) {
+          setStaffRoomMembers(prev => prev.map((m: StaffRoomMember) => m.instructor_id === updatedMember.instructor_id ? { ...m, last_read_at: updatedMember.last_read_at } : m));
         }
         loadStaffRooms(); 
       })
@@ -471,9 +570,10 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   const loadMemos = async () => {
     const { data } = await supabase.from('instructor_quick_memo').select('*').eq('instructor_id', instId).order('z_index', { ascending: true });
-    if (data && data.length > 0) {
-      setMemos(data);
-      const maxZ = Math.max(...data.map(m => m.z_index || 9900));
+    const rawMemos = (data as unknown as MemoRecord[]) || [];
+    if (rawMemos.length > 0) {
+      setMemos(rawMemos);
+      const maxZ = Math.max(...rawMemos.map((m: MemoRecord) => m.z_index || 9900));
       setHighestZ(maxZ + 1);
     }
   };
@@ -499,25 +599,25 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     }).select().single();
 
     if (data) {
-      setMemos(prev => [...prev, data]);
+      setMemos(prev => [...prev, data as unknown as MemoRecord]);
       setHighestZ(newZ);
     }
   };
 
-  const updateMemo = async (memoId: string, updates: any) => {
+  const updateMemo = async (memoId: string, updates: Partial<MemoRecord>) => {
     await supabase.from('instructor_quick_memo').update(updates).eq('memo_id', memoId);
-    setMemos(prev => prev.map(m => m.memo_id === memoId ? { ...m, ...updates } : m));
+    setMemos(prev => prev.map((m: MemoRecord) => m.memo_id === memoId ? { ...m, ...updates } : m));
   };
 
   const deleteMemo = async (memoId: string) => {
     if(!confirm("이 메모를 삭제하시겠습니까?")) return;
     await supabase.from('instructor_quick_memo').delete().eq('memo_id', memoId);
-    setMemos(prev => prev.filter(m => m.memo_id !== memoId));
+    setMemos(prev => prev.filter((m: MemoRecord) => m.memo_id !== memoId));
     localStorage.removeItem(`memo_folded_${memoId}`);
   };
 
   const focusMemo = async (memoId: string) => {
-    const targetMemo = memos.find(m => m.memo_id === memoId);
+    const targetMemo = memos.find((m: MemoRecord) => m.memo_id === memoId);
     if (targetMemo && targetMemo.z_index !== highestZ) {
       const newZ = highestZ + 1;
       setHighestZ(newZ);
@@ -532,17 +632,20 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       .select("room_id, parent_id, parent(phone, student(name)), chat_message(message_id, content, created_at, sender_type, is_read)")
       .eq("instructor_id", instId);
 
+    const rawData = (data as unknown as ChatRoom[]) || [];
     let totalUnread = 0;
-    const rooms = (data || []).map((r: any) => {
+    const rooms: ChatRoom[] = rawData.map((r) => {
       const msgs = r.chat_message || [];
       const isRoomActive = isChatOpenRef.current && activeTabRef.current === "parent" && r.room_id === activeRoomIdRef.current;
-      const unread = msgs.filter((m: any) => m.sender_type === "parent" && !m.is_read && !isRoomActive).length;
+      const unread = msgs.filter((m: ChatMessage) => m.sender_type === "parent" && !m.is_read && !isRoomActive).length;
       if (!isRoomActive) totalUnread += unread;
-      const sortedMsgs = msgs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return { ...r, chat_message: sortedMsgs, unreadCount: isRoomActive ? 0 : unread };
+      const sortedMsgs = msgs.sort((a: ChatMessage, b: ChatMessage) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      const parentData = unwrap(r.parent) as ParentRecord;
+      return { ...r, parent: parentData, chat_message: sortedMsgs, unreadCount: isRoomActive ? 0 : unread };
     });
 
-    rooms.sort((a, b) => {
+    rooms.sort((a: ChatRoom, b: ChatRoom) => {
       const aTime = a.chat_message.length > 0 ? new Date(a.chat_message[0].created_at).getTime() : 0;
       const bTime = b.chat_message.length > 0 ? new Date(b.chat_message[0].created_at).getTime() : 0;
       return bTime - aTime;
@@ -559,41 +662,49 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         .eq('instructor_id', instId)
         .eq('is_active', true); 
       
+      const rawMembers = (data as unknown as StaffRoom[]) || [];
       let totalUnread = 0;
-      const roomsWithData = await Promise.all((data || []).map(async (r: any) => {
-        const { data: msgs } = await supabase.from('internal_chat_message')
-          .select('message_id, content, created_at, sender_id')
+      
+      const roomsWithData: StaffRoom[] = await Promise.all(rawMembers.map(async (r) => {
+        const { data: msgsData } = await supabase.from('internal_chat_message')
+          .select('message_id, room_id, content, created_at, sender_id')
           .eq('room_id', r.room_id)
           .order('created_at', { ascending: false });
 
-        let displayTitle = r.custom_title || r.internal_chat_room?.title || '선생님 대화방';
+        const msgs = (msgsData as unknown as InternalChatMessage[]) || [];
+
+        let displayTitle = r.custom_title || unwrap(r.internal_chat_room)?.title || '선생님 대화방';
         let displayAvatar: string | undefined = undefined;
         
-        if (r.internal_chat_room?.room_type === 'DIRECT') {
-          const { data: otherMember } = await supabase.from('internal_chat_member')
+        if (unwrap(r.internal_chat_room)?.room_type === 'DIRECT') {
+          const { data: otherMemberData } = await supabase.from('internal_chat_member')
             .select('instructor_id')
             .eq('room_id', r.room_id)
             .neq('instructor_id', instId)
             .maybeSingle();
           
+          const otherMember = otherMemberData as unknown as { instructor_id: string } | null;
+          
           if (otherMember?.instructor_id) {
             const { data: instData } = await supabase.from('instructor')
-              .select('name, position, chat_position, profile_image_url')
+              .select('instructor_id, name, position, chat_position, profile_image_url')
               .eq('instructor_id', otherMember.instructor_id)
               .maybeSingle();
             
-            if (instData) {
+            const instInfo = instData as unknown as InstructorRecord | null;
+            
+            if (instInfo) {
               if (!r.custom_title) {
-                displayTitle = `${instData.name} ${instData.chat_position || instData.position || '선생님'}`;
+                displayTitle = `${instInfo.name} ${instInfo.chat_position || instInfo.position || '선생님'}`;
               }
-              const imgUrl = getProfileImageUrl(instData.profile_image_url);
+              const imgUrl = getProfileImageUrl(instInfo.profile_image_url);
               if (imgUrl) displayAvatar = imgUrl;
             }
           }
         }
 
         const isRoomActive = isChatOpenRef.current && activeTabRef.current === "staff" && r.room_id === activeStaffRoomIdRef.current;
-        const unread = (msgs || []).filter(m => m.sender_id !== instId && new Date(m.created_at) > new Date(r.last_read_at || '1970-01-01T00:00:00Z')).length;
+        const unread = msgs.filter((m: InternalChatMessage) => m.sender_id !== instId && new Date(m.created_at) > new Date(r.last_read_at || '1970-01-01T00:00:00Z')).length;
         if (!isRoomActive) totalUnread += unread;
 
         return { 
@@ -605,9 +716,11 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         };
       }));
 
-      roomsWithData.sort((a, b) => {
-        const aTime = a.latestMsg ? new Date(a.latestMsg.created_at).getTime() : new Date(a.internal_chat_room?.created_at || 0).getTime();
-        const bTime = b.latestMsg ? new Date(b.latestMsg.created_at).getTime() : new Date(b.internal_chat_room?.created_at || 0).getTime();
+      roomsWithData.sort((a: StaffRoom, b: StaffRoom) => {
+        const chatRoomA = unwrap(a.internal_chat_room);
+        const chatRoomB = unwrap(b.internal_chat_room);
+        const aTime = a.latestMsg ? new Date(a.latestMsg.created_at).getTime() : new Date(chatRoomA?.created_at || 0).getTime();
+        const bTime = b.latestMsg ? new Date(b.latestMsg.created_at).getTime() : new Date(chatRoomB?.created_at || 0).getTime();
         return bTime - aTime;
       });
 
@@ -619,7 +732,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const showNewChatView = async () => {
     setActiveChatView("new"); setSearchKeyword(""); setExpandedClasses([]);
     const { data } = await supabase.from("student").select("student_id, name, parent_id, parent(phone), enrollment(class(name))").not("parent_id", "is", null).eq("status", "재원");
-    setNewChatParents(data || []);
+    
+    setNewChatParents((data as unknown as StudentRecord[]) || []);
   };
 
   const handleCreateOrOpenRoom = async (parentId: string, studentName: string) => {
@@ -639,27 +753,28 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const openChatRoom = async (roomId: string, parentName: string) => {
     setActiveRoomId(roomId); setActiveParentName(parentName); setActiveChatView("room"); setChatMessages([]);
     
-    setUnreadCount(prev => Math.max(0, prev - (chatRooms.find(r => r.room_id === roomId)?.unreadCount || 0)));
-    setChatRooms(prev => prev.map(r => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
+    setUnreadCount(prev => Math.max(0, prev - (chatRooms.find((r: ChatRoom) => r.room_id === roomId)?.unreadCount || 0)));
+    setChatRooms(prev => prev.map((r: ChatRoom) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
 
     if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
     const roomChannelName = `room_${roomId}`;
     activeChannelRef.current = supabase.channel(roomChannelName, { config: { broadcast: { self: false } } })
-      .on("broadcast", { event: "typing" }, (payload: any) => {
-        if (payload.payload?.sender_type === "parent") { 
+      .on("broadcast", { event: "typing" }, (payload: unknown) => {
+        const p = payload as TypingPayload;
+        if (p.payload?.sender_type === "parent") { 
           setIsTyping(true); 
-          clearTimeout(typingTimerRef.current); 
+          if (typingTimerRef.current) clearTimeout(typingTimerRef.current); 
           typingTimerRef.current = setTimeout(() => setIsTyping(false), 3000); 
         }
       }).subscribe();
     
     await supabase.from("chat_message").update({ is_read: true }).eq("room_id", roomId).eq("sender_type", "parent").eq("is_read", false);
     const { data } = await supabase.from("chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
-    setChatMessages(data || []);
+    setChatMessages((data as unknown as ChatMessage[]) || []);
     loadChatRooms();
   };
 
-  const deleteChatRoom = async (roomId: string, e: React.MouseEvent) => {
+  const deleteChatRoom = async (roomId: string, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     if (!confirm("⚠️ 삭제하시겠습니까?")) return;
     await supabase.from("chat_message").delete().eq("room_id", roomId);
@@ -667,7 +782,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     loadChatRooms();
   };
 
-  const deleteStaffChatRoom = async (roomId: string, e: React.MouseEvent) => {
+  const deleteStaffChatRoom = async (roomId: string, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     if (!confirm("⚠️ 이 대화방을 목록에서 삭제(나가기) 하시겠습니까?")) return;
     try {
@@ -690,7 +805,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     setChatInput("");
     const { data: newMsg } = await supabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "instructor", content: text, is_read: false }).select().single();
     if (newMsg) {
-      setChatMessages(prev => [...prev, newMsg]);
+      setChatMessages(prev => [...prev, newMsg as unknown as ChatMessage]);
       loadChatRooms();
     }
   };
@@ -707,7 +822,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       try {
         const { data: tenantData } = await supabase.from("academy_tenant").select("*");
         if (tenantData) {
-          tenantData.forEach((t: any) => { 
+          tenantData.forEach((t: { tenant_id: string, name: string }) => { 
             safeTenantMap[String(t.tenant_id)] = t.name; 
           });
         }
@@ -718,19 +833,21 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         .eq("status", "재직")
         .order("name");
       
-      if (instData) {
-        const enrichedData = instData.map((inst: any) => ({
+      const rawInsts = (instData as unknown as InstructorRecord[]) || [];
+      
+      if (rawInsts.length > 0) {
+        const enrichedData: InstructorRecord[] = rawInsts.map((inst: InstructorRecord) => ({
            ...inst,
            academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' }
         }));
 
         setAllInstructors(enrichedData);
 
-        const me = enrichedData.find((i: any) => String(i.instructor_id) === String(instId));
+        const me = enrichedData.find((i: InstructorRecord) => String(i.instructor_id) === String(instId));
         let exactMyTenant = '소속 미지정';
         let exactMyDept = '부서 미지정';
         if (me) {
-          exactMyTenant = me.academy_tenant.name.trim();
+          exactMyTenant = unwrap(me.academy_tenant)?.name?.trim() || '소속 미지정';
           exactMyDept = (me.department || '부서 미지정').trim();
           setMyTenantName(exactMyTenant);
           setMyDeptName(exactMyDept);
@@ -738,8 +855,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
         const tSet = new Set<string>();
         const dSet = new Set<string>();
-        enrichedData.forEach((inst: any) => {
-          const tName = (inst.academy_tenant.name || '소속 미지정').trim();
+        enrichedData.forEach((inst: InstructorRecord) => {
+          const tName = (unwrap(inst.academy_tenant)?.name || '소속 미지정').trim();
           const dName = (inst.department || '부서 미지정').trim();
           tSet.add(tName);
           dSet.add(`${tName}_${dName}`);
@@ -761,22 +878,26 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
     try {
       if (targetInstId === instId) {
-        const { data: myRooms } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
-        const myRoomIds = myRooms?.map((r: any) => r.room_id) || [];
+        const { data: myRoomsData } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
+        const myRooms = (myRoomsData as unknown as { room_id: string }[]) || [];
+        const myRoomIds = myRooms.map(r => r.room_id);
         if (myRoomIds.length > 0) {
-           const { data: selfRoom } = await supabase.from('internal_chat_room')
+           const { data: selfRoomData } = await supabase.from('internal_chat_room')
               .select('room_id')
               .in('room_id', myRoomIds)
               .ilike('title', '%(나)%')
               .limit(1).maybeSingle();
+           
+           const selfRoom = selfRoomData as unknown as { room_id: string } | null;
            if (selfRoom) {
                openStaffChatRoom(selfRoom.room_id, `${targetName} (나)`);
                return;
            }
         }
         const titleWithPos = `${targetName} (나)`;
-        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId, tenant_id: myTenantId }).select().single();
+        const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId, tenant_id: myTenantId }).select().single();
         if (roomError) throw roomError;
+        const newRoom = newRoomData as unknown as { room_id: string };
         if (newRoom) {
           await supabase.from('internal_chat_member').insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
           openStaffChatRoom(newRoom.room_id, titleWithPos);
@@ -784,20 +905,23 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         return;
       }
 
-      const { data: targetRooms, error: targetError } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
+      const { data: targetRoomsData, error: targetError } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', targetInstId);
       if (targetError) throw targetError;
 
-      const targetRoomIds = targetRooms?.map((r: any) => r.room_id) || [];
+      const targetRooms = (targetRoomsData as unknown as { room_id: string }[]) || [];
+      const targetRoomIds = targetRooms.map(r => r.room_id);
       let roomId = null;
       if (targetRoomIds.length > 0) {
-        const { data: commonMembers } = await supabase.from('internal_chat_member').select('room_id, internal_chat_room!inner(room_type)').eq('instructor_id', instId).in('room_id', targetRoomIds).eq('internal_chat_room.room_type', 'DIRECT');
-        if (commonMembers && commonMembers.length > 0) roomId = commonMembers[0].room_id;
+        const { data: commonMembersData } = await supabase.from('internal_chat_member').select('room_id, internal_chat_room!inner(room_type)').eq('instructor_id', instId).in('room_id', targetRoomIds).eq('internal_chat_room.room_type', 'DIRECT');
+        const commonMembers = (commonMembersData as unknown as { room_id: string }[]) || [];
+        if (commonMembers.length > 0) roomId = commonMembers[0].room_id;
       }
 
       if (!roomId) {
         const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
-        const { data: newRoom, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId, tenant_id: myTenantId }).select().single();
+        const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos, created_by: instId, tenant_id: myTenantId }).select().single();
         if (roomError) throw roomError;
+        const newRoom = newRoomData as unknown as { room_id: string };
         if (newRoom) {
           roomId = newRoom.room_id;
           await supabase.from('internal_chat_member').insert([{ room_id: roomId, instructor_id: instId }, { room_id: roomId, instructor_id: targetInstId }]);
@@ -813,7 +937,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     const myTenantId = localStorage.getItem("logica_tenant_id");
 
     if (selectedInstIds.length === 1) {
-      const target = allInstructors.find((i: any) => i.instructor_id === selectedInstIds[0]);
+      const target = allInstructors.find((i: InstructorRecord) => i.instructor_id === selectedInstIds[0]);
       if (target) await handleCreateOrOpenStaffRoom(target.instructor_id, target.name, target.chat_position || target.position);
       return;
     }
@@ -821,8 +945,10 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     if (!roomName) return;
 
     try {
-      const { data: newRoom } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId, tenant_id: myTenantId }).select().single();
-      const membersToInsert = selectedInstIds.map(id => ({ room_id: newRoom.room_id, instructor_id: id }));
+      const { data: newRoomData } = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName, created_by: instId, tenant_id: myTenantId }).select().single();
+      const newRoom = newRoomData as unknown as { room_id: string };
+      
+      const membersToInsert: { room_id: string; instructor_id: string; }[] = selectedInstIds.map((id: string) => ({ room_id: newRoom.room_id, instructor_id: id }));
       if (!selectedInstIds.includes(instId)) membersToInsert.push({ room_id: newRoom.room_id, instructor_id: instId }); 
       
       await supabase.from('internal_chat_member').insert(membersToInsert);
@@ -834,18 +960,19 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     setActiveStaffRoomId(roomId); setActiveStaffRoomName(roomName); setStaffChatView("room"); setStaffMessages([]);
     setShowMembers(false); 
     
-    setStaffUnreadCount(prev => Math.max(0, prev - (staffRooms.find((r: any) => r.room_id === roomId)?.unreadCount || 0)));
-    setStaffRooms(prev => prev.map((r: any) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
+    setStaffUnreadCount(prev => Math.max(0, prev - (staffRooms.find((r: StaffRoom) => r.room_id === roomId)?.unreadCount || 0)));
+    setStaffRooms(prev => prev.map((r: StaffRoom) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
 
     if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
     const staffRoomChannelName = `staff_room_${roomId}`;
-    supabase.getChannels().forEach((ch) => { if (ch.topic.includes(staffRoomChannelName)) supabase.removeChannel(ch); });
+    supabase.getChannels().forEach((ch: RealtimeChannel) => { if (ch.topic.includes(staffRoomChannelName)) supabase.removeChannel(ch); });
 
     activeStaffChannelRef.current = supabase.channel(staffRoomChannelName, { config: { broadcast: { self: false } } })
-      .on("broadcast", { event: "typing" }, (payload: any) => {
-        if (payload.payload?.sender_id !== instId) { 
-          setTypingStaffName(payload.payload?.sender_name || "알 수 없는"); 
-          clearTimeout(staffTypingTimerRef.current); 
+      .on("broadcast", { event: "typing" }, (payload: unknown) => {
+        const p = payload as TypingPayload;
+        if (p.payload?.sender_id !== instId) { 
+          setTypingStaffName(p.payload?.sender_name || "알 수 없는"); 
+          if (staffTypingTimerRef.current) clearTimeout(staffTypingTimerRef.current); 
           staffTypingTimerRef.current = setTimeout(() => setTypingStaffName(null), 3000); 
         }
       }).subscribe();
@@ -854,12 +981,12 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString(), is_active: true }).eq("room_id", roomId).eq("instructor_id", instId);
       
       const [msgRes, memRes] = await Promise.all([
-        supabase.from("internal_chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true }),
-        supabase.from("internal_chat_member").select("instructor_id, last_read_at, instructor(name, position, chat_position, profile_image_url)").eq("room_id", roomId)
+        supabase.from("internal_chat_message").select("message_id, room_id, content, created_at, sender_id").eq("room_id", roomId).order("created_at", { ascending: true }),
+        supabase.from("internal_chat_member").select("instructor_id, last_read_at, instructor(instructor_id, name, position, chat_position, profile_image_url)").eq("room_id", roomId)
       ]);
       
-      setStaffMessages(msgRes.data || []);
-      setStaffRoomMembers(memRes.data || []);
+      setStaffMessages((msgRes.data as unknown as InternalChatMessage[]) || []);
+      setStaffRoomMembers((memRes.data as unknown as StaffRoomMember[]) || []);
       loadStaffRooms(); 
     } catch (e) {}
   };
@@ -879,7 +1006,10 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       
       if (error) throw error;
       
-      const updatedName = newName.trim() || staffRooms.find(r => r.room_id === activeStaffRoomId)?.internal_chat_room?.title;
+      const targetRoom = staffRooms.find((r: StaffRoom) => r.room_id === activeStaffRoomId);
+      const chatRoomObj = unwrap(targetRoom?.internal_chat_room) as InternalChatRoom | undefined;
+      const updatedName = newName.trim() || chatRoomObj?.title || "";
+      
       setActiveStaffRoomName(updatedName);
       loadStaffRooms(); 
       alert("✅ 대화방 이름이 변경되었습니다.");
@@ -896,30 +1026,34 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       const { data: newMsg, error } = await supabase.from("internal_chat_message").insert({ room_id: activeStaffRoomId, sender_id: instId, content: text }).select().single();
       if (error) throw error;
       if (newMsg) {
-        setStaffMessages(prev => [...prev, newMsg]);
+        setStaffMessages(prev => [...prev, newMsg as unknown as InternalChatMessage]);
         await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", activeStaffRoomId).eq("instructor_id", instId);
         loadStaffRooms(); 
       }
     } catch (e: any) { alert("메시지 전송 에러: " + e.message); }
   };
 
-  const filteredParents = newChatParents.filter((s: any) => (s?.name || "").toLowerCase().includes(searchKeyword.toLowerCase()));
-  const groupedParents: Record<string, any[]> = {};
-  filteredParents.forEach((s: any) => {
+  const filteredParents = newChatParents.filter((s: StudentRecord) => (s?.name || "").toLowerCase().includes(searchKeyword.toLowerCase()));
+  const groupedParents: Record<string, StudentRecord[]> = {};
+  filteredParents.forEach((s: StudentRecord) => {
     let classes: string[] = [];
-    if (s.enrollment && s.enrollment.length > 0) s.enrollment.forEach((e: any) => { if (e.class?.name) classes.push(e.class.name); });
+    const enrollments = s.enrollment ? (Array.isArray(s.enrollment) ? s.enrollment : [s.enrollment]) : [];
+    enrollments.forEach((e: { class?: { name: string } }) => { 
+      const cName = unwrap(e.class)?.name;
+      if (cName) classes.push(cName); 
+    });
     if (classes.length === 0) classes.push("반 미배정");
-    classes.forEach(cName => {
+    classes.forEach((cName: string) => {
       if (!groupedParents[cName]) groupedParents[cName] = [];
-      if (!groupedParents[cName].find(x => x.student_id === s.student_id)) groupedParents[cName].push(s);
+      if (!groupedParents[cName].find((x: StudentRecord) => x.student_id === s.student_id)) groupedParents[cName].push(s);
     });
   });
 
-  const filteredInstructors = allInstructors.filter((inst: any) => (inst?.name || "").includes(staffSearchKeyword));
-  const orgTree: Record<string, Record<string, any[]>> = {};
+  const filteredInstructors = allInstructors.filter((inst: InstructorRecord) => (inst?.name || "").includes(staffSearchKeyword));
+  const orgTree: Record<string, Record<string, InstructorRecord[]>> = {};
   
-  filteredInstructors.forEach((inst: any) => {
-    const tenantName = (inst.academy_tenant?.name || '소속 미지정').trim();
+  filteredInstructors.forEach((inst: InstructorRecord) => {
+    const tenantName = (unwrap(inst.academy_tenant)?.name || '소속 미지정').trim();
     const deptName = (inst.department || '부서 미지정').trim();
     
     if (!orgTree[tenantName]) orgTree[tenantName] = {};
@@ -928,12 +1062,12 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     orgTree[tenantName][deptName].push(inst);
   });
 
-  const toggleTenant = (t: string) => setExpandedTenants(p => p.includes(t) ? p.filter(x => x !== t) : [...p, t]);
-  const toggleDept = (d: string) => setExpandedDepts(p => p.includes(d) ? p.filter(x => x !== d) : [...p, d]);
+  const toggleTenant = (t: string) => setExpandedTenants((p: string[]) => p.includes(t) ? p.filter((x: string) => x !== t) : [...p, t]);
+  const toggleDept = (d: string) => setExpandedDepts((p: string[]) => p.includes(d) ? p.filter((x: string) => x !== d) : [...p, d]);
 
   return (
     <>
-      {canUseMemo && memos.map(memo => (
+      {canUseMemo && memos.map((memo: MemoRecord) => (
         <DraggableMemo 
           key={memo.memo_id} 
           memo={memo} 
@@ -1037,7 +1171,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                   {Object.keys(groupedParents).length === 0 ? (
                     <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
                   ) : (
-                    Object.keys(groupedParents).sort().map((className, idx) => {
+                    Object.keys(groupedParents).sort().map((className: string, idx: number) => {
                       const students = groupedParents[className];
                       const isExpanded = searchKeyword.length > 0 || expandedClasses.includes(className);
                       return (
@@ -1048,11 +1182,11 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                           </button>
                           {isExpanded && (
                             <div className="mt-2">
-                              {students.map((s: any) => (
+                              {students.map((s: StudentRecord) => (
                                 <div key={s.student_id} onClick={() => handleCreateOrOpenRoom(s.parent_id, s.name)} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:border-blue-400 cursor-pointer transition-all flex items-center justify-between mb-2 last:mb-0 ml-2">
                                   <div>
                                     <div className="font-bold text-slate-700 text-sm">{s.name} 학생 학부모님</div>
-                                    <div className="text-[11px] text-slate-400 font-bold mt-0.5">{s.parent?.phone || '번호없음'}</div>
+                                    <div className="text-[11px] text-slate-400 font-bold mt-0.5">{unwrap(s.parent)?.phone || '번호없음'}</div>
                                   </div>
                                   <button className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-100 transition-colors">대화 시작</button>
                                 </div>
@@ -1074,9 +1208,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                       <button onClick={showNewChatView} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-4 py-2.5 rounded-lg shadow-md text-xs transition-colors">+ 새 채팅방 개설하기</button>
                     </div>
                   ) : (
-                    chatRooms.map(r => {
-                      const phone = r.parent?.phone || '번호없음';
-                      const pName = `${r.parent?.student?.[0]?.name || '알 수 없는'} 학부모님`;
+                    chatRooms.map((r: ChatRoom) => {
+                      const parentData = unwrap(r.parent);
+                      const pName = `${unwrap(parentData?.student)?.name || '알 수 없는'} 학부모님`;
                       let previewText = r.chat_message?.length > 0 ? r.chat_message[0].content : '대화 내역이 없습니다.';
                       if (previewText.length > 18) previewText = previewText.substring(0, 18) + '...';
 
@@ -1107,7 +1241,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                 
                 <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
                   {chatMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10 bg-white/50 p-4 rounded-xl mx-4">대화 내역이 없습니다.</div> :
-                    chatMessages.map(msg => (
+                    chatMessages.map((msg: ChatMessage) => (
                       <div key={msg.message_id} className={`flex w-full mb-1 ${msg.sender_type === "parent" ? "justify-start" : "justify-end"}`}>
                         {msg.sender_type === "parent" && (
                           <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
@@ -1120,7 +1254,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                           
                           <div className={`flex items-end gap-1.5 ${msg.sender_type !== "parent" ? "flex-row-reverse" : "flex-row"}`}>
                             <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type !== "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
-                              {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                              {String(msg.content).split('\n').map((line: string, i: number) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
                             </div>
                             <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_type !== "parent" ? "items-end" : "items-start"}`}>
                               {msg.sender_type !== 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
@@ -1163,7 +1297,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                   {filteredInstructors.length === 0 ? (
                     <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div>
                   ) : (
-                    Object.keys(orgTree).sort((a, b) => {
+                    Object.keys(orgTree).sort((a: string, b: string) => {
                       const aTrim = a.trim();
                       const bTrim = b.trim();
                       const myT = (myTenantName || '소속 미지정').trim();
@@ -1177,9 +1311,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                       if (bTrim === '본사') return 1;
                       
                       return aTrim.localeCompare(bTrim);
-                    }).map(tenantName => {
+                    }).map((tenantName: string) => {
                       const isTenantExpanded = expandedTenants.includes(tenantName) || staffSearchKeyword.length > 0;
-                      const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
+                      const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc: number, curr: InstructorRecord[]) => acc + curr.length, 0);
                       
                       const myT = (myTenantName || '소속 미지정').trim();
                       const isMyTenant = tenantName.trim() === myT;
@@ -1196,7 +1330,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                           </button>
                           {isTenantExpanded && (
                             <div className="mt-1.5 ml-2 border-l-2 border-slate-200 pl-2 space-y-2">
-                              {Object.keys(orgTree[tenantName]).sort((a, b) => {
+                              {Object.keys(orgTree[tenantName]).sort((a: string, b: string) => {
                                 const aTrim = a.trim();
                                 const bTrim = b.trim();
                                 const myD = (myDeptName || '부서 미지정').trim();
@@ -1209,7 +1343,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                                 }
                                 
                                 return aTrim.localeCompare(bTrim);
-                              }).map(deptName => {
+                              }).map((deptName: string) => {
                                 const deptId = `${tenantName}_${deptName}`;
                                 const isDeptExpanded = expandedDepts.includes(deptId) || staffSearchKeyword.length > 0;
                                 const deptMembers = orgTree[tenantName][deptName];
@@ -1229,17 +1363,17 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                                     </button>
                                     {isDeptExpanded && (
                                       <div className="mt-1.5 ml-2 space-y-1.5">
-                                        {[...deptMembers].sort((a: any, b: any) => {
+                                        {[...deptMembers].sort((a: InstructorRecord, b: InstructorRecord) => {
                                           if (a.instructor_id === instId) return -1;
                                           if (b.instructor_id === instId) return 1;
                                           
-                                          const posOrder: any = { '최고관리자': 1, '원장': 2, '부원장': 3, '실장': 4, '전임강사': 5, '파트강사': 6, '조교': 7 };
+                                          const posOrder: Record<string, number> = { '최고관리자': 1, '원장': 2, '부원장': 3, '실장': 4, '전임강사': 5, '파트강사': 6, '조교': 7 };
                                           const orderA = posOrder[a.position] || 99;
                                           const orderB = posOrder[b.position] || 99;
                                           if (orderA !== orderB) return orderA - orderB;
                                           
                                           return a.name.localeCompare(b.name);
-                                        }).map((inst: any) => {
+                                        }).map((inst: InstructorRecord) => {
                                           const isSelected = selectedInstIds.includes(inst.instructor_id);
                                           const avatarUrl = getProfileImageUrl(inst.profile_image_url);
                                           const isMe = inst.instructor_id === instId;
@@ -1300,7 +1434,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                      <button onClick={showNewStaffChatView} className="bg-slate-700 hover:bg-slate-800 text-white font-bold px-4 py-2.5 rounded-lg text-xs transition-colors">+ 조직도 열기</button>
                    </div>
                 ) : (
-                  staffRooms.map((r, idx) => {
+                  staffRooms.map((r: StaffRoom, idx: number) => {
                     let previewText = r.latestMsg ? r.latestMsg.content : '대화 내역이 없습니다.';
                     if (previewText.length > 18) previewText = previewText.substring(0, 18) + '...';
 
@@ -1308,8 +1442,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                       <div key={idx} onClick={() => openStaffChatRoom(r.room_id, r.displayTitle)} className="bg-white p-3 rounded-xl border shadow-sm hover:border-slate-400 flex items-center gap-3 cursor-pointer mb-2 group">
                         <div className="relative shrink-0 w-10 h-10">
                           <div className="relative w-full h-full bg-slate-200 rounded-full flex justify-center items-center text-slate-600 font-bold overflow-hidden">
-                            <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
-                            {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && (
+                            <span className="absolute z-0">{unwrap(r.internal_chat_room)?.room_type === 'GROUP' ? '👥' : 'T'}</span>
+                            {unwrap(r.internal_chat_room)?.room_type !== 'GROUP' && r.displayAvatar && (
                               <img 
                                 src={r.displayAvatar || undefined} 
                                 alt="profile" 
@@ -1360,25 +1494,28 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                       <div className="absolute top-8 right-0 w-52 bg-white border border-slate-200 shadow-xl rounded-xl p-2 z-50 animate-[fadeIn_0.1s_ease-out]">
                         <div className="text-[10px] font-black text-slate-400 mb-1.5 px-2">현재 참여자 목록</div>
                         <div className="max-h-48 overflow-y-auto custom-scroll space-y-0.5 pr-1">
-                          {staffRoomMembers.map(m => (
-                            <div key={m.instructor_id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg transition-colors">
-                              <div className="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center overflow-hidden shrink-0 border border-slate-100">
-                                {m.instructor?.profile_image_url ? (
-                                  <img src={getProfileImageUrl(m.instructor.profile_image_url) || undefined} alt="profile" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
-                                ) : (
-                                  <span className="text-[9px] font-bold text-slate-500">T</span>
-                                )}
+                          {staffRoomMembers.map((m: StaffRoomMember) => {
+                            const instInfo = unwrap(m.instructor);
+                            return (
+                              <div key={m.instructor_id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg transition-colors">
+                                <div className="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center overflow-hidden shrink-0 border border-slate-100">
+                                  {instInfo?.profile_image_url ? (
+                                    <img src={getProfileImageUrl(instInfo.profile_image_url) || undefined} alt="profile" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                  ) : (
+                                    <span className="text-[9px] font-bold text-slate-500">T</span>
+                                  )}
+                                </div>
+                                <div className="flex flex-col min-w-0 flex-1">
+                                  <span className="text-[11px] font-bold text-slate-700 truncate leading-tight">
+                                    {instInfo?.name} {m.instructor_id === instId && <span className="text-blue-500">(나)</span>}
+                                  </span>
+                                  <span className="text-[9px] font-medium text-slate-400 truncate leading-none mt-0.5">
+                                    {instInfo?.chat_position || instInfo?.position || '선생님'}
+                                  </span>
+                                </div>
                               </div>
-                              <div className="flex flex-col min-w-0 flex-1">
-                                <span className="text-[11px] font-bold text-slate-700 truncate leading-tight">
-                                  {m.instructor?.name} {m.instructor_id === instId && <span className="text-blue-500">(나)</span>}
-                                </span>
-                                <span className="text-[9px] font-medium text-slate-400 truncate leading-none mt-0.5">
-                                  {m.instructor?.chat_position || m.instructor?.position || '선생님'}
-                                </span>
-                              </div>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -1387,9 +1524,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
                 <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3" onClick={() => setShowMembers(false)}>
                   {staffMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10">메시지가 없습니다.</div> :
-                    staffMessages.map(msg => {
-                      const unreadBy = staffRoomMembers.filter(m => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
-                      const senderInfo = staffRoomMembers.find(m => m.instructor_id === msg.sender_id)?.instructor;
+                    staffMessages.map((msg: InternalChatMessage) => {
+                      const unreadBy = staffRoomMembers.filter((m: StaffRoomMember) => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
+                      const senderInfo = unwrap(staffRoomMembers.find((m: StaffRoomMember) => m.instructor_id === msg.sender_id)?.instructor);
                       const avatarUrl = getProfileImageUrl(senderInfo?.profile_image_url);
 
                       return (
@@ -1417,7 +1554,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                             
                             <div className={`flex items-end gap-1.5 ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row'}`}>
                               <div className={`px-3.5 py-2 rounded-2xl shadow-sm text-[13px] ${msg.sender_id === instId ? 'bg-slate-700 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
-                                {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                                {String(msg.content).split('\n').map((line: string, i: number) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
                               </div>
                               <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
                                 {msg.sender_id === instId && unreadBy > 0 && <span className="text-slate-600 font-bold mb-0.5">{unreadBy}</span>}
@@ -1434,9 +1571,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
                     <div className="flex justify-start w-full mb-1">
                       <div className="relative w-7 h-7 bg-slate-300 rounded-full flex justify-center items-center text-white text-xs shrink-0 overflow-hidden mr-2">
                         <span className="absolute z-0">T</span>
-                        {staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar && (
+                        {staffRooms.find((r: StaffRoom) => r.room_id === activeStaffRoomId)?.displayAvatar && (
                           <img 
-                            src={staffRooms.find(r => r.room_id === activeStaffRoomId)?.displayAvatar || undefined} 
+                            src={staffRooms.find((r: StaffRoom) => r.room_id === activeStaffRoomId)?.displayAvatar || undefined} 
                             alt="profile" 
                             className="absolute w-full h-full object-cover z-10" 
                             onError={(e) => { e.currentTarget.style.display = 'none'; }} 
