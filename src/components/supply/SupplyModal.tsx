@@ -21,15 +21,16 @@ export default function SupplyModal({
 }: SupplyModalProps) {
   const [type, setType] = useState("사무용품");
   const [content, setContent] = useState("");
+  // 🌟 [핵심 변경] 깜빡임 없는 UI 업데이트를 위한 로컬 댓글 상태 추가
+  const [comments, setComments] = useState<any[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [commentInput, setCommentInput] = useState("");
   
   const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
   
-  // 🌟 세부 권한 상태
   const [canDeletePost, setCanDeletePost] = useState(false);
   const [canDeleteOthersComment, setCanDeleteOthersComment] = useState(false);
-  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); // 🌟 회의 안건 상정 권한
+  const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); 
 
   const commentEndRef = useRef<HTMLDivElement>(null);
 
@@ -72,9 +73,11 @@ export default function SupplyModal({
       if (reqData) {
         setType(reqData.request_type || "사무용품");
         setContent(reqData.content || "");
+        setComments(reqData.comments || []); // 🌟 로컬 상태에 댓글 연동
       } else {
         setType("사무용품");
         setContent("");
+        setComments([]); // 🌟 초기화
       }
       setCommentInput("");
     }
@@ -82,17 +85,18 @@ export default function SupplyModal({
 
   const isReadonly = Boolean(reqData) && !isSuperAdminOrAdmin && String(reqData?.author_id) !== String(currentUser.instId);
 
+  // 🌟 [핵심 변경] 로컬 comments 상태를 바라보도록 스크롤 이벤트 수정
   useEffect(() => {
     if (commentEndRef.current) {
       commentEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [reqData?.comments]);
+  }, [comments]);
 
   const handleSubmit = async () => {
     if (!content.trim()) return alert("신청 내용을 입력해주세요.");
     
     const myTenantId = localStorage.getItem("logica_tenant_id");
-    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId; // 🌟 본사 오류 방지
+    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId; 
 
     setIsSubmitting(true);
     
@@ -108,7 +112,7 @@ export default function SupplyModal({
           last_updater_name: currentUser.name
         }).eq("request_id", primaryKey);
         
-        if (error) throw error; // 🌟 강력한 에러 검증
+        if (error) throw error; 
       } else {
         if (!validTenantId) { alert("소속 지점 정보가 없습니다."); setIsSubmitting(false); return; }
 
@@ -124,10 +128,10 @@ export default function SupplyModal({
           tenant_id: validTenantId 
         });
         
-        if (error) throw error; // 🌟 강력한 에러 검증
+        if (error) throw error; 
       }
       
-      onSuccess();
+      onSuccess(); // 🌟 본문 저장 시에는 창이 닫혀야 하므로 유지
       onClose();
     } catch (e: any) {
       alert(`저장 실패: ${e.message}`);
@@ -136,6 +140,7 @@ export default function SupplyModal({
     }
   };
 
+  // 🌟 [핵심 변경] 깜빡임(새로고침) 방지를 위한 onSuccess 제거 및 로컬 UI 즉각 반영
   const handleAddComment = async () => {
     if (!commentInput.trim() || !reqData) return;
     
@@ -151,7 +156,7 @@ export default function SupplyModal({
       createdAt: dateStr
     };
     
-    const updatedComments = [...(reqData.comments || []), newComment];
+    const updatedComments = [...comments, newComment]; // 🌟 로컬 상태 기반 업데이트
     const primaryKey = reqData.request_id || reqData.id;
     
     try {
@@ -163,17 +168,20 @@ export default function SupplyModal({
       
       if (error) throw error;
 
-      reqData.comments = updatedComments; 
+      if (reqData) reqData.comments = updatedComments; // 부모 데이터 보존
+      setComments(updatedComments); // 즉각적인 UI 반영
       setCommentInput("");
-      onSuccess(); 
+      
+      // onSuccess(); 🚫 제거됨 (화면 깜빡임 방지)
     } catch (e: any) {
       alert("댓글 등록 실패: " + e.message);
     }
   };
 
+  // 🌟 [핵심 변경] 깜빡임(새로고침) 방지를 위한 onSuccess 제거 및 로컬 UI 즉각 반영
   const handleDeleteComment = async (commentId: number) => {
     if (!confirm("이 댓글을 삭제하시겠습니까?")) return;
-    const updatedComments = reqData.comments.filter((c: any) => c.id !== commentId);
+    const updatedComments = comments.filter(c => c.id !== commentId); // 🌟 로컬 상태 기반 업데이트
     const primaryKey = reqData.request_id || reqData.id;
 
     try {
@@ -185,8 +193,10 @@ export default function SupplyModal({
       
       if (error) throw error;
 
-      reqData.comments = updatedComments;
-      onSuccess();
+      if (reqData) reqData.comments = updatedComments; // 부모 데이터 보존
+      setComments(updatedComments); // 즉각적인 UI 반영
+      
+      // onSuccess(); 🚫 제거됨 (화면 깜빡임 방지)
     } catch (e: any) {
       alert("댓글 삭제 실패: " + e.message);
     }
@@ -276,10 +286,11 @@ export default function SupplyModal({
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
-              {(!reqData || !reqData.comments || reqData.comments.length === 0) ? (
+              {/* 🌟 [핵심 변경] 로컬 상태인 comments를 순회하여 렌더링 */}
+              {comments.length === 0 ? (
                 <div className="flex-1 flex items-center justify-center text-slate-400 font-bold text-xs h-full">아직 등록된 진행 상황 노트가 없습니다.</div>
               ) : (
-                reqData.comments.map((c: any) => {
+                comments.map((c: any) => {
                   const isMe = c.authorName === currentUser.name;
                   const canDelete = isMe || isSuperAdminOrAdmin || canDeleteOthersComment; 
                   

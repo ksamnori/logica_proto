@@ -11,7 +11,6 @@ import AssignBookModal from "@/components/lesson/AssignBookModal";
 export default function LessonPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [masterBooks, setMasterBooks] = useState<any[]>([]);
@@ -30,8 +29,8 @@ export default function LessonPage() {
   const [assignModalData, setAssignModalData] = useState<any | null>(null);
 
   const [canDeleteBook, setCanDeleteBook] = useState(false);
+  const [canViewAllClasses, setCanViewAllClasses] = useState(false); // 🌟 전체 반 열람 권한 상태 추가
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
@@ -43,7 +42,8 @@ export default function LessonPage() {
       
       if (isGodMode) {
         setIsAuthorized(true);
-        setCanDeleteBook(true); // 최고관리자급은 삭제 무조건 허용
+        setCanDeleteBook(true); 
+        setCanViewAllClasses(true); // 🌟 무조건 전체 열람 허용
         return;
       }
 
@@ -60,23 +60,19 @@ export default function LessonPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 교재 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/lesson"))) {
         alert("⛔ 교재 관리 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
       } else {
         setIsAuthorized(true);
-        // 삭제 권한이 메뉴 리스트(allowed_menus)에 포함되어 있는지 확인
-        if (data.allowed_menus.includes('action_delete_book')) {
-          setCanDeleteBook(true);
-        }
+        if (data.allowed_menus.includes('action_delete_book')) setCanDeleteBook(true);
+        if (data.allowed_menus.includes('action_view_all_classes')) setCanViewAllClasses(true); // 🌟 전체 반 열람 권한 연동
       }
     };
 
     checkAccess();
   }, [router]);
 
-  // 권한이 통과되었을 때만 데이터를 불러옵니다.
   useEffect(() => {
     if (isAuthorized) {
       fetchMasterBooks();
@@ -90,41 +86,43 @@ export default function LessonPage() {
 
   const fetchMasterBooks = async () => {
     const tenantId = localStorage.getItem("logica_tenant_id");
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
     
-    // 🚨 [보안 강화] 소속 지점 정보가 없으면 조회를 원천 차단합니다.
-    if (!tenantId) {
+    if (!validTenantId) {
       setMasterBooks([]);
       return;
     }
 
-    // 🌟 오직 내 지점(tenant_id)에 속한 마스터 교재만 불러옵니다.
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("textbook")
       .select("*")
-      .eq("tenant_id", tenantId)
+      .eq("tenant_id", validTenantId)
       .order("created_at", { ascending: false });
       
+    if (error) console.error("교재 로드 에러:", error);
     setMasterBooks(data || []);
   };
 
   const createDummyBook = async () => {
     const tenantId = localStorage.getItem("logica_tenant_id");
-    if (!tenantId) return alert("소속 지점 정보가 없어 교재를 생성할 수 없습니다.");
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+
+    if (!validTenantId) return alert("소속 지점 정보가 없어 교재를 생성할 수 없습니다.");
 
     const bookName = prompt("새로운 마스터 교재 이름을 입력하세요:\n(예: 개념원리 중1-1)");
     if (!bookName) return;
     try {
-      // 🌟 교재 생성 시 내 지점(tenant_id) 꼬리표를 명확히 달아줍니다.
-      await supabase.from("textbook").insert({ 
+      const { error } = await supabase.from("textbook").insert({ 
         title: bookName, 
         book_type: "주교재", 
         target_sessions: 12,
-        tenant_id: tenantId 
+        tenant_id: validTenantId 
       });
+      if (error) throw error;
       alert(`[${bookName}] 교재가 생성되었습니다.`);
       fetchMasterBooks();
-    } catch (e) {
-      alert("교재 생성 실패");
+    } catch (e: any) {
+      alert("교재 생성 실패: " + e.message);
     }
   };
 
@@ -152,23 +150,25 @@ export default function LessonPage() {
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const tenantId = localStorage.getItem("logica_tenant_id");
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
     
-    // 🚨 [보안 강화] 소속 지점 정보가 없으면 반 조회를 원천 차단합니다.
-    if (!tenantId) {
+    if (!validTenantId) {
       setClasses([]);
       return;
     }
 
-    const isAdmin = ["ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || pos.includes("원장") || pos.includes("실장");
+    // 🌟 최고관리자, 원장, 실장 체크를 명확히 분리
+    const isAdminLike = ["ADMIN", "MANAGER", "PRINCIPAL", "SUPER_ADMIN", "VICE_ADMIN"].includes(role.toUpperCase()) || 
+                        pos.includes("원장") || pos.includes("실장") || pos.includes("최고관리자") || pos.includes("부원장") || pos.includes("대장");
 
-    // 🌟 오직 내 지점(tenant_id)에 속한 반만 불러오도록 강제 필터링!
     let query = supabase
       .from("class")
       .select("*, instructor(name), enrollment(student_id), class_schedule(*)")
-      .eq("tenant_id", tenantId)
+      .eq("tenant_id", validTenantId)
       .order("name");
     
-    if (!isAdmin && instId) {
+    // 🌟 [핵심 로직] 관리자급도 아니고 전체 조회 권한(canViewAllClasses)도 없다면 본인 반만 조회
+    if (!isAdminLike && !canViewAllClasses && instId) {
       query = query.eq("instructor_id", instId);
     }
 
@@ -293,13 +293,12 @@ export default function LessonPage() {
     return groups;
   }, [classes]);
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null; 
   }
 
   return (
@@ -364,7 +363,6 @@ export default function LessonPage() {
                       }} className="px-3 py-1.5 bg-[#002864] text-white rounded-lg text-[11px] font-bold transition-colors shadow-sm text-center hover:bg-blue-900">배정</button>
                       <div className="flex gap-1">
                         <button onClick={() => { setEditModalData(b); setIsEditModalOpen(true); }} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[10px] font-bold transition-colors shadow-sm flex-1">수정</button>
-                        {/* 🌟 삭제 권한이 있는 사용자에게만 삭제 버튼 노출 */}
                         {canDeleteBook && (
                           <button onClick={() => deleteMasterBook(b.book_id)} className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-500 rounded text-[10px] font-bold transition-colors shadow-sm flex-1">삭제</button>
                         )}
@@ -377,7 +375,6 @@ export default function LessonPage() {
           </div>
         </div>
 
-        {/* 우측 반 및 교재 현황 패널 */}
         <div className="flex-1 flex flex-col min-w-0 bg-white rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0 z-10">
             <h2 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
@@ -517,7 +514,6 @@ export default function LessonPage() {
                             <button onClick={() => window.location.href = `/progress?class_id=${selectedClass.class_id}&book_id=${cb.book_id}`} className="px-3 py-1.5 bg-slate-50 hover:bg-blue-50 text-slate-600 hover:text-[#002864] rounded-lg font-bold text-xs shadow-sm transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1">
                               진도/과제 관리로 이동 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                             </button>
-                            {/* 배정 취소 버튼은 반 삭제와 유사하므로 필요하다면 나중에 권한 분리 가능 */}
                             <button onClick={() => deleteClassTextbook(cb.class_textbook_id)} className="ml-auto text-xs font-bold text-rose-400 hover:text-rose-600 underline">배정 취소</button>
                           </div>
                         </div>

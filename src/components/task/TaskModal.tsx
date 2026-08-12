@@ -88,6 +88,7 @@ export default function TaskModal({
     setModalData((prev: any) => ({ ...prev, [field]: value }));
   };
 
+  // 🌟 [핵심 변경] 댓글 등록 시 전체 새로고침(깜빡임) 유발하는 onSuccess 제거
   const handleAddComment = async () => {
     if (!commentInput.trim() || !modalData?.memo_id) return;
     const now = new Date();
@@ -112,14 +113,17 @@ export default function TaskModal({
 
       if (error) throw error;
 
-      setComments(updatedComments);
+      if (task) task.comments = updatedComments; // 부모 데이터 로컬 업데이트
+      setComments(updatedComments); // 즉각적인 UI 반영
       setCommentInput("");
-      onSuccess(); 
+      
+      // onSuccess(); 🚫 제거됨 (화면 깜빡임 방지)
     } catch (e: any) {
       alert("댓글 등록 실패: " + e.message);
     }
   };
 
+  // 🌟 [핵심 변경] 댓글 삭제 시 전체 새로고침(깜빡임) 유발하는 onSuccess 제거
   const handleDeleteComment = async (commentId: number) => {
     if (!confirm("이 댓글을 삭제하시겠습니까?")) return;
     const updatedComments = comments.filter(c => c.id !== commentId);
@@ -133,8 +137,10 @@ export default function TaskModal({
       
       if (error) throw error;
 
-      setComments(updatedComments);
-      onSuccess();
+      if (task) task.comments = updatedComments; // 부모 데이터 로컬 업데이트
+      setComments(updatedComments); // 즉각적인 UI 반영
+      
+      // onSuccess(); 🚫 제거됨 (화면 깜빡임 방지)
     } catch (e: any) {
       alert("댓글 삭제 실패: " + e.message);
     }
@@ -142,6 +148,9 @@ export default function TaskModal({
 
   const saveTask = async () => {
     if (!modalData.content?.trim()) return alert("본문 내용을 입력해주세요.");
+
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    const validTenantId = myTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : myTenantId;
 
     setIsSaving(true);
     const currentTimeISO = new Date().toISOString();
@@ -161,16 +170,18 @@ export default function TaskModal({
         if (error) throw error; 
         alert("성공적으로 저장되었습니다.");
       } else {
-        // 🚨 [수정] DB에 아직 tenant_id 컬럼이 없으므로 payload에서 완전히 제거
+        if (!validTenantId) { alert("소속 지점 정보가 없습니다."); setIsSaving(false); return; }
+        
         payload.instructor_id = currentUser.instId;
         payload.author_name = currentUser.name;
         payload.created_at = currentTimeISO;
+        payload.tenant_id = validTenantId; 
         
         const { error } = await supabase.from("instructor_memo").insert([payload]);
         if (error) throw error; 
         alert("업무(공지)가 등록되었습니다.");
       }
-      onSuccess();
+      onSuccess(); // 🌟 본문 저장 시에는 창을 닫아야 하므로 유지
       onClose();
     } catch (e: any) { 
       alert("저장 실패: " + (e.message || "서버 통신 오류")); 
@@ -192,11 +203,10 @@ export default function TaskModal({
 
   const submitAgenda = async () => {
     const myTenantId = localStorage.getItem("logica_tenant_id");
-    const validTenantId = myTenantId === 'hq' ? 'd59395b0-8c9c-4dd3-9e25-ff569da98abc' : myTenantId;
+    const validTenantId = myTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : myTenantId;
     if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
 
     try {
-      // agenda 테이블에는 tenant_id가 존재하므로 정상 삽입
       const { error } = await supabase.from("agenda").insert({
         title: `[업무공유] ${modalData.memo_type}`,
         content: modalData.content,

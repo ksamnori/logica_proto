@@ -64,8 +64,42 @@ export default function Sidebar() {
     fetchData();
   }, []);
 
+  // 🌟 GUEST(체험용) 계정 투명 방패(조작 차단) 로직 개선
+  useEffect(() => {
+    if (displayRole === 'GUEST') {
+      const blockActions = (e: Event) => {
+        const target = e.target as HTMLElement;
+        
+        // 1. 사이드바(aside) 내부 클릭은 허용
+        if (target.closest('aside')) return;
+        // 2. 🌟 허가된 인터랙션 영역(채팅, 메모, 상단 헤더, 닫기 버튼 등) 완벽 허용
+        if (target.closest('.allow-guest-interaction')) return;
+        
+        // 그 외 우측 화면의 클릭, 키보드 입력 등 차단
+        e.preventDefault();
+        e.stopPropagation();
+        
+        // 과도한 알림 방지를 위해 'click' 이벤트에만 알림 노출
+        if (e.type === 'click') {
+          alert("🔒 테스트(체험용) 계정은 읽기 전용 모드입니다.\n화면 구경은 가능하지만 데이터를 수정하거나 삭제할 수 없습니다.");
+        }
+      };
+
+      // 캡처링 단계에서 이벤트 원천 차단
+      window.addEventListener('click', blockActions, true);
+      window.addEventListener('keydown', blockActions, true);
+      window.addEventListener('mousedown', blockActions, true); 
+
+      return () => {
+        window.removeEventListener('click', blockActions, true);
+        window.removeEventListener('keydown', blockActions, true);
+        window.removeEventListener('mousedown', blockActions, true);
+      };
+    }
+  }, [displayRole]);
+
   const canAccess = (path: string) => {
-    if (strictSuperAdmin || isPrincipal) return true; 
+    if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true; 
     if (isLoadingPerms) return false; 
     return allowedMenus.includes(path);
   };
@@ -86,44 +120,35 @@ export default function Sidebar() {
       );
     }
     
-    // 🌟 기본 메뉴 스타일
     let customBg = active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
     let customLabel = active ? 'font-black' : 'font-bold';
     let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
 
-    // 🌟 [특정 메뉴 컬러 트렌디 커스텀]
     if (path === '/home') {
-      // 신뢰와 안정의 Logica 네이비
       customBg = active ? 'bg-[#002864] border-[#001f4d] text-white shadow-md' : 'bg-blue-50/50 border-blue-100 text-[#002864] hover:bg-blue-100 hover:border-blue-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-blue-200 font-medium' : 'text-blue-400 font-medium';
     } else if (path === '/learning') {
-      // 성장과 피드백의 에메랄드
       customBg = active ? 'bg-emerald-500 border-emerald-600 text-white shadow-md' : 'bg-emerald-50/50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-emerald-100 font-medium' : 'text-emerald-500 font-medium';
     } else if (path === '/exam-list') {
-      // 학구적이고 세련된 바이올렛
       customBg = active ? 'bg-violet-500 border-violet-600 text-white shadow-md' : 'bg-violet-50/50 border-violet-100 text-violet-700 hover:bg-violet-100 hover:border-violet-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-violet-100 font-medium' : 'text-violet-400 font-medium';
     } else if (path === '/minutes') {
-      // 미래지향적 스마트 스카이 블루
       customBg = active ? 'bg-sky-500 border-sky-600 text-white shadow-md' : 'bg-sky-50/50 border-sky-100 text-sky-700 hover:bg-sky-100 hover:border-sky-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-sky-100 font-medium' : 'text-sky-500 font-medium';
     } else if (path === '/admin-dashboard') {
-      // 데스크의 활력을 띠는 앰버/오렌지
       customBg = active ? 'bg-orange-500 border-orange-600 text-white shadow-md' : 'bg-orange-50/50 border-orange-100 text-orange-700 hover:bg-orange-100 hover:border-orange-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-orange-100 font-medium' : 'text-orange-400 font-medium';
     } else if (path === '/academy-info') {
-      // 짙은 녹색 배경 + 흰 글씨
       customBg = active ? 'bg-[#1f2d26] border-[#1f2d26] text-white shadow-md' : 'bg-[#2e4036] border-[#2e4036] text-white hover:bg-[#24332b] hover:border-[#24332b] shadow-sm';
       customLabel = 'font-black';
       customDesc = 'text-emerald-200 font-medium';
     } else if (path === '/permission') {
-      // 옅은 붉은색 배경 + 붉은 글씨
       customBg = active ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 shadow-sm';
     }
 
@@ -158,7 +183,7 @@ export default function Sidebar() {
             {tenantName}
           </span>
           <span className="text-[10px] font-bold text-slate-400 uppercase leading-none tracking-wider whitespace-nowrap">
-            {strictSuperAdmin ? "Super Admin" : displayRole.replace('_', ' ')}
+            {strictSuperAdmin ? "Super Admin" : (displayRole === 'GUEST' ? "테스트(읽기전용)" : displayRole.replace('_', ' '))}
           </span>
         </div>
       </div>
@@ -204,21 +229,19 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {(strictSuperAdmin || isPrincipal) && (
-          <div className="mb-6">
-            <div className="px-4 flex items-center gap-1.5 mb-3">
-              <span className="text-[13px]">👑</span>
-              <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">원장·최고관리자 전용</p>
-              <span className="text-[9px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-black border border-indigo-200 ml-1">ADMIN</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 px-3">
-              <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
-              <MenuItem path="/permission" label="권한 관리" />
-              <MenuItem path="/instructor" label="강사 관리" />
-              <MenuItem path="/academy-info" label="LOGICA 학원 정보" full />
-            </div>
+        <div className="mb-6">
+          <div className="px-4 flex items-center gap-1.5 mb-3">
+            <span className="text-[13px]">👑</span>
+            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">원장·최고관리자 전용</p>
+            <span className="text-[9px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-black border border-indigo-200 ml-1">ADMIN</span>
           </div>
-        )}
+          <div className="grid grid-cols-2 gap-2 px-3">
+            <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
+            <MenuItem path="/permission" label="권한 관리" />
+            <MenuItem path="/instructor" label="강사 관리" />
+            <MenuItem path="/academy-info" label="LOGICA 학원 정보" full />
+          </div>
+        </div>
 
       </nav>
     </aside>

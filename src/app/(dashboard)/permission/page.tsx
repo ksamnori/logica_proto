@@ -20,6 +20,7 @@ const PERMISSION_GROUPS = [
       { id: "/student", label: "학생 관리 (기본 정보/리포트)" },
       { id: "action_delete_student", label: "↳ [권한] 학생 데이터 영구 삭제", isAction: true },
       { id: "/class", label: "반 관리 (수강생/일정 배정)" },
+      { id: "action_view_all_classes", label: "↳ [권한] 전체 수강반 열람 (미체크 시 본인 반만 노출)", isAction: true },
       { id: "action_delete_class", label: "↳ [권한] 반(클래스) 삭제", isAction: true },
       { id: "/lesson", label: "교재 관리 (마스터 교재/진도 배정)" },
       { id: "action_delete_book", label: "↳ [권한] 마스터 교재 삭제", isAction: true },
@@ -66,7 +67,12 @@ const PERMISSION_GROUPS = [
     category: "소통 및 행정 업무",
     items: [
       { id: "/minutes", label: "AI 회의록 (회의 안건/일정)" },
-      { id: "action_delete_minutes", label: "↳ [권한] AI 회의록(안건/기록) 삭제", isAction: true }, 
+      { id: "action_create_voice_minutes", label: "↳ [권한] AI 실시간 음성 회의록 작성", isAction: true },
+      { id: "action_create_manual_agenda", label: "↳ [권한] 새 안건 수동 작성", isAction: true },
+      { id: "action_bind_meeting", label: "↳ [권한] 안건 병합하여 회의록 생성", isAction: true },
+      { id: "action_edit_agenda_status", label: "↳ [권한] 안건 상태(대기/진행/완료) 변경", isAction: true },
+      { id: "action_delete_own_agenda", label: "↳ [권한] 본인이 작성한 안건 삭제", isAction: true },
+      { id: "action_delete_minutes", label: "↳ [권한] AI 회의록 전체 삭제 (관리자급)", isAction: true }, 
       
       { id: "/task", label: "업무 공유 보드 (공지/인계 사항)" },
       { id: "action_delete_task", label: "↳ [권한] 업무/공지 기록 삭제", isAction: true },
@@ -74,6 +80,8 @@ const PERMISSION_GROUPS = [
       { id: "action_submit_task_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
       
       { id: "/cs", label: "학부모 요청 및 CS 관리" },
+      // 🌟 [추가됨] CS 타인 열람 권한 
+      { id: "action_view_all_cs", label: "↳ [권한] 타인의 CS 요청 내역 전체 열람", isAction: true },
       { id: "action_delete_cs", label: "↳ [권한] 학부모 요청(CS) 기록 삭제", isAction: true },
       { id: "action_delete_cs_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
       { id: "action_submit_cs_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
@@ -111,12 +119,12 @@ const ROLES = [
   { id: "TEACHER", name: "전임강사", desc: "클래스, 학생, 출제, 학습 관리" },
   { id: "PART_TEACHER", name: "파트강사", desc: "제한된 반 및 학생 관리" },
   { id: "TA", name: "조교", desc: "보조 채점, 클리닉 출결 지원" },
+  { id: "GUEST", name: "체험/테스트", desc: "모든 메뉴 열람 전용 (조작 차단됨)" },
 ];
 
 export default function PermissionPage() {
   const router = useRouter();
   
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [tenantId, setTenantId] = useState("");
@@ -125,14 +133,12 @@ export default function PermissionPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 원장급 권한인지 검사합니다!
   useEffect(() => {
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const tId = localStorage.getItem("logica_tenant_id");
 
-    // "실장" 이나 일반 강사를 가차없이 차단하고 오직 원장/대장 급만 허용!
-    const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
+    const adminFlag = ["SUPER_ADMIN", "ADMIN", "GUEST"].includes(role.toUpperCase()) || 
                       ["최고관리자", "대장", "원장"].some(p => pos.includes(p));
 
     if (!tId) {
@@ -236,13 +242,12 @@ export default function PermissionPage() {
     }
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null; 
   }
 
   if (isLoading) {

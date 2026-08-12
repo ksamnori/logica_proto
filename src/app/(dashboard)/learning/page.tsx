@@ -49,10 +49,7 @@ type TabType = 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT';
 
 export default function LearningPage() {
   const router = useRouter();
-
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-
   const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
 
   const [groupedClasses, setGroupedClasses] = useState<Record<string, ClassInfo[]>>({});
@@ -78,15 +75,13 @@ export default function LearningPage() {
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
       
       if (isGodMode) {
         setIsAuthorized(true);
@@ -106,7 +101,6 @@ export default function LearningPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 학습/평가(learning) 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/learning"))) {
         alert("⛔ 학습 및 평가 관리 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
@@ -114,15 +108,11 @@ export default function LearningPage() {
         setIsAuthorized(true);
       }
     };
-
     checkAccess();
   }, [router]);
 
-  // 권한이 통과되었을 때만 기본 데이터를 불러옵니다.
   useEffect(() => {
-    if (isAuthorized) {
-      fetchBaseData();
-    }
+    if (isAuthorized) fetchBaseData();
   }, [isAuthorized]);
 
   useEffect(() => {
@@ -147,11 +137,8 @@ export default function LearningPage() {
 
       fetchStatsForTab(allStudentsList);
 
-      if (view.type === 'STUDENT') {
-        fetchStudentTimeline(view.studentId, view.classId);
-      } else if (view.type === 'GLOBAL_LIST') {
-        fetchGlobalListForTab(savedTab, allStudentsList);
-      }
+      if (view.type === 'STUDENT') fetchStudentTimeline(view.studentId, view.classId);
+      else if (view.type === 'GLOBAL_LIST') fetchGlobalListForTab(savedTab, allStudentsList);
     }
   }, [allStudentsList]);
 
@@ -173,31 +160,16 @@ export default function LearningPage() {
   const handleMainTabClick = (tab: TabType) => {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
-    
-    setSelectedBlocks([]);
-    setGlobalSelectedBlocks([]);
-    setIsFilterActive(false);
-    setSelectedDate(null); 
-
-    setGlobalList([]);
-    setTimelineData([]);
-    
-    if (currentView.type === 'STUDENT') {
-      fetchStudentTimeline(currentView.studentId, currentView.classId);
-    } else if (currentView.type === 'GLOBAL_LIST') {
-      fetchGlobalListForTab(tab, allStudentsList);
-    }
+    setSelectedBlocks([]); setGlobalSelectedBlocks([]); setIsFilterActive(false); setSelectedDate(null); 
+    setGlobalList([]); setTimelineData([]);
+    if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
+    else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab(tab, allStudentsList);
   };
 
   const handleCalendarSummaryClick = (tab: TabType) => {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
-
-    setSelectedBlocks([]);
-    setGlobalSelectedBlocks([]);
-    
-    setGlobalList([]);
-    setTimelineData([]);
+    setSelectedBlocks([]); setGlobalSelectedBlocks([]); setGlobalList([]); setTimelineData([]);
 
     let newView = currentView;
     if (currentView.type === 'ALL' || currentView.type === 'CLASS') {
@@ -206,29 +178,18 @@ export default function LearningPage() {
       sessionStorage.setItem('logica_learning_view', JSON.stringify(newView));
     }
 
-    if (newView.type === 'STUDENT') {
-      fetchStudentTimeline(newView.studentId, newView.classId);
-    } else if (newView.type === 'GLOBAL_LIST') {
-      fetchGlobalListForTab(tab, allStudentsList);
-    }
+    if (newView.type === 'STUDENT') fetchStudentTimeline(newView.studentId, newView.classId);
+    else if (newView.type === 'GLOBAL_LIST') fetchGlobalListForTab(tab, allStudentsList);
   };
 
   const handleViewChange = (view: ViewState) => {
     setCurrentView(view);
     sessionStorage.setItem('logica_learning_view', JSON.stringify(view));
-    
-    setSelectedBlocks([]);
-    setGlobalSelectedBlocks([]);
-    setSelectedDate(null); 
+    setSelectedBlocks([]); setGlobalSelectedBlocks([]); setSelectedDate(null); 
+    setGlobalList([]); setTimelineData([]);
 
-    setGlobalList([]);
-    setTimelineData([]);
-
-    if (view.type === 'STUDENT') {
-      fetchStudentTimeline(view.studentId, view.classId);
-    } else if (view.type === 'GLOBAL_LIST') {
-      fetchGlobalListForTab(activeTab, allStudentsList);
-    }
+    if (view.type === 'STUDENT') fetchStudentTimeline(view.studentId, view.classId);
+    else if (view.type === 'GLOBAL_LIST') fetchGlobalListForTab(activeTab, allStudentsList);
   };
 
   const handleStudentClick = (studentId: string, studentName: string, classId: string, className: string) => {
@@ -245,12 +206,7 @@ export default function LearningPage() {
       const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('원장') || pos.includes('실장') || pos.includes('최고관리자');
 
       let classQuery = supabase.from('class').select('class_id, name, level_name').order('name');
-      
-      // 🌟 [보안 강화] 타 지점의 클래스가 렌더링되지 않도록 격리
-      if (tenantId && tenantId !== 'hq') {
-        classQuery = classQuery.eq('tenant_id', tenantId);
-      }
-
+      if (tenantId && tenantId !== 'hq') classQuery = classQuery.eq('tenant_id', tenantId);
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const { data: classes } = await classQuery;
@@ -260,7 +216,6 @@ export default function LearningPage() {
       const studentsByClass: Record<string, StudentInfo[]> = {};
       const allStudents: StudentInfo[] = [];
       const processedStudentIds = new Set<string>();
-      
       const studentClassMap = new Map<string, string[]>();
 
       const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, student(name, status)').in('class_id', classIds);
@@ -388,8 +343,9 @@ export default function LearningPage() {
       const targetClassIds = studentObj?.allClassIds && studentObj.allClassIds.length > 0 
           ? studentObj.allClassIds : [classId];
 
+      // 🌟 [핵심 버그 수정 1] exam_master에서 sub_title을 꼭 포함해서 쿼리해야 합니다!!
       const { data: exams } = await supabase.from('exam_assignment')
-        .select('assignment_id, status, total_score, created_at, exam_master!inner(exam_id, title, exam_type, total_questions)')
+        .select('assignment_id, status, total_score, created_at, exam_master!inner(exam_id, title, sub_title, exam_type, total_questions)')
         .eq('student_id', studentId).order('created_at', { ascending: false });
 
       const { data: hws } = await supabase.from('homework_assignment')
@@ -408,9 +364,7 @@ export default function LearningPage() {
       examAns?.forEach(a => tallyGrading(exCounts, a.exam_assignment_id, a.grading_code));
 
       const hwCounts: Record<string, { o: number; x: number; helped: number }> = {};
-      hwAns?.forEach(a => {
-        tallyGrading(hwCounts, a.homework_id, a.grading_code);
-      });
+      hwAns?.forEach(a => tallyGrading(hwCounts, a.homework_id, a.grading_code));
 
       let combined: any[] = [];
 
@@ -422,6 +376,7 @@ export default function LearningPage() {
           realId: ex.assignment_id,
           masterId: m?.exam_id,
           title: m?.title || '제목 없음',
+          subTitle: m?.sub_title, // 🌟 여기서 subTitle을 담아줘야 자식 컴포넌트에 전달됩니다!
           date: ex.created_at,
           status: ex.status,
           total: m?.total_questions || 0,
@@ -487,8 +442,9 @@ export default function LearningPage() {
         const chunk = studentIds.slice(i, i + chunkSize);
 
         if (tab === 'EXAM' || tab === 'INCORRECT') {
+          // 🌟 여기도 sub_title을 꼭 포함시킵니다!
           let query = supabase.from('exam_assignment')
-            .select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, total_questions, exam_type)')
+            .select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)')
             .in('student_id', chunk);
             
           if (tab === 'EXAM') query = query.neq('exam_master.exam_type', '과제').neq('exam_master.exam_type', '오답프린트');
@@ -545,7 +501,8 @@ export default function LearningPage() {
             }
           });
 
-          const { data: examData } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
+          // 🌟 과제용 문제지도 sub_title을 포함하여 불러오기
+          const { data: examData } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, sub_title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
           const exIds = examData?.map(e => e.assignment_id) || [];
           const { data: eAns } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', exIds);
           
@@ -833,7 +790,6 @@ export default function LearningPage() {
   const handleGenerateIncorrectPrint = async () => {
     if (selectedBlocks.length === 0) { alert('오답 프린트로 묶을 블록을 하나 이상 선택해주세요.'); return; }
     
-    // 🌟 [추가됨] 학생의 타임라인(StudentTimeline)에서도 오답프린트 생성 전 지점 꼬리표를 챙겨옵니다!
     const myTenantId = localStorage.getItem("logica_tenant_id");
     if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
 
@@ -890,13 +846,12 @@ export default function LearningPage() {
       const { data: inst } = await supabase.from('class').select('instructor_id').eq('class_id', currentView.classId).single();
       const instId = inst?.instructor_id || localStorage.getItem('logica_instructor_id');
 
-      // 🌟 [핵심 변경] 오답 프린트 생성 시 지점 꼬리표(tenant_id) 부착!
       const { data: exMaster, error: exErr } = await supabase.from('exam_master').insert({
         title,
         exam_type: '오답프린트',
         instructor_id: instId,
         total_questions: targetQIds.length,
-        tenant_id: myTenantId // 👈 꼬리표 추가
+        tenant_id: myTenantId
       }).select().single();
 
       if (exErr) throw exErr;
@@ -980,7 +935,6 @@ export default function LearningPage() {
     return dt;
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 렌더링 차단 (흰 화면 아님)
   if (isAuthorized === null) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">

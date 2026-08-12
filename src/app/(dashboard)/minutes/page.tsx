@@ -13,7 +13,6 @@ import SimpleEditor from "@/components/minutes/SimpleEditor";
 export default function MinutesPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isSuperLevel: false });
@@ -44,9 +43,13 @@ export default function MinutesPage() {
   const [calendarMonth, setCalendarMonth] = useState<Date>(new Date());
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
 
-  const [canDeleteMinutes, setCanDeleteMinutes] = useState(false);
+  const [canDeleteMinutes, setCanDeleteMinutes] = useState(false); 
+  const [canRecordVoice, setCanRecordVoice] = useState(false); 
+  const [canCreateManual, setCanCreateManual] = useState(false); 
+  const [canBindMeeting, setCanBindMeeting] = useState(false); 
+  const [canDeleteOwn, setCanDeleteOwn] = useState(false); 
+  const [canEditStatus, setCanEditStatus] = useState(false); 
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
     const checkAccess = async () => {
       const instId = localStorage.getItem("logica_instructor_id") || "";
@@ -69,6 +72,11 @@ export default function MinutesPage() {
       if (isGodMode) {
         setIsAuthorized(true);
         setCanDeleteMinutes(true);
+        setCanRecordVoice(true);
+        setCanCreateManual(true);
+        setCanBindMeeting(true);
+        setCanDeleteOwn(true);
+        setCanEditStatus(true); 
         return;
       }
 
@@ -85,22 +93,23 @@ export default function MinutesPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 회의록 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/minutes"))) {
         alert("⛔ AI 회의록 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
       } else {
         setIsAuthorized(true);
-        if (data.allowed_menus.includes('action_delete_minutes')) {
-          setCanDeleteMinutes(true);
-        }
+        setCanDeleteMinutes(data.allowed_menus.includes('action_delete_minutes'));
+        setCanRecordVoice(data.allowed_menus.includes('action_create_voice_minutes'));
+        setCanCreateManual(data.allowed_menus.includes('action_create_manual_agenda'));
+        setCanBindMeeting(data.allowed_menus.includes('action_bind_meeting'));
+        setCanDeleteOwn(data.allowed_menus.includes('action_delete_own_agenda'));
+        setCanEditStatus(data.allowed_menus.includes('action_edit_agenda_status')); 
       }
     };
 
     checkAccess();
   }, [router]);
 
-  // 권한이 통과되었을 때만 데이터 페칭 및 실시간 구독을 등록합니다.
   useEffect(() => {
     if (isAuthorized) {
       fetchAgendas();
@@ -125,7 +134,6 @@ export default function MinutesPage() {
     const position = localStorage.getItem("logica_instructor_position") || "";
     const tenantId = localStorage.getItem("logica_tenant_id");
 
-    // 🚨 [보안 강화] tenantId가 없으면 조회를 원천 차단
     if (!tenantId) return;
 
     const isSuperLevel = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
@@ -133,7 +141,6 @@ export default function MinutesPage() {
                          String(position).includes('원장') || 
                          String(position).includes('실장');
 
-    // 🌟 [보안 강화] 오직 내 지점(tenant_id)의 안건만 불러옵니다. (타 지점 유출 차단)
     const { data } = await supabase
       .from('agenda')
       .select('*')
@@ -167,6 +174,23 @@ export default function MinutesPage() {
             const startStr = ev.start?.dateTime || ev.start?.date;
             let endStr = ev.end?.dateTime || ev.end?.date;
             let isMultiDay = false;
+            let timeString = "";
+
+            // 🌟 [핵심 추가] 구글 캘린더의 시작~종료 시간 추출 포맷팅
+            if (ev.start?.dateTime && ev.end?.dateTime) {
+              const s = new Date(ev.start.dateTime);
+              const e = new Date(ev.end.dateTime);
+              const formatTime = (d: Date) => {
+                const hours = d.getHours();
+                const ampm = hours >= 12 ? '오후' : '오전';
+                const h = hours % 12 || 12;
+                const m = String(d.getMinutes()).padStart(2, '0');
+                return `${ampm} ${h}:${m}`;
+              };
+              timeString = `${formatTime(s)} ~ ${formatTime(e)}`;
+            } else {
+              timeString = "종일 일정";
+            }
             
             if (ev.end?.date) {
                const eDate = new Date(ev.end.date);
@@ -180,10 +204,12 @@ export default function MinutesPage() {
                if (e.getTime() > s.getTime()) isMultiDay = true;
             }
 
+            const descHtml = ev.description ? `<span class="text-slate-300 mx-1">|</span> ${ev.description}` : '';
+
             return {
               id: ev.id,
               title: ev.summary || '(제목 없음)',
-              content: ev.description || '<p>상세 내용 없음</p>',
+              content: `<p>🕒 ${timeString}${descHtml}</p>`,
               type: '외부 일정', 
               source: 'Meeting',
               status: '대기중',
@@ -207,7 +233,6 @@ export default function MinutesPage() {
     if (!tenantId) return;
 
     try {
-      // 🌟 [보안 강화] 오직 내 지점(tenant_id)의 강사만 불러옵니다.
       const { data: insts } = await supabase
         .from('instructor')
         .select('*')
@@ -425,14 +450,15 @@ export default function MinutesPage() {
     }
   };
 
-  // 🌟 삭제 로직
   const deleteAgenda = async (note: any, e: React.MouseEvent) => {
     e.stopPropagation();
     if (note.isExternal) return alert("구글 캘린더에서 직접 생성된 외부 일정은 로지카에서 삭제할 수 없습니다.\n구글 캘린더에서 직접 삭제해주세요.");
     
-    // 🌟 [엄격한 통제] 슈퍼어드민/원장이 아니면서 삭제 권한마저 없다면 얄짤없이 컷!
-    if (!currentUser.isSuperLevel && !canDeleteMinutes) {
-      return alert("⛔ 삭제 권한이 없습니다.\n(원장님이 부여한 삭제 권한이 있어야만 본인 작성 글도 지울 수 있습니다.)");
+    const isOwn = note.created_by === currentUser.instId;
+    const hasOwnDeletePerm = isOwn && canDeleteOwn;
+
+    if (!currentUser.isSuperLevel && !canDeleteMinutes && !hasOwnDeletePerm) {
+      return alert("⛔ 삭제 권한이 없습니다.\n(원장님이 부여한 전체 삭제 권한 또는 본인 작성글 삭제 권한이 있어야 합니다.)");
     }
 
     if (!confirm("이 기록을 완전히 삭제하시겠습니까?")) return;
@@ -455,6 +481,11 @@ export default function MinutesPage() {
 
   const toggleStatus = async (note: any, e: React.MouseEvent) => {
     e.stopPropagation();
+
+    if (!currentUser.isSuperLevel && !canEditStatus) {
+      return alert("⛔ 안건 상태를 변경할 권한이 없습니다.");
+    }
+
     if (note.isExternal) return;
     let newStatus = '미해결';
     if (note.status === '미해결') newStatus = '진행중';
@@ -539,16 +570,18 @@ export default function MinutesPage() {
     displayMeetings = displayMeetings.slice(0, 15);
   }
 
-  const isActionDeleteAllowed = currentUser.isSuperLevel || canDeleteMinutes;
-
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null; 
   }
+
+  const allowRecord = currentUser.isSuperLevel || canRecordVoice;
+  const allowManual = currentUser.isSuperLevel || canCreateManual;
+  const allowBind = currentUser.isSuperLevel || canBindMeeting;
+  const isStatusEditAllowed = currentUser.isSuperLevel || canEditStatus;
 
   return (
     <div className="h-full flex flex-col font-pretendard">
@@ -578,22 +611,28 @@ export default function MinutesPage() {
           <div className="p-4 pb-2">
             <div className="flex gap-2">
               <button 
-                onClick={() => setIsAiRecordOpen(true)} 
-                className="flex-1 bg-white border border-rose-200 hover:border-rose-400 hover:shadow-lg transition-all rounded-xl flex items-center justify-center py-3.5 group shadow-sm hover:-translate-y-0.5" 
-                title="AI 실시간 음성 녹음"
+                onClick={() => {
+                  if (allowRecord) setIsAiRecordOpen(true);
+                  else alert("음성 회의록 작성 권한이 없습니다.");
+                }} 
+                className={`flex-1 bg-white border border-rose-200 rounded-xl flex items-center justify-center py-3.5 group shadow-sm transition-all ${allowRecord ? 'hover:border-rose-400 hover:shadow-lg hover:-translate-y-0.5' : 'opacity-50 cursor-not-allowed'}`} 
+                title={allowRecord ? "AI 실시간 음성 녹음" : "권한 없음"}
               >
-                <div className="w-10 h-10 bg-rose-50 rounded-full flex items-center justify-center group-hover:bg-rose-500 transition-colors shadow-inner group-hover:shadow-[0_0_15px_rgba(244,63,94,0.5)]">
-                  <svg className="w-5 h-5 text-rose-500 group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
+                <div className={`w-10 h-10 bg-rose-50 rounded-full flex items-center justify-center ${allowRecord ? 'group-hover:bg-rose-500 transition-colors shadow-inner group-hover:shadow-[0_0_15px_rgba(244,63,94,0.5)]' : ''}`}>
+                  <svg className={`w-5 h-5 text-rose-500 ${allowRecord ? 'group-hover:text-white transition-colors' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                 </div>
               </button>
 
               <button 
-                onClick={() => setIsNewAgendaModalOpen(true)} 
-                className="flex-1 bg-white border border-blue-200 hover:border-[#002864] hover:shadow-lg transition-all rounded-xl flex items-center justify-center py-3.5 group shadow-sm hover:-translate-y-0.5"
-                title="새 안건 수동 작성"
+                onClick={() => {
+                  if (allowManual) setIsNewAgendaModalOpen(true);
+                  else alert("수동 안건 작성 권한이 없습니다.");
+                }} 
+                className={`flex-1 bg-white border border-blue-200 rounded-xl flex items-center justify-center py-3.5 group shadow-sm transition-all ${allowManual ? 'hover:border-[#002864] hover:shadow-lg hover:-translate-y-0.5' : 'opacity-50 cursor-not-allowed'}`}
+                title={allowManual ? "새 안건 수동 작성" : "권한 없음"}
               >
-                <div className="w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center group-hover:bg-[#002864] transition-colors shadow-inner group-hover:shadow-[0_0_15px_rgba(0,40,100,0.4)]">
-                  <svg className="w-5 h-5 text-[#002864] group-hover:text-white transition-colors" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                <div className={`w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center ${allowManual ? 'group-hover:bg-[#002864] transition-colors shadow-inner group-hover:shadow-[0_0_15px_rgba(0,40,100,0.4)]' : ''}`}>
+                  <svg className={`w-5 h-5 text-[#002864] ${allowManual ? 'group-hover:text-white transition-colors' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                 </div>
               </button>
             </div>
@@ -641,7 +680,10 @@ export default function MinutesPage() {
                     <div className="absolute bottom-4 right-5 z-10 text-5xl drop-shadow-md">📱</div>
                   </div>
 
-                  <div onClick={() => setIsAiRecordOpen(true)} className="bg-gradient-to-br from-blue-400 to-indigo-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group cursor-pointer hover:shadow-md hover:-translate-y-1 transition-all">
+                  <div onClick={() => {
+                    if (allowRecord) setIsAiRecordOpen(true);
+                    else alert("음성 회의록 작성 권한이 없습니다.");
+                  }} className={`bg-gradient-to-br from-blue-400 to-indigo-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group transition-all ${allowRecord ? 'cursor-pointer hover:shadow-md hover:-translate-y-1' : 'opacity-70 cursor-not-allowed'}`}>
                     <div className="relative z-10">
                       <h3 className="font-black text-lg drop-shadow-sm leading-tight">AI 실시간 녹음<br/>및 요약</h3>
                     </div>
@@ -649,7 +691,10 @@ export default function MinutesPage() {
                     <div className="absolute bottom-4 right-5 z-10 text-5xl drop-shadow-md">🎙️</div>
                   </div>
 
-                  <div onClick={handleBindClick} className="bg-gradient-to-br from-violet-400 to-purple-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group cursor-pointer hover:shadow-md hover:-translate-y-1 transition-all">
+                  <div onClick={() => {
+                    if (allowBind) handleBindClick();
+                    else alert("회의록 병합 권한이 없습니다.");
+                  }} className={`bg-gradient-to-br from-violet-400 to-purple-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group transition-all ${allowBind ? 'cursor-pointer hover:shadow-md hover:-translate-y-1' : 'opacity-70 cursor-not-allowed'}`}>
                     <div className="relative z-10">
                       <h3 className="font-black text-lg drop-shadow-sm leading-tight">안건 병합하여<br/>회의록 생성</h3>
                     </div>
@@ -722,6 +767,13 @@ export default function MinutesPage() {
                       dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ~ ${eDate.getMonth()+1}/${eDate.getDate()}`;
                     }
 
+                    const checkDeleteAllowed = (item: any) => {
+                      if (currentUser.isSuperLevel || canDeleteMinutes) return true;
+                      if (canDeleteOwn && item.created_by === currentUser.instId) return true;
+                      return false;
+                    };
+                    const isDeleteAllowed = checkDeleteAllowed(note);
+
                     return (
                       <div 
                         key={note.id} 
@@ -765,7 +817,11 @@ export default function MinutesPage() {
                           <div className="flex flex-col items-end gap-1.5">
                             <button 
                               onClick={(e) => toggleStatus(note, e)} 
-                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border transition-colors ${note.status === '완료' ? 'bg-emerald-50 text-emerald-600 border-emerald-200 hover:bg-emerald-100' : (note.status === '진행중' ? 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100' : 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100')}`}
+                              className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm border transition-colors 
+                                ${note.status === '완료' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : (note.status === '진행중' ? 'bg-amber-50 text-amber-600 border-amber-200' : 'bg-rose-50 text-rose-600 border-rose-200')}
+                                ${isStatusEditAllowed ? (note.status === '완료' ? 'hover:bg-emerald-100' : (note.status === '진행중' ? 'hover:bg-amber-100' : 'hover:bg-rose-100')) : 'cursor-not-allowed opacity-60'}
+                              `}
+                              title={!isStatusEditAllowed ? "상태 변경 권한 없음" : "상태 변경"}
                             >
                               {note.status === '완료' ? '완료됨' : (note.status === '진행중' ? '진행중' : '대기중')}
                             </button>
@@ -781,11 +837,11 @@ export default function MinutesPage() {
                           
                           <button 
                             onClick={(e) => {
-                              if (isActionDeleteAllowed) deleteAgenda(note, e);
+                              if (isDeleteAllowed) deleteAgenda(note, e);
                               else e.stopPropagation(); 
                             }} 
-                            className={`p-1 transition-opacity ${isActionDeleteAllowed ? 'text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 cursor-pointer' : 'text-slate-200 opacity-0 group-hover:opacity-40 cursor-not-allowed hidden'}`} 
-                            title={isActionDeleteAllowed ? "완전 삭제" : "삭제 권한 없음"}
+                            className={`p-1 transition-opacity ${isDeleteAllowed ? 'text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 cursor-pointer' : 'text-slate-200 opacity-0 group-hover:opacity-40 cursor-not-allowed hidden'}`} 
+                            title={isDeleteAllowed ? "완전 삭제" : "삭제 권한 없음"}
                           >
                             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
                           </button>
@@ -802,7 +858,10 @@ export default function MinutesPage() {
             <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#002864] text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 animate-[slideUp_0.3s_ease-out] border border-blue-900 z-30">
               <span className="font-bold text-xs"><span className="text-amber-400">{selectedIds.length}개</span>의 안건이 선택됨</span>
               <div className="w-px h-3 bg-slate-500"></div>
-              <button onClick={() => setIsBindMeetingOpen(true)} className="text-xs font-black bg-white text-[#002864] hover:bg-slate-100 px-3 py-1.5 rounded-full transition-colors shadow-sm">
+              <button onClick={() => {
+                if (allowBind) setIsBindMeetingOpen(true);
+                else alert("회의록 병합 권한이 없습니다.");
+              }} className={`text-xs font-black bg-white text-[#002864] px-3 py-1.5 rounded-full transition-colors shadow-sm ${allowBind ? 'hover:bg-slate-100' : 'opacity-50 cursor-not-allowed'}`}>
                 회의록 병합하기 ✨
               </button>
             </div>
@@ -983,7 +1042,7 @@ export default function MinutesPage() {
                 </>
               ) : (
                 <>
-                  {isActionDeleteAllowed ? (
+                  {(currentUser.isSuperLevel || canDeleteMinutes || (viewNote.created_by === currentUser.instId && canDeleteOwn)) ? (
                     <button 
                       onClick={(e) => deleteAgenda(viewNote, e)} 
                       className="px-3 py-2 bg-rose-50 text-rose-600 font-bold text-[12px] rounded-lg hover:bg-rose-100 transition-colors border border-rose-200 flex items-center gap-1.5"

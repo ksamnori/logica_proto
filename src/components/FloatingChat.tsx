@@ -1,7 +1,7 @@
 // src/components/FloatingChat.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 function DraggableMemo({ 
@@ -83,7 +83,7 @@ function DraggableMemo({
     <div 
       ref={memoRef}
       onPointerDown={() => onFocus(memo.memo_id)}
-      className={`fixed w-64 ${isFolded ? 'h-8 rounded-lg' : 'h-64 rounded-b-lg rounded-tr-lg'} ${memo.color} shadow-xl flex flex-col overflow-hidden border border-black/5 transition-[height,border-radius] duration-300 ease-in-out`}
+      className={`fixed w-64 ${isFolded ? 'h-8 rounded-lg' : 'h-64 rounded-b-lg rounded-tr-lg'} ${memo.color} shadow-xl flex flex-col overflow-hidden border border-black/5 transition-[height,border-radius] duration-300 ease-in-out allow-guest-interaction`}
       style={{ left: 0, top: 0, transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: memo.z_index || 9900 }}
     >
       <div 
@@ -159,6 +159,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const [selectedInstIds, setSelectedInstIds] = useState<string[]>([]);
   const [staffRoomMembers, setStaffRoomMembers] = useState<any[]>([]);
   
+  // 🌟 참가자 목록 표시 상태 추가
+  const [showMembers, setShowMembers] = useState(false);
+
   const [typingStaffName, setTypingStaffName] = useState<string | null>(null);
 
   const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
@@ -167,9 +170,39 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
   const [memos, setMemos] = useState<any[]>([]);
   const [highestZ, setHighestZ] = useState(9900);
 
-  // 🌟 [핵심 추가] 권한 제어를 위한 상태 변수
   const [canUseChat, setCanUseChat] = useState(false);
   const [canUseMemo, setCanUseMemo] = useState(false);
+
+  const flashIntervalRef = useRef<any>(null);
+  const originalTitleRef = useRef<string>("");
+
+  useEffect(() => {
+    if (typeof document !== "undefined" && !originalTitleRef.current) {
+      originalTitleRef.current = document.title;
+    }
+  }, []);
+
+  const startFlashing = useCallback(() => {
+    if (flashIntervalRef.current) return; 
+    if (!originalTitleRef.current && typeof document !== "undefined") {
+      originalTitleRef.current = document.title;
+    }
+    let isAlt = false;
+    flashIntervalRef.current = setInterval(() => {
+      document.title = isAlt ? "💬 [새 메시지 도착!]" : originalTitleRef.current;
+      isAlt = !isAlt;
+    }, 1000);
+  }, []);
+
+  const stopFlashing = useCallback(() => {
+    if (flashIntervalRef.current) {
+      clearInterval(flashIntervalRef.current);
+      flashIntervalRef.current = null;
+      if (typeof document !== "undefined") {
+        document.title = originalTitleRef.current;
+      }
+    }
+  }, []);
 
   const activeRoomIdRef = useRef<string | null>(null);
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
@@ -229,7 +262,11 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       if (target && target.closest('.memo-btn') && canUseMemo) {
         createMemo();
       } else if (target && target.closest('.chat-btn') && canUseChat) {
-        if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); setActiveStaffRoomId(null); setStaffChatView("list"); }
+        if (isChatOpen) { 
+          setActiveRoomId(null); setActiveChatView("list"); setActiveStaffRoomId(null); setStaffChatView("list"); 
+        } else {
+          stopFlashing(); 
+        }
         setIsChatOpen(!isChatOpen);
       } else if (target && target.closest('.mic-btn')) {
         if (onMicClick) onMicClick();
@@ -290,6 +327,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   useEffect(() => {
     const handleFocus = async () => {
+      stopFlashing(); 
+
       if (isChatOpenRef.current) {
         if (activeTabRef.current === "parent" && activeRoomIdRef.current) {
           await supabase.from("chat_message").update({ is_read: true })
@@ -307,18 +346,17 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, [instId]);
+  }, [instId, stopFlashing]);
 
   useEffect(() => {
     if (!instId) return;
 
-    // 🌟 [권한 체크 함수] 시작
     const checkPerms = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id");
 
-      const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자');
+      const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자') || role === 'GUEST';
       const isPrin = role === 'ADMIN' || pos.includes('원장');
 
       if (isSA || isPrin) {
@@ -381,9 +419,13 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         if (String(activeRoomIdRef.current) === String(payload.new.room_id)) {
           setChatMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
         }
+        
         if (isRoomActive && payload.new.sender_type === "parent") {
           await supabase.from("chat_message").update({ is_read: true }).eq("message_id", payload.new.message_id);
+        } else if (payload.new.sender_type === "parent") {
+          startFlashing();
         }
+        
         loadChatRooms(); 
       })
       .on("postgres_changes", { event: "UPDATE", schema: "public", table: "chat_message" }, (payload) => {
@@ -400,8 +442,11 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         if (String(activeStaffRoomIdRef.current) === String(payload.new.room_id)) {
           setStaffMessages(prev => prev.find(m => m.message_id === payload.new.message_id) ? prev : [...prev, payload.new]);
         }
+        
         if (isRoomActive && payload.new.sender_id !== instId) {
           await supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
+        } else if (payload.new.sender_id !== instId) {
+          startFlashing();
         }
         
         await supabase.from("internal_chat_member").update({ is_active: true }).eq("room_id", payload.new.room_id).eq("instructor_id", instId);
@@ -421,7 +466,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
       if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
     };
-  }, [instId]);
+  }, [instId, startFlashing]);
 
   const loadMemos = async () => {
     const { data } = await supabase.from('instructor_quick_memo').select('*').eq('instructor_id', instId).order('z_index', { ascending: true });
@@ -508,8 +553,9 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   const loadStaffRooms = async () => {
     try {
+      // 🌟 [핵심 변경] 방 이름 변경 기능(custom_title)을 위해 쿼리 수정
       const { data } = await supabase.from('internal_chat_member')
-        .select('room_id, internal_chat_room(title, room_type, created_at), last_read_at')
+        .select('room_id, custom_title, internal_chat_room(title, room_type, created_at), last_read_at')
         .eq('instructor_id', instId)
         .eq('is_active', true); 
       
@@ -520,7 +566,8 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
           .eq('room_id', r.room_id)
           .order('created_at', { ascending: false });
 
-        let displayTitle = r.internal_chat_room?.title || '선생님 대화방';
+        // 🌟 [핵심 변경] 커스텀 타이틀이 있으면 그것을 최우선으로 보여줌
+        let displayTitle = r.custom_title || r.internal_chat_room?.title || '선생님 대화방';
         let displayAvatar = null;
         
         if (r.internal_chat_room?.room_type === 'DIRECT') {
@@ -537,7 +584,10 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
               .maybeSingle();
             
             if (instData) {
-              displayTitle = `${instData.name} ${instData.chat_position || instData.position || '선생님'}`;
+              // 1:1 대화방의 경우, 커스텀 타이틀이 지정되지 않았을 때만 상대방 이름 표시
+              if (!r.custom_title) {
+                displayTitle = `${instData.name} ${instData.chat_position || instData.position || '선생님'}`;
+              }
               if (instData.profile_image_url) displayAvatar = getProfileImageUrl(instData.profile_image_url);
             }
           }
@@ -783,6 +833,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   const openStaffChatRoom = async (roomId: string, roomName: string) => {
     setActiveStaffRoomId(roomId); setActiveStaffRoomName(roomName); setStaffChatView("room"); setStaffMessages([]);
+    setShowMembers(false); // 🌟 방 입장 시 참가자 목록 창 닫기 초기화
     
     setStaffUnreadCount(prev => Math.max(0, prev - (staffRooms.find((r: any) => r.room_id === roomId)?.unreadCount || 0)));
     setStaffRooms(prev => prev.map((r: any) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
@@ -812,6 +863,31 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
       setStaffRoomMembers(memRes.data || []);
       loadStaffRooms(); 
     } catch (e) {}
+  };
+
+  // 🌟 [추가] 나만의 방 이름 변경 (커스텀 타이틀) 저장 로직
+  const handleRenameStaffRoom = async () => {
+    if (!activeStaffRoomId) return;
+    const currentName = activeStaffRoomName;
+    const newName = prompt("이 채팅방의 이름을 나에게만 보이도록 변경합니다.\n(빈칸으로 저장하면 원래 이름으로 복구됩니다.)", currentName);
+    
+    if (newName === null || newName.trim() === currentName) return; 
+
+    try {
+      const { error } = await supabase.from('internal_chat_member')
+        .update({ custom_title: newName.trim() || null }) 
+        .eq('room_id', activeStaffRoomId)
+        .eq('instructor_id', instId);
+      
+      if (error) throw error;
+      
+      const updatedName = newName.trim() || staffRooms.find(r => r.room_id === activeStaffRoomId)?.internal_chat_room?.title;
+      setActiveStaffRoomName(updatedName);
+      loadStaffRooms(); 
+      alert("✅ 대화방 이름이 변경되었습니다.");
+    } catch (e: any) {
+      alert("방 이름 변경 실패: " + e.message);
+    }
   };
 
   const sendStaffMsg = async () => {
@@ -859,7 +935,6 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
   return (
     <>
-      {/* 🌟 [권한 적용] 메모 사용 권한이 있을 때만 렌더링 */}
       {canUseMemo && memos.map(memo => (
         <DraggableMemo 
           key={memo.memo_id} 
@@ -877,7 +952,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         onPointerUp={handleIconUp} 
         onPointerCancel={handleIconUp}
         style={{ touchAction: "none" }}
-        className="fixed bottom-6 right-6 sm:bottom-10 sm:right-10 flex flex-col items-center gap-3 z-[9999] cursor-grab active:cursor-grabbing"
+        className="fixed bottom-6 right-6 sm:bottom-10 sm:right-10 flex flex-col items-center gap-3 z-[9999] cursor-grab active:cursor-grabbing allow-guest-interaction"
       >
         {onMicClick && (
           <button
@@ -888,7 +963,6 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
           </button>
         )}
 
-        {/* 🌟 [권한 적용] 메모 사용 권한이 있을 때만 버튼 렌더링 */}
         {canUseMemo && (
           <button
             className="memo-btn w-12 h-12 bg-amber-400 text-amber-900 rounded-full shadow-[0_4px_15px_rgba(251,191,36,0.5)] flex items-center justify-center hover:bg-amber-500 hover:scale-105 transition-all"
@@ -898,7 +972,6 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
           </button>
         )}
 
-        {/* 🌟 [권한 적용] 채팅 사용 권한이 있을 때만 버튼 렌더링 */}
         {canUseChat && (
           <button
             className="chat-btn w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors relative"
@@ -910,11 +983,10 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
         )}
       </div>
 
-      {/* 🌟 [권한 적용] 채팅 사용 권한이 있을 때만 패널 렌더링 */}
       {canUseChat && (
         <div 
           ref={panelRef}
-          className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[680px] max-h-[85vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
+          className={`fixed bottom-[90px] right-6 sm:bottom-10 sm:right-[110px] w-[360px] h-[680px] max-h-[85vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 allow-guest-interaction ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
           style={{ transform: `scale(${isChatOpen ? 1 : 0.95})`, transformOrigin: 'bottom right' }}
         >
           <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none select-none">
@@ -1267,11 +1339,58 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
               </div>
             ) : (
               <div className="flex-1 flex flex-col min-h-0 relative bg-[#f1f3f5]">
-                <div className="bg-white px-3 py-2 border-b flex items-center gap-2 z-10 sticky top-0">
-                  <button onClick={() => { setStaffChatView("list"); setActiveStaffRoomId(null); loadStaffRooms(); }} className="p-1.5 text-slate-500 rounded-lg"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                  <span className="font-bold text-slate-800 text-[13px]">{activeStaffRoomName}</span>
+                {/* 🌟 [핵심 추가] 상단 헤더: 뒤로가기 버튼 + 방 이름 변경 + 참가자 확인 */}
+                <div className="bg-white px-3 py-2 border-b flex justify-between items-center z-10 sticky top-0 shadow-sm">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <button onClick={() => { setStaffChatView("list"); setActiveStaffRoomId(null); loadStaffRooms(); setShowMembers(false); }} className="p-1.5 text-slate-500 rounded-lg hover:bg-slate-100 transition-colors shrink-0">
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
+                    </button>
+                    {/* 🌟 제목을 누르거나 ✏️ 버튼을 누르면 나만의 방 이름 변경 */}
+                    <span 
+                      onClick={handleRenameStaffRoom} 
+                      className="font-bold text-slate-800 text-[13px] truncate cursor-pointer hover:underline hover:text-blue-600 transition-colors" 
+                      title="클릭하여 방 이름 변경"
+                    >
+                      {activeStaffRoomName}
+                    </span>
+                    <button onClick={handleRenameStaffRoom} className="text-slate-400 hover:text-blue-500 shrink-0 text-xs transition-colors" title="방 이름 변경">✏️</button>
+                  </div>
+                  
+                  {/* 🌟 참가자 목록 버튼 및 팝업 */}
+                  <div className="relative shrink-0 ml-2">
+                    <button onClick={() => setShowMembers(!showMembers)} className={`text-[11px] font-bold transition-colors flex items-center gap-1 px-2 py-1 rounded ${showMembers ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                      👥 {staffRoomMembers.length}
+                    </button>
+                    {showMembers && (
+                      <div className="absolute top-8 right-0 w-52 bg-white border border-slate-200 shadow-xl rounded-xl p-2 z-50 animate-[fadeIn_0.1s_ease-out]">
+                        <div className="text-[10px] font-black text-slate-400 mb-1.5 px-2">현재 참여자 목록</div>
+                        <div className="max-h-48 overflow-y-auto custom-scroll space-y-0.5 pr-1">
+                          {staffRoomMembers.map(m => (
+                            <div key={m.instructor_id} className="flex items-center gap-2 px-2 py-1.5 hover:bg-slate-50 rounded-lg transition-colors">
+                              <div className="w-6 h-6 bg-slate-200 rounded-full flex items-center justify-center overflow-hidden shrink-0 border border-slate-100">
+                                {m.instructor?.profile_image_url ? (
+                                  <img src={getProfileImageUrl(m.instructor.profile_image_url)} alt="profile" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+                                ) : (
+                                  <span className="text-[9px] font-bold text-slate-500">T</span>
+                                )}
+                              </div>
+                              <div className="flex flex-col min-w-0 flex-1">
+                                <span className="text-[11px] font-bold text-slate-700 truncate leading-tight">
+                                  {m.instructor?.name} {m.instructor_id === instId && <span className="text-blue-500">(나)</span>}
+                                </span>
+                                <span className="text-[9px] font-medium text-slate-400 truncate leading-none mt-0.5">
+                                  {m.instructor?.chat_position || m.instructor?.position || '선생님'}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 </div>
-                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3">
+
+                <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-3" onClick={() => setShowMembers(false)}>
                   {staffMessages.length === 0 ? <div className="text-center text-slate-400 font-bold text-xs mt-10">메시지가 없습니다.</div> :
                     staffMessages.map(msg => {
                       const unreadBy = staffRoomMembers.filter(m => m.instructor_id !== instId && new Date(m.last_read_at || 0) < new Date(msg.created_at)).length;
@@ -1340,7 +1459,7 @@ export default function FloatingChat({ instId, onMicClick }: { instId: string; o
 
                   <div ref={messagesEndRef} />
                 </div>
-                <div className="bg-white p-3 border-t flex items-end gap-2">
+                <div className="bg-white p-3 border-t flex items-end gap-2" onClick={() => setShowMembers(false)}>
                   <textarea 
                     rows={1} 
                     value={staffChatInput} 

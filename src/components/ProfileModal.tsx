@@ -9,7 +9,7 @@ interface ProfileModalProps {
   onClose: () => void;
   instId: string;
   instructorName: string;
-  isHQ?: boolean; // 본사 여부를 확인하는 옵션
+  isHQ?: boolean; 
 }
 
 export default function ProfileModal({ isOpen, onClose, instId, instructorName, isHQ = false }: ProfileModalProps) {
@@ -18,7 +18,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
   const [profileForm, setProfileForm] = useState({ 
     phone: "", 
     password: "", 
-    chatPosition: "", // 💡 [추가] 직책 상태값 추가
+    chatPosition: "", 
     autoActive: false, 
     chatStart: isHQ ? "09:00" : "", 
     chatEnd: isHQ ? "18:00" : "", 
@@ -48,7 +48,6 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
       setPosition({ x: 0, y: 0 });
       setZoom(1);
 
-      // 🌟 [유령 데이터 방지 1] DB 조회 전 입력란 초기화 (브라우저 자동완성 찌꺼기 제거)
       setProfileForm({
         phone: "", password: "", chatPosition: "", autoActive: false, chatStart: "", chatEnd: "", autoMsg: ""
       });
@@ -58,7 +57,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
           setProfileForm({
             phone: data.phone ? formatPhone(data.phone) : "",
             password: "", 
-            chatPosition: data.chat_position || "", // 💡 [추가] DB에서 내 기존 채팅 직책 불러오기
+            chatPosition: data.chat_position || "", 
             autoActive: data.auto_reply_active === true, 
             chatStart: data.chat_allow_start || (isHQ ? "09:00" : ""), 
             chatEnd: data.chat_allow_end || (isHQ ? "18:00" : ""), 
@@ -145,7 +144,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
       let updateData: any = {
         phone: profileForm.phone, 
-        chat_position: profileForm.chatPosition, // 💡 [추가] DB의 chat_position 칸에 수정한 직책 저장
+        chat_position: profileForm.chatPosition, 
         auto_reply_active: profileForm.autoActive,
         chat_allow_start: profileForm.chatStart || null, 
         chat_allow_end: profileForm.chatEnd || null,
@@ -170,7 +169,6 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
       if (dbError) throw new Error(`DB 저장 실패: ${dbError.message}`);
 
-      // 💡 [핵심] 브라우저에 저장된 직책 정보도 즉시 업데이트하여, 새로고침 시 헤더에 바로 반영되게 함
       if (profileForm.chatPosition) {
         localStorage.setItem("logica_instructor_position", profileForm.chatPosition);
       }
@@ -186,14 +184,14 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
   };
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+    // 🌟 [핵심] 모달 최상위 컨테이너에 allow-guest-interaction 추가
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 allow-guest-interaction">
       <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
         <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
           <h2 className="font-bold">{isHQ ? "내 프로필 및 설정" : "선생님 프로필 및 설정"}</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 text-2xl font-bold transition-colors leading-none">&times;</button>
         </div>
         
-        {/* 🌟 [유령 데이터 방지 2] 폼 엘리먼트를 명시적으로 선언하고 자동완성을 강력하게 차단합니다 */}
         <form autoComplete="off" onSubmit={(e) => { e.preventDefault(); saveProfile(); }} className="p-6 space-y-3 overflow-y-auto custom-scroll flex-1">
           
           <div className="flex flex-col items-center justify-center mb-4 pb-4 border-b border-slate-100">
@@ -245,7 +243,6 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">이름 (변경불가)</label>
-            {/* 🌟 [유령 데이터 방지 3] 브라우저가 다른 텍스트를 채우지 못하도록 속성 추가 */}
             <input type="text" value={instructorName} readOnly autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 bg-slate-100 outline-none" />
           </div>
           <div>
@@ -265,7 +262,6 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 변경 (선택)</label>
-            {/* 🌟 [유령 데이터 방지 4] 비밀번호 필드는 반드시 new-password를 선언하여 강제 개입을 차단! */}
             <input type="password" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} autoComplete="new-password" data-lpignore="true" placeholder="변경할 경우에만 입력하세요 (최소 6자리)" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm placeholder-slate-300" />
           </div>
 

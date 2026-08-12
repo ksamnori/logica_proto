@@ -401,6 +401,8 @@ export default function StudentTimeline({
     sessionStorage.setItem('clinicTargetStudentId', currentView?.studentId);
     sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
     sessionStorage.setItem('isClinicMode', 'true');
+    
+    sessionStorage.setItem('examType', '오답프린트');
 
     window.location.href = '/exam/step2?source=clinic_incorrect';
   };
@@ -408,7 +410,6 @@ export default function StudentTimeline({
   const handleCreatePrint = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다.");
     
-    // 🌟 [추가됨] 학생 탭 내부 모달에서도 꼬리표 챙기기!
     const myTenantId = localStorage.getItem("logica_tenant_id");
     if (!myTenantId) throw new Error("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
 
@@ -425,14 +426,13 @@ export default function StudentTimeline({
       else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
       else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
 
-      // 🌟 [핵심 변경] 오답 프린트 생성 시 꼬리표 부착!
       const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
         title: examTitle,
         sub_title: subTitle,
         exam_type: '오답프린트',
         total_questions: matchedCache.length,
         instructor_id: instId,
-        tenant_id: myTenantId, // 👈 꼬리표 추가!
+        tenant_id: myTenantId, 
         layout_settings: {
           column: 2,
           split: 4,
@@ -519,7 +519,17 @@ export default function StudentTimeline({
 
           <div className="flex items-center gap-2 pr-1">
             <span className="text-[12px] font-bold text-slate-500 mr-1 flex items-center gap-1">🖨️ 오답 프린트 생성 <span className="text-slate-300 ml-1">|</span></span>
-            <button onClick={() => openModal('SELECTED')} className="px-3 py-1.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[12px] transition-all shadow-sm">선택 문제지 오답</button>
+            
+            {/* 💡 [수정 내용] 선택된 블록이 있을 때만 화면에 나타납니다. (텍스트: 학습지별 오답) */}
+            {selectedBlocks.length > 0 && (
+              <button 
+                onClick={() => openModal('SELECTED')} 
+                className="px-3 py-1.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[12px] transition-all shadow-sm"
+              >
+                학습지별 오답
+              </button>
+            )}
+            
             <button onClick={() => openModal('TAXONOMY')} className="px-3 py-1.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] transition-all shadow-sm">유형별 오답</button>
             <button onClick={() => openModal('PERIOD')} className="px-3 py-1.5 rounded bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 font-bold text-[12px] transition-all shadow-sm">기간별 오답</button>
           </div>
@@ -548,7 +558,8 @@ export default function StudentTimeline({
 
       if (isLeaf) {
         return (
-          <div key={key} className="flex items-center py-1 px-1.5 ml-3 hover:bg-slate-50 rounded transition-colors group">
+          // 💡 [수정 내용] 최하위 뎁스(리프 노드)의 들여쓰기를 확실하게 넣었습니다 (ml-10).
+          <div key={key} className="flex items-center py-1 px-1.5 ml-10 hover:bg-slate-50 rounded transition-colors group">
             <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 py-1">
               <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer" />
               <span className="flex-1 text-[13px] font-semibold text-slate-600 truncate group-hover:text-[#002864] transition-colors min-w-0" title={displayName}>{displayName}</span>
@@ -594,9 +605,10 @@ export default function StudentTimeline({
 
           <div className="flex flex-1 overflow-hidden">
             <div className="w-40 border-r border-slate-200 bg-slate-50 flex flex-col pt-4 shrink-0">
-              <button onClick={() => setModalTab('TAXONOMY')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'TAXONOMY' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>단원별 취약 유형</button>
-              <button onClick={() => setModalTab('PERIOD')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'PERIOD' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>기간별 오답</button>
+              {/* 💡 [수정 내용] 모달 좌측 탭 순서를 학습지 -> 유형 -> 기간 순서로 강제 고정했습니다. */}
               <button onClick={() => setModalTab('SELECTED')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'SELECTED' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>학습지별 오답</button>
+              <button onClick={() => setModalTab('TAXONOMY')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'TAXONOMY' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>유형별 오답</button>
+              <button onClick={() => setModalTab('PERIOD')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'PERIOD' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>기간별 오답</button>
             </div>
 
             <div className="flex-1 flex flex-col bg-white overflow-hidden relative">
@@ -780,8 +792,16 @@ export default function StudentTimeline({
                       {formatDateLabel(item.date, true)}
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border shrink-0 whitespace-nowrap ${badgeColor}`}>{typeLabel}</span>
-                    <div className="flex-1 font-extrabold text-[14px] truncate" title={item.title || '제목 없음'}>
-                      {item.title || '제목 없음'}
+                    
+                    <div className="flex-1 flex items-center gap-2 min-w-0">
+                      {item.subTitle && (
+                        <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm shrink-0 whitespace-nowrap">
+                          {item.subTitle}
+                        </span>
+                      )}
+                      <div className="font-extrabold text-[14px] truncate" title={item.title || '제목 없음'}>
+                        {item.title || '제목 없음'}
+                      </div>
                     </div>
                   </div>
 

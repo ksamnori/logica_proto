@@ -14,6 +14,9 @@ export function useExamData() {
   const [questions, setQuestions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAnswer, setShowAnswer] = useState(false);
+  
+  // 💡 [신규 추가] 현재 모드가 클리닉(오답 프린트) 모드인지 추적하는 상태
+  const [isClinicMode, setIsClinicMode] = useState(false);
 
   const [depth5Map, setDepth5Map] = useState<Record<string, string>>({});
   const [depth6Map, setDepth6Map] = useState<Record<string, string>>({});
@@ -39,6 +42,10 @@ export function useExamData() {
   const [editForm, setEditForm] = useState<any>({});
 
   useEffect(() => {
+    // 💡 초기 로드 시 클리닉 모드인지 판별
+    const clinicFlag = sessionStorage.getItem('isClinicMode') === 'true' || searchParams.get('source') === 'clinic_incorrect';
+    setIsClinicMode(clinicFlag);
+
     fetchAndFilterQuestions();
     loadAddTaxonomyTree();
   }, []);
@@ -403,43 +410,131 @@ export function useExamData() {
     } catch (e) {}
   };
 
+  const handleDragStart = (e: React.DragEvent, idx: number) => { setDraggedIdx(idx); e.dataTransfer.effectAllowed = "move"; };
+  const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
+  const handleDrop = (e: React.DragEvent, targetIdx: number) => {
+    e.preventDefault();
+    if (draggedIdx === null || draggedIdx === targetIdx) return;
+    
+    setQuestions(prevQs => {
+      const newQs = [...prevQs]; 
+      const draggedItem = newQs[draggedIdx];
+      
+      if (checkedIds.has(draggedItem.id) && checkedIds.size > 1) {
+        const selected = newQs.filter(q => checkedIds.has(q.id));
+        const unselected = newQs.filter(q => !checkedIds.has(q.id));
+        let insertPos = 0;
+        for (let i = 0; i <= targetIdx; i++) { if (!checkedIds.has(prevQs[i].id)) insertPos++; }
+        unselected.splice(insertPos, 0, ...selected);
+        return unselected;
+      } else {
+        newQs.splice(draggedIdx, 1);
+        newQs.splice(targetIdx, 0, draggedItem);
+        return newQs;
+      }
+    });
+    setDraggedIdx(null);
+  };
+
+  const openTwinSearch = async (idx: number, subIdx: number, q: any) => {
+    setTwinTarget({ idx, subIdx, q });
+    setTwinViewOpen(true);
+    setIsSearchingTwin(true);
+    setTwinPoolTwins([]);
+    setTwinPoolSimilars([]);
+
+    const targetId = q.thk_taxonomy_id && String(q.thk_taxonomy_id).trim() !== '' ? q.thk_taxonomy_id : (q.taxonomy_id || q.item_id);
+
+    if (!targetId || targetId === 'null' || targetId === 'undefined') {
+      alert("이 문항은 분류 코드가 명확하지 않아 검색이 불가능합니다.");
+      setIsSearchingTwin(false);
+      return;
+    }
+
+    try {
+      let fallbackId = targetId;
+      if (targetId.includes('-')) {
+        const parts = targetId.split('-');
+        if (parts.length > 2) fallbackId = parts.slice(0, -1).join('-');
+      }
+      
+      const parentId = q.parent_question_id || 'NO_PARENT_ID_MATCH';
+      const currentQuestionId = q.question_id;
+
+      const orQueryStr = `parent_question_id.eq."${currentQuestionId}",question_id.eq."${parentId}",parent_question_id.eq."${parentId}",item_id.ilike."${fallbackId}%",taxonomy_id.ilike."${fallbackId}%",thk_taxonomy_id.ilike."${fallbackId}%"`;
+
+      const { data, error } = await supabase.from('question_db')
+        .select('*')
+        .or(orQueryStr)
+        .neq('question_id', currentQuestionId)
+        .limit(200);
+
+      if (error) throw error;
+
+      const existingIds = new Set(questions.flatMap(g => g.items.map((i: any) => i.question_id)));
+      const filteredData = (data || []).filter((item: any) => !existingIds.has(item.question_id) && item.is_hidden !== true && item.is_hidden !== 'Y' && item.is_hidden !== 'true');
+
+      if (filteredData.length === 0) {
+        setIsSearchingTwin(false);
+        return;
+      }
+
+      await fetchDepthMappings(filteredData);
+      await fetchParentSources(filteredData);
+
+      const twins: any[] = [];
+      const similars: any[] = [];
+
+      filteredData.forEach(item => {
+        const isExactTwin = (item.parent_question_id === currentQuestionId) || 
+                            (item.question_id === parentId && parentId !== 'NO_PARENT_ID_MATCH') || 
+                            (item.parent_question_id === parentId && parentId !== 'NO_PARENT_ID_MATCH');
+        if (isExactTwin) twins.push(item);
+        else similars.push(item);
+      });
+
+      setTwinPoolTwins(twins.sort(() => 0.5 - Math.random()).slice(0, 2));
+      setTwinPoolSimilars(similars.sort(() => 0.5 - Math.random()).slice(0, 10));
+
+    } catch (err) {
+      console.error("쌍둥이 검색 에러:", err);
+    } finally {
+      setIsSearchingTwin(false);
+    }
+  };
+
   const goToStep3 = () => {
     if (questions.length === 0) return alert("출제할 문항이 없습니다.");
     sessionStorage.setItem("examQuestions", JSON.stringify(questions.map(g => g.items.map((i:any) => i.question_id))));
     sessionStorage.setItem("qCount", String(questions.length));
     
-    // 💡 1. taxonomy_id (또는 item_id) 앞 3자리를 분석하여 대표 학년 추출
     const gradeCount: Record<string, number> = {};
     
     questions.forEach(g => {
       const q = g.items[0];
-      // ex) M110101 -> M11
       const taxId = String(q.taxonomy_id || q.item_id || '').trim().toUpperCase();
       let gradeStr = '';
 
       if (taxId.length >= 3) {
-        const schoolType = taxId[0]; // E, M, H
-        const grade = taxId[1];      // 1, 2, 3...
-        const semester = taxId[2];   // 1, 2
+        const schoolType = taxId[0]; 
+        const grade = taxId[1];      
+        const semester = taxId[2];   
 
         let schoolName = '';
         if (schoolType === 'E') schoolName = '초등';
         else if (schoolType === 'M') schoolName = '중등';
         else if (schoolType === 'H') schoolName = '고등';
 
-        // 정상적인 코드 포맷일 경우에만 문자열 조립 (예: 중등 1-1)
         if (schoolName && !isNaN(Number(grade)) && !isNaN(Number(semester))) {
           gradeStr = `${schoolName} ${grade}-${semester}`;
         }
       }
       
-      // 추출된 학년이 있으면 카운트 증가
       if (gradeStr) {
         gradeCount[gradeStr] = (gradeCount[gradeStr] || 0) + 1;
       }
     });
 
-    // 🏆 최빈값(가장 문항 수가 많은 학년/학기) 찾기
     let maxGrade = '공통 과정';
     let maxCount = 0;
     for (const [grade, count] of Object.entries(gradeCount)) {
@@ -449,10 +544,8 @@ export function useExamData() {
       }
     }
     
-    // 🔥 찾아낸 깔끔한 대표 학년을 세션에 저장 (뷰어가 이 값을 DB에 저장)
     sessionStorage.setItem('majorGrade', maxGrade);
 
-    // 💡 2. 평균 난이도 추출 및 저장
     const diffCount: Record<string, number> = {};
     questions.forEach(g => {
       const diff = (g.items[0].difficulty || getDiffLabelByRate(g.items[0].solving_probability)).trim();
@@ -466,7 +559,6 @@ export function useExamData() {
     }
     sessionStorage.setItem('avgDifficulty', maxDiff);
 
-    // 💡 3. 출제 범위 설정
     const sorted = [...questions].sort((a, b) => {
       const s1 = a.items[0].taxonomy_name || ''; const s2 = b.items[0].taxonomy_name || '';
       return s1.localeCompare(s2);
@@ -486,6 +578,8 @@ export function useExamData() {
     twinViewOpen, setTwinViewOpen, twinTarget, setTwinTarget, twinPoolTwins, setTwinPoolTwins,
     twinPoolSimilars, setTwinPoolSimilars, isSearchingTwin, setIsSearchingTwin,
     editingId, setEditingId, editForm, setEditForm,
-    fetchDepthMappings, fetchParentSources, loadAddTaxonomyTree, goToStep3
+    fetchDepthMappings, fetchParentSources, loadAddTaxonomyTree, goToStep3,
+    handleDragStart, handleDragOver, handleDrop, openTwinSearch,
+    isClinicMode // 💡 내보내기에 isClinicMode 포함
   };
 }

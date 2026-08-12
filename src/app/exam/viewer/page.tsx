@@ -236,8 +236,13 @@ export default function ExamViewerPage() {
         const loadExamId = editExamId || duplicateExamId;
 
         title = sessionStorage.getItem('examTitle') || '새로운 테스트';
+        
+        // 🌟 [핵심 변경 1] 세션에서 examSubTitle(보라색 태그 내용)을 가져와 badge에 복원합니다!
+        badge = sessionStorage.getItem('examSubTitle') || '';
 
-        if (sessionStorage.getItem('isClinicMode') === 'true') {
+        const sessionExamType = sessionStorage.getItem('examType');
+
+        if (sessionStorage.getItem('isClinicMode') === 'true' || sessionExamType === '오답프린트') {
           lType = '오답프린트';
         } else {
           try {
@@ -251,8 +256,9 @@ export default function ExamViewerPage() {
           const { data: origExam } = await supabase.from('exam_master').select('*').eq('exam_id', loadExamId).single();
           if (origExam) {
             title = duplicateExamId ? (origExam.title + ' (복제본)') : origExam.title;
-            badge = origExam.sub_title || '';
+            // 🌟 오답 프린트 모드일 때는 원본의 sub_title을 덮어쓰지 않고 클리닉용 보라색 태그를 우선시합니다.
             if (sessionStorage.getItem('isClinicMode') !== 'true') {
+              badge = origExam.sub_title || '';
               lType = origExam.exam_type || '선택없음';
             }
             dbLayoutSettings = origExam.layout_settings || null;
@@ -827,12 +833,11 @@ export default function ExamViewerPage() {
     setTestWeek(getISOWeekKST(new Date(d + 'T00:00:00Z')));
   };
 
-  // 🌟 [핵심 해결] 시험지 저장 시 tenant_id 누락 문제 완벽 조치!
   const saveExam = async (skipNav: boolean = false): Promise<boolean> => {
     setIsSaving(true);
     try {
       const instId = localStorage.getItem('logica_instructor_id');
-      const myTenantId = localStorage.getItem('logica_tenant_id'); // 🌟 여기 추가!!
+      const myTenantId = localStorage.getItem('logica_tenant_id'); 
       
       if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다.");
       if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
@@ -853,7 +858,7 @@ export default function ExamViewerPage() {
             major_grade: sessionStorage.getItem('majorGrade') || null, avg_difficulty: sessionStorage.getItem('avgDifficulty') || null,
             scope_start: sessionStorage.getItem('scopeStart') || null, scope_end: sessionStorage.getItem('scopeEnd') || null,
             layout_settings: finalLayoutSettings, 
-            tenant_id: myTenantId, // 🌟 업데이트 시에도 tenant_id 강제 기록
+            tenant_id: myTenantId, 
             ...weeklyFields
           }).eq('exam_id', rebuildExamIdRef.current);
           if (rebuildErr) throw new Error(`시험지 저장 실패: ${rebuildErr.message}`);
@@ -861,14 +866,13 @@ export default function ExamViewerPage() {
           const { error: delErr } = await supabase.from('exam_item').delete().eq('exam_id', examId);
           if (delErr) throw new Error(`기존 문항 삭제 실패: ${delErr.message}`);
         } else {
-          // 🌟 Insert 시 tenant_id가 함께 저장되므로 리스트에서 무조건 보입니다!
           const { data, error: insertErr } = await supabase.from('exam_master').insert({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType,
             total_questions: examStateRef.current?.groups.length || 0, instructor_id: instId,
             major_grade: sessionStorage.getItem('majorGrade') || null, avg_difficulty: sessionStorage.getItem('avgDifficulty') || null,
             scope_start: sessionStorage.getItem('scopeStart') || null, scope_end: sessionStorage.getItem('scopeEnd') || null,
             layout_settings: finalLayoutSettings, 
-            tenant_id: myTenantId, // 🌟 누락 해결!
+            tenant_id: myTenantId, 
             ...weeklyFields
           }).select().single();
           if (insertErr || !data) throw new Error(`시험지 생성 실패: ${insertErr?.message || '알 수 없는 오류'}`);
@@ -935,7 +939,13 @@ export default function ExamViewerPage() {
 
       if (wasNew) {
         sessionStorage.removeItem('examQuestions'); sessionStorage.removeItem('qCount');
-        sessionStorage.removeItem('examTitle'); sessionStorage.removeItem('editExamId'); sessionStorage.removeItem('duplicateExamId');
+        sessionStorage.removeItem('examTitle'); 
+        
+        // 🌟 저장 후, 세션에 남아있는 보라색 태그 정보 찌꺼기 깔끔하게 청소!
+        sessionStorage.removeItem('examSubTitle'); 
+        sessionStorage.removeItem('examType'); 
+        
+        sessionStorage.removeItem('editExamId'); sessionStorage.removeItem('duplicateExamId');
         currentExamIdRef.current = examId; 
         setSavedExamId(examId); 
         isNewExamRef.current = false; 

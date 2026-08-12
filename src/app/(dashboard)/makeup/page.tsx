@@ -11,8 +11,10 @@ import MakeupModal from "@/components/makeup/MakeupModal";
 export default function MakeupPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
+  // 🌟 [보안 로직 추가] 메뉴 및 세부 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const [canEditMakeup, setCanEditMakeup] = useState(false);
+  const [canDeleteMakeup, setCanDeleteMakeup] = useState(false);
 
   // === 기본 데이터 상태 ===
   const [makeups, setMakeups] = useState<any[]>([]);
@@ -29,18 +31,21 @@ export default function MakeupPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedMakeup, setSelectedMakeup] = useState<any | null>(null);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
+  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한 검사 및 세부 권한 연동
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
+      // 최고관리자, 원장, 대장급은 모든 권한 프리패스
       const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
                         pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
       
       if (isGodMode) {
         setIsAuthorized(true);
+        setCanEditMakeup(true);
+        setCanDeleteMakeup(true);
         return;
       }
 
@@ -57,12 +62,15 @@ export default function MakeupPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 보강 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
+      // 보강 관리 메뉴 전체 접근 권한 확인
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/makeup"))) {
         alert("⛔ 보강 관리 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
       } else {
         setIsAuthorized(true);
+        // 🌟 [핵심 변경] 권한 관리 페이지에서 설정한 수정/삭제 세부 권한을 읽어서 연동
+        setCanEditMakeup(data.allowed_menus.includes("action_edit_makeup"));
+        setCanDeleteMakeup(data.allowed_menus.includes("action_delete_makeup"));
       }
     };
 
@@ -80,9 +88,9 @@ export default function MakeupPage() {
     setIsLoading(true);
     try {
       const tenantId = localStorage.getItem("logica_tenant_id");
+      const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
 
-      // 🚨 [보안 강화] 소속 지점 정보가 없으면 조회를 원천 차단합니다.
-      if (!tenantId) {
+      if (!validTenantId) {
         setIsLoading(false);
         return;
       }
@@ -97,11 +105,11 @@ export default function MakeupPage() {
       let instQuery = supabase.from('instructor').select('instructor_id, name').eq('status', '재직');
       let stuQuery = supabase.from('student').select('student_id, name, grade').eq('status', '재원').order('name').limit(1000);
 
-      // 🌟 내 지점의 강사, 학생, 보강 일정만 불러오도록 격리!
-      if (tenantId && tenantId !== 'hq') {
-        makeupQuery = makeupQuery.eq('tenant_id', tenantId);
-        instQuery = instQuery.eq('tenant_id', tenantId);
-        stuQuery = stuQuery.eq('tenant_id', tenantId);
+      // 내 지점의 강사, 학생, 보강 일정만 격리
+      if (validTenantId) {
+        makeupQuery = makeupQuery.eq('tenant_id', validTenantId);
+        instQuery = instQuery.eq('tenant_id', validTenantId);
+        stuQuery = stuQuery.eq('tenant_id', validTenantId);
       }
 
       const [instRes, stuRes, makeupRes] = await Promise.all([
@@ -120,7 +128,6 @@ export default function MakeupPage() {
     }
   };
 
-  // 💡 [성능 최적화] useEffect에 의한 화면 두 번 깜빡임(Double Render) 방지
   const filteredMakeups = useMemo(() => {
     const searchLow = filterSearch.trim().toLowerCase();
     return makeups.filter(m => {
@@ -153,9 +160,13 @@ export default function MakeupPage() {
   };
 
   const deleteMakeup = async (id: string) => {
+    // 🌟 [보안 강화] 강제 삭제 시도 시 백단에서도 한 번 더 권한을 차단합니다.
+    if (!canDeleteMakeup) return alert("⛔ 보강 일정을 삭제할 권한이 없습니다.");
+
     if (!confirm("이 보강 일정을 정말 삭제하시겠습니까?")) return;
     try {
-      await supabase.from('individual_makeup').delete().eq('makeup_id', id);
+      const { error } = await supabase.from('individual_makeup').delete().eq('makeup_id', id);
+      if (error) throw error;
       alert("삭제되었습니다.");
       fetchInitialData();
     } catch (e: any) { alert("삭제 실패: " + e.message); }
@@ -167,7 +178,7 @@ export default function MakeupPage() {
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null; 
   }
 
   return (
@@ -202,9 +213,12 @@ export default function MakeupPage() {
           🔄 전체보기
         </button>
 
-        <button onClick={() => openModal()} className="ml-auto bg-[#002864] text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
-          새 보강 일정 등록
-        </button>
+        {/* 🌟 수정(등록) 권한이 있는 경우에만 새 보강 일정 등록 버튼 노출 */}
+        {canEditMakeup && (
+          <button onClick={() => openModal()} className="ml-auto bg-[#002864] text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
+            새 보강 일정 등록
+          </button>
+        )}
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden min-h-0">
@@ -219,7 +233,9 @@ export default function MakeupPage() {
                 <th className="py-3 px-4 font-extrabold text-slate-500 text-center">담당 강사</th>
                 <th className="py-3 px-4 font-extrabold text-slate-500 text-center">보강 내용(단원)</th>
                 <th className="py-3 px-4 font-extrabold text-slate-500 text-center">상태</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">관리</th>
+                {(canEditMakeup || canDeleteMakeup) && (
+                  <th className="py-3 px-4 font-extrabold text-slate-500 text-center">관리</th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -253,12 +269,20 @@ export default function MakeupPage() {
                       <td className="py-3 px-4 text-center font-bold text-slate-700">{instName}</td>
                       <td className="py-3 px-4 text-center font-bold text-slate-600 truncate max-w-[200px]" title={m.target_category_id}>{m.target_category_id || '-'}</td>
                       <td className="py-3 px-4 text-center"><span className={`${statusClass} px-2 py-1 rounded text-xs font-bold`}>{m.status || '예정'}</span></td>
-                      <td className="py-3 px-4 text-center">
-                        <div className="flex items-center justify-center gap-1.5">
-                          <button onClick={() => openModal(m)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-xs rounded shadow-sm transition-colors">수정</button>
-                          <button onClick={() => deleteMakeup(m.makeup_id)} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-xs border border-rose-200 hover:border-rose-400 rounded shadow-sm transition-colors">삭제</button>
-                        </div>
-                      </td>
+                      
+                      {/* 🌟 [핵심 변경] 권한에 따라 버튼을 개별적으로 렌더링 */}
+                      {(canEditMakeup || canDeleteMakeup) && (
+                        <td className="py-3 px-4 text-center">
+                          <div className="flex items-center justify-center gap-1.5">
+                            {canEditMakeup && (
+                              <button onClick={() => openModal(m)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-xs rounded shadow-sm transition-colors">수정</button>
+                            )}
+                            {canDeleteMakeup && (
+                              <button onClick={() => deleteMakeup(m.makeup_id)} className="px-3 py-1.5 bg-rose-50 hover:bg-rose-500 text-rose-400 hover:text-white font-bold text-xs border border-rose-200 hover:border-rose-400 rounded shadow-sm transition-colors">삭제</button>
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })

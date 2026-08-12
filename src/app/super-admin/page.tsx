@@ -14,6 +14,10 @@ export default function AdminDashboardPage() {
   const [adminProfileName, setAdminProfileName] = useState("관리자님");
   const [activeTab, setActiveTab] = useState("student");
 
+  // 🌟 [지점 목록 상태 추가]
+  const [tenants, setTenants] = useState<any[]>([]);
+
+  const [sTenantId, setSTenantId] = useState("");
   const [sName, setSName] = useState("");
   const [sPw, setSPw] = useState("");
   const [sContact, setSContact] = useState("");
@@ -23,10 +27,11 @@ export default function AdminDashboardPage() {
   const [sStatus, setSStatus] = useState("입학테스트");
   const [isStudentSubmitting, setIsStudentSubmitting] = useState(false);
 
+  const [iTenantId, setITenantId] = useState("");
   const [iLoginId, setILoginId] = useState("");
   const [iPw, setIPw] = useState("");
   const [iName, setIName] = useState("");
-  const [iPosition, setIPosition] = useState("전임강사"); // 기본값 변경
+  const [iPosition, setIPosition] = useState("전임강사"); 
   const [iEmail, setIEmail] = useState("");
   const [iPhone, setIPhone] = useState("");
   const [isInstructorSubmitting, setIsInstructorSubmitting] = useState(false);
@@ -83,6 +88,7 @@ export default function AdminDashboardPage() {
         }
         
         setAdminProfileName(`${data.name} ${data.position || '관리자'}님`);
+        fetchTenants(); // 권한 확인 후 지점 목록 로드
       } else {
         alert('강사 정보를 확인할 수 없습니다. 다시 로그인해주세요.');
         window.location.href = '/';
@@ -91,6 +97,19 @@ export default function AdminDashboardPage() {
 
     checkSuperAdminAccess();
   }, []);
+
+  // 🌟 [지점 목록 불러오기]
+  const fetchTenants = async () => {
+    const { data } = await supabase.from('academy_tenant').select('*').eq('status', 'ACTIVE');
+    if (data && data.length > 0) {
+      setTenants(data);
+      // 대치 본원이 있으면 기본값으로, 없으면 첫 번째 지점 선택
+      const daechi = data.find(t => t.name.includes('대치'));
+      const defaultId = daechi ? daechi.tenant_id : data[0].tenant_id;
+      setSTenantId(defaultId);
+      setITenantId(defaultId);
+    }
+  };
 
   useEffect(() => {
     if (activeTab === "instructor-manage") {
@@ -121,11 +140,9 @@ export default function AdminDashboardPage() {
   };
 
   const registerStudent = async () => {
+    if (!sTenantId) return alert("소속 지점을 선택해주세요!");
     if (!sName || !sContact || !sPw) return alert("이름, 학생 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
     if (sContact.length < 12) return alert("올바른 연락처 형식을 입력해주세요. (예: 010-1234-5678)");
-    
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
 
     setIsStudentSubmitting(true);
 
@@ -189,7 +206,7 @@ export default function AdminDashboardPage() {
           password_hash: sPw,
           status: sStatus,
           parent_id: finalParentId,
-          tenant_id: myTenantId 
+          tenant_id: sTenantId // 🌟 선택한 지점 ID 부여
         }]);
 
       if (studentError) throw studentError;
@@ -205,21 +222,20 @@ export default function AdminDashboardPage() {
   };
 
   const registerInstructor = async () => {
+    if (!iTenantId) return alert("소속 지점을 선택해주세요!");
     if (!iLoginId || !iPw || !iName) return alert("로그인 ID, 비밀번호, 이름은 필수입니다!");
     if (iPw.length < 6) return alert("비밀번호는 최소 6자리 이상이어야 합니다.");
-    
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다.");
 
     setIsInstructorSubmitting(true);
 
-    // 🌟 [핵심 변경] 신규 직급 체계에 맞춘 Role 매핑 로직
     let assignedRole = 'TEACHER';
     if (iPosition === '원장') assignedRole = 'ADMIN';
     else if (iPosition === '부원장') assignedRole = 'VICE_ADMIN';
     else if (iPosition === '실장') assignedRole = 'MANAGER';
+    else if (iPosition === '전임강사') assignedRole = 'TEACHER';
     else if (iPosition === '파트강사') assignedRole = 'PART_TEACHER';
     else if (iPosition === '조교') assignedRole = 'TA';
+    else if (iPosition === '테스트/체험') assignedRole = 'GUEST'; // 🌟 GUEST 계정 권한 부여
 
     try {
       const fakeEmail = `${iLoginId}@logica.com`;
@@ -255,7 +271,7 @@ export default function AdminDashboardPage() {
         email: iEmail || null,
         phone: iPhone || null,
         status: '재직',
-        tenant_id: myTenantId
+        tenant_id: iTenantId // 🌟 선택한 지점 ID 부여
       }]);
 
       if (dbError) {
@@ -286,16 +302,9 @@ export default function AdminDashboardPage() {
         
       if (error) throw error;
 
-      const filteredData = (data || []).filter((inst: any) => {
-        const isHQ = inst.academy_tenant?.tenant_type === 'HQ' || 
-                     inst.academy_tenant?.name?.includes('본사') ||
-                     inst.position?.includes('본사'); 
-        return !isHQ;
-      });
-
-      // 🌟 [핵심 변경] 새 직급 체계 기반 정렬 로직 (원장 -> 부원장 -> 실장 -> 전임 -> 파트 -> 조교)
-      const posOrder: any = { '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6 };
-      const sortedData = filteredData.sort((a: any, b: any) => {
+      // 슈퍼어드민은 모든 지점(본사 포함)의 사람을 다 통제할 수 있어야 하므로 필터 제거
+      const posOrder: any = { '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6, '테스트/체험': 7 };
+      const sortedData = (data || []).sort((a: any, b: any) => {
         let orderA = posOrder[a.position] || 99;
         let orderB = posOrder[b.position] || 99;
         if (orderA === orderB) return a.name.localeCompare(b.name);
@@ -317,14 +326,16 @@ export default function AdminDashboardPage() {
 
   const saveInstructorEdit = async () => {
     if (!editInst.name) return alert('이름은 필수입니다.');
+    if (!editInst.tenant_id) return alert('소속 지점을 지정해야 합니다.');
 
-    // 🌟 [핵심 변경] 수정 시에도 새 체계에 맞춘 Role 업데이트
     let assignedRole = 'TEACHER';
     if (editInst.position === '원장') assignedRole = 'ADMIN';
     else if (editInst.position === '부원장') assignedRole = 'VICE_ADMIN';
     else if (editInst.position === '실장') assignedRole = 'MANAGER';
+    else if (editInst.position === '전임강사') assignedRole = 'TEACHER';
     else if (editInst.position === '파트강사') assignedRole = 'PART_TEACHER';
     else if (editInst.position === '조교') assignedRole = 'TA';
+    else if (editInst.position === '테스트/체험') assignedRole = 'GUEST';
 
     try {
       const { error } = await supabase.from('instructor').update({
@@ -333,7 +344,8 @@ export default function AdminDashboardPage() {
         role: assignedRole,
         phone: editInst.phone || null,
         email: editInst.email || null,
-        status: editInst.status
+        status: editInst.status,
+        tenant_id: editInst.tenant_id
       }).eq('instructor_id', editInst.instructor_id);
 
       if (error) throw error;
@@ -434,6 +446,13 @@ export default function AdminDashboardPage() {
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-xl font-bold mb-5 text-slate-800 border-b border-slate-100 pb-3">신규 학생 정보 입력</h2>
                 <div className="grid grid-cols-2 gap-5">
+                  <div className="col-span-2 bg-slate-50 p-4 border border-slate-200 rounded-lg">
+                    <label className="block text-sm font-bold text-slate-700 mb-1">소속 지점 (Tenant) <span className="text-red-500">*</span></label>
+                    <select value={sTenantId} onChange={(e) => setSTenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-700">
+                      {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                    </select>
+                  </div>
+
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">이름 <span className="text-red-500">*</span></label>
                     <input type="text" value={sName} onChange={(e) => setSName(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="예: 홍길동" />
@@ -485,19 +504,27 @@ export default function AdminDashboardPage() {
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
                 <h2 className="text-xl font-bold mb-4 text-slate-800">신규 관리자(선생님) 등록</h2>
                 <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2 bg-slate-50 p-4 border border-slate-200 rounded-lg">
+                    <label className="block text-sm font-bold text-slate-700 mb-1">소속 지점 (Tenant) <span className="text-red-500">*</span></label>
+                    <select value={iTenantId} onChange={(e) => setITenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-700">
+                      {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                    </select>
+                  </div>
+
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">로그인 ID (영어/숫자) *</label><input type="text" value={iLoginId} onChange={(e) => setILoginId(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="예: admin123" /></div>
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">초기 비밀번호 (6자리 이상) *</label><input type="password" value={iPw} onChange={(e) => setIPw(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="비밀번호 입력" /></div>
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">이름 *</label><input type="text" value={iName} onChange={(e) => setIName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="예: 김로지" /></div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">직급 *</label>
-                    <select value={iPosition} onChange={(e) => setIPosition(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]">
-                      {/* 🌟 [추가] 부원장 등 신규 직급 리스트 업데이트 */}
+                    <select value={iPosition} onChange={(e) => setIPosition(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] font-bold">
                       <option value="원장">원장</option>
                       <option value="부원장">부원장</option>
                       <option value="실장">실장</option>
                       <option value="전임강사">전임강사</option>
                       <option value="파트강사">파트강사</option>
                       <option value="조교">조교</option>
+                      {/* 🌟 체험용 계정 생성 옵션 추가 */}
+                      <option value="테스트/체험">테스트/체험 (GUEST)</option>
                     </select>
                   </div>
                   <div><label className="block text-sm font-bold text-slate-700 mb-1">실제 이메일 (선택)</label><input type="email" value={iEmail} onChange={(e) => setIEmail(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="email@example.com" /></div>
@@ -519,16 +546,18 @@ export default function AdminDashboardPage() {
 
           {/* 관리자 목록 폼 */}
           {activeTab === 'instructor-manage' && (
-            <div className="space-y-6 max-w-5xl mx-auto block">
+            <div className="space-y-6 max-w-6xl mx-auto block">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
                 <div className="flex justify-between items-center mb-4 shrink-0">
-                  <h2 className="text-xl font-bold text-slate-800">등록된 관리자 목록 (학원)</h2>
+                  <h2 className="text-xl font-bold text-slate-800">등록된 관리자 전체 목록 (슈퍼어드민)</h2>
                   <button onClick={loadInstructors} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors">새로고침 ↻</button>
                 </div>
                 <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg">
                   <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
                     <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <tr>
+                        {/* 🌟 지점(Tenant) 구분 컬럼 추가 */}
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">지점</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이름</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">로그인 ID</th>
                         <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">직급</th>
@@ -539,15 +568,18 @@ export default function AdminDashboardPage() {
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
                       {isLoadingInstructors ? (
-                        <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">데이터를 불러오는 중입니다...</td></tr>
+                        <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">데이터를 불러오는 중입니다...</td></tr>
                       ) : instructors.length === 0 ? (
-                        <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">등록된 선생님이 없습니다.</td></tr>
+                        <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">등록된 선생님이 없습니다.</td></tr>
                       ) : (
                         instructors.map(inst => (
                           <tr key={inst.instructor_id} className={inst.status === '퇴사' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-blue-50/50 transition-colors'}>
+                            <td className="py-3 px-4 font-bold text-slate-600">{inst.academy_tenant?.name || '-'}</td>
                             <td className="py-3 px-4 font-bold text-[#002864]">{inst.name}</td>
                             <td className="py-3 px-4 text-slate-500 font-mono text-xs">{inst.login_id}</td>
-                            <td className="py-3 px-4 font-bold text-slate-700">{inst.position || '-'}</td>
+                            <td className="py-3 px-4 font-bold text-slate-700">
+                              {inst.position === '테스트/체험' ? <span className="text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 text-xs">체험용 GUEST</span> : inst.position}
+                            </td>
                             <td className="py-3 px-4 font-bold text-slate-500">{inst.phone || '-'}</td>
                             <td className="py-3 px-4 text-center">
                               {inst.status === '재직' ? <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded-md text-xs font-bold">재직 중</span>
@@ -586,17 +618,25 @@ export default function AdminDashboardPage() {
             </div>
             <div className="p-6 bg-slate-50 space-y-4">
               <div className="grid grid-cols-2 gap-4">
+                {/* 🌟 모달에서도 소속 지점 수정 가능 */}
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">소속 지점</label>
+                  <select value={editInst.tenant_id || ""} onChange={(e) => setEditInst({...editInst, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
+                    {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                  </select>
+                </div>
+
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={editInst.name || ''} onChange={(e) => setEditInst({...editInst, name: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">직급</label>
                   <select value={editInst.position || '파트강사'} onChange={(e) => setEditInst({...editInst, position: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
-                    {/* 🌟 [추가] 모달 드롭다운에도 동일하게 추가 */}
                     <option value="원장">원장</option>
                     <option value="부원장">부원장</option>
                     <option value="실장">실장</option>
                     <option value="전임강사">전임강사</option>
                     <option value="파트강사">파트강사</option>
                     <option value="조교">조교</option>
+                    <option value="테스트/체험">테스트/체험 (GUEST)</option>
                   </select>
                 </div>
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={editInst.phone || ''} onChange={handlePhoneChange((val: string) => setEditInst({...editInst, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>

@@ -19,6 +19,9 @@ export default function TaskBoardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedTask, setSelectedTask] = useState<any>(null);
 
+  // 🌟 [추가] 완료된 카드의 확장(펼침) 상태를 관리하는 배열
+  const [expandedCardIds, setExpandedCardIds] = useState<string[]>([]);
+
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -94,14 +97,16 @@ export default function TaskBoardPage() {
 
   const fetchTasks = async () => {
     setIsLoading(true);
-
+    const tenantId = localStorage.getItem("logica_tenant_id");
+    
     try {
-      // 🚨 [수정] instructor_memo 에는 아직 tenant_id가 없으므로 필터링 없이 모두 호출합니다.
-      const { data, error } = await supabase
-        .from("instructor_memo")
-        .select("*")
-        .order("created_at", { ascending: false })
-        .limit(1000);
+      let query = supabase.from("instructor_memo").select("*").order("created_at", { ascending: false }).limit(1000);
+      
+      if (tenantId && tenantId !== 'hq') {
+         query = query.eq("tenant_id", tenantId);
+      }
+
+      const { data, error } = await query;
       
       if (error) {
         console.error("데이터 조회 오류:", error);
@@ -179,6 +184,14 @@ export default function TaskBoardPage() {
     setSelectedTask(null);
   };
 
+  // 🌟 [추가] 카드 펼쳐보기/접기 토글 함수
+  const toggleCardExpand = (e: React.MouseEvent, memoId: string) => {
+    e.stopPropagation(); 
+    setExpandedCardIds(prev => 
+      prev.includes(memoId) ? prev.filter(id => id !== memoId) : [...prev, memoId]
+    );
+  };
+
   const todos = useMemo(() => tasks.filter(t => !t.status || t.status === "할일" || t.status === "대기"), [tasks]);
   const inProgress = useMemo(() => tasks.filter(t => t.status === "진행중"), [tasks]);
   const dones = useMemo(() => tasks.filter(t => t.status === "완료"), [tasks]);
@@ -214,6 +227,11 @@ export default function TaskBoardPage() {
     const cmts = task.comments || [];
     const canDrag = currentUser.isAdmin || String(task.instructor_id) === String(currentUser.instId);
 
+    // 🌟 [추가] 완료(Done) 상태이고 명시적으로 펼치지 않았다면 접힌 상태(Collapsed)로 처리
+    const isDone = task.status === "완료";
+    const isExpanded = expandedCardIds.includes(task.memo_id);
+    const isCollapsed = isDone && !isExpanded;
+
     return (
       <div 
         key={task.memo_id} 
@@ -221,33 +239,55 @@ export default function TaskBoardPage() {
         onDragStart={canDrag ? (e) => handleDragStart(e, task.memo_id) : undefined} 
         onDragEnd={canDrag ? handleDragEnd : undefined}
         onClick={() => openModal(task)} 
-        className={`task-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
+        // 🌟 [변경] 접힌 상태 스타일 적용
+        className={`task-card p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'} ${isCollapsed ? 'bg-slate-50/70 opacity-80 hover:opacity-100' : 'bg-white'}`}
       >
         <div className="flex justify-between items-start mb-1">
           <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{task.memo_type}</span>
+          {isCollapsed && <span className="text-[9px] font-bold text-slate-400">{updatedDateStr}</span>}
         </div>
-        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep line-clamp-3">
+        
+        {/* 🌟 [변경] 접힌 상태에서는 1줄(line-clamp-1)만 노출되도록 분기 */}
+        <div className={`text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep ${isCollapsed ? 'line-clamp-1 px-1 text-xs text-slate-500' : 'line-clamp-3'}`}>
           {task.content}
         </div>
-        {cmts.length > 0 && (
-          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
-            {cmts.slice(-2).map((c: any) => (
-              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
-                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+
+        {/* 🌟 상세 내용은 펼쳐졌을 때만 렌더링 */}
+        {!isCollapsed && (
+          <>
+            {cmts.length > 0 && (
+              <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
+                {cmts.slice(-2).map((c: any) => (
+                  <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                    <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+            <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
+              <div className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-slate-500">최종 수정: {updaterName}</span>
+                <span className="text-slate-400">{updatedDateStr}</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-blue-500">작성: {task.author_name}</span>
+                <span className="text-slate-400">{createdDateStr}</span>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 🌟 완료(Done) 상태의 카드에만 펼치기/접기 버튼 노출 */}
+        {isDone && (
+          <div className={`pt-2 flex justify-center ${isCollapsed ? 'mt-0' : 'border-t border-slate-100 mt-1'}`}>
+            <button
+              onClick={(e) => toggleCardExpand(e, task.memo_id)}
+              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
+            >
+              {isExpanded ? "▲ 요약 보기" : "▼ 상세 보기"}
+            </button>
           </div>
         )}
-        <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-slate-500">최종 수정: {updaterName}</span>
-            <span className="text-slate-400">{updatedDateStr}</span>
-          </div>
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-blue-500">작성: {task.author_name}</span>
-            <span className="text-slate-400">{createdDateStr}</span>
-          </div>
-        </div>
       </div>
     );
   };

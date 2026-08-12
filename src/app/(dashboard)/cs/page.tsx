@@ -9,8 +9,8 @@ import CSModal from "@/components/cs/CSModal";
 export default function CSBoardPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const [hasViewAllPerm, setHasViewAllPerm] = useState(false); 
 
   const [requests, setRequests] = useState<any[]>([]);
   const [students, setStudents] = useState<any[]>([]);
@@ -23,7 +23,9 @@ export default function CSBoardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedReq, setSelectedReq] = useState<any>(null);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
+  // 🌟 [추가] 완료된 카드의 확장(펼침) 상태를 관리하는 배열
+  const [expandedCardIds, setExpandedCardIds] = useState<string[]>([]);
+
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -34,6 +36,7 @@ export default function CSBoardPage() {
                         pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
       
       if (isGodMode) {
+        setHasViewAllPerm(true); 
         setIsAuthorized(true);
         return;
       }
@@ -51,11 +54,11 @@ export default function CSBoardPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // CS 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/cs"))) {
         alert("⛔ 학부모 요청/CS 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
       } else {
+        setHasViewAllPerm(data.allowed_menus.includes("action_view_all_cs"));
         setIsAuthorized(true);
       }
     };
@@ -70,19 +73,21 @@ export default function CSBoardPage() {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       
-      const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
-                      ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
+      const isRoleAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
+                          ["최고관리자", "대장", "원장", "실장"].some(p => pos.includes(p));
       
-      setCurrentUser({ instId, name, isAdmin });
+      const finalViewAll = isRoleAdmin || hasViewAllPerm;
+      
+      setCurrentUser({ instId, name, isAdmin: finalViewAll });
       const now = new Date();
       setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
-      fetchInitialData(instId, isAdmin);
+      fetchInitialData(instId, finalViewAll);
 
       const tenantId = localStorage.getItem("logica_tenant_id");
       const channel = supabase.channel(`cs_board_realtime_${tenantId}`)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, (payload) => {
           if (payload.eventType === 'INSERT') {
-            fetchInitialData(instId, isAdmin);
+            fetchInitialData(instId, finalViewAll);
           } else if (payload.eventType === 'UPDATE') {
             setRequests(prev => prev.map(r => r.request_id === payload.new.request_id ? { ...r, ...payload.new } : r));
           } else if (payload.eventType === 'DELETE') {
@@ -93,7 +98,7 @@ export default function CSBoardPage() {
 
       return () => { supabase.removeChannel(channel); };
     }
-  }, [isAuthorized]);
+  }, [isAuthorized, hasViewAllPerm]);
 
   const fetchInitialData = async (instId: string, isAdmin: boolean) => {
     setIsLoading(true);
@@ -103,7 +108,6 @@ export default function CSBoardPage() {
       let instQuery = supabase.from("instructor").select("instructor_id, name, position").eq("status", "재직");
       let stuQuery = supabase.from("student").select("student_id, name, grade").eq("status", "재원").order("name");
       
-      // 🌟 [보안 강화] 내 지점 데이터만 불러오도록 격리
       if (tenantId && tenantId !== 'hq') {
          instQuery = instQuery.eq("tenant_id", tenantId);
          stuQuery = stuQuery.eq("tenant_id", tenantId);
@@ -115,7 +119,6 @@ export default function CSBoardPage() {
 
       let query = supabase.from("parent_request_log").select("*, student(name), author:instructor!parent_request_log_author_id_fkey(name)");
 
-      // 🌟 [보안 강화] 내 지점 데이터만 불러오도록 격리
       if (tenantId && tenantId !== 'hq') {
         query = query.eq("tenant_id", tenantId);
       }
@@ -204,6 +207,14 @@ export default function CSBoardPage() {
     setSelectedReq(null);
   };
 
+  // 🌟 [추가] 카드 펼쳐보기/접기 토글 함수
+  const toggleCardExpand = (e: React.MouseEvent, reqId: string) => {
+    e.stopPropagation(); // 모달이 열리지 않게 이벤트 버블링 차단
+    setExpandedCardIds(prev => 
+      prev.includes(reqId) ? prev.filter(id => id !== reqId) : [...prev, reqId]
+    );
+  };
+
   const waits = useMemo(() => requests.filter(r => !r.status || r.status === "대기"), [requests]);
   const inProgress = useMemo(() => requests.filter(r => r.status === "처리중"), [requests]);
   const dones = useMemo(() => requests.filter(r => r.status === "완료"), [requests]);
@@ -241,6 +252,11 @@ export default function CSBoardPage() {
     const cmts = req.comments || [];
     const canDrag = currentUser.isAdmin || String(req.author_id) === String(currentUser.instId) || String(req.processed_instructor_id) === String(currentUser.instId);
 
+    // 🌟 [추가] 완료(Done) 상태이고 명시적으로 펼치지 않았다면 접힌 상태(Collapsed)로 처리
+    const isDone = req.status === "완료";
+    const isExpanded = expandedCardIds.includes(req.request_id);
+    const isCollapsed = isDone && !isExpanded;
+
     return (
       <div 
         key={req.request_id} 
@@ -248,40 +264,64 @@ export default function CSBoardPage() {
         onDragStart={canDrag ? (e) => handleDragStart(e, req.request_id) : undefined} 
         onDragEnd={canDrag ? handleDragEnd : undefined}
         onClick={() => openModal(req)} 
-        className={`req-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
+        // 🌟 [변경] 접힌 카드일 경우 투명도와 배경색을 옅게 조절하여 시각적으로 가볍게 만듦
+        className={`req-card p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'} ${isCollapsed ? 'bg-slate-50/70 opacity-80 hover:opacity-100' : 'bg-white'}`}
       >
         <div className="flex justify-between items-start mb-1">
           <div>
             <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type}</span>
             {req.is_private && <span className="bg-slate-700 text-white px-1.5 py-0.5 rounded shadow-sm border border-slate-800 ml-1 text-[10px] font-bold">🔒 비공개</span>}
           </div>
+          {/* 🌟 접힌 상태일 때는 우측 상단에 심플하게 수정일자 표기 */}
+          {isCollapsed && <span className="text-[9px] font-bold text-slate-400">{updatedDateStr}</span>}
         </div>
+        
         <h4 className="font-extrabold text-sm text-[#002864]">{sName} 학생</h4>
-        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep bg-slate-50 p-2 rounded-lg border border-slate-100 line-clamp-3">
+        
+        {/* 🌟 [변경] 접힌 상태에서는 1줄(line-clamp-1)만 노출되도록 스타일 분기 */}
+        <div className={`text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep ${isCollapsed ? 'line-clamp-1 px-1 text-xs text-slate-500' : 'bg-slate-50 p-2 rounded-lg border border-slate-100 line-clamp-3'}`}>
           {req.reason}
         </div>
-        {cmts.length > 0 && (
-          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
-            {cmts.slice(-2).map((c: any) => (
-              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
-                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+        
+        {/* 🌟 상세 내용들(댓글, 담당자, 날짜 정보)은 펼쳐졌을 때만 렌더링 */}
+        {!isCollapsed && (
+          <>
+            {cmts.length > 0 && (
+              <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
+                {cmts.slice(-2).map((c: any) => (
+                  <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                    <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+            <div className="text-[10px] font-bold text-slate-500 mb-1.5 mt-1">
+              담당: <span className={assigneeName === "미지정" ? "text-rose-400" : "text-[#002864]"}>{assigneeName}</span>
+            </div>
+            <div className="flex flex-col pt-2 border-t border-slate-100 gap-1.5">
+              <div className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-slate-500">최종 수정: {updaterName}</span>
+                <span className="text-slate-400">{updatedDateStr}</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-blue-500">작성: {authorName}</span>
+                <span className="text-slate-400">{createdDateStr}</span>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 🌟 [추가] 완료(Done) 상태의 카드에만 펼치기/접기 버튼 노출 */}
+        {isDone && (
+          <div className={`pt-2 flex justify-center ${isCollapsed ? 'mt-0' : 'border-t border-slate-100 mt-1'}`}>
+            <button
+              onClick={(e) => toggleCardExpand(e, req.request_id)}
+              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
+            >
+              {isExpanded ? "▲ 요약 보기" : "▼ 상세 보기"}
+            </button>
           </div>
         )}
-        <div className="text-[10px] font-bold text-slate-500 mb-1.5 mt-1">
-          담당: <span className={assigneeName === "미지정" ? "text-rose-400" : "text-[#002864]"}>{assigneeName}</span>
-        </div>
-        <div className="flex flex-col pt-2 border-t border-slate-100 gap-1.5">
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-slate-500">최종 수정: {updaterName}</span>
-            <span className="text-slate-400">{updatedDateStr}</span>
-          </div>
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-blue-500">작성: {authorName}</span>
-            <span className="text-slate-400">{createdDateStr}</span>
-          </div>
-        </div>
       </div>
     );
   };

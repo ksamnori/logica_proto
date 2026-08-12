@@ -9,7 +9,6 @@ import SupplyModal from "@/components/supply/SupplyModal";
 export default function SupplyBoardPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [requests, setRequests] = useState<any[]>([]);
@@ -21,7 +20,9 @@ export default function SupplyBoardPage() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedReq, setSelectedReq] = useState<any>(null);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 권한부터 즉시 검사합니다.
+  // 🌟 [추가] 완료된 카드의 확장(펼침) 상태를 관리하는 배열
+  const [expandedCardIds, setExpandedCardIds] = useState<string[]>([]);
+
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -49,7 +50,6 @@ export default function SupplyBoardPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 비품 신청 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/supply"))) {
         alert("⛔ 비품 신청 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
@@ -85,7 +85,6 @@ export default function SupplyBoardPage() {
     try {
       let query = supabase.from("supply_request").select("*").order("created_at", { ascending: false }).limit(1000);
       
-      // 🌟 [보안 강화] 내 지점 데이터만 불러오도록 격리
       if (tenantId && tenantId !== 'hq') {
          query = query.eq("tenant_id", tenantId);
       }
@@ -145,6 +144,14 @@ export default function SupplyBoardPage() {
     setSelectedReq(null);
   };
 
+  // 🌟 [추가] 카드 펼쳐보기/접기 토글 함수
+  const toggleCardExpand = (e: React.MouseEvent, reqId: string) => {
+    e.stopPropagation(); 
+    setExpandedCardIds(prev => 
+      prev.includes(reqId) ? prev.filter(id => id !== reqId) : [...prev, reqId]
+    );
+  };
+
   const todos = useMemo(() => requests.filter(r => !r.status || r.status === "대기"), [requests]);
   const inProgress = useMemo(() => requests.filter(r => r.status === "진행중"), [requests]);
   const dones = useMemo(() => requests.filter(r => r.status === "완료"), [requests]);
@@ -176,40 +183,68 @@ export default function SupplyBoardPage() {
     const cmts = req.comments || [];
     const canDrag = currentUser.isAdmin || String(req.author_id) === String(currentUser.instId);
 
+    // 🌟 [추가] 완료(Done) 상태이고 명시적으로 펼치지 않았다면 접힌 상태(Collapsed)로 처리
+    const isDone = req.status === "완료";
+    const primaryId = req.request_id || req.id;
+    const isExpanded = expandedCardIds.includes(primaryId);
+    const isCollapsed = isDone && !isExpanded;
+
     return (
       <div 
-        key={req.request_id || req.id} 
+        key={primaryId} 
         draggable={canDrag} 
-        onDragStart={canDrag ? (e) => handleDragStart(e, req.request_id || req.id) : undefined} 
+        onDragStart={canDrag ? (e) => handleDragStart(e, primaryId) : undefined} 
         onDragEnd={canDrag ? handleDragEnd : undefined}
         onClick={() => openModal(req)} 
-        className={`task-card bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'}`}
+        // 🌟 [변경] 접힌 상태 스타일 적용
+        className={`task-card p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'} ${isCollapsed ? 'bg-slate-50/70 opacity-80 hover:opacity-100' : 'bg-white'}`}
       >
         <div className="flex justify-between items-start mb-1">
           <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type || "기타"}</span>
+          {isCollapsed && <span className="text-[9px] font-bold text-slate-400">{updatedDateStr}</span>}
         </div>
-        <div className="text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep line-clamp-3">
+        
+        {/* 🌟 [변경] 접힌 상태에서는 1줄(line-clamp-1)만 노출되도록 분기 */}
+        <div className={`text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep ${isCollapsed ? 'line-clamp-1 px-1 text-xs text-slate-500' : 'line-clamp-3'}`}>
           {req.content || req.title}
         </div>
-        {cmts.length > 0 && (
-          <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
-            {cmts.slice(-2).map((c: any) => (
-              <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
-                <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+
+        {/* 🌟 상세 내용은 펼쳐졌을 때만 렌더링 */}
+        {!isCollapsed && (
+          <>
+            {cmts.length > 0 && (
+              <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
+                {cmts.slice(-2).map((c: any) => (
+                  <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                    <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
+            <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
+              <div className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-slate-500">최종 수정: {updaterName}</span>
+                <span className="text-slate-400">{updatedDateStr}</span>
+              </div>
+              <div className="flex justify-between items-center text-[10px] font-bold">
+                <span className="text-blue-500">작성: {req.author_name}</span>
+                <span className="text-slate-400">{createdDateStr}</span>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* 🌟 완료(Done) 상태의 카드에만 펼치기/접기 버튼 노출 */}
+        {isDone && (
+          <div className={`pt-2 flex justify-center ${isCollapsed ? 'mt-0' : 'border-t border-slate-100 mt-1'}`}>
+            <button
+              onClick={(e) => toggleCardExpand(e, primaryId)}
+              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
+            >
+              {isExpanded ? "▲ 요약 보기" : "▼ 상세 보기"}
+            </button>
           </div>
         )}
-        <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-slate-500">최종 수정: {updaterName}</span>
-            <span className="text-slate-400">{updatedDateStr}</span>
-          </div>
-          <div className="flex justify-between items-center text-[10px] font-bold">
-            <span className="text-blue-500">작성: {req.author_name}</span>
-            <span className="text-slate-400">{createdDateStr}</span>
-          </div>
-        </div>
       </div>
     );
   };

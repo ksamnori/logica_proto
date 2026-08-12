@@ -226,7 +226,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       setPosition({ x: 0, y: 0 });
       setZoom(1);
 
-      // 🌟 [유령 데이터 방지 1] DB 조회를 기다리는 동안 이전 잔재나 브라우저 자동완성이 끼어들지 못하게 초기화
       setEditName("");
       setEditPhone("");
       setEditEmail("");
@@ -397,7 +396,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
   return (
     <>
-      <div className={`absolute top-5 right-8 z-[60] flex items-center bg-white/90 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.08)] border border-slate-200 rounded-full transition-all duration-500 ease-out ${isHeaderExpanded ? 'pr-6 pl-2 py-2' : 'px-2 py-2'}`}>
+      {/* 🌟 TopHeader 전체에 allow-guest-interaction 추가 */}
+      <div className={`absolute top-5 right-8 z-[60] flex items-center bg-white/90 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.08)] border border-slate-200 rounded-full transition-all duration-500 ease-out allow-guest-interaction ${isHeaderExpanded ? 'pr-6 pl-2 py-2' : 'px-2 py-2'}`}>
         <button onClick={() => setIsHeaderExpanded(!isHeaderExpanded)} className="shrink-0 w-9 h-9 flex items-center justify-center rounded-full hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors">
           <svg className={`w-5 h-5 transition-transform duration-500 ${isHeaderExpanded ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
         </button>
@@ -408,7 +408,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           </button>
 
           {isNotiOpen && (
-            <div className="absolute top-14 right-0 w-80 bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.12)] border border-slate-200 z-[70] flex flex-col overflow-hidden">
+            <div className="absolute top-14 right-0 w-80 bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.12)] border border-slate-200 z-[70] flex flex-col overflow-hidden allow-guest-interaction">
               <div className="bg-slate-50 p-4 border-b border-slate-200 flex justify-between items-center shrink-0">
                 <h3 className="font-bold text-slate-800 text-sm">🔔 내 알림 (긴급/배정)</h3>
                 <button onClick={() => setIsNotiOpen(false)} className="text-slate-400 hover:text-slate-600 font-bold">&times;</button>
@@ -463,10 +463,10 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-[#002864] shrink-0">
               <h2 className="text-lg font-bold text-white">⚙️ 내 정보 수정</h2>
-              <button onClick={() => { setIsProfileModalOpen(false); setNewPassword(""); setConfirmPassword(""); }} className="text-blue-200 hover:text-white text-2xl leading-none transition-colors">&times;</button>
+              {/* 🌟 닫기 버튼에 allow-guest-interaction 추가 */}
+              <button onClick={() => { setIsProfileModalOpen(false); setNewPassword(""); setConfirmPassword(""); }} className="text-blue-200 hover:text-white text-2xl leading-none transition-colors allow-guest-interaction px-2">&times;</button>
             </div>
             
-            {/* 🌟 [유령 데이터 방지 2] form 속성에 autoComplete="off" 추가하여 브라우저의 오지랖 원천 차단 */}
             <form onSubmit={handleSaveProfile} autoComplete="off" className="p-6 flex-1 overflow-y-auto custom-scroll space-y-6">
               
               <div className="flex flex-col items-center border-b border-slate-100 pb-6">
@@ -535,7 +535,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                       <span className="text-xs font-bold text-slate-500 shrink-0">확대</span>
                     </div>
 
-                    <button type="button" onClick={() => { setImageSrc(null); setPosition({x:0, y:0}); setZoom(1); }} className="mt-4 text-[11px] font-bold text-slate-500 hover:text-slate-700 underline underline-offset-2 transition-colors">
+                    <button type="button" onClick={() => { setImageSrc(null); setPosition({x:0, y:0}); setZoom(1); }} className="mt-4 text-[11px] font-bold text-slate-500 hover:text-slate-700 underline underline-offset-2 transition-colors allow-guest-interaction">
                       취소하고 이전 사진 유지
                     </button>
                   </div>
@@ -546,17 +546,14 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 <h3 className="text-sm font-black text-slate-800">기본 정보</h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
-                  {/* 🌟 [유령 데이터 방지 3] autoComplete="none" 및 data-lpignore="true" 추가 */}
                   <input type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
-                  {/* 🌟 [유령 데이터 방지 3] */}
                   <input type="text" value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="010-0000-0000" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이메일</label>
-                  {/* 🌟 [유령 데이터 방지 3] */}
                   <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="email@example.com" />
                 </div>
               </div>
@@ -565,7 +562,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 <h3 className="text-sm font-black text-slate-800">비밀번호 변경 <span className="text-xs font-normal text-slate-400 ml-1">(선택 사항)</span></h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호</label>
-                  {/* 🌟 [유령 데이터 방지 4] 비밀번호 필드에는 반드시 new-password 지정 */}
                   <input 
                     type="password" 
                     value={newPassword} 
@@ -579,7 +575,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 {newPassword && (
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호 확인</label>
-                    {/* 🌟 [유령 데이터 방지 4] */}
                     <input 
                       type="password" 
                       required={!!newPassword}

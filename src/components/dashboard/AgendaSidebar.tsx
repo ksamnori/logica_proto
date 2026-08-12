@@ -65,6 +65,24 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
             const startStr = ev.start?.dateTime || ev.start?.date;
             let endStr = ev.end?.dateTime || ev.end?.date;
             let isMultiDay = false;
+            let timeString = "";
+
+            // 🌟 [핵심 추가] 구글 캘린더의 시작~종료 시간 추출 포맷팅
+            if (ev.start?.dateTime && ev.end?.dateTime) {
+              const s = new Date(ev.start.dateTime);
+              const e = new Date(ev.end.dateTime);
+              const formatTime = (d: Date) => {
+                const hours = d.getHours();
+                const ampm = hours >= 12 ? '오후' : '오전';
+                const h = hours % 12 || 12;
+                const m = String(d.getMinutes()).padStart(2, '0');
+                return `${ampm} ${h}:${m}`;
+              };
+              timeString = `${formatTime(s)} ~ ${formatTime(e)}`;
+            } else {
+              timeString = "종일 일정";
+            }
+
             if (ev.end?.date) {
                const eDate = new Date(ev.end.date);
                eDate.setDate(eDate.getDate() - 1);
@@ -75,10 +93,14 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                const e = new Date(endStr); e.setHours(0,0,0,0);
                if (e.getTime() > s.getTime()) isMultiDay = true;
             }
+
+            // 🌟 "상세 내용 없음" 대신 시간을 우선 출력하고, 내용이 있으면 뒤에 붙임
+            const descHtml = ev.description ? `<span class="text-slate-300 mx-1">|</span> ${ev.description}` : '';
+
             return {
               id: ev.id,
               title: ev.summary || '(제목 없음)',
-              content: ev.description || '<p>상세 내용 없음</p>',
+              content: `<p>🕒 ${timeString}${descHtml}</p>`,
               type: '외부 일정', 
               source: 'Meeting',
               status: '대기중',
@@ -97,7 +119,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
 
   const allCombinedAgendas = [...agendas, ...externalEvents];
 
-  // 🌟 [타입 에러 완벽 해결] 모든 리턴값에 명시적으로 icon을 부여했습니다!
   const getMeetingTypeTheme = (type: string) => {
     if (type === '주간 회의') return { dot: 'bg-blue-500', text: 'text-blue-600', bg: 'bg-blue-50', border: 'border-blue-200', icon: '📁' };
     if (type === '임시 회의') return { dot: 'bg-amber-500', text: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-200', icon: '📁' };

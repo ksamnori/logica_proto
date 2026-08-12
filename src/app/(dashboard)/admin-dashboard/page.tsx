@@ -24,7 +24,6 @@ const NotiStatusBadge = ({ status }: { status: string }) => {
 export default function AdminDashboardPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태 (운영 대시보드 철통 보안)
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자" });
@@ -57,7 +56,6 @@ export default function AdminDashboardPage() {
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -85,7 +83,6 @@ export default function AdminDashboardPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 운영 대시보드 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/admin-dashboard"))) {
         alert("⛔ 운영 대시보드(KPI/통계)에 접근할 권한이 없습니다.");
         router.replace("/home");
@@ -169,7 +166,6 @@ export default function AdminDashboardPage() {
     ]);
   };
 
-  // 🌟 [보안 및 격리 강화] 모든 fetch 함수에 tenant_id 필터링을 강제 적용합니다.
   const fetchKPIStudents = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     let query = supabase.from('student').select('*');
@@ -207,12 +203,10 @@ export default function AdminDashboardPage() {
   const fetchKPIAdmission = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     
-    // 대기생 수 조회 (tenant_id 적용)
     let stuQuery = supabase.from('student').select('*').eq('status', '입학테스트');
     if (tId && tId !== 'hq') stuQuery = stuQuery.eq('tenant_id', tId);
     const { data: students } = await stuQuery;
     
-    // 이달의 합격자 수 조회
     const { data: apps } = await supabase.from('admission_application').select('*').gte('created_at', firstDayOfMonth);
     const passedCount = apps?.filter(a => ['합격'].includes(a.test_result || a.status || a.application_status)).length || 0;
     
@@ -236,11 +230,21 @@ export default function AdminDashboardPage() {
 
   const fetchMemos = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
-    let query = supabase.from('instructor_memo').select('*').neq('status', '완료').order('created_at', { ascending: false }).limit(20);
-    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
-    
-    const { data } = await query;
-    setMemos(data || []);
+    try {
+      let query = supabase.from('instructor_memo').select('*').neq('status', '완료').order('created_at', { ascending: false }).limit(20);
+      
+      if (tId && tId !== 'hq') {
+         query = query.eq('tenant_id', tId);
+      }
+
+      const { data, error } = await query;
+        
+      if (error) throw error;
+      setMemos(data || []);
+    } catch (err) {
+      console.error("업무 보드 로딩 에러:", err);
+      setMemos([]);
+    }
   };
 
   const fetchAdmissions = async () => {
@@ -393,20 +397,28 @@ export default function AdminDashboardPage() {
   const saveMemo = async () => {
     if (!memoData.content.trim()) return alert("내용을 입력해주세요.");
     
-    if (!tenantId) return alert("소속 지점 정보가 없습니다.");
+    const myTenantId = localStorage.getItem("logica_tenant_id");
+    const validTenantId = myTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : myTenantId;
+
+    if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
 
     try {
-      await supabase.from('instructor_memo').insert({ 
+      const { error } = await supabase.from('instructor_memo').insert({ 
         instructor_id: currentUser.instId, 
         author_name: currentUser.name, 
         memo_type: memoData.type, 
         content: memoData.content,
-        tenant_id: tenantId
+        tenant_id: validTenantId
       });
+
+      if (error) throw error;
+
       setIsMemoModalOpen(false);
       setMemoData({ type: "일반공지", content: "" });
       fetchMemos();
-    } catch (err) { alert("등록 실패"); }
+    } catch (err: any) { 
+      alert("등록 실패: " + err.message); 
+    }
   };
 
   const deleteMemo = async (memoId: string) => {
@@ -417,13 +429,12 @@ export default function AdminDashboardPage() {
     } catch (err) { alert("삭제 실패"); }
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우 화면 원천 차단
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null; 
   }
 
   return (
@@ -565,9 +576,9 @@ export default function AdminDashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-5 bg-transparent border border-t-0 border-slate-200 rounded-b-2xl shadow-sm">
               {instructorsStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">강사 데이터를 불러오는 중입니다...</div> : 
                 instructorsStats.map(inst => (
-                  <div key={inst.instructor_id} onClick={() => router.push(`/instructor/${inst.instructor_id}`)} className="border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow bg-white hover:border-[#002864] flex cursor-pointer gap-2.5 h-[110px]">
+                  <div key={inst.instructor_id} onClick={() => router.push(`/instructor`)} className="border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow bg-white hover:border-[#002864] flex cursor-pointer gap-2.5 h-[110px]">
                     
-                    <div className="w-[72px] bg-gradient-to-br from-[#002864] to-blue-500 rounded-lg shadow-inner overflow-hidden flex-shrink-0 border border-slate-200 relative h-full">
+                    <div className="w-[72px] bg-slate-100 rounded-lg shadow-inner overflow-hidden flex-shrink-0 border border-slate-200 relative h-full">
                       {inst.profile_image_url ? (
                         <img 
                           src={inst.profile_image_url.startsWith('http') ? inst.profile_image_url : `https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/${inst.profile_image_url}`} 
@@ -575,7 +586,7 @@ export default function AdminDashboardPage() {
                           alt="profile"
                         />
                       ) : (
-                        <div className="absolute inset-0 flex items-center justify-center text-2xl font-black text-blue-200">
+                        <div className="absolute inset-0 flex items-center justify-center text-2xl font-black text-blue-400 bg-blue-50">
                           {inst.name?.charAt(0) || 'T'}
                         </div>
                       )}
@@ -732,7 +743,6 @@ export default function AdminDashboardPage() {
         hasAccess={() => true} 
       />
 
-      {/* 수동 설정 모달 및 공지 모달 */}
       {isMemoModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -757,7 +767,20 @@ export default function AdminDashboardPage() {
             </div>
             <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
               <button onClick={() => setIsMemoModalOpen(false)} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm">취소</button>
-              <button onClick={saveMemo} className="px-4 py-2 bg-[#002864] text-white text-xs font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm">공지 등록</button>
+              <button onClick={async () => {
+                if (!memoData.content.trim()) return alert("내용을 입력해주세요.");
+                const myTenantId = localStorage.getItem("logica_tenant_id");
+                const validTenantId = myTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : myTenantId;
+                if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
+                try {
+                  const { error } = await supabase.from('instructor_memo').insert({
+                    instructor_id: currentUser.instId, author_name: currentUser.name,
+                    memo_type: memoData.type, content: memoData.content, tenant_id: validTenantId
+                  });
+                  if (error) throw error;
+                  setIsMemoModalOpen(false); setMemoData({ type: "일반공지", content: "" }); fetchMemos();
+                } catch (err: any) { alert("등록 실패: " + err.message); }
+              }} className="px-4 py-2 bg-[#002864] text-white text-xs font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm">공지 등록</button>
             </div>
           </div>
         </div>
