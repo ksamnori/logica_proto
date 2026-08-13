@@ -682,7 +682,8 @@ function ReviewContent() {
         });
       });
 
-      const getLv = (e: number, m: number) => { if (m===0) return '중'; const p = (e/m)*100; if(p>=70) return '상'; if(p>=50) return '중'; return '하'; };
+      // 💡 [수정] 상(70 이상), 중(40 이상), 하(40 미만)으로 기준 완화
+      const getLv = (e: number, m: number) => { if (m===0) return '중'; const p = (e/m)*100; if(p>=70) return '상'; if(p>=40) return '중'; return '하'; };
       const lvThink = getLv(sThink, maxThink); const lvPersist = getLv(sPersist, maxPersist); const lvKnow = getLv(sKnow, maxKnow);
 
       const { data: cmtData } = await supabase.from('admission_eval_comment').select('comment_text').eq('thinking_level', lvThink).eq('persistence_level', lvPersist).eq('knowledge_level', lvKnow).maybeSingle();
