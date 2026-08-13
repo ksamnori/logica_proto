@@ -5,7 +5,6 @@ import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-// 분리된 모달 컴포넌트 불러오기
 import QuestionModal from "@/components/progress/QuestionModal";
 
 // 💡 JSON 파싱 안전망
@@ -27,48 +26,41 @@ const safeParseIds = (raw: any): number[] => {
 export default function ProgressPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
-  // === 기본 데이터 상태 ===
   const [classes, setClasses] = useState<any[]>([]);
   const [textbooks, setTextbooks] = useState<any[]>([]);
   const [workbooks, setWorkbooks] = useState<any[]>([]);
   const [students, setStudents] = useState<{ id: string; name: string }[]>([]);
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<string[]>([]);
 
-  // === 선택 및 탭 상태 ===
   const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedBookId, setSelectedBookId] = useState("");
   const [selectedWbId, setSelectedWbId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("all");
   const [activePageNum, setActivePageNum] = useState<number | null>(null);
 
-  // === 문항 데이터 상태 ===
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
   const [workbookQuestions, setWorkbookQuestions] = useState<any[]>([]);
   const [pages, setPages] = useState<number[]>([]);
   const [groupedMainQs, setGroupedMainQs] = useState<{ [key: number]: any[] }>({});
-  const [groupedWbQs, setGroupedWbQs] = useState<{ [parent_id: number]: any[] }>({});
   
-  // === 진도 상태 맵 ===
+  // 🌟 [핵심 변경] N:N 다중 워크북 문항 매핑 상태
+  const [groupedWbQs, setGroupedWbQs] = useState<{ [main_tq_id: number]: any[] }>({});
+  
   const [statusMap, setStatusMap] = useState<{ [key: string]: string }>({});
 
-  // === 체크박스 제어 상태 ===
   const [checkedPages, setCheckedPages] = useState<number[]>([]);
   const [checkedMainQs, setCheckedMainQs] = useState<number[]>([]);
   const [checkedWbQs, setCheckedWbQs] = useState<number[]>([]);
 
-  // === 모달 및 토스트 ===
   const [isLoading, setIsLoading] = useState(false);
   const [modalQuestion, setModalQuestion] = useState<any>(null);
   const [toastMsg, setToastMsg] = useState("");
   const mathJaxRef = useRef<boolean>(false);
 
-  // 💡 [핵심 1] 다중 클릭 동시성(Race Condition) 방지를 위한 대기열(Queue) 변수
   const actionQueue = useRef<Promise<void>>(Promise.resolve());
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -96,7 +88,6 @@ export default function ProgressPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 진도 관리 메뉴 접근 권한이 없다면 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/progress"))) {
         alert("⛔ 진도 관리 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
@@ -108,7 +99,6 @@ export default function ProgressPage() {
     checkAccess();
   }, [router]);
 
-  // 권한이 통과되었을 때만 초기 데이터를 페칭합니다.
   useEffect(() => {
     if (isAuthorized) {
       fetchInitialClasses();
@@ -129,7 +119,6 @@ export default function ProgressPage() {
     }
   }, [selectedBookId, selectedWbId]);
 
-  // MathJax 렉 제거
   useEffect(() => {
     if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
       (window as any).MathJax.typesetPromise().catch((err: any) => console.log("MathJax 에러:", err));
@@ -162,12 +151,10 @@ export default function ProgressPage() {
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const tId = localStorage.getItem("logica_tenant_id") || "";
     
-    // 최고관리자, SUPER_ADMIN 권한 조건 완벽 포괄
     const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || pos.includes("최고관리자") || pos.includes("원장") || pos.includes("실장");
 
     let query = supabase.from("class").select("class_id, name, level_name").order("name");
     
-    // 🌟 [보안 강화] 타 지점 클래스가 안 보이도록 격리
     if (tId && tId !== 'hq') {
       query = query.eq('tenant_id', tId);
     }
@@ -221,6 +208,7 @@ export default function ProgressPage() {
   const fetchQuestions = async (bookId: string, wbId: string) => {
     setIsLoading(true);
     try {
+      // 1. 주교재 문항 불러오기
       const { data: mainData } = await supabase.from("textbook_question").select("*").eq("book_id", Number(bookId)).order("page_number", { ascending: true }).order("tq_id", { ascending: true });
       const grouped = (mainData || []).reduce((acc: any, q: any) => {
         const pNum = q.page_number || 0;
@@ -229,20 +217,39 @@ export default function ProgressPage() {
       }, {});
 
       const sortedPages = Object.keys(grouped).map(Number).filter(n => !isNaN(n)).sort((a,b)=>a-b);
-      setAllQuestions(mainData || []); setGroupedMainQs(grouped); setPages(sortedPages);
+      setAllQuestions(mainData || []); 
+      setGroupedMainQs(grouped); 
+      setPages(sortedPages);
       if (sortedPages.length > 0) setActivePageNum(sortedPages[0]);
       setCheckedPages([]); setCheckedMainQs([]); setCheckedWbQs([]); 
 
+      // 2. 워크북 문항 연결 로직 전면 개편 (similar_tq_ids 기반 유연한 매핑)
       if (wbId) {
         const { data: wbData } = await supabase.from("textbook_question").select("*").eq("book_id", Number(wbId));
-        const wbGrouped = (wbData || []).reduce((acc: any, q: any) => {
-          if (q.parent_tq_id) {
-            if (!acc[q.parent_tq_id]) acc[q.parent_tq_id] = [];
-            acc[q.parent_tq_id].push(q);
-          }
-          return acc;
-        }, {});
-        setWorkbookQuestions(wbData || []); setGroupedWbQs(wbGrouped);
+        setWorkbookQuestions(wbData || []);
+
+        const wbGrouped: { [main_tq_id: number]: any[] } = {};
+        
+        // 🌟 주교재의 similar_tq_ids(JSON 배열)를 읽어서 매핑된 워크북 문항들을 1:N 혹은 N:N으로 찾아냅니다.
+        (mainData || []).forEach(mq => {
+            // 안전하게 JSONB 배열 추출
+            const linkedIds = safeParseIds(mq.similar_tq_ids);
+            
+            // 해당 ID들을 가진 워크북 문제들을 전부 가져옵니다.
+            const matchedWbQs = (wbData || []).filter((wq: any) => linkedIds.includes(wq.tq_id));
+            
+            // 매칭된 문제가 없더라도 하위 호환성을 위해 parent_tq_id도 검사해줍니다.
+            const legacyMatchedWbQs = (wbData || []).filter((wq: any) => wq.parent_tq_id === mq.tq_id);
+            
+            // 두 결과를 합치고 중복 제거
+            const combinedMatches = Array.from(new Set([...matchedWbQs, ...legacyMatchedWbQs]));
+            
+            if (combinedMatches.length > 0) {
+                wbGrouped[mq.tq_id] = combinedMatches;
+            }
+        });
+        
+        setGroupedWbQs(wbGrouped);
       } else {
         setWorkbookQuestions([]); setGroupedWbQs({});
       }
@@ -589,6 +596,7 @@ export default function ProgressPage() {
     await applyActionToIds('DONE_AND_WB_HW', mainIds, wbIds);
   };
 
+  // 🌟 [핵심 변경] 본교재 체크 시 배열로 엮인 여러 개의 워크북 문제들을 모두 선택
   const handleMainQCheck = (tq_id: number, isChecked: boolean) => {
     if (isChecked) {
       setCheckedMainQs(prev => [...prev, tq_id]);
@@ -641,13 +649,12 @@ export default function ProgressPage() {
     );
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null;
   }
 
   return (
@@ -768,7 +775,7 @@ export default function ProgressPage() {
             <div className="w-1/2 flex flex-col bg-emerald-50/30">
               <div className="p-3 border-b border-slate-200 bg-emerald-50/80 text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
                 <div className="flex items-center gap-2">
-                  <span className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-bold">워크북 연결 문항</span>
+                  <span className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-bold">워크북 다중 연결 문항</span>
                   <span className="text-emerald-700 font-bold text-xs">선택된 본교재 기준</span>
                 </div>
               </div>
@@ -777,6 +784,7 @@ export default function ProgressPage() {
                 : activePageNum !== null && groupedMainQs[activePageNum]?.length > 0 ? (
                   <div className="bg-white border border-emerald-200 shadow-sm rounded-xl overflow-hidden">
                     {groupedMainQs[activePageNum].map((mq: any) => {
+                      // 🌟 [핵심] 1:N 혹은 N:N으로 매핑된 워크북 문제들을 모두 가져와 뿌려줍니다!
                       const linkedWbQs = groupedWbQs[mq.tq_id] || [];
                       if (linkedWbQs.length === 0) return null;
                       return linkedWbQs.map((wq: any) => (
@@ -784,7 +792,7 @@ export default function ProgressPage() {
                           <div className="w-12 flex items-center justify-center border-r border-emerald-50 shrink-0 bg-emerald-50/30">
                             <input type="checkbox" checked={checkedWbQs.includes(wq.tq_id)} onChange={(e) => setCheckedWbQs(prev => e.target.checked ? [...prev, wq.tq_id] : prev.filter(id => id !== wq.tq_id))} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
                           </div>
-                          <div className="w-24 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0">
+                          <div className="w-28 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0">
                             <span className="text-emerald-500 font-medium text-[10px] truncate leading-tight">연결: 본 {mq.question_number}번</span>
                             <button onClick={() => setModalQuestion({ ...wq, type: 'wb' })} className="text-emerald-700 font-extrabold text-[14px] text-left hover:text-emerald-500 hover:underline">{wq.question_number || "-"}</button>
                           </div>
@@ -826,7 +834,6 @@ export default function ProgressPage() {
         </div>
       </div>
 
-      {/* 분리된 문항 상세 보기 모달 */}
       <QuestionModal 
         isOpen={!!modalQuestion} 
         question={modalQuestion} 
