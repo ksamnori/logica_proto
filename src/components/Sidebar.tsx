@@ -152,6 +152,13 @@ export default function Sidebar() {
       customBg = active ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 shadow-sm';
     }
 
+    // 새 메뉴 디자인 통일
+    if (path === '/print-center') {
+      customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
+    }
+
     return (
       <Link href={path} className={`${baseClass} ${customBg}`}>
         <span className={`text-[13px] truncate tracking-tight ${customLabel}`}>{label}</span>
@@ -225,7 +232,9 @@ export default function Sidebar() {
             <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
             <MenuItem path="/billing" label="수납/청구" />
             <MenuItem path="/unpaid" label="미납 관리" />
-            <MenuItem path="/shop-admin" label="상점 관리" full />
+            {/* 🌟 수정 부분: full 속성을 빼고 나란히 배치 */}
+            <MenuItem path="/shop-admin" label="상점 관리" />
+            <MenuItem path="/print-center" label="서류 출력" />
           </div>
         </div>
 

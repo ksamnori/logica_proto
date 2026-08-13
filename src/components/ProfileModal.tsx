@@ -12,12 +12,24 @@ interface ProfileModalProps {
   isHQ?: boolean; 
 }
 
+// 🌟 [추가] DB 업데이트를 위한 명확한 타입 인터페이스 정의 (any 대체)
+interface InstructorUpdateData {
+  phone: string;
+  chat_position: string;
+  auto_reply_active: boolean;
+  chat_allow_start: string | null;
+  chat_allow_end: string | null;
+  auto_reply_message: string | null;
+  profile_image_url?: string;
+}
+
 export default function ProfileModal({ isOpen, onClose, instId, instructorName, isHQ = false }: ProfileModalProps) {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   
   const [profileForm, setProfileForm] = useState({ 
     phone: "", 
     password: "", 
+    passwordConfirm: "", // 🌟 [추가] 비밀번호 확인 필드
     chatPosition: "", 
     autoActive: false, 
     chatStart: isHQ ? "09:00" : "", 
@@ -49,7 +61,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
       setZoom(1);
 
       setProfileForm({
-        phone: "", password: "", chatPosition: "", autoActive: false, chatStart: "", chatEnd: "", autoMsg: ""
+        phone: "", password: "", passwordConfirm: "", chatPosition: "", autoActive: false, chatStart: "", chatEnd: "", autoMsg: ""
       });
 
       supabase.from("instructor").select("*").eq("instructor_id", instId).single().then(({ data }) => {
@@ -57,6 +69,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
           setProfileForm({
             phone: data.phone ? formatPhone(data.phone) : "",
             password: "", 
+            passwordConfirm: "",
             chatPosition: data.chat_position || "", 
             autoActive: data.auto_reply_active === true, 
             chatStart: data.chat_allow_start || (isHQ ? "09:00" : ""), 
@@ -136,13 +149,17 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
   const saveProfile = async () => {
     setIsSavingProfile(true);
     try {
+      // 🌟 [수정] 비밀번호 확인 로직 추가
       if (profileForm.password) {
         if (profileForm.password.length < 6) throw new Error("비밀번호는 최소 6자리 이상이어야 합니다.");
+        if (profileForm.password !== profileForm.passwordConfirm) throw new Error("새 비밀번호와 확인 비밀번호가 일치하지 않습니다.");
+        
         const { error: authError } = await supabase.auth.updateUser({ password: profileForm.password });
         if (authError) throw new Error(`비밀번호 변경 실패: ${authError.message}`);
       }
 
-      let updateData: any = {
+      // 🌟 [수정] 명확한 타입(InstructorUpdateData)을 사용하여 any 제거
+      let updateData: InstructorUpdateData = {
         phone: profileForm.phone, 
         chat_position: profileForm.chatPosition, 
         auto_reply_active: profileForm.autoActive,
@@ -164,7 +181,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
       const { error: dbError } = await supabase
         .from("instructor")
-        .update(updateData)
+        .update(updateData as any) // Supabase update type compatibility
         .eq("instructor_id", instId);
 
       if (dbError) throw new Error(`DB 저장 실패: ${dbError.message}`);
@@ -176,15 +193,16 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
       alert(profileForm.password ? "기본 정보와 비밀번호가 모두 성공적으로 수정되었습니다." : "정보가 성공적으로 수정되었습니다.");
       onClose();
       window.location.reload(); 
-    } catch (e: any) { 
-      alert("정보 수정 실패: " + e.message); 
+    } catch (e: unknown) { 
+      // 🌟 [수정] any 대신 unknown 사용 및 에러 메시지 추출
+      const errorMessage = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
+      alert("정보 수정 실패: " + errorMessage); 
     } finally { 
       setIsSavingProfile(false); 
     }
   };
 
   return (
-    // 🌟 [핵심] 모달 최상위 컨테이너에 allow-guest-interaction 추가
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 allow-guest-interaction">
       <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]">
         <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
@@ -260,9 +278,38 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
             <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
             <input type="text" value={profileForm.phone} maxLength={13} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} autoComplete="none" data-lpignore="true" placeholder="010-0000-0000" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm" />
           </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">비밀번호 변경 (선택)</label>
-            <input type="password" value={profileForm.password} onChange={e => setProfileForm({...profileForm, password: e.target.value})} autoComplete="new-password" data-lpignore="true" placeholder="변경할 경우에만 입력하세요 (최소 6자리)" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm placeholder-slate-300" />
+          
+          <div className="space-y-3 pt-2">
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호 (선택)</label>
+              <input 
+                type="password" 
+                value={profileForm.password} 
+                onChange={e => setProfileForm({...profileForm, password: e.target.value})} 
+                autoComplete="new-password" 
+                data-lpignore="true" 
+                placeholder="변경할 경우에만 입력하세요 (최소 6자리)" 
+                className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm placeholder-slate-300" 
+              />
+            </div>
+            {/* 🌟 [추가] 비밀번호를 입력할 때만 확인 칸이 스르륵 나타남 */}
+            {profileForm.password && (
+              <div className="animate-[fadeIn_0.2s_ease-out]">
+                <label className="block text-xs font-bold text-rose-500 mb-1">새 비밀번호 확인</label>
+                <input 
+                  type="password" 
+                  value={profileForm.passwordConfirm} 
+                  onChange={e => setProfileForm({...profileForm, passwordConfirm: e.target.value})} 
+                  autoComplete="new-password" 
+                  data-lpignore="true" 
+                  placeholder="오탈자 방지를 위해 다시 한번 입력하세요" 
+                  className={`w-full px-3 py-2 border rounded-lg font-bold text-slate-800 focus:outline-none text-sm placeholder-slate-300 ${profileForm.password === profileForm.passwordConfirm ? 'border-emerald-500 focus:border-emerald-600 ring-1 ring-emerald-500' : 'border-rose-300 focus:border-rose-500 ring-1 ring-rose-300'}`} 
+                />
+                {profileForm.passwordConfirm && profileForm.password !== profileForm.passwordConfirm && (
+                  <p className="text-[10px] text-rose-500 mt-1 font-bold">비밀번호가 일치하지 않습니다.</p>
+                )}
+              </div>
+            )}
           </div>
 
           <hr className="border-slate-200 my-4" />

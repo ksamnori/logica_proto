@@ -9,6 +9,12 @@ import StudentEditModal from "@/components/student/StudentEditModal";
 import ConsultModal from "@/components/student/ConsultModal";
 import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
 
+// 🌟 [안전 장치] Supabase에서 객체 배열로 반환되는 관계 데이터를 단일 객체로 꺼내줍니다.
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
 export default function StudentDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -29,11 +35,30 @@ export default function StudentDetailPage() {
   const [clinicList, setClinicList] = useState<any[]>([]);
   const [billingList, setBillingList] = useState<any[]>([]);
 
+  const [schoolExams, setSchoolExams] = useState<any[]>([]);
+  const [isSchoolExamModalOpen, setIsSchoolExamModalOpen] = useState(false);
+  const [schoolExamForm, setSchoolExamForm] = useState({
+    year: new Date().getFullYear(),
+    semester: 1,
+    examType: "중간고사",
+    subject: "수학",
+    score: ""
+  });
+  const [isSavingSchoolExam, setIsSavingSchoolExam] = useState(false);
+
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isConsultModalOpen, setIsConsultModalOpen] = useState(false);
   const [isBillingModalOpen, setIsBillingModalOpen] = useState(false);
   const [isPaymentModalOpen, setIsPaymentModalOpen] = useState(false);
   
+  // 🌟 [추가] 재등록 관련 상태
+  const [isReEnrollModalOpen, setIsReEnrollModalOpen] = useState(false);
+  const [isSubmittingReEnroll, setIsSubmittingReEnroll] = useState(false);
+  const [reEnrollForm, setReEnrollForm] = useState({
+    classId: "",
+    startDate: new Date().toISOString().split('T')[0]
+  });
+
   const [selectedConsultLog, setSelectedConsultLog] = useState<any>(null);
   const [payFormInit, setPayFormInit] = useState<any>(null);
 
@@ -42,10 +67,8 @@ export default function StudentDetailPage() {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [attendForm, setAttendForm] = useState({ id: "", status: "출석", lateMin: 0, remark: "" });
 
-  // 🌟 [핵심 변경] 사용자가 가진 세부 동작 권한을 저장할 상태 추가
   const [allowedActions, setAllowedActions] = useState<string[]>([]);
 
-  // 🌟 권한 로드 함수
   const loadPermissions = async () => {
     const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
     const pos = localStorage.getItem("logica_instructor_position") || "";
@@ -55,7 +78,6 @@ export default function StudentDetailPage() {
     const isPrin = role === 'ADMIN' || pos.includes('원장');
 
     if (isSA || isPrin) {
-      // 최고관리자, 원장은 무조건 모든 권한 프리패스
       setAllowedActions(["action_view_consult", "action_view_exam", "action_view_clinic", "action_edit_attend"]);
       return;
     }
@@ -84,7 +106,7 @@ export default function StudentDetailPage() {
       setCurrentUser({ instId, name, isAdmin });
     }
     if (studentId) {
-      loadPermissions(); // 🌟 데이터 부를 때 내 권한도 같이 세팅!
+      loadPermissions(); 
       loadInitialData();
       loadClasses();
     }
@@ -94,6 +116,7 @@ export default function StudentDetailPage() {
     if (activeTab === "consult") loadConsultLogs();
     if (activeTab === "attend") loadAttendance();
     if (activeTab === "billing") loadBillings();
+    if (activeTab === "exam") loadSchoolExams(); 
   }, [activeTab, calYear, calMonth]);
 
   const loadInitialData = async () => {
@@ -101,7 +124,12 @@ export default function StudentDetailPage() {
       const { data: stuData } = await supabase.from("student").select("*, parent(*)").eq("student_id", studentId).single();
       setStudent(stuData);
 
-      const { data: enrollData } = await supabase.from("enrollment").select("enrollment_id, class_id, class(name)").eq("student_id", studentId);
+      // 🌟 [수정] 수강 이력을 위해 start_date, end_date, status 도 가져오고 역순 정렬
+      const { data: enrollData } = await supabase
+        .from("enrollment")
+        .select("enrollment_id, class_id, start_date, end_date, status, class(name)")
+        .eq("student_id", studentId)
+        .order("start_date", { ascending: false });
       setEnrollments(enrollData || []);
 
       const { data: hwData } = await supabase.from("student_homework_result").select("status, homework_assignment(homework_title, target_questions, textbook(title))").eq("student_id", studentId);
@@ -116,7 +144,11 @@ export default function StudentDetailPage() {
   };
 
   const loadClasses = async () => {
-    const { data } = await supabase.from("class").select("class_id, name, level_name, tuition_fee").order("name");
+    const tId = localStorage.getItem("logica_tenant_id");
+    let query = supabase.from("class").select("class_id, name, level_name, tuition_fee").eq("status", "예정");
+    if (tId) query = query.eq("tenant_id", tId);
+    
+    const { data } = await query.order("name");
     setAllClasses(data || []);
   };
 
@@ -175,6 +207,119 @@ export default function StudentDetailPage() {
     setBillingList(data || []);
   };
 
+  const loadSchoolExams = async () => {
+    try {
+      const { data, error } = await supabase
+        .from("student_school_exam")
+        .select("*")
+        .eq("student_id", studentId)
+        .order("year", { ascending: false })
+        .order("semester", { ascending: false })
+        .order("exam_type", { ascending: true })
+        .order("created_at", { ascending: false });
+      
+      if (error) throw error;
+      setSchoolExams(data || []);
+    } catch (error) {
+      console.error("학교 성적 로드 에러:", error);
+    }
+  };
+
+  const handleSaveSchoolExam = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!schoolExamForm.score || isNaN(Number(schoolExamForm.score))) {
+      alert("올바른 점수를 입력해주세요.");
+      return;
+    }
+
+    setIsSavingSchoolExam(true);
+    try {
+      const tId = localStorage.getItem("logica_tenant_id");
+      const { error } = await supabase.from("student_school_exam").insert({
+        student_id: studentId,
+        year: schoolExamForm.year,
+        semester: schoolExamForm.semester,
+        exam_type: schoolExamForm.examType,
+        subject: schoolExamForm.subject,
+        score: parseFloat(schoolExamForm.score),
+        tenant_id: tId
+      });
+
+      if (error) throw error;
+
+      alert("학교 내신 성적이 등록되었습니다.");
+      setIsSchoolExamModalOpen(false);
+      setSchoolExamForm({ ...schoolExamForm, score: "" }); 
+      loadSchoolExams();
+    } catch (error: any) {
+      alert("저장에 실패했습니다: " + error.message);
+    } finally {
+      setIsSavingSchoolExam(false);
+    }
+  };
+
+  const deleteSchoolExam = async (id: string) => {
+    if (!confirm("이 성적 기록을 삭제하시겠습니까?")) return;
+    try {
+      const { error } = await supabase.from("student_school_exam").delete().eq("id", id);
+      if (error) throw error;
+      loadSchoolExams();
+    } catch (error: any) {
+      alert("삭제 실패: " + error.message);
+    }
+  };
+
+  // 🌟 [추가] 재등록(수강 이력 추가) 처리 함수
+  const handleReEnroll = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reEnrollForm.classId) return alert("배정할 반을 선택해주세요.");
+    if (!reEnrollForm.startDate) return alert("시작일을 선택해주세요.");
+    
+    setIsSubmittingReEnroll(true);
+    try {
+      const tId = localStorage.getItem("logica_tenant_id");
+      
+      // 1. 학생 상태를 '재원'으로 롤백
+      await supabase.from("student").update({ status: "재원", updated_at: new Date().toISOString() }).eq("student_id", studentId);
+      
+      // 2. 새로운 수강 이력 인서트
+      await supabase.from("enrollment").insert({
+        student_id: studentId,
+        class_id: reEnrollForm.classId,
+        start_date: reEnrollForm.startDate,
+        status: "수강중",
+        tenant_id: tId
+      });
+
+      alert("🎉 성공적으로 재원 처리 및 반 배정이 완료되었습니다.");
+      setIsReEnrollModalOpen(false);
+      loadInitialData(); // 최신 상태 갱신
+    } catch (err: any) {
+      alert("재등록 실패: " + err.message);
+    } finally {
+      setIsSubmittingReEnroll(false);
+    }
+  };
+
+  // 🌟 [추가] 진행중인 수강 이력 종료 처리
+  const handleEndEnrollment = async (enrollmentId: string) => {
+    const endDate = prompt("수강 종료일(퇴원/휴원일 또는 분반일)을 YYYY-MM-DD 형식으로 입력해주세요.", new Date().toISOString().split('T')[0]);
+    if (!endDate) return;
+
+    try {
+      await supabase.from("enrollment").update({ 
+        end_date: endDate, 
+        status: "수강종료",
+        updated_at: new Date().toISOString()
+      }).eq("enrollment_id", enrollmentId);
+      
+      alert("수강 이력이 종료되었습니다.\n💡 학생의 상태(퇴원/휴원 등)도 변경하려면 우측 상단의 [정보 수정]을 이용해주세요.");
+      loadInitialData();
+    } catch (err: any) {
+      alert("종료 처리 실패: " + err.message);
+    }
+  };
+
   const deleteStudentData = async () => {
     if (!currentUser.isAdmin) {
       alert("🚫 학생의 모든 데이터를 완전히 삭제하는 기능은 원장 및 관리자만 수행할 수 있습니다.");
@@ -186,6 +331,7 @@ export default function StudentDetailPage() {
       await Promise.all([
         supabase.from('student_homework_result').delete().eq('student_id', studentId),
         supabase.from('student_exam_result').delete().eq('student_id', studentId),
+        supabase.from('student_school_exam').delete().eq('student_id', studentId),
         supabase.from('student_incorrect_record').delete().eq('student_id', studentId),
         supabase.from('student_progress').delete().eq('student_id', studentId),
         supabase.from('admission_test_report').delete().eq('student_id', studentId),
@@ -238,8 +384,10 @@ export default function StudentDetailPage() {
     } catch (e) { alert("저장 실패"); }
   };
 
+  // 🌟 [수정] 현재 진행중인 활성 반 이름만 콤마로 연결하여 가져옵니다.
   const getEnrolledClassNames = () => {
-    return enrollments.length > 0 ? enrollments.map(e => e.class?.name).join(", ") : "미배정";
+    const activeEnrolls = enrollments.filter(e => !e.end_date || e.status === '수강중');
+    return activeEnrolls.length > 0 ? activeEnrolls.map(e => unwrap(e.class)?.name).join(", ") : "미배정";
   };
 
   const calendarDays = useMemo(() => {
@@ -276,7 +424,6 @@ export default function StudentDetailPage() {
 
   if (!student) return <div className="p-10 text-center font-bold text-slate-500">데이터를 불러오는 중입니다...</div>;
 
-  // 🌟 [핵심 변경] 권한이 있는 경우에만 탭 배열에 포함되도록 동적 구성
   const TABS = [
     { id: 'info', name: '학생 상세 정보 및 수강반' },
     ...(allowedActions.includes('action_view_consult') ? [{ id: 'consult', name: '상담 기록' }] : []),
@@ -307,11 +454,17 @@ export default function StudentDetailPage() {
                 <span>{student.school || ""} {student.grade || ""}</span>
               </p>
               <p className="text-xs font-bold text-slate-400 mt-2 flex items-center gap-2">
-                <span>📱 {student.phone || "-"}</span><span className="text-slate-300">|</span><span>👨‍👩‍👧 {student.parent?.phone || "-"}</span>
+                <span>📱 {student.phone || "-"}</span><span className="text-slate-300">|</span><span>👨‍👩‍👧 {unwrap(student.parent)?.phone || "-"}</span>
               </p>
             </div>
           </div>
           <div className="relative z-10 flex gap-3">
+            {/* 🌟 [추가] 휴원/퇴원생일 경우 재등록 버튼 활성화 */}
+            {(student.status === "휴원" || student.status === "퇴원") && (
+              <button onClick={() => setIsReEnrollModalOpen(true)} className="px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 transition-colors flex items-center gap-2 text-sm animate-pulse">
+                🔄 복귀/재등록 처리
+              </button>
+            )}
             <button onClick={() => setIsEditModalOpen(true)} className="px-5 py-2.5 bg-[#002864] text-white font-bold rounded-xl shadow-md hover:bg-blue-900 transition-colors flex items-center gap-2 text-sm">
               <svg className="w-4 h-4 text-blue-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
               정보 수정
@@ -321,7 +474,6 @@ export default function StudentDetailPage() {
 
         <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col min-h-[600px]">
           <div className="flex overflow-x-auto border-b border-slate-200 bg-slate-50/50 px-2 pt-2 custom-scroll shrink-0">
-            {/* 🌟 권한에 따라 필터링된 탭만 렌더링 */}
             {TABS.map(tab => (
               <button 
                 key={tab.id} onClick={() => setActiveTab(tab.id as any)}
@@ -336,6 +488,7 @@ export default function StudentDetailPage() {
             
             {activeTab === "info" && (
               <div className="space-y-8 animate-[fadeIn_0.3s_ease-out]">
+                {/* 1. 학생 기본 정보 */}
                 <div>
                   <h3 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2"><span className="w-1.5 h-4 bg-[#0ea5e9] rounded-full"></span>학생 기본 정보</h3>
                   <div className="grid grid-cols-12 gap-6 bg-slate-50 p-6 rounded-2xl border border-slate-100">
@@ -346,15 +499,52 @@ export default function StudentDetailPage() {
                     <div className="col-span-12 lg:col-span-3"><label className="block text-xs font-bold text-slate-500 mb-1">학년</label><input type="text" value={student.grade || ""} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
                     
                     <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={student.phone || ""} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
-                    <div className="col-span-12 lg:col-span-8"><label className="block text-xs font-bold text-slate-500 mb-1">배정 클래스</label><input type="text" value={getEnrolledClassNames()} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none truncate" /></div>
+                    <div className="col-span-12 lg:col-span-8"><label className="block text-xs font-bold text-slate-500 mb-1">현재 배정 클래스</label><input type="text" value={getEnrolledClassNames()} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none truncate" /></div>
                   </div>
                 </div>
+
+                {/* 🌟 [추가] 2. 수강 이력 타임라인 */}
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2">
+                    <span className="w-1.5 h-4 bg-purple-500 rounded-full"></span>수강 이력 타임라인
+                  </h3>
+                  <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+                    {enrollments.length === 0 ? (
+                      <div className="text-center text-slate-400 font-bold py-6">수강 이력이 없습니다.</div>
+                    ) : (
+                      <div className="space-y-4">
+                        {enrollments.map((en, idx) => (
+                          <div key={en.enrollment_id} className="flex items-center justify-between border-b border-slate-100 last:border-0 pb-4 last:pb-0">
+                            <div>
+                              <div className="flex items-center gap-2 mb-1">
+                                <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${!en.end_date || en.status === '수강중' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                  {!en.end_date || en.status === '수강중' ? '수강중' : '수강종료'}
+                                </span>
+                                <span className="font-bold text-slate-800 text-sm">{unwrap(en.class)?.name || '알 수 없는 반'}</span>
+                              </div>
+                              <div className="text-xs font-bold text-slate-400">
+                                {en.start_date} ~ {en.end_date || '현재 진행 중'}
+                              </div>
+                            </div>
+                            {(!en.end_date || en.status === '수강중') && (
+                              <button onClick={() => handleEndEnrollment(en.enrollment_id)} className="text-[11px] font-bold text-rose-500 hover:text-rose-700 bg-rose-50 px-3 py-1.5 rounded-lg border border-rose-100 transition-colors">
+                                수강 종료 처리
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* 3. 학부모 정보 */}
                 <div>
                   <h3 className="text-base font-extrabold text-slate-800 mb-4 flex items-center gap-2"><span className="w-1.5 h-4 bg-emerald-400 rounded-full"></span>학부모 정보</h3>
                   <div className="grid grid-cols-12 gap-6 bg-slate-50 p-6 rounded-2xl border border-slate-100">
-                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">학부모 성함</label><input type="text" value={student.parent?.name || "미등록"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
-                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">관계</label><input type="text" value={student.parent?.relationship || "-"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
-                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={student.parent?.phone || "-"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">학부모 성함</label><input type="text" value={unwrap(student.parent)?.name || "미등록"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">관계</label><input type="text" value={unwrap(student.parent)?.relationship || "-"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
+                    <div className="col-span-12 lg:col-span-4"><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={unwrap(student.parent)?.phone || "-"} readOnly className="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 font-bold text-slate-800 focus:outline-none" /></div>
                   </div>
                 </div>
               </div>
@@ -391,7 +581,7 @@ export default function StudentDetailPage() {
                           </div>
                         </div>
                         <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-line mb-3 pl-2">{log.content}</p>
-                        <div className="text-[11px] font-bold text-slate-400 text-right">기록자: {log.instructor?.name || '알 수 없음'} {log.is_admission ? '' : '선생님'}</div>
+                        <div className="text-[11px] font-bold text-slate-400 text-right">기록자: {unwrap(log.instructor)?.name || '알 수 없음'} {log.is_admission ? '' : '선생님'}</div>
                       </div>
                     ))
                   }
@@ -432,7 +622,6 @@ export default function StudentDetailPage() {
                         <h3 className="font-extrabold text-slate-700 text-lg mb-6 pb-4 border-b border-slate-200">{selectedDate.split('-')[0]}년 {parseInt(selectedDate.split('-')[1])}월 {parseInt(selectedDate.split('-')[2])}일 출결</h3>
                         <div className="space-y-5 flex-1">
                           
-                          {/* 🌟 [핵심 변경] 권한이 있으면 수정 폼을, 없으면 안내 메시지만 보여줍니다. */}
                           {allowedActions.includes('action_edit_attend') ? (
                             <>
                               <div>
@@ -484,13 +673,13 @@ export default function StudentDetailPage() {
                 <div className="space-y-3">
                   {hwList.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm bg-slate-50 border border-dashed border-slate-300 rounded-xl">배부된 과제가 없습니다.</div> :
                     hwList.map((hw, idx) => {
-                      const assign = hw.homework_assignment;
+                      const assign = unwrap(hw.homework_assignment);
                       if (!assign) return null;
                       const qCount = assign.target_questions ? (typeof assign.target_questions === 'string' ? JSON.parse(assign.target_questions).length : assign.target_questions.length) : 0;
                       return (
                         <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
                           <div>
-                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-bold mb-1 inline-block">{assign.textbook?.title || '기타 교재'}</span>
+                            <span className="text-[10px] bg-slate-100 text-slate-500 px-2 py-0.5 rounded font-bold mb-1 inline-block">{unwrap(assign.textbook)?.title || '기타 교재'}</span>
                             <h4 className="font-bold text-slate-800 text-sm">{assign.homework_title}</h4>
                           </div>
                           <div className="text-right">
@@ -506,21 +695,66 @@ export default function StudentDetailPage() {
             )}
 
             {activeTab === "exam" && (
-              <div className="space-y-4 animate-[fadeIn_0.3s_ease-out]">
-                <h3 className="font-extrabold text-slate-700 mb-4">테스트 결과</h3>
-                <div className="space-y-3">
-                  {examList.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm bg-slate-50 border border-dashed border-slate-300 rounded-xl">시험 기록이 없습니다.</div> :
-                    examList.map((ex, idx) => (
-                      <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
-                        <div><h4 className="font-bold text-slate-800 text-sm">{ex.exam_master?.title}</h4></div>
-                        <div className="text-right flex items-center gap-3">
-                          <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{ex.test_status}</span>
-                          <span className="font-black text-slate-700 w-12 text-right">{ex.total_score !== null ? `${ex.total_score}점` : '-'}</span>
+              <div className="space-y-8 animate-[fadeIn_0.3s_ease-out]">
+                <div>
+                  <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-2">
+                    <h3 className="font-extrabold text-slate-700 flex items-center gap-2">
+                      <span className="w-1.5 h-4 bg-indigo-500 rounded-full"></span>학교 내신 성적
+                    </h3>
+                    <button 
+                      onClick={() => setIsSchoolExamModalOpen(true)} 
+                      className="px-3 py-1.5 bg-indigo-50 text-indigo-600 font-bold rounded-lg text-xs hover:bg-indigo-100 transition-colors shadow-sm"
+                    >
+                      + 성적 추가
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    {schoolExams.length === 0 ? (
+                      <div className="col-span-full text-center py-6 text-slate-400 font-bold text-sm bg-slate-50 border border-dashed border-slate-300 rounded-xl">등록된 학교 성적이 없습니다.</div>
+                    ) : (
+                      schoolExams.map((se, idx) => (
+                        <div key={se.id || idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm relative group hover:border-indigo-300 transition-colors">
+                          <button 
+                            onClick={() => deleteSchoolExam(se.id)} 
+                            className="absolute top-2 right-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-opacity bg-white rounded-full w-6 h-6 flex items-center justify-center shadow-sm border border-slate-100"
+                            title="삭제"
+                          >
+                            ✕
+                          </button>
+                          <div className="text-[10px] font-bold text-slate-400 mb-1">{se.year}년 {se.semester}학기 {se.exam_type}</div>
+                          <div className="flex justify-between items-end">
+                            <div className="font-black text-slate-700">{se.subject}</div>
+                            <div className="text-lg font-black text-indigo-600">{se.score}점</div>
+                          </div>
                         </div>
-                      </div>
-                    ))
-                  }
+                      ))
+                    )}
+                  </div>
                 </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-2">
+                    <h3 className="font-extrabold text-slate-700 flex items-center gap-2">
+                      <span className="w-1.5 h-4 bg-emerald-500 rounded-full"></span>학원 자체 테스트 결과
+                    </h3>
+                  </div>
+                  <div className="space-y-3">
+                    {examList.length === 0 ? (
+                      <div className="text-center py-10 text-slate-400 font-bold text-sm bg-slate-50 border border-dashed border-slate-300 rounded-xl">시험 기록이 없습니다.</div>
+                    ) : (
+                      examList.map((ex, idx) => (
+                        <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
+                          <div><h4 className="font-bold text-slate-800 text-sm">{unwrap(ex.exam_master)?.title}</h4></div>
+                          <div className="text-right flex items-center gap-3">
+                            <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded">{ex.test_status}</span>
+                            <span className="font-black text-slate-700 w-12 text-right">{ex.total_score !== null ? `${ex.total_score}점` : '-'}</span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
               </div>
             )}
 
@@ -533,7 +767,7 @@ export default function StudentDetailPage() {
                       <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 flex justify-between items-center shadow-sm">
                         <div>
                           <span className="text-[10px] bg-rose-50 text-rose-500 border border-rose-100 px-2 py-0.5 rounded font-bold mb-1 inline-block">{c.task_type}</span>
-                          <h4 className="font-bold text-slate-800 text-sm">연결 문항 번호: {c.textbook_question?.question_number || '-'}</h4>
+                          <h4 className="font-bold text-slate-800 text-sm">연결 문항 번호: {unwrap(c.textbook_question)?.question_number || '-'}</h4>
                         </div>
                         <div className="text-right"><span className="text-[11px] font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded">{c.status}</span></div>
                       </div>
@@ -584,7 +818,7 @@ export default function StudentDetailPage() {
                             <div>
                               <div className="flex items-center gap-2 mb-1">
                                 {bill.status === "완납" ? <span className="bg-emerald-100 text-emerald-700 px-2.5 py-1 rounded text-[11px] font-black border border-emerald-200">✅ 완납</span> : <span className="bg-rose-100 text-rose-600 px-2.5 py-1 rounded text-[11px] font-black border border-rose-200">🔴 미납</span>}
-                                <span className="text-sm font-extrabold text-[#002864]">{bill.class?.name || '미배정'}</span>
+                                <span className="text-sm font-extrabold text-[#002864]">{unwrap(bill.class)?.name || '미배정'}</span>
                               </div>
                               <div className="text-xs font-bold text-slate-400">납부 기한: {bill.due_date}까지</div>
                             </div>
@@ -644,6 +878,132 @@ export default function StudentDetailPage() {
         onClose={() => setIsPaymentModalOpen(false)} 
         onSuccess={loadBillings} 
       />
+
+      {/* 학교 성적 모달 */}
+      {isSchoolExamModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-indigo-600 p-4 flex justify-between items-center text-white shrink-0">
+              <h2 className="font-bold text-lg flex items-center gap-2">🏫 학교 성적 등록</h2>
+              <button onClick={() => setIsSchoolExamModalOpen(false)} className="text-indigo-200 hover:text-white font-bold text-2xl leading-none">&times;</button>
+            </div>
+            
+            <form onSubmit={handleSaveSchoolExam} className="p-6 bg-slate-50 flex flex-col gap-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">연도</label>
+                  <input type="number" value={schoolExamForm.year} onChange={(e) => setSchoolExamForm({...schoolExamForm, year: parseInt(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">학기</label>
+                  <select value={schoolExamForm.semester} onChange={(e) => setSchoolExamForm({...schoolExamForm, semester: parseInt(e.target.value)})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white">
+                    <option value={1}>1학기</option>
+                    <option value={2}>2학기</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">고사</label>
+                  <select value={schoolExamForm.examType} onChange={(e) => setSchoolExamForm({...schoolExamForm, examType: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white">
+                    <option value="중간고사">중간고사</option>
+                    <option value="기말고사">기말고사</option>
+                    <option value="수행평가">수행평가</option>
+                    <option value="모의고사">모의고사</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">과목</label>
+                  <select value={schoolExamForm.subject} onChange={(e) => setSchoolExamForm({...schoolExamForm, subject: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white">
+                    <option value="수학">수학</option>
+                    <option value="영어">영어</option>
+                    <option value="국어">국어</option>
+                    <option value="과학">과학</option>
+                    <option value="사회">사회</option>
+                    <option value="기타">기타</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">취득 점수</label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    step="0.1"
+                    required
+                    value={schoolExamForm.score} 
+                    onChange={(e) => setSchoolExamForm({...schoolExamForm, score: e.target.value})} 
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 font-black text-indigo-700 text-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500" 
+                    placeholder="예: 95.5" 
+                  />
+                  <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">점</span>
+                </div>
+              </div>
+
+              <div className="mt-2 flex gap-2">
+                <button type="button" onClick={() => setIsSchoolExamModalOpen(false)} className="flex-1 py-3 bg-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-300 transition-colors text-sm">취소</button>
+                <button type="submit" disabled={isSavingSchoolExam} className="flex-1 py-3 bg-indigo-600 text-white font-bold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors shadow-sm text-sm">
+                  {isSavingSchoolExam ? "저장 중..." : "성적 등록하기"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 [추가] 재등록 모달 */}
+      {isReEnrollModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-emerald-600 p-4 flex justify-between items-center text-white shrink-0">
+              <h2 className="font-bold text-lg flex items-center gap-2">🔄 학생 재원(재등록) 처리</h2>
+              <button onClick={() => setIsReEnrollModalOpen(false)} className="text-emerald-200 hover:text-white font-bold text-2xl leading-none">&times;</button>
+            </div>
+            
+            <form onSubmit={handleReEnroll} className="p-6 bg-slate-50 flex flex-col gap-4">
+              <div className="text-sm font-bold text-slate-600 mb-2 leading-relaxed">
+                <span className="text-emerald-600">[{student.name}]</span> 학생을 다시 재원생으로 전환하고 새로운 반에 배정합니다.
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">배정할 수강 반 <span className="text-rose-500">*</span></label>
+                <select 
+                  required
+                  value={reEnrollForm.classId} 
+                  onChange={(e) => setReEnrollForm({...reEnrollForm, classId: e.target.value})} 
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 bg-white"
+                >
+                  <option value="" disabled>반을 선택해주세요</option>
+                  {allClasses.map(c => (
+                    <option key={c.class_id} value={c.class_id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">수강 시작일 (재등록일) <span className="text-rose-500">*</span></label>
+                <input 
+                  type="date" 
+                  required
+                  value={reEnrollForm.startDate} 
+                  onChange={(e) => setReEnrollForm({...reEnrollForm, startDate: e.target.value})} 
+                  className="w-full px-3 py-2.5 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 bg-white" 
+                />
+              </div>
+
+              <div className="mt-4 flex gap-2">
+                <button type="button" onClick={() => setIsReEnrollModalOpen(false)} className="flex-1 py-3 bg-slate-200 text-slate-600 font-bold rounded-xl hover:bg-slate-300 transition-colors text-sm">취소</button>
+                <button type="submit" disabled={isSubmittingReEnroll} className="flex-1 py-3 bg-emerald-600 text-white font-bold rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-colors shadow-sm text-sm">
+                  {isSubmittingReEnroll ? "처리 중..." : "재등록 완료하기"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

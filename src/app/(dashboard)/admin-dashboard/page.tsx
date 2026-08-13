@@ -1,7 +1,7 @@
 // src/app/(dashboard)/admin-dashboard/page.tsx
 "use client";
 
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Chart from "chart.js/auto";
@@ -21,6 +21,11 @@ const NotiStatusBadge = ({ status }: { status: string }) => {
   return <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 px-1.5 py-0.5 rounded text-[9px] font-bold shrink-0 shadow-sm">성공</span>;
 };
 
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
 export default function AdminDashboardPage() {
   const router = useRouter();
 
@@ -28,6 +33,7 @@ export default function AdminDashboardPage() {
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자" });
   const [tenantId, setTenantId] = useState("hq");
+  const [tenantName, setTenantName] = useState("로딩중...");
   
   const [todayString, setTodayString] = useState("데이터를 불러오는 중입니다...");
   const [thisMonthStr, setThisMonthStr] = useState("");
@@ -37,6 +43,14 @@ export default function AdminDashboardPage() {
   const [kpi, setKpi] = useState({
     totalStu: 0, newStu: 0, leftStu: 0, payRate: 0, paidAmt: 0, unpaidAmt: 0, waitingStu: 0, passedStu: 0, csCount: 0
   });
+
+  const [allStudentsData, setAllStudentsData] = useState<any[]>([]);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchClassFilter, setSearchClassFilter] = useState("all");
+  const [searchStatusFilter, setSearchStatusFilter] = useState("재원");
+  const [searchGradeFilter, setSearchGradeFilter] = useState("all");
+  
+  const [showStudentPhone, setShowStudentPhone] = useState<Record<string, boolean>>({});
 
   const [csRequests, setCsRequests] = useState<any[]>([]);
   const [memos, setMemos] = useState<any[]>([]);
@@ -103,6 +117,16 @@ export default function AdminDashboardPage() {
       setCurrentUser({ instId, name });
       setTenantId(tId);
 
+      const getTenantName = async () => {
+        if (tId && tId !== 'hq') {
+          const { data } = await supabase.from('academy_tenant').select('name').eq('tenant_id', tId).single();
+          if (data) setTenantName(data.name);
+        } else if (tId === 'hq') {
+          setTenantName('본사 (HQ)');
+        }
+      };
+      getTenantName();
+
       const today = new Date();
       const days = ['일', '월', '화', '수', '목', '금', '토'];
       setTodayString(`${today.getFullYear()}년 ${today.getMonth() + 1}월 ${today.getDate()}일 (${days[today.getDay()]}) 실시간 요약 지표`);
@@ -162,9 +186,77 @@ export default function AdminDashboardPage() {
     await Promise.allSettled([
       fetchKPIStudents(), fetchKPIBilling(), fetchKPIAdmission(),
       fetchCSRequests(), fetchAdmissions(), fetchLiveFeeds(),
-      fetchInstructorStats(), fetchClassMonitoring(), fetchMemos()
+      fetchInstructorStats(), fetchClassMonitoring(), fetchMemos(),
+      fetchAllSearchData() 
     ]);
   };
+
+  // 🌟 [수정] 학생 수강 기록 조회 시 'end_date' 필드를 추가로 가져옵니다!
+  const fetchAllSearchData = async () => {
+    const tId = localStorage.getItem("logica_tenant_id");
+    // enrollment 에서 status 뿐만 아니라 end_date 도 가져와야 현재 수강중인지 정확히 알 수 있습니다.
+    let query = supabase.from('student').select('student_id, name, phone, school, grade, status, parent(phone), enrollment(status, end_date, class(name))');
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+    
+    const { data } = await query.order('name');
+    setAllStudentsData(data || []);
+  };
+
+  const availableGrades = useMemo(() => {
+    const grades = allStudentsData.map(s => s.grade).filter(Boolean);
+    return Array.from(new Set(grades)).sort((a, b) => {
+      const order = { '초': 1, '중': 2, '고': 3 };
+      const aMatch = String(a).match(/([초중고])\s*(\d)/);
+      const bMatch = String(b).match(/([초중고])\s*(\d)/);
+      if (aMatch && bMatch) {
+        if (order[aMatch[1] as keyof typeof order] !== order[bMatch[1] as keyof typeof order]) {
+          return order[aMatch[1] as keyof typeof order] - order[bMatch[1] as keyof typeof order];
+        }
+        return Number(aMatch[2]) - Number(bMatch[2]);
+      }
+      return String(a).localeCompare(String(b));
+    });
+  }, [allStudentsData]);
+
+  // 🌟 [추가] 학생들의 실제 수강 기록을 뒤져 존재하는 모든 반의 이름을 동적으로 추출합니다.
+  const availableClasses = useMemo(() => {
+    const classSet = new Set<string>();
+    allStudentsData.forEach(s => {
+      // 🌟 [핵심 변경] end_date가 없거나, status가 수강중인 기록만 유효한 것으로 처리
+      const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+      activeEnrolls.forEach((e:any) => {
+        const cName = unwrap(e.class)?.name;
+        if (cName) classSet.add(cName);
+      });
+    });
+    return Array.from(classSet).sort();
+  }, [allStudentsData]);
+
+  const filteredSearchData = useMemo(() => {
+    return allStudentsData.filter(s => {
+      if (searchStatusFilter !== 'all' && s.status !== searchStatusFilter) return false;
+      if (searchGradeFilter !== 'all' && s.grade !== searchGradeFilter) return false;
+      
+      // 🌟 [핵심 변경] end_date 판별 로직 적용
+      const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+      const classNames = activeEnrolls.map((e:any) => unwrap(e.class)?.name).filter(Boolean);
+      
+      if (searchClassFilter !== 'all' && !classNames.includes(searchClassFilter)) return false;
+      
+      if (searchQuery.trim() !== '') {
+        const q = searchQuery.toLowerCase().trim();
+        const sName = (s.name || '').toLowerCase();
+        const sSchool = (s.school || '').toLowerCase();
+        const sPhone = (s.phone || '').replace(/-/g, '');
+        const pPhone = (unwrap(s.parent)?.phone || '').replace(/-/g, '');
+        const qPhone = q.replace(/-/g, '');
+        
+        return sName.includes(q) || sSchool.includes(q) || sPhone.includes(qPhone) || pPhone.includes(qPhone);
+      }
+      return true;
+    });
+  }, [allStudentsData, searchQuery, searchClassFilter, searchStatusFilter, searchGradeFilter]);
+
 
   const fetchKPIStudents = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
@@ -232,13 +324,8 @@ export default function AdminDashboardPage() {
     const tId = localStorage.getItem("logica_tenant_id");
     try {
       let query = supabase.from('instructor_memo').select('*').neq('status', '완료').order('created_at', { ascending: false }).limit(20);
-      
-      if (tId && tId !== 'hq') {
-         query = query.eq('tenant_id', tId);
-      }
-
+      if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
       const { data, error } = await query;
-        
       if (error) throw error;
       setMemos(data || []);
     } catch (err) {
@@ -270,7 +357,7 @@ export default function AdminDashboardPage() {
     const hqTenantId = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc'; 
 
     let instQuery = supabase.from('instructor').select('*').eq('status', '재직');
-    let classQuery = supabase.from('class').select('*').eq('status', '진행중');
+    let classQuery = supabase.from('class').select('*, class_schedule(*)').eq('status', '진행중');
     let stuQuery = supabase.from('student').select('*');
     let enrollQuery = supabase.from('enrollment').select('*');
 
@@ -291,13 +378,19 @@ export default function AdminDashboardPage() {
       if (pos.includes('실장')) return 3;
       if (pos.includes('전임')) return 4; 
       if (pos.includes('파트')) return 5; 
-      if (pos.includes('조교')) return 6;
       return 99;
     };
 
     const insts = (rawInsts || [])
       .filter(i => i.tenant_id !== hqTenantId) 
-      .filter(i => !(i.position?.includes('조교')))
+      .filter(i => {
+        const pos = i.position || '';
+        const role = i.role || '';
+        const isGuest = pos.includes('테스트') || pos.includes('체험') || role === 'GUEST';
+        const isSuper = pos.includes('최고관리자') || role === 'SUPER_ADMIN';
+        const isTA = pos.includes('조교') || role === 'TA';
+        return !isGuest && !isSuper && !isTA;
+      })
       .sort((a, b) => {
         const rankA = getRoleRank(a.position), rankB = getRoleRank(b.position);
         if (rankA !== rankB) return rankA - rankB;
@@ -446,10 +539,13 @@ export default function AdminDashboardPage() {
           <div className="relative z-10 flex justify-between items-center ml-6">
             <div>
               <h1 className="text-3xl font-black tracking-tight font-lexend flex items-center gap-3">
-                <span>Logica Super Admin</span>
-                <span className="bg-blue-500/30 text-blue-200 text-xs px-2 py-1 rounded font-bold border border-blue-400/30 font-pretendard shadow-sm">
-                  최고 관리자 통제실
+                <span>LOGICA 학원 통합 관리</span>
+                <span className="bg-blue-500/30 text-blue-100 text-[15px] px-3 py-1 rounded-lg font-bold border border-blue-400/30 font-pretendard shadow-sm flex items-center shadow-inner">
+                  🏢 {tenantName}
                 </span>
+                <button onClick={() => router.push('/supervisor')} className="shrink-0 ml-3 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white border border-indigo-400/50 px-4 py-1.5 rounded-xl text-sm font-bold shadow-md transition-all flex items-center gap-1.5">
+                  <span className="text-lg">📡</span> 클리닉 관제탑
+                </button>
               </h1>
               <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">{todayString}</p>
             </div>
@@ -459,62 +555,145 @@ export default function AdminDashboardPage() {
         <main className="flex-1 overflow-visible px-8 pb-10 -mt-14 relative z-10 bg-transparent">
           
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 mb-6 px-6">
-            <div onClick={() => router.push('/student')} className="bg-white rounded-2xl p-6 border border-slate-200/60 shadow-lg relative overflow-hidden group hover:border-[#002864] transition-colors cursor-pointer h-64 flex flex-col">
-              <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-blue-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-              <div className="flex-1">
-                <div className="flex justify-between items-start mb-2 relative z-10">
-                  <span className="text-sm font-bold text-slate-500">전체 재원생 수</span>
-                  <span className="bg-blue-100 text-[#002864] text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-sm">LIVE</span>
-                </div>
-                <div className="flex items-end gap-2 relative z-10 mt-1">
-                  <span className="text-4xl font-black text-[#002864]">{kpi.totalStu}</span>
-                  <span className="text-sm font-bold text-slate-400 mb-1">명</span>
-                </div>
+            
+            {/* KPI 요약 블록 */}
+            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-lg relative overflow-hidden flex flex-col justify-between h-64 col-span-1">
+              <div className="absolute right-[-10px] top-[-10px] w-32 h-32 bg-slate-50 rounded-full opacity-50"></div>
+              
+              <div className="flex-1 flex justify-between items-center border-b border-slate-100 pb-2 cursor-pointer group relative z-10" onClick={() => router.push('/student')}>
+                 <div>
+                   <div className="text-[11px] font-bold text-slate-500 mb-0.5">전체 재원생</div>
+                   <div className="flex items-end gap-1"><span className="text-2xl font-black text-[#002864] group-hover:text-blue-600 transition-colors">{kpi.totalStu}</span><span className="text-[10px] font-bold text-slate-400 mb-1.5">명</span></div>
+                 </div>
+                 <div className="text-right text-[10px] font-bold flex flex-col gap-0.5">
+                   <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm">신규 +{kpi.newStu}</span>
+                   <span className="text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm">퇴원 -{kpi.leftStu}</span>
+                 </div>
               </div>
-              <div className="pt-4 border-t border-slate-100 flex gap-2 text-[11px] font-bold relative z-10 shrink-0">
-                <span className="text-emerald-600 bg-emerald-50 px-2 py-1 rounded shadow-sm border border-emerald-100 flex-1 text-center">이달 신규 +{kpi.newStu}</span>
-                <span className="text-rose-500 bg-rose-50 px-2 py-1 rounded shadow-sm border border-rose-100 flex-1 text-center">퇴원 -{kpi.leftStu}</span>
+              
+              <div className="flex-1 flex flex-col justify-center border-b border-slate-100 py-1.5 cursor-pointer group relative z-10" onClick={() => router.push('/billing')}>
+                 <div className="flex justify-between items-end mb-1">
+                   <span className="text-[11px] font-bold text-slate-500">{new Date().getMonth() + 1}월 수납률</span>
+                   <span className="text-lg font-black text-sky-600 group-hover:text-sky-400 transition-colors">{kpi.payRate}%</span>
+                 </div>
+                 <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner">
+                   <div className={`h-full rounded-full transition-all ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
+                 </div>
+              </div>
+
+              <div className="flex-1 flex justify-between items-center pt-2 cursor-pointer group relative z-10" onClick={() => router.push('/admission')}>
+                 <div>
+                   <div className="text-[11px] font-bold text-slate-500 mb-0.5">입학 대기생</div>
+                   <div className="flex items-end gap-1"><span className="text-2xl font-black text-amber-500 group-hover:text-amber-400 transition-colors">{kpi.waitingStu}</span><span className="text-[10px] font-bold text-slate-400 mb-1.5">명</span></div>
+                 </div>
+                 <div className="text-[10px] font-bold text-slate-500 text-right">
+                   이번 달 승인<br/><span className="text-amber-600 font-black text-sm">{kpi.passedStu}</span> 명
+                 </div>
               </div>
             </div>
 
-            <div onClick={() => router.push('/billing')} className="bg-white rounded-2xl p-6 border border-blue-200 shadow-lg relative overflow-hidden group cursor-pointer h-64 flex flex-col">
-               <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-sky-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-               <div className="flex-1">
-                 <div className="flex justify-between items-start mb-2 relative z-10">
-                   <span className="text-sm font-bold text-slate-500">{new Date().getMonth() + 1}월 수납률</span>
-                 </div>
-                 <div className="flex items-end gap-1.5 relative z-10 mt-1 mb-3">
-                   <span className="text-4xl font-black tracking-tighter text-[#002864]">{kpi.payRate}</span>
-                   <span className="text-xl font-bold text-slate-400 mb-1">%</span>
-                 </div>
-                 <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden relative z-10">
-                   <div className={`h-full rounded-full transition-all duration-1000 shadow-[0_0_10px_rgba(56,189,248,0.5)] ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
-                 </div>
-               </div>
-               <div className="flex justify-between text-[11px] font-bold text-slate-500 relative z-10 pt-4 border-t border-slate-100 shrink-0">
-                 <span>수납: <span className="text-slate-800 text-xs">{kpi.paidAmt.toLocaleString()}</span></span>
-                 <span className="text-rose-400">미납: <span className="text-rose-500 text-xs">{kpi.unpaidAmt.toLocaleString()}</span></span>
-               </div>
-             </div>
-
-            <div onClick={() => router.push('/admission')} className="bg-white rounded-2xl p-6 border border-slate-200/60 shadow-lg relative overflow-hidden group hover:border-amber-400 transition-colors cursor-pointer h-64 flex flex-col">
-              <div className="absolute right-[-10px] top-[-10px] w-24 h-24 bg-amber-50 rounded-full opacity-50 group-hover:scale-150 transition-transform duration-500"></div>
-              <div className="flex-1">
-                <div className="flex justify-between items-start mb-2 relative z-10">
-                  <span className="text-sm font-bold text-slate-500">입학테스트 대기생</span>
-                  <span className="bg-amber-100 text-amber-700 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shadow-sm">잠재 고객</span>
-                </div>
-                <div className="flex items-end gap-2 relative z-10 mt-1">
-                  <span className="text-4xl font-black text-amber-500">{kpi.waitingStu}</span>
-                  <span className="text-sm font-bold text-slate-400 mb-1">명</span>
+            {/* 통합 빠른 검색기 */}
+            <div className="bg-white rounded-2xl p-5 border border-indigo-100 shadow-lg col-span-1 md:col-span-2 h-64 flex flex-col relative overflow-hidden group">
+              <div className="absolute right-[-10px] bottom-[-20px] text-8xl opacity-[0.03] pointer-events-none group-hover:scale-110 transition-transform duration-500">🔎</div>
+              
+              <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
+                <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+                  <span className="text-base">🔎</span> 통합 원생 검색기
+                  <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shadow-sm ml-1">Quick Search</span>
+                </span>
+              </div>
+              
+              <div className="flex gap-2 mb-3 shrink-0 relative z-10">
+                <select value={searchStatusFilter} onChange={e=>setSearchStatusFilter(e.target.value)} className="w-[80px] border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-slate-600 bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm">
+                  <option value="all">상태 전체</option>
+                  <option value="재원">✅ 재원</option>
+                  <option value="휴원">⏸️ 휴원</option>
+                  <option value="퇴원">❌ 퇴원</option>
+                  <option value="입학테스트">📝 대기</option>
+                </select>
+                <select value={searchGradeFilter} onChange={e=>setSearchGradeFilter(e.target.value)} className="w-[84px] border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-slate-600 bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm">
+                  <option value="all">학년 전체</option>
+                  {availableGrades.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+                <select value={searchClassFilter} onChange={e=>setSearchClassFilter(e.target.value)} className="w-[100px] border border-slate-300 rounded-lg p-1.5 text-xs font-bold text-slate-600 bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm truncate">
+                  <option value="all">수강반 전체</option>
+                  {/* 🌟 동적으로 추출된 정확한 진행 반 목록 렌더링 */}
+                  {availableClasses.map(cName => <option key={cName} value={cName}>{cName}</option>)}
+                </select>
+                <div className="flex-1 relative">
+                  <input type="text" value={searchQuery} onChange={e=>setSearchQuery(e.target.value)} placeholder="이름, 연락처, 학부모 연락처, 학교 검색..." className="w-full border border-slate-300 rounded-lg p-1.5 pl-8 text-xs font-bold text-slate-800 bg-white focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm placeholder:text-slate-400" />
+                  <svg className="w-4 h-4 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
                 </div>
               </div>
-              <div className="pt-4 border-t border-slate-100 flex justify-between items-center text-[11px] font-bold relative z-10 shrink-0">
-                <span className="text-slate-500">이번 달 입학 승인</span>
-                <span className="text-slate-800"><span className="font-black text-amber-600 text-sm">{kpi.passedStu}</span> 명</span>
+
+              <div className="flex-1 overflow-y-auto custom-scroll border border-slate-200 rounded-lg bg-slate-50 relative z-10 min-h-0 shadow-inner">
+                <table className="w-full text-left text-[11px] whitespace-nowrap">
+                  <thead className="sticky top-0 bg-white border-b border-slate-200 z-10 shadow-sm">
+                    <tr>
+                      <th className="py-2 px-3 font-extrabold text-slate-500 w-[80px]">이름</th>
+                      <th className="py-2 px-3 font-extrabold text-slate-500">학교/학년</th>
+                      <th className="py-2 px-3 font-extrabold text-slate-500">수강반</th>
+                      <th className="py-2 px-3 font-extrabold text-slate-500">학부모 연락처</th>
+                      <th className="py-2 px-3 font-extrabold text-slate-500 text-center">상태</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 font-medium">
+                    {filteredSearchData.length === 0 ? (
+                      <tr><td colSpan={5} className="py-8 text-center text-slate-400 font-bold">조건에 맞는 학생이 없습니다.</td></tr>
+                    ) : (
+                      filteredSearchData.map(s => {
+                        // 🌟 [핵심 변경] end_date가 비어있거나 status가 수강중인 것만 활성으로 판별!
+                        const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+                        const cNames = activeEnrolls.map((e:any)=>unwrap(e.class)?.name).filter(Boolean).join(", ") || "-";
+                        
+                        const schoolGradeStr = `${s.school||'-'} ${s.grade||''}`.trim();
+                        const parentPhone = unwrap(s.parent)?.phone || '미입력';
+
+                        return (
+                          <tr key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="cursor-pointer hover:bg-indigo-50/50 transition-colors group bg-white">
+                            <td className="py-2 px-3 font-bold text-[#002864] group-hover:text-indigo-600 group-hover:underline max-w-[100px] truncate">{s.name}</td>
+                            <td className="py-2 px-3 text-slate-500 max-w-[120px] truncate" title={schoolGradeStr}>{schoolGradeStr}</td>
+                            <td className="py-2 px-3 text-slate-600 max-w-[120px] truncate" title={cNames}>{cNames}</td>
+                            <td className="py-2 px-3 text-slate-500 align-middle">
+                              <div className="flex flex-col gap-1 justify-center">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-slate-700 tabular-nums tracking-tight">{parentPhone}</span>
+                                  {s.status === '입학테스트' && parentPhone && (
+                                    <span className="text-[8px] bg-rose-50 text-rose-500 border border-rose-100 px-1 py-0.5 rounded shadow-sm leading-none mt-0.5">학부모</span>
+                                  )}
+                                  {s.phone && !showStudentPhone[s.student_id] && (
+                                    <button 
+                                      onClick={(e) => { e.stopPropagation(); setShowStudentPhone(p => ({...p, [s.student_id]: true})); }}
+                                      className="text-[9px] bg-white border border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 px-1 py-0.5 rounded font-bold transition-colors shadow-sm flex items-center gap-0.5 leading-none mt-0.5"
+                                      title="학생 연락처 보기"
+                                    >
+                                      학생 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                                    </button>
+                                  )}
+                                </div>
+                                {s.phone && showStudentPhone[s.student_id] && (
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-[11px] font-bold text-indigo-600 tabular-nums tracking-tight">{s.phone}</span>
+                                    <span className="text-[8px] bg-indigo-50 text-indigo-500 border border-indigo-100 px-1 py-0.5 rounded shadow-sm">학생</span>
+                                  </div>
+                                )}
+                              </div>
+                            </td>
+                            <td className="py-2 px-3 text-center align-middle">
+                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shadow-sm border ${s.status==='재원'?'bg-emerald-50 text-emerald-600 border-emerald-100':s.status==='입학테스트'?'bg-amber-50 text-amber-600 border-amber-100':s.status==='휴원'?'bg-rose-50 text-rose-500 border-rose-100':'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                {s.status === '입학테스트' ? '대기' : s.status}
+                              </span>
+                            </td>
+                          </tr>
+                        );
+                      })
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
+            {/* CS 영역 */}
             <div onClick={() => router.push('/cs')} className="bg-white rounded-2xl p-5 border border-rose-100 shadow-lg relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
               <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
               <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
@@ -538,6 +717,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
+            {/* 업무 메모 영역 */}
             <div className="bg-white rounded-2xl p-5 border border-purple-100 shadow-lg relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
               <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
                 <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
@@ -576,7 +756,7 @@ export default function AdminDashboardPage() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3 p-5 bg-transparent border border-t-0 border-slate-200 rounded-b-2xl shadow-sm">
               {instructorsStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">강사 데이터를 불러오는 중입니다...</div> : 
                 instructorsStats.map(inst => (
-                  <div key={inst.instructor_id} onClick={() => router.push(`/instructor`)} className="border border-slate-200 rounded-xl p-3 shadow-sm hover:shadow-md transition-shadow bg-white hover:border-[#002864] flex cursor-pointer gap-2.5 h-[110px]">
+                  <div key={inst.instructor_id} className="border border-slate-200 rounded-xl p-3 shadow-sm bg-white flex gap-2.5 h-[110px]">
                     
                     <div className="w-[72px] bg-slate-100 rounded-lg shadow-inner overflow-hidden flex-shrink-0 border border-slate-200 relative h-full">
                       {inst.profile_image_url ? (
@@ -594,7 +774,13 @@ export default function AdminDashboardPage() {
                     
                     <div className="flex-1 flex flex-col min-w-0 h-full">
                       <div className="flex justify-between items-center mb-1.5 gap-1 shrink-0">
-                        <div className="font-extrabold text-[13px] text-slate-800 truncate leading-none mt-0.5">{inst.name} 선생님</div>
+                        <div 
+                          className="font-extrabold text-[13px] text-slate-800 truncate leading-none mt-0.5 cursor-pointer hover:text-[#002864] hover:underline" 
+                          onClick={() => router.push('/instructor')}
+                          title="강사 관리 페이지로 이동"
+                        >
+                          {inst.name} 선생님
+                        </div>
                         
                         <div className="flex items-center gap-1.5 shrink-0">
                           <div className="flex gap-0.5 text-[9px] font-bold">
@@ -612,7 +798,15 @@ export default function AdminDashboardPage() {
                         <div className="text-[9px] font-bold text-slate-500 mb-1 flex items-center gap-1 shrink-0"><span>📚</span> 담당 수강반 ({inst.myClasses.length})</div>
                         <div className="flex flex-wrap gap-1 content-start flex-1 overflow-y-auto custom-scroll pr-1 pb-1 min-h-0">
                           {inst.myClasses.length === 0 ? <span className="text-[10px] text-slate-400 font-bold">배정된 반 없음</span> : 
-                            inst.myClasses.map((c: any) => <span key={c.class_id} className="text-[9px] font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap">{c.name}</span>)
+                            inst.myClasses.map((c: any) => (
+                              <span 
+                                key={c.class_id} 
+                                onClick={(e) => { e.stopPropagation(); openClassModal({...c, instructor: { name: inst.name }}); }} 
+                                className="text-[9px] font-bold bg-slate-50 border border-slate-200 px-1.5 py-0.5 rounded text-slate-600 shadow-sm whitespace-nowrap cursor-pointer hover:bg-indigo-50 hover:text-indigo-700 hover:border-indigo-200 transition-colors"
+                              >
+                                {c.name}
+                              </span>
+                            ))
                           }
                         </div>
                       </div>

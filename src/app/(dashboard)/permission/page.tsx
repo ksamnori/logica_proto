@@ -80,7 +80,6 @@ const PERMISSION_GROUPS = [
       { id: "action_submit_task_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
       
       { id: "/cs", label: "학부모 요청 및 CS 관리" },
-      // 🌟 [추가됨] CS 타인 열람 권한 
       { id: "action_view_all_cs", label: "↳ [권한] 타인의 CS 요청 내역 전체 열람", isAction: true },
       { id: "action_delete_cs", label: "↳ [권한] 학부모 요청(CS) 기록 삭제", isAction: true },
       { id: "action_delete_cs_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
@@ -100,6 +99,8 @@ const PERMISSION_GROUPS = [
       { id: "/billing", label: "수납 및 청구서 발행" },
       { id: "/unpaid", label: "미납자 특별 관리" },
       { id: "/shop-admin", label: "포인트 상점 관리" },
+      // 🌟 [핵심 변경] 서류 출력 페이지 권한 추가 완료!
+      { id: "/print-center", label: "교육청 서류 출력 센터" }, 
     ]
   },
   {

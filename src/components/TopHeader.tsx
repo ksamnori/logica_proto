@@ -124,7 +124,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
         setCurrentName((prev) => prev !== instructorData.name ? instructorData.name : prev);
       }
       
-      // 🌟 [핵심 변경] DB 컬럼명 오타 수정 완료! (profile_img_url -> profile_image_url)
       const dbImg = instructorData.profile_image_url || instructorData.profile_image;
       if (dbImg && dbImg !== "null" && dbImg !== "undefined") {
         setCurrentProfileImg((prevImg) => {
@@ -236,14 +235,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
     setNotifications([]);
     setUnreadNotiCount(0);
     setIsNotiOpen(false);
-  };
-
-  const handleSupervisorClick = () => {
-    if (isSuperAdmin) {
-      router.push('/supervisor');
-    } else {
-      alert('접근 권한이 없습니다.\n원장 또는 실장 권한만 접속 가능합니다.');
-    }
   };
 
   const handleOpenProfile = async () => {
@@ -384,7 +375,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           name: editName, 
           phone: editPhone, 
           email: editEmail, 
-          profile_image_url: newImgUrl, // 🌟 여기서도 오타 수정 완료
+          profile_image_url: newImgUrl, 
           profile_image: newImgUrl 
         })
         .eq('instructor_id', currentUid);
@@ -463,9 +454,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
         <div className={`flex items-center overflow-hidden transition-all duration-500 ease-in-out ${isHeaderExpanded ? 'max-w-[800px] opacity-100 ml-4 pl-4 border-l border-slate-200' : 'max-w-0 opacity-0 ml-0 pl-0 border-transparent'}`}>
           <DigitalClock />
-          <button onClick={handleSupervisorClick} className="shrink-0 mr-5 bg-[#002864] hover:bg-blue-900 text-white border border-blue-800 px-4 py-2 rounded-xl text-sm font-bold shadow-md hover:shadow-lg transition-all flex items-center gap-1.5">
-            <span className="text-lg">📡</span> 클리닉 관제탑
-          </button>
+          {/* 🌟 클리닉 관제탑 버튼이 제거된 영역입니다. */}
 
           <div className="w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm shrink-0 mr-3">
             {finalProfileImgUrl && !imgError ? (
