@@ -709,6 +709,9 @@ function ReviewContent() {
 
       alert("✅ 진단 리포트 재생성 완료! 이제 새 데이터가 반영됩니다.");
       
+      // 💡 [핵심 수정] 리포트 재생성 후 버튼 즉시 부활!
+      setShowReportBtn(true);
+      
     } catch(e: any) { 
       console.error("리포트 생성 상세 오류 내역:", e);
       alert("❌ 리포트 생성 오류:\n" + e.message); 
