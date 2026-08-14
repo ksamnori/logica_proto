@@ -8,6 +8,12 @@ import { supabase } from "@/lib/supabase";
 import EditBookModal from "@/components/lesson/EditBookModal";
 import AssignBookModal from "@/components/lesson/AssignBookModal";
 
+// 🌟 안전하게 배열 껍데기를 벗겨주는 헬퍼 함수
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
 export default function LessonPage() {
   const router = useRouter();
 
@@ -29,7 +35,7 @@ export default function LessonPage() {
   const [assignModalData, setAssignModalData] = useState<any | null>(null);
 
   const [canDeleteBook, setCanDeleteBook] = useState(false);
-  const [canViewAllClasses, setCanViewAllClasses] = useState(false); // 🌟 전체 반 열람 권한 상태 추가
+  const [canViewAllClasses, setCanViewAllClasses] = useState(false); 
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -43,7 +49,7 @@ export default function LessonPage() {
       if (isGodMode) {
         setIsAuthorized(true);
         setCanDeleteBook(true); 
-        setCanViewAllClasses(true); // 🌟 무조건 전체 열람 허용
+        setCanViewAllClasses(true);
         return;
       }
 
@@ -66,7 +72,7 @@ export default function LessonPage() {
       } else {
         setIsAuthorized(true);
         if (data.allowed_menus.includes('action_delete_book')) setCanDeleteBook(true);
-        if (data.allowed_menus.includes('action_view_all_classes')) setCanViewAllClasses(true); // 🌟 전체 반 열람 권한 연동
+        if (data.allowed_menus.includes('action_view_all_classes')) setCanViewAllClasses(true); 
       }
     };
 
@@ -157,7 +163,6 @@ export default function LessonPage() {
       return;
     }
 
-    // 🌟 최고관리자, 원장, 실장 체크를 명확히 분리
     const isAdminLike = ["ADMIN", "MANAGER", "PRINCIPAL", "SUPER_ADMIN", "VICE_ADMIN"].includes(role.toUpperCase()) || 
                         pos.includes("원장") || pos.includes("실장") || pos.includes("최고관리자") || pos.includes("부원장") || pos.includes("대장");
 
@@ -167,7 +172,6 @@ export default function LessonPage() {
       .eq("tenant_id", validTenantId)
       .order("name");
     
-    // 🌟 [핵심 로직] 관리자급도 아니고 전체 조회 권한(canViewAllClasses)도 없다면 본인 반만 조회
     if (!isAdminLike && !canViewAllClasses && instId) {
       query = query.eq("instructor_id", instId);
     }
@@ -471,15 +475,19 @@ export default function LessonPage() {
                 ) : (
                   <>
                     {assignedBooks.map(cb => {
+                      // 🌟 배열 껍데기 벗겨내기 적용!
+                      const tb = unwrap(cb.textbook);
+                      if (!tb) return null;
+
                       let badgeClass = "bg-slate-100 text-slate-600";
                       if (cb.status === "진행중") badgeClass = "bg-blue-100 text-blue-700 border-blue-200";
                       else if (cb.status === "완료") badgeClass = "bg-emerald-100 text-emerald-700 border-emerald-200";
 
                       let bookBadgeClass = "bg-slate-50 text-slate-500 border-slate-200";
-                      if (cb.textbook.book_type === "주교재") bookBadgeClass = "bg-blue-50 text-blue-700 border-blue-200";
-                      else if (cb.textbook.book_type === "부교재") bookBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                      else if (cb.textbook.book_type === "연산교재") bookBadgeClass = "bg-purple-50 text-purple-700 border-purple-200";
-                      else if (cb.textbook.book_type === "워크북") bookBadgeClass = "bg-amber-50 text-amber-700 border-amber-200";
+                      if (tb.book_type === "주교재") bookBadgeClass = "bg-blue-50 text-blue-700 border-blue-200";
+                      else if (tb.book_type === "부교재") bookBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                      else if (tb.book_type === "연산교재") bookBadgeClass = "bg-purple-50 text-purple-700 border-purple-200";
+                      else if (tb.book_type === "워크북") bookBadgeClass = "bg-amber-50 text-amber-700 border-amber-200";
 
                       const sDate = cb.start_date ? cb.start_date.substring(5).replace("-","/") : "-";
                       const eDate = cb.target_end_date ? cb.target_end_date.substring(5).replace("-","/") : "-";
@@ -491,9 +499,9 @@ export default function LessonPage() {
                             <div>
                               <div className="flex items-center gap-2 mb-1.5">
                                 <span className={`${badgeClass} px-2 py-0.5 rounded text-[10px] font-extrabold border shadow-sm`}>{cb.status}</span>
-                                <span className={`${bookBadgeClass} px-1.5 py-0.5 rounded text-[10px] font-extrabold border shadow-sm`}>{cb.textbook.book_type}</span>
+                                <span className={`${bookBadgeClass} px-1.5 py-0.5 rounded text-[10px] font-extrabold border shadow-sm`}>{tb.book_type}</span>
                               </div>
-                              <div className="font-extrabold text-slate-800 text-[16px]">{cb.textbook.title}</div>
+                              <div className="font-extrabold text-slate-800 text-[16px]">{tb.title}</div>
                             </div>
                             <div className="text-right">
                               <div className="text-xs font-bold text-slate-500 bg-slate-50 px-2 py-1 rounded border border-slate-100">일정: {sDate} ~ {eDate}</div>

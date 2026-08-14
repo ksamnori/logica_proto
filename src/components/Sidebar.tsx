@@ -64,32 +64,21 @@ export default function Sidebar() {
     fetchData();
   }, []);
 
-  // 🌟 GUEST(체험용) 계정 투명 방패(조작 차단) 로직 개선
   useEffect(() => {
     if (displayRole === 'GUEST') {
       const blockActions = (e: Event) => {
         const target = e.target as HTMLElement;
-        
-        // 1. 사이드바(aside) 내부 클릭은 허용
         if (target.closest('aside')) return;
-        // 2. 🌟 허가된 인터랙션 영역(채팅, 메모, 상단 헤더, 닫기 버튼 등) 완벽 허용
         if (target.closest('.allow-guest-interaction')) return;
-        
-        // 그 외 우측 화면의 클릭, 키보드 입력 등 차단
         e.preventDefault();
         e.stopPropagation();
-        
-        // 과도한 알림 방지를 위해 'click' 이벤트에만 알림 노출
         if (e.type === 'click') {
           alert("🔒 테스트(체험용) 계정은 읽기 전용 모드입니다.\n화면 구경은 가능하지만 데이터를 수정하거나 삭제할 수 없습니다.");
         }
       };
-
-      // 캡처링 단계에서 이벤트 원천 차단
       window.addEventListener('click', blockActions, true);
       window.addEventListener('keydown', blockActions, true);
       window.addEventListener('mousedown', blockActions, true); 
-
       return () => {
         window.removeEventListener('click', blockActions, true);
         window.removeEventListener('keydown', blockActions, true);
@@ -150,13 +139,19 @@ export default function Sidebar() {
       customDesc = 'text-emerald-200 font-medium';
     } else if (path === '/permission') {
       customBg = active ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 shadow-sm';
-    }
-
-    // 새 메뉴 디자인 통일
-    if (path === '/print-center') {
+    } else if (path === '/print-center') {
       customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
+    } else if (path === '/mapper') {
+      customBg = active ? 'bg-fuchsia-500 border-fuchsia-600 text-white shadow-md' : 'bg-fuchsia-50/50 border-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-100 hover:border-fuchsia-200 shadow-sm';
+      customLabel = 'font-black';
+    } else if (path === '/qdb-upload') {
+      customBg = active ? 'bg-slate-700 border-slate-800 text-white shadow-md' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400 shadow-sm';
+      customLabel = 'font-black';
+    } else if (path === '/book-upload') {
+      customBg = active ? 'bg-teal-500 border-teal-600 text-white shadow-md' : 'bg-teal-50/50 border-teal-100 text-teal-700 hover:bg-teal-100 hover:border-teal-200 shadow-sm';
+      customLabel = 'font-black';
     }
 
     return (
@@ -232,7 +227,6 @@ export default function Sidebar() {
             <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
             <MenuItem path="/billing" label="수납/청구" />
             <MenuItem path="/unpaid" label="미납 관리" />
-            {/* 🌟 수정 부분: full 속성을 빼고 나란히 배치 */}
             <MenuItem path="/shop-admin" label="상점 관리" />
             <MenuItem path="/print-center" label="서류 출력" />
           </div>
@@ -246,9 +240,16 @@ export default function Sidebar() {
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
             <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
+            
+            {/* 🌟 수정 부분: full 속성을 모두 제거하여 권한 관리와 강사 관리를 같은 줄에 나란히 배치 */}
             <MenuItem path="/permission" label="권한 관리" />
             <MenuItem path="/instructor" label="강사 관리" />
-            <MenuItem path="/academy-info" label="LOGICA 학원 정보" full />
+            
+            <MenuItem path="/mapper" label="교재 매핑 툴" full />
+            <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
+            <MenuItem path="/book-upload" label="교재 구조 업로드" />
+            
+            <MenuItem path="/academy-info" label="학원 정보 설정" full />
           </div>
         </div>
 

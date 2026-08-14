@@ -4,11 +4,26 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-
 import QuestionModal from "@/components/progress/QuestionModal";
 
-// 💡 JSON 파싱 안전망
-const safeParseIds = (raw: any): number[] => {
+// 🌟 TypeScript 타입 에러 방지를 위한 명확한 인터페이스 정의
+interface TextbookInfo {
+  title: string;
+  book_type: string;
+}
+
+interface ClassTextbookRow {
+  book_id: string | number;
+  textbook: TextbookInfo | TextbookInfo[] | null;
+}
+
+// 💡 안전하게 배열 껍데기를 벗겨주는 헬퍼 함수
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
+const safeParseIds = (raw: any): any[] => {
   if (!raw) return [];
   try {
     let val = raw;
@@ -16,10 +31,8 @@ const safeParseIds = (raw: any): number[] => {
       if (val === "null" || val.trim() === "") return [];
       val = JSON.parse(val);
     }
-    if (Array.isArray(val)) return val.map(Number);
-  } catch (err) {
-    console.warn("데이터 파싱 경고:", err);
-  }
+    if (Array.isArray(val)) return val;
+  } catch (err) {}
   return [];
 };
 
@@ -29,30 +42,29 @@ export default function ProgressPage() {
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
   const [classes, setClasses] = useState<any[]>([]);
-  const [textbooks, setTextbooks] = useState<any[]>([]);
-  const [workbooks, setWorkbooks] = useState<any[]>([]);
+  
+  // 🌟 주교재와 부교재/워크북을 분리하여 관리
+  const [mainTextbooks, setMainTextbooks] = useState<ClassTextbookRow[]>([]);
+  const [subTextbooks, setSubTextbooks] = useState<ClassTextbookRow[]>([]);
+  
   const [students, setStudents] = useState<{ id: string; name: string }[]>([]);
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<string[]>([]);
 
   const [selectedClassId, setSelectedClassId] = useState("");
   const [selectedBookId, setSelectedBookId] = useState("");
-  const [selectedWbId, setSelectedWbId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("all");
   const [activePageNum, setActivePageNum] = useState<number | null>(null);
 
   const [allQuestions, setAllQuestions] = useState<any[]>([]);
-  const [workbookQuestions, setWorkbookQuestions] = useState<any[]>([]);
   const [pages, setPages] = useState<number[]>([]);
   const [groupedMainQs, setGroupedMainQs] = useState<{ [key: number]: any[] }>({});
   
-  // 🌟 [핵심 변경] N:N 다중 워크북 문항 매핑 상태
   const [groupedWbQs, setGroupedWbQs] = useState<{ [main_tq_id: number]: any[] }>({});
-  
   const [statusMap, setStatusMap] = useState<{ [key: string]: string }>({});
 
   const [checkedPages, setCheckedPages] = useState<number[]>([]);
-  const [checkedMainQs, setCheckedMainQs] = useState<number[]>([]);
-  const [checkedWbQs, setCheckedWbQs] = useState<number[]>([]);
+  const [checkedMainQs, setCheckedMainQs] = useState<any[]>([]); 
+  const [checkedWbQs, setCheckedWbQs] = useState<any[]>([]); 
 
   const [isLoading, setIsLoading] = useState(false);
   const [modalQuestion, setModalQuestion] = useState<any>(null);
@@ -67,123 +79,85 @@ export default function ProgressPage() {
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
-      
-      if (isGodMode) {
-        setIsAuthorized(true);
-        return;
-      }
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('원장');
+      if (isGodMode) { setIsAuthorized(true); return; }
 
-      if (!tId || !role) {
-         alert("권한 정보가 없습니다.");
-         router.replace("/home");
-         return;
-      }
-
-      const { data } = await supabase
-        .from('tenant_role_permissions')
-        .select('allowed_menus')
-        .eq('tenant_id', tId)
-        .eq('role_name', role)
-        .maybeSingle();
-
+      if (!tId || !role) { router.replace("/home"); return; }
+      const { data } = await supabase.from('tenant_role_permissions').select('allowed_menus').eq('tenant_id', tId).eq('role_name', role).maybeSingle();
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/progress"))) {
-        alert("⛔ 진도 관리 페이지에 접근할 권한이 없습니다.");
-        router.replace("/home");
-      } else {
-        setIsAuthorized(true);
-      }
+        alert("⛔ 진도 관리 페이지에 접근할 권한이 없습니다."); router.replace("/home");
+      } else { setIsAuthorized(true); }
     };
-
     checkAccess();
   }, [router]);
 
-  useEffect(() => {
-    if (isAuthorized) {
-      fetchInitialClasses();
-      loadMathJax();
-    }
-  }, [isAuthorized]);
+  useEffect(() => { if (isAuthorized) { fetchInitialClasses(); loadMathJax(); } }, [isAuthorized]);
+  useEffect(() => { if (!selectedClassId) return; fetchClassDetails(selectedClassId); }, [selectedClassId]);
 
   useEffect(() => {
-    if (!selectedClassId) return;
-    fetchClassDetails(selectedClassId);
-  }, [selectedClassId]);
-
-  useEffect(() => {
-    if (selectedBookId) {
-      fetchQuestions(selectedBookId, selectedWbId);
-    } else {
-      setAllQuestions([]); setPages([]); setGroupedMainQs({}); setActivePageNum(null);
-    }
-  }, [selectedBookId, selectedWbId]);
+    if (selectedBookId) fetchQuestions(selectedBookId);
+    else { setAllQuestions([]); setPages([]); setGroupedMainQs({}); setActivePageNum(null); }
+  }, [selectedBookId]);
 
   useEffect(() => {
     if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
       (window as any).MathJax.typesetPromise().catch((err: any) => console.log("MathJax 에러:", err));
     }
-  }, [activePageNum, selectedStudentId, selectedBookId, selectedWbId]);
+  }, [activePageNum, selectedStudentId, selectedBookId, groupedWbQs]);
 
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
       mathJaxRef.current = true;
-      (window as any).MathJax = {
-        tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] },
-        startup: { typeset: false },
-      };
-      const script = document.createElement("script");
-      script.id = "MathJax-script";
-      script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js";
-      script.async = true;
+      (window as any).MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] }, startup: { typeset: false } };
+      const script = document.createElement("script"); script.id = "MathJax-script"; script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-chtml.js"; script.async = true;
       document.head.appendChild(script);
     }
   };
 
-  const showToast = (msg: string) => {
-    setToastMsg(msg);
-    setTimeout(() => setToastMsg(""), 2500);
-  };
+  const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 2500); };
 
   const fetchInitialClasses = async () => {
     const instId = localStorage.getItem("logica_instructor_id") || "";
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const tId = localStorage.getItem("logica_tenant_id") || "";
-    
     const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || pos.includes("최고관리자") || pos.includes("원장") || pos.includes("실장");
-
     let query = supabase.from("class").select("class_id, name, level_name").order("name");
-    
-    if (tId && tId !== 'hq') {
-      query = query.eq('tenant_id', tId);
-    }
-
+    if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
     if (!isAdmin && instId) query = query.eq("instructor_id", instId);
-    
     const { data } = await query;
     if (data) setClasses(data);
   };
 
   const fetchClassDetails = async (classId: string) => {
     try {
-      const { data: classBooks } = await supabase.from("class_textbook").select("book_id, textbook(title, book_type)").eq("class_id", classId);
-      const mains: any[] = []; const wbs: any[] = [];
-      classBooks?.forEach((cb: any) => {
-        if (!cb.textbook) return;
-        if (cb.textbook.book_type === "워크북") wbs.push(cb);
-        else mains.push(cb);
-      });
-      setTextbooks(mains); setWorkbooks(wbs);
-      if (!mains.find(b => b.book_id.toString() === selectedBookId)) setSelectedBookId("");
-      if (!wbs.find(b => b.book_id.toString() === selectedWbId)) setSelectedWbId("");
-
-      const { data: enrolls, error } = await supabase.from("enrollment")
-        .select("student_id, student(name, status)")
+      const { data: classBooks, error: cbError } = await supabase
+        .from("class_textbook")
+        .select("book_id, textbook(title, book_type)")
         .eq("class_id", classId);
 
-      if (error) throw error;
+      if (cbError) throw cbError;
 
+      const typedClassBooks = classBooks as unknown as ClassTextbookRow[];
+      
+      // 🌟 주교재와 그 외(부교재/워크북 등) 분리
+      const mains = typedClassBooks?.filter(cb => {
+        const tb = unwrap(cb.textbook);
+        return tb && tb.book_type === "주교재"; 
+      }) || [];
+
+      const subs = typedClassBooks?.filter(cb => {
+        const tb = unwrap(cb.textbook);
+        return tb && tb.book_type !== "주교재"; 
+      }) || [];
+      
+      setMainTextbooks(mains);
+      setSubTextbooks(subs);
+
+      const allBooks = [...mains, ...subs];
+      if (!allBooks.find(b => b.book_id.toString() === selectedBookId)) setSelectedBookId("");
+
+      const { data: enrolls } = await supabase.from("enrollment").select("student_id, student(name, status)").eq("class_id", classId);
       const sMap = new Map();
       enrolls?.forEach((e: any) => {
         if (e.student && e.student.status === '재원') {
@@ -191,24 +165,18 @@ export default function ProgressPage() {
           sMap.set(e.student_id, sName);
         }
       });
-
       const sList = Array.from(sMap.entries()).map(([id, name]) => ({ id, name }));
       setStudents(sList);
-      
       const sIds = sList.map(s => s.id);
       setEnrolledStudentIds(sIds);
       setSelectedStudentId("all");
-      
       await loadStatusMapDB(classId, sIds);
-    } catch (e) { 
-      console.error("클래스 데이터 페칭 에러:", e); 
-    }
+    } catch (e) { console.error(e); }
   };
 
-  const fetchQuestions = async (bookId: string, wbId: string) => {
+  const fetchQuestions = async (bookId: string) => {
     setIsLoading(true);
     try {
-      // 1. 주교재 문항 불러오기
       const { data: mainData } = await supabase.from("textbook_question").select("*").eq("book_id", Number(bookId)).order("page_number", { ascending: true }).order("tq_id", { ascending: true });
       const grouped = (mainData || []).reduce((acc: any, q: any) => {
         const pNum = q.page_number || 0;
@@ -217,66 +185,44 @@ export default function ProgressPage() {
       }, {});
 
       const sortedPages = Object.keys(grouped).map(Number).filter(n => !isNaN(n)).sort((a,b)=>a-b);
-      setAllQuestions(mainData || []); 
-      setGroupedMainQs(grouped); 
-      setPages(sortedPages);
+      setAllQuestions(mainData || []); setGroupedMainQs(grouped); setPages(sortedPages);
       if (sortedPages.length > 0) setActivePageNum(sortedPages[0]);
       setCheckedPages([]); setCheckedMainQs([]); setCheckedWbQs([]); 
 
-      // 2. 워크북 문항 연결 로직 전면 개편 (similar_tq_ids 기반 유연한 매핑)
-      if (wbId) {
-        const { data: wbData } = await supabase.from("textbook_question").select("*").eq("book_id", Number(wbId));
-        setWorkbookQuestions(wbData || []);
+      const allWbUuids = new Set<string>();
+      mainData?.forEach(mq => {
+          const linkedIds = safeParseIds(mq.similar_tq_ids);
+          linkedIds.forEach(id => { if (typeof id === 'string') allWbUuids.add(id); });
+      });
 
-        const wbGrouped: { [main_tq_id: number]: any[] } = {};
+      const wbGrouped: { [main_tq_id: number]: any[] } = {};
+      if (allWbUuids.size > 0) {
+        const { data: wbData } = await supabase.from('question_db').select('*').in('question_id', Array.from(allWbUuids));
         
-        // 🌟 주교재의 similar_tq_ids(JSON 배열)를 읽어서 매핑된 워크북 문항들을 1:N 혹은 N:N으로 찾아냅니다.
-        (mainData || []).forEach(mq => {
-            // 안전하게 JSONB 배열 추출
+        mainData?.forEach(mq => {
             const linkedIds = safeParseIds(mq.similar_tq_ids);
-            
-            // 해당 ID들을 가진 워크북 문제들을 전부 가져옵니다.
-            const matchedWbQs = (wbData || []).filter((wq: any) => linkedIds.includes(wq.tq_id));
-            
-            // 매칭된 문제가 없더라도 하위 호환성을 위해 parent_tq_id도 검사해줍니다.
-            const legacyMatchedWbQs = (wbData || []).filter((wq: any) => wq.parent_tq_id === mq.tq_id);
-            
-            // 두 결과를 합치고 중복 제거
-            const combinedMatches = Array.from(new Set([...matchedWbQs, ...legacyMatchedWbQs]));
-            
-            if (combinedMatches.length > 0) {
-                wbGrouped[mq.tq_id] = combinedMatches;
-            }
+            const matchedQs = (wbData || []).filter(wq => linkedIds.includes(wq.question_id));
+            if (matchedQs.length > 0) wbGrouped[mq.tq_id] = matchedQs;
         });
-        
-        setGroupedWbQs(wbGrouped);
-      } else {
-        setWorkbookQuestions([]); setGroupedWbQs({});
       }
+      setGroupedWbQs(wbGrouped);
+
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  const getStatusKey = (tq_id: number, sId: string) => `${selectedClassId}_${tq_id}_${sId}`;
+  const getStatusKey = (id: string | number, sId: string) => `${selectedClassId}_${id}_${sId}`;
 
   const loadStatusMapDB = async (classId: string, studentIds: string[]) => {
     try {
-      const { data: assignments, error } = await supabase
-        .from('homework_assignment')
-        .select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids)')
-        .eq('class_id', classId);
-        
-      if (error) throw error;
-
+      const { data: assignments } = await supabase.from('homework_assignment').select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids)').eq('class_id', classId);
       const newMap: { [key: string]: string } = {};
       const studentCountByTq: any = {};
 
       assignments?.forEach((hw: any) => {
         const tqIds = safeParseIds(hw.target_questions);
-
         hw.student_homework_result?.forEach((res: any) => {
           const completed = safeParseIds(res.completed_tq_ids);
-
-          tqIds.forEach((tqId: number) => {
+          tqIds.forEach((tqId: string | number) => {
             const isDone = completed.includes(tqId);
             const key = getStatusKey(tqId, res.student_id);
             if (isDone || newMap[key] !== 'done') newMap[key] = isDone ? 'done' : 'homework';
@@ -285,8 +231,7 @@ export default function ProgressPage() {
             studentCountByTq[tqId].hwCount++;
             if (isDone) studentCountByTq[tqId].doneCount++;
           });
-
-          completed.forEach((tqId: number) => {
+          completed.forEach((tqId: string | number) => {
             if (!tqIds.includes(tqId)) {
               newMap[getStatusKey(tqId, res.student_id)] = 'done';
               if (!studentCountByTq[tqId]) studentCountByTq[tqId] = { hwCount: 0, doneCount: 0 };
@@ -299,188 +244,101 @@ export default function ProgressPage() {
       const totalStudents = studentIds.length;
       if (totalStudents > 0) {
           Object.entries(studentCountByTq).forEach(([tqIdStr, counts]: [string, any]) => {
-              const tqId = Number(tqIdStr);
-              if (counts.doneCount >= totalStudents) {
-                  newMap[getStatusKey(tqId, 'all')] = 'done';
-              } else if (counts.doneCount > 0) {
-                  newMap[getStatusKey(tqId, 'all')] = 'partial';
-              } else if (counts.hwCount >= totalStudents) {
-                  newMap[getStatusKey(tqId, 'all')] = 'homework';
-              } else if (counts.hwCount > 0) {
-                  newMap[getStatusKey(tqId, 'all')] = 'partial';
-              }
+              const tqId = isNaN(Number(tqIdStr)) ? tqIdStr : Number(tqIdStr);
+              if (counts.doneCount >= totalStudents) newMap[getStatusKey(tqId, 'all')] = 'done';
+              else if (counts.doneCount > 0) newMap[getStatusKey(tqId, 'all')] = 'partial';
+              else if (counts.hwCount >= totalStudents) newMap[getStatusKey(tqId, 'all')] = 'homework';
+              else if (counts.hwCount > 0) newMap[getStatusKey(tqId, 'all')] = 'partial';
           });
       }
-
       setStatusMap(newMap);
-    } catch (e: any) { 
-      console.error("loadStatusMapDB 에러:", e.message || e); 
-    }
+    } catch (e: any) { console.error(e); }
   };
 
-  const assignHomeworkToStudents = async (targetStudentIds: string[], mainIds: number[], wbIds: number[], titleStr: string) => {
+  const assignHomeworkToStudents = async (targetStudentIds: string[], mainIds: any[], wbIds: any[], titleStr: string) => {
     try {
         const allTqIds = [...mainIds, ...wbIds];
         if (!allTqIds.length || !selectedBookId || !targetStudentIds.length) return;
 
-        const now = new Date();
-        const kstOffset = 9 * 60 * 60 * 1000;
-        const kstDate = new Date(now.getTime() + kstOffset);
-        const dateStr = kstDate.toISOString().split('T')[0];
-        
+        const dateStr = new Date(Date.now() + 9 * 3600000).toISOString().split('T')[0];
         const startOfTodayKST = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
         const endOfTodayKST = new Date(`${dateStr}T23:59:59.999+09:00`).toISOString();
 
         await Promise.all(targetStudentIds.map(async (sId) => {
-            try {
-                const studentName = students.find(s => s.id === sId)?.name || '학생';
+            const studentName = students.find(s => s.id === sId)?.name || '학생';
+            const { data: existing } = await supabase.from('homework_assignment')
+                .select('homework_id, target_questions, homework_title').eq('class_id', selectedClassId).eq('target_student_id', sId) 
+                .neq('homework_title', '[시스템] 수업 진도 완료 기록').gte('created_at', startOfTodayKST).lte('created_at', endOfTodayKST).order('created_at', { ascending: false }).limit(1);
 
-                const { data: existing, error: existErr } = await supabase.from('homework_assignment')
-                    .select('homework_id, target_questions, homework_title')
-                    .eq('class_id', selectedClassId)
-                    .eq('target_student_id', sId) 
-                    .neq('homework_title', '[시스템] 수업 진도 완료 기록')
-                    .gte('created_at', startOfTodayKST)
-                    .lte('created_at', endOfTodayKST)
-                    .order('created_at', { ascending: false })
-                    .limit(1);
-
-                if (existErr) throw existErr;
-
-                let hwId: number;
-
-                if (existing && existing.length > 0) {
-                    hwId = existing[0].homework_id;
-                    const prevQs = safeParseIds(existing[0].target_questions);
-                    const newQs = Array.from(new Set([...prevQs, ...allTqIds])); 
-
-                    let updatedTitle = existing[0].homework_title || '';
-                    if (!updatedTitle.includes('통합')) {
-                        if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
-                            updatedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
-                        }
+            let hwId: number;
+            if (existing && existing.length > 0) {
+                hwId = existing[0].homework_id;
+                const prevQs = safeParseIds(existing[0].target_questions);
+                const newQs = Array.from(new Set([...prevQs, ...allTqIds])); 
+                let updatedTitle = existing[0].homework_title || '';
+                if (!updatedTitle.includes('통합')) {
+                    if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
+                        updatedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
                     }
-                    
-                    await supabase.from('homework_assignment')
-                        .update({ target_questions: newQs, homework_title: updatedTitle })
-                        .eq('homework_id', hwId);
-                } else {
-                    let expectedTitle = `[${studentName}] ${titleStr} (${dateStr})`;
-                    if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
-
-                    const { data: hwData, error: insErr } = await supabase.from('homework_assignment').insert({
-                        book_id: Number(selectedBookId),
-                        target_questions: allTqIds,
-                        class_id: selectedClassId,
-                        target_student_id: sId, 
-                        due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-                        homework_title: expectedTitle
-                    }).select();
-
-                    if (insErr) throw insErr;
-                    if (!hwData || hwData.length === 0) return;
-                    hwId = hwData[0].homework_id;
                 }
-
-                const { data: res } = await supabase.from('student_homework_result')
-                    .select('hw_result_id')
-                    .eq('homework_id', hwId)
-                    .eq('student_id', sId)
-                    .maybeSingle();
-                    
-                if (!res) {
-                    await supabase.from('student_homework_result').insert({ 
-                        homework_id: hwId, student_id: sId, status: '미제출', completed_tq_ids: [] 
-                    });
-                }
-            } catch (err) {
-                console.error(`[과제배부 에러] 학생 ID ${sId}:`, err);
+                await supabase.from('homework_assignment').update({ target_questions: newQs, homework_title: updatedTitle }).eq('homework_id', hwId);
+            } else {
+                let expectedTitle = `[${studentName}] ${titleStr} (${dateStr})`;
+                if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
+                const { data: hwData } = await supabase.from('homework_assignment').insert({
+                    book_id: Number(selectedBookId), target_questions: allTqIds, class_id: selectedClassId, target_student_id: sId, 
+                    due_date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0], homework_title: expectedTitle
+                }).select();
+                if (!hwData || hwData.length === 0) return;
+                hwId = hwData[0].homework_id;
             }
+
+            const { data: res } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
+            if (!res) await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '미제출', completed_tq_ids: [] });
         }));
-    } catch (e: any) {
-        console.error("assignHomeworkToStudents 전체 런타임 에러:", e.message || e);
-    }
+    } catch (e: any) { console.error(e); }
   };
 
-  const markProgressAsCompleteInDB = async (tq_ids: number[], targetStudentIds: string[]) => {
+  const markProgressAsCompleteInDB = async (tq_ids: any[], targetStudentIds: string[]) => {
     try {
       if (!tq_ids.length || !selectedBookId || !targetStudentIds.length) return;
-
       await Promise.all(targetStudentIds.map(async (sId) => {
-        try {
-          const { data: existing } = await supabase.from('homework_assignment')
-            .select('homework_id')
-            .eq('class_id', selectedClassId)
-            .eq('book_id', Number(selectedBookId))
-            .eq('target_student_id', sId) 
-            .eq('homework_title', '[시스템] 수업 진도 완료 기록')
-            .limit(1);
+        const { data: existing } = await supabase.from('homework_assignment').select('homework_id').eq('class_id', selectedClassId).eq('book_id', Number(selectedBookId)).eq('target_student_id', sId).eq('homework_title', '[시스템] 수업 진도 완료 기록').limit(1);
 
-          let hwId: number;
-          if (existing && existing.length > 0) {
-            hwId = existing[0].homework_id;
-          } else {
-            const { data: ins, error: insErr } = await supabase.from('homework_assignment').insert({
-              book_id: Number(selectedBookId), 
-              target_questions: [], 
-              due_date: '2099-12-31', 
-              homework_title: '[시스템] 수업 진도 완료 기록', 
-              class_id: selectedClassId, 
-              target_student_id: sId 
-            }).select();
-            
-            if (insErr) throw insErr;
-            if (!ins || ins.length === 0) return;
-            hwId = ins[0].homework_id;
-          }
+        let hwId: number;
+        if (existing && existing.length > 0) {
+          hwId = existing[0].homework_id;
+        } else {
+          const { data: ins } = await supabase.from('homework_assignment').insert({ book_id: Number(selectedBookId), target_questions: [], due_date: '2099-12-31', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId }).select();
+          if (!ins || ins.length === 0) return;
+          hwId = ins[0].homework_id;
+        }
 
-          const { data: res } = await supabase.from('student_homework_result')
-            .select('hw_result_id, completed_tq_ids')
-            .eq('homework_id', hwId)
-            .eq('student_id', sId)
-            .maybeSingle();
-
-          if (res) {
-            const comp = safeParseIds(res.completed_tq_ids);
-            const newComp = Array.from(new Set([...comp, ...tq_ids]));
-            await supabase.from('student_homework_result')
-                .update({ completed_tq_ids: newComp, status: '채점완료' })
-                .eq('hw_result_id', res.hw_result_id);
-          } else {
-            await supabase.from('student_homework_result').insert({ 
-                homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids 
-            });
-          }
-        } catch (err) {
-          console.error(`[진도기록 에러] 학생 ID ${sId}:`, err);
+        const { data: res } = await supabase.from('student_homework_result').select('hw_result_id, completed_tq_ids').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
+        if (res) {
+          const comp = safeParseIds(res.completed_tq_ids);
+          const newComp = Array.from(new Set([...comp, ...tq_ids]));
+          await supabase.from('student_homework_result').update({ completed_tq_ids: newComp, status: '채점완료' }).eq('hw_result_id', res.hw_result_id);
+        } else {
+          await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids });
         }
       }));
-    } catch (e: any) {
-      console.error("markProgressAsCompleteInDB 전체 런타임 에러:", e.message || e);
-    }
+    } catch (e: any) { console.error(e); }
   };
 
-  const cancelProgressForIds = async (tqIds: number[], targetStudentIds: string[]) => {
+  const cancelProgressForIds = async (tqIds: any[], targetStudentIds: string[]) => {
     try {
       if (!tqIds.length || !selectedClassId || !targetStudentIds.length) return;
-      
-      const { data: assignments, error: getErr } = await supabase.from('homework_assignment')
-        .select('homework_id, target_questions, homework_title, target_student_id')
-        .eq('class_id', selectedClassId);
-      if (getErr) return;
+      const { data: assignments } = await supabase.from('homework_assignment').select('homework_id, target_questions, homework_title, target_student_id').eq('class_id', selectedClassId);
       
       for (const hw of (assignments || [])) {
         if (hw.target_student_id && !targetStudentIds.includes(hw.target_student_id)) continue;
-
-        const { data: results } = await supabase.from('student_homework_result')
-          .select('student_id, completed_tq_ids')
-          .eq('homework_id', hw.homework_id)
-          .in('student_id', targetStudentIds);
+        const { data: results } = await supabase.from('student_homework_result').select('student_id, completed_tq_ids').eq('homework_id', hw.homework_id).in('student_id', targetStudentIds);
           
         if (results) {
           for (const r of results) {
             const comp = safeParseIds(r.completed_tq_ids);
-            const newComp = comp.filter((id: number) => !tqIds.includes(id));
+            const newComp = comp.filter((id: any) => !tqIds.includes(id));
             if (newComp.length !== comp.length) {
               await supabase.from('student_homework_result').update({ completed_tq_ids: newComp }).eq('homework_id', hw.homework_id).eq('student_id', r.student_id);
             }
@@ -492,14 +350,12 @@ export default function ProgressPage() {
 
         if (isTargetingAll || isPersonalHw) {
             const tqArr = safeParseIds(hw.target_questions);
-            const remaining = tqArr.filter((id: number) => !tqIds.includes(id));
+            const remaining = tqArr.filter((id: any) => !tqIds.includes(id));
             const targetChanged = remaining.length !== tqArr.length;
 
             const { data: allResultsCheck } = await supabase.from('student_homework_result').select('completed_tq_ids').eq('homework_id', hw.homework_id);
             let allResultsEmpty = true;
-            allResultsCheck?.forEach(r => {
-                if (safeParseIds(r.completed_tq_ids).length > 0) allResultsEmpty = false;
-            });
+            allResultsCheck?.forEach(r => { if (safeParseIds(r.completed_tq_ids).length > 0) allResultsEmpty = false; });
 
             if (remaining.length === 0 && allResultsEmpty && hw.homework_title !== '[시스템] 수업 진도 완료 기록') {
               await supabase.from('student_homework_result').delete().eq('homework_id', hw.homework_id);
@@ -509,16 +365,14 @@ export default function ProgressPage() {
             }
         }
       }
-    } catch (e: any) {
-      console.error("cancelProgressForIds 런타임 에러:", e.message || e);
-    }
+    } catch (e: any) { console.error(e); }
   };
 
-  const applyActionToIds = async (actionType: string, mainIds: number[], wbIds: number[]) => {
+  const applyActionToIds = async (actionType: string, mainIds: any[], wbIds: any[]) => {
     const newMap = { ...statusMap };
     const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
 
-    const updateMap = (id: number, status: string | null) => {
+    const updateMap = (id: any, status: string | null) => {
       if (selectedStudentId === 'all') {
         if (status) { newMap[getStatusKey(id, 'all')] = status; targets.forEach(sId => newMap[getStatusKey(id, sId)] = status); }
         else { delete newMap[getStatusKey(id, 'all')]; targets.forEach(sId => delete newMap[getStatusKey(id, sId)]); }
@@ -529,37 +383,31 @@ export default function ProgressPage() {
     };
 
     if (actionType === 'DONE_AND_WB_HW') {
-      mainIds.forEach(id => updateMap(id, 'done'));
-      wbIds.forEach(id => updateMap(id, 'homework'));
+      mainIds.forEach(id => updateMap(id, 'done')); wbIds.forEach(id => updateMap(id, 'homework'));
     } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-      mainIds.forEach(id => updateMap(id, 'homework'));
-      wbIds.forEach(id => updateMap(id, 'homework'));
+      mainIds.forEach(id => updateMap(id, 'homework')); wbIds.forEach(id => updateMap(id, 'homework'));
     } else if (actionType === 'CANCEL') {
-      mainIds.forEach(id => updateMap(id, null));
-      wbIds.forEach(id => updateMap(id, null));
+      mainIds.forEach(id => updateMap(id, null)); wbIds.forEach(id => updateMap(id, null));
     }
 
     setStatusMap(newMap);
 
     let tMsg = "선택한 상태가 취소되었습니다.";
-    if (actionType === 'DONE_AND_WB_HW') tMsg = `본교재 진도완료 및 워크북 과제(${wbIds.length}문제)가 배부되었습니다!`;
+    if (actionType === 'DONE_AND_WB_HW') tMsg = `선택 교재 진도완료 및 연계 과제(${wbIds.length}문제)가 배부되었습니다!`;
     if (actionType === 'MAIN_HW_AND_WB_HW') tMsg = `과제 배부가 완료되었습니다!`;
     showToast(tMsg);
 
     actionQueue.current = actionQueue.current.then(async () => {
       await cancelProgressForIds([...mainIds, ...wbIds], targets);
-      
       if (actionType === 'DONE_AND_WB_HW') {
         if (mainIds.length > 0) await markProgressAsCompleteInDB(mainIds, targets);
-        if (wbIds.length > 0) await assignHomeworkToStudents(targets, [], wbIds, '워크북 과제');
+        if (wbIds.length > 0) await assignHomeworkToStudents(targets, [], wbIds, '연계 과제');
       } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-        const titleStr = (mainIds.length > 0 && wbIds.length === 0) ? '본교재 과제' : ((wbIds.length > 0 && mainIds.length === 0) ? '워크북 과제' : '통합 과제');
+        const titleStr = (mainIds.length > 0 && wbIds.length === 0) ? '교재 과제' : ((wbIds.length > 0 && mainIds.length === 0) ? '연계 과제' : '통합 과제');
         const combinedHwIds = [...mainIds, ...wbIds];
         if (combinedHwIds.length > 0) await assignHomeworkToStudents(targets, mainIds, wbIds, titleStr);
       }
-    }).catch(err => {
-      console.error("큐(Queue) 처리 중 오류 발생:", err);
-    });
+    }).catch(err => console.error(err));
   };
 
   const executeProgressAction = async (actionType: string) => {
@@ -568,7 +416,7 @@ export default function ProgressPage() {
       checkedPages.forEach(pNum => {
         (groupedMainQs[pNum] || []).forEach(mq => {
           if (!mIds.includes(mq.tq_id)) mIds.push(mq.tq_id);
-          (groupedWbQs[mq.tq_id] || []).forEach(wq => { if (!wIds.includes(wq.tq_id)) wIds.push(wq.tq_id); });
+          (groupedWbQs[mq.tq_id] || []).forEach(wq => { if (!wIds.includes(wq.question_id)) wIds.push(wq.question_id); });
         });
       });
       setCheckedPages([]);
@@ -578,34 +426,33 @@ export default function ProgressPage() {
     setCheckedMainQs([]); setCheckedWbQs([]);
   };
 
-  const markSingleQuestionCompleted = async (tqId: number, type: 'main'|'wb') => {
-    const mainIds = type === 'main' ? [tqId] : [];
-    const wbIds = type === 'wb' ? [tqId] : [];
-    if (type === 'main' && selectedWbId) {
-      (groupedWbQs[tqId] || []).forEach(wq => wbIds.push(wq.tq_id));
+  const markSingleQuestionCompleted = async (qId: any, type: 'main'|'wb') => {
+    const mainIds = type === 'main' ? [qId] : [];
+    const wbIds = type === 'wb' ? [qId] : [];
+    if (type === 'main') {
+      (groupedWbQs[qId] || []).forEach(wq => wbIds.push(wq.question_id));
     }
     await applyActionToIds('DONE_AND_WB_HW', mainIds, wbIds);
   };
 
   const markSinglePageCompleted = async (pNum: number) => {
-    let mainIds: number[] = []; let wbIds: number[] = [];
+    let mainIds: any[] = []; let wbIds: any[] = [];
     (groupedMainQs[pNum] || []).forEach(mq => {
       mainIds.push(mq.tq_id);
-      if (selectedWbId) (groupedWbQs[mq.tq_id] || []).forEach(wq => wbIds.push(wq.tq_id));
+      (groupedWbQs[mq.tq_id] || []).forEach(wq => wbIds.push(wq.question_id));
     });
     await applyActionToIds('DONE_AND_WB_HW', mainIds, wbIds);
   };
 
-  // 🌟 [핵심 변경] 본교재 체크 시 배열로 엮인 여러 개의 워크북 문제들을 모두 선택
   const handleMainQCheck = (tq_id: number, isChecked: boolean) => {
     if (isChecked) {
       setCheckedMainQs(prev => [...prev, tq_id]);
       const linkedWbs = groupedWbQs[tq_id] || [];
-      setCheckedWbQs(prev => Array.from(new Set([...prev, ...linkedWbs.map((w: any) => w.tq_id)])));
+      setCheckedWbQs(prev => Array.from(new Set([...prev, ...linkedWbs.map((w: any) => w.question_id)])));
     } else {
       setCheckedMainQs(prev => prev.filter(id => id !== tq_id));
       const linkedWbs = groupedWbQs[tq_id] || [];
-      const wbIdsToRemove = linkedWbs.map((w: any) => w.tq_id);
+      const wbIdsToRemove = linkedWbs.map((w: any) => w.question_id);
       setCheckedWbQs(prev => prev.filter(id => !wbIdsToRemove.includes(id)));
     }
   };
@@ -635,37 +482,29 @@ export default function ProgressPage() {
     return "대기";
   };
 
-  const renderBadge = (tqId: number, type: 'main'|'wb') => {
-    const st = statusMap[getStatusKey(tqId, selectedStudentId)];
+  const renderBadge = (id: any, type: 'main'|'wb') => {
+    const st = statusMap[getStatusKey(id, selectedStudentId)];
     if (st === "done") return <span className={`w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 ${type==='wb' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8]'}`}>진도완료</span>;
     if (st === "homework") return <span className="w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] shrink-0 ml-4">과제배부</span>;
     if (st === "partial") return <span className="w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 shrink-0 ml-4">진행중</span>;
     
     return (
-      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className={`group/qbadge cursor-pointer w-16 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors ${type==='wb' ? 'hover:bg-emerald-600 hover:text-white hover:border-emerald-600' : 'hover:bg-slate-700 hover:text-white hover:border-slate-700'}`}>
+      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(id, type); }} className={`group/qbadge cursor-pointer w-16 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors ${type==='wb' ? 'hover:bg-emerald-600 hover:text-white hover:border-emerald-600' : 'hover:bg-slate-700 hover:text-white hover:border-slate-700'}`}>
         <span className="group-hover/qbadge:hidden">대기</span>
         <span className="hidden group-hover/qbadge:inline tracking-tighter">진도 체크</span>
       </span>
     );
   };
 
-  if (isAuthorized === null) {
-    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
-  }
-  
-  if (isAuthorized === false) {
-    return null;
-  }
+  if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  if (isAuthorized === false) return null;
 
   return (
     <div className="flex flex-col h-full bg-slate-100 overflow-hidden relative p-4 sm:p-8 gap-6">
-      
       <div className="flex justify-between items-end shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-800">전체 진도 관리</h2>
-          <p className="text-sm font-bold text-slate-400 mt-1">
-            수강반별 본교재와 워크북의 진도를 관리하고 과제를 배부합니다.
-          </p>
+          <p className="text-sm font-bold text-slate-400 mt-1">수강반별 본교재와 연결된 마스터 문제(워크북)의 진도를 관리하고 과제를 배부합니다.</p>
         </div>
       </div>
 
@@ -676,16 +515,38 @@ export default function ProgressPage() {
             <option value="">수강반 선택...</option>
             {classes.map(c => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
           </select>
+          
           <div className="w-px h-5 bg-slate-300 mx-2"></div>
+          
           <span className="text-xs font-bold text-slate-500">본교재:</span>
-          <select value={selectedBookId} onChange={(e) => setSelectedBookId(e.target.value)} disabled={!selectedClassId} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] bg-white w-64 shadow-sm text-sm disabled:opacity-50">
+          <select 
+            value={mainTextbooks.find(b => b.book_id.toString() === selectedBookId) ? selectedBookId : ""} 
+            onChange={(e) => setSelectedBookId(e.target.value)} 
+            disabled={!selectedClassId} 
+            className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] bg-white w-64 shadow-sm text-sm disabled:opacity-50"
+          >
             <option value="">본교재 선택...</option>
-            {textbooks.map((b: any) => <option key={b.book_id} value={b.book_id}>[{b.textbook.book_type}] {b.textbook.title}</option>)}
+            {mainTextbooks.map((b: any) => {
+              const tb = unwrap(b.textbook);
+              return <option key={b.book_id} value={b.book_id}>[{tb?.book_type || '주교재'}] {tb?.title}</option>;
+            })}
           </select>
-          <span className="text-xs font-bold text-slate-500 ml-2">워크북:</span>
-          <select value={selectedWbId} onChange={(e) => setSelectedWbId(e.target.value)} disabled={!selectedClassId} className="px-3 py-1.5 border border-emerald-300 rounded-lg font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-emerald-50 w-64 shadow-sm text-sm disabled:opacity-50">
-            <option value="">워크북 선택 안함</option>
-            {workbooks.map((b: any) => <option key={b.book_id} value={b.book_id}>[워크북] {b.textbook.title}</option>)}
+
+          <div className="w-px h-5 bg-slate-300 mx-2"></div>
+
+          {/* 🌟 추가된 부교재/워크북 드롭다운 */}
+          <span className="text-xs font-bold text-slate-500">부교재/워크북:</span>
+          <select 
+            value={subTextbooks.find(b => b.book_id.toString() === selectedBookId) ? selectedBookId : ""} 
+            onChange={(e) => setSelectedBookId(e.target.value)} 
+            disabled={!selectedClassId} 
+            className="px-3 py-1.5 border border-emerald-300 rounded-lg font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-emerald-50 w-64 shadow-sm text-sm disabled:opacity-50"
+          >
+            <option value="">부교재/워크북 선택...</option>
+            {subTextbooks.map((b: any) => {
+              const tb = unwrap(b.textbook);
+              return <option key={b.book_id} value={b.book_id}>[{tb?.book_type || '워크북'}] {tb?.title}</option>;
+            })}
           </select>
         </div>
       </div>
@@ -741,7 +602,7 @@ export default function ProgressPage() {
             <div className="w-1/2 flex flex-col border-r border-slate-200 bg-white">
               <div className="p-3 border-b border-slate-200 bg-[#f8fafc] text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
                 <div className="flex items-center gap-2">
-                  <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">본교재</span>
+                  <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">선택 교재</span>
                   <span className="text-[#002864] font-extrabold text-sm">{activePageNum !== null ? `${activePageNum} Page` : "- Page"}</span>
                 </div>
                 <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-slate-300 shadow-sm">
@@ -775,36 +636,35 @@ export default function ProgressPage() {
             <div className="w-1/2 flex flex-col bg-emerald-50/30">
               <div className="p-3 border-b border-slate-200 bg-emerald-50/80 text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
                 <div className="flex items-center gap-2">
-                  <span className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-bold">워크북 다중 연결 문항</span>
-                  <span className="text-emerald-700 font-bold text-xs">선택된 본교재 기준</span>
+                  <span className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-bold">마스터DB 다중 연결 문항</span>
+                  <span className="text-emerald-700 font-bold text-xs">선택된 본교재 기준 자동 호출</span>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-5 pb-32">
-                {!selectedWbId ? <div className="flex h-full items-center justify-center text-slate-400 font-bold">상단에서 워크북을 선택해주세요.</div>
-                : activePageNum !== null && groupedMainQs[activePageNum]?.length > 0 ? (
+                {activePageNum !== null && groupedMainQs[activePageNum]?.length > 0 ? (
                   <div className="bg-white border border-emerald-200 shadow-sm rounded-xl overflow-hidden">
                     {groupedMainQs[activePageNum].map((mq: any) => {
-                      // 🌟 [핵심] 1:N 혹은 N:N으로 매핑된 워크북 문제들을 모두 가져와 뿌려줍니다!
                       const linkedWbQs = groupedWbQs[mq.tq_id] || [];
                       if (linkedWbQs.length === 0) return null;
                       return linkedWbQs.map((wq: any) => (
-                        <div key={wq.tq_id} className="flex border-b border-emerald-50 hover:bg-emerald-50/50 transition-colors items-stretch">
+                        <div key={wq.question_id} className="flex border-b border-emerald-50 hover:bg-emerald-50/50 transition-colors items-stretch">
                           <div className="w-12 flex items-center justify-center border-r border-emerald-50 shrink-0 bg-emerald-50/30">
-                            <input type="checkbox" checked={checkedWbQs.includes(wq.tq_id)} onChange={(e) => setCheckedWbQs(prev => e.target.checked ? [...prev, wq.tq_id] : prev.filter(id => id !== wq.tq_id))} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
+                            <input type="checkbox" checked={checkedWbQs.includes(wq.question_id)} onChange={(e) => setCheckedWbQs(prev => e.target.checked ? [...prev, wq.question_id] : prev.filter(id => id !== wq.question_id))} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
                           </div>
-                          <div className="w-28 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0">
+                          <div className="w-32 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0">
                             <span className="text-emerald-500 font-medium text-[10px] truncate leading-tight">연결: 본 {mq.question_number}번</span>
-                            <button onClick={() => setModalQuestion({ ...wq, type: 'wb' })} className="text-emerald-700 font-extrabold text-[14px] text-left hover:text-emerald-500 hover:underline">{wq.question_number || "-"}</button>
+                            <button onClick={() => setModalQuestion({ ...wq, type: 'wb' })} className="text-emerald-700 font-extrabold text-[14px] text-left hover:text-emerald-500 hover:underline">{wq.question_number || "-"}{wq.sub_num ? `-${wq.sub_num}` : ''}</button>
+                            <span className="text-[9px] font-bold text-slate-400 truncate w-full mt-1 bg-slate-50 px-1 rounded border border-slate-100" title={wq.pdf_source}>{wq.pdf_source?.replace('.pdf', '')}</span>
                           </div>
                           <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
                             <span className="text-emerald-800 break-all">$ {wq.answer} $</span>
-                            {renderBadge(wq.tq_id, 'wb')}
+                            {renderBadge(wq.question_id, 'wb')}
                           </div>
                         </div>
                       ));
                     })}
                   </div>
-                ) : null}
+                ) : <div className="flex h-full items-center justify-center text-slate-400 font-bold">본교재 문항을 선택하면 연결된 문제들이 나타납니다.</div>}
               </div>
             </div>
 
@@ -819,11 +679,11 @@ export default function ProgressPage() {
                 </div>
                 <button onClick={() => executeProgressAction("DONE_AND_WB_HW")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                  본교재 진도완료 + 워크북 과제
+                  진도완료 + 연계 과제
                 </button>
                 <button onClick={() => executeProgressAction("MAIN_HW_AND_WB_HW")} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                  본교재 과제 + 워크북 과제
+                  교재 과제 + 연계 과제
                 </button>
                 <div className="w-px h-6 bg-slate-300 mx-1"></div>
                 <button onClick={() => executeProgressAction("CANCEL")} className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-sm rounded-xl transition-colors shadow-sm">
