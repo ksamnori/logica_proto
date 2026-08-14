@@ -412,16 +412,15 @@ function PrintReportContent() {
 
   const getPct = (earned: number, max: number) => (!max || max === 0) ? 0 : Math.round((earned / max) * 100);
   
-  // 💡 [수정] 표기에 쓰이는 기준도 상/중/하 로직(70점, 40점)에 맞춰서 통일
   const getTraitLevel = (pct: number) => { if (pct >= 70) return '탁월'; if (pct >= 40) return '양호'; return '도약'; };
 
   const renderDetailRow = (name: string, earned: number, avgScore: number, max: number) => (
     <tr key={name}>
-      <td className="py-1.5 bg-white text-slate-700">{name}</td>
-      <td className="py-1.5 bg-white text-slate-400 font-medium">{max}</td>
-      <td className="py-1.5 bg-white text-slate-400 font-medium">{avgScore}</td>
-      <td className="py-1.5 bg-[#1e493b]/5 text-[#1e493b] font-black">{parseFloat(earned.toFixed(1))}</td>
-      <td className="py-1.5 bg-white text-emerald-600">{getPct(earned, max)}%</td>
+      <td className="py-1.5 bg-white text-slate-700 text-[11px]">{name}</td>
+      <td className="py-1.5 bg-white text-slate-400 font-medium text-[11px]">{max}</td>
+      <td className="py-1.5 bg-white text-slate-400 font-medium text-[11px]">{avgScore}</td>
+      <td className="py-1.5 bg-[#1e493b]/5 text-[#1e493b] font-black text-[11px]">{parseFloat(earned.toFixed(1))}</td>
+      <td className="py-1.5 bg-white text-emerald-600 text-[11px]">{getPct(earned, max)}%</td>
     </tr>
   );
 
@@ -430,8 +429,8 @@ function PrintReportContent() {
     let lvStyle = studentLv === '탁월' ? 'text-emerald-600 bg-emerald-50 border-emerald-200' : (studentLv === '양호' ? 'text-blue-600 bg-blue-50 border-blue-200' : 'text-amber-600 bg-amber-50 border-amber-200');
     return (
       <tr key={name}>
-        <td className="py-1.5 text-left border-b border-slate-100 flex items-center gap-2 px-2"><div className="w-1.5 h-1.5 rounded-full bg-[#1e493b]/60"></div> {name}</td>
-        <td className="py-1.5 text-center border-b border-slate-100 font-black text-[#1e493b] text-sm">{pct}%</td>
+        <td className="py-1.5 text-left border-b border-slate-100 flex items-center gap-2 px-2 text-xs"><div className="w-1.5 h-1.5 rounded-full bg-[#1e493b]/60"></div> {name}</td>
+        <td className="py-1.5 text-center border-b border-slate-100 font-black text-[#1e493b] text-[13px]">{pct}%</td>
         <td className="py-1.5 text-center border-b border-slate-100 px-2"><span className={`w-full block py-0.5 rounded border text-[11px] font-black ${lvStyle}`}>{studentLv}</span></td>
       </tr>
     );
@@ -490,7 +489,7 @@ function PrintReportContent() {
           min-height: 297mm; 
           background: white; 
           margin: 2rem auto; 
-          padding: 12mm 18mm; 
+          padding: 10mm 15mm; 
           box-sizing: border-box; 
           box-shadow: 0 10px 25px rgba(0,0,0,0.1); 
           display: flex; 
@@ -598,9 +597,9 @@ function PrintReportContent() {
                 <div className="col-span-9 grid grid-cols-2 gap-4">
                   <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col">
                     <h3 className="text-sm font-extrabold text-slate-800 mb-3 text-center bg-slate-50 py-1.5 rounded">수학 내용 영역별 분석</h3>
-                    <table className="w-full text-[11px] text-center border-collapse mb-3">
-                      <thead className="bg-slate-100 text-slate-600 border-y border-slate-300">
-                        <tr><th className="py-1">영역</th><th className="py-1">만점</th><th className="py-1">평균</th><th className="py-1 text-[#1e493b]">획득</th><th className="py-1 text-emerald-600">성취율</th></tr>
+                    <table className="w-full text-center border-collapse mb-3">
+                      <thead className="bg-slate-100 text-slate-600 border-y border-slate-300 text-[11px]">
+                        <tr><th className="py-1.5">영역</th><th className="py-1.5">만점</th><th className="py-1.5">평균</th><th className="py-1.5 text-[#1e493b]">획득</th><th className="py-1.5 text-emerald-600">성취율</th></tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
                         {renderDetailRow('수와 연산', reportData.stats.calc, reportData.avgStats.calc, reportData.rBase.max_calc)}
@@ -615,9 +614,9 @@ function PrintReportContent() {
 
                   <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col">
                     <h3 className="text-sm font-extrabold text-slate-800 mb-3 text-center bg-slate-50 py-1.5 rounded">문항 난이도별 분석</h3>
-                    <table className="w-full text-[11px] text-center border-collapse mb-3">
-                      <thead className="bg-slate-100 text-slate-600 border-y border-slate-300">
-                        <tr><th className="py-1">단계</th><th className="py-1">만점</th><th className="py-1">평균</th><th className="py-1 text-[#1e493b]">획득</th><th className="py-1 text-emerald-600">성취율</th></tr>
+                    <table className="w-full text-center border-collapse mb-3">
+                      <thead className="bg-slate-100 text-slate-600 border-y border-slate-300 text-[11px]">
+                        <tr><th className="py-1.5">단계</th><th className="py-1.5">만점</th><th className="py-1.5">평균</th><th className="py-1.5 text-[#1e493b]">획득</th><th className="py-1.5 text-emerald-600">성취율</th></tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
                         {renderDetailRow('Level 1', reportData.stats.d1, reportData.avgStats.d1, reportData.rBase.max_diff_1)}
@@ -646,11 +645,10 @@ function PrintReportContent() {
               <section className="grid grid-cols-2 gap-4 mb-2 shrink-0">
                 <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col items-center relative overflow-hidden">
                   <h3 className="text-sm font-extrabold text-white bg-[#1e493b] px-6 py-1.5 rounded-full mb-2 w-max relative z-10">3대 인지 특성</h3>
-                  {/* 💡 차트 높이를 줄여 공간 확보 */}
                   <div className="w-full relative h-[160px] mb-2 z-10"><canvas ref={cogLeftChartRef}></canvas></div>
-                  <table className="w-full text-xs text-center border-collapse relative z-10">
-                    <thead className="bg-slate-50 text-slate-500 border-y border-slate-200">
-                      <tr><th className="py-1 w-1/2">분석 항목</th><th className="py-1 w-1/4">성취율</th><th className="py-1 w-1/4">수준</th></tr>
+                  <table className="w-full text-center border-collapse relative z-10">
+                    <thead className="bg-slate-50 text-slate-500 border-y border-slate-200 text-xs">
+                      <tr><th className="py-1.5 w-1/2">분석 항목</th><th className="py-1.5 w-1/4">성취율</th><th className="py-1.5 w-1/4">수준</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
                       {renderCogRow('수 감각', getPct(reportData.stats.sense, reportData.rBase.max_calc_sense))}
@@ -658,7 +656,7 @@ function PrintReportContent() {
                       {renderCogRow('논리추론', getPct(reportData.stats.logic, reportData.rBase.max_logic))}
                     </tbody>
                   </table>
-                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 mt-2 w-full text-[10px] text-slate-600 font-medium leading-relaxed space-y-1 relative z-10">
+                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 mt-2.5 w-full text-[10px] text-slate-600 font-medium leading-relaxed space-y-1 relative z-10">
                     <div>• <span className="text-[#1e493b] font-bold">수 감각:</span> 수의 구조/크기를 이해하는 직관력</div>
                     <div>• <span className="text-[#1e493b] font-bold">공간지각력:</span> 3차원 상상 및 도형 파악 능력</div>
                     <div>• <span className="text-[#1e493b] font-bold">논리추론:</span> 규칙을 발견하고 결론을 도출하는 힘</div>
@@ -667,11 +665,10 @@ function PrintReportContent() {
 
                 <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex flex-col items-center relative overflow-hidden">
                   <h3 className="text-sm font-extrabold text-white bg-slate-700 px-6 py-1.5 rounded-full mb-2 w-max relative z-10">3대 행동 특성</h3>
-                  {/* 💡 차트 높이를 줄여 공간 확보 */}
                   <div className="w-full relative h-[160px] mb-2 z-10"><canvas ref={cogRightChartRef}></canvas></div>
-                  <table className="w-full text-xs text-center border-collapse relative z-10">
-                    <thead className="bg-slate-50 text-slate-500 border-y border-slate-200">
-                      <tr><th className="py-1 w-1/2">분석 항목</th><th className="py-1 w-1/4">성취율</th><th className="py-1 w-1/4">수준</th></tr>
+                  <table className="w-full text-center border-collapse relative z-10">
+                    <thead className="bg-slate-50 text-slate-500 border-y border-slate-200 text-xs">
+                      <tr><th className="py-1.5 w-1/2">분석 항목</th><th className="py-1.5 w-1/4">성취율</th><th className="py-1.5 w-1/4">수준</th></tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-bold text-slate-700">
                       {renderCogRow('배경지식', getPct(reportData.stats.know, reportData.rBase.max_knowledge))}
@@ -679,7 +676,7 @@ function PrintReportContent() {
                       {renderCogRow('과제집착력', getPct(reportData.stats.persist, reportData.rBase.max_persistence))}
                     </tbody>
                   </table>
-                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-2 mt-2 w-full text-[10px] text-slate-600 font-medium leading-relaxed space-y-1 relative z-10">
+                  <div className="bg-slate-50 border border-slate-100 rounded-lg p-2.5 mt-2.5 w-full text-[10px] text-slate-600 font-medium leading-relaxed space-y-1 relative z-10">
                     <div>• <span className="text-slate-700 font-bold">배경지식:</span> 수학 개념과 원리에 대한 사전 지식</div>
                     <div>• <span className="text-slate-700 font-bold">사고력:</span> 새롭고 복합적인 문제를 해결하는 유연함</div>
                     <div>• <span className="text-slate-700 font-bold">과제집착력:</span> 끝까지 포기하지 단단하게 몰입하는 끈기</div>
@@ -687,23 +684,30 @@ function PrintReportContent() {
                 </div>
               </section>
 
-              <section className="flex-1 flex flex-col">
-                <h2 className="text-lg font-black text-slate-800 mb-2 border-b-2 border-slate-800 pb-1 flex items-center gap-2">
+              <section className="flex-1 flex flex-col min-h-0">
+                <h2 className="text-base font-black text-slate-800 mb-2 border-b-2 border-slate-800 pb-1 flex items-center gap-2 shrink-0">
                   <span>💡</span> 진단 평가 종합 결과
                 </h2>
-                {/* 💡 여백과 글씨 크기/줄간격 최적화하여 넉넉하게 들어가도록 조치 */}
-                <div className="bg-white border-2 border-[#1e493b]/20 rounded-2xl p-5 flex-1 relative shadow-sm flex flex-col">
+                <div className="bg-white border-2 border-[#1e493b]/20 rounded-2xl p-5 flex-1 relative shadow-sm flex flex-col min-h-0">
                   <svg className="absolute top-3 left-3 text-[#1e493b] w-8 h-8 opacity-10" fill="currentColor" viewBox="0 0 24 24"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h4v10h-10z"/></svg>
-                  <div className="flex gap-2 mb-3 relative z-10">
+                  <div className="flex gap-2 mb-3 relative z-10 shrink-0">
                     <span className="px-3 py-1 bg-[#1e493b] text-white rounded-full text-[12px] font-black shadow-sm">종합 분석</span>
                   </div>
-                  <p className="text-slate-700 font-bold text-[13px] leading-[1.65] tracking-tight text-justify indent-2 whitespace-pre-line relative z-10 flex-1">
-                    {reportData.evalComment}
-                  </p>
+                  {/* 💡 들여쓰기 완전 삭제, 폰트 14px 복구, 줄간격 1.7배로 시원하게 유지 */}
+                  <div className="text-slate-700 font-bold text-[14px] leading-[1.7] tracking-tight text-justify relative z-10 flex-1 overflow-hidden">
+                    {reportData.evalComment.split(/\r?\n/).map((paragraph: string, idx: number) => {
+                      if (!paragraph.trim()) return null;
+                      return (
+                        <p key={idx} className="mb-3 last:mb-0">
+                          {paragraph.trim()}
+                        </p>
+                      );
+                    })}
+                  </div>
                 </div>
               </section>
             </main>
-            <footer className="mt-4 pt-3 border-t border-slate-200 text-center text-[11px] text-slate-400 font-bold shrink-0">LOGICA. 깊고 단단한 심화 수학.</footer>
+            <footer className="mt-3 pt-2 border-t border-slate-200 text-center text-[11px] text-slate-400 font-bold shrink-0">LOGICA. 깊고 단단한 심화 수학.</footer>
           </div>
         </>
       )}
