@@ -23,15 +23,34 @@ export default function QuestionDBUploadPage() {
   const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
-    const checkAccess = () => {
+    const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
-      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('원장');
-      if (isGodMode) {
+      if (!role || !tId) {
+        alert("로그인 정보가 없습니다.");
+        router.replace("/home");
+        return;
+      }
+
+      // SUPER_ADMIN은 무조건 통과
+      if (role === 'SUPER_ADMIN') {
+        setIsAuthorized(true);
+        return;
+      }
+
+      // DB에서 현재 직급의 권한 조회
+      const { data, error } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .single();
+
+      if (!error && data && data.allowed_menus.includes("/qdb-upload")) {
         setIsAuthorized(true);
       } else {
-        alert("⛔ 마스터 DB 업로드 툴은 원장 및 최고관리자 전용입니다.");
+        alert("⛔ 마스터 DB 업로드 툴 접근 권한이 없습니다. 권한 관리 페이지에서 허용해주세요.");
         router.replace("/home");
       }
     };

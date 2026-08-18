@@ -99,8 +99,23 @@ const PERMISSION_GROUPS = [
       { id: "/billing", label: "수납 및 청구서 발행" },
       { id: "/unpaid", label: "미납자 특별 관리" },
       { id: "/shop-admin", label: "포인트 상점 관리" },
-      // 🌟 [핵심 변경] 서류 출력 페이지 권한 추가 완료!
       { id: "/print-center", label: "교육청 서류 출력 센터" }, 
+    ]
+  },
+  {
+    category: "문제 및 교재 DB 업로드",
+    desc: "문제은행 및 교재 구조를 파싱하여 서버에 등록하는 권한입니다.",
+    items: [
+      { id: "/qdb-upload", label: "마스터 문제은행(question_db) 업로드" },
+      { id: "/book-upload", label: "통합 교재(textbook) 일괄 업로드" },
+    ]
+  },
+  {
+    category: "교재 구조화 및 데이터 교정",
+    desc: "교재 매핑 툴과 분류(Taxonomy) 교정 툴 권한입니다.",
+    items: [
+      { id: "/mapper", label: "3단 크로스 교재 매퍼" },
+      { id: "/taxonomy-editor", label: "수동 뎁스(Taxonomy) 교정 툴" },
     ]
   },
   {

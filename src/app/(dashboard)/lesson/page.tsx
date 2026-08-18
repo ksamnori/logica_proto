@@ -8,7 +8,7 @@ import { supabase } from "@/lib/supabase";
 import EditBookModal from "@/components/lesson/EditBookModal";
 import AssignBookModal from "@/components/lesson/AssignBookModal";
 
-// 🌟 안전하게 배열 껍데기를 벗겨주는 헬퍼 함수
+// 안전하게 배열 껍데기를 벗겨주는 헬퍼 함수
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
@@ -99,10 +99,11 @@ export default function LessonPage() {
       return;
     }
 
+    // 🌟 [핵심 수정] 지점 전용 교재(validTenantId) 뿐만 아니라, 전 지점 공용 교재(tenant_id is null)도 모두 불러오도록 or 조건 추가!
     const { data, error } = await supabase
       .from("textbook")
       .select("*")
-      .eq("tenant_id", validTenantId)
+      .or(`tenant_id.eq.${validTenantId},tenant_id.is.null`)
       .order("created_at", { ascending: false });
       
     if (error) console.error("교재 로드 에러:", error);
@@ -475,7 +476,6 @@ export default function LessonPage() {
                 ) : (
                   <>
                     {assignedBooks.map(cb => {
-                      // 🌟 배열 껍데기 벗겨내기 적용!
                       const tb = unwrap(cb.textbook);
                       if (!tb) return null;
 

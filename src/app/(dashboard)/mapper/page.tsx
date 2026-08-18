@@ -54,14 +54,36 @@ export default function VisualMapperPage() {
 
   const mathJaxRef = useRef<boolean>(false);
 
+  // 🌟 [수정] DB 기반 권한 체크 로직 적용
   useEffect(() => {
-    const checkAccess = () => {
+    const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
-      const pos = localStorage.getItem("logica_instructor_position") || "";
-      // LOGICA Factory 권한 통일
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'MANAGER' || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('부원장') || pos.includes('실장') || pos.includes('전임강사');
-      if (isGodMode) setIsAuthorized(true);
-      else { alert("⛔ 교재 매핑 기능은 관리자 전용입니다."); router.replace("/home"); }
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      if (!role || !tId) {
+        alert("로그인 정보가 없습니다.");
+        router.replace("/home");
+        return;
+      }
+
+      if (role === 'SUPER_ADMIN') {
+        setIsAuthorized(true);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .single();
+
+      if (!error && data && data.allowed_menus.includes("/mapper")) {
+        setIsAuthorized(true);
+      } else {
+        alert("⛔ 교재 매핑 툴 접근 권한이 없습니다. 권한 관리 페이지에서 허용해주세요.");
+        router.replace("/home");
+      }
     };
     checkAccess();
   }, [router]);

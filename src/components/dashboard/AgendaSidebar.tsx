@@ -67,7 +67,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
             let isMultiDay = false;
             let timeString = "";
 
-            // 🌟 [핵심 추가] 구글 캘린더의 시작~종료 시간 추출 포맷팅
             if (ev.start?.dateTime && ev.end?.dateTime) {
               const s = new Date(ev.start.dateTime);
               const e = new Date(ev.end.dateTime);
@@ -94,7 +93,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                if (e.getTime() > s.getTime()) isMultiDay = true;
             }
 
-            // 🌟 "상세 내용 없음" 대신 시간을 우선 출력하고, 내용이 있으면 뒤에 붙임
             const descHtml = ev.description ? `<span class="text-slate-300 mx-1">|</span> ${ev.description}` : '';
 
             return {
@@ -276,6 +274,22 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
             }
 
             return displayItems.map(item => {
+              // 🌟 1. 오늘 날짜 여부 판별 로직 추가
+              const today = new Date();
+              let isTodayItem = false;
+
+              if (item.isMultiDay && item.end_date) {
+                const s = new Date(item.meeting_date); s.setHours(0,0,0,0);
+                const e = new Date(item.end_date); e.setHours(0,0,0,0);
+                const curr = new Date(today); curr.setHours(0,0,0,0);
+                isTodayItem = curr.getTime() >= s.getTime() && curr.getTime() <= e.getTime();
+              } else {
+                const itemDate = item.meeting_date ? new Date(item.meeting_date) : new Date(item.created_at);
+                isTodayItem = itemDate.getDate() === today.getDate() && 
+                              itemDate.getMonth() === today.getMonth() && 
+                              itemDate.getFullYear() === today.getFullYear();
+              }
+
               const isGoogleEvent = item.isExternal;
               const isMeetingNote = item.source === 'Meeting' && !isGoogleEvent;
               
@@ -299,6 +313,11 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                 const eDate = new Date(item.end_date);
                 dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ~ ${eDate.getMonth()+1}/${eDate.getDate()}`;
               }
+              
+              // 🌟 2. 텍스트 강조 (오늘인 경우 '오늘'로 변경)
+              if (isTodayItem && !item.isMultiDay) {
+                dateDisplay = `오늘 ${itemDate.getHours()}:${String(itemDate.getMinutes()).padStart(2,'0')}`;
+              }
 
               return (
                 <div 
@@ -309,7 +328,12 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                       else alert('권한이 없습니다.');
                     }
                   }}
-                  className={`bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-colors ${isMeetingNote || isGoogleEvent ? (hasAccess('/minutes') ? 'cursor-pointer hover:border-[#002864] hover:bg-slate-50' : 'cursor-not-allowed') : ''}`}
+                  // 🌟 3. 테두리 강조 스타일 추가
+                  className={`bg-white p-3 rounded-xl border shadow-sm flex flex-col gap-1.5 transition-colors ${
+                    isTodayItem ? 'border-[#002864] ring-1 ring-[#002864]/20' : 'border-slate-200'
+                  } ${
+                    isMeetingNote || isGoogleEvent ? (hasAccess('/minutes') ? 'cursor-pointer hover:border-[#002864] hover:bg-slate-50' : 'cursor-not-allowed') : ''
+                  }`}
                 >
                   <div className="flex items-center gap-2">
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 text-sm ${theme.bg} ${theme.text} ${theme.border}`}>
@@ -329,7 +353,8 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                     <span className={`px-1.5 py-0.5 text-[8px] font-black rounded border ${badgeStyle}`}>
                       {badgeText}
                     </span>
-                    <span className="text-[9px] font-bold text-slate-400">
+                    {/* 🌟 4. 오늘인 경우 색상 강조 */}
+                    <span className={`text-[9px] font-bold ${isTodayItem ? 'text-rose-500' : 'text-slate-400'}`}>
                       {dateDisplay}
                     </span>
                   </div>

@@ -13,8 +13,6 @@ export default function Sidebar() {
   const [strictSuperAdmin, setStrictSuperAdmin] = useState(false);
   const [isPrincipal, setIsPrincipal] = useState(false); 
   const [isManager, setIsManager] = useState(false);
-  
-  // 🌟 팩토리(작업실) 접근 권한 상태 추가
   const [isFactoryWorker, setIsFactoryWorker] = useState(false);
   
   const [tenantName, setTenantName] = useState<string>("로딩중...");
@@ -32,8 +30,6 @@ export default function Sidebar() {
     const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자') || pos.includes('대장');
     const isPrin = role === 'ADMIN' || pos.includes('원장'); 
     const isMgr = role === 'MANAGER' || pos.includes('실장');
-    
-    // 🌟 원장, 부원장, 실장, 전임강사, 최고관리자 모두 팩토리 권한 부여
     const isFW = isSA || isPrin || isMgr || pos.includes('부원장') || pos.includes('전임강사');
     
     setStrictSuperAdmin(isSA);
@@ -97,8 +93,8 @@ export default function Sidebar() {
   const canAccess = (path: string) => {
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true; 
     
-    // 🌟 팩토리 메뉴들은 FactoryWorker 권한이 있으면 무조건 통과
-    const factoryPaths = ['/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
+    // 🌟 팩토리 메뉴 권한 처리 (대시보드 포함)
+    const factoryPaths = ['/factory-dashboard', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
     if (factoryPaths.includes(path) && isFactoryWorker) return true;
     
     if (isLoadingPerms) return false; 
@@ -155,17 +151,13 @@ export default function Sidebar() {
       customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
-    } else if (path === '/mapper') {
-      customBg = active ? 'bg-fuchsia-500 border-fuchsia-600 text-white shadow-md' : 'bg-fuchsia-50/50 border-fuchsia-100 text-fuchsia-700 hover:bg-fuchsia-100 hover:border-fuchsia-200 shadow-sm';
+    } else if (path === '/factory-dashboard') {
+      // 🌟 새로 추가된 DB 통계 대시보드
+      customBg = active ? 'bg-slate-800 border-slate-900 text-white shadow-md' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400 shadow-sm';
       customLabel = 'font-black';
-    } else if (path === '/qdb-upload') {
-      customBg = active ? 'bg-slate-700 border-slate-800 text-white shadow-md' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400 shadow-sm';
-      customLabel = 'font-black';
-    } else if (path === '/book-upload') {
-      customBg = active ? 'bg-teal-500 border-teal-600 text-white shadow-md' : 'bg-teal-50/50 border-teal-100 text-teal-700 hover:bg-teal-100 hover:border-teal-200 shadow-sm';
-      customLabel = 'font-black';
-    } else if (path === '/taxonomy-editor') {
-      customBg = active ? 'bg-pink-500 border-pink-600 text-white shadow-md' : 'bg-pink-50/50 border-pink-100 text-pink-700 hover:bg-pink-100 hover:border-pink-200 shadow-sm';
+    } else if (['/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path)) {
+      // Factory 도구들 공통 스타일
+      customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
       customLabel = 'font-black';
     }
 
@@ -232,14 +224,15 @@ export default function Sidebar() {
           <MenuItem path="/admission" label="진단평가 관리" />
         </MenuSection>
 
-        {/* 🌟 LOGICA Factory 섹션 신설 */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🏭</span>
             <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">LOGICA Factory</p>
-            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md font-black border border-slate-200 ml-1">DB 작업실</span>
+            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md font-black border border-slate-200 ml-1">전임강사 이상</span>
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
+            {/* 🌟 팩토리 대시보드를 맨 앞에 크게 배치 */}
+            <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
             <MenuItem path="/mapper" label="교재 매핑 툴" />
             <MenuItem path="/taxonomy-editor" label="분류 교정 툴" />
             <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
