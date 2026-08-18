@@ -5,7 +5,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-// 🌟 뎁스 파악용 헬퍼 함수
 const getTaxParts = (taxId: string | null | undefined) => {
   if (!taxId || taxId === '미분류') return [];
   return taxId.split('-');
@@ -14,24 +13,19 @@ const getTaxParts = (taxId: string | null | undefined) => {
 export default function VisualMapperPage() {
   const router = useRouter();
 
-  // 권한 및 상태 관리
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [textbooks, setTextbooks] = useState<any[]>([]);
   
-  // 워크북 목록 (source_book_name 타겟팅)
   const [workbooks, setWorkbooks] = useState<string[]>([]); 
   const [wbFilterText, setWbFilterText] = useState("");
 
-  // 선택된 교재 상태
   const [selectedMainBookId, setSelectedMainBookId] = useState("");
   const [selectedWbSource, setSelectedWbSource] = useState("");
 
-  // 문제 데이터 상태
   const [mainQuestions, setMainQuestions] = useState<any[]>([]);
   const [wbQuestions, setWbQuestions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
 
-  // === 핵심 매핑 상태 ===
   const [selectedMainId, setSelectedMainId] = useState<string | null>(null);
   const [selectedWbIds, setSelectedWbIds] = useState<string[]>([]);
   const [mappings, setMappings] = useState<Record<string, string[]>>({});
@@ -64,7 +58,6 @@ export default function VisualMapperPage() {
     }
   }, [selectedMainBookId, selectedWbSource]);
 
-  // 수식(LaTeX) 렌더링
   useEffect(() => {
     const renderMath = () => {
       if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
@@ -102,8 +95,9 @@ export default function VisualMapperPage() {
   const fetchQuestions = async (mainId: string, wbSource: string) => {
     setIsLoading(true);
     try {
+      // 🌟 Number() 래핑 제거
       const { data: mainData } = await supabase.from("textbook_question")
-        .select("*").eq("book_id", Number(mainId))
+        .select("*").eq("book_id", mainId)
         .order("page_number", { ascending: true }).order("tq_id", { ascending: true });
       
       const { data: wbData } = await supabase.from("question_db")
@@ -142,9 +136,6 @@ export default function VisualMapperPage() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  // ==========================================
-  // 🤖 🌟 [7-Depth 타겟팅] AI 추천 매칭 로직
-  // ==========================================
   const handleAiMatch = () => {
     if (mainQuestions.length === 0 || wbQuestions.length === 0) {
       return alert("본교재와 워크북 문항이 모두 화면에 떠 있는 상태에서 실행해주세요.");
@@ -164,7 +155,6 @@ export default function VisualMapperPage() {
       const mqTaxParts = getTaxParts(mq.taxonomy_id);
 
       wbQuestions.forEach(wq => {
-        // 이미 매핑된 문제는 패스
         if (matchedWbIds.has(wq.question_id)) return;
 
         const wqNumStr = String(wq.question_number || "");
@@ -176,16 +166,13 @@ export default function VisualMapperPage() {
         let isTaxonomyMatch = false;
         let matchedDepth = 0;
 
-        // 🚨 [핵심] Depth 7 매칭 우선 검사, 없으면 Depth 6 매칭 검사
         if (mqTaxParts.length > 0 && wqTaxParts.length > 0) {
           if (mqTaxParts.length >= 7 && wqTaxParts.length >= 7) {
-            // 7 Depth 비교
             if (mqTaxParts.slice(0, 7).join('-') === wqTaxParts.slice(0, 7).join('-')) {
               isTaxonomyMatch = true;
               matchedDepth = 7;
             }
           } else if (mqTaxParts.length >= 6 && wqTaxParts.length >= 6) {
-            // 6 Depth 비교 (7뎁스가 없는 경우)
             if (mqTaxParts.slice(0, 6).join('-') === wqTaxParts.slice(0, 6).join('-')) {
               isTaxonomyMatch = true;
               matchedDepth = 6;
@@ -193,12 +180,10 @@ export default function VisualMapperPage() {
           }
         }
 
-        // 문제 번호와 문자(접두사)가 완벽히 동일해야 함
         const isNumberMatch = mqBaseNum !== "" && wqBaseNum !== "" && (mqBaseNum === wqBaseNum);
         const isTextMatch = mqBaseText === wqBaseText;
         const isExactStringMatch = (!mqBaseNum || !wqBaseNum) && (mqNumStr.trim() === wqNumStr.trim());
 
-        // 🌟 무조건 Taxonomy(뎁스)가 일치하는 상태에서만 매칭!
         if (isTaxonomyMatch && ((isNumberMatch && isTextMatch) || isExactStringMatch)) {
           matchedWbIds.add(wq.question_id);
           if (matchedDepth === 7) match7DepthCount++;
@@ -336,7 +321,6 @@ export default function VisualMapperPage() {
       </div>
 
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
-        {/* 왼쪽: 본교재 리스트 */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-indigo-50/80 border-b border-indigo-100 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-indigo-900 text-sm">📘 본교재 (textbook_question)</h2>
@@ -351,7 +335,6 @@ export default function VisualMapperPage() {
                 const mappedWbs = mappings[qIdStr] || [];
                 const hasMapping = mappedWbs.length > 0;
                 
-                // 🌟 문항의 실제 뎁스 표시용
                 const taxDepth = getTaxParts(q.taxonomy_id).length;
 
                 return (
@@ -361,7 +344,6 @@ export default function VisualMapperPage() {
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{q.page_number}p</span>
                         <span className="text-xs font-black text-indigo-900">번호: {q.question_number}</span>
-                        {/* 🌟 뎁스 뱃지 추가 */}
                         {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm">Depth {taxDepth}</span>}
                       </div>
                       {hasMapping && (
@@ -380,7 +362,6 @@ export default function VisualMapperPage() {
           </div>
         </div>
 
-        {/* 중앙 연결 액션 버튼 */}
         <div className="w-20 flex flex-col justify-center items-center shrink-0">
           <div className="bg-white p-2 rounded-2xl shadow-md border border-slate-200 flex flex-col gap-2 relative">
             <button onClick={handleLink} disabled={!selectedMainId || selectedWbIds.length === 0} className={`w-14 h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainId && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
@@ -394,7 +375,6 @@ export default function VisualMapperPage() {
           </div>
         </div>
 
-        {/* 오른쪽: 워크북 리스트 (question_db) */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-emerald-50/80 border-b border-emerald-100 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-emerald-900 text-sm">📗 마스터DB 워크북 (question_db)</h2>
@@ -409,7 +389,6 @@ export default function VisualMapperPage() {
                 const mappedMainId = getMappedMainIdForWb(qUuid);
                 const isMappedToOther = mappedMainId && mappedMainId !== selectedMainId;
                 
-                // 🌟 문항의 실제 뎁스 표시용
                 const taxDepth = getTaxParts(q.taxonomy_id).length;
 
                 return (
@@ -424,7 +403,6 @@ export default function VisualMapperPage() {
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">{q.final_printed_page || q.detected_page_num}p</span>
                           <span className={`text-xs font-black ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>번호: {q.question_number}-{q.sub_num}</span>
-                          {/* 🌟 뎁스 뱃지 추가 */}
                           {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm">Depth {taxDepth}</span>}
                         </div>
                         {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-100">타 문항에 연결됨</span>}

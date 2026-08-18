@@ -6,18 +6,16 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import QuestionModal from "@/components/progress/QuestionModal";
 
-// 🌟 TypeScript 타입 에러 방지를 위한 명확한 인터페이스 정의
 interface TextbookInfo {
   title: string;
   book_type: string;
 }
 
 interface ClassTextbookRow {
-  book_id: string | number;
+  book_id: string; // 🌟 UUID 지원
   textbook: TextbookInfo | TextbookInfo[] | null;
 }
 
-// 💡 안전하게 배열 껍데기를 벗겨주는 헬퍼 함수
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
@@ -40,10 +38,8 @@ export default function ProgressPage() {
   const router = useRouter();
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-
   const [classes, setClasses] = useState<any[]>([]);
   
-  // 🌟 주교재와 부교재/워크북을 분리하여 관리
   const [mainTextbooks, setMainTextbooks] = useState<ClassTextbookRow[]>([]);
   const [subTextbooks, setSubTextbooks] = useState<ClassTextbookRow[]>([]);
   
@@ -51,20 +47,26 @@ export default function ProgressPage() {
   const [enrolledStudentIds, setEnrolledStudentIds] = useState<string[]>([]);
 
   const [selectedClassId, setSelectedClassId] = useState("");
-  const [selectedBookId, setSelectedBookId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("all");
-  const [activePageNum, setActivePageNum] = useState<number | null>(null);
-
-  const [allQuestions, setAllQuestions] = useState<any[]>([]);
-  const [pages, setPages] = useState<number[]>([]);
-  const [groupedMainQs, setGroupedMainQs] = useState<{ [key: number]: any[] }>({});
   
-  const [groupedWbQs, setGroupedWbQs] = useState<{ [main_tq_id: number]: any[] }>({});
+  const [selectedMainBookId, setSelectedMainBookId] = useState("");
+  const [selectedSubBookId, setSelectedSubBookId] = useState("");
+
+  const [mainPages, setMainPages] = useState<number[]>([]);
+  const [subPages, setSubPages] = useState<number[]>([]);
+  
+  const [activeMainPage, setActiveMainPage] = useState<number | null>(null);
+  const [activeSubPage, setActiveSubPage] = useState<number | null>(null);
+
+  const [groupedMainQs, setGroupedMainQs] = useState<{ [key: number]: any[] }>({});
+  const [groupedSubQs, setGroupedSubQs] = useState<{ [key: number]: any[] }>({});
+  
   const [statusMap, setStatusMap] = useState<{ [key: string]: string }>({});
 
-  const [checkedPages, setCheckedPages] = useState<number[]>([]);
+  const [checkedMainPages, setCheckedMainPages] = useState<number[]>([]);
+  const [checkedSubPages, setCheckedSubPages] = useState<number[]>([]);
   const [checkedMainQs, setCheckedMainQs] = useState<any[]>([]); 
-  const [checkedWbQs, setCheckedWbQs] = useState<any[]>([]); 
+  const [checkedSubQs, setCheckedSubQs] = useState<any[]>([]); 
 
   const [isLoading, setIsLoading] = useState(false);
   const [modalQuestion, setModalQuestion] = useState<any>(null);
@@ -95,15 +97,24 @@ export default function ProgressPage() {
   useEffect(() => { if (!selectedClassId) return; fetchClassDetails(selectedClassId); }, [selectedClassId]);
 
   useEffect(() => {
-    if (selectedBookId) fetchQuestions(selectedBookId);
-    else { setAllQuestions([]); setPages([]); setGroupedMainQs({}); setActivePageNum(null); }
-  }, [selectedBookId]);
+    if (selectedMainBookId) fetchMainQuestions(selectedMainBookId);
+    else { setMainPages([]); setGroupedMainQs({}); setActiveMainPage(null); }
+  }, [selectedMainBookId]);
 
   useEffect(() => {
-    if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
-      (window as any).MathJax.typesetPromise().catch((err: any) => console.log("MathJax 에러:", err));
-    }
-  }, [activePageNum, selectedStudentId, selectedBookId, groupedWbQs]);
+    if (selectedSubBookId) fetchSubQuestions(selectedSubBookId);
+    else { setSubPages([]); setGroupedSubQs({}); setActiveSubPage(null); }
+  }, [selectedSubBookId]);
+
+  useEffect(() => {
+    const renderMath = () => {
+      if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
+        (window as any).MathJax.typesetPromise().catch((err: any) => console.log("MathJax 에러:", err));
+      }
+    };
+    const timer = setTimeout(renderMath, 150);
+    return () => clearTimeout(timer);
+  }, [activeMainPage, activeSubPage, groupedMainQs, groupedSubQs, selectedStudentId]);
 
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -140,7 +151,6 @@ export default function ProgressPage() {
 
       const typedClassBooks = classBooks as unknown as ClassTextbookRow[];
       
-      // 🌟 주교재와 그 외(부교재/워크북 등) 분리
       const mains = typedClassBooks?.filter(cb => {
         const tb = unwrap(cb.textbook);
         return tb && tb.book_type === "주교재"; 
@@ -154,8 +164,8 @@ export default function ProgressPage() {
       setMainTextbooks(mains);
       setSubTextbooks(subs);
 
-      const allBooks = [...mains, ...subs];
-      if (!allBooks.find(b => b.book_id.toString() === selectedBookId)) setSelectedBookId("");
+      if (!mains.find(b => b.book_id === selectedMainBookId)) setSelectedMainBookId("");
+      if (!subs.find(b => b.book_id === selectedSubBookId)) setSelectedSubBookId("");
 
       const { data: enrolls } = await supabase.from("enrollment").select("student_id, student(name, status)").eq("class_id", classId);
       const sMap = new Map();
@@ -174,39 +184,38 @@ export default function ProgressPage() {
     } catch (e) { console.error(e); }
   };
 
-  const fetchQuestions = async (bookId: string) => {
+  // 🌟 Number() 래핑 제거
+  const fetchMainQuestions = async (bookId: string) => {
     setIsLoading(true);
     try {
-      const { data: mainData } = await supabase.from("textbook_question").select("*").eq("book_id", Number(bookId)).order("page_number", { ascending: true }).order("tq_id", { ascending: true });
-      const grouped = (mainData || []).reduce((acc: any, q: any) => {
+      const { data } = await supabase.from("textbook_question").select("*").eq("book_id", bookId).order("page_number", { ascending: true }).order("tq_id", { ascending: true });
+      const grouped = (data || []).reduce((acc: any, q: any) => {
         const pNum = q.page_number || 0;
         if (!acc[pNum]) acc[pNum] = [];
         acc[pNum].push(q); return acc;
       }, {});
 
       const sortedPages = Object.keys(grouped).map(Number).filter(n => !isNaN(n)).sort((a,b)=>a-b);
-      setAllQuestions(mainData || []); setGroupedMainQs(grouped); setPages(sortedPages);
-      if (sortedPages.length > 0) setActivePageNum(sortedPages[0]);
-      setCheckedPages([]); setCheckedMainQs([]); setCheckedWbQs([]); 
+      setGroupedMainQs(grouped); setMainPages(sortedPages);
+      if (sortedPages.length > 0) setActiveMainPage(sortedPages[0]);
+      setCheckedMainPages([]); setCheckedMainQs([]);
+    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+  };
 
-      const allWbUuids = new Set<string>();
-      mainData?.forEach(mq => {
-          const linkedIds = safeParseIds(mq.similar_tq_ids);
-          linkedIds.forEach(id => { if (typeof id === 'string') allWbUuids.add(id); });
-      });
+  const fetchSubQuestions = async (bookId: string) => {
+    setIsLoading(true);
+    try {
+      const { data } = await supabase.from("textbook_question").select("*").eq("book_id", bookId).order("page_number", { ascending: true }).order("tq_id", { ascending: true });
+      const grouped = (data || []).reduce((acc: any, q: any) => {
+        const pNum = q.page_number || 0;
+        if (!acc[pNum]) acc[pNum] = [];
+        acc[pNum].push(q); return acc;
+      }, {});
 
-      const wbGrouped: { [main_tq_id: number]: any[] } = {};
-      if (allWbUuids.size > 0) {
-        const { data: wbData } = await supabase.from('question_db').select('*').in('question_id', Array.from(allWbUuids));
-        
-        mainData?.forEach(mq => {
-            const linkedIds = safeParseIds(mq.similar_tq_ids);
-            const matchedQs = (wbData || []).filter(wq => linkedIds.includes(wq.question_id));
-            if (matchedQs.length > 0) wbGrouped[mq.tq_id] = matchedQs;
-        });
-      }
-      setGroupedWbQs(wbGrouped);
-
+      const sortedPages = Object.keys(grouped).map(Number).filter(n => !isNaN(n)).sort((a,b)=>a-b);
+      setGroupedSubQs(grouped); setSubPages(sortedPages);
+      if (sortedPages.length > 0) setActiveSubPage(sortedPages[0]);
+      setCheckedSubPages([]); setCheckedSubQs([]);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
@@ -255,10 +264,9 @@ export default function ProgressPage() {
     } catch (e: any) { console.error(e); }
   };
 
-  const assignHomeworkToStudents = async (targetStudentIds: string[], mainIds: any[], wbIds: any[], titleStr: string) => {
+  const assignHomeworkToStudents = async (targetStudentIds: string[], tqIds: any[], bookId: string, titleStr: string) => {
     try {
-        const allTqIds = [...mainIds, ...wbIds];
-        if (!allTqIds.length || !selectedBookId || !targetStudentIds.length) return;
+        if (!tqIds.length || !bookId || !targetStudentIds.length) return;
 
         const dateStr = new Date(Date.now() + 9 * 3600000).toISOString().split('T')[0];
         const startOfTodayKST = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
@@ -267,26 +275,19 @@ export default function ProgressPage() {
         await Promise.all(targetStudentIds.map(async (sId) => {
             const studentName = students.find(s => s.id === sId)?.name || '학생';
             const { data: existing } = await supabase.from('homework_assignment')
-                .select('homework_id, target_questions, homework_title').eq('class_id', selectedClassId).eq('target_student_id', sId) 
+                .select('homework_id, target_questions, homework_title').eq('class_id', selectedClassId).eq('book_id', bookId).eq('target_student_id', sId) 
                 .neq('homework_title', '[시스템] 수업 진도 완료 기록').gte('created_at', startOfTodayKST).lte('created_at', endOfTodayKST).order('created_at', { ascending: false }).limit(1);
 
             let hwId: number;
             if (existing && existing.length > 0) {
                 hwId = existing[0].homework_id;
                 const prevQs = safeParseIds(existing[0].target_questions);
-                const newQs = Array.from(new Set([...prevQs, ...allTqIds])); 
-                let updatedTitle = existing[0].homework_title || '';
-                if (!updatedTitle.includes('통합')) {
-                    if (titleStr.includes('통합') || (updatedTitle.includes('워크북') && mainIds.length > 0) || (updatedTitle.includes('본교재') && wbIds.length > 0)) {
-                        updatedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
-                    }
-                }
-                await supabase.from('homework_assignment').update({ target_questions: newQs, homework_title: updatedTitle }).eq('homework_id', hwId);
+                const newQs = Array.from(new Set([...prevQs, ...tqIds])); 
+                await supabase.from('homework_assignment').update({ target_questions: newQs }).eq('homework_id', hwId);
             } else {
                 let expectedTitle = `[${studentName}] ${titleStr} (${dateStr})`;
-                if (mainIds.length > 0 && wbIds.length > 0) expectedTitle = `[${studentName}] 통합 과제 (${dateStr})`;
                 const { data: hwData } = await supabase.from('homework_assignment').insert({
-                    book_id: Number(selectedBookId), target_questions: allTqIds, class_id: selectedClassId, target_student_id: sId, 
+                    book_id: bookId, target_questions: tqIds, class_id: selectedClassId, target_student_id: sId, 
                     due_date: new Date(Date.now() + 7 * 86400000).toISOString().split('T')[0], homework_title: expectedTitle
                 }).select();
                 if (!hwData || hwData.length === 0) return;
@@ -299,17 +300,17 @@ export default function ProgressPage() {
     } catch (e: any) { console.error(e); }
   };
 
-  const markProgressAsCompleteInDB = async (tq_ids: any[], targetStudentIds: string[]) => {
+  const markProgressAsCompleteInDB = async (tq_ids: any[], targetStudentIds: string[], bookId: string) => {
     try {
-      if (!tq_ids.length || !selectedBookId || !targetStudentIds.length) return;
+      if (!tq_ids.length || !bookId || !targetStudentIds.length) return;
       await Promise.all(targetStudentIds.map(async (sId) => {
-        const { data: existing } = await supabase.from('homework_assignment').select('homework_id').eq('class_id', selectedClassId).eq('book_id', Number(selectedBookId)).eq('target_student_id', sId).eq('homework_title', '[시스템] 수업 진도 완료 기록').limit(1);
+        const { data: existing } = await supabase.from('homework_assignment').select('homework_id').eq('class_id', selectedClassId).eq('book_id', bookId).eq('target_student_id', sId).eq('homework_title', '[시스템] 수업 진도 완료 기록').limit(1);
 
         let hwId: number;
         if (existing && existing.length > 0) {
           hwId = existing[0].homework_id;
         } else {
-          const { data: ins } = await supabase.from('homework_assignment').insert({ book_id: Number(selectedBookId), target_questions: [], due_date: '2099-12-31', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId }).select();
+          const { data: ins } = await supabase.from('homework_assignment').insert({ book_id: bookId, target_questions: [], due_date: '2099-12-31', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId }).select();
           if (!ins || ins.length === 0) return;
           hwId = ins[0].homework_id;
         }
@@ -368,132 +369,69 @@ export default function ProgressPage() {
     } catch (e: any) { console.error(e); }
   };
 
-  const applyActionToIds = async (actionType: string, mainIds: any[], wbIds: any[]) => {
+  const executeProgressAction = async (actionType: string) => {
+    let mIds = [...checkedMainQs]; 
+    checkedMainPages.forEach(pNum => {
+        (groupedMainQs[pNum] || []).forEach((mq: any) => { if (!mIds.includes(mq.tq_id)) mIds.push(mq.tq_id); });
+    });
+
+    let sIds = [...checkedSubQs];
+    checkedSubPages.forEach(pNum => {
+        (groupedSubQs[pNum] || []).forEach((sq: any) => { if (!sIds.includes(sq.tq_id)) sIds.push(sq.tq_id); });
+    });
+
+    if (mIds.length === 0 && sIds.length === 0) return alert("처리할 문항이나 페이지를 선택해주세요.");
+
     const newMap = { ...statusMap };
     const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
 
-    const updateMap = (id: any, status: string | null) => {
-      if (selectedStudentId === 'all') {
-        if (status) { newMap[getStatusKey(id, 'all')] = status; targets.forEach(sId => newMap[getStatusKey(id, sId)] = status); }
-        else { delete newMap[getStatusKey(id, 'all')]; targets.forEach(sId => delete newMap[getStatusKey(id, sId)]); }
-      } else {
-        if (status) newMap[getStatusKey(id, selectedStudentId)] = status;
-        else delete newMap[getStatusKey(id, selectedStudentId)];
-      }
+    const updateMap = (ids: any[], status: string | null) => {
+      ids.forEach(id => {
+        if (selectedStudentId === 'all') {
+          if (status) { newMap[getStatusKey(id, 'all')] = status; targets.forEach(sId => newMap[getStatusKey(id, sId)] = status); }
+          else { delete newMap[getStatusKey(id, 'all')]; targets.forEach(sId => delete newMap[getStatusKey(id, sId)]); }
+        } else {
+          if (status) newMap[getStatusKey(id, selectedStudentId)] = status;
+          else delete newMap[getStatusKey(id, selectedStudentId)];
+        }
+      });
     };
 
-    if (actionType === 'DONE_AND_WB_HW') {
-      mainIds.forEach(id => updateMap(id, 'done')); wbIds.forEach(id => updateMap(id, 'homework'));
-    } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-      mainIds.forEach(id => updateMap(id, 'homework')); wbIds.forEach(id => updateMap(id, 'homework'));
+    if (actionType === 'DEFAULT') {
+      updateMap(mIds, 'done'); updateMap(sIds, 'homework');
+      setStatusMap(newMap);
+      showToast(`기본 일괄 처리 (본교재: 진도완료 / 워크북: 과제배부) 적용 완료!`);
+    } else if (actionType === 'ALL_HW') {
+      updateMap(mIds, 'homework'); updateMap(sIds, 'homework');
+      setStatusMap(newMap);
+      showToast(`모든 선택 항목이 과제로 배부되었습니다!`);
     } else if (actionType === 'CANCEL') {
-      mainIds.forEach(id => updateMap(id, null)); wbIds.forEach(id => updateMap(id, null));
+      updateMap(mIds, null); updateMap(sIds, null);
+      setStatusMap(newMap);
+      showToast(`선택한 항목의 상태가 취소되었습니다.`);
     }
-
-    setStatusMap(newMap);
-
-    let tMsg = "선택한 상태가 취소되었습니다.";
-    if (actionType === 'DONE_AND_WB_HW') tMsg = `선택 교재 진도완료 및 연계 과제(${wbIds.length}문제)가 배부되었습니다!`;
-    if (actionType === 'MAIN_HW_AND_WB_HW') tMsg = `과제 배부가 완료되었습니다!`;
-    showToast(tMsg);
 
     actionQueue.current = actionQueue.current.then(async () => {
-      await cancelProgressForIds([...mainIds, ...wbIds], targets);
-      if (actionType === 'DONE_AND_WB_HW') {
-        if (mainIds.length > 0) await markProgressAsCompleteInDB(mainIds, targets);
-        if (wbIds.length > 0) await assignHomeworkToStudents(targets, [], wbIds, '연계 과제');
-      } else if (actionType === 'MAIN_HW_AND_WB_HW') {
-        const titleStr = (mainIds.length > 0 && wbIds.length === 0) ? '교재 과제' : ((wbIds.length > 0 && mainIds.length === 0) ? '연계 과제' : '통합 과제');
-        const combinedHwIds = [...mainIds, ...wbIds];
-        if (combinedHwIds.length > 0) await assignHomeworkToStudents(targets, mainIds, wbIds, titleStr);
+      await cancelProgressForIds([...mIds, ...sIds], targets);
+      
+      if (actionType === 'DEFAULT') {
+        if (mIds.length > 0) await markProgressAsCompleteInDB(mIds, targets, selectedMainBookId);
+        if (sIds.length > 0) await assignHomeworkToStudents(targets, sIds, selectedSubBookId, '워크북 과제');
+      } else if (actionType === 'ALL_HW') {
+        if (mIds.length > 0) await assignHomeworkToStudents(targets, mIds, selectedMainBookId, '주교재 과제');
+        if (sIds.length > 0) await assignHomeworkToStudents(targets, sIds, selectedSubBookId, '부교재/워크북 과제');
       }
     }).catch(err => console.error(err));
+
+    setCheckedMainQs([]); setCheckedSubQs([]); setCheckedMainPages([]); setCheckedSubPages([]);
   };
 
-  const executeProgressAction = async (actionType: string) => {
-    let mIds = [...checkedMainQs]; let wIds = [...checkedWbQs];
-    if (checkedPages.length > 0) {
-      checkedPages.forEach(pNum => {
-        (groupedMainQs[pNum] || []).forEach(mq => {
-          if (!mIds.includes(mq.tq_id)) mIds.push(mq.tq_id);
-          (groupedWbQs[mq.tq_id] || []).forEach(wq => { if (!wIds.includes(wq.question_id)) wIds.push(wq.question_id); });
-        });
-      });
-      setCheckedPages([]);
-    }
-    if (mIds.length === 0 && wIds.length === 0) return alert("처리할 문항이나 페이지를 선택해주세요.");
-    await applyActionToIds(actionType, mIds, wIds);
-    setCheckedMainQs([]); setCheckedWbQs([]);
-  };
-
-  const markSingleQuestionCompleted = async (qId: any, type: 'main'|'wb') => {
-    const mainIds = type === 'main' ? [qId] : [];
-    const wbIds = type === 'wb' ? [qId] : [];
-    if (type === 'main') {
-      (groupedWbQs[qId] || []).forEach(wq => wbIds.push(wq.question_id));
-    }
-    await applyActionToIds('DONE_AND_WB_HW', mainIds, wbIds);
-  };
-
-  const markSinglePageCompleted = async (pNum: number) => {
-    let mainIds: any[] = []; let wbIds: any[] = [];
-    (groupedMainQs[pNum] || []).forEach(mq => {
-      mainIds.push(mq.tq_id);
-      (groupedWbQs[mq.tq_id] || []).forEach(wq => wbIds.push(wq.question_id));
-    });
-    await applyActionToIds('DONE_AND_WB_HW', mainIds, wbIds);
-  };
-
-  const handleMainQCheck = (tq_id: number, isChecked: boolean) => {
-    if (isChecked) {
-      setCheckedMainQs(prev => [...prev, tq_id]);
-      const linkedWbs = groupedWbQs[tq_id] || [];
-      setCheckedWbQs(prev => Array.from(new Set([...prev, ...linkedWbs.map((w: any) => w.question_id)])));
-    } else {
-      setCheckedMainQs(prev => prev.filter(id => id !== tq_id));
-      const linkedWbs = groupedWbQs[tq_id] || [];
-      const wbIdsToRemove = linkedWbs.map((w: any) => w.question_id);
-      setCheckedWbQs(prev => prev.filter(id => !wbIdsToRemove.includes(id)));
-    }
-  };
-
-  const toggleAllMainQs = (isChecked: boolean) => {
-    if (!activePageNum) return;
-    (groupedMainQs[activePageNum] || []).forEach((q: any) => handleMainQCheck(q.tq_id, isChecked));
-  };
-
-  const handlePageChange = (direction: number) => {
-    if (activePageNum === null || pages.length === 0) return;
-    const currentIndex = pages.indexOf(activePageNum);
-    const targetIndex = currentIndex + direction;
-    if (targetIndex >= 0 && targetIndex < pages.length) setActivePageNum(pages[targetIndex]);
-    else alert(direction > 0 ? "마지막 페이지입니다." : "첫 페이지입니다.");
-  };
-
-  const getPageStatus = (pNum: number) => {
-    const qs = groupedMainQs[pNum] || [];
-    if (qs.length === 0) return "대기";
-    let doneC = 0, hwC = 0;
-    qs.forEach((q: any) => {
-      const st = statusMap[getStatusKey(q.tq_id, selectedStudentId)];
-      if (st === "done") doneC++; if (st === "homework") hwC++;
-    });
-    if (doneC === qs.length) return "done"; if (hwC === qs.length) return "homework"; if (doneC > 0 || hwC > 0) return "partial";
-    return "대기";
-  };
-
-  const renderBadge = (id: any, type: 'main'|'wb') => {
+  const renderBadge = (id: any) => {
     const st = statusMap[getStatusKey(id, selectedStudentId)];
-    if (st === "done") return <span className={`w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 ${type==='wb' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300' : 'bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8]'}`}>진도완료</span>;
+    if (st === "done") return <span className="w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] shrink-0 ml-4">진도완료</span>;
     if (st === "homework") return <span className="w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] shrink-0 ml-4">과제배부</span>;
     if (st === "partial") return <span className="w-16 text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 shrink-0 ml-4">진행중</span>;
-    
-    return (
-      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(id, type); }} className={`group/qbadge cursor-pointer w-16 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors ${type==='wb' ? 'hover:bg-emerald-600 hover:text-white hover:border-emerald-600' : 'hover:bg-slate-700 hover:text-white hover:border-slate-700'}`}>
-        <span className="group-hover/qbadge:hidden">대기</span>
-        <span className="hidden group-hover/qbadge:inline tracking-tighter">진도 체크</span>
-      </span>
-    );
+    return <span className="w-16 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4">대기</span>;
   };
 
   if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
@@ -504,7 +442,7 @@ export default function ProgressPage() {
       <div className="flex justify-between items-end shrink-0">
         <div>
           <h2 className="text-xl font-bold text-slate-800">전체 진도 관리</h2>
-          <p className="text-sm font-bold text-slate-400 mt-1">수강반별 본교재와 연결된 마스터 문제(워크북)의 진도를 관리하고 과제를 배부합니다.</p>
+          <p className="text-sm font-bold text-slate-400 mt-1">수강반별 본교재와 부교재(워크북)의 진도를 독립적으로 관리하고 과제를 배부합니다.</p>
         </div>
       </div>
 
@@ -515,15 +453,14 @@ export default function ProgressPage() {
             <option value="">수강반 선택...</option>
             {classes.map(c => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
           </select>
-          
           <div className="w-px h-5 bg-slate-300 mx-2"></div>
           
-          <span className="text-xs font-bold text-slate-500">본교재:</span>
+          <span className="text-xs font-bold text-blue-600">📘 본교재:</span>
           <select 
-            value={mainTextbooks.find(b => b.book_id.toString() === selectedBookId) ? selectedBookId : ""} 
-            onChange={(e) => setSelectedBookId(e.target.value)} 
+            value={mainTextbooks.find(b => b.book_id === selectedMainBookId) ? selectedMainBookId : ""} 
+            onChange={(e) => setSelectedMainBookId(e.target.value)} 
             disabled={!selectedClassId} 
-            className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] bg-white w-64 shadow-sm text-sm disabled:opacity-50"
+            className="px-3 py-1.5 border border-blue-300 rounded-lg font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] bg-blue-50 w-64 shadow-sm text-sm disabled:opacity-50"
           >
             <option value="">본교재 선택...</option>
             {mainTextbooks.map((b: any) => {
@@ -534,11 +471,10 @@ export default function ProgressPage() {
 
           <div className="w-px h-5 bg-slate-300 mx-2"></div>
 
-          {/* 🌟 추가된 부교재/워크북 드롭다운 */}
-          <span className="text-xs font-bold text-slate-500">부교재/워크북:</span>
+          <span className="text-xs font-bold text-emerald-600">📗 부교재/워크북:</span>
           <select 
-            value={subTextbooks.find(b => b.book_id.toString() === selectedBookId) ? selectedBookId : ""} 
-            onChange={(e) => setSelectedBookId(e.target.value)} 
+            value={subTextbooks.find(b => b.book_id === selectedSubBookId) ? selectedSubBookId : ""} 
+            onChange={(e) => setSelectedSubBookId(e.target.value)} 
             disabled={!selectedClassId} 
             className="px-3 py-1.5 border border-emerald-300 rounded-lg font-bold text-emerald-700 focus:outline-none focus:ring-2 focus:ring-emerald-600 bg-emerald-50 w-64 shadow-sm text-sm disabled:opacity-50"
           >
@@ -566,132 +502,156 @@ export default function ProgressPage() {
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden relative">
-          <div className="w-[280px] bg-white border-r border-slate-200 flex flex-col shrink-0 relative z-10">
-            <div className="p-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center text-xs font-bold text-slate-500 shrink-0">
-              <label className="flex items-center gap-2 cursor-pointer hover:text-slate-700">
-                <input type="checkbox" checked={pages.length > 0 && checkedPages.length === pages.length} onChange={(e) => setCheckedPages(e.target.checked ? pages : [])} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
-                <span>전체 페이지 선택</span>
+        <div className="flex-1 flex overflow-hidden relative bg-slate-50">
+          
+          <div className="w-1/2 flex flex-col border-r border-slate-200 bg-white shadow-[2px_0_10px_rgba(0,0,0,0.02)] z-10">
+            <div className="p-2 border-b border-slate-200 bg-blue-50/50 flex items-center gap-2 overflow-x-auto custom-scroll shrink-0 shadow-inner">
+              <label className="flex items-center gap-1.5 cursor-pointer px-3 py-1 bg-white border border-slate-300 rounded-md shrink-0 shadow-sm hover:bg-slate-50">
+                <input type="checkbox" checked={mainPages.length > 0 && checkedMainPages.length === mainPages.length} onChange={(e) => setCheckedMainPages(e.target.checked ? mainPages : [])} className="w-3.5 h-3.5 accent-[#002864]" />
+                <span className="text-[11px] font-bold text-slate-600">전체</span>
+              </label>
+              <div className="w-px h-5 bg-slate-300 mx-1"></div>
+              {mainPages.length === 0 && <span className="text-xs font-bold text-slate-400 italic">본교재를 선택해주세요.</span>}
+              {mainPages.map(p => (
+                <div key={p} className="flex items-center shrink-0 group">
+                  <input type="checkbox" checked={checkedMainPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedMainPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} className="mr-1 w-3.5 h-3.5 accent-[#002864] cursor-pointer" />
+                  <button onClick={() => setActiveMainPage(p)} className={`px-3 py-1 rounded-md text-[11px] font-extrabold transition-all border ${activeMainPage === p ? "bg-[#002864] text-white border-[#002864] shadow-md" : "bg-white text-slate-500 border-slate-200 hover:bg-blue-50"}`}>
+                    {p}p
+                  </button>
+                </div>
+              ))}
+            </div>
+
+            <div className="p-3 border-b border-slate-200 bg-[#f8fafc] text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">📘 본교재</span>
+                <span className="text-[#002864] font-extrabold text-sm">{activeMainPage !== null ? `${activeMainPage} Page` : "- Page"}</span>
+              </div>
+              <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-slate-300 shadow-sm hover:bg-slate-50">
+                <input type="checkbox" checked={activeMainPage !== null && groupedMainQs[activeMainPage]?.length > 0 && groupedMainQs[activeMainPage]?.every((q:any) => checkedMainQs.includes(q.tq_id))} onChange={(e) => {
+                  const isChecked = e.target.checked;
+                  if (!activeMainPage) return;
+                  const ids = (groupedMainQs[activeMainPage] || []).map((q: any) => q.tq_id);
+                  if (isChecked) setCheckedMainQs(prev => Array.from(new Set([...prev, ...ids])));
+                  else setCheckedMainQs(prev => prev.filter(id => !ids.includes(id)));
+                }} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
+                <span className="font-bold text-slate-600">현재 페이지 전체 선택</span>
               </label>
             </div>
-            <div className="flex-1 overflow-y-auto custom-scroll">
-              {isLoading ? <div className="p-10 text-center font-bold text-slate-400">데이터 로딩중...</div>
-              : pages.length === 0 ? <div className="p-10 text-center text-slate-400 font-bold">교재를 선택해주세요.</div>
-              : pages.map(p => {
-                  const status = getPageStatus(p);
-                  const isActive = activePageNum === p;
-                  return (
-                    <div key={p} onClick={() => setActivePageNum(p)} className={`flex items-center p-3 border-b border-slate-100 hover:bg-slate-50 transition-colors cursor-pointer group ${isActive ? "bg-[#f1f5f9] border-r-4 border-r-[#002864]" : ""}`}>
-                      <div className="flex items-center justify-between w-full">
-                        <div className="flex items-center gap-3">
-                          <input type="checkbox" checked={checkedPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
-                          <span className={`font-bold text-[14px] ${isActive ? "text-[#002864]" : "text-slate-600 group-hover:text-[#002864]"}`}>{p === 0 ? "미지정" : `${p}P`}</span>
+
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-32 bg-slate-50/50">
+              {activeMainPage !== null && groupedMainQs[activeMainPage]?.length > 0 ? (
+                <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden">
+                  {groupedMainQs[activeMainPage].map((q: any) => (
+                    <div key={q.tq_id} className="flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors items-stretch">
+                      <div className="w-12 flex items-center justify-center border-r border-slate-100 shrink-0 bg-slate-50">
+                        <input type="checkbox" checked={checkedMainQs.includes(q.tq_id)} onChange={(e) => {
+                          const isChecked = e.target.checked;
+                          if (isChecked) setCheckedMainQs(prev => [...prev, q.tq_id]);
+                          else setCheckedMainQs(prev => prev.filter(id => id !== q.tq_id));
+                        }} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
+                      </div>
+                      <div className="w-28 py-2 px-3 flex flex-col justify-center border-r border-slate-100 shrink-0 overflow-hidden">
+                        <span className="text-slate-400 font-medium text-[10px] truncate leading-tight">{q.question_category || "일반"}</span>
+                        <button onClick={() => setModalQuestion({ ...q, type: 'main' })} className="text-slate-700 font-extrabold text-[14px] text-left hover:text-blue-600 hover:underline">{q.question_number || "-"}</button>
+                      </div>
+                      <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
+                        <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">
+                          {q.question}
                         </div>
-                        {status === "done" && <span className="w-16 text-center text-[10px] font-bold rounded py-0.5 bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8]">진도완료</span>}
-                        {status === "homework" && <span className="w-16 text-center text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d]">과제배부</span>}
-                        {status === "partial" && <span className="w-16 text-center text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300">진행중</span>}
-                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); markSinglePageCompleted(p); }} className="group/badge w-16 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-slate-700 hover:text-white hover:border-slate-700 transition-colors"><span className="group-hover/badge:hidden">대기</span><span className="hidden group-hover/badge:inline tracking-tighter">진도 체크</span></span>}
+                        {renderBadge(q.tq_id)}
                       </div>
                     </div>
-                  );
-                })}
+                  ))}
+                </div>
+              ) : <div className="text-center text-slate-400 font-bold p-10">문항이 없습니다.</div>}
             </div>
           </div>
 
-          <div className="flex-1 flex bg-slate-50 relative z-0">
-            <div className="w-1/2 flex flex-col border-r border-slate-200 bg-white">
-              <div className="p-3 border-b border-slate-200 bg-[#f8fafc] text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">선택 교재</span>
-                  <span className="text-[#002864] font-extrabold text-sm">{activePageNum !== null ? `${activePageNum} Page` : "- Page"}</span>
+          <div className="w-1/2 flex flex-col bg-emerald-50/20">
+            <div className="p-2 border-b border-emerald-200 bg-emerald-50 flex items-center gap-2 overflow-x-auto custom-scroll shrink-0 shadow-inner">
+              <label className="flex items-center gap-1.5 cursor-pointer px-3 py-1 bg-white border border-emerald-300 rounded-md shrink-0 shadow-sm hover:bg-emerald-50">
+                <input type="checkbox" checked={subPages.length > 0 && checkedSubPages.length === subPages.length} onChange={(e) => setCheckedSubPages(e.target.checked ? subPages : [])} className="w-3.5 h-3.5 accent-[#059669]" />
+                <span className="text-[11px] font-bold text-emerald-700">전체</span>
+              </label>
+              <div className="w-px h-5 bg-emerald-200 mx-1"></div>
+              {subPages.length === 0 && <span className="text-xs font-bold text-emerald-600/60 italic">부교재/워크북을 선택해주세요.</span>}
+              {subPages.map(p => (
+                <div key={p} className="flex items-center shrink-0 group">
+                  <input type="checkbox" checked={checkedSubPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedSubPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} className="mr-1 w-3.5 h-3.5 accent-[#059669] cursor-pointer" />
+                  <button onClick={() => setActiveSubPage(p)} className={`px-3 py-1 rounded-md text-[11px] font-extrabold transition-all border ${activeSubPage === p ? "bg-[#059669] text-white border-[#059669] shadow-md" : "bg-white text-emerald-600 border-emerald-200 hover:bg-emerald-50"}`}>
+                    {p}p
+                  </button>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-slate-300 shadow-sm">
-                  <input type="checkbox" checked={activePageNum !== null && groupedMainQs[activePageNum]?.length > 0 && groupedMainQs[activePageNum]?.every((q:any) => checkedMainQs.includes(q.tq_id))} onChange={(e) => toggleAllMainQs(e.target.checked)} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
-                  <span className="font-bold text-slate-600">전체 선택</span>
-                </label>
+              ))}
+            </div>
+
+            <div className="p-3 border-b border-emerald-200 bg-[#f0fdf4] text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="bg-[#059669] text-white px-2.5 py-1 rounded text-xs font-bold">📗 부교재/워크북</span>
+                <span className="text-[#059669] font-extrabold text-sm">{activeSubPage !== null ? `${activeSubPage} Page` : "- Page"}</span>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-5 pb-32">
-                {activePageNum !== null && groupedMainQs[activePageNum]?.length > 0 ? (
-                  <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden">
-                    {groupedMainQs[activePageNum].map((q: any) => (
-                      <div key={q.tq_id} className="flex border-b border-slate-100 hover:bg-blue-50/30 transition-colors items-stretch">
-                        <div className="w-12 flex items-center justify-center border-r border-slate-100 shrink-0 bg-slate-50">
-                          <input type="checkbox" checked={checkedMainQs.includes(q.tq_id)} onChange={(e) => handleMainQCheck(q.tq_id, e.target.checked)} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
-                        </div>
-                        <div className="w-28 py-2 px-3 flex flex-col justify-center border-r border-slate-100 shrink-0 overflow-hidden">
-                          <span className="text-slate-400 font-medium text-[10px] truncate leading-tight">{q.question_category || "일반"}</span>
-                          <button onClick={() => setModalQuestion({ ...q, type: 'main' })} className="text-slate-700 font-extrabold text-[14px] text-left hover:text-blue-600 hover:underline">{q.question_number || "-"}</button>
-                        </div>
-                        <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
-                          <span className="text-[#002864] break-all">$ {q.answer} $</span>
-                          {renderBadge(q.tq_id, 'main')}
-                        </div>
+              <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-emerald-300 shadow-sm hover:bg-emerald-50">
+                <input type="checkbox" checked={activeSubPage !== null && groupedSubQs[activeSubPage]?.length > 0 && groupedSubQs[activeSubPage]?.every((q:any) => checkedSubQs.includes(q.tq_id))} onChange={(e) => {
+                  const isChecked = e.target.checked;
+                  if (!activeSubPage) return;
+                  const ids = (groupedSubQs[activeSubPage] || []).map((q: any) => q.tq_id);
+                  if (isChecked) setCheckedSubQs(prev => Array.from(new Set([...prev, ...ids])));
+                  else setCheckedSubQs(prev => prev.filter(id => !ids.includes(id)));
+                }} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
+                <span className="font-bold text-emerald-700">현재 페이지 전체 선택</span>
+              </label>
+            </div>
+
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-32">
+              {activeSubPage !== null && groupedSubQs[activeSubPage]?.length > 0 ? (
+                <div className="bg-white border border-emerald-200 shadow-sm rounded-xl overflow-hidden">
+                  {groupedSubQs[activeSubPage].map((q: any) => (
+                    <div key={q.tq_id} className="flex border-b border-emerald-50 hover:bg-emerald-50/50 transition-colors items-stretch">
+                      <div className="w-12 flex items-center justify-center border-r border-emerald-50 shrink-0 bg-emerald-50/30">
+                        <input type="checkbox" checked={checkedSubQs.includes(q.tq_id)} onChange={(e) => {
+                          const isChecked = e.target.checked;
+                          if (isChecked) setCheckedSubQs(prev => [...prev, q.tq_id]);
+                          else setCheckedSubQs(prev => prev.filter(id => id !== q.tq_id));
+                        }} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
                       </div>
-                    ))}
-                  </div>
-                ) : <div className="text-center text-slate-400 font-bold p-10">문항이 없습니다.</div>}
-              </div>
-            </div>
-
-            <div className="w-1/2 flex flex-col bg-emerald-50/30">
-              <div className="p-3 border-b border-slate-200 bg-emerald-50/80 text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="bg-emerald-600 text-white px-2.5 py-1 rounded text-xs font-bold">마스터DB 다중 연결 문항</span>
-                  <span className="text-emerald-700 font-bold text-xs">선택된 본교재 기준 자동 호출</span>
-                </div>
-              </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-5 pb-32">
-                {activePageNum !== null && groupedMainQs[activePageNum]?.length > 0 ? (
-                  <div className="bg-white border border-emerald-200 shadow-sm rounded-xl overflow-hidden">
-                    {groupedMainQs[activePageNum].map((mq: any) => {
-                      const linkedWbQs = groupedWbQs[mq.tq_id] || [];
-                      if (linkedWbQs.length === 0) return null;
-                      return linkedWbQs.map((wq: any) => (
-                        <div key={wq.question_id} className="flex border-b border-emerald-50 hover:bg-emerald-50/50 transition-colors items-stretch">
-                          <div className="w-12 flex items-center justify-center border-r border-emerald-50 shrink-0 bg-emerald-50/30">
-                            <input type="checkbox" checked={checkedWbQs.includes(wq.question_id)} onChange={(e) => setCheckedWbQs(prev => e.target.checked ? [...prev, wq.question_id] : prev.filter(id => id !== wq.question_id))} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
-                          </div>
-                          <div className="w-32 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0">
-                            <span className="text-emerald-500 font-medium text-[10px] truncate leading-tight">연결: 본 {mq.question_number}번</span>
-                            <button onClick={() => setModalQuestion({ ...wq, type: 'wb' })} className="text-emerald-700 font-extrabold text-[14px] text-left hover:text-emerald-500 hover:underline">{wq.question_number || "-"}{wq.sub_num ? `-${wq.sub_num}` : ''}</button>
-                            <span className="text-[9px] font-bold text-slate-400 truncate w-full mt-1 bg-slate-50 px-1 rounded border border-slate-100" title={wq.pdf_source}>{wq.pdf_source?.replace('.pdf', '')}</span>
-                          </div>
-                          <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
-                            <span className="text-emerald-800 break-all">$ {wq.answer} $</span>
-                            {renderBadge(wq.question_id, 'wb')}
-                          </div>
+                      <div className="w-28 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0 overflow-hidden">
+                        <span className="text-emerald-500 font-medium text-[10px] truncate leading-tight">{q.question_category || "일반"}</span>
+                        <button onClick={() => setModalQuestion({ ...q, type: 'wb' })} className="text-emerald-700 font-extrabold text-[14px] text-left hover:text-emerald-500 hover:underline">{q.question_number || "-"}</button>
+                      </div>
+                      <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
+                        <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">
+                          {q.question}
                         </div>
-                      ));
-                    })}
-                  </div>
-                ) : <div className="flex h-full items-center justify-center text-slate-400 font-bold">본교재 문항을 선택하면 연결된 문제들이 나타납니다.</div>}
-              </div>
-            </div>
-
-            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.15)] flex items-center p-2 z-20 gap-2 w-max">
-                <div className="flex items-center gap-1 mr-2 border-r border-slate-200 pr-3">
-                <button onClick={() => handlePageChange(-1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">
-                    <span>←</span> 이전
-                </button>
-                <button onClick={() => handlePageChange(1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">
-                    다음 <span>→</span>
-                </button>
+                        {renderBadge(q.tq_id)}
+                      </div>
+                    </div>
+                  ))}
                 </div>
-                <button onClick={() => executeProgressAction("DONE_AND_WB_HW")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                  진도완료 + 연계 과제
-                </button>
-                <button onClick={() => executeProgressAction("MAIN_HW_AND_WB_HW")} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                  교재 과제 + 연계 과제
-                </button>
-                <div className="w-px h-6 bg-slate-300 mx-1"></div>
-                <button onClick={() => executeProgressAction("CANCEL")} className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-sm rounded-xl transition-colors shadow-sm">
-                  선택 취소
-                </button>
-              </div>
+              ) : <div className="text-center text-emerald-600/50 font-bold p-10">문항이 없습니다.</div>}
+            </div>
           </div>
+
+          <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.15)] flex items-center p-2 z-20 gap-2 w-max">
+              
+              <button onClick={() => executeProgressAction("DEFAULT")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+                일괄 처리 (본교재: 진도 / 부교재: 과제)
+              </button>
+              
+              <button onClick={() => executeProgressAction("ALL_HW")} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+                모두 과제 배부 (본교재+부교재)
+              </button>
+              
+              <div className="w-px h-6 bg-slate-300 mx-1"></div>
+              
+              <button onClick={() => executeProgressAction("CANCEL")} className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-sm rounded-xl transition-colors shadow-sm">
+                선택 취소
+              </button>
+            </div>
         </div>
+
       </div>
 
       <QuestionModal 

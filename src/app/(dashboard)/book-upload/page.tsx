@@ -23,7 +23,7 @@ interface ParsedQuestion {
 }
 
 interface TextbookQuestionInsert {
-  book_id: number;
+  book_id: string; 
   page_number: number;
   question_number: string;
   answer: string | null;
@@ -41,7 +41,7 @@ export default function BookUploadPage() {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
-  const [bookTitle, setBookTitle] = useState("초등로지카 MAX 6-1 1단원_1교_디수정");
+  const [bookTitle, setBookTitle] = useState("");
   const [bookType, setBookType] = useState("주교재");
   const [targetSessions, setTargetSessions] = useState(12);
 
@@ -51,6 +51,9 @@ export default function BookUploadPage() {
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
+
+  // 🌟 드래그 앤 드롭 상태 관리
+  const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
     const checkAccess = () => {
@@ -65,17 +68,21 @@ export default function BookUploadPage() {
 
   const addLog = (msg: string) => setUploadLogs(prev => [...prev, msg]);
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // 🌟 파일 처리 및 스마트 이름 추출 공통 로직
+  const processFile = (file: File) => {
     setFileName(file.name);
     setUploadLogs([]);
     
-    if (file.name.includes("워크북")) {
-      setBookType("워크북"); setBookTitle("초등로지카 MAX 6-1 1단원 워크북_1교_디수정");
+    // 파일명에서 쓸데없는 꼬리표 자르고 순수 교재명 자동 추출
+    let cleanName = file.name.replace(/\.json$/i, ''); // 확장자 제거
+    cleanName = cleanName.split('_Problems')[0]; // _Problems 뒷부분 전부 제거
+    
+    setBookTitle(cleanName); // 입력창에 자동 세팅
+
+    if (cleanName.includes("워크북") || file.name.includes("워크북")) {
+      setBookType("워크북");
     } else {
-      setBookType("주교재"); setBookTitle("초등로지카 MAX 6-1 1단원_1교_디수정");
+      setBookType("주교재");
     }
 
     const reader = new FileReader();
@@ -85,10 +92,38 @@ export default function BookUploadPage() {
         if (Array.isArray(json)) {
           setFileData(json);
           addLog(`✅ 파일 로드 완료: 총 ${json.length}개의 문항 감지.`);
+          addLog(`💡 추출된 기본 교재명: [${cleanName}]`);
         } else alert("유효하지 않은 JSON 형식입니다. 배열 형태여야 합니다.");
       } catch (err) { alert("JSON 파일 파싱 중 오류가 발생했습니다."); }
     };
     reader.readAsText(file);
+  };
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  // 🌟 드래그 앤 드롭 이벤트 핸들러
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.name.endsWith('.json')) {
+      processFile(file);
+    } else if (file) {
+      alert("JSON 파일만 업로드 가능합니다.");
+    }
   };
 
   const mapDifficulty = (diff: string | null | undefined) => {
@@ -104,7 +139,6 @@ export default function BookUploadPage() {
     if (!fileData || fileData.length === 0) return alert("업로드할 데이터가 없습니다.");
     if (!bookTitle.trim()) return alert("교재 이름을 입력해주세요.");
 
-    const tId = localStorage.getItem("logica_tenant_id") || null;
     setIsUploading(true);
     setUploadProgress(0);
 
@@ -146,12 +180,11 @@ export default function BookUploadPage() {
       addLog(`✅ [Step 1 완료] 마스터 DB 업데이트 완료.`);
 
       addLog(`🚀 [Step 2] 교재 골격(textbook) 확인 중...`);
-      let currentBookId: number; 
+      let currentBookId: string; 
       
       const { data: existingBook, error: checkErr } = await supabase.from('textbook').select('book_id').eq('title', bookTitle).eq('book_type', bookType).maybeSingle();
       if (checkErr) throw new Error("교재 중복 확인 오류");
 
-      // 🌟 [핵심 변경] 기존 문항 맵핑용 딕셔너리
       const existingTqMap: Record<string, number> = {};
 
       if (existingBook) {
@@ -160,7 +193,6 @@ export default function BookUploadPage() {
         }
         currentBookId = existingBook.book_id;
         
-        // 교재 내 기존 문항들의 question_id 목록을 싹 긁어옵니다.
         const { data: existingQs } = await supabase.from('textbook_question').select('tq_id, question_id').eq('book_id', currentBookId);
         if (existingQs) {
           existingQs.forEach(q => {
@@ -169,19 +201,23 @@ export default function BookUploadPage() {
         }
         addLog(`✅ 기존 교재 감지됨. 기존 문항 ${Object.keys(existingTqMap).length}개 로드 완료.`);
       } else {
+        // 🌟 [핵심 변경] tenant_id: null 로 고정하여 전 지점 공용(글로벌) 교재로 생성되게 함!
         const { data: newBook, error: insertBookErr } = await supabase.from('textbook').insert({
-            title: bookTitle, book_type: bookType, target_sessions: targetSessions, tenant_id: tId === 'hq' ? null : tId
+            title: bookTitle, 
+            book_type: bookType, 
+            target_sessions: targetSessions, 
+            tenant_id: null 
         }).select('book_id').single();
+        
         if (insertBookErr || !newBook) throw new Error(`교재 생성 실패: ${insertBookErr?.message}`);
         currentBookId = newBook.book_id;
-        addLog(`✅ [Step 2 완료] 교재 골격 새롭게 세팅 완료 (ID: ${currentBookId})`);
+        addLog(`✅ [Step 2 완료] 전 지점 공용 교재 골격 새롭게 세팅 완료`);
       }
       
       setUploadProgress(50);
 
       addLog(`🚀 [Step 3] 교재-문항 매핑 데이터 갱신 중...`);
       
-      // 🌟 [핵심 변경] 새로 넣을 배열과 기존 것 덮어쓸 배열 분리
       const toInsert: TextbookQuestionInsert[] = [];
       const toUpdate: (TextbookQuestionInsert & { tq_id: number })[] = [];
 
@@ -205,7 +241,6 @@ export default function BookUploadPage() {
           raw_metadata: q as Record<string, unknown>
         };
 
-        // 기존에 이미 등록된 question_id라면 업데이트 배열로, 아니면 인서트 배열로
         if (existingTqMap[q.question_id]) {
           toUpdate.push({ ...payload, tq_id: existingTqMap[q.question_id] });
         } else {
@@ -216,7 +251,6 @@ export default function BookUploadPage() {
       let processedCount = 0;
       const totalCount = toInsert.length + toUpdate.length;
 
-      // 🔄 기존 문항 업데이트 (tq_id 기반)
       if (toUpdate.length > 0) {
         addLog(`🔄 기존 문항 덮어쓰기(Update) ${toUpdate.length}개 진행 중...`);
         const updateChunkSize = 50; 
@@ -231,7 +265,6 @@ export default function BookUploadPage() {
         }
       }
 
-      // ➕ 새 문항 이어붙이기 (Insert)
       if (toInsert.length > 0) {
         addLog(`➕ 신규 문항 이어붙이기(Insert) ${toInsert.length}개 진행 중...`);
         for (let i = 0; i < toInsert.length; i += chunkSize) {
@@ -245,9 +278,9 @@ export default function BookUploadPage() {
       }
 
       addLog(`🎉 모든 업로드 과정이 완벽하게 종료되었습니다!`);
-      alert(`✅ 성공적으로 처리가 완료되었습니다!\n교재명: ${bookTitle}\n새로 추가됨: ${toInsert.length}개\n기존 업데이트됨: ${toUpdate.length}개`);
+      alert(`✅ 성공적으로 공용 교재 처리가 완료되었습니다!\n교재명: ${bookTitle}\n새로 추가됨: ${toInsert.length}개\n기존 업데이트됨: ${toUpdate.length}개`);
       
-      setFileData(null); setFileName("");
+      setFileData(null); setFileName(""); setBookTitle("");
       const fileInput = document.getElementById('jsonFileInput') as HTMLInputElement;
       if (fileInput) fileInput.value = '';
 
@@ -287,26 +320,36 @@ export default function BookUploadPage() {
             </ul>
           </div>
 
+          {/* 🌟 드래그 앤 드롭 지원 영역 */}
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">1. 파싱된 교재 JSON 파일 선택</label>
-            <div className="flex items-center gap-3">
-              <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-xl border border-slate-300 transition-colors font-bold shadow-sm flex-shrink-0">
-                파일 찾기...
-                <input id="jsonFileInput" type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
-              </label>
-              <div className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-500 truncate">
-                {fileName ? <span className="text-indigo-600 font-bold">{fileName} ({fileData?.length}문항 감지됨)</span> : "선택된 파일이 없습니다."}
+            <label className="block text-sm font-bold text-slate-700 mb-2">1. 파싱된 교재 JSON 파일 등록 (드래그 앤 드롭 지원)</label>
+            <div 
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => document.getElementById('jsonFileInput')?.click()}
+              className={`mt-2 flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-xl transition-all cursor-pointer ${
+                isDragOver ? 'border-indigo-500 bg-indigo-50 scale-[1.02]' : 'border-slate-300 bg-slate-50 hover:bg-slate-100 hover:border-slate-400'
+              }`}
+            >
+              <input id="jsonFileInput" type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
+              <div className="text-4xl mb-3">{isDragOver ? '📂' : '📄'}</div>
+              <p className="text-slate-600 font-bold mb-1">여기로 JSON 파일을 드래그하거나 클릭하세요</p>
+              <div className="text-xs text-slate-500 font-medium h-4 mt-1">
+                {fileName ? <span className="text-indigo-600 font-bold bg-indigo-100 px-2 py-1 rounded">{fileName} ({fileData?.length}문항)</span> : "선택된 파일이 없습니다."}
               </div>
             </div>
           </div>
 
           <div className="grid grid-cols-2 gap-5 pt-4 border-t border-slate-100">
             <div className="col-span-2">
-              <label className="block text-sm font-bold text-slate-700 mb-2">2. 교재 공식 명칭</label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">2. 교재 공식 명칭 <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1 font-bold">전국 공용 자동 설정</span></label>
               <input 
                 type="text" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} 
-                className="w-full px-4 py-3 rounded-xl border border-slate-300 font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm" 
+                placeholder="파일을 올리면 자동으로 추출됩니다."
+                className="w-full px-4 py-3 rounded-xl border border-slate-300 font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm transition-all" 
               />
+              <p className="text-xs text-slate-500 mt-1.5 ml-1">※ 파일명에서 자동 추출된 이름입니다. 이 이름이 교재와 문항 전체에 일괄 적용됩니다.</p>
             </div>
             
             <div>

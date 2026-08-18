@@ -254,8 +254,14 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
       return;
     }
     try {
-      const { data: allApps } = await supabase.from("admission_application").select("student_id");
-      const allAssignedIds = allApps?.map(a => a.student_id) || [];
+      // 🌟 [변경점] 전체 배정 현황을 가져와서 다른 방에 배정되었는지(타 일정 중복) 확인합니다.
+      const { data: allApps } = await supabase.from("admission_application").select("student_id, admission_session_id");
+      const otherAppsMap: Record<string, boolean> = {};
+      allApps?.forEach(a => {
+        if (String(a.admission_session_id) !== String(selectedSessionId)) {
+          otherAppsMap[a.student_id] = true;
+        }
+      });
 
       const { data: apps, error: aError } = await supabase
         .from("admission_application")
@@ -318,6 +324,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
       const waitingTempList = (tempStus || []).map((s: any) => ({
         ...s,
         isAssigned: false,
+        isAssignedOther: false, // 임시생은 아직 다른 곳에 배정될 수 없으므로 무조건 false
         source: 'temp'
       }));
 
@@ -328,8 +335,10 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
 
       if (fError) throw fError;
 
+      // 🌟 [핵심 변경점] 기존에는 allAssignedIds 에 있으면 명단에서 아예 지워버렸지만, 
+      // 이제는 '현재 방(studentIdsInSession)'에 없는 학생이면 무조건 띄워줍니다!
       const waitingFormalList = (formalStus || [])
-        .filter((s: any) => !allAssignedIds.includes(s.student_id)) 
+        .filter((s: any) => !studentIdsInSession.includes(s.student_id)) 
         .map((s: any) => ({
           id: s.student_id, 
           student_id: s.student_id,
@@ -340,6 +349,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           test_date: s.created_at,
           created_at: s.created_at, 
           isAssigned: false,
+          isAssignedOther: !!otherAppsMap[s.student_id], // 🌟 타 일정 중복 여부 확인
           source: 'student'
         }));
 
@@ -390,7 +400,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     if (!hasAdminPermission) return alert("저장 권한이 없습니다."); 
     if (!testDate || !testHour || !testMinute || !examId) return alert("시험지, 날짜, 시작 시간은 필수입니다!");
     
-    // 🌟 [추가됨] 방을 개설할 때 소속 지점 꼬리표를 챙깁니다.
     const myTenantId = localStorage.getItem("logica_tenant_id");
     if (!myTenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
 
@@ -428,7 +437,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           exam_id: examId, 
           session_comment: comment || null, 
           status: "모집중",
-          tenant_id: myTenantId // 🌟 [추가됨] 방 개설 시 꼬리표 부착!
+          tenant_id: myTenantId
         }]);
         if (error) throw error;
 
@@ -536,7 +545,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
 
         if (tempErr || !tempStudents) throw new Error("대기생 정보를 불러올 수 없습니다.");
 
-        // 🌟 [추가됨] 임시생을 진짜 DB로 넣을 때 꼬리표 부착 (AssignModal과 동일한 구조의 방어선)
         const myTenantId = localStorage.getItem("logica_tenant_id");
         if (!myTenantId) throw new Error("소속 지점 정보가 없습니다.");
 
@@ -561,7 +569,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             school: temp.school_name, 
             parent_id: parentId,
             status: "입학테스트",
-            tenant_id: myTenantId // 🌟 꼬리표 부착!
+            tenant_id: myTenantId 
           }).select().single();
 
           if (sErr) throw new Error(`[${temp.student_name}] 등록 실패: ${sErr.message}`);
@@ -980,6 +988,8 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                              <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
                              <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              {sourceBadge}
+                             {/* 🌟 앗! 이 학생은 다른 방에 들어가 있는 학생이네요! (중복 배정 가능) */}
+                             {std.isAssignedOther && <span className="text-[9px] bg-amber-100 text-amber-700 border border-amber-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔄 타 일정 중복</span>}
                              {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
                            </div>
                            <div className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">

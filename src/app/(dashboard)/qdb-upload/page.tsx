@@ -12,12 +12,15 @@ export default function QuestionDBUploadPage() {
   const [fileData, setFileData] = useState<any[] | null>(null);
   const [fileName, setFileName] = useState("");
   
-  // 🌟 교재 이름 강제 지정 상태
-  const [bookTitle, setBookTitle] = useState("초등로지카 MAX 6-1 1단원_1교_디수정");
+  // 🌟 교재 이름 상태 (기본값은 비워두고 파일 업로드 시 자동 채움)
+  const [bookTitle, setBookTitle] = useState("");
   
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
+  
+  // 🌟 드래그 앤 드롭 상태 관리
+  const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
     const checkAccess = () => {
@@ -39,19 +42,15 @@ export default function QuestionDBUploadPage() {
     setUploadLogs(prev => [...prev, msg]);
   };
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
+  // 🌟 공통 파일 처리 로직 (드래그 앤 드롭과 클릭 업로드 모두 사용)
+  const processFile = (file: File) => {
     setFileName(file.name);
     setUploadLogs([]);
 
-    // 파일명에 따라 기본 교재명 세팅
-    if (file.name.includes("워크북")) {
-      setBookTitle("초등로지카 MAX 6-1 1단원 워크북_1교_디수정");
-    } else {
-      setBookTitle("초등로지카 MAX 6-1 1단원_1교_디수정");
-    }
+    // 🌟 [핵심] 파일명에서 쓸데없는 꼬리표 자르고 순수 교재명 자동 추출
+    let cleanName = file.name.replace(/\.json$/i, ''); // 1. 확장자 제거
+    cleanName = cleanName.split('_Problems')[0]; // 2. _Problems... 뒷부분 전부 제거
+    setBookTitle(cleanName); // 3. 입력창에 강제 세팅
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -60,6 +59,7 @@ export default function QuestionDBUploadPage() {
         if (Array.isArray(json)) {
           setFileData(json);
           addLog(`✅ 파일 로드 성공: 총 ${json.length}개의 문항 데이터 감지.`);
+          addLog(`💡 추출된 기본 교재명: [${cleanName}]`);
         } else {
           alert("유효하지 않은 JSON 형식입니다. 배열 형태여야 합니다.");
         }
@@ -68,6 +68,32 @@ export default function QuestionDBUploadPage() {
       }
     };
     reader.readAsText(file);
+  };
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) processFile(file);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    const file = e.dataTransfer.files?.[0];
+    if (file && file.name.endsWith('.json')) {
+      processFile(file);
+    } else {
+      alert("JSON 파일만 업로드 가능합니다.");
+    }
   };
 
   // DB의 CHECK 제약조건 충돌 방지를 위한 난이도 필터
@@ -90,13 +116,12 @@ export default function QuestionDBUploadPage() {
 
     setIsUploading(true);
     setUploadProgress(5);
-    addLog(`🚀 마스터 DB(question_db) 스마트 업로드 시작...`);
+    addLog(`🚀 마스터 DB(question_db) 스마트 일괄 업로드 시작...`);
 
     try {
-      // 1. JSON 파일 안의 question_id 목록 추출
+      // 1. JSON 파일 안의 question_id 목록 추출하여 기존 DB와 대조
       const incomingIds = fileData.map(q => q.question_id).filter(Boolean);
       
-      // 2. DB에 이미 존재하는 question_id 가져오기 (비교용)
       const { data: existingQs, error: fetchErr } = await supabase
         .from('question_db')
         .select('question_id')
@@ -105,14 +130,16 @@ export default function QuestionDBUploadPage() {
       if (fetchErr) throw new Error("기존 데이터 확인 중 오류 발생");
 
       const existingIdSet = new Set(existingQs?.map(q => q.question_id) || []);
-      addLog(`✅ 기존 등록된 마스터 문항 ${existingIdSet.size}개 감지됨.`);
+      
+      let updateCount = 0;
+      let insertCount = 0;
 
-      // 3. 업데이트할 녀석과 새로 추가할 녀석을 분리
-      const toInsert: any[] = [];
-      const toUpdate: any[] = [];
+      // 2. 완벽하게 스키마에 맞게 데이터 매핑
+      const questionsToUpsert = fileData.map((q) => {
+        if (existingIdSet.has(q.question_id)) updateCount++;
+        else insertCount++;
 
-      fileData.forEach((q) => {
-        const payload = {
+        return {
           question_id: q.question_id,
           item_id: q.item_id || null,
           parent_question_id: q.parent_question_id || null,
@@ -162,54 +189,37 @@ export default function QuestionDBUploadPage() {
           image_2_url: q.image_2_url || null,
           image_2_type: q.image_2_type || null,
           
-          // 🌟 입력한 교재명 강제 주입
           book_name: finalBookName || q.book_name || null,
           source_book_name: finalBookName || q.source_book_name || q.book_name || null,
           
           updated_at: new Date().toISOString()
         };
-
-        if (existingIdSet.has(q.question_id)) {
-          toUpdate.push(payload);
-        } else {
-          toInsert.push(payload);
-        }
       });
 
+      addLog(`📊 데이터 분석 결과: 기존 덮어쓰기(Update) ${updateCount}건 | 신규 이어붙이기(Insert) ${insertCount}건`);
+
+      // 3. Supabase UPSERT를 활용한 일괄 처리
+      const chunkSize = 100;
       let processedCount = 0;
-      const totalCount = toUpdate.length + toInsert.length;
 
-      // 4. 🔄 기존 문항 덮어쓰기 (Update)
-      if (toUpdate.length > 0) {
-        addLog(`🔄 기존 문항 덮어쓰기(Update) ${toUpdate.length}개 진행 중...`);
-        const updateChunkSize = 50;
-        for (let i = 0; i < toUpdate.length; i += updateChunkSize) {
-          const chunk = toUpdate.slice(i, i + updateChunkSize);
-          await Promise.all(chunk.map(async (item) => {
-            const { question_id, ...updateData } = item;
-            await supabase.from('question_db').update(updateData).eq('question_id', question_id);
-          }));
-          processedCount += chunk.length;
-          setUploadProgress(5 + Math.round((processedCount / totalCount) * 90));
-        }
-      }
+      for (let i = 0; i < questionsToUpsert.length; i += chunkSize) {
+        const chunk = questionsToUpsert.slice(i, i + chunkSize);
+        
+        const { error: upsertErr } = await supabase
+          .from('question_db')
+          .upsert(chunk, { onConflict: 'question_id' });
 
-      // 5. ➕ 새 문항 이어붙이기 (Insert)
-      if (toInsert.length > 0) {
-        addLog(`➕ 신규 문항 이어붙이기(Insert) ${toInsert.length}개 진행 중...`);
-        const insertChunkSize = 100;
-        for (let i = 0; i < toInsert.length; i += insertChunkSize) {
-          const chunk = toInsert.slice(i, i + insertChunkSize);
-          const { error: insertErr } = await supabase.from('question_db').insert(chunk);
-          if (insertErr) throw new Error(`문항 이어붙이기 오류: ${insertErr.message}`);
-          
-          processedCount += chunk.length;
-          setUploadProgress(5 + Math.round((processedCount / totalCount) * 90));
+        if (upsertErr) {
+          throw new Error(`청크 업로드 오류 (Row ${i}): ${upsertErr.message}`);
         }
+        
+        processedCount += chunk.length;
+        setUploadProgress(5 + Math.round((processedCount / questionsToUpsert.length) * 95));
+        addLog(`⏳ ${processedCount} / ${questionsToUpsert.length} 문항 안전하게 Upsert 처리 완료...`);
       }
 
       addLog(`🎉 마스터 DB 업로드 최종 완료!`);
-      alert(`✅ 마스터 문제은행 처리가 완료되었습니다!\n새로 추가됨: ${toInsert.length}개\n기존 덮어쓰기됨: ${toUpdate.length}개\n적용된 교재명: ${finalBookName}`);
+      alert(`✅ 마스터 문제은행 처리가 완료되었습니다!\n총 처리 문항: ${processedCount}개\n(신규: ${insertCount}개 / 업데이트: ${updateCount}개)\n적용된 교재명: ${finalBookName}`);
 
       setFileData(null);
       setFileName("");
@@ -234,36 +244,42 @@ export default function QuestionDBUploadPage() {
       
       <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-10 overflow-hidden">
         
-        {/* 헤더 */}
         <div className="bg-slate-800 p-6 text-white shrink-0">
           <h1 className="text-2xl font-black flex items-center gap-2">
             <span>🗄️</span> 마스터 문제은행 (question_db) 스마트 업로드
           </h1>
           <p className="text-slate-300 text-sm mt-2 font-medium">
-            AI로 파싱된 원본 문제 JSON 파일을 마스터 DB에 추가합니다. 기존 데이터는 덮어쓰고, 새로운 데이터는 이어붙입니다.
+            AI로 파싱된 원본 문제 JSON 파일을 마스터 DB에 추가합니다. (기존 데이터는 덮어쓰고, 신규는 이어붙입니다.)
           </p>
         </div>
 
-        {/* 폼 영역 */}
         <div className="p-8 space-y-6 flex-1 overflow-y-auto custom-scroll">
           <div className="p-4 bg-blue-50 border border-blue-200 rounded-xl">
-            <h3 className="text-blue-800 font-bold text-sm mb-1">💡 스마트 이어붙이기 작동 안내</h3>
+            <h3 className="text-blue-800 font-bold text-sm mb-1">💡 스마트 이어붙이기(Upsert) 안내</h3>
             <ul className="text-xs text-blue-700 list-disc list-inside ml-4 space-y-1">
-              <li>이곳에 등록된 <code>question_id</code>가 있어야만 교재 뼈대(textbook_question)에 등록이 가능합니다.</li>
-              <li>만약 마스터 DB에 이미 있는 문제(UUID 동일)라면 기존 정보는 <b>새로운 내용으로 덮어씁니다(Update).</b></li>
-              <li>마스터 DB에 없는 새로운 문제라면 맨 뒤에 <b>이어서 추가합니다(Insert).</b></li>
+              <li>이곳에 먼저 문제가 등록되어 있어야 <b>교재 구조화 업로드</b>가 가능합니다.</li>
+              <li>동일한 <code>question_id</code>가 이미 존재하면 <b>내용만 업데이트(Update)</b> 합니다.</li>
+              <li>데이터베이스에 없는 새로운 문제라면 맨 뒤에 <b>새로 추가(Insert)</b> 합니다.</li>
             </ul>
           </div>
 
+          {/* 🌟 드래그 앤 드롭 영역 */}
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">1. 문제 데이터 JSON 파일 선택</label>
-            <div className="flex items-center gap-3">
-              <label className="cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 px-5 py-2.5 rounded-xl border border-slate-300 transition-colors font-bold shadow-sm flex-shrink-0">
-                파일 찾기...
-                <input id="jsonFileInput" type="file" accept=".json" onChange={handleFileUpload} className="hidden" />
-              </label>
-              <div className="flex-1 px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium text-slate-500 truncate">
-                {fileName ? <span className="text-indigo-600 font-bold">{fileName} ({fileData?.length}문항 감지됨)</span> : "선택된 파일이 없습니다."}
+            <label className="block text-sm font-bold text-slate-700 mb-2">1. 문제 데이터 JSON 파일 등록 (드래그 앤 드롭 지원)</label>
+            <div 
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              onClick={() => document.getElementById('jsonFileInput')?.click()}
+              className={`mt-2 flex flex-col items-center justify-center p-8 border-2 border-dashed rounded-xl transition-all cursor-pointer ${
+                isDragOver ? 'border-indigo-500 bg-indigo-50 scale-[1.02]' : 'border-slate-300 bg-slate-50 hover:bg-slate-100 hover:border-slate-400'
+              }`}
+            >
+              <input id="jsonFileInput" type="file" accept=".json" onChange={handleFileSelect} className="hidden" />
+              <div className="text-4xl mb-3">{isDragOver ? '📂' : '📄'}</div>
+              <p className="text-slate-600 font-bold mb-1">여기로 JSON 파일을 드래그하거나 클릭하세요</p>
+              <div className="text-xs text-slate-500 font-medium h-4 mt-1">
+                {fileName ? <span className="text-indigo-600 font-bold bg-indigo-100 px-2 py-1 rounded">{fileName} ({fileData?.length}문항)</span> : "선택된 파일이 없습니다."}
               </div>
             </div>
           </div>
@@ -274,16 +290,15 @@ export default function QuestionDBUploadPage() {
               type="text" 
               value={bookTitle} 
               onChange={(e) => setBookTitle(e.target.value)} 
-              placeholder="예: 초등로지카 MAX 6-1 1단원"
-              className="w-full px-4 py-3 rounded-xl border border-slate-300 font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm" 
+              placeholder="파일을 올리면 자동으로 추출됩니다."
+              className="w-full px-4 py-3 rounded-xl border border-slate-300 font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 shadow-sm transition-all" 
             />
-            <p className="text-xs text-slate-500 mt-1.5 ml-1">※ 입력한 교재명이 JSON의 기존 정보를 덮어쓰고 모든 문제에 일괄 적용됩니다.</p>
+            <p className="text-xs text-slate-500 mt-1.5 ml-1">※ 파일명에서 자동 추출된 이름입니다. 필요한 경우 수정하세요. 이 이름이 모든 문제에 일괄 적용됩니다.</p>
           </div>
 
-          {/* 터미널 느낌의 로그 창 */}
           <div className="bg-slate-900 rounded-xl p-4 h-48 overflow-y-auto custom-scroll font-mono text-xs text-emerald-400">
             {uploadLogs.length === 0 ? (
-              <span className="text-slate-600">대기 중... JSON 파일을 로드해주세요.</span>
+              <span className="text-slate-600">대기 중... JSON 파일을 드래그 앤 드롭 하세요.</span>
             ) : (
               uploadLogs.map((log, i) => (
                 <div key={i} className="mb-1">{`> ${log}`}</div>
@@ -292,7 +307,6 @@ export default function QuestionDBUploadPage() {
           </div>
         </div>
 
-        {/* 하단 버튼 및 진행바 */}
         <div className="p-6 bg-slate-50 border-t border-slate-200 shrink-0">
           {isUploading && (
             <div className="mb-4">
@@ -313,7 +327,7 @@ export default function QuestionDBUploadPage() {
               ${!fileData ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 
                 isUploading ? 'bg-slate-400 text-white cursor-wait' : 'bg-slate-800 hover:bg-slate-950 text-white active:scale-[0.98]'}`}
           >
-            {isUploading ? "데이터 동기화 진행 중..." : "🗄️ 문제은행 마스터 DB (question_db) 일괄 등록 실행"}
+            {isUploading ? "데이터 동기화 진행 중..." : "🗄️ 문제은행 마스터 DB 스마트 일괄 업로드 실행"}
           </button>
         </div>
 
