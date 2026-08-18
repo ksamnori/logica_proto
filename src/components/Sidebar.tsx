@@ -13,8 +13,11 @@ export default function Sidebar() {
   const [strictSuperAdmin, setStrictSuperAdmin] = useState(false);
   const [isPrincipal, setIsPrincipal] = useState(false); 
   const [isManager, setIsManager] = useState(false);
-  const [tenantName, setTenantName] = useState<string>("로딩중...");
   
+  // 🌟 팩토리(작업실) 접근 권한 상태 추가
+  const [isFactoryWorker, setIsFactoryWorker] = useState(false);
+  
+  const [tenantName, setTenantName] = useState<string>("로딩중...");
   const [displayRole, setDisplayRole] = useState<string>("TEACHER"); 
   
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
@@ -30,9 +33,13 @@ export default function Sidebar() {
     const isPrin = role === 'ADMIN' || pos.includes('원장'); 
     const isMgr = role === 'MANAGER' || pos.includes('실장');
     
+    // 🌟 원장, 부원장, 실장, 전임강사, 최고관리자 모두 팩토리 권한 부여
+    const isFW = isSA || isPrin || isMgr || pos.includes('부원장') || pos.includes('전임강사');
+    
     setStrictSuperAdmin(isSA);
     setIsPrincipal(isPrin);
     setIsManager(isMgr || isPrin || isSA);
+    setIsFactoryWorker(isFW);
 
     const fetchData = async () => {
       const tId = localStorage.getItem('logica_tenant_id');
@@ -89,6 +96,11 @@ export default function Sidebar() {
 
   const canAccess = (path: string) => {
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true; 
+    
+    // 🌟 팩토리 메뉴들은 FactoryWorker 권한이 있으면 무조건 통과
+    const factoryPaths = ['/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
+    if (factoryPaths.includes(path) && isFactoryWorker) return true;
+    
     if (isLoadingPerms) return false; 
     return allowedMenus.includes(path);
   };
@@ -151,6 +163,9 @@ export default function Sidebar() {
       customLabel = 'font-black';
     } else if (path === '/book-upload') {
       customBg = active ? 'bg-teal-500 border-teal-600 text-white shadow-md' : 'bg-teal-50/50 border-teal-100 text-teal-700 hover:bg-teal-100 hover:border-teal-200 shadow-sm';
+      customLabel = 'font-black';
+    } else if (path === '/taxonomy-editor') {
+      customBg = active ? 'bg-pink-500 border-pink-600 text-white shadow-md' : 'bg-pink-50/50 border-pink-100 text-pink-700 hover:bg-pink-100 hover:border-pink-200 shadow-sm';
       customLabel = 'font-black';
     }
 
@@ -217,6 +232,21 @@ export default function Sidebar() {
           <MenuItem path="/admission" label="진단평가 관리" />
         </MenuSection>
 
+        {/* 🌟 LOGICA Factory 섹션 신설 */}
+        <div className="mb-6">
+          <div className="px-4 flex items-center gap-1.5 mb-3">
+            <span className="text-[13px]">🏭</span>
+            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">LOGICA Factory</p>
+            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md font-black border border-slate-200 ml-1">DB 작업실</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 px-3">
+            <MenuItem path="/mapper" label="교재 매핑 툴" />
+            <MenuItem path="/taxonomy-editor" label="분류 교정 툴" />
+            <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
+            <MenuItem path="/book-upload" label="교재 업로드" />
+          </div>
+        </div>
+
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🏢</span>
@@ -240,15 +270,8 @@ export default function Sidebar() {
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
             <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
-            
-            {/* 🌟 수정 부분: full 속성을 모두 제거하여 권한 관리와 강사 관리를 같은 줄에 나란히 배치 */}
             <MenuItem path="/permission" label="권한 관리" />
             <MenuItem path="/instructor" label="강사 관리" />
-            
-            <MenuItem path="/mapper" label="교재 매핑 툴" full />
-            <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
-            <MenuItem path="/book-upload" label="교재 구조 업로드" />
-            
             <MenuItem path="/academy-info" label="학원 정보 설정" full />
           </div>
         </div>
