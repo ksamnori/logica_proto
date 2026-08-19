@@ -22,7 +22,6 @@ const applySafeCleaner = (text: string) => {
   cleaned = cleaned.replace(/\\?degree\b/g, '^{\\circ}');
   
   // 🌟 핵심 필터: AI의 과도한 더블 역슬래시(\\frac)를 싱글(\frac)로 강제 교정
-  // (단, LaTeX에서 줄바꿈 기호로 쓰이는 \\ 는 보호하기 위해 뒤에 알파벳이 올 때만 변환)
   cleaned = cleaned.replace(/\\\\(?=[a-zA-Z])/g, '\\');
   
   return cleaned.trim();
@@ -61,14 +60,35 @@ export default function PdfParserPage() {
   const [aiProgress, setAiProgress] = useState({ current: 0, total: 0 });
 
   useEffect(() => {
-    const checkAccess = () => {
+    // 🌟 [수정] 하드코딩된 권한 체크를 지우고, DB(tenant_role_permissions) 연동으로 교체
+    const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
-      const pos = localStorage.getItem("logica_instructor_position") || "";
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'MANAGER' || 
-                        pos.includes('최고관리자') || pos.includes('원장') || 
-                        pos.includes('부원장') || pos.includes('실장') || pos.includes('전임강사');
-      if (isGodMode) setIsAuthorized(true);
-      else { alert("⛔ 권한이 없습니다."); router.replace("/home"); }
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      if (role === 'SUPER_ADMIN') {
+        setIsAuthorized(true);
+        return;
+      }
+
+      if (!role || !tId) {
+        alert("로그인 정보가 없습니다.");
+        router.replace("/home");
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('tenant_role_permissions')
+        .select('allowed_menus')
+        .eq('tenant_id', tId)
+        .eq('role_name', role)
+        .single();
+
+      if (!error && data && data.allowed_menus.includes("/pdf-parser")) {
+        setIsAuthorized(true);
+      } else { 
+        alert("⛔ PDF 문항 추출기 접근 권한이 없습니다."); 
+        router.replace("/home"); 
+      }
     };
     checkAccess();
 
@@ -238,7 +258,7 @@ export default function PdfParserPage() {
             id: generateUUID(),
             qNum: qNum === "Q" ? autoIncQNum : qNum,
             pageNum: currentPrintedPage ? String(currentPrintedPage) : String(i),
-            difficulty: '중', // 🌟 AI 생성 시 기본 난이도 '중'
+            difficulty: '중',
             blob: undefined, 
             preview: undefined,
             questionText: cleanQText,
@@ -338,7 +358,7 @@ export default function PdfParserPage() {
         id: generateUUID(),
         qNum: String(currentQNum),
         pageNum: String(pageNum),
-        difficulty: '중', // 🌟 수동 드래그 생성 시 기본 난이도 '중'
+        difficulty: '중',
         blob: blob, preview: previewUrl,
         blob2: undefined, preview2: undefined,
         answerBlob: undefined, answerPreview: undefined,
@@ -397,7 +417,6 @@ export default function PdfParserPage() {
         
         const finalQuestionText = item.questionText.trim() ? item.questionText.trim() : '수동 이미지 추출 문항';
 
-        // 🌟 [핵심] difficulty를 null이 아닌 item.difficulty(최상,상,중,하,최하)로 올바르게 전송
         const { error: dbErr } = await supabase.from('question_db').insert({
           question_id: item.id,
           source_book_name: bookTitle,
@@ -432,7 +451,7 @@ export default function PdfParserPage() {
       <div className="bg-slate-900 rounded-2xl p-6 shadow-lg flex flex-col xl:flex-row justify-between items-center shrink-0 gap-6">
         <div>
           <h1 className="text-2xl font-black text-white flex items-center gap-2">
-            <span>✂️</span> PDF 자동 분해 파서 <span className="text-xs bg-indigo-500 text-indigo-50 px-2 py-0.5 rounded ml-2">Auto Parser</span>
+            <span>✂️</span> PDF 문항 추출기 <span className="text-xs bg-indigo-500 text-indigo-50 px-2 py-0.5 rounded ml-2">Auto Parser</span>
           </h1>
           <p className="text-sm font-bold text-slate-400 mt-1">AI를 통해 텍스트를 자동 추출하거나 마우스로 드래그하여 이미지를 잘라냅니다.</p>
         </div>
@@ -547,7 +566,6 @@ export default function PdfParserPage() {
                   <div key={item.id} className={`bg-white border rounded-xl p-4 shadow-sm transition-all relative group flex flex-col gap-3 ${isAnyTarget ? 'border-indigo-400 shadow-indigo-100/50 ring-1 ring-indigo-400' : 'border-slate-200 hover:border-indigo-300'}`}>
                     <button onClick={() => removeItem(item.id)} className="absolute top-3 right-3 w-7 h-7 bg-rose-50 text-rose-500 rounded-lg flex items-center justify-center font-bold text-sm hover:bg-rose-100 transition-colors z-10 opacity-0 group-hover:opacity-100">✕</button>
                     
-                    {/* 🌟 1. 페이지 / 번호 / 난이도 입력칸 */}
                     <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100 pr-8">
                       <div className="flex items-center gap-1.5 flex-[0.8] min-w-0">
                         <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap shrink-0">페이지:</span>
