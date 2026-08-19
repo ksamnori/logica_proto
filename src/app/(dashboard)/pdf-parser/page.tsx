@@ -20,6 +20,11 @@ const applySafeCleaner = (text: string) => {
   cleaned = cleaned.replace(/\xa0/g, ' ').replace(/\u200b/g, '');
   cleaned = cleaned.replace(/∠/g, '\\angle ').replace(/°/g, '^{\\circ}');
   cleaned = cleaned.replace(/\\?degree\b/g, '^{\\circ}');
+  
+  // 🌟 핵심 필터: AI의 과도한 더블 역슬래시(\\frac)를 싱글(\frac)로 강제 교정
+  // (단, LaTeX에서 줄바꿈 기호로 쓰이는 \\ 는 보호하기 위해 뒤에 알파벳이 올 때만 변환)
+  cleaned = cleaned.replace(/\\\\(?=[a-zA-Z])/g, '\\');
+  
   return cleaned.trim();
 };
 

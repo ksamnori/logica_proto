@@ -103,19 +103,18 @@ const PERMISSION_GROUPS = [
     ]
   },
   {
-    category: "문제 및 교재 DB 업로드",
-    desc: "문제은행 및 교재 구조를 파싱하여 서버에 등록하는 권한입니다.",
+    category: "LOGICA Factory (저작 도구)",
+    desc: "문제은행 파싱, 교정, 매핑 등 팩토리 도구 권한입니다.",
     items: [
-      { id: "/qdb-upload", label: "마스터 문제은행(question_db) 업로드" },
-      { id: "/book-upload", label: "통합 교재(textbook) 일괄 업로드" },
-    ]
-  },
-  {
-    category: "교재 구조화 및 데이터 교정",
-    desc: "교재 매핑 툴과 분류(Taxonomy) 교정 툴 권한입니다.",
-    items: [
-      { id: "/mapper", label: "3단 크로스 교재 매퍼" },
-      { id: "/taxonomy-editor", label: "수동 뎁스(Taxonomy) 교정 툴" },
+      { id: "/pdf-parser", label: "PDF 문항 추출기 (페이지 전체 접근)" },
+      { id: "/mapper", label: "교재 수동 연결 도구 (페이지 전체 접근)" },
+      { id: "/taxonomy-editor", label: "문제 교정 및 쌍둥이/유사 생성 (페이지 전체 접근)" },
+      { id: "action_add_question", label: "↳ [권한] 새 문항 추가", isAction: true },
+      { id: "action_delete_question", label: "↳ [권한] 문항 완전 삭제", isAction: true },
+      { id: "action_edit_question", label: "↳ [권한] 문항 & 해설 & 이미지 수정", isAction: true },
+      { id: "action_generate_twins", label: "↳ [권한] 쌍둥이/유사 문제 AI 자동 생성", isAction: true },
+      { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },
+      { id: "/book-upload", label: "교재 구조 (textbook) 일괄 업로드" },
     ]
   },
   {

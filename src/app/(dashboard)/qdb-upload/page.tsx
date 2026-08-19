@@ -12,14 +12,12 @@ export default function QuestionDBUploadPage() {
   const [fileData, setFileData] = useState<any[] | null>(null);
   const [fileName, setFileName] = useState("");
   
-  // 🌟 교재 이름 상태 (기본값은 비워두고 파일 업로드 시 자동 채움)
   const [bookTitle, setBookTitle] = useState("");
   
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
   
-  // 🌟 드래그 앤 드롭 상태 관리
   const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
@@ -33,13 +31,11 @@ export default function QuestionDBUploadPage() {
         return;
       }
 
-      // SUPER_ADMIN은 무조건 통과
       if (role === 'SUPER_ADMIN') {
         setIsAuthorized(true);
         return;
       }
 
-      // DB에서 현재 직급의 권한 조회
       const { data, error } = await supabase
         .from('tenant_role_permissions')
         .select('allowed_menus')
@@ -61,15 +57,13 @@ export default function QuestionDBUploadPage() {
     setUploadLogs(prev => [...prev, msg]);
   };
 
-  // 🌟 공통 파일 처리 로직 (드래그 앤 드롭과 클릭 업로드 모두 사용)
   const processFile = (file: File) => {
     setFileName(file.name);
     setUploadLogs([]);
 
-    // 🌟 [핵심] 파일명에서 쓸데없는 꼬리표 자르고 순수 교재명 자동 추출
-    let cleanName = file.name.replace(/\.json$/i, ''); // 1. 확장자 제거
-    cleanName = cleanName.split('_Problems')[0]; // 2. _Problems... 뒷부분 전부 제거
-    setBookTitle(cleanName); // 3. 입력창에 강제 세팅
+    let cleanName = file.name.replace(/\.json$/i, ''); 
+    cleanName = cleanName.split('_Problems')[0]; 
+    setBookTitle(cleanName); 
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -115,7 +109,6 @@ export default function QuestionDBUploadPage() {
     }
   };
 
-  // DB의 CHECK 제약조건 충돌 방지를 위한 난이도 필터
   const mapDifficulty = (diff: string | null) => {
     if (!diff) return null;
     const cleanDiff = diff.trim();
@@ -129,7 +122,6 @@ export default function QuestionDBUploadPage() {
   const processUpload = async () => {
     if (!fileData || fileData.length === 0) return alert("업로드할 데이터가 없습니다.");
     
-    // 교재명 입력 확인
     const finalBookName = bookTitle.trim();
     if (!finalBookName) return alert("교재 이름을 입력해주세요.");
 
@@ -138,7 +130,6 @@ export default function QuestionDBUploadPage() {
     addLog(`🚀 마스터 DB(question_db) 스마트 일괄 업로드 시작...`);
 
     try {
-      // 1. JSON 파일 안의 question_id 목록 추출하여 기존 DB와 대조
       const incomingIds = fileData.map(q => q.question_id).filter(Boolean);
       
       const { data: existingQs, error: fetchErr } = await supabase
@@ -153,7 +144,6 @@ export default function QuestionDBUploadPage() {
       let updateCount = 0;
       let insertCount = 0;
 
-      // 2. 완벽하게 스키마에 맞게 데이터 매핑
       const questionsToUpsert = fileData.map((q) => {
         if (existingIdSet.has(q.question_id)) updateCount++;
         else insertCount++;
@@ -217,7 +207,6 @@ export default function QuestionDBUploadPage() {
 
       addLog(`📊 데이터 분석 결과: 기존 덮어쓰기(Update) ${updateCount}건 | 신규 이어붙이기(Insert) ${insertCount}건`);
 
-      // 3. Supabase UPSERT를 활용한 일괄 처리
       const chunkSize = 100;
       let processedCount = 0;
 
@@ -261,13 +250,14 @@ export default function QuestionDBUploadPage() {
   return (
     <div className="flex flex-col h-full bg-slate-50 font-pretendard p-6 overflow-hidden items-center">
       
-      <div className="w-full max-w-3xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-10 overflow-hidden">
+      {/* 🌟 크기 및 레이아웃 통일: w-full max-w-4xl */}
+      <div className="w-full max-w-4xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-4 overflow-hidden h-[calc(100vh-6rem)]">
         
-        <div className="bg-slate-800 p-6 text-white shrink-0">
+        <div className="bg-[#002864] p-6 text-white shrink-0">
           <h1 className="text-2xl font-black flex items-center gap-2">
             <span>🗄️</span> 마스터 문제은행 (question_db) 스마트 업로드
           </h1>
-          <p className="text-slate-300 text-sm mt-2 font-medium">
+          <p className="text-blue-200 text-sm mt-2 font-medium">
             AI로 파싱된 원본 문제 JSON 파일을 마스터 DB에 추가합니다. (기존 데이터는 덮어쓰고, 신규는 이어붙입니다.)
           </p>
         </div>
@@ -282,7 +272,6 @@ export default function QuestionDBUploadPage() {
             </ul>
           </div>
 
-          {/* 🌟 드래그 앤 드롭 영역 */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">1. 문제 데이터 JSON 파일 등록 (드래그 앤 드롭 지원)</label>
             <div 
@@ -304,7 +293,7 @@ export default function QuestionDBUploadPage() {
           </div>
 
           <div className="pt-2 border-t border-slate-100">
-            <label className="block text-sm font-bold text-slate-700 mb-2">2. 강제 지정할 교재 이름 (book_name)</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">2. 강제 지정할 교재 이름 (book_name) <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1 font-bold">전국 공용 자동 설정</span></label>
             <input 
               type="text" 
               value={bookTitle} 
@@ -315,7 +304,7 @@ export default function QuestionDBUploadPage() {
             <p className="text-xs text-slate-500 mt-1.5 ml-1">※ 파일명에서 자동 추출된 이름입니다. 필요한 경우 수정하세요. 이 이름이 모든 문제에 일괄 적용됩니다.</p>
           </div>
 
-          <div className="bg-slate-900 rounded-xl p-4 h-48 overflow-y-auto custom-scroll font-mono text-xs text-emerald-400">
+          <div className="bg-slate-900 rounded-xl p-4 h-40 overflow-y-auto custom-scroll font-mono text-[11px] text-emerald-400 shadow-inner">
             {uploadLogs.length === 0 ? (
               <span className="text-slate-600">대기 중... JSON 파일을 드래그 앤 드롭 하세요.</span>
             ) : (
@@ -329,12 +318,12 @@ export default function QuestionDBUploadPage() {
         <div className="p-6 bg-slate-50 border-t border-slate-200 shrink-0">
           {isUploading && (
             <div className="mb-4">
-              <div className="flex justify-between text-xs font-bold text-slate-600 mb-1">
+              <div className="flex justify-between text-xs font-bold text-indigo-700 mb-1">
                 <span>데이터 베이스 동기화 중...</span>
                 <span>{uploadProgress}%</span>
               </div>
-              <div className="w-full bg-slate-200 rounded-full h-2.5 overflow-hidden">
-                <div className="bg-slate-700 h-2.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
+              <div className="w-full bg-indigo-100 rounded-full h-2.5 overflow-hidden shadow-inner">
+                <div className="bg-indigo-600 h-2.5 rounded-full transition-all duration-300" style={{ width: `${uploadProgress}%` }}></div>
               </div>
             </div>
           )}
@@ -344,9 +333,9 @@ export default function QuestionDBUploadPage() {
             disabled={!fileData || isUploading}
             className={`w-full py-4 rounded-xl font-black text-lg transition-all shadow-md flex items-center justify-center gap-2
               ${!fileData ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 
-                isUploading ? 'bg-slate-400 text-white cursor-wait' : 'bg-slate-800 hover:bg-slate-950 text-white active:scale-[0.98]'}`}
+                isUploading ? 'bg-indigo-400 text-white cursor-wait' : 'bg-[#002864] hover:bg-blue-900 text-white active:scale-[0.98]'}`}
           >
-            {isUploading ? "데이터 동기화 진행 중..." : "🗄️ 문제은행 마스터 DB 스마트 일괄 업로드 실행"}
+            {isUploading ? "데이터 동기화 진행 중..." : "🗄️ 문제은행 마스터 DB 스마트 일괄 등록 실행"}
           </button>
         </div>
 

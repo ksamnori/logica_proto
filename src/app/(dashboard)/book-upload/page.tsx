@@ -52,7 +52,6 @@ export default function BookUploadPage() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
 
-  // 🌟 드래그 앤 드롭 상태 관리
   const [isDragOver, setIsDragOver] = useState(false);
 
   useEffect(() => {
@@ -66,13 +65,11 @@ export default function BookUploadPage() {
         return;
       }
 
-      // SUPER_ADMIN은 무조건 통과
       if (role === 'SUPER_ADMIN') {
         setIsAuthorized(true);
         return;
       }
 
-      // DB에서 현재 직급의 권한 조회
       const { data, error } = await supabase
         .from('tenant_role_permissions')
         .select('allowed_menus')
@@ -92,16 +89,14 @@ export default function BookUploadPage() {
 
   const addLog = (msg: string) => setUploadLogs(prev => [...prev, msg]);
 
-  // 🌟 파일 처리 및 스마트 이름 추출 공통 로직
   const processFile = (file: File) => {
     setFileName(file.name);
     setUploadLogs([]);
     
-    // 파일명에서 쓸데없는 꼬리표 자르고 순수 교재명 자동 추출
-    let cleanName = file.name.replace(/\.json$/i, ''); // 확장자 제거
-    cleanName = cleanName.split('_Problems')[0]; // _Problems 뒷부분 전부 제거
+    let cleanName = file.name.replace(/\.json$/i, '');
+    cleanName = cleanName.split('_Problems')[0]; 
     
-    setBookTitle(cleanName); // 입력창에 자동 세팅
+    setBookTitle(cleanName);
 
     if (cleanName.includes("워크북") || file.name.includes("워크북")) {
       setBookType("워크북");
@@ -128,7 +123,6 @@ export default function BookUploadPage() {
     if (file) processFile(file);
   };
 
-  // 🌟 드래그 앤 드롭 이벤트 핸들러
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
@@ -225,7 +219,6 @@ export default function BookUploadPage() {
         }
         addLog(`✅ 기존 교재 감지됨. 기존 문항 ${Object.keys(existingTqMap).length}개 로드 완료.`);
       } else {
-        // 🌟 [핵심 변경] tenant_id: null 로 고정하여 전 지점 공용(글로벌) 교재로 생성되게 함!
         const { data: newBook, error: insertBookErr } = await supabase.from('textbook').insert({
             title: bookTitle, 
             book_type: bookType, 
@@ -322,11 +315,12 @@ export default function BookUploadPage() {
 
   return (
     <div className="flex flex-col h-full bg-slate-50 font-pretendard p-6 overflow-hidden items-center">
-      <div className="w-full max-w-4xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-4 overflow-hidden">
+      {/* 🌟 크기 통일: w-full max-w-4xl */}
+      <div className="w-full max-w-4xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-4 overflow-hidden h-[calc(100vh-6rem)]">
         
         <div className="bg-[#002864] p-6 text-white shrink-0">
           <h1 className="text-2xl font-black flex items-center gap-2">
-            <span>🚀</span> 통합 교재 일괄 업로드 시스템
+            <span>🚀</span> 통합 교재(Textbook) 일괄 업로드
           </h1>
           <p className="text-blue-200 text-sm mt-2 font-medium">
             마스터 문제은행(<code>question_db</code>)과 교재 구조(<code>textbook_question</code>)를 한 번에 묶어서 안전하게 처리합니다.
@@ -344,7 +338,6 @@ export default function BookUploadPage() {
             </ul>
           </div>
 
-          {/* 🌟 드래그 앤 드롭 지원 영역 */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">1. 파싱된 교재 JSON 파일 등록 (드래그 앤 드롭 지원)</label>
             <div 

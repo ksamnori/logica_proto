@@ -93,7 +93,7 @@ export default function Sidebar() {
   const canAccess = (path: string) => {
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true; 
     
-    // 🌟 팩토리 메뉴 권한 처리 (PDF 파서 추가)
+    // 🌟 팩토리 메뉴 권한 처리 
     const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
     if (factoryPaths.includes(path) && isFactoryWorker) return true;
     
@@ -104,13 +104,14 @@ export default function Sidebar() {
   const MenuItem = ({ path, label, desc, full = false }: { path: string, label: string, desc?: string, full?: boolean }) => {
     const active = pathname === path || pathname.startsWith(path + "/");
     const disabled = !canAccess(path);
+    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path);
     
-    const baseClass = `flex flex-col items-center justify-center px-2 py-3 rounded-xl transition-all border ${full ? 'col-span-2' : 'col-span-1'}`;
+    const baseClass = `flex flex-col items-center justify-center px-2 py-3 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
     
     if (disabled) {
       return (
         <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`} title="접근 권한이 없습니다">
-          <span className="text-[13px] font-bold truncate">{label}</span>
+          <span className="text-[13px] font-bold truncate w-full text-center">{label}</span>
           {desc && <span className="text-[10px] font-medium mt-0.5">{desc}</span>}
           <span className="absolute top-1 right-2 text-[8px] font-black text-slate-300">🔒</span>
         </div>
@@ -151,19 +152,18 @@ export default function Sidebar() {
       customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
-    } else if (path === '/factory-dashboard') {
-      customBg = active ? 'bg-slate-800 border-slate-900 text-white shadow-md' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400 shadow-sm';
-      customLabel = 'font-black';
-    } else if (['/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path)) {
-      // 🌟 PDF 파서도 공장 테마 적용
-      customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
+    } else if (isFactory) {
+      // 🌟 LOGICA Factory 라이트 인더스트리얼 테마 적용
+      customBg = active 
+        ? 'bg-amber-50 border-amber-200 text-amber-800 shadow-sm' 
+        : 'bg-white border-slate-200 text-slate-600 hover:bg-amber-50/50 hover:border-amber-200 hover:text-amber-700 shadow-sm';
       customLabel = 'font-black';
     }
 
     return (
       <Link href={path} className={`${baseClass} ${customBg}`}>
-        <span className={`text-[13px] truncate tracking-tight ${customLabel}`}>{label}</span>
-        {desc && <span className={`text-[10px] truncate tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
+        <span className={`text-[13px] truncate w-full text-center tracking-tight ${customLabel}`}>{label}</span>
+        {desc && <span className={`text-[10px] truncate w-full text-center tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
       </Link>
     );
   };
@@ -223,22 +223,24 @@ export default function Sidebar() {
           <MenuItem path="/admission" label="진단평가 관리" />
         </MenuSection>
 
-        <div className="mb-6">
-          <div className="px-4 flex items-center gap-1.5 mb-3">
-            <span className="text-[13px]">🏭</span>
-            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">LOGICA Factory</p>
-            <span className="text-[9px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-black border border-indigo-200 ml-1">전임강사 이상</span>
+        {/* 🌟 LOGICA Factory 라이트 인더스트리얼 테마 영역 */}
+        <div className="mx-3 mb-6 bg-slate-50/80 rounded-xl pt-4 pb-3 border border-slate-200 shadow-sm relative overflow-hidden group">
+          {/* 노란색/진회색 공장 안전 경계선 데코레이션 (기존보다 밝고 부드럽게) */}
+          <div className="absolute top-0 left-0 w-full h-1.5 bg-[repeating-linear-gradient(45deg,#fcd34d,#fcd34d_8px,#475569_8px,#475569_16px)] opacity-50"></div>
+          
+          <div className="px-3 flex items-center gap-2 mb-3 mt-1">
+            <span className="text-[14px] grayscale group-hover:grayscale-0 transition-all duration-500">🏭</span>
+            <p className="text-[11px] font-black text-slate-600 uppercase tracking-widest leading-none">LOGICA Factory</p>
           </div>
-          <div className="grid grid-cols-2 gap-2 px-3">
+          
+          <div className="grid grid-cols-2 gap-1.5 px-2">
             <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
-            {/* 🌟 PDF 파서 메뉴 추가 */}
-            <MenuItem path="/pdf-parser" label="PDF 자동 파서" full />
+            <MenuItem path="/pdf-parser" label="PDF 문항 추출기" full />
+            <MenuItem path="/taxonomy-editor" label="문제 교정 및 쌍둥이/유사 생성" full />
+            <MenuItem path="/mapper" label="교재 수동 연결 도구" full />
             
-            <MenuItem path="/mapper" label="교재 매핑 툴" />
-            <MenuItem path="/taxonomy-editor" label="분류 교정 툴" />
-            
+            <MenuItem path="/book-upload" label="교재 DB 업로드" />
             <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
-            <MenuItem path="/book-upload" label="교재 업로드" />
           </div>
         </div>
 
