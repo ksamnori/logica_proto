@@ -6,7 +6,6 @@ import { useRouter, usePathname } from "next/navigation";
 import { getSecureNotifications } from "@/app/actions/profile";
 import { supabase } from "@/lib/supabase";
 
-// 🌟 [정석 타입 정의] 알림 데이터 구조 선언
 interface MemoData {
   memo_id: string;
   author_name: string;
@@ -80,6 +79,9 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+  
+  // 🌟 게스트(체험용) 계정 여부 판별 상태 추가
+  const [isGuest, setIsGuest] = useState(false);
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });
@@ -88,6 +90,15 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   
   const imageRef = useRef<HTMLImageElement>(null);
+
+  useEffect(() => {
+    // 🌟 컴포넌트 마운트 시 권한 확인
+    const role = localStorage.getItem("logica_instructor_role") || "";
+    const pos = localStorage.getItem("logica_instructor_position") || "";
+    if (role === 'GUEST' || pos.includes('테스트') || pos.includes('체험')) {
+      setIsGuest(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (profileImgUrl && profileImgUrl !== "null" && profileImgUrl !== "undefined") {
@@ -341,6 +352,13 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // 🌟 안전장치: 게스트 계정은 저장 함수 실행 원천 차단
+    if (isGuest) {
+      alert("🔒 체험용(게스트) 계정은 프로필 정보를 수정할 수 없습니다.");
+      return;
+    }
+    
     if (!editName) return alert("이름은 필수 항목입니다.");
 
     setIsSavingProfile(true);
@@ -454,7 +472,6 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
         <div className={`flex items-center overflow-hidden transition-all duration-500 ease-in-out ${isHeaderExpanded ? 'max-w-[800px] opacity-100 ml-4 pl-4 border-l border-slate-200' : 'max-w-0 opacity-0 ml-0 pl-0 border-transparent'}`}>
           <DigitalClock />
-          {/* 🌟 클리닉 관제탑 버튼이 제거된 영역입니다. */}
 
           <div className="w-11 h-11 rounded-full bg-slate-100 border border-slate-200 flex items-center justify-center overflow-hidden shadow-sm shrink-0 mr-3">
             {finalProfileImgUrl && !imgError ? (
@@ -467,9 +484,9 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           <div className="flex flex-col text-left shrink-0">
             <p className="font-extrabold text-slate-800 leading-tight truncate">{currentName} 선생님</p>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[10px] font-bold text-blue-500 cursor-pointer hover:text-blue-700 transition-colors" onClick={handleOpenProfile}>정보수정</span>
+              <span className="text-[10px] font-bold text-blue-500 cursor-pointer hover:text-blue-700 transition-colors allow-guest-interaction" onClick={handleOpenProfile}>정보수정</span>
               <div className="w-1 h-1 bg-slate-300 rounded-full"></div>
-              <span className="text-[10px] font-bold text-slate-400 cursor-pointer hover:text-rose-500 transition-colors" onClick={onLogout}>로그아웃</span>
+              <span className="text-[10px] font-bold text-slate-400 cursor-pointer hover:text-rose-500 transition-colors allow-guest-interaction" onClick={onLogout}>로그아웃</span>
             </div>
           </div>
         </div>
@@ -483,7 +500,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
               <button onClick={() => { setIsProfileModalOpen(false); setNewPassword(""); setConfirmPassword(""); }} className="text-blue-200 hover:text-white text-2xl leading-none transition-colors allow-guest-interaction px-2">&times;</button>
             </div>
             
-            <form onSubmit={handleSaveProfile} autoComplete="off" className="p-6 flex-1 overflow-y-auto custom-scroll space-y-6">
+            <form onSubmit={handleSaveProfile} autoComplete="off" className="p-6 flex-1 overflow-y-auto custom-scroll space-y-6 allow-guest-interaction">
               
               <div className="flex flex-col items-center border-b border-slate-100 pb-6">
                 <h3 className="text-sm font-black text-slate-800 mb-4 w-full text-left">프로필 사진</h3>
@@ -498,12 +515,14 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                       )}
                     </div>
                     
-                    <label className="relative overflow-hidden cursor-pointer bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold py-2.5 px-5 rounded-xl border border-slate-300 transition-colors shadow-sm flex items-center gap-2">
+                    {/* 🌟 게스트는 사진 업로드 비활성화 */}
+                    <label className={`relative overflow-hidden bg-slate-100 text-slate-700 text-xs font-bold py-2.5 px-5 rounded-xl border border-slate-300 transition-colors shadow-sm flex items-center gap-2 ${isGuest ? 'cursor-not-allowed opacity-60' : 'hover:bg-slate-200 cursor-pointer'}`}>
                       <span className="text-base z-10">📸</span> <span className="z-10 relative">새 사진 업로드 및 자르기</span>
                       <input 
                         type="file" 
                         accept="image/*" 
-                        className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" 
+                        disabled={isGuest}
+                        className={`absolute inset-0 w-full h-full opacity-0 z-20 ${isGuest ? 'cursor-not-allowed' : 'cursor-pointer'}`} 
                         onChange={handleFileChange} 
                         onClick={(e) => { (e.target as HTMLInputElement).value = ''; }}
                       />
@@ -558,19 +577,20 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 )}
               </div>
 
+              {/* 🌟 텍스트 필드 게스트 비활성화 처리 */}
               <div className="space-y-4 pb-5 border-b border-slate-100">
                 <h3 className="text-sm font-black text-slate-800">기본 정보</h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
-                  <input type="text" required value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" />
+                  <input type="text" required disabled={isGuest} value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
-                  <input type="text" value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="010-0000-0000" />
+                  <input type="text" disabled={isGuest} value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-medium focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} placeholder="010-0000-0000" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이메일</label>
-                  <input type="email" value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" placeholder="email@example.com" />
+                  <input type="email" disabled={isGuest} value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-medium focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} placeholder="email@example.com" />
                 </div>
               </div>
 
@@ -580,15 +600,16 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                   <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호</label>
                   <input 
                     type="password" 
+                    disabled={isGuest}
                     value={newPassword} 
                     onChange={(e) => setNewPassword(e.target.value)} 
                     autoComplete="new-password"
                     data-lpignore="true"
-                    className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" 
+                    className={`w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'}`} 
                     placeholder="변경할 경우에만 입력 (최소 6자리)" 
                   />
                 </div>
-                {newPassword && (
+                {newPassword && !isGuest && (
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호 확인</label>
                     <input 
@@ -598,20 +619,21 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                       onChange={(e) => setConfirmPassword(e.target.value)} 
                       autoComplete="new-password"
                       data-lpignore="true"
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]" 
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] bg-white" 
                       placeholder="다시 한번 입력" 
                     />
                   </div>
                 )}
               </div>
 
+              {/* 🌟 저장 버튼 게스트 비활성화 처리 */}
               <div className="pt-4 shrink-0">
                 <button 
                   type="submit" 
-                  disabled={isSavingProfile} 
-                  className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold py-3.5 rounded-xl shadow-md transition-colors disabled:opacity-50 text-sm"
+                  disabled={isSavingProfile || isGuest} 
+                  className={`w-full font-bold py-3.5 rounded-xl shadow-md transition-colors text-sm ${isGuest ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-[#002864] hover:bg-blue-900 text-white active:scale-[0.98]'}`}
                 >
-                  {isSavingProfile ? "업로드 및 저장 중... ⏳" : "수정 내용 적용하기"}
+                  {isGuest ? "🔒 체험용 계정은 수정 불가" : isSavingProfile ? "업로드 및 저장 중... ⏳" : "수정 내용 적용하기"}
                 </button>
               </div>
             </form>

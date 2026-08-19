@@ -12,7 +12,6 @@ interface ProfileModalProps {
   isHQ?: boolean; 
 }
 
-// 🌟 [추가] DB 업데이트를 위한 명확한 타입 인터페이스 정의 (any 대체)
 interface InstructorUpdateData {
   phone: string;
   chat_position: string;
@@ -26,10 +25,13 @@ interface InstructorUpdateData {
 export default function ProfileModal({ isOpen, onClose, instId, instructorName, isHQ = false }: ProfileModalProps) {
   const [isSavingProfile, setIsSavingProfile] = useState(false);
   
+  // 🌟 게스트(체험용) 계정 여부 판별 상태 추가
+  const [isGuest, setIsGuest] = useState(false);
+  
   const [profileForm, setProfileForm] = useState({ 
     phone: "", 
     password: "", 
-    passwordConfirm: "", // 🌟 [추가] 비밀번호 확인 필드
+    passwordConfirm: "", 
     chatPosition: "", 
     autoActive: false, 
     chatStart: isHQ ? "09:00" : "", 
@@ -53,6 +55,15 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
     if (res.length < 12) return res.substring(0, 3) + '-' + res.substring(3, 7) + '-' + res.substring(7);
     return res.substring(0, 3) + '-' + res.substring(3, 7) + '-' + res.substring(7, 11) + '-' + res.substring(11);
   };
+
+  useEffect(() => {
+    // 🌟 컴포넌트 마운트 시 권한 확인
+    const role = localStorage.getItem("logica_instructor_role") || "";
+    const pos = localStorage.getItem("logica_instructor_position") || "";
+    if (role === 'GUEST' || pos.includes('테스트') || pos.includes('체험')) {
+      setIsGuest(true);
+    }
+  }, []);
 
   useEffect(() => {
     if (isOpen && instId) {
@@ -147,9 +158,14 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
   };
 
   const saveProfile = async () => {
+    // 🌟 안전장치: 게스트 계정은 저장 함수 실행 원천 차단
+    if (isGuest) {
+      alert("🔒 체험용(게스트) 계정은 프로필 정보를 수정할 수 없습니다.");
+      return;
+    }
+
     setIsSavingProfile(true);
     try {
-      // 🌟 [수정] 비밀번호 확인 로직 추가
       if (profileForm.password) {
         if (profileForm.password.length < 6) throw new Error("비밀번호는 최소 6자리 이상이어야 합니다.");
         if (profileForm.password !== profileForm.passwordConfirm) throw new Error("새 비밀번호와 확인 비밀번호가 일치하지 않습니다.");
@@ -158,7 +174,6 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
         if (authError) throw new Error(`비밀번호 변경 실패: ${authError.message}`);
       }
 
-      // 🌟 [수정] 명확한 타입(InstructorUpdateData)을 사용하여 any 제거
       let updateData: InstructorUpdateData = {
         phone: profileForm.phone, 
         chat_position: profileForm.chatPosition, 
@@ -181,7 +196,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
       const { error: dbError } = await supabase
         .from("instructor")
-        .update(updateData as any) // Supabase update type compatibility
+        .update(updateData as any)
         .eq("instructor_id", instId);
 
       if (dbError) throw new Error(`DB 저장 실패: ${dbError.message}`);
@@ -194,7 +209,6 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
       onClose();
       window.location.reload(); 
     } catch (e: unknown) { 
-      // 🌟 [수정] any 대신 unknown 사용 및 에러 메시지 추출
       const errorMessage = e instanceof Error ? e.message : '알 수 없는 오류가 발생했습니다.';
       alert("정보 수정 실패: " + errorMessage); 
     } finally { 
@@ -218,9 +232,10 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
                 <div className="w-20 h-20 rounded-full bg-slate-100 border-2 border-slate-200 shadow-inner flex items-center justify-center overflow-hidden mb-3 relative">
                   {currentImgUrl ? <img src={currentImgUrl} className="w-full h-full object-cover" alt="current" /> : <span className="text-2xl">👨‍🏫</span>}
                 </div>
-                <label className="relative overflow-hidden cursor-pointer text-[11px] font-bold text-blue-600 bg-blue-50 px-3 py-1.5 rounded hover:bg-blue-100 transition-colors">
+                {/* 🌟 게스트는 사진 업로드 비활성화 */}
+                <label className={`relative overflow-hidden text-[11px] font-bold px-3 py-1.5 rounded transition-colors ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'text-blue-600 bg-blue-50 hover:bg-blue-100 cursor-pointer'}`}>
                   <span className="z-10 relative">사진 변경 및 자르기</span>
-                  <input type="file" accept="image/*" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-20" onChange={handleFileChange} />
+                  <input type="file" accept="image/*" disabled={isGuest} className={`absolute inset-0 w-full h-full opacity-0 z-20 ${isGuest ? 'cursor-not-allowed' : 'cursor-pointer'}`} onChange={handleFileChange} />
                 </label>
               </>
             ) : (
@@ -261,22 +276,31 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">이름 (변경불가)</label>
-            <input type="text" value={instructorName} readOnly autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 bg-slate-100 outline-none" />
+            <input type="text" value={instructorName} readOnly autoComplete="none" data-lpignore="true" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 bg-slate-100 outline-none cursor-not-allowed" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">내 직책 (채팅 표시용)</label>
             <input 
               type="text" 
+              disabled={isGuest}
               value={profileForm.chatPosition} 
               onChange={e => setProfileForm({...profileForm, chatPosition: e.target.value})} 
               placeholder={isHQ ? "예: 팀장, 주임, 연구원" : "예: 원장, 강사"} 
               autoComplete="none" data-lpignore="true"
-              className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm" 
+              className={`w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-sm focus:outline-none focus:border-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800'}`} 
             />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
-            <input type="text" value={profileForm.phone} maxLength={13} onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} autoComplete="none" data-lpignore="true" placeholder="010-0000-0000" className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm" />
+            <input 
+              type="text" 
+              disabled={isGuest}
+              value={profileForm.phone} 
+              maxLength={13} 
+              onChange={e => setProfileForm({...profileForm, phone: formatPhone(e.target.value)})} 
+              autoComplete="none" data-lpignore="true" placeholder="010-0000-0000" 
+              className={`w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-sm focus:outline-none focus:border-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800'}`} 
+            />
           </div>
           
           <div className="space-y-3 pt-2">
@@ -284,16 +308,16 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
               <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호 (선택)</label>
               <input 
                 type="password" 
+                disabled={isGuest}
                 value={profileForm.password} 
                 onChange={e => setProfileForm({...profileForm, password: e.target.value})} 
                 autoComplete="new-password" 
                 data-lpignore="true" 
                 placeholder="변경할 경우에만 입력하세요 (최소 6자리)" 
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:border-[#002864] text-sm placeholder-slate-300" 
+                className={`w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-sm focus:outline-none focus:border-[#002864] placeholder-slate-300 ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800'}`} 
               />
             </div>
-            {/* 🌟 [추가] 비밀번호를 입력할 때만 확인 칸이 스르륵 나타남 */}
-            {profileForm.password && (
+            {profileForm.password && !isGuest && (
               <div className="animate-[fadeIn_0.2s_ease-out]">
                 <label className="block text-xs font-bold text-rose-500 mb-1">새 비밀번호 확인</label>
                 <input 
@@ -303,7 +327,7 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
                   autoComplete="new-password" 
                   data-lpignore="true" 
                   placeholder="오탈자 방지를 위해 다시 한번 입력하세요" 
-                  className={`w-full px-3 py-2 border rounded-lg font-bold text-slate-800 focus:outline-none text-sm placeholder-slate-300 ${profileForm.password === profileForm.passwordConfirm ? 'border-emerald-500 focus:border-emerald-600 ring-1 ring-emerald-500' : 'border-rose-300 focus:border-rose-500 ring-1 ring-rose-300'}`} 
+                  className={`w-full px-3 py-2 border rounded-lg font-bold text-slate-800 focus:outline-none text-sm placeholder-slate-300 bg-white ${profileForm.password === profileForm.passwordConfirm ? 'border-emerald-500 focus:border-emerald-600 ring-1 ring-emerald-500' : 'border-rose-300 focus:border-rose-500 ring-1 ring-rose-300'}`} 
                 />
                 {profileForm.passwordConfirm && profileForm.password !== profileForm.passwordConfirm && (
                   <p className="text-[10px] text-rose-500 mt-1 font-bold">비밀번호가 일치하지 않습니다.</p>
@@ -316,21 +340,37 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
           
           <h3 className="font-bold text-sm text-[#002864] mb-2 flex items-center gap-1">💬 {isHQ ? "부재중 메시지 설정" : "채팅 및 자동응답 설정"}</h3>
           
-          <div className="flex items-center justify-between bg-slate-50 p-3 rounded-lg border border-slate-200 shadow-sm">
-            <div><div className="font-bold text-sm text-slate-700">자동응답 켜기</div><div className="text-[10px] text-slate-500">{isHQ ? "업무 시간 외에 부재중 메시지를 전송합니다." : "상담 시간 외에 자동 메시지를 전송합니다."}</div></div>
-            <label className="relative inline-flex items-center cursor-pointer">
-              <input type="checkbox" checked={profileForm.autoActive} onChange={e => setProfileForm({...profileForm, autoActive: e.target.checked})} className="sr-only peer" />
+          <div className={`flex items-center justify-between p-3 rounded-lg border shadow-sm ${isGuest ? 'bg-slate-100 border-slate-200' : 'bg-slate-50 border-slate-200'}`}>
+            <div>
+              <div className={`font-bold text-sm ${isGuest ? 'text-slate-400' : 'text-slate-700'}`}>자동응답 켜기</div>
+              <div className={`text-[10px] ${isGuest ? 'text-slate-400' : 'text-slate-500'}`}>{isHQ ? "업무 시간 외에 부재중 메시지를 전송합니다." : "상담 시간 외에 자동 메시지를 전송합니다."}</div>
+            </div>
+            <label className={`relative inline-flex items-center ${isGuest ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'}`}>
+              <input type="checkbox" disabled={isGuest} checked={profileForm.autoActive} onChange={e => setProfileForm({...profileForm, autoActive: e.target.checked})} className="sr-only peer" />
               <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
             </label>
           </div>
 
           <div className="grid grid-cols-2 gap-3 mt-2">
-            <div><label className="block text-xs font-bold text-slate-500 mb-1">{isHQ ? "업무 시작 시간" : "상담 가능 시작 시간"}</label><input type="time" value={profileForm.chatStart} onChange={e => setProfileForm({...profileForm, chatStart: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-sm focus:outline-none focus:border-[#002864]" /></div>
-            <div><label className="block text-xs font-bold text-slate-500 mb-1">{isHQ ? "업무 종료 시간" : "상담 가능 종료 시간"}</label><input type="time" value={profileForm.chatEnd} onChange={e => setProfileForm({...profileForm, chatEnd: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-sm focus:outline-none focus:border-[#002864]" /></div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">{isHQ ? "업무 시작 시간" : "상담 가능 시작 시간"}</label>
+              <input type="time" disabled={isGuest} value={profileForm.chatStart} onChange={e => setProfileForm({...profileForm, chatStart: e.target.value})} className={`w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-sm focus:outline-none focus:border-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800'}`} />
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-1">{isHQ ? "업무 종료 시간" : "상담 가능 종료 시간"}</label>
+              <input type="time" disabled={isGuest} value={profileForm.chatEnd} onChange={e => setProfileForm({...profileForm, chatEnd: e.target.value})} className={`w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-sm focus:outline-none focus:border-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800'}`} />
+            </div>
           </div>
           <div className="mt-2">
             <label className="block text-xs font-bold text-slate-500 mb-1">{isHQ ? "부재중 메시지 내용" : "자동응답 메시지 내용"}</label>
-            <textarea rows={2} value={profileForm.autoMsg} onChange={e => setProfileForm({...profileForm, autoMsg: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 text-[11px] focus:outline-none focus:border-[#002864] resize-none custom-scroll" placeholder={isHQ ? "현재 본사 업무 시간이 아닙니다. 내일 확인 후 답변드리겠습니다." : "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다."}></textarea>
+            <textarea 
+              rows={2} 
+              disabled={isGuest}
+              value={profileForm.autoMsg} 
+              onChange={e => setProfileForm({...profileForm, autoMsg: e.target.value})} 
+              className={`w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-[11px] focus:outline-none focus:border-[#002864] resize-none custom-scroll ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-800'}`} 
+              placeholder={isHQ ? "현재 본사 업무 시간이 아닙니다. 내일 확인 후 답변드리겠습니다." : "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다."}>
+            </textarea>
           </div>
           
           <button type="submit" className="hidden"></button>
@@ -338,8 +378,8 @@ export default function ProfileModal({ isOpen, onClose, instId, instructorName, 
 
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
           <button type="button" onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm text-sm">닫기</button>
-          <button type="button" onClick={saveProfile} disabled={isSavingProfile} className="px-4 py-2 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm text-sm disabled:opacity-50">
-            {isSavingProfile ? "저장 중..." : "정보 저장"}
+          <button type="button" onClick={saveProfile} disabled={isSavingProfile || isGuest} className={`px-4 py-2 font-bold rounded-lg transition-colors shadow-sm text-sm ${isGuest ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-[#002864] text-white hover:bg-blue-900 disabled:opacity-50'}`}>
+            {isGuest ? "🔒 수정 불가" : isSavingProfile ? "저장 중..." : "정보 저장"}
           </button>
         </div>
       </div>
