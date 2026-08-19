@@ -61,6 +61,9 @@ function ReviewContent() {
   const [totalScore, setTotalScore] = useState<number | "-">(0);
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isDeletingReport, setIsDeletingReport] = useState(false);
+  
+  // 🌟 [추가] 리포트 권한 상태 관리
+  const [hasReportAuth, setHasReportAuth] = useState(false);
 
   const [modalQ, setModalQ] = useState<any>(null);
   const [modalWrongLog, setModalWrongLog] = useState<any[] | null>(null);
@@ -68,6 +71,34 @@ function ReviewContent() {
   const [contextIds, setContextIds] = useState({ studentId: "", examPaperId: "", standardName: "" });
 
   const mathJaxRef = useRef(false);
+
+  // 🌟 [추가] 사용자의 리포트 관리 권한 확인
+  useEffect(() => {
+    const checkReportAuth = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      if (role === 'SUPER_ADMIN') {
+        setHasReportAuth(true);
+        return;
+      }
+
+      if (role && tId) {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .single();
+          
+        // 권한 배열에 우리가 추가한 action_manage_admission_report가 있는지 확인
+        if (data && data.allowed_menus.includes("action_manage_admission_report")) {
+          setHasReportAuth(true);
+        }
+      }
+    };
+    checkReportAuth();
+  }, []);
 
   useEffect(() => {
     loadMathJax();
@@ -310,10 +341,9 @@ function ReviewContent() {
       const studentName = Array.isArray(aData.student) ? aData.student[0]?.name : aData.student?.name;
       setHeaderInfo({ title: `📝 ${exTitle} 채점표`, subtitle: `대상: ${studentName} 학생 | 유형: ${exType} [평가기준: ${stdName || '미지정'}]`, type: exType });
 
-      // 💡 [핵심 검증] DB에 리포트가 진짜로 있는지 꼼꼼하게 체크하여 버튼을 켭니다.
       if (exType === '입학테스트') {
         const { data: repCheck } = await supabase.from('admission_test_report').select('report_id').eq('assignment_id', parseInt(assignmentId as string)).maybeSingle();
-        setShowReportBtn(!!repCheck); // 리포트가 존재할 때만 버튼 활성화
+        setShowReportBtn(!!repCheck); 
       }
 
       const { data: items, error: iErr } = await supabase.from('exam_item').select('*').eq('exam_id', epId).order('sort_order');
@@ -643,7 +673,6 @@ function ReviewContent() {
         await loadExamResults();
         alert(`🎉 [시험] 채점 내역 저장 및 오답노트 연동이 완료되었습니다! (총점: ${finalScore}점)`);
         
-        // 💡 [핵심 검증] 단순 저장 후에도 리포트 유무를 재확인하여 엉뚱하게 켜지지 않도록 방지
         if (headerInfo.type === '입학테스트') {
           const { data: repCheck } = await supabase.from('admission_test_report').select('report_id').eq('assignment_id', parseInt(assignmentId as string)).maybeSingle();
           setShowReportBtn(!!repCheck);
@@ -712,7 +741,6 @@ function ReviewContent() {
         });
       });
 
-      // 💡 [수정] 상(70 이상), 중(40 이상), 하(40 미만)으로 깐깐하게 적용!
       const getLv = (e: number, m: number) => { if (m===0) return '중'; const p = (e/m)*100; if(p>=70) return '상'; if(p>=40) return '중'; return '하'; };
       const lvThink = getLv(sThink, maxThink); const lvPersist = getLv(sPersist, maxPersist); const lvKnow = getLv(sKnow, maxKnow);
 
@@ -744,7 +772,6 @@ function ReviewContent() {
 
       alert("✅ 진단 리포트 재생성 완료! 이제 새 데이터가 반영됩니다.");
       
-      // 💡 [핵심 추가] 재생성에 성공하면 즉시 버튼을 살려냅니다!
       setShowReportBtn(true);
       
     } catch(e: any) { 
@@ -804,7 +831,8 @@ function ReviewContent() {
               <p className="text-blue-200 text-sm mt-1">{headerInfo.subtitle}</p>
             </div>
             <div className="text-right flex items-center gap-4">
-              {showReportBtn && (
+              {/* 🌟 [권한적용] 상단 열기 버튼 */}
+              {hasReportAuth && showReportBtn && (
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
                   window.open(`/print/report?assignment_id=${assignmentId}&_bust=${bustStr}`, '_blank');
@@ -933,12 +961,13 @@ function ReviewContent() {
               <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                 {isSaving ? "저장 중... ⏳" : "1️⃣ 채점 내역 DB 저장 및 오답노트 전송"}
               </button>
-              {headerInfo.type === '입학테스트' && (
+              {/* 🌟 [권한적용] 하단 생성/열람/삭제 버튼들 */}
+              {hasReportAuth && headerInfo.type === '입학테스트' && (
                 <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                   {isGeneratingReport ? "리포트 생성 중... ⏳" : "2️⃣ 진단 리포트 생성하기 🪄"}
                 </button>
               )}
-              {headerInfo.type === '입학테스트' && showReportBtn && (
+              {hasReportAuth && headerInfo.type === '입학테스트' && showReportBtn && (
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
                   window.open(`/print/report?assignment_id=${assignmentId}&_bust=${bustStr}`, '_blank');
@@ -946,7 +975,7 @@ function ReviewContent() {
                   3️⃣ 진단 리포트 열기 📊
                 </button>
               )}
-              {headerInfo.type === '입학테스트' && showReportBtn && (
+              {hasReportAuth && headerInfo.type === '입학테스트' && showReportBtn && (
                 <button 
                   onClick={handleDeleteReport} 
                   disabled={isDeletingReport} 

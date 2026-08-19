@@ -31,14 +31,30 @@ const sortQuestionsList = (data: any[]) => {
   });
 };
 
-const fetchAllRows = async (tableName: string, selectQuery: string = '*') => {
+const fetchAllRows = async (tableName: string, selectQuery: string = '*', filterCol?: string, filterVal?: string) => {
   let allData: any[] = [];
   let start = 0;
   const step = 1000;
   let hasMore = true;
 
   while (hasMore) {
-    const { data, error } = await supabase.from(tableName).select(selectQuery).range(start, start + step - 1);
+    let query = supabase.from(tableName).select(selectQuery);
+    
+    if (filterCol && filterVal !== undefined) {
+      query = query.eq(filterCol, filterVal);
+    }
+    
+    if (tableName === 'question_db' || tableName === 'textbook_question') {
+      query = query.order('question_id', { ascending: true });
+    } else if (tableName === 'master_category') {
+      query = query.order('category_id', { ascending: true });
+    } else if (tableName === 'master_item') {
+      query = query.order('item_id', { ascending: true });
+    }
+
+    query = query.range(start, start + step - 1);
+    
+    const { data, error } = await query;
     if (error) { console.error(`${tableName} 로드 실패:`, error); break; }
     if (data && data.length > 0) { allData = [...allData, ...data]; start += step; }
     if (!data || data.length < step) hasMore = false; 
@@ -50,8 +66,6 @@ export default function TaxonomyEditorPage() {
   const router = useRouter();
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  
-  // 🌟 세부 권한 상태 추가
   const [perms, setPerms] = useState({ add: false, delete: false, edit: false, twin: false });
 
   const [categories, setCategories] = useState<any[]>([]);
@@ -116,7 +130,6 @@ export default function TaxonomyEditorPage() {
       
       if (!error && data && data.allowed_menus.includes("/taxonomy-editor")) {
         setIsAuthorized(true);
-        // 🌟 세부 액션 권한 검증 및 세팅
         setPerms({
           add: data.allowed_menus.includes("action_add_question"),
           delete: data.allowed_menus.includes("action_delete_question"),
@@ -172,14 +185,65 @@ export default function TaxonomyEditorPage() {
     } catch (e) { console.error(e); }
   };
 
+  // 🌟 [핵심 완벽 해결] 원본 교재를 고르면 자식을 찾고, 쌍둥이 교재를 고르면 부모를 찾는 양방향 레이더
   const fetchQuestions = async () => {
     if (!selectedBook) return;
     setIsLoading(true);
     try {
-      const { data } = await supabase.from("question_db").select("*").eq("source_book_name", selectedBook);
-      setQuestions(sortQuestionsList(data || []));
-      setSelectedQuestion(null); setIsEditingContent(false);
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+      // 1. 현재 선택된 책의 문항을 가져옵니다.
+      const data = await fetchAllRows("question_db", "*", "source_book_name", selectedBook);
+      let fetchedQuestions = data || [];
+
+      // 현재 불려온 모든 문항의 ID 기록장
+      const initialQids = new Set(fetchedQuestions.map(q => String(q.question_id).trim().toLowerCase()));
+
+      // 2. 부모 소환 로직: 현재 불려온 문항들이 가진 parent_question_id 중 안 불려온 것들 (쌍둥이 교재 선택 시 발동)
+      const pids = fetchedQuestions.map(q => q.parent_question_id).filter(id => id && String(id).trim().toLowerCase() !== 'null');
+      const missingPids = Array.from(new Set(pids)).filter(pid => !initialQids.has(String(pid).trim().toLowerCase()));
+
+      let extraParents: any[] = [];
+      if (missingPids.length > 0) {
+        for (let i = 0; i < missingPids.length; i += 500) {
+          const chunk = missingPids.slice(i, i + 500);
+          const { data: chunkData } = await supabase.from("question_db").select("*").in("question_id", chunk);
+          if (chunkData) extraParents = [...extraParents, ...chunkData];
+        }
+      }
+
+      // 현재까지 확보된 모든 문항 ID 병합 (원본 + 소환된 부모)
+      const allCurrentQidsSet = new Set([...fetchedQuestions, ...extraParents].map(q => String(q.question_id).trim().toLowerCase()));
+      const allCurrentQidsArray = [...fetchedQuestions, ...extraParents].map(q => q.question_id);
+      
+      // 3. 자식 소환 로직: 확보된 모든 문항을 부모로 삼고 있는 자식(쌍둥이) 문항들 중 안 불려온 것들 (원본 교재 선택 시 발동)
+      let extraChildren: any[] = [];
+      if (allCurrentQidsArray.length > 0) {
+        for (let i = 0; i < allCurrentQidsArray.length; i += 500) {
+          const chunk = allCurrentQidsArray.slice(i, i + 500);
+          // 내 문항 ID를 parent_question_id 로 가지고 있는 녀석들을 전부 수배
+          const { data: chunkData } = await supabase.from("question_db").select("*").in("parent_question_id", chunk);
+          if (chunkData) {
+             const newChildren = chunkData.filter(c => !allCurrentQidsSet.has(String(c.question_id).trim().toLowerCase()));
+             extraChildren = [...extraChildren, ...newChildren];
+          }
+        }
+      }
+
+      // 최종적으로 원본 + 소환된 부모 + 소환된 자식들을 하나로 병합
+      fetchedQuestions = [...fetchedQuestions, ...extraParents, ...extraChildren];
+
+      // 중복 제거 (방어 코드)
+      const finalMap = new Map();
+      fetchedQuestions.forEach(q => finalMap.set(q.question_id, q));
+      const finalQuestions = Array.from(finalMap.values());
+
+      setQuestions(sortQuestionsList(finalQuestions));
+      setSelectedQuestion(null); 
+      setIsEditingContent(false);
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const getKoreanPath = (taxId: string) => {
@@ -291,7 +355,7 @@ export default function TaxonomyEditorPage() {
 
   const deleteQuestion = async () => {
     if (!selectedQuestion) return;
-    if (!confirm("⚠️ 정말 이 문항을 DB에서 완전히 삭제하시겠습니까?")) return;
+    if (!confirm("⚠️ 정말 이 문항을 DB에서 완전히 삭제하시겠습니까? (연결된 자식 쌍둥이 문항도 함께 영향을 받을 수 있습니다.)")) return;
     setIsLoading(true);
     try {
       await supabase.from('textbook_question').delete().eq('question_id', selectedQuestion.question_id);
@@ -492,7 +556,7 @@ export default function TaxonomyEditorPage() {
         taxonomy_id: selectedQuestion.taxonomy_id,
         difficulty: selectedQuestion.difficulty || '중',
         is_human_verified: true,
-        derivation_type: twin.question_type || '쌍둥이' 
+        derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN' 
       }));
 
       const { error } = await supabase.from('question_db').insert(twinInserts);
@@ -514,6 +578,18 @@ export default function TaxonomyEditorPage() {
     updated[index][field] = value;
     setGeneratedTwins(updated);
   };
+
+  // 🌟 트리 구조를 완벽하게 잡아줍니다.
+  const isMainNode = (q: any) => {
+    const pid = q.parent_question_id;
+    return !pid || String(pid).trim().toLowerCase() === 'null' || String(pid).trim() === '';
+  };
+
+  const mainListQs = questions.filter(isMainNode);
+  const childListQs = questions.filter(q => !isMainNode(q));
+  
+  const mainQIdsSet = new Set(mainListQs.map(q => String(q.question_id).trim().toLowerCase()));
+  const orphanQs = childListQs.filter(q => !mainQIdsSet.has(String(q.parent_question_id).trim().toLowerCase()));
 
   if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">권한 확인 중...</div>;
   if (isAuthorized === false) return null;
@@ -665,7 +741,6 @@ export default function TaxonomyEditorPage() {
       {/* ===================== 메인 UI ===================== */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center mb-4 shrink-0 gap-4">
         <div>
-          {/* 🌟 1. 페이지 제목 업데이트 */}
           <h1 className="text-2xl font-black text-[#002864] flex items-center gap-2">
             <span>⚙️</span> 문제 교정 및 쌍둥이/유사 문제 생성
           </h1>
@@ -688,48 +763,102 @@ export default function TaxonomyEditorPage() {
 
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
         
-        {/* ===================== 좌측: 문제 리스트 ===================== */}
+        {/* ===================== 좌측: 문제 리스트 (트리 구조) ===================== */}
         <div className="w-[400px] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
           <div className="p-3 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-slate-800 text-sm">📋 전체 문항 리스트 ({questions.length}개)</h2>
-            {/* 🌟 추가 권한 제어 */}
             <button onClick={createNewQuestion} disabled={!selectedBook || isLoading || !perms.add} className={`text-[10px] text-white px-2.5 py-1.5 rounded font-bold shadow-sm flex items-center gap-1 transition-colors ${perms.add ? 'bg-[#002864] hover:bg-blue-800' : 'bg-slate-300 cursor-not-allowed'}`} title={!perms.add ? "새 문항 추가 권한이 없습니다." : ""}>
               <span>➕</span> 새 문항 추가
             </button>
           </div>
-          <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll bg-slate-50/50">
+          <div className="flex-1 overflow-y-auto p-3 custom-scroll bg-slate-50/50">
             {questions.length === 0 ? (
               <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm">교재를 조회해주세요.</div>
             ) : (
-              questions.map(q => {
-                const isSelected = selectedQuestion?.question_id === q.question_id;
-                const hasTaxonomy = q.taxonomy_id && q.taxonomy_id !== '미분류';
-                const isTwin = q.derivation_type === '쌍둥이' || q.derivation_type === '유사';
+              <>
+                {mainListQs.map(q => {
+                  const isSelected = selectedQuestion?.question_id === q.question_id;
+                  const hasTaxonomy = q.taxonomy_id && q.taxonomy_id !== '미분류';
+                  
+                  // 안전한 비교 (공백/대소문자 무시)
+                  const myTwins = childListQs.filter(c => String(c.parent_question_id).trim().toLowerCase() === String(q.question_id).trim().toLowerCase());
 
-                return (
-                  <div id={`q-list-${q.question_id}`} key={q.question_id} onClick={() => handleQuestionClick(q)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-2 ${isSelected ? 'border-[#002864] bg-blue-50/50' : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-md'}`}>
-                    {isSelected && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864]"></div>}
-                    <div className="flex justify-between items-start">
-                      <div className="flex items-center gap-2">
-                        {isTwin ? (
-                           <span className={`text-[10px] font-black px-2 py-0.5 rounded shadow-sm border ${q.derivation_type === '유사' ? 'text-amber-700 bg-amber-100 border-amber-200' : 'text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200'}`}>
-                             {q.derivation_type}
-                           </span>
-                        ) : (
-                           <span className="text-[10px] font-black text-white bg-slate-600 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num || '?'}p</span>
-                        )}
-                        <span className="text-sm font-black text-slate-800">{q.question_number || '-'}{q.sub_num ? `-${q.sub_num}` : ''}</span>
+                  return (
+                    <React.Fragment key={q.question_id}>
+                      {/* 🌟 1. 메인 문항 카드 */}
+                      <div id={`q-list-${q.question_id}`} onClick={() => handleQuestionClick(q)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-2 mt-2 ${isSelected ? 'border-[#002864] bg-blue-50/50' : 'border-slate-200 bg-white hover:border-blue-300 hover:shadow-md'}`}>
+                        {isSelected && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864]"></div>}
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-2">
+                            <span className="text-[10px] font-black text-white bg-slate-600 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num || '?'}p</span>
+                            <span className="text-sm font-black text-slate-800">{q.question_number || '-'}{q.sub_num ? `-${q.sub_num}` : ''}</span>
+                          </div>
+                          {hasTaxonomy ? (
+                            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">분류됨</span>
+                          ) : (
+                            <span className="text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded animate-pulse">수정필요</span>
+                          )}
+                        </div>
+                        <div className="text-xs font-medium text-slate-700 line-clamp-2 leading-relaxed whitespace-pre-wrap">{q.question}</div>
                       </div>
-                      {hasTaxonomy ? (
-                        <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">분류됨</span>
-                      ) : (
-                        <span className="text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded animate-pulse">수정필요</span>
+
+                      {/* 🌟 2. 쌍둥이/유사 문항 트리 (들여쓰기) */}
+                      {myTwins.length > 0 && (
+                        <div className="pl-5 ml-3 my-1 border-l-2 border-indigo-200 flex flex-col gap-1.5 relative">
+                          {/* 연결선 디자인 */}
+                          <div className="absolute top-0 left-0 w-3 border-t-2 border-indigo-200 mt-4"></div>
+                          
+                          {myTwins.map(twin => {
+                            const isTwinSelected = selectedQuestion?.question_id === twin.question_id;
+                            const isSimilar = twin.derivation_type === '유사';
+                            const badgeLabel = twin.derivation_type === 'TWIN' || twin.derivation_type === '쌍둥이' ? '쌍둥이' : '유사';
+                            
+                            return (
+                              <div id={`q-list-${twin.question_id}`} key={twin.question_id} onClick={() => handleQuestionClick(twin)} className={`p-2.5 rounded-lg border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-1.5 ${isTwinSelected ? 'border-indigo-500 bg-indigo-50/50 ring-1 ring-indigo-500' : 'border-slate-200 bg-white hover:border-indigo-300'}`}>
+                                <div className="flex justify-between items-center">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border ${isSimilar ? 'text-amber-700 bg-amber-100 border-amber-200' : 'text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200'}`}>
+                                      {isSimilar ? '💡 유사' : `👯 ${badgeLabel}`}
+                                    </span>
+                                    <span className="text-[11px] font-black text-slate-700">{twin.question_number || '-'}</span>
+                                  </div>
+                                </div>
+                                <div className="text-[11px] font-medium text-slate-600 line-clamp-1 truncate">{twin.question}</div>
+                              </div>
+                            );
+                          })}
+                        </div>
                       )}
+                    </React.Fragment>
+                  );
+                })}
+
+                {/* 🌟 3. 부모가 없는(Orphan) 고립된 쌍둥이 문항 처리 */}
+                {orphanQs.length > 0 && (
+                  <div className="pt-4 mt-4 border-t border-slate-200">
+                    <div className="text-[10px] font-bold text-rose-500 mb-2 px-2 bg-rose-50 py-1 rounded-md border border-rose-100 inline-block">⚠️ 원본이 유실된 쌍둥이/유사 문항</div>
+                    <div className="flex flex-col gap-2">
+                      {orphanQs.map(q => {
+                        const isSelected = selectedQuestion?.question_id === q.question_id;
+                        const isSimilar = q.derivation_type === '유사';
+                        return (
+                          <div id={`q-list-${q.question_id}`} key={q.question_id} onClick={() => handleQuestionClick(q)} className={`p-2.5 rounded-lg border transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-1.5 ${isSelected ? 'border-rose-500 bg-rose-50/50 ring-1 ring-rose-500' : 'border-slate-200 bg-white hover:border-rose-300'}`}>
+                            <div className="flex justify-between items-center">
+                              <div className="flex items-center gap-1.5">
+                                <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border ${isSimilar ? 'text-amber-700 bg-amber-100 border-amber-200' : 'text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200'}`}>
+                                  {q.derivation_type || '쌍둥이'}
+                                </span>
+                                <span className="text-[11px] font-black text-slate-700">{q.question_number || '-'}</span>
+                              </div>
+                            </div>
+                            <div className="text-[11px] font-medium text-slate-600 line-clamp-1 truncate">{q.question}</div>
+                          </div>
+                        );
+                      })}
                     </div>
-                    <div className="text-xs font-medium text-slate-700 line-clamp-2 leading-relaxed whitespace-pre-wrap">{q.question}</div>
                   </div>
-                );
-              })
+                )}
+              </>
             )}
           </div>
         </div>
@@ -777,7 +906,7 @@ export default function TaxonomyEditorPage() {
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
                       {/* 🌟 세부 버튼 권한 제어 */}
-                      <button onClick={handleGenerateTwins} disabled={!perms.twin} className={`px-4 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 mr-2 ${perms.twin ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!perms.twin ? "생성 권한이 없습니다." : ""}>
+                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-4 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 mr-2 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
                         <span>👯</span> <span>쌍둥이/유사 생성</span>
                       </button>
                       

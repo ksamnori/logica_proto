@@ -78,6 +78,7 @@ export default function AdmissionPage() {
 
   // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
+  const [hasReportAuth, setHasReportAuth] = useState(false); // 🌟 리포트 접근 권한 상태 추가
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
@@ -106,7 +107,7 @@ export default function AdmissionPage() {
 
   const appsScrollRef = useRef<HTMLDivElement>(null);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
+  // 🌟 컴포넌트 마운트 시 즉시 권한 검사 및 리포트 권한 설정
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -118,6 +119,7 @@ export default function AdmissionPage() {
       
       if (isGodMode) {
         setIsAuthorized(true);
+        setHasReportAuth(true); // 관리자는 무조건 리포트 권한 허용
         return;
       }
 
@@ -139,6 +141,10 @@ export default function AdmissionPage() {
         router.replace("/home");
       } else {
         setIsAuthorized(true);
+        // 🌟 DB에 리포트 열람 권한이 있는지 체크
+        if (data.allowed_menus.includes("action_manage_admission_report")) {
+          setHasReportAuth(true);
+        }
       }
     };
 
@@ -484,7 +490,7 @@ export default function AdmissionPage() {
     }
   };
 
-  // 🌟 권한 확인이 끝나지 않았거나 권한이 없으면 렌더링하지 않음
+  // 권한 확인이 끝나지 않았거나 권한이 없으면 렌더링하지 않음
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
@@ -710,7 +716,12 @@ export default function AdmissionPage() {
                             <button onClick={() => router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`)} className={`text-[11px] px-2.5 py-1.5 rounded font-bold shadow-sm border transition-colors flex items-center gap-1 shrink-0 ${isDone ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-[#002864] text-white border-[#002864] hover:bg-blue-900'}`}>
                               {isDone ? '채점/리뷰' : '채점하기'}
                             </button>
-                            {isDone && <button onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')} className="text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0">📊 리포트</button>}
+                            {/* 🌟 [권한 연동] 리포트 열람 권한이 있을 때만 버튼 노출 */}
+                            {isDone && hasReportAuth && (
+                              <button onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')} className="text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0">
+                                📊 리포트
+                              </button>
+                            )}
                           </div>
                         );
                         scoreDisplay = isDone ? <span className="font-black text-[#002864] bg-blue-50 px-2 py-1.5 rounded border border-blue-100 text-[13px] w-14 text-center shrink-0 shadow-sm">{shadowAssign.total_score || 0}점</span> : <span className="font-bold text-slate-300 text-[12px] w-14 text-center shrink-0">-점</span>;

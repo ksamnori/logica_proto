@@ -61,6 +61,7 @@ const PERMISSION_GROUPS = [
       { id: "/admission", label: "진단평가 및 대기생 관리" },
       { id: "action_create_admission", label: "↳ [권한] 진단평가 새 일정 만들기", isAction: true },
       { id: "action_bulk_admission", label: "↳ [권한] 진단평가 일괄 관리 (상태/삭제)", isAction: true },
+      { id: "action_manage_admission_report", label: "↳ [권한] 진단 리포트 생성 및 열람", isAction: true },
     ]
   },
   {
