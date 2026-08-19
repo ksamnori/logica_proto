@@ -93,8 +93,8 @@ export default function Sidebar() {
   const canAccess = (path: string) => {
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true; 
     
-    // 🌟 팩토리 메뉴 권한 처리 (대시보드 포함)
-    const factoryPaths = ['/factory-dashboard', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
+    // 🌟 팩토리 메뉴 권한 처리 (PDF 파서 추가)
+    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
     if (factoryPaths.includes(path) && isFactoryWorker) return true;
     
     if (isLoadingPerms) return false; 
@@ -152,11 +152,10 @@ export default function Sidebar() {
       customLabel = 'font-black';
       customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
     } else if (path === '/factory-dashboard') {
-      // 🌟 새로 추가된 DB 통계 대시보드
       customBg = active ? 'bg-slate-800 border-slate-900 text-white shadow-md' : 'bg-slate-100 border-slate-300 text-slate-700 hover:bg-slate-200 hover:border-slate-400 shadow-sm';
       customLabel = 'font-black';
-    } else if (['/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path)) {
-      // Factory 도구들 공통 스타일
+    } else if (['/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path)) {
+      // 🌟 PDF 파서도 공장 테마 적용
       customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
       customLabel = 'font-black';
     }
@@ -228,13 +227,16 @@ export default function Sidebar() {
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🏭</span>
             <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">LOGICA Factory</p>
-            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md font-black border border-slate-200 ml-1">전임강사 이상</span>
+            <span className="text-[9px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-black border border-indigo-200 ml-1">전임강사 이상</span>
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
-            {/* 🌟 팩토리 대시보드를 맨 앞에 크게 배치 */}
             <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
+            {/* 🌟 PDF 파서 메뉴 추가 */}
+            <MenuItem path="/pdf-parser" label="PDF 자동 파서" full />
+            
             <MenuItem path="/mapper" label="교재 매핑 툴" />
             <MenuItem path="/taxonomy-editor" label="분류 교정 툴" />
+            
             <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
             <MenuItem path="/book-upload" label="교재 업로드" />
           </div>

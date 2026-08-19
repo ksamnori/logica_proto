@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@google-cloud/speech": "^7.5.0",
+    "@google/generative-ai": "^0.24.1",
     "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.110.8",
     "canvas-confetti": "^1.9.4",
