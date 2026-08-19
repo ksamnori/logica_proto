@@ -5,7 +5,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
-// 🌟 [추가] Supabase의 1,000줄 제한 무력화 (전체 데이터 루프 호출)
 const fetchAllRows = async (tableName: string, selectQuery: string = '*') => {
   let allData: any[] = [];
   let start = 0;
@@ -34,7 +33,6 @@ export default function VisualMapperPage() {
   
   const [workbooks, setWorkbooks] = useState<string[]>([]); 
   
-  // 3단 구성을 위한 2개의 부교재 필터 상태
   const [wbFilterText1, setWbFilterText1] = useState("");
   const [wbFilterText2, setWbFilterText2] = useState("");
 
@@ -54,7 +52,6 @@ export default function VisualMapperPage() {
 
   const mathJaxRef = useRef<boolean>(false);
 
-  // 🌟 [수정] DB 기반 권한 체크 로직 적용
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -95,7 +92,6 @@ export default function VisualMapperPage() {
     }
   }, [isAuthorized]);
 
-  // 독립적인 데이터 호출 (본교재, 부교재1, 부교재2가 각자 동작함)
   useEffect(() => {
     if (selectedMainBookId) fetchMainQuestions(selectedMainBookId);
     else { setMainQuestions([]); setMappings({}); setSelectedMainId(null); setSelectedWbIds([]); }
@@ -111,7 +107,6 @@ export default function VisualMapperPage() {
     else setWbQuestions2([]);
   }, [selectedWbSource2]);
 
-  // 수식 렌더링 타이머
   useEffect(() => {
     const renderMath = () => {
       if ((window as any).MathJax && (window as any).MathJax.typesetPromise) {
@@ -132,7 +127,6 @@ export default function VisualMapperPage() {
   };
 
   const loadBooks = async () => {
-    // 🌟 [수정] 제한 없이 모든 데이터를 가져와서 자연스러운 숫자 순서로 정렬합니다.
     const tbData = await fetchAllRows('textbook', 'book_id, title');
     if (tbData) {
       setTextbooks(tbData.sort((a, b) => a.title.localeCompare(b.title, 'ko', { numeric: true })));
@@ -145,7 +139,6 @@ export default function VisualMapperPage() {
     }
   };
 
-  // 본교재 전용 Fetch 로직
   const fetchMainQuestions = async (mainId: string) => {
     setIsLoading(true);
     try {
@@ -170,7 +163,6 @@ export default function VisualMapperPage() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  // 부교재 전용 공통 Fetch 로직
   const fetchWbQuestions = async (source: string, setter: React.Dispatch<React.SetStateAction<any[]>>) => {
     setIsLoading(true);
     try {
@@ -193,9 +185,6 @@ export default function VisualMapperPage() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  // ==========================================
-  // 🤖 3단계를 모두 아우르는 통합 AI 추천 매칭
-  // ==========================================
   const handleAiMatch = () => {
     if (mainQuestions.length === 0) {
       return alert("기준이 될 본교재를 먼저 선택해주세요.");
@@ -274,10 +263,85 @@ export default function VisualMapperPage() {
     setSelectedWbIds(prev => prev.includes(uuid) ? prev.filter(id => id !== uuid) : [...prev, uuid]);
   };
 
+  // 🔗 1. 일반 수평 연결 (유사/과제용)
   const handleLink = () => {
     if (!selectedMainId) return;
     setMappings(prev => ({ ...prev, [selectedMainId]: selectedWbIds }));
     
+    moveToNextMainQuestion();
+  };
+
+  const handleUnlink = (mainIdStr: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setMappings(prev => { const newMap = { ...prev }; delete newMap[mainIdStr]; return newMap; });
+    if (selectedMainId === mainIdStr) setSelectedWbIds([]);
+  };
+
+  // 👯 2. 수직 쌍둥이 묶기 (강제 종속)
+  const handleTwinLink = async () => {
+    if (!selectedMainId || selectedWbIds.length === 0) return;
+    if (!confirm(`선택한 ${selectedWbIds.length}개의 문항을 본교재 문항의 '쌍둥이(자식)'로 영구 편입하시겠습니까?\n\n⚠️ 주의: 이 작업은 즉시 마스터 DB에 반영되며, 이후 분류 편집기에서 쌍둥이 트리 구조로 묶이게 됩니다.`)) return;
+
+    setIsLoading(true);
+    try {
+      const mainQ = mainQuestions.find(q => q.tq_id.toString() === selectedMainId);
+      if (!mainQ) throw new Error("본교재 문항을 찾을 수 없습니다.");
+
+      // 선택된 워크북 문항들의 부모 ID를 강제로 덮어씌움
+      const { error } = await supabase.from('question_db')
+        .update({
+           parent_question_id: mainQ.question_id,
+           derivation_type: 'TWIN'
+        })
+        .in('question_id', selectedWbIds);
+
+      if (error) throw error;
+
+      // 수평 연결(similar_tq_ids)에서는 빼주는 것이 논리적으로 깔끔함
+      setMappings(prev => {
+        const newMap = { ...prev };
+        for (const key in newMap) {
+          newMap[key] = newMap[key].filter(id => !selectedWbIds.includes(id));
+        }
+        return newMap;
+      });
+
+      alert("✅ 쌍둥이 편입이 완료되었습니다!");
+      
+      // 상태 갱신을 위해 데이터 리로드
+      if (selectedWbSource1) fetchWbQuestions(selectedWbSource1, setWbQuestions1);
+      if (selectedWbSource2) fetchWbQuestions(selectedWbSource2, setWbQuestions2);
+
+      moveToNextMainQuestion();
+
+    } catch (e: any) {
+      alert("쌍둥이 묶기 실패: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 👯 쌍둥이 종속 해제
+  const handleUnlinkTwin = async (wbQuestionId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!confirm("이 문항의 쌍둥이 종속 관계를 해제하시겠습니까? (원본 유실로 처리됩니다)")) return;
+    setIsLoading(true);
+    try {
+      const { error } = await supabase.from('question_db')
+        .update({ parent_question_id: null }) // 고아 상태로 만듦
+        .eq('question_id', wbQuestionId);
+      if (error) throw error;
+      
+      if (selectedWbSource1) fetchWbQuestions(selectedWbSource1, setWbQuestions1);
+      if (selectedWbSource2) fetchWbQuestions(selectedWbSource2, setWbQuestions2);
+    } catch(err: any) {
+      alert("해제 실패: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const moveToNextMainQuestion = () => {
     const currentIndex = mainQuestions.findIndex(q => q.tq_id.toString() === selectedMainId);
     if (currentIndex >= 0 && currentIndex < mainQuestions.length - 1) {
       const nextId = mainQuestions[currentIndex + 1].tq_id.toString();
@@ -289,15 +353,9 @@ export default function VisualMapperPage() {
     }
   };
 
-  const handleUnlink = (mainIdStr: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    setMappings(prev => { const newMap = { ...prev }; delete newMap[mainIdStr]; return newMap; });
-    if (selectedMainId === mainIdStr) setSelectedWbIds([]);
-  };
-
   const handleSaveToDB = async () => {
     if (!selectedMainBookId) return alert("저장할 교재를 선택해주세요.");
-    if (!confirm(`총 ${Object.keys(mappings).length}개의 본교재 문항에 설정된 워크북 매핑을 저장하시겠습니까?`)) return;
+    if (!confirm(`총 ${Object.keys(mappings).length}개의 본교재 문항에 설정된 수평(과제용) 연결을 저장하시겠습니까?\n(쌍둥이 편입은 이 버튼을 누르지 않아도 이미 저장되어 있습니다.)`)) return;
 
     setIsLoading(true);
     try {
@@ -311,7 +369,7 @@ export default function VisualMapperPage() {
       });
 
       await Promise.all([...updates, ...unmappedUpdates]);
-      alert("✅ 완벽하게 3단 매핑 데이터가 DB에 저장되었습니다!");
+      alert("✅ 완벽하게 3단 수평 매핑 데이터가 DB에 저장되었습니다!");
     } catch (err: any) { alert("저장 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
@@ -334,11 +392,11 @@ export default function VisualMapperPage() {
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center mb-4 shrink-0 gap-4">
         <div>
           <h1 className="text-2xl font-black text-[#002864] flex items-center gap-2"><span>🔗</span> 3단 크로스 교재 매퍼 <span className="text-sm font-bold text-white bg-blue-500 px-2 py-0.5 rounded ml-2 shadow-sm">Cross Mapper</span></h1>
-          <p className="text-sm font-bold text-slate-500 mt-1">본교재 1권에 여러 부교재 문항을 동시에 불러와 한 번에 꼬리를 연결합니다.</p>
+          <p className="text-sm font-bold text-slate-500 mt-1">본교재 1권에 여러 부교재 문항을 불러와 과제용으로 연결하거나, 완전히 쌍둥이 자식으로 엮어줍니다.</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-sm font-bold text-slate-500 flex flex-col items-end">
-            <span>현재 연결된 본교재</span>
+            <span>수평 연결(과제용) 문항</span>
             <span><span className="text-emerald-600 font-black text-xl">{Object.keys(mappings).length}</span> 문항</span>
           </div>
           <div className="w-px h-10 bg-slate-200 mx-1"></div>
@@ -348,7 +406,7 @@ export default function VisualMapperPage() {
           </button>
           
           <button onClick={handleSaveToDB} disabled={isLoading} className="px-6 py-3 bg-emerald-600 text-white font-black rounded-xl shadow-md hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-2">
-            <span className="text-lg">💾</span> {isLoading ? "저장 중..." : "DB에 연결 저장"}
+            <span className="text-lg">💾</span> {isLoading ? "저장 중..." : "DB에 수평 연결 저장"}
           </button>
         </div>
       </div>
@@ -367,7 +425,7 @@ export default function VisualMapperPage() {
         
         {/* 부교재 1 선택 */}
         <div className="flex flex-col gap-1.5 xl:border-r border-slate-200 xl:pr-4">
-          <span className="text-xs font-black text-emerald-600">📗 [꼬리] 부교재/워크북 1:</span>
+          <span className="text-xs font-black text-emerald-600">📗 [꼬리] 부교재/쌍둥이 1:</span>
           <div className="flex items-center gap-2">
             <input type="text" placeholder="검색..." value={wbFilterText1} onChange={(e) => setWbFilterText1(e.target.value)} className="w-24 px-2 py-1.5 border border-emerald-300 rounded-lg text-xs focus:ring-2 focus:ring-emerald-600 bg-white shadow-sm font-medium outline-none" />
             <select value={selectedWbSource1} onChange={(e) => setSelectedWbSource1(e.target.value)} className="flex-1 px-3 py-1.5 border border-emerald-300 rounded-lg font-bold text-emerald-800 bg-emerald-50 truncate text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none">
@@ -379,7 +437,7 @@ export default function VisualMapperPage() {
 
         {/* 부교재 2 선택 */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-black text-violet-600">📙 [꼬리] 부교재/워크북 2:</span>
+          <span className="text-xs font-black text-violet-600">📙 [꼬리] 부교재/쌍둥이 2:</span>
           <div className="flex items-center gap-2">
             <input type="text" placeholder="검색..." value={wbFilterText2} onChange={(e) => setWbFilterText2(e.target.value)} className="w-24 px-2 py-1.5 border border-violet-300 rounded-lg text-xs focus:ring-2 focus:ring-violet-600 bg-white shadow-sm font-medium outline-none" />
             <select value={selectedWbSource2} onChange={(e) => setSelectedWbSource2(e.target.value)} className="flex-1 px-3 py-1.5 border border-violet-300 rounded-lg font-bold text-violet-800 bg-violet-50 truncate text-sm shadow-sm focus:ring-2 focus:ring-violet-500 outline-none">
@@ -415,14 +473,13 @@ export default function VisualMapperPage() {
                     {isSelected && <div className="absolute left-0 top-0 w-1.5 h-full bg-indigo-500"></div>}
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
-                        {/* 🌟 1. 눈에 확 띄는 페이지 뱃지 (본교재: Indigo) */}
                         <span className="text-[12px] font-black text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">{q.page_number}p</span>
                         <span className="text-sm font-black text-indigo-900 ml-1">{q.question_number}</span>
                         {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm hidden 2xl:inline-block">Depth {taxDepth}</span>}
                       </div>
                       {hasMapping && (
                         <div className="flex items-center gap-2 z-10 relative">
-                          <span className="text-[10px] font-extrabold text-white bg-rose-500 px-2 py-0.5 rounded-full shadow-sm">{mappedWbs.length}개 연결됨</span>
+                          <span className="text-[10px] font-extrabold text-white bg-blue-500 px-2 py-0.5 rounded-full shadow-sm">{mappedWbs.length}개 수평연결됨</span>
                           <button onClick={(e) => handleUnlink(qIdStr, e)} className="text-[10px] font-bold text-slate-400 hover:text-rose-600 underline">초기화</button>
                         </div>
                       )}
@@ -435,16 +492,33 @@ export default function VisualMapperPage() {
         </div>
 
         {/* ======================= 중앙: 연결 버튼 ======================= */}
-        <div className="w-16 flex flex-col justify-center items-center shrink-0 z-10">
-          <div className="bg-white p-2 rounded-2xl shadow-md border border-slate-200 flex flex-col gap-2 relative">
-            <button onClick={handleLink} disabled={!selectedMainId || selectedWbIds.length === 0} className={`w-12 h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainId && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-indigo-500 to-rose-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+        <div className="w-20 flex flex-col justify-center items-center shrink-0 z-10 gap-3">
+          
+          <div className="bg-white p-2 rounded-2xl shadow-md border border-slate-200 flex flex-col gap-2 relative w-full">
+            <button onClick={handleLink} disabled={!selectedMainId || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainId && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-indigo-500 to-blue-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
               <svg className="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-              <span className="text-[10px] font-black">묶기</span>
+              <span className="text-[10px] font-black">수평 연결</span>
             </button>
-            <div className="text-center mt-1">
-              <div className="text-[10px] font-black text-rose-600">{selectedWbIds.length}개</div>
+            <div className="text-center mt-0.5 mb-1">
+              <div className="text-[9px] font-black text-indigo-600">유사/과제용</div>
             </div>
           </div>
+
+          <div className="bg-white p-2 rounded-2xl shadow-md border border-rose-200 flex flex-col gap-2 relative w-full">
+            <button onClick={handleTwinLink} disabled={!selectedMainId || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainId && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-rose-500 to-fuchsia-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+              <span className="text-lg mb-0.5">👯</span>
+              <span className="text-[10px] font-black">수직 편입</span>
+            </button>
+            <div className="text-center mt-0.5 mb-1">
+              <div className="text-[9px] font-black text-rose-600">쌍둥이화</div>
+            </div>
+          </div>
+
+          <div className="text-center mt-2">
+            <span className="text-[10px] font-bold text-slate-400">선택됨</span>
+            <div className="text-sm font-black text-slate-700">{selectedWbIds.length}개</div>
+          </div>
+
         </div>
 
         {/* ======================= 우측 1: 부교재 1 리스트 ======================= */}
@@ -461,6 +535,11 @@ export default function VisualMapperPage() {
                 const mappedMainId = getMappedMainIdForWb(qUuid);
                 const isMappedToOther = mappedMainId && mappedMainId !== selectedMainId;
 
+                // 🌟 수직 쌍둥이 정보 뱃지 로직
+                const isTwin = q.parent_question_id && String(q.parent_question_id).trim().toLowerCase() !== 'null';
+                const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === selectedMainId);
+                const isMyTwin = isTwin && mainQ && String(q.parent_question_id).trim() === String(mainQ.question_id).trim();
+
                 return (
                   <div key={qUuid} onClick={() => handleWbClick(qUuid)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-emerald-500 bg-emerald-50' : 'border-transparent bg-white hover:border-emerald-300 hover:shadow-md'} ${isMappedToOther ? 'opacity-40 grayscale' : ''}`}>
                     <div className="flex flex-col justify-start pt-1 shrink-0">
@@ -471,11 +550,20 @@ export default function VisualMapperPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* 🌟 2. 눈에 확 띄는 페이지 뱃지 (부교재 1: Emerald) */}
                           <span className="text-[12px] font-black text-white bg-emerald-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
                           <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>{q.question_number}-{q.sub_num}</span>
                         </div>
-                        {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shrink-0">연결됨</span>}
+                        
+                        <div className="flex items-center gap-1">
+                          {isMyTwin && (
+                            <div className="flex items-center gap-1 z-10">
+                              <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded border border-fuchsia-200 shrink-0 shadow-sm">내 쌍둥이</span>
+                              <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-[9px] font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
+                            </div>
+                          )}
+                          {isTwin && !isMyTwin && <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">타문항 쌍둥이</span>}
+                          {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shrink-0">수평 연결됨</span>}
+                        </div>
                       </div>
                       <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">{q.question}</div>
                     </div>
@@ -499,6 +587,11 @@ export default function VisualMapperPage() {
                 const mappedMainId = getMappedMainIdForWb(qUuid);
                 const isMappedToOther = mappedMainId && mappedMainId !== selectedMainId;
 
+                // 🌟 수직 쌍둥이 정보 뱃지 로직
+                const isTwin = q.parent_question_id && String(q.parent_question_id).trim().toLowerCase() !== 'null';
+                const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === selectedMainId);
+                const isMyTwin = isTwin && mainQ && String(q.parent_question_id).trim() === String(mainQ.question_id).trim();
+
                 return (
                   <div key={qUuid} onClick={() => handleWbClick(qUuid)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-violet-500 bg-violet-50' : 'border-transparent bg-white hover:border-violet-300 hover:shadow-md'} ${isMappedToOther ? 'opacity-40 grayscale' : ''}`}>
                     <div className="flex flex-col justify-start pt-1 shrink-0">
@@ -509,11 +602,20 @@ export default function VisualMapperPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          {/* 🌟 3. 눈에 확 띄는 페이지 뱃지 (부교재 2: Violet) */}
                           <span className="text-[12px] font-black text-white bg-violet-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
                           <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{q.question_number}-{q.sub_num}</span>
                         </div>
-                        {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shrink-0">연결됨</span>}
+                        
+                        <div className="flex items-center gap-1">
+                          {isMyTwin && (
+                            <div className="flex items-center gap-1 z-10">
+                              <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded border border-fuchsia-200 shrink-0 shadow-sm">내 쌍둥이</span>
+                              <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-[9px] font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
+                            </div>
+                          )}
+                          {isTwin && !isMyTwin && <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">타문항 쌍둥이</span>}
+                          {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shrink-0">수평 연결됨</span>}
+                        </div>
                       </div>
                       <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">{q.question}</div>
                     </div>
