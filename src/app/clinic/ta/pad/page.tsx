@@ -5,6 +5,7 @@ import React, { useEffect, useRef } from "react";
 import { useTaHandheld, formatSeat } from "./useTaHandheld";
 import SeatCanvas from "@/app/clinic/_shared/SeatCanvas";
 import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
+import TaTopBar from "../TaTopBar";
 
 // 💡 config는 반드시 본체 스크립트가 실행되기 "전"에 window.MathJax에 있어야 한다 — MathJax는 로드되는
 // 시점에 이 값을 읽어 typesetPromise 등 API를 구성한다. 예전엔 next/script의 onLoad(=본체 스크립트가
@@ -44,10 +45,7 @@ export default function TaHandheldDashboard() {
     taName, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
     myAssignedSeats, assignmentMap, claimedByOthers,
     selectedCallKey, setSelectedCallKey, markState, setMarkState,
-    nameModalOpen, setNameModalOpen,
-    isFirstTime, setIsFirstTime, tempNameInput, setTempNameInput,
-    exitModalOpen, setExitModalOpen,
-    commitTaName, handleConfirmCall, handleConfirmRecheck, handleExit, formatElapsed, updateHandlingPresence,
+    handleConfirmCall, handleConfirmRecheck, formatElapsed, updateHandlingPresence,
     allSeats, allSeatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked,
   } = useTaHandheld();
 
@@ -68,12 +66,6 @@ export default function TaHandheldDashboard() {
     ...Object.values(rechecksSnapshot).map(r => ({ key: `${r.seat}::${r.uid}`, type: 'recheck' as const, seat: r.seat, name: r.name, classes: r.classes, time: r.requestedAt })),
   ].filter(req => selectedCallKey === req.key || assignmentMap[req.seat] === taClientId || assignmentMap[req.seat] === undefined)
    .sort((a, b) => a.time - b.time);
-
-  // 💡 [버그 수정] 예전엔 시스템 전체(callsSnapshot/rechecksSnapshot 전부)의 미처리 건수로
-  // "근무 종료" 버튼을 막아서, 내 담당이 아닌 — 다른 조교에게 배정된 — 호출이 남아있다는 이유로
-  // 정작 내 몫은 다 끝낸 조교(알바)가 퇴근을 못 누르는 상황이 생겼다. requestList는 이미
-  // "나에게 보이는(내 담당 + 미배정)" 요청만 걸러둔 목록이므로 그 길이를 대신 쓴다.
-  const unresolvedCount = requestList.length;
 
   return (
     <div className="h-screen bg-slate-100 flex flex-col overflow-hidden font-pretendard select-none">
@@ -96,17 +88,7 @@ export default function TaHandheldDashboard() {
         .custom-scrollbar::-webkit-scrollbar { width:5px; } .custom-scrollbar::-webkit-scrollbar-thumb { background:#cbd5e1; border-radius:10px; }
       `}}/>
 
-      {/* 헤더 */}
-      <div className="bg-white border-b border-slate-200 px-4 py-2.5 flex items-center justify-between sticky top-0 z-20 shadow-sm">
-        <div>
-          <h1 className="font-lexend text-base font-bold text-[#002864] tracking-tight leading-none">Logica Clinic</h1>
-          <p className="text-[10px] text-slate-400 font-medium">조교 전용 · <span onClick={() => { setTempNameInput(taName); setIsFirstTime(false); setNameModalOpen(true); }} className="cursor-pointer underline decoration-dotted hover:text-slate-600 transition-colors" title="이름 변경">{taName || '이름 설정'}</span> 조교님</p>
-        </div>
-        <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
-          <span className={`w-2 h-2 rounded-full inline-block ${isConnected ? 'bg-green-500 animate-[pulse_1.6s_infinite]' : 'bg-rose-500'}`}></span>
-          <span>{isConnected ? '연결됨' : '연결 중...'}</span>
-        </div>
-      </div>
+      <TaTopBar taName={taName} isConnected={isConnected} hasActiveRequest={!!selectedCallKey} />
 
       {/* 💡 2560×1600급 데스크톱 모니터를 기준으로 잡되, 좌석/호출 패널은 그 너비대로 같이 커지지 않도록
           이 줄만 별도로 max-w를 좁게 잡는다 — 그 아래 "문제 상세" 영역은 이 컨테이너의 전체 너비를 그대로
@@ -260,39 +242,7 @@ export default function TaHandheldDashboard() {
             </button>
           </div>
         )}
-
-        {/* 5. 퇴근 */}
-        <button onClick={() => setExitModalOpen(true)} className="w-full bg-white border border-rose-200 text-rose-500 font-bold py-3 rounded-2xl text-xs hover:bg-rose-50 transition-colors shrink-0 shadow-sm">
-          조교 근무 종료
-        </button>
       </div>
-
-      {/* 모달 1: 이름 입력 */}
-      {nameModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 px-6">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-xs text-center shadow-2xl animate-[fadeIn_0.2s_ease-out]">
-            <p className="text-sm font-semibold text-slate-700 mb-4">{isFirstTime ? '조교님 성함을 입력해주세요' : '이름을 변경합니다'}</p>
-            <input type="text" value={tempNameInput} onChange={e => setTempNameInput(e.target.value)} onKeyDown={e => e.key === 'Enter' && commitTaName()} placeholder="이름 입력" maxLength={10} className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm text-center font-semibold text-slate-700 focus:outline-none focus:border-[#002864] mb-4 bg-slate-50" />
-            <div className="flex gap-2">
-              {!isFirstTime && <button onClick={() => setNameModalOpen(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 text-sm font-semibold hover:bg-slate-50 transition-colors">취소</button>}
-              <button onClick={commitTaName} className="flex-1 py-2.5 rounded-xl bg-[#002864] text-white text-sm font-semibold shadow-md hover:bg-blue-900 transition-colors">확인</button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 모달 2: 퇴근 확인 */}
-      {exitModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 px-6">
-          <div className="bg-white rounded-2xl p-6 w-full max-w-xs text-center shadow-2xl animate-[fadeIn_0.2s_ease-out]">
-            <p className="text-sm font-semibold text-slate-700 mb-4">{unresolvedCount > 0 ? '아직 처리하지 않은 호출이 있습니다. 모두 처리 후 종료할 수 있습니다.' : '정말 근무를 종료하시겠습니까?'}</p>
-            <div className="flex gap-2">
-              <button onClick={() => setExitModalOpen(false)} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 text-sm font-semibold hover:bg-slate-50 transition-colors">취소</button>
-              <button onClick={handleExit} disabled={unresolvedCount > 0} className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white text-sm font-semibold shadow-md hover:bg-rose-700 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">종료</button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

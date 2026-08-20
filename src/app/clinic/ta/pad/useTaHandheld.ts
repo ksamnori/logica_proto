@@ -2,6 +2,7 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { clearActiveCall, clearActiveRecheck } from "@/lib/clinicSession";
+import { seedTaTenantId, getInstructorName } from "../taAccess";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { SEAT_LAYOUT_UPDATED_EVENT, formatSeatLabel, Seat, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
 
@@ -66,11 +67,6 @@ export function useTaHandheld() {
   const [selectedCallKey, setSelectedCallKey] = useState<string | null>(null);
   const [markState, setMarkState] = useState<Record<string, 'hint' | 'skip' | null>>({});
 
-  const [nameModalOpen, setNameModalOpen] = useState(false);
-  const [isFirstTime, setIsFirstTime] = useState(false);
-  const [tempNameInput, setTempNameInput] = useState("");
-  const [exitModalOpen, setExitModalOpen] = useState(false);
-
   const activeStudentsRef = useRef<Record<string, StudentData>>({});
   const callsRef = useRef<Record<string, CallData>>({});
   const rechecksRef = useRef<Record<string, RecheckData>>({});
@@ -84,20 +80,22 @@ export function useTaHandheld() {
   useEffect(() => {
     let savedName = localStorage.getItem(TA_NAME_STORAGE_KEY) || "";
     let savedClientId = localStorage.getItem(TA_CLIENT_ID_STORAGE_KEY);
-    
+
     if (!savedClientId) {
       savedClientId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       localStorage.setItem(TA_CLIENT_ID_STORAGE_KEY, savedClientId);
     }
-    
+
     setTaClientId(savedClientId);
     setTaJoinedAt(Date.now());
 
+    // 💡 이름을 따로 물어보지 않는다 — 강사 로그인 시 저장된 실명을 그대로 쓴다.
+    if (!savedName) savedName = getInstructorName();
+
     if (savedName) {
+      localStorage.setItem(TA_NAME_STORAGE_KEY, savedName);
+      seedTaTenantId();
       setTaName(savedName);
-    } else {
-      setIsFirstTime(true);
-      setNameModalOpen(true);
     }
 
     const handleBeforeUnload = () => { if (clinicChannelRef.current) clinicChannelRef.current.untrack(); };
@@ -111,6 +109,12 @@ export function useTaHandheld() {
 
   useEffect(() => {
     if (taName && taClientId && SUPABASE_URL && SUPABASE_ANON_KEY) connectClinicChannel();
+    return () => {
+      if (clinicChannelRef.current) {
+        supabaseClient.removeChannel(clinicChannelRef.current);
+        clinicChannelRef.current = null;
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taName, taClientId]);
 
@@ -308,8 +312,13 @@ export function useTaHandheld() {
       .not('seat', 'is', null);
     if (error) return;
 
+    // 💡 clinic_session_state에는 tenant_id 컬럼이 없어 지점으로 직접 필터링할 수 없다. 대신 이미
+    // 지점별로 로드해둔 좌석 배치(allSeatObjsRef)에 실제로 존재하는 좌석 번호로만 좁혀서, 다른 지점의
+    // 활성 세션이 우리 지점 몫으로 섞여 들어와 담당 배정되는 걸 막는다. 좌석 배치가 아예 없는 본사
+    // 계정(tenant_id가 UUID가 아님 → getActiveSeatLayout이 빈 배치 반환)은 이 필터로 자연히 0명이 된다.
+    const knownSeats = new Set(allSeatObjsRef.current.map(s => String(s.number)));
     const latestByStudent = new Map<string, any>();
-    (sessions || []).filter((r: any) => r.seat).forEach((r: any) => {
+    (sessions || []).filter((r: any) => r.seat && knownSeats.has(String(r.seat))).forEach((r: any) => {
       const prev = latestByStudent.get(r.student_id);
       if (!prev || (r.session_no || 1) > (prev.session_no || 1)) latestByStudent.set(r.student_id, r);
     });
@@ -542,7 +551,8 @@ export function useTaHandheld() {
   useEffect(() => { handleTaActionFromOtherScreenRef.current = handleTaActionFromOtherScreen; });
 
   const loadAllSeats = useCallback(() => {
-    getActiveSeatLayout().then(layout => {
+    const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+    getActiveSeatLayout(myTenantId).then(layout => {
       const sorted = [...layout.seats].sort((a, b) => a.number - b.number);
       setAllSeats(sorted.map(s => String(s.number)));
       setAllSeatObjs(sorted);
@@ -581,20 +591,14 @@ export function useTaHandheld() {
     }).catch(err => console.error('클리닉 채널 연결 오류:', err));
   };
 
-  const commitTaName = () => {
-    const val = tempNameInput.trim();
-    if (!val) return;
-    setTaName(val);
-    localStorage.setItem(TA_NAME_STORAGE_KEY, val);
-    setNameModalOpen(false);
-    setIsFirstTime(false);
-  };
-
   const handleConfirmCall = () => {
     if (!selectedCallKey || !markState[selectedCallKey]) return;
     const c = callsSnapshot[selectedCallKey];
     if (!c) return;
-    sendToStudent(c.seat, 'force_cancel_call', { qNum: Number(c.qNum), mark: markState[selectedCallKey], taName: taName });
+    // 💡 일반 호출(포털에서 누른 호출)은 qNum이 숫자가 아니라 문자열 'general'이다. 여기서 Number()로
+    // 캐스팅하면 NaN이 되어, 이 broadcast를 받는 다른 조교 패드/감독관 화면의 로컬 상태 키('general')와
+    // 안 맞아서 그 화면에서는 호출 표시가 즉시 안 지워진다(다음 DB 폴링 때야 뒤늦게 정리됨).
+    sendToStudent(c.seat, 'force_cancel_call', { qNum: c.qNum, mark: markState[selectedCallKey], taName: taName });
 
     const sid = activeStudentsRef.current[c.seat]?.sessionId;
     if (sid) clearActiveCall(supabaseClient, sid, c.qNum);
@@ -625,29 +629,11 @@ export function useTaHandheld() {
     flushState();
   };
 
-  const handleExit = () => {
-    if (clinicChannelRef.current) clinicChannelRef.current.untrack().catch(() => {});
-    localStorage.removeItem(TA_NAME_STORAGE_KEY);
-    const freshClientId = crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    localStorage.setItem(TA_CLIENT_ID_STORAGE_KEY, freshClientId);
-    setTaClientId(freshClientId);
-    setTaName("");
-    setSelectedCallKey(null);
-    setMarkState({});
-    setTempNameInput("");
-    setExitModalOpen(false);
-    setIsFirstTime(true);
-    setNameModalOpen(true);
-  };
-
   return {
     taName, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
     myAssignedSeats, assignmentMap, claimedByOthers, totalTaCount,
     selectedCallKey, setSelectedCallKey, markState, setMarkState,
-    nameModalOpen, setNameModalOpen,
-    isFirstTime, setIsFirstTime, tempNameInput, setTempNameInput,
-    exitModalOpen, setExitModalOpen,
-    commitTaName, handleConfirmCall, handleConfirmRecheck, handleExit, formatElapsed, updateHandlingPresence,
+    handleConfirmCall, handleConfirmRecheck, formatElapsed, updateHandlingPresence,
     allSeats, allSeatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked,
   };
 }

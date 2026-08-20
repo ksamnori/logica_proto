@@ -79,20 +79,14 @@ export default function LessonPage() {
 
   const [progressModalData, setProgressModalData] = useState<any>(null);
 
-  // 🌟 [핵심 수정] 권한 체크 로직 보강
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isTeacherMode = role === 'TEACHER';
-
-      // 강사 모드가 아닐 때만 텍스트 기반 관리자 권한을 인정합니다.
-      const isGodMode = !isTeacherMode && (
-        role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장')
-      );
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
       
       if (isGodMode) {
         setIsAuthorized(true);
@@ -227,7 +221,6 @@ export default function LessonPage() {
     } catch (e) { alert("삭제 실패"); }
   };
 
-  // 🌟 [핵심 보강] 목록 조회 시에도 강사 모드일 경우 권한 강제 축소
   const fetchClasses = async () => {
     const instId = localStorage.getItem("logica_instructor_id") || "";
     const role = localStorage.getItem("logica_instructor_role") || "";
@@ -240,12 +233,8 @@ export default function LessonPage() {
       return;
     }
 
-    const isTeacherMode = role === 'TEACHER';
-
-    const isAdminLike = !isTeacherMode && (
-      ["ADMIN", "MANAGER", "PRINCIPAL", "SUPER_ADMIN", "VICE_ADMIN"].includes(role.toUpperCase()) || 
-      pos.includes("원장") || pos.includes("실장") || pos.includes("최고관리자") || pos.includes("부원장") || pos.includes("대장")
-    );
+    const isAdminLike = ["ADMIN", "MANAGER", "PRINCIPAL", "SUPER_ADMIN", "VICE_ADMIN"].includes(role.toUpperCase()) || 
+                        pos.includes("원장") || pos.includes("실장") || pos.includes("최고관리자") || pos.includes("부원장") || pos.includes("대장");
 
     let query = supabase
       .from("class")
@@ -253,7 +242,6 @@ export default function LessonPage() {
       .eq("tenant_id", validTenantId)
       .order("name");
     
-    // 권한이 없으면 자신의 반만 조회하도록 쿼리 필터링
     if (!isAdminLike && !canViewAllClasses && instId) {
       query = query.eq("instructor_id", instId);
     }
@@ -282,7 +270,8 @@ export default function LessonPage() {
 
       const assignedBookIds = data.map(cb => cb.book_id);
       
-      const { data: qData } = await supabase.from("textbook_question").select("tq_id, book_id, page_number, question_number").in("book_id", assignedBookIds);
+      // 🌟 [핵심 버그 수정] 모달에서 문제와 정답을 띄우기 위해 누락되었던 전체 데이터를 스캔하도록 select("*") 로 복구!
+      const { data: qData } = await supabase.from("textbook_question").select("*").in("book_id", assignedBookIds);
       const questionsData = qData || [];
 
       const bookPagesMap: Record<string, number[]> = {};
@@ -580,9 +569,7 @@ export default function LessonPage() {
 
       <div className="flex flex-1 gap-5 overflow-hidden">
         
-        {/* ==============================================
-            1열: 마스터 교재
-            ============================================== */}
+        {/* 1열: 마스터 교재 */}
         <div className="w-[340px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 relative z-10 shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden transition-all">
           <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0">
             <div className="flex justify-between items-center mb-3">
@@ -640,9 +627,7 @@ export default function LessonPage() {
           </div>
         </div>
 
-        {/* ==============================================
-            2열: 교재 배정 및 진도 현황 (중앙) 
-            ============================================== */}
+        {/* 2열: 교재 배정 및 진도 현황 (중앙) */}
         <div className="flex-1 flex flex-col min-w-0 bg-white rounded-xl border border-slate-200 shadow-[0_8px_30px_rgba(0,0,0,0.04)] relative overflow-hidden transition-all">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0 z-10">
             <h2 className="text-[15px] font-black text-slate-800 flex items-center gap-2">
@@ -849,9 +834,7 @@ export default function LessonPage() {
           </div>
         </div>
 
-        {/* ==============================================
-            3열: 선생님을 위한 [클래스 인사이트] (우측 사이드바) 
-            ============================================== */}
+        {/* 3열: 선생님을 위한 [클래스 인사이트] (우측 사이드바) */}
         {selectedClass && (
           <div className="w-[300px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden z-10 animate-in fade-in slide-in-from-right-4 duration-300">
              <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0">
@@ -863,7 +846,6 @@ export default function LessonPage() {
              
              <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-5 bg-slate-50/50">
                
-               {/* 1. 수강반 요약 정보 */}
                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2.5">
                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                    <span className="text-[11px] font-bold text-slate-500">담당 강사</span>
@@ -879,7 +861,6 @@ export default function LessonPage() {
                  </div>
                </div>
 
-               {/* 2. 요주의 학생 알림 */}
                <div className="flex flex-col gap-2">
                  <span className="text-[11px] font-extrabold text-rose-600 flex items-center gap-1">
                    <span>🚨</span> 요주의 학생 알림
@@ -916,7 +897,6 @@ export default function LessonPage() {
                  </div>
                </div>
 
-               {/* 3. 퀵 액션 버튼 모음 */}
                <div className="flex flex-col gap-2">
                  <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
                    <span>⚡</span> 빠른 실행 액션
@@ -961,7 +941,7 @@ export default function LessonPage() {
         onSuccess={() => fetchClassAssignedBooks(selectedClass)} 
       />
 
-      {/* 🌟 상세 모달 렌더링 영역 */}
+      {/* 🌟 팝업 창 연동 */}
       {progressModalData && (
          <ProgressDetailModal 
             data={progressModalData} 

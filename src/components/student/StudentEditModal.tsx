@@ -14,6 +14,11 @@ interface StudentEditModalProps {
   onSuccess: () => void;
 }
 
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
 export default function StudentEditModal({ 
   isOpen, 
   studentId, 
@@ -24,7 +29,6 @@ export default function StudentEditModal({
   onSuccess 
 }: StudentEditModalProps) {
   
-  // 🌟 성별(gender) 상태 추가
   const [editForm, setEditForm] = useState({
     name: "", 
     gender: "", 
@@ -49,17 +53,20 @@ export default function StudentEditModal({
     setIsSuperAdmin(adminFlag);
 
     if (isOpen && student) {
+      const parentObj = unwrap(student.parent);
+
       setEditForm({
         name: student.name || "", 
-        gender: student.gender || "", // 🌟 성별 초기값 세팅
+        gender: student.gender || "", 
         status: student.status || "재원", 
         school: student.school || "", 
         grade: student.grade || "", 
         phone: student.phone || "",
-        parentId: student.parent?.parent_id || "", 
-        parentName: student.parent?.name || "", 
-        parentRel: student.parent?.relationship || "", 
-        parentPhone: student.parent?.phone || "", 
+        parentId: student.parent_id || parentObj?.parent_id || "", 
+        parentName: parentObj?.name || "", 
+        parentRel: parentObj?.relationship || "", 
+        // 더미 번호인 경우 화면에는 빈칸으로 보여줍니다.
+        parentPhone: parentObj?.phone?.includes('unassigned') ? "" : (parentObj?.phone || ""), 
         newClassId: ""
       });
     }
@@ -75,58 +82,100 @@ export default function StudentEditModal({
   const submitEditStudent = async () => {
     setIsSaving(true);
     try {
-      let finalParentId = editForm.parentId;
+      let finalParentId = editForm.parentId || null;
+      const inputPhone = editForm.parentPhone.trim();
+      const inputName = editForm.parentName.trim();
+      const inputRel = editForm.parentRel.trim();
 
-      if (!finalParentId && (editForm.parentName || editForm.parentPhone)) {
-        const { data: newParent, error: insertError } = await supabase
-          .from("parent")
-          .insert({ 
-            name: editForm.parentName, 
-            relationship: editForm.parentRel, 
-            phone: editForm.parentPhone 
-          })
-          .select()
-          .single();
-          
-        if (insertError) throw insertError;
-        if (newParent) finalParentId = newParent.parent_id;
-      } else if (finalParentId) {
-        const { error: updateParentError } = await supabase
-          .from("parent")
-          .update({ 
-            name: editForm.parentName, 
-            relationship: editForm.parentRel, 
-            phone: editForm.parentPhone 
-          })
-          .eq("parent_id", finalParentId);
-          
-        if (updateParentError) throw updateParentError;
+      // 🌟 [핵심 변경] 연락처 입력 여부와 관계없이 완벽하게 동작하는 우회/연결 로직
+      if (!inputPhone && !inputName && !inputRel) {
+        // 학부모 정보가 아예 비워져 있다면 연결 해제
+        finalParentId = null;
+      } else {
+        if (inputPhone) {
+          // 1. 번호가 입력된 경우: 기존 학부모 스캔 및 연결
+          const { data: existingParent } = await supabase
+            .from("parent")
+            .select("parent_id")
+            .eq("phone", inputPhone)
+            .maybeSingle();
+
+          if (existingParent) {
+            finalParentId = existingParent.parent_id;
+            const { error: pUpdateErr } = await supabase
+              .from("parent")
+              .update({ name: inputName, relationship: inputRel })
+              .eq("parent_id", finalParentId);
+            if (pUpdateErr) throw pUpdateErr;
+          } else if (finalParentId) {
+            const { error: pUpdateErr } = await supabase
+              .from("parent")
+              .update({ phone: inputPhone, name: inputName, relationship: inputRel })
+              .eq("parent_id", finalParentId);
+            if (pUpdateErr) throw pUpdateErr;
+          } else {
+            const { data: newParent, error: pInsertErr } = await supabase
+              .from("parent")
+              .insert({ phone: inputPhone, name: inputName, relationship: inputRel })
+              .select()
+              .single();
+            if (pInsertErr) throw pInsertErr;
+            finalParentId = newParent.parent_id;
+          }
+        } else {
+          // 2. 번호가 비워져 있는 경우 (하지만 이름/관계는 입력됨)
+          if (finalParentId) {
+            // 기존 학부모 업데이트: 번호 갱신은 생략하여 NOT NULL 위반 방지
+            const { error: pUpdateErr } = await supabase
+              .from("parent")
+              .update({ name: inputName, relationship: inputRel })
+              .eq("parent_id", finalParentId);
+            if (pUpdateErr) throw pUpdateErr;
+          } else {
+            // 신규 생성인데 번호가 없는 경우: DB 에러를 막기 위한 임시 더미 번호 강제 주입
+            const dummyPhone = `unassigned_${Date.now()}`;
+            const { data: newParent, error: pInsertErr } = await supabase
+              .from("parent")
+              .insert({ phone: dummyPhone, name: inputName, relationship: inputRel })
+              .select()
+              .single();
+            if (pInsertErr) throw pInsertErr;
+            finalParentId = newParent.parent_id;
+          }
+        }
       }
 
-      // 🌟 저장 항목에 gender 추가
-      const updates: any = { 
+      // 학생 정보 완벽 업데이트
+      const studentUpdates = { 
         name: editForm.name, 
         gender: editForm.gender || null, 
         status: editForm.status, 
         school: editForm.school, 
         grade: editForm.grade, 
-        phone: editForm.phone 
+        phone: editForm.phone,
+        parent_id: finalParentId
       };
-      
-      if (finalParentId) updates.parent_id = finalParentId;
 
       const { error: studentUpdateError } = await supabase
         .from("student")
-        .update(updates)
+        .update(studentUpdates)
         .eq("student_id", studentId);
         
       if (studentUpdateError) throw studentUpdateError;
 
-      alert("학생 정보가 수정되었습니다.");
+      alert("학생 및 학부모 정보가 성공적으로 수정되었습니다.");
       onSuccess();
       onClose();
     } catch (e: any) { 
-      alert("학생 정보 저장 실패: " + e.message); 
+      console.error("업데이트 에러 세부정보:", e);
+      // 에러 메시지 텍스트 강제 추출 안전장치
+      const errMsg = e.message || e.details || JSON.stringify(e) || "알 수 없는 에러";
+      
+      if (errMsg.includes("unique constraint") || e.code === "23505") {
+        alert("저장 실패: 입력하신 학부모 연락처가 이미 다른 학부모의 번호로 등록되어 있습니다.");
+      } else {
+        alert("정보 저장 실패: " + errMsg); 
+      }
     } finally {
       setIsSaving(false);
     }
@@ -210,7 +259,7 @@ export default function StudentEditModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-50 p-4">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-50 p-4 font-pretendard">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-[fadeIn_0.2s_ease-out]">
         
         {/* 모달 헤더 */}
@@ -386,6 +435,7 @@ export default function StudentEditModal({
                   value={editForm.parentPhone} 
                   onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} 
                   className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                  placeholder="연락처를 비워두면 저장/업데이트가 가능합니다."
                 />
               </div>
             </div>

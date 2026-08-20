@@ -8,9 +8,9 @@ import { supabase } from "@/lib/supabase";
 export default function LoginPage() {
   const router = useRouter(); 
 
-  // 🌟 [수정] 다시 loginId로 되돌려서 전화번호/아이디 입력을 받습니다.
   const [loginId, setLoginId] = useState("");
   const [loginPw, setLoginPw] = useState("");
+  const [showLoginPw, setShowLoginPw] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   
   const [isPwModalOpen, setIsPwModalOpen] = useState(false);
@@ -329,7 +329,6 @@ export default function LoginPage() {
 
         <form onSubmit={handleLogin} className="space-y-5">
           <div>
-            {/* 🌟 [수정] 안내 문구를 아이디 또는 이메일로 변경 */}
             <label className="block text-sm font-bold text-slate-700 mb-1">로그인 ID 또는 이메일</label>
             <div className="relative">
               <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
@@ -352,8 +351,9 @@ export default function LoginPage() {
           <div>
             <div className="flex justify-between items-center mb-1">
               <label className="block text-sm font-bold text-slate-700">비밀번호</label>
-              <button 
-                type="button" 
+              <button
+                type="button"
+                tabIndex={-1}
                 onClick={() => setIsPwModalOpen(true)}
                 className="text-[11px] font-bold text-blue-500 hover:text-blue-700 hover:underline transition-colors focus:outline-none"
               >
@@ -367,13 +367,31 @@ export default function LoginPage() {
                 </svg>
               </span>
               <input
-                type="password"
+                type={showLoginPw ? "text" : "password"}
                 required
                 value={loginPw}
                 onChange={(e) => setLoginPw(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] font-medium"
+                className="w-full pl-10 pr-10 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] font-medium"
                 placeholder="비밀번호를 입력하세요"
               />
+              <button
+                type="button"
+                tabIndex={-1}
+                onMouseDown={(e) => { e.preventDefault(); setShowLoginPw(true); }}
+                onMouseUp={() => setShowLoginPw(false)}
+                onMouseLeave={() => setShowLoginPw(false)}
+                onTouchStart={(e) => { e.preventDefault(); setShowLoginPw(true); }}
+                onTouchEnd={() => setShowLoginPw(false)}
+                onTouchCancel={() => setShowLoginPw(false)}
+                className={`absolute inset-y-0 right-0 flex items-center pr-3 transition-colors ${showLoginPw ? "text-[#002864]" : "text-slate-400 hover:text-slate-600"}`}
+                aria-label="누르고 있으면 비밀번호 표시"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path>
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path>
+                  {showLoginPw && <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M3 3l18 18"></path>}
+                </svg>
+              </button>
             </div>
           </div>
 

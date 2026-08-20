@@ -22,8 +22,8 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
   const [isLoading, setIsLoading] = useState(true);
 
   const [selectedQ, setSelectedQ] = useState<any>(null);
+  const [qData, setQData] = useState<any>(null); 
 
-  // 🌟 마우스 스크롤 상태
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollIntervalRef = useRef<NodeJS.Timeout | null>(null);
   
@@ -81,13 +81,11 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
     if (data) fetchData();
   }, [data]);
 
-  // 🌟 [핵심] 로딩이 끝나면 가장 마지막에 진도/과제가 나간 페이지를 찾아 자동으로 스크롤해줍니다!
   useEffect(() => {
     if (!isLoading && data.pages.length > 0) {
       setTimeout(() => {
-        let targetPage = data.pages[0]; // 기본은 첫 페이지
+        let targetPage = data.pages[0]; 
 
-        // 뒤에서부터 역순으로 추적하여 흔적(채점, 과제, 완료)이 있는 페이지를 찾음
         for (let i = data.pages.length - 1; i >= 0; i--) {
           const p = data.pages[i];
           const pageQs = data.groupedQs[p] || [];
@@ -102,28 +100,50 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
           }
         }
 
-        // 해당 페이지의 열(Column) ID를 찾아 부드럽게 스크롤 이동
         const targetEl = document.getElementById(`page-col-${targetPage}`);
         if (targetEl && scrollRef.current) {
            scrollRef.current.scrollTo({
-              left: Math.max(0, targetEl.offsetLeft - 120), // 120px은 좌측 고정된 학생명 컬럼의 너비를 고려한 여백
+              left: Math.max(0, targetEl.offsetLeft - 120),
               behavior: 'smooth'
            });
         }
-      }, 150); // DOM이 완벽히 그려진 후 스크롤되도록 약간의 딜레이
+      }, 150); 
     }
   }, [isLoading, data.pages, data.groupedQs, data.students, ansMap]);
 
   useEffect(() => {
     if (selectedQ) {
+      setQData(selectedQ);
+      if (selectedQ.question_id) {
+        supabase.from('question_db').select('*').eq('question_id', selectedQ.question_id).single().then(({data}) => {
+          if (data) {
+            setQData((prev: any) => {
+              const merged = { ...prev };
+              for (const key in data) {
+                if (data[key] !== null && data[key] !== undefined && data[key] !== '') {
+                  merged[key] = data[key];
+                }
+              }
+              return merged;
+            });
+          }
+        });
+      }
+    } else {
+      setQData(null);
+    }
+  }, [selectedQ]);
+
+  useEffect(() => {
+    if (qData) {
       const timer = setTimeout(() => {
         if (typeof window !== "undefined" && (window as any).MathJax && (window as any).MathJax.typesetPromise) {
           (window as any).MathJax.typesetPromise().catch(() => {});
         }
-      }, 50);
+      }, 150);
       return () => clearTimeout(timer);
     }
-  }, [selectedQ]);
+  }, [qData]);
 
   const startContinuousScroll = (direction: 'left' | 'right') => {
     if (scrollIntervalRef.current) return;
@@ -182,6 +202,18 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
     if (code === 'DONE') return "✔";
     if (code === 'HOMEWORK') return "과제";
     return code; 
+  };
+
+  const renderHTML = (html: any) => {
+    if (!html) return '-';
+    return String(html).replace(/\\bigcirc/g, '\\circ').replace(/\n/g, '<br>');
+  };
+
+  const renderAnswer = (ans: any) => {
+    if (!ans || ans === '-') return '-';
+    const str = renderHTML(ans);
+    if (str.includes('<img') || str.includes('<br>')) return str;
+    return `$ ${str} $`;
   };
 
   return (
@@ -267,7 +299,6 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                    <th className="sticky top-0 left-0 z-30 bg-[#f8fafc] border-b border-r border-slate-300 py-2.5 px-3 shadow-[2px_2px_5px_rgba(0,0,0,0.05)] w-24 min-w-[96px] text-center">
                      <span className="text-[11px] font-black text-slate-500">학생명</span>
                    </th>
-                   {/* 🌟 [핵심] 각각의 th에 고유한 id를 부여하여 스크롤 목적지로 사용합니다 */}
                    {data.pages.map(p => (
                      <th key={p} id={`page-col-${p}`} className="sticky top-0 z-20 bg-white border-b border-r border-slate-200 py-2 px-2 text-center min-w-[70px] shadow-[0_2px_5px_rgba(0,0,0,0.02)]">
                        <span className="text-[12px] font-black text-[#002864]">{p}p</span>
@@ -316,28 +347,71 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
         </div>
       </div>
 
-      {selectedQ && (
+      {qData && (
         <div className="fixed inset-0 z-[200] flex justify-center items-center bg-slate-900/40 backdrop-blur-sm p-4 animate-[fadeIn_0.1s_ease-out]">
-          <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+          <div className="bg-white w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <div className="bg-[#002864] px-5 py-3.5 flex justify-between items-center text-white shrink-0 shadow-md z-10">
               <h3 className="font-extrabold text-sm flex items-center gap-2">
-                <span>🔍</span> {selectedQ.page_number}p - {String(selectedQ.question_number).replace(/TWIN/gi, 'T').replace(/SIMILAR/gi, 'S').replace(/CLINIC/gi, 'C')}번 문항 상세
+                <span>🔍</span> {qData.page_number}p - {String(qData.question_number).replace(/TWIN/gi, 'T').replace(/SIMILAR/gi, 'S').replace(/CLINIC/gi, 'C')}번 문항 상세
               </h3>
-              <button onClick={() => setSelectedQ(null)} className="text-white/80 hover:text-rose-400 transition-colors font-bold text-2xl leading-none">&times;</button>
+              <button onClick={() => { setSelectedQ(null); setQData(null); }} className="text-white/80 hover:text-rose-400 transition-colors font-bold text-2xl leading-none">&times;</button>
             </div>
             
-            <div className="p-6 overflow-y-auto max-h-[60vh] custom-scroll bg-slate-50 space-y-4">
+            <div className="p-6 overflow-y-auto custom-scroll bg-slate-50 space-y-4">
                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                   <div className="text-[11px] font-black text-slate-400 mb-2.5 border-b border-slate-100 pb-2">질문 내용</div>
-                  <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" 
-                       dangerouslySetInnerHTML={{ __html: String(selectedQ.question || '-').replace(/\\bigcirc/g, '\\circ').replace(/\n/g, '<br>') }} />
+                  <div className="math-text text-slate-800 font-medium whitespace-pre-wrap leading-relaxed" 
+                       dangerouslySetInnerHTML={{ __html: renderHTML(qData.question) }} />
                </div>
                
                <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
                   <div className="text-[11px] font-black text-blue-400 mb-2.5 border-b border-blue-200 pb-2">DB 정답</div>
-                  <div className="math-text text-blue-700 font-bold text-[15px] whitespace-pre-wrap" 
-                       dangerouslySetInnerHTML={{ __html: `$ ${selectedQ.answer || '-'} $` }} />
+                  <div className="math-text text-blue-800 font-bold text-[15px] whitespace-pre-wrap" 
+                       dangerouslySetInnerHTML={{ __html: renderAnswer(qData.answer || qData.solution || '-') }} />
                </div>
+
+               {qData.explanation && !(qData.step_1_concept || qData.step_2_approach || qData.step_3_process || qData.step_4_conclusion) && (
+                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="text-[11px] font-black text-slate-400 mb-2.5 border-b border-slate-100 pb-2">상세 해설</div>
+                    <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed"
+                         dangerouslySetInnerHTML={{ __html: renderHTML(qData.explanation) }} />
+                 </div>
+               )}
+
+               {/* 🌟 원본 스키마 컬럼명 완벽 대응 */}
+               {(qData.step_1_concept || qData.step_2_approach || qData.step_3_process || qData.step_4_conclusion) && (
+                 <div className="mt-6 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                   <div className="text-[12px] font-black text-slate-600 mb-4 border-b border-slate-100 pb-2 flex items-center gap-1.5">
+                     <span>💡</span> 4단계 상세 해설
+                   </div>
+                   <div className="space-y-5">
+                     {qData.step_1_concept && (
+                       <div className="relative pl-3 border-l-4 border-emerald-400">
+                         <div className="text-[11px] font-black text-emerald-600 mb-1">1단계 (조건 분석)</div>
+                         <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_1_concept) }} />
+                       </div>
+                     )}
+                     {qData.step_2_approach && (
+                       <div className="relative pl-3 border-l-4 border-indigo-400">
+                         <div className="text-[11px] font-black text-indigo-600 mb-1">2단계 (개념 적용)</div>
+                         <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_2_approach) }} />
+                       </div>
+                     )}
+                     {qData.step_3_process && (
+                       <div className="relative pl-3 border-l-4 border-amber-400">
+                         <div className="text-[11px] font-black text-amber-600 mb-1">3단계 (수식 전개)</div>
+                         <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_3_process) }} />
+                       </div>
+                     )}
+                     {qData.step_4_conclusion && (
+                       <div className="relative pl-3 border-l-4 border-rose-400">
+                         <div className="text-[11px] font-black text-rose-600 mb-1">4단계 (검토 및 마무리)</div>
+                         <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_4_conclusion) }} />
+                       </div>
+                     )}
+                   </div>
+                 </div>
+               )}
             </div>
           </div>
         </div>

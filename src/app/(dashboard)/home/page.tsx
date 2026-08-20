@@ -6,6 +6,22 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 
+// 🌟 안전한 JSON 파싱 함수 (진도율 계산용)
+const safeParseIds = (raw: any): number[] => {
+  if (!raw) return [];
+  try {
+    let val = raw;
+    if (typeof val === 'string') {
+      if (val === "null" || val.trim() === "") return [];
+      val = JSON.parse(val);
+    }
+    if (Array.isArray(val)) return val.map(Number);
+  } catch (err) {
+    console.warn("데이터 파싱 경고:", err);
+  }
+  return [];
+};
+
 export default function TeacherDashboardPage() {
   const router = useRouter();
 
@@ -224,30 +240,113 @@ export default function TeacherDashboardPage() {
       return;
     }
 
+    // 🌟 불필요한 무거운 조인(exam_assignment) 걷어냄
     const { data: classStudents } = await supabase
       .from("student")
-      .select("*, parent(*), exam_assignment(*), enrollment(class(name)), consultation_log(created_at)")
+      .select("*, parent(*), enrollment(class(name)), consultation_log(created_at)")
       .eq("status", "재원")
       .in("student_id", allTargetIds);
     
-    let totalScore = 0; let scoreCount = 0; let hwSubmitCount = 0;
-    
-    (classStudents || []).forEach((s: any, idx: number) => {
-      if (s.exam_assignment && s.exam_assignment.length > 0 && s.exam_assignment[0].total_score !== null) {
-        totalScore += s.exam_assignment[0].total_score;
-        scoreCount++;
-      }
-      if (idx % 5 !== 0) hwSubmitCount++; 
-    });
-
     setStudents((classStudents || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+    const activeStudentIds = (classStudents || []).map((s: any) => s.student_id);
 
-    const avgScore = scoreCount > 0 ? Math.round(totalScore / scoreCount) : 0;
-    const hwRate = (classStudents || []).length > 0 ? Math.round((hwSubmitCount / (classStudents || []).length) * 100) : 0;
+    // =========================================================================
+    // 🌟 [핵심 변경 1] 최근 2주(14일) 시험 평균 점수 리얼 데이터
+    // =========================================================================
+    const kstNowMs = Date.now() + 9 * 3600000;
+    const twoWeeksAgo = new Date(kstNowMs - 14 * 24 * 3600000).toISOString();
+    
+    const { data: exams } = await supabase.from('exam_assignment')
+      .select('total_score')
+      .eq('class_id', classId)
+      .gte('created_at', twoWeeksAgo)
+      .not('total_score', 'is', null);
 
+    const avgScore = exams && exams.length > 0 
+      ? Math.round(exams.reduce((acc, curr) => acc + (curr.total_score || 0), 0) / exams.length) 
+      : 0;
+
+    // =========================================================================
+    // 🌟 [핵심 변경 2] 최근 1달(30일) 과제 제출률 리얼 데이터
+    // =========================================================================
+    const oneMonthAgo = new Date(kstNowMs - 30 * 24 * 3600000).toISOString();
+    
+    const { data: hws } = await supabase.from('homework_assignment')
+      .select('target_student_id, student_homework_result(student_id, status)')
+      .eq('class_id', classId)
+      .gte('created_at', oneMonthAgo)
+      .not('homework_title', 'eq', '[시스템] 수업 진도 완료 기록');
+
+    let expectedHwCount = 0;
+    let submittedHwCount = 0;
+
+    if (hws && hws.length > 0 && activeStudentIds.length > 0) {
+      hws.forEach(hw => {
+        const targetIds = hw.target_student_id ? [hw.target_student_id] : activeStudentIds;
+        const validTargets = targetIds.filter((id: string) => activeStudentIds.includes(id));
+        
+        expectedHwCount += validTargets.length;
+
+        hw.student_homework_result?.forEach((res: any) => {
+          if (validTargets.includes(res.student_id)) {
+            if (res.status && ['제출완료', '채점완료', '완료'].includes(res.status)) {
+              submittedHwCount++;
+            }
+          }
+        });
+      });
+    }
+    const hwRate = expectedHwCount > 0 ? Math.round((submittedHwCount / expectedHwCount) * 100) : 0;
+
+    // =========================================================================
+    // 🌟 [핵심 변경 3] 주교재 진도율 리얼 데이터 엔진 (이전 구현분 복구)
+    // =========================================================================
     const { data: cbData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId).eq("textbook.book_type", "주교재");
     const bookName = cbData && cbData.length > 0 ? cbData[0].textbook?.title : "주교재 미배정";
-    const bookProgress = cbData && cbData.length > 0 ? Math.floor(Math.random() * 40) + 30 : 0; 
+    
+    let bookProgress = 0;
+    if (cbData && cbData.length > 0 && cbData[0].book_id) {
+      const bookId = cbData[0].book_id;
+      const { data: qData } = await supabase.from("textbook_question").select("tq_id, page_number").eq("book_id", bookId);
+      
+      if (qData && qData.length > 0) {
+        const pageTqMap: Record<number, number[]> = {};
+        qData.forEach(q => {
+          if (!pageTqMap[q.page_number]) pageTqMap[q.page_number] = [];
+          pageTqMap[q.page_number].push(q.tq_id);
+        });
+        const totalPages = Object.keys(pageTqMap).map(Number);
+        const totalPagesCount = totalPages.length;
+
+        const { data: hwsForProg } = await supabase.from("homework_assignment").select("student_homework_result(student_id, completed_tq_ids)").eq("class_id", classId).eq("book_id", bookId);
+        
+        if (activeStudentIds.length > 0 && hwsForProg) {
+          const studentDoneTqs: Record<string, Set<number>> = {};
+          activeStudentIds.forEach((id: string) => studentDoneTqs[id] = new Set());
+
+          hwsForProg.forEach(hw => {
+             hw.student_homework_result?.forEach((res: any) => {
+                const sId = res.student_id;
+                if (studentDoneTqs[sId]) {
+                   const completedQs = safeParseIds(res.completed_tq_ids);
+                   completedQs.forEach(tqId => studentDoneTqs[sId].add(tqId));
+                }
+             });
+          });
+
+          let classDonePagesCount = 0;
+          totalPages.forEach(p => {
+             const tqsOnPage = pageTqMap[p];
+             const allStudentsDone = activeStudentIds.every((sId: string) => {
+                return tqsOnPage.every(tqId => studentDoneTqs[sId].has(tqId));
+             });
+             if (allStudentsDone) classDonePagesCount++;
+          });
+
+          bookProgress = totalPagesCount > 0 ? Math.min(100, Math.round((classDonePagesCount / totalPagesCount) * 100)) : 0;
+        }
+      }
+    }
 
     setClassStats({ avgScore, hwRate, bookName, bookProgress });
   };
@@ -526,18 +625,28 @@ export default function TeacherDashboardPage() {
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0 mt-1">
           <div className="flex flex-col gap-3 h-[220px]">
-            <div onClick={() => router.push('/exam')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-center hover:border-blue-300 transition-colors cursor-pointer">
-              <div className="flex justify-between items-center mb-1">
-                <span className="text-xs font-bold text-slate-500">학업 성취도 (평균)</span>
-                <span className="text-xl font-black text-slate-800 leading-none">{classStats.avgScore > 0 ? classStats.avgScore : "-"}<span className="text-xs font-bold text-slate-500 ml-0.5">점</span></span>
-              </div>
-              <div>
-                <div className="flex justify-between text-[10px] font-bold text-slate-400 mb-1">
-                  <span>과제 제출률</span>
-                  <span className="text-blue-600">{classStats.hwRate}%</span>
+            
+            {/* 🌟 [UI 개편] 기존의 통합 블록을 시험/과제로 각각 쪼개어 가로 배치했습니다 */}
+            <div className="flex gap-3 flex-1">
+              <div onClick={() => router.push('/exam')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-blue-300 transition-colors cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-blue-100">최근 2주</span>
+                  <span className="text-[11px] font-bold text-slate-600">시험 성취도 (평균)</span>
                 </div>
-                <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
-                  <div className={`h-full rounded-full transition-all duration-500 ${classStats.hwRate < 60 ? "bg-rose-500" : "bg-blue-500"}`} style={{ width: `${classStats.hwRate}%` }}></div>
+                <div className="text-right mt-1 flex items-end justify-end gap-0.5">
+                  <span className="text-2xl font-black text-slate-800 group-hover:text-blue-600 transition-colors leading-none">{classStats.avgScore > 0 ? classStats.avgScore : "-"}</span>
+                  <span className="text-[11px] font-bold text-slate-500 mb-0.5">점</span>
+                </div>
+              </div>
+              
+              <div onClick={() => router.push('/learning')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-amber-300 transition-colors cursor-pointer group">
+                <div className="flex flex-col">
+                  <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-amber-100">최근 1달</span>
+                  <span className="text-[11px] font-bold text-slate-600">과제 제출률</span>
+                </div>
+                <div className="text-right mt-1 flex items-end justify-end gap-0.5">
+                  <span className="text-2xl font-black text-amber-500 group-hover:text-amber-600 transition-colors leading-none">{classStats.hwRate}</span>
+                  <span className="text-[11px] font-bold text-amber-400 mb-0.5">%</span>
                 </div>
               </div>
             </div>
@@ -798,7 +907,6 @@ export default function TeacherDashboardPage() {
                            {(isPresent || isLate) && !student.checkOut && (
                               <button onClick={() => handleAttAction(student, 'ENDED')} className="px-3 py-1 bg-slate-700 text-white text-[10px] font-extrabold rounded-md shadow-sm hover:bg-slate-900 transition-colors">종료</button>
                            )}
-                           {/* 🌟 수정된 종료 완료 뱃지 */}
                            {student.checkOut && !isEarlyLeave && (
                               <span className="text-[10px] bg-slate-800 text-white px-2.5 py-1 rounded-md font-black shadow-sm flex items-center gap-1">
                                 <span className="text-emerald-400">✓</span> 종료됨 <span className="text-slate-300 font-bold ml-0.5">{timeOutStr}</span>

@@ -12,8 +12,7 @@ export function isSessionExpired(session: { started_at: string; duration_ms: num
     return (new Date(session.started_at).getTime() + session.duration_ms) <= now;
 }
 
-// 오늘 학생의 최신 세션을 가져오거나, 없거나 이미 시간이 다 지났으면 새로 만든다(재이용은 30분).
-export async function resolveTodaySession(supabaseClient: any, studentId: string, todayStr: string) {
+async function fetchLatestSession(supabaseClient: any, studentId: string, todayStr: string) {
     const { data: rows } = await supabaseClient
         .from('clinic_session_state')
         .select('*')
@@ -21,13 +20,22 @@ export async function resolveTodaySession(supabaseClient: any, studentId: string
         .eq('session_date', todayStr)
         .order('session_no', { ascending: false })
         .limit(1);
+    return rows?.[0] || null;
+}
 
-    const latest = rows?.[0] || null;
+// 오늘 학생의 최신 세션을 가져오거나, 없거나 이미 시간이 다 지났으면 새로 만든다(재이용은 30분).
+export async function resolveTodaySession(supabaseClient: any, studentId: string, todayStr: string) {
+    const latest = await fetchLatestSession(supabaseClient, studentId, todayStr);
 
     if (!latest) {
         const fresh = { student_id: studentId, session_date: todayStr, session_no: 1, started_at: new Date().toISOString(), duration_ms: DEFAULT_CLINIC_SESSION_DURATION_MS, seat: null, manual_seat: null, ended_at: null };
         const { data: inserted } = await supabaseClient.from('clinic_session_state').insert(fresh).select().single();
-        return inserted || fresh;
+        // 💡 같은 학생 화면이 거의 동시에 두 번 마운트되면(React strict mode의 effect 중복 실행,
+        // 새로고침 겹침 등) 둘 다 "오늘 세션 없음"을 보고 동시에 insert를 시도할 수 있다. 이때 진
+        // 쪽은 (student_id, session_date, session_no) unique 제약으로 insert가 실패하는데, 그 결과를
+        // 그대로 id 없는 로컬 fresh 객체로 반환해버리면 이후 좌석 배정/호출/자리비움 DB 갱신이
+        // 전부 조용히 씹힌다. insert가 실패하면 이긴 쪽이 이미 만들어둔 실제 행을 다시 읽어와 쓴다.
+        return inserted || await fetchLatestSession(supabaseClient, studentId, todayStr) || fresh;
     }
 
     // 시간이 다 지났거나(자연 만료), 이미 종료 처리된(승인된 조기 종료 등) 세션이면 재이용 세션을 새로 연다.
@@ -36,7 +44,7 @@ export async function resolveTodaySession(supabaseClient: any, studentId: string
         await supabaseClient.from('clinic_session_state').update({ seat: null, ended_at: latest.ended_at || new Date().toISOString() }).eq('id', latest.id);
         const fresh = { student_id: studentId, session_date: todayStr, session_no: latest.session_no + 1, started_at: new Date().toISOString(), duration_ms: RENEWAL_CLINIC_SESSION_DURATION_MS, seat: null, manual_seat: latest.manual_seat || null, ended_at: null };
         const { data: inserted } = await supabaseClient.from('clinic_session_state').insert(fresh).select().single();
-        return inserted || fresh;
+        return inserted || await fetchLatestSession(supabaseClient, studentId, todayStr) || fresh;
     }
 
     return latest;
