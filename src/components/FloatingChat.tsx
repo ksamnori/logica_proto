@@ -160,6 +160,8 @@ function DraggableMemo({
     if (!e.isPrimary || !dragInfo.current.isDragging) return;
     dragInfo.current.isDragging = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
+    
+    // 🌟 [핵심 수정] 마우스를 뗄 때, 최종 위치(x, y)를 DB에 저장하라고 신호를 보냅니다.
     onUpdate(memo.memo_id, { pos_x: pos.x, pos_y: pos.y });
   };
 
@@ -283,7 +285,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
   const [memos, setMemos] = useState<MemoRecord[]>([]);
   const [highestZ, setHighestZ] = useState(9900);
 
-  // 🌟 [권한 완벽 연동] DB의 권한 설정을 읽어와서 플로팅 챗/메모를 동적으로 제어합니다.
   const [canUseChat, setCanUseChat] = useState(false);
   const [canUseMemo, setCanUseMemo] = useState(false);
 
@@ -292,14 +293,12 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
       const role = localStorage.getItem("logica_instructor_role") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
 
-      // 최고관리자는 모든 기능 무조건 허용
       if (role === 'SUPER_ADMIN') {
         setCanUseChat(true);
         setCanUseMemo(true);
         return;
       }
 
-      // DB 권한 조회
       if (role && tId) {
         const { data } = await supabase
           .from('tenant_role_permissions')

@@ -95,6 +95,9 @@ export default function Sidebar() {
   }, [displayRole]);
 
   const canAccess = (path: string) => {
+    // 🌟 [핵심 수정] 게스트(GUEST) 계정은 조교 전용 도구에 접근할 수 없도록 최상단에서 먼저 차단합니다.
+    if (displayRole === 'GUEST' && path === '/ta-tools') return false;
+
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true;
 
     // 🌟 조교(TA) 전용 메뉴는 TA 역할 계정에게 항상 열어준다
