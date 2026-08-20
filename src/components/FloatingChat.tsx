@@ -5,7 +5,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
-// 🌟 [완벽한 타입 정의] Supabase의 Join 데이터 구조를 모두 포용하는 정석 설계도
 export interface MemoRecord {
   memo_id: string;
   content: string;
@@ -104,7 +103,6 @@ export interface TypingPayload {
   };
 }
 
-// 🌟 [안전 장치] Supabase에서 객체 배열로 반환되는 관계 데이터를 단일 객체로 꺼내줍니다.
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
@@ -285,9 +283,39 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
   const [memos, setMemos] = useState<MemoRecord[]>([]);
   const [highestZ, setHighestZ] = useState(9900);
 
-  // 🌟 [원인 완벽 해결] 채팅/메모 버튼이 영구적으로 보이도록 초기값을 강제로 고정합니다.
-  const [canUseChat] = useState(true);
-  const [canUseMemo] = useState(true);
+  // 🌟 [권한 완벽 연동] DB의 권한 설정을 읽어와서 플로팅 챗/메모를 동적으로 제어합니다.
+  const [canUseChat, setCanUseChat] = useState(false);
+  const [canUseMemo, setCanUseMemo] = useState(false);
+
+  useEffect(() => {
+    const checkFeaturesAccess = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+
+      // 최고관리자는 모든 기능 무조건 허용
+      if (role === 'SUPER_ADMIN') {
+        setCanUseChat(true);
+        setCanUseMemo(true);
+        return;
+      }
+
+      // DB 권한 조회
+      if (role && tId) {
+        const { data } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', tId)
+          .eq('role_name', role)
+          .maybeSingle();
+
+        if (data && data.allowed_menus) {
+          setCanUseChat(data.allowed_menus.includes('action_use_chat'));
+          setCanUseMemo(data.allowed_menus.includes('action_use_memo'));
+        }
+      }
+    };
+    checkFeaturesAccess();
+  }, [instId]); 
 
   const flashIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const originalTitleRef = useRef<string>("");

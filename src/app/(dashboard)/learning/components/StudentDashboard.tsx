@@ -1,123 +1,180 @@
+// src/app/(dashboard)/learning/components/StudentDashboard.tsx
 "use client";
 
-import React from "react";
+import React, { useMemo } from 'react';
 
 interface StudentDashboardProps {
   currentView: any;
   activeTab: string;
   isFilterActive: boolean;
-  setIsFilterActive: (active: boolean) => void;
+  setIsFilterActive: (v: boolean) => void;
   handleViewChange: (view: any) => void;
   handleStudentClick: (studentId: string, studentName: string, classId: string, className: string) => void;
   groupedClasses: Record<string, any[]>;
-  studentStatsMap: Record<string, any>;
+  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; }>;
   LEVEL_ORDER: string[];
 }
 
 export default function StudentDashboard({
-  currentView, activeTab, isFilterActive, setIsFilterActive, handleViewChange,
-  handleStudentClick, groupedClasses, studentStatsMap, LEVEL_ORDER
+  handleStudentClick, groupedClasses, studentStatsMap, LEVEL_ORDER, currentView
 }: StudentDashboardProps) {
 
-  const renderStudentCard = (s: any, classId: string, cName: string) => {
-    // 💡 [핵심 수정] 탭이나 반(Class)에 상관없이 무조건 학생 본인의 전체(_ALL) 미해결 문제 수를 가져옵니다!
-    // 이렇게 해야 탭을 이리저리 이동해도 3색 버블의 숫자가 절대 변하지 않습니다.
-    const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
+  // 🌟 미해결 항목이 있는 학생들만 추출하여 '해야 할 일(To-Do)' 액션 리스트 생성
+  const actionList = useMemo(() => {
+    const list: any[] = [];
+    let totalExam = 0;
+    let totalHw = 0;
+    let totalPrint = 0;
     
-    const displayExamQ = allStats.examQ;
-    const displayHwQ = allStats.hwQ;
-    const displayPrintQ = allStats.printQ;
+    // 💡 [핵심 버그 수정] 다중 수강생 중복 방지 (Key 중복 및 카운트 뻥튀기 차단)
+    const processedStudentIds = new Set<string>();
 
-    // 💡 카드의 빨간색 음영(하이라이트) 여부는 현재 선택된 탭에 맞춰서 똑똑하게 반응합니다.
-    let displayTotal = 0;
-    if (activeTab === 'EXAM') displayTotal = displayExamQ;
-    else if (activeTab === 'HOMEWORK') displayTotal = displayHwQ;
-    else if (activeTab === 'INCORRECT') displayTotal = displayPrintQ;
-    else displayTotal = displayExamQ + displayHwQ + displayPrintQ;
+    LEVEL_ORDER.forEach(lvl => {
+      const classes = groupedClasses[lvl] || [];
+      classes.forEach(cls => {
+        // 현재 뷰가 특정 반을 선택한 상태라면 그 반 학생들만 필터링
+        if (currentView.type === 'CLASS' && currentView.classId !== cls.class_id) return;
 
-    // 미해결 학생만 보기 필터가 켜져 있고, 현재 탭의 미해결 건수가 없으면 숨김
-    if (isFilterActive && displayTotal === 0) return null;
+        cls.students.forEach((stu: any) => {
+          // 이미 리스트에 추가된 다중 수강생이라면 무시하고 넘어감
+          if (processedStudentIds.has(stu.id)) return;
 
-    return (
-      <div key={`${s.id}_${classId}`} onClick={() => handleStudentClick(s.id, s.name, classId, cName)} 
-        className={`px-3 py-3 rounded-xl border shadow-sm cursor-pointer transition-all flex items-center justify-between ${
-          displayTotal > 0 ? 'bg-rose-50/50 border-rose-300 hover:border-rose-500 hover:-translate-y-0.5' : 'bg-white border-slate-200 hover:border-[#002864] hover:-translate-y-0.5'
-        }`}
-      >
-        <div className="flex items-center gap-1.5 min-w-0">
-          <div className={`font-extrabold text-[14px] truncate ${displayTotal > 0 ? 'text-rose-900' : 'text-slate-800'}`}>{s.name}</div>
-        </div>
-        
-        <div className="flex items-center gap-1.5 shrink-0 ml-2">
-          {displayExamQ > 0 && <span className="bg-blue-100 text-blue-700 px-2 py-0.5 min-w-[28px] text-center rounded-full shadow-sm text-[12px] font-black" title="시험 미해결 문항">{displayExamQ}</span>}
-          {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 px-2 py-0.5 min-w-[28px] text-center rounded-full shadow-sm text-[12px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
-          {displayPrintQ > 0 && <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 min-w-[28px] text-center rounded-full shadow-sm text-[12px] font-black" title="오답 미해결 문항">{displayPrintQ}</span>}
-        </div>
-      </div>
-    );
-  };
+          // page.tsx에서 내려주는 studentStatsMap을 활용해 실시간 미해결 건수 스캔
+          const stats = studentStatsMap[`${stu.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
+          const totalPending = stats.examQ + stats.hwQ + stats.printQ;
+          
+          if (totalPending > 0) {
+            processedStudentIds.add(stu.id); // 처리 명단에 등록
+            list.push({
+              id: stu.id,
+              name: stu.name,
+              classId: cls.class_id,
+              className: cls.name,
+              level: lvl,
+              stats
+            });
+            totalExam += stats.examQ;
+            totalHw += stats.hwQ;
+            totalPrint += stats.printQ;
+          }
+        });
+      });
+    });
 
-  const isAllView = currentView.type === 'ALL';
+    // 🚨 미해결 항목 총합이 많은 학생 순으로 내림차순 정렬 (가장 급한 학생이 맨 위로)
+    list.sort((a, b) => {
+      const aTotal = a.stats.examQ + a.stats.hwQ + a.stats.printQ;
+      const bTotal = b.stats.examQ + b.stats.hwQ + b.stats.printQ;
+      if (bTotal !== aTotal) return bTotal - aTotal;
+      return a.name.localeCompare(b.name);
+    });
+
+    return { list, totalExam, totalHw, totalPrint };
+  }, [groupedClasses, studentStatsMap, LEVEL_ORDER, currentView]);
+
+  const { list, totalExam, totalHw, totalPrint } = actionList;
 
   return (
-    <>
-      <div className="px-5 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
+    <div className="flex flex-col h-full bg-slate-50/50">
+      
+      {/* 🚀 상단 요약 현황판 헤더 */}
+      <div className="px-8 py-6 border-b border-slate-200 bg-white flex justify-between items-end shrink-0 shadow-sm z-10">
         <div>
-          {isAllView ? (
-            <>
-              <h2 className="text-base font-extrabold text-slate-800">전체 학생 요약 대시보드</h2>
-              <p className="text-[12px] font-bold text-slate-500 mt-0.5">모든 반의 학생들을 한눈에 확인하고 미해결 항목을 관리하세요.</p>
-            </>
-          ) : (
-            <h2 className="text-base font-extrabold text-slate-800"><span className="text-[#002864]">{currentView.className}</span> 반 학생 목록</h2>
-          )}
+          <h2 className="text-2xl font-black text-rose-600 tracking-tight flex items-center gap-2">
+            <span>🚨</span> 미해결 집중 관리 (Action Center)
+          </h2>
+          <p className="text-sm font-bold text-slate-500 mt-1.5">
+            {currentView.type === 'CLASS' ? (
+              <span className="text-[#002864] font-extrabold bg-blue-50 px-2 py-0.5 rounded border border-blue-100 mr-1">[{currentView.className}] 반</span>
+            ) : (
+              <span className="text-slate-600 font-extrabold mr-1">학원 전체 학생 중</span> 
+            )} 
+            미제출/미해결된 항목이 있는 학생들을 모아보고 즉시 관리합니다.
+          </p>
         </div>
-        <div className="flex items-center gap-2">
-          {activeTab !== 'DASHBOARD' && (
-            <button onClick={() => handleViewChange({ type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' })} className="px-4 py-2 rounded-lg text-[13px] font-bold bg-white text-[#002864] border border-[#002864] hover:bg-blue-50 transition-colors shadow-sm">
-              전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'} 보기 ➔
-            </button>
-          )}
-          <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-[13px] font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
-            🚨 미해결 학생만 보기
-          </button>
+        
+        <div className="flex gap-4">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-3 flex flex-col items-center min-w-[110px] shadow-sm">
+            <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 미해결 시험</span>
+            <span className="text-2xl font-black text-blue-700">{totalExam}<span className="text-sm ml-0.5">건</span></span>
+          </div>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 flex flex-col items-center min-w-[110px] shadow-sm">
+            <span className="text-[11px] font-extrabold text-amber-600 mb-1">📝 미해결 과제</span>
+            <span className="text-2xl font-black text-amber-700">{totalHw}<span className="text-sm ml-0.5">건</span></span>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex flex-col items-center min-w-[110px] shadow-sm">
+            <span className="text-[11px] font-extrabold text-emerald-600 mb-1">❌ 오답 미해결</span>
+            <span className="text-2xl font-black text-emerald-700">{totalPrint}<span className="text-sm ml-0.5">건</span></span>
+          </div>
         </div>
       </div>
-      
-      <div className="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50/50">
-        {isAllView ? (
-          LEVEL_ORDER.map(lvl => {
-            const classList = groupedClasses[lvl];
-            if (!classList || classList.length === 0) return null;
-            const visibleClasses = classList.filter(c => c.students.some((s: any) => {
-              const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
-              let dTotal = 0;
-              if (activeTab === 'EXAM') dTotal = allStats.examQ;
-              else if (activeTab === 'HOMEWORK') dTotal = allStats.hwQ;
-              else if (activeTab === 'INCORRECT') dTotal = allStats.printQ;
-              else dTotal = allStats.examQ + allStats.hwQ + allStats.printQ;
-              return !isFilterActive || dTotal > 0;
-            }));
-            if (visibleClasses.length === 0) return null;
 
-            return visibleClasses.map((c, cIdx) => (
-              <div key={`class_group_${c.class_id}_${cIdx}`} className="mb-8">
-                <div className="flex items-center gap-2 mb-3 border-b border-slate-200 pb-2">
-                  <span className="bg-[#002864] text-white text-[11px] font-black px-2 py-0.5 rounded tracking-wider">{lvl}</span>
-                  <h2 className="text-[15px] font-extrabold text-slate-800">{c.name}</h2>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-                  {c.students.map((s: any) => renderStudentCard(s, c.class_id, c.name))}
-                </div>
-              </div>
-            ));
-          })
+      {/* 🚀 메인 미해결 리스트 테이블 */}
+      <div className="flex-1 overflow-y-auto custom-scroll p-6 sm:p-8">
+        {list.length === 0 ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400 font-bold bg-white border border-slate-200 rounded-2xl shadow-sm">
+            <span className="text-6xl mb-4">✨</span>
+            <p className="text-xl text-emerald-600 font-black tracking-tight mb-1">모든 학생이 학습을 완벽하게 마쳤습니다!</p>
+            <p className="text-sm text-slate-500">현재 미해결된 시험, 과제, 오답 항목이 없습니다.</p>
+          </div>
         ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-3">
-            {Object.values(groupedClasses).flat().find((c: any) => c.class_id === currentView.classId)?.students.map((s: any) => renderStudentCard(s, currentView.classId, currentView.className))}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-100 border-b border-slate-200 text-[12px] font-extrabold text-slate-600 uppercase tracking-wider">
+                  <th className="py-3.5 px-6 w-16 text-center">순위</th>
+                  <th className="py-3.5 px-6 w-48">수강반</th>
+                  <th className="py-3.5 px-6 w-32">학생명</th>
+                  <th className="py-3.5 px-6 text-center text-blue-700">시험</th>
+                  <th className="py-3.5 px-6 text-center text-amber-700">과제</th>
+                  <th className="py-3.5 px-6 text-center text-emerald-700">오답 프린트</th>
+                  <th className="py-3.5 px-6 w-36 text-center">관리 액션</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {list.map((stu, idx) => (
+                  <tr key={stu.id} className="hover:bg-rose-50/40 transition-colors group">
+                    <td className="py-3.5 px-6 text-center text-xs font-bold text-slate-400">
+                      {idx < 3 ? <span className="text-rose-500 font-black">{idx + 1}</span> : idx + 1}
+                    </td>
+                    <td className="py-3.5 px-6">
+                      <span className="bg-slate-100 border border-slate-200 text-slate-600 px-2.5 py-1 rounded text-xs font-extrabold shadow-sm">
+                        {stu.className}
+                      </span>
+                    </td>
+                    <td className="py-3.5 px-6 font-black text-slate-800 text-[14px]">
+                      {stu.name}
+                    </td>
+                    <td className="py-3.5 px-6 text-center">
+                      {stu.stats.examQ > 0 ? (
+                        <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-blue-200">{stu.stats.examQ}</span>
+                      ) : <span className="text-slate-300 font-medium text-xs">-</span>}
+                    </td>
+                    <td className="py-3.5 px-6 text-center">
+                      {stu.stats.hwQ > 0 ? (
+                        <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-amber-200">{stu.stats.hwQ}</span>
+                      ) : <span className="text-slate-300 font-medium text-xs">-</span>}
+                    </td>
+                    <td className="py-3.5 px-6 text-center">
+                      {stu.stats.printQ > 0 ? (
+                        <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-emerald-200">{stu.stats.printQ}</span>
+                      ) : <span className="text-slate-300 font-medium text-xs">-</span>}
+                    </td>
+                    <td className="py-3.5 px-6 text-center">
+                      <button 
+                        onClick={() => handleStudentClick(stu.id, stu.name, stu.classId, stu.className)}
+                        className="bg-rose-500 hover:bg-rose-600 text-white px-4 py-2.5 rounded-lg text-[11px] font-black transition-colors shadow-sm w-full flex items-center justify-center gap-1.5 opacity-90 group-hover:opacity-100 group-hover:-translate-y-0.5"
+                      >
+                        정리하기 ➔
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

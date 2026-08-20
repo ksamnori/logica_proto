@@ -1,3 +1,4 @@
+// src/app/(dashboard)/learning/components/GlobalList.tsx
 "use client";
 
 import React from "react";
@@ -5,6 +6,7 @@ import React from "react";
 const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
 interface GlobalListProps {
+  currentView: any; // 🌟 추가된 View 상태
   activeTab: string;
   globalList: any[];
   isLoading: boolean;
@@ -22,24 +24,26 @@ interface GlobalListProps {
 }
 
 export default function GlobalList({
-  activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
+  currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleViewChange, toggleGlobalSelection,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint
 }: GlobalListProps) {
   
   return (
-    <>
+    <div className="flex flex-col h-full overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2">
         <div className="flex justify-between items-center">
           <div>
+            {/* 🌟 [수정] 현재 선택된 반(Class) 이름이 있다면 명확하게 표시해 줍니다. */}
             <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
-              <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'}</span> 
+              {currentView.type === 'CLASS' ? (
+                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'}</span> 
+              ) : (
+                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'}</span> 
+              )}
             </h2>
             <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
           </div>
-          <button onClick={() => handleViewChange({ type: 'ALL', classId: '', className: '', studentId: '', studentName: '' })} className="px-3 py-1.5 border border-slate-300 bg-white hover:bg-slate-100 rounded-lg text-[11px] font-bold text-slate-600 transition-colors shadow-sm">
-            돌아가기 ↺
-          </button>
         </div>
 
         <div className="flex justify-between items-center bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm mt-0.5">
@@ -113,12 +117,10 @@ export default function GlobalList({
                   <div className="flex items-center gap-2.5 shrink-0 justify-end w-[380px]">
                     <div className="text-[11px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ}문항</div>
                     
-                    <div className="flex items-center gap-1.5 shrink-0 w-[80px] flex-wrap justify-center">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 whitespace-nowrap">✅ {res.oCount || 0}</span>
-                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 whitespace-nowrap">❌ {res.xCount || 0}</span>
-                      {/* 💡 [13번] 힌트/조교 호출 도움을 받아 푼 문항(TO/TX)이 있으면 별도로 표시 —
-                          안 그러면 도움받아 맞힌 문제도 그냥 ✅로만 보여 선생님이 구분할 수 없다. */}
-                      {res.helpedCount > 0 && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-100 whitespace-nowrap" title="힌트 또는 조교 호출 도움을 받아 푼 문항 수">🧑‍🏫 {res.helpedCount}</span>}
+                    <div className="flex flex-row flex-nowrap items-center gap-1.5 shrink-0 w-[120px] justify-center">
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {res.oCount || 0}</span>
+                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {res.xCount || 0}</span>
+                      {res.helpedCount > 0 && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-100 whitespace-nowrap shadow-sm" title="힌트 또는 조교 호출 도움을 받아 푼 문항 수">🧑‍🏫 {res.helpedCount}</span>}
                     </div>
                     
                     <div className="flex items-center gap-1.5 shrink-0 w-[110px] justify-end">
@@ -142,6 +144,6 @@ export default function GlobalList({
           </div>
         )}
       </div>
-    </>
+    </div>
   );
 }

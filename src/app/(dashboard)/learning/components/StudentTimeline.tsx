@@ -520,7 +520,6 @@ export default function StudentTimeline({
           <div className="flex items-center gap-2 pr-1">
             <span className="text-[12px] font-bold text-slate-500 mr-1 flex items-center gap-1">🖨️ 오답 프린트 생성 <span className="text-slate-300 ml-1">|</span></span>
             
-            {/* 💡 [수정 내용] 선택된 블록이 있을 때만 화면에 나타납니다. (텍스트: 학습지별 오답) */}
             {selectedBlocks.length > 0 && (
               <button 
                 onClick={() => openModal('SELECTED')} 
@@ -558,7 +557,6 @@ export default function StudentTimeline({
 
       if (isLeaf) {
         return (
-          // 💡 [수정 내용] 최하위 뎁스(리프 노드)의 들여쓰기를 확실하게 넣었습니다 (ml-10).
           <div key={key} className="flex items-center py-1 px-1.5 ml-10 hover:bg-slate-50 rounded transition-colors group">
             <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 py-1">
               <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer" />
@@ -605,7 +603,6 @@ export default function StudentTimeline({
 
           <div className="flex flex-1 overflow-hidden">
             <div className="w-40 border-r border-slate-200 bg-slate-50 flex flex-col pt-4 shrink-0">
-              {/* 💡 [수정 내용] 모달 좌측 탭 순서를 학습지 -> 유형 -> 기간 순서로 강제 고정했습니다. */}
               <button onClick={() => setModalTab('SELECTED')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'SELECTED' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>학습지별 오답</button>
               <button onClick={() => setModalTab('TAXONOMY')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'TAXONOMY' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>유형별 오답</button>
               <button onClick={() => setModalTab('PERIOD')} className={`py-4 px-5 text-left font-bold text-sm transition-all border-l-4 ${modalTab === 'PERIOD' ? 'border-sky-500 bg-white text-slate-800' : 'border-transparent text-slate-500 hover:bg-slate-100'}`}>기간별 오답</button>
@@ -805,12 +802,13 @@ export default function StudentTimeline({
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-3 shrink-0 justify-end w-[440px]">
+                  <div className="flex items-center gap-3 shrink-0 justify-end w-[480px]">
                     <div className="text-[12px] font-bold text-slate-500 shrink-0 w-[60px] text-right whitespace-nowrap">총 {item.total || 0}문항</div>
 
-                    <div className="flex items-center gap-1.5 shrink-0 w-[90px] justify-center">
-                      <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100 whitespace-nowrap">✅ {item.oCount || 0}</span>
-                      <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-100 whitespace-nowrap">❌ {item.xCount || 0}</span>
+                    {/* 🌟 O/X 뱃지 한 줄 고정 (너비 자동 조정 및 줄바꿈 방지) */}
+                    <div className="flex flex-row flex-nowrap items-center gap-1.5 shrink-0 w-[120px] justify-center">
+                      <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {item.oCount || 0}</span>
+                      <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {item.xCount || 0}</span>
                     </div>
 
                     <div className="flex items-center gap-1.5 shrink-0 w-[130px] justify-end">

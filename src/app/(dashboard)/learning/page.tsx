@@ -38,7 +38,7 @@ interface ClassInfo {
 }
 
 interface ViewState {
-  type: 'ALL' | 'CLASS' | 'STUDENT' | 'GLOBAL_LIST';
+  type: 'ALL' | 'CLASS' | 'STUDENT';
   classId: string;
   className: string;
   studentId: string;
@@ -75,13 +75,20 @@ export default function LearningPage() {
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
+  // 🌟 [핵심 수정] 권한 체크 로직: 강사 뷰 모드일 때 관리자 텍스트 프리패스 차단
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+      const isTeacherMode = role === 'TEACHER';
+      
+      // 강사 모드가 아닐 때만 텍스트 기반 관리자 권한을 인정합니다.
+      const isGodMode = !isTeacherMode && (
+        role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+        pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장')
+      );
       
       if (isGodMode) {
         setIsAuthorized(true);
@@ -122,7 +129,10 @@ export default function LearningPage() {
       let view: ViewState = { type: 'ALL', classId: '', className: '', studentId: '', studentName: '' };
 
       if (savedViewStr) {
-        try { view = JSON.parse(savedViewStr); } catch(e){}
+        try { 
+          const parsed = JSON.parse(savedViewStr); 
+          if (['ALL', 'CLASS', 'STUDENT'].includes(parsed.type)) view = parsed;
+        } catch(e){}
       }
 
       const urlStudentId = new URLSearchParams(window.location.search).get('studentId');
@@ -138,7 +148,7 @@ export default function LearningPage() {
       fetchStatsForTab(allStudentsList);
 
       if (view.type === 'STUDENT') fetchStudentTimeline(view.studentId, view.classId);
-      else if (view.type === 'GLOBAL_LIST') fetchGlobalListForTab(savedTab, allStudentsList);
+      else fetchGlobalListForTab(savedTab, allStudentsList);
     }
   }, [allStudentsList]);
 
@@ -161,9 +171,9 @@ export default function LearningPage() {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
     setSelectedBlocks([]); setGlobalSelectedBlocks([]); setIsFilterActive(false); setSelectedDate(null); 
-    setGlobalList([]); setTimelineData([]);
+    
     if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
-    else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab(tab, allStudentsList);
+    else fetchGlobalListForTab(tab, allStudentsList);
   };
 
   const handleCalendarSummaryClick = (tab: TabType) => {
@@ -171,15 +181,8 @@ export default function LearningPage() {
     sessionStorage.setItem('logica_learning_tab', tab);
     setSelectedBlocks([]); setGlobalSelectedBlocks([]); setGlobalList([]); setTimelineData([]);
 
-    let newView = currentView;
-    if (currentView.type === 'ALL' || currentView.type === 'CLASS') {
-      newView = { type: 'GLOBAL_LIST', classId: '', className: '', studentId: '', studentName: '' };
-      setCurrentView(newView);
-      sessionStorage.setItem('logica_learning_view', JSON.stringify(newView));
-    }
-
-    if (newView.type === 'STUDENT') fetchStudentTimeline(newView.studentId, newView.classId);
-    else if (newView.type === 'GLOBAL_LIST') fetchGlobalListForTab(tab, allStudentsList);
+    if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
+    else fetchGlobalListForTab(tab, allStudentsList);
   };
 
   const handleViewChange = (view: ViewState) => {
@@ -189,13 +192,14 @@ export default function LearningPage() {
     setGlobalList([]); setTimelineData([]);
 
     if (view.type === 'STUDENT') fetchStudentTimeline(view.studentId, view.classId);
-    else if (view.type === 'GLOBAL_LIST') fetchGlobalListForTab(activeTab, allStudentsList);
+    else fetchGlobalListForTab(activeTab, allStudentsList);
   };
 
   const handleStudentClick = (studentId: string, studentName: string, classId: string, className: string) => {
     handleViewChange({ type: 'STUDENT', classId, className, studentId, studentName });
   };
 
+  // 🌟 [핵심 보강] 목록 조회 시에도 강사 모드일 경우 권한 강제 축소
   const fetchBaseData = async () => {
     setIsLoading(true);
     try {
@@ -203,10 +207,18 @@ export default function LearningPage() {
       const role = localStorage.getItem('logica_instructor_role') || '';
       const pos = localStorage.getItem('logica_instructor_position') || '';
       const tenantId = localStorage.getItem('logica_tenant_id') || '';
-      const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('원장') || pos.includes('실장') || pos.includes('최고관리자');
+      
+      const isTeacherMode = role === 'TEACHER';
+
+      const isAdmin = !isTeacherMode && (
+        ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || 
+        pos.includes('원장') || pos.includes('실장') || pos.includes('최고관리자')
+      );
 
       let classQuery = supabase.from('class').select('class_id, name, level_name').order('name');
       if (tenantId && tenantId !== 'hq') classQuery = classQuery.eq('tenant_id', tenantId);
+      
+      // 관리자가 아니면(즉, 강사 뷰일 경우) 담당 강사인 반만 조회
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const { data: classes } = await classQuery;
@@ -343,7 +355,6 @@ export default function LearningPage() {
       const targetClassIds = studentObj?.allClassIds && studentObj.allClassIds.length > 0 
           ? studentObj.allClassIds : [classId];
 
-      // 🌟 [핵심 버그 수정 1] exam_master에서 sub_title을 꼭 포함해서 쿼리해야 합니다!!
       const { data: exams } = await supabase.from('exam_assignment')
         .select('assignment_id, status, total_score, created_at, exam_master!inner(exam_id, title, sub_title, exam_type, total_questions)')
         .eq('student_id', studentId).order('created_at', { ascending: false });
@@ -376,7 +387,7 @@ export default function LearningPage() {
           realId: ex.assignment_id,
           masterId: m?.exam_id,
           title: m?.title || '제목 없음',
-          subTitle: m?.sub_title, // 🌟 여기서 subTitle을 담아줘야 자식 컴포넌트에 전달됩니다!
+          subTitle: m?.sub_title, 
           date: ex.created_at,
           status: ex.status,
           total: m?.total_questions || 0,
@@ -442,7 +453,6 @@ export default function LearningPage() {
         const chunk = studentIds.slice(i, i + chunkSize);
 
         if (tab === 'EXAM' || tab === 'INCORRECT') {
-          // 🌟 여기도 sub_title을 꼭 포함시킵니다!
           let query = supabase.from('exam_assignment')
             .select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)')
             .in('student_id', chunk);
@@ -456,7 +466,25 @@ export default function LearningPage() {
             const { data: ans } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', assignIds);
             const counts: Record<string, { o: number; x: number; helped: number }> = {};
             ans?.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
-            const enriched = data.map(d => ({ ...d, oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0, helpedCount: counts[d.assignment_id]?.helped || 0 }));
+            
+            const enriched = data.map(d => {
+               const em = unwrap(d.exam_master);
+               const cls = unwrap(d.class);
+               const stu = unwrap(d.student);
+               return {
+                 ...d,
+                 is_exam_hw: false,
+                 oCount: counts[d.assignment_id]?.o || 0,
+                 xCount: counts[d.assignment_id]?.x || 0,
+                 helpedCount: counts[d.assignment_id]?.helped || 0,
+                 totalQ: em?.total_questions || 0,
+                 class_name: cls?.name || '반 미지정',
+                 student: { name: stu?.name || '알수없음' },
+                 title: em?.title || '제목 없음',
+                 subTitle: em?.sub_title,
+                 sort_date: d.created_at
+               };
+            });
             list = [...list, ...enriched];
           }
         }
@@ -481,7 +509,7 @@ export default function LearningPage() {
               if (chunk.includes(hw.target_student_id)) {
                 const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
                 list.push({
-                  is_exam_hw: false, homework_id: hw.homework_id, student_id: hw.target_student_id, class_id: hw.class_id, class_name: hw.class?.name || '반 미지정',
+                  is_exam_hw: false, homework_id: hw.homework_id, student_id: hw.target_student_id, class_id: hw.class_id, class_name: unwrap(hw.class)?.name || '반 미지정',
                   student: { name: getStudentName(hw.target_student_id) }, homework_assignment: hw, status: res?.status || '미제출', sort_date: hw.due_date || hw.created_at,
                   oCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.x || 0, helpedCount: hCounts[`${hw.homework_id}_${hw.target_student_id}`]?.helped || 0, totalQ: totalQ
                 });
@@ -492,7 +520,7 @@ export default function LearningPage() {
                 if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
                   const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
                   list.push({
-                    is_exam_hw: false, homework_id: hw.homework_id, student_id: sId, class_id: hw.class_id, class_name: hw.class?.name || '반 미지정',
+                    is_exam_hw: false, homework_id: hw.homework_id, student_id: sId, class_id: hw.class_id, class_name: unwrap(hw.class)?.name || '반 미지정',
                     student: { name: getStudentName(sId) }, homework_assignment: hw, status: res?.status || '미제출', sort_date: hw.due_date || hw.created_at,
                     oCount: hCounts[`${hw.homework_id}_${sId}`]?.o || 0, xCount: hCounts[`${hw.homework_id}_${sId}`]?.x || 0, helpedCount: hCounts[`${hw.homework_id}_${sId}`]?.helped || 0, totalQ: totalQ
                   });
@@ -501,7 +529,6 @@ export default function LearningPage() {
             }
           });
 
-          // 🌟 과제용 문제지도 sub_title을 포함하여 불러오기
           const { data: examData } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, sub_title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
           const exIds = examData?.map(e => e.assignment_id) || [];
           const { data: eAns } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', exIds);
@@ -511,6 +538,7 @@ export default function LearningPage() {
 
           const formattedExamHws = (examData || []).map((e:any) => ({
             ...e, is_exam_hw: true, sort_date: e.created_at, class_name: unwrap(e.class)?.name || '반 미지정',
+            student: { name: unwrap(e.student)?.name || '알수없음' },
             oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, helpedCount: eCounts[e.assignment_id]?.helped || 0, totalQ: unwrap(e.exam_master)?.total_questions || 0
           }));
           list = [...list, ...formattedExamHws];
@@ -539,10 +567,11 @@ export default function LearningPage() {
 
   const filteredGlobalList = useMemo(() => {
     return globalList.filter(item => {
+      if (currentView.type === 'CLASS' && item.class_id !== currentView.classId) return false;
       if (!filterByDate(item.sort_date || item.created_at)) return false;
       return true;
     });
-  }, [globalList, dateFilter, selectedDate]);
+  }, [globalList, dateFilter, selectedDate, currentView]);
 
   const handleSelectAllGlobal = () => {
     if (globalSelectedBlocks.length === filteredGlobalList.length && filteredGlobalList.length > 0) {
@@ -732,7 +761,7 @@ export default function LearningPage() {
       
       alert("✅ 채점 완료 처리되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
-      else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab(activeTab, allStudentsList);
+      else fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch (err) {
       alert("완료 처리 중 오류가 발생했습니다.");
@@ -746,7 +775,7 @@ export default function LearningPage() {
       await supabase.from('exam_assignment').delete().eq('assignment_id', assignmentId);
       
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId);
-      else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab(activeTab, allStudentsList);
+      else fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch (e) { alert("삭제 실패"); }
   };
@@ -757,7 +786,7 @@ export default function LearningPage() {
     try {
       await supabase.from('homework_assignment').update({ homework_title: newTitle.trim() }).eq('homework_id', hwId);
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
-      else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab('HOMEWORK', allStudentsList);
+      else fetchGlobalListForTab('HOMEWORK', allStudentsList);
     } catch (e) { alert("수정 실패"); }
   };
 
@@ -769,7 +798,7 @@ export default function LearningPage() {
       await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
       
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId);
-      else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab('HOMEWORK', allStudentsList);
+      else fetchGlobalListForTab('HOMEWORK', allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch (e) { alert("삭제 실패"); }
   };
@@ -783,7 +812,7 @@ export default function LearningPage() {
       await supabase.from('exam_master').delete().eq('exam_id', examId);
       
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
-      else if (currentView.type === 'GLOBAL_LIST') fetchGlobalListForTab('INCORRECT', allStudentsList);
+      else fetchGlobalListForTab('INCORRECT', allStudentsList);
     } catch (e) { alert("삭제 실패"); }
   };
 
@@ -968,7 +997,7 @@ export default function LearningPage() {
         <div className="w-[230px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
           <div className={`p-4 border-b border-slate-200 shrink-0 flex justify-between items-center transition-colors ${currentView.type === 'ALL' ? 'bg-blue-50' : 'bg-slate-50'}`}>
             <h3 className={`text-[12px] font-extrabold flex items-center gap-1.5 cursor-pointer hover:underline ${currentView.type === 'ALL' ? 'text-blue-700' : 'text-[#002864]'}`} onClick={() => handleViewChange({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
-              <span>📂 전체 학생 목록</span>
+              <span>🏫 학원 전체 현황</span>
             </h3>
             <button onClick={toggleAllAccordions} className="text-[11px] font-bold bg-white border border-slate-300 px-2.5 py-1 rounded hover:bg-slate-100 transition-colors shadow-sm focus:outline-none">
               {isAllExpanded ? "접기" : "펼치기"}
@@ -1038,19 +1067,33 @@ export default function LearningPage() {
         </div>
 
         <div className="flex-1 flex flex-col relative bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-          { (currentView.type === 'ALL' || currentView.type === 'CLASS') && (
+          { (currentView.type === 'ALL' || currentView.type === 'CLASS') && activeTab === 'DASHBOARD' && (
             <StudentDashboard currentView={currentView} activeTab={activeTab} isFilterActive={isFilterActive} setIsFilterActive={setIsFilterActive} handleViewChange={handleViewChange} handleStudentClick={handleStudentClick} groupedClasses={groupedClasses} studentStatsMap={studentStatsMap} LEVEL_ORDER={LEVEL_ORDER} />
           )}  
 
-          {currentView.type === 'GLOBAL_LIST' && (
-            <GlobalList 
-              activeTab={activeTab} globalList={globalList} isLoading={isLoading} 
-              globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
-              handleBulkCompleteGlobal={handleBulkCompleteGlobal} handleBulkDeleteGlobal={handleBulkDeleteGlobal} 
-              handleViewChange={handleViewChange} toggleGlobalSelection={toggleGlobalSelection} 
-              formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
-              handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
-            />
+          { (currentView.type === 'ALL' || currentView.type === 'CLASS') && activeTab !== 'DASHBOARD' && (
+            <div className="flex flex-col h-full overflow-hidden">
+              {activeTab === 'INCORRECT' && currentView.type === 'ALL' && (
+                <div className="bg-indigo-50/80 border border-indigo-200 p-4 m-6 mb-2 rounded-xl flex items-center justify-between shadow-sm shrink-0">
+                  <div className="flex flex-col gap-1">
+                     <h3 className="text-indigo-800 font-extrabold text-[13px] flex items-center gap-1.5"><span>💡</span> 오답 프린트는 어디서 만드나요?</h3>
+                     <p className="text-indigo-600/90 font-bold text-[11px] pl-5 leading-relaxed">
+                        오답 프린트는 학생 개인의 오답 기록을 바탕으로 만들어지는 <strong className="text-indigo-700 font-black">개인 맞춤형 문제지</strong>입니다.<br/>
+                        좌측 학생 명단에서 <strong className="text-indigo-700 font-black bg-white px-1 py-0.5 rounded shadow-sm">특정 학생을 선택</strong>하시면 타임라인 우측 상단에 🖨️ 생성 장치(버튼)가 나타납니다.
+                     </p>
+                  </div>
+                </div>
+              )}
+              <GlobalList 
+                currentView={currentView}
+                activeTab={activeTab} globalList={filteredGlobalList} isLoading={isLoading} 
+                globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
+                handleBulkCompleteGlobal={handleBulkCompleteGlobal} handleBulkDeleteGlobal={handleBulkDeleteGlobal} 
+                handleViewChange={handleViewChange} toggleGlobalSelection={toggleGlobalSelection} 
+                formatDateLabel={formatDateLabel} handleForceComplete={handleForceComplete} 
+                handleDeleteExam={handleDeleteExam} handleDeleteHomework={handleDeleteHomework} handleDeletePrint={handleDeletePrint} 
+              />
+            </div>
           )}
 
           {currentView.type === 'STUDENT' && (

@@ -5,6 +5,7 @@ import React, { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import QuestionModal from "@/components/progress/QuestionModal";
+import ProgressDetailModal from "@/components/progress/ProgressDetailModal";
 
 interface TextbookInfo {
   title: string;
@@ -21,7 +22,6 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-// 💡 JSON 파싱 안전망
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -54,7 +54,6 @@ export default function ProgressPage() {
   const [selectedWbId, setSelectedWbId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("all");
   
-  // 🌟 [오류 해결] 본교재/워크북 독립 페이지 관리를 위한 상태 변수 복구
   const [activeMainPage, setActiveMainPage] = useState<number | null>(null);
   const [activeWbPage, setActiveWbPage] = useState<number | null>(null);
 
@@ -69,25 +68,35 @@ export default function ProgressPage() {
   
   const [statusMap, setStatusMap] = useState<{ [key: string]: string }>({});
 
-  const [checkedMainPages, setCheckedMainPages] = useState<number[]>([]);
-  const [checkedWbPages, setCheckedWbPages] = useState<number[]>([]);
-  const [checkedMainQs, setCheckedMainQs] = useState<number[]>([]);
-  const [checkedWbQs, setCheckedWbQs] = useState<number[]>([]);
-
   const [isLoading, setIsLoading] = useState(false);
   const [modalQuestion, setModalQuestion] = useState<any>(null);
   const [toastMsg, setToastMsg] = useState("");
   const mathJaxRef = useRef<boolean>(false);
 
+  const [progressModalData, setProgressModalData] = useState<any>(null);
+  const [classScheduleInfo, setClassScheduleInfo] = useState<{days: string[], holidays: string[], extras: string[]}>({days: [], holidays: [], extras: []});
+
+  const [checkedMainPages, setCheckedMainPages] = useState<number[]>([]);
+  const [checkedWbPages, setCheckedWbPages] = useState<number[]>([]);
+  const [checkedMainQs, setCheckedMainQs] = useState<number[]>([]);
+  const [checkedWbQs, setCheckedWbQs] = useState<number[]>([]);
+
   const actionQueue = useRef<Promise<void>>(Promise.resolve());
 
+  // 🌟 [핵심 수정] 권한 체크 시 강사 모드일 때 관리자 텍스트 패스 차단
   useEffect(() => {
     const checkAccess = async () => {
-      const role = localStorage.getItem("logica_instructor_role") || "";
+      const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('원장');
+      const isTeacherMode = role === 'TEACHER';
+      
+      const isGodMode = !isTeacherMode && (
+        role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+        pos.includes('최고관리자') || pos.includes('원장') || pos.includes('대장')
+      );
+
       if (isGodMode) { setIsAuthorized(true); return; }
 
       if (!tId || !role) { router.replace("/home"); return; }
@@ -106,7 +115,9 @@ export default function ProgressPage() {
     if (selectedBookId || selectedWbId) {
       fetchQuestions(selectedBookId, selectedWbId);
     } else {
-      setAllQuestions([]); setMainPages([]); setWbPages([]); setGroupedMainQs({}); setGroupedWbQs({}); 
+      setAllQuestions([]); setWorkbookQuestions([]);
+      setMainPages([]); setWbPages([]); 
+      setGroupedMainQs({}); setGroupedWbQs({}); 
       setActiveMainPage(null); setActiveWbPage(null);
     }
   }, [selectedBookId, selectedWbId]);
@@ -132,15 +143,23 @@ export default function ProgressPage() {
 
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 2500); };
 
+  // 🌟 [핵심 보강] 목록 조회 시에도 강사 뷰일 경우 본인 담당 반만 노출
   const fetchInitialClasses = async () => {
     const instId = localStorage.getItem("logica_instructor_id") || "";
-    const role = localStorage.getItem("logica_instructor_role") || "";
+    const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     const tId = localStorage.getItem("logica_tenant_id") || "";
-    const isAdmin = ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || pos.includes("최고관리자") || pos.includes("원장") || pos.includes("실장");
+
+    const isTeacherMode = role === 'TEACHER';
+
+    const isAdmin = !isTeacherMode && (
+      ["SUPER_ADMIN", "ADMIN", "MANAGER", "PRINCIPAL"].includes(role.toUpperCase()) || 
+      pos.includes("최고관리자") || pos.includes("원장") || pos.includes("실장")
+    );
     
     let query = supabase.from("class").select("class_id, name, level_name").order("name");
     if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+    
     if (!isAdmin && instId) query = query.eq("instructor_id", instId);
     
     const { data } = await query;
@@ -149,12 +168,26 @@ export default function ProgressPage() {
 
   const fetchClassDetails = async (classId: string) => {
     try {
-      const { data: classBooks, error: cbError } = await supabase
-        .from("class_textbook")
-        .select("book_id, textbook(title, book_type)")
-        .eq("class_id", classId);
+      const [
+        { data: classBooks }, 
+        { data: directStudents }, 
+        { data: enrolls },
+        { data: classData },
+        { data: holidayData },
+        { data: extraData }
+      ] = await Promise.all([
+        supabase.from("class_textbook").select("book_id, textbook(title, book_type)").eq("class_id", classId),
+        supabase.from("student").select("student_id, name").eq("class_id", classId),
+        supabase.from("enrollment").select("student_id, student(name, status)").eq("class_id", classId),
+        supabase.from("class").select("class_schedule(day_of_week)").eq("class_id", classId).maybeSingle(),
+        supabase.from("class_holiday").select("holiday_date").eq("class_id", classId),
+        supabase.from("class_extra_session").select("session_date").eq("class_id", classId)
+      ]);
 
-      if (cbError) throw cbError;
+      const days = classData?.class_schedule?.map((s: any) => s.day_of_week) || [];
+      const hols = holidayData?.map((h: any) => h.holiday_date) || [];
+      const extras = extraData?.map((e: any) => e.session_date) || [];
+      setClassScheduleInfo({ days, holidays: hols, extras });
 
       const typedClassBooks = classBooks as unknown as ClassTextbookRow[];
       const mains: ClassTextbookRow[] = []; 
@@ -171,11 +204,6 @@ export default function ProgressPage() {
       if (!mains.find(b => b.book_id === selectedBookId)) setSelectedBookId("");
       if (!wbs.find(b => b.book_id === selectedWbId)) setSelectedWbId("");
 
-      const [{ data: directStudents }, { data: enrolls }] = await Promise.all([
-        supabase.from("student").select("student_id, name").eq("class_id", classId),
-        supabase.from("enrollment").select("student_id, student(name, status)").eq("class_id", classId)
-      ]);
-
       const sMap = new Map();
       directStudents?.forEach(s => sMap.set(s.student_id, s.name));
       enrolls?.forEach((e: any) => {
@@ -185,7 +213,7 @@ export default function ProgressPage() {
         }
       });
 
-      const sList = Array.from(sMap.entries()).map(([id, name]) => ({ id, name }));
+      const sList = Array.from(sMap.entries()).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
       setStudents(sList);
       setEnrolledStudentIds(sList.map(s => s.id));
       setSelectedStudentId("all");
@@ -250,48 +278,60 @@ export default function ProgressPage() {
       if (error) throw error;
 
       const newMap: { [key: string]: string } = {};
-      const classWideByTq: any = {};
+      const tqStudentStatus: Record<number, Record<string, string>> = {};
 
       assignments?.forEach((hw: any) => {
-        let tqIds = safeParseIds(hw.target_questions);
-        const isClassWide = !hw.target_student_id;
+        const targetQs = safeParseIds(hw.target_questions);
+        const validStudentIds = (hw.student_homework_result || []).map((res: any) => res.student_id);
 
-        hw.student_homework_result?.forEach((res: any) => {
-          let completed = safeParseIds(res.completed_tq_ids);
-
-          tqIds.forEach((tqId: number) => {
-            const isDone = completed.includes(tqId);
-            const key = getStatusKey(tqId, res.student_id);
-            if (isDone || newMap[key] !== 'done') newMap[key] = isDone ? 'done' : 'homework';
-
-            if (isClassWide) {
-              if (!classWideByTq[tqId]) classWideByTq[tqId] = { total: 0, done: 0 };
-              classWideByTq[tqId].total++;
-              if (isDone) classWideByTq[tqId].done++;
+        validStudentIds.forEach((sId: string) => {
+          targetQs.forEach((tqId: number) => {
+            if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+            if (tqStudentStatus[tqId][sId] !== 'done') {
+              tqStudentStatus[tqId][sId] = 'homework';
             }
           });
+        });
 
-          completed.forEach((tqId: number) => {
-            if (!tqIds.includes(tqId)) {
-              newMap[getStatusKey(tqId, res.student_id)] = 'done';
-              if (isClassWide) {
-                if (!classWideByTq[tqId]) classWideByTq[tqId] = { total: studentIds.length, done: 0 };
-                classWideByTq[tqId].done++;
-              }
-            }
+        hw.student_homework_result?.forEach((res: any) => {
+          const sId = res.student_id;
+          const completedQs = safeParseIds(res.completed_tq_ids);
+          
+          completedQs.forEach((tqId: number) => {
+            if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+            tqStudentStatus[tqId][sId] = 'done';
           });
         });
       });
 
       const totalStudents = studentIds.length;
-      if (totalStudents > 0) {
-        Object.entries(classWideByTq).forEach(([tqIdStr, counts]: [string, any]) => {
-          const tqId = Number(tqIdStr);
-          if (counts.doneCount >= totalStudents) newMap[getStatusKey(tqId, 'all')] = 'done';
-          else if (counts.doneCount > 0) newMap[getStatusKey(tqId, 'all')] = 'partial';
-          else if (counts.total > 0) newMap[getStatusKey(tqId, 'all')] = 'homework';
+      
+      Object.keys(tqStudentStatus).forEach(tqIdStr => {
+        const tqId = Number(tqIdStr);
+        let doneCount = 0;
+        let hwCount = 0;
+
+        studentIds.forEach(sId => {
+          const st = tqStudentStatus[tqId]?.[sId];
+          if (st) {
+            newMap[getStatusKey(tqId, sId)] = st; 
+            if (st === 'done') doneCount++;
+            else if (st === 'homework') hwCount++;
+          }
         });
-      }
+
+        if (totalStudents > 0) {
+          if (doneCount >= totalStudents) {
+            newMap[getStatusKey(tqId, 'all')] = 'done';
+          } else if (doneCount > 0) {
+            newMap[getStatusKey(tqId, 'all')] = 'partial';
+          } else if (hwCount >= totalStudents) {
+            newMap[getStatusKey(tqId, 'all')] = 'homework';
+          } else if (hwCount > 0) {
+            newMap[getStatusKey(tqId, 'all')] = 'partial';
+          }
+        }
+      });
 
       setStatusMap(newMap);
     } catch (e: any) { 
@@ -299,57 +339,187 @@ export default function ProgressPage() {
     }
   };
 
-  const getOrCreateDailyAssignment = async (bookId: string, titlePrefix: string) => {
-    const dateStr = new Date(Date.now() + 9 * 3600000).toISOString().split('T')[0];
-    const startOfTodayKST = new Date(`${dateStr}T00:00:00+09:00`).toISOString();
-    const endOfTodayKST = new Date(`${dateStr}T23:59:59.999+09:00`).toISOString();
-    const expectedTitle = `[시스템] ${titlePrefix} (${dateStr})`;
-
-    let query = supabase.from('homework_assignment')
-      .select('homework_id, target_questions')
-      .eq('class_id', selectedClassId)
-      .eq('book_id', bookId)
-      .gte('created_at', startOfTodayKST)
-      .lte('created_at', endOfTodayKST)
-      .limit(1);
-      
-    if (selectedStudentId === 'all') query = query.is('target_student_id', null);
-    else query = query.eq('target_student_id', selectedStudentId);
-
-    const { data: existing } = await query;
-    if (existing && existing.length > 0) return existing[0];
-
-    let insertData: any = {
-      book_id: bookId, target_questions: [], class_id: selectedClassId,
-      due_date: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      homework_title: expectedTitle
-    };
-    if (selectedStudentId !== 'all') insertData.target_student_id = selectedStudentId;
-
-    const { data: hwData, error: hwErr } = await supabase.from('homework_assignment').insert(insertData).select();
-    if (hwErr) throw hwErr;
-    if (!hwData || hwData.length === 0) throw new Error("과제 생성에 실패했습니다.");
-    
-    const newId = hwData[0].homework_id;
-    const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
-    await supabase.from('student_homework_result').insert(targets.map(sId => ({ homework_id: newId, student_id: sId, status: '미제출', completed_tq_ids: [] })));
-
-    return { homework_id: newId, target_questions: [] };
-  };
-
   const saveHomeworkToDB = async (bookId: string, tq_ids: number[], isWorkbook: boolean) => {
     if (!tq_ids.length || !bookId) return;
-    const hw = await getOrCreateDailyAssignment(bookId, isWorkbook ? '워크북 자동 과제' : '본교재 자동 과제');
-    const existing = safeParseIds(hw.target_questions);
-    const newTqs = Array.from(new Set([...existing, ...tq_ids]));
-    await supabase.from('homework_assignment').update({ target_questions: newTqs }).eq('homework_id', hw.homework_id);
+
+    const kstNowMs = Date.now() + 9 * 3600000;
+    const kstNowDate = new Date(kstNowMs);
+    const y = kstNowDate.getUTCFullYear();
+    const m = String(kstNowDate.getUTCMonth() + 1).padStart(2, '0');
+    const d = String(kstNowDate.getUTCDate()).padStart(2, '0');
+    const dateStr = `${y}-${m}-${d}`;
+    const expectedTitle = `[시스템] ${isWorkbook ? '워크북 과제' : '본교재 과제'} (${dateStr})`;
+
+    const getNextSessionDueDate = () => {
+      const { days, holidays, extras } = classScheduleInfo;
+      
+      const getFallback = () => {
+        const fbDate = new Date(kstNowMs + 7 * 24 * 3600000);
+        return `${fbDate.getUTCFullYear()}-${String(fbDate.getUTCMonth()+1).padStart(2,'0')}-${String(fbDate.getUTCDate()).padStart(2,'0')}T22:00:00+09:00`;
+      };
+
+      if (days.length === 0 && extras.length === 0) return getFallback();
+
+      const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
+      let cursorMs = kstNowMs;
+      
+      for (let i = 1; i <= 30; i++) {
+        cursorMs += 24 * 3600000;
+        const targetDate = new Date(cursorMs);
+        const ty = targetDate.getUTCFullYear();
+        const tm = String(targetDate.getUTCMonth() + 1).padStart(2, '0');
+        const td = String(targetDate.getUTCDate()).padStart(2, '0');
+        const ymd = `${ty}-${tm}-${td}`;
+        const dayLabel = DAY_LABELS[targetDate.getUTCDay()];
+
+        if (extras.includes(ymd) || (days.includes(dayLabel) && !holidays.includes(ymd))) {
+          return `${ymd}T22:00:00+09:00`;
+        }
+      }
+      return getFallback();
+    };
+
+    const nextSessionStr = getNextSessionDueDate();
+
+    const { data: todayHws } = await supabase.from('homework_assignment')
+      .select('homework_id, target_questions, target_student_id, homework_title, due_date')
+      .eq('class_id', selectedClassId)
+      .eq('book_id', bookId)
+      .not('homework_title', 'eq', '[시스템] 수업 진도 완료 기록')
+      .gte('created_at', `${dateStr}T00:00:00+09:00`)
+      .lte('created_at', `${dateStr}T23:59:59.999+09:00`);
+
+    const classWideHw = todayHws?.find(hw => hw.target_student_id === null);
+    const individualHws = todayHws?.filter(hw => hw.target_student_id !== null) || [];
+
+    let baseDueDate = classWideHw?.due_date;
+    if (baseDueDate) {
+       const ymdMatch = baseDueDate.match(/^\d{4}-\d{2}-\d{2}/);
+       const ymd = ymdMatch ? ymdMatch[0] : nextSessionStr.split('T')[0];
+       if (ymd < dateStr) {
+          baseDueDate = nextSessionStr; 
+       }
+    } else {
+       baseDueDate = nextSessionStr;
+    }
+
+    if (selectedStudentId === 'all') {
+      if (classWideHw) {
+        const existing = safeParseIds(classWideHw.target_questions);
+        const newTqs = Array.from(new Set([...existing, ...tq_ids]));
+        await supabase.from('homework_assignment').update({ target_questions: newTqs, due_date: baseDueDate }).eq('homework_id', classWideHw.homework_id);
+        
+        const indStudentIds = individualHws.map(hw => hw.target_student_id);
+        const { data: existingResults } = await supabase.from('student_homework_result').select('student_id').eq('homework_id', classWideHw.homework_id);
+        const existingIds = existingResults?.map(r => r.student_id) || [];
+        
+        const missingTargets = enrolledStudentIds.filter(id => !indStudentIds.includes(id) && !existingIds.includes(id));
+        if (missingTargets.length > 0) {
+          await supabase.from('student_homework_result').insert(
+            missingTargets.map(sId => ({ homework_id: classWideHw.homework_id, student_id: sId, status: '미제출', completed_tq_ids: [] }))
+          );
+        }
+      } else {
+        const { data: insData, error: insErr } = await supabase.from('homework_assignment').insert({
+          book_id: bookId, target_questions: tq_ids, class_id: selectedClassId,
+          due_date: baseDueDate, 
+          homework_title: expectedTitle
+        }).select('homework_id').single();
+        if (insErr) throw insErr;
+        
+        const indStudentIds = individualHws.map(hw => hw.target_student_id);
+        const targets = enrolledStudentIds.filter(id => !indStudentIds.includes(id));
+        if (targets.length > 0) {
+          await supabase.from('student_homework_result').insert(
+            targets.map(sId => ({ homework_id: insData.homework_id, student_id: sId, status: '미제출', completed_tq_ids: [] }))
+          );
+        }
+      }
+
+      for (const indHw of individualHws) {
+        const existingInd = safeParseIds(indHw.target_questions);
+        const newIndTqs = Array.from(new Set([...existingInd, ...tq_ids]));
+        await supabase.from('homework_assignment').update({ target_questions: newIndTqs, due_date: baseDueDate }).eq('homework_id', indHw.homework_id);
+      }
+
+    } else {
+      const stuId = selectedStudentId;
+
+      if (classWideHw) {
+        const classTqs = safeParseIds(classWideHw.target_questions);
+
+        const { data: classResults } = await supabase.from('student_homework_result')
+          .select('hw_result_id, student_id, completed_tq_ids')
+          .eq('homework_id', classWideHw.homework_id);
+
+        await supabase.from('student_homework_result').delete().eq('homework_id', classWideHw.homework_id);
+        await supabase.from('homework_assignment').delete().eq('homework_id', classWideHw.homework_id);
+
+        const resultsToProcess: { hw_result_id: any; student_id: any; completed_tq_ids: any; }[] = classResults || [];
+        
+        if (!resultsToProcess.some(r => r.student_id === stuId)) {
+          resultsToProcess.push({ hw_result_id: -1, student_id: stuId, completed_tq_ids: [] });
+        }
+
+        for (const res of resultsToProcess) {
+          const sId = res.student_id;
+          const completed = safeParseIds(res.completed_tq_ids);
+
+          let finalTqs = [...classTqs];
+          
+          const existingIndHw = individualHws.find(hw => hw.target_student_id === sId);
+          if (existingIndHw) {
+            finalTqs = [...finalTqs, ...safeParseIds(existingIndHw.target_questions)];
+            await supabase.from('student_homework_result').delete().eq('homework_id', existingIndHw.homework_id);
+            await supabase.from('homework_assignment').delete().eq('homework_id', existingIndHw.homework_id);
+          }
+
+          if (sId === stuId) {
+            finalTqs = [...finalTqs, ...tq_ids];
+          }
+
+          finalTqs = Array.from(new Set(finalTqs));
+
+          const { data: insData } = await supabase.from('homework_assignment').insert({
+            book_id: bookId, target_questions: finalTqs, class_id: selectedClassId, target_student_id: sId,
+            due_date: baseDueDate, 
+            homework_title: expectedTitle
+          }).select('homework_id').single();
+
+          if (insData) {
+            await supabase.from('student_homework_result').insert({
+              homework_id: insData.homework_id, student_id: sId, status: '미제출', completed_tq_ids: completed
+            });
+          }
+        }
+
+      } else {
+        const indHw = individualHws.find(hw => hw.target_student_id === stuId);
+        if (indHw) {
+          const existingInd = safeParseIds(indHw.target_questions);
+          const combinedTqs = Array.from(new Set([...existingInd, ...tq_ids]));
+          await supabase.from('homework_assignment').update({ target_questions: combinedTqs, due_date: baseDueDate }).eq('homework_id', indHw.homework_id);
+        } else {
+          const { data: insData, error: insErr } = await supabase.from('homework_assignment').insert({
+            book_id: bookId, target_questions: tq_ids, class_id: selectedClassId, target_student_id: stuId,
+            due_date: baseDueDate, 
+            homework_title: expectedTitle
+          }).select('homework_id').single();
+          if (insErr) throw insErr;
+
+          await supabase.from('student_homework_result').insert({ 
+            homework_id: insData.homework_id, student_id: stuId, status: '미제출', completed_tq_ids: [] 
+          });
+        }
+      }
+    }
   };
 
   const markProgressAsCompleteInDB = async (tq_ids: number[], targetStudentIds: string[], bookId: string) => {
     try {
       if (!tq_ids.length || !bookId || !targetStudentIds.length) return;
 
-      for (const sId of targetStudentIds) {
+      await Promise.all(targetStudentIds.map(async (sId) => {
         let { data: existing, error: existingErr } = await supabase.from('homework_assignment')
           .select('homework_id')
           .eq('class_id', selectedClassId)
@@ -365,12 +535,11 @@ export default function ProgressPage() {
           hwId = existing[0].homework_id;
         } else {
           const { data: ins, error: insErr } = await supabase.from('homework_assignment').insert({
-            book_id: bookId, target_questions: [], due_date: '2099-12-31', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId
-          }).select();
+            book_id: bookId, target_questions: [], due_date: '2099-12-31T22:00:00+09:00', homework_title: '[시스템] 수업 진도 완료 기록', class_id: selectedClassId, target_student_id: sId
+          }).select('homework_id').single();
           
           if (insErr) throw insErr;
-          if (!ins || ins.length === 0) throw new Error("진도 완료 기록 생성에 실패했습니다.");
-          hwId = ins[0].homework_id;
+          hwId = ins.homework_id;
         }
 
         const { data: res } = await supabase.from('student_homework_result').select('hw_result_id, completed_tq_ids').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
@@ -381,7 +550,7 @@ export default function ProgressPage() {
         } else {
           await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids });
         }
-      }
+      }));
     } catch (e: any) {
       console.error("markProgressAsCompleteInDB 에러:", e.message || e);
     }
@@ -442,7 +611,6 @@ export default function ProgressPage() {
   };
 
   const applyActionToIds = async (actionType: string, mainIds: number[], wbIds: number[]) => {
-    // 1. 화면(UI) 상태 즉시 업데이트
     const newMap = { ...statusMap };
     const targets = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
 
@@ -469,7 +637,6 @@ export default function ProgressPage() {
 
     setStatusMap(newMap);
 
-    // 2. 🌟 실제 DB 서버 전송은 큐(Queue)를 통해 순차 진행
     actionQueue.current = actionQueue.current.then(async () => {
       await cancelProgressForIds([...mainIds, ...wbIds], targets);
       
@@ -481,7 +648,7 @@ export default function ProgressPage() {
         if (wbIds.length > 0 && selectedWbId) await saveHomeworkToDB(selectedWbId, wbIds, true);
       }
     }).catch(err => {
-      console.error("큐(Queue) 처리 중 오류 발생:", err);
+      console.error("큐(Queue) DB 처리 중 오류 발생:", err);
     });
   };
 
@@ -514,7 +681,7 @@ export default function ProgressPage() {
     const mainIds = type === 'main' ? [tqId] : [];
     const wbIds = type === 'wb' ? [tqId] : [];
     await applyActionToIds(type === 'main' ? 'DONE_AND_WB_HW' : 'MAIN_HW_AND_WB_HW', mainIds, wbIds);
-    showToast(`${type==='main'?'본교재':'워크북/과제'} 개별 처리 완료!`);
+    showToast(`${type==='main'?'본교재 진도 처리':'워크북 과제 배부'} 완료!`);
   };
 
   const cancelSingleQuestion = async (tqId: number, type: 'main'|'wb') => {
@@ -558,13 +725,65 @@ export default function ProgressPage() {
     return "대기";
   };
 
+  const calculateProgress = (pages: number[], groupedQs: any) => {
+    if (pages.length === 0) return { percent: 0, done: 0, total: 0 };
+    let doneP = 0;
+    pages.forEach(p => {
+      const qs = groupedQs[p] || [];
+      const allDone = qs.length > 0 && qs.every((q: any) => {
+         const st = statusMap[getStatusKey(q.tq_id, selectedStudentId)];
+         return st === 'done' || st === 'homework';
+      });
+      if (allDone) doneP++;
+    });
+    return { percent: Math.round((doneP / pages.length) * 100), done: doneP, total: pages.length };
+  };
+
+  const mainProgress = calculateProgress(mainPages, groupedMainQs);
+  const wbProgress = calculateProgress(wbPages, groupedWbQs);
+
+  const selectedMainBook = textbooks.find(b => b.book_id === selectedBookId);
+  const mainBookTitle = selectedMainBook ? (unwrap(selectedMainBook.textbook) as TextbookInfo)?.title : '본교재';
+  const selectedWbBook = workbooks.find(b => b.book_id === selectedWbId);
+  const wbBookTitle = selectedWbBook ? (unwrap(selectedWbBook.textbook) as TextbookInfo)?.title : '워크북/과제';
+
+  const openProgressModal = (type: 'main' | 'wb') => {
+    const targetStudents = selectedStudentId === 'all' 
+      ? [...students].sort((a, b) => a.name.localeCompare(b.name))
+      : students.filter(s => s.id === selectedStudentId);
+
+    const commonData = {
+      classId: selectedClassId,
+      students: targetStudents,
+      statusMap: statusMap
+    };
+
+    if (type === 'main' && selectedBookId) {
+      setProgressModalData({
+        ...commonData,
+        bookId: selectedBookId,
+        bookTitle: mainBookTitle,
+        pages: mainPages,
+        groupedQs: groupedMainQs
+      });
+    } else if (type === 'wb' && selectedWbId) {
+      setProgressModalData({
+        ...commonData,
+        bookId: selectedWbId,
+        bookTitle: wbBookTitle,
+        pages: wbPages,
+        groupedQs: groupedWbQs
+      });
+    }
+  };
+
   const renderBadge = (tqId: number, type: 'main'|'wb') => {
     const st = statusMap[getStatusKey(tqId, selectedStudentId)];
     
     if (st === "done") {
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className={`group/qbadge cursor-pointer w-[40px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors ${type==='wb' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300' : 'bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300'}`}>
-          <span className="group-hover/qbadge:hidden">완료</span>
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className={`group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors ${type==='wb' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300' : 'bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300'}`}>
+          <span className="group-hover/qbadge:hidden">진도완료</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
       );
@@ -572,8 +791,8 @@ export default function ProgressPage() {
     
     if (st === "homework") {
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[40px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
-          <span className="group-hover/qbadge:hidden">과제</span>
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
+          <span className="group-hover/qbadge:hidden">과제배부</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
       );
@@ -581,17 +800,17 @@ export default function ProgressPage() {
     
     if (st === "partial") {
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[40px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
-          <span className="group-hover/qbadge:hidden">진행</span>
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
+          <span className="group-hover/qbadge:hidden">진행중</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
       );
     }
     
     return (
-      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className={`group/qbadge cursor-pointer w-[40px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors ${type==='wb' ? 'hover:bg-emerald-600 hover:text-white hover:border-emerald-600' : 'hover:bg-[#002864] hover:text-white hover:border-[#002864]'}`}>
+      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className={`group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors ${type==='wb' ? 'hover:bg-emerald-600 hover:text-white hover:border-emerald-600' : 'hover:bg-[#002864] hover:text-white hover:border-[#002864]'}`}>
         <span className="group-hover/qbadge:hidden">대기</span>
-        <span className="hidden group-hover/qbadge:inline tracking-tighter">{type === 'main' ? '체크' : '과제'}</span>
+        <span className="hidden group-hover/qbadge:inline tracking-tighter">{type === 'main' ? '진도처리' : '과제배부'}</span>
       </span>
     );
   };
@@ -608,11 +827,11 @@ export default function ProgressPage() {
   if (isAuthorized === false) return null;
 
   return (
-    <div className="flex flex-col h-full bg-slate-100 overflow-hidden relative p-4 sm:p-8 gap-6">
+    <div className="flex flex-col h-full bg-slate-100 overflow-hidden relative p-4 sm:p-8 gap-6 font-pretendard">
       
       <div className="flex justify-between items-end shrink-0">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">전체 진도 관리</h2>
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">전체 진도 관리</h2>
           <p className="text-sm font-bold text-slate-400 mt-1">
             수강반별 본교재와 워크북의 진도를 관리하고 과제를 배부합니다.
           </p>
@@ -656,16 +875,13 @@ export default function ProgressPage() {
           </div>
         </div>
 
-        <div className="flex-1 flex overflow-hidden relative">
+        <div className="flex-1 flex overflow-hidden relative bg-slate-50/50">
           
-          {/* ==========================================
-              📘 좌측 1/2: 본교재 영역
-              ========================================== */}
           <div className="w-1/2 flex border-r border-slate-200 bg-white shadow-[2px_0_10px_rgba(0,0,0,0.02)] z-10 overflow-hidden">
             
-            <div className="w-[140px] shrink-0 border-r border-slate-200 bg-blue-50/50 flex flex-col overflow-y-auto custom-scroll shadow-[inset_-2px_0_5px_rgba(0,0,0,0.02)] z-20">
+            <div className="w-[140px] shrink-0 border-r border-slate-200 bg-blue-50/50 flex flex-col overflow-y-auto custom-scroll shadow-[inset_-2px_0_5px_rgba(0,0,0,0.02)] z-20 select-none pointer-events-auto" draggable={false} onDragStart={(e) => e.preventDefault()}>
               <div className="sticky top-0 bg-blue-50/90 backdrop-blur-sm border-b border-slate-200 p-2 shrink-0 z-30 flex flex-col items-center">
-                <label className="flex items-center justify-between gap-1.5 cursor-pointer w-full p-2 bg-white border border-slate-300 rounded-lg shadow-sm hover:bg-slate-50 transition-colors" title="모든 페이지 선택">
+                <label className="flex items-center justify-between gap-1.5 cursor-pointer w-full p-2 bg-white border border-slate-300 rounded-lg shadow-sm hover:bg-slate-50 transition-colors select-none" draggable={false} onDragStart={(e) => e.preventDefault()} title="모든 페이지 선택">
                   <span className="text-[11px] font-black text-[#002864]">전체선택</span>
                   <input type="checkbox" checked={mainPages.length > 0 && checkedMainPages.length === mainPages.length} onChange={(e) => setCheckedMainPages(e.target.checked ? mainPages : [])} className="w-4 h-4 accent-[#002864]" />
                 </label>
@@ -677,7 +893,13 @@ export default function ProgressPage() {
                   const status = getPageStatus(p, 'main');
                   const isActive = activeMainPage === p;
                   return (
-                    <div key={p} onClick={() => setActiveMainPage(p)} className={`flex items-center justify-between p-2 rounded-lg border shadow-sm transition-all cursor-pointer group ${isActive ? 'bg-white border-[#002864] ring-1 ring-[#002864]' : 'bg-white/60 border-slate-200 hover:border-blue-300'}`}>
+                    <div 
+                      key={p} 
+                      onClick={() => setActiveMainPage(p)} 
+                      draggable={false} 
+                      onDragStart={(e) => e.preventDefault()}
+                      className={`flex items-center justify-between p-2 rounded-lg border shadow-sm transition-all cursor-pointer group select-none ${isActive ? 'bg-white border-[#002864] ring-1 ring-[#002864]' : 'bg-white/60 border-slate-200 hover:border-blue-300'}`}
+                    >
                       <div className="flex items-center gap-1.5 shrink-0">
                         <input type="checkbox" checked={checkedMainPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedMainPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 accent-[#002864] cursor-pointer" />
                         <span className={`text-[12px] font-black w-6 text-center ${isActive ? "text-[#002864]" : "text-slate-500 group-hover:text-[#002864]"}`}>{p}p</span>
@@ -696,12 +918,25 @@ export default function ProgressPage() {
             </div>
 
             <div className="flex-1 flex flex-col min-w-0 bg-slate-50/50 relative">
-              <div className="p-3 border-b border-slate-200 bg-[#f8fafc] text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">📘 본교재</span>
-                  <span className="text-[#002864] font-extrabold text-sm">{activeMainPage !== null ? `${activeMainPage} Page` : "- Page"}</span>
+              <div className="p-3 border-b border-slate-200 bg-[#f8fafc] text-xs flex justify-between items-center shadow-sm z-10 shrink-0 select-none">
+                <div 
+                  className="flex items-center gap-4 cursor-pointer hover:bg-blue-50/50 px-3 py-1.5 rounded-lg border border-transparent hover:border-blue-200 transition-colors group"
+                  onClick={() => openProgressModal('main')}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">📘 본교재</span>
+                    <span className="text-[#002864] font-extrabold text-sm">{activeMainPage !== null ? `${activeMainPage} Page` : "- Page"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 border-l border-slate-300 pl-4" title="클릭하여 상세 매트릭스 뷰 보기">
+                    <div className="w-32 h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner relative">
+                       <div className="absolute top-0 left-0 h-full bg-[#002864] transition-all group-hover:bg-blue-500" style={{ width: `${mainProgress.percent}%` }}></div>
+                    </div>
+                    <span className="text-xs font-black text-[#002864] group-hover:text-blue-600">{mainProgress.percent}%</span>
+                    <span className="text-[10px] font-bold text-blue-500 bg-white border border-blue-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap">매트릭스 뷰 🔍</span>
+                  </div>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-slate-300 shadow-sm hover:bg-slate-50">
+
+                <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-slate-300 shadow-sm hover:bg-slate-50 shrink-0 ml-auto">
                   <input type="checkbox" checked={activeMainPage !== null && groupedMainQs[activeMainPage]?.length > 0 && groupedMainQs[activeMainPage]?.every((q:any) => checkedMainQs.includes(q.tq_id))} onChange={(e) => {
                     const isChecked = e.target.checked;
                     if (!activeMainPage) return;
@@ -713,7 +948,7 @@ export default function ProgressPage() {
                 </label>
               </div>
 
-              <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-32">
+              <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-6">
                 {activeMainPage !== null && groupedMainQs[activeMainPage]?.length > 0 ? (
                   <div className="bg-white border border-slate-200 shadow-sm rounded-xl overflow-hidden">
                     {groupedMainQs[activeMainPage].map((q: any) => (
@@ -742,14 +977,11 @@ export default function ProgressPage() {
             </div>
           </div>
 
-          {/* ==========================================
-              📗 우측 1/2: 워크북/과제 영역
-              ========================================== */}
           <div className="w-1/2 flex bg-emerald-50/20 overflow-hidden">
             
-            <div className="w-[140px] shrink-0 border-r border-emerald-200 bg-emerald-50/80 flex flex-col overflow-y-auto custom-scroll shadow-[inset_-2px_0_5px_rgba(0,0,0,0.02)] z-20">
+            <div className="w-[140px] shrink-0 border-r border-emerald-200 bg-emerald-50/80 flex flex-col overflow-y-auto custom-scroll shadow-[inset_-2px_0_5px_rgba(0,0,0,0.02)] z-20 select-none pointer-events-auto" draggable={false} onDragStart={(e) => e.preventDefault()}>
               <div className="sticky top-0 bg-emerald-50/90 backdrop-blur-sm border-b border-emerald-200 p-2 shrink-0 z-30 flex flex-col items-center">
-                <label className="flex items-center justify-between gap-1.5 cursor-pointer w-full p-2 bg-white border border-emerald-300 rounded-lg shadow-sm hover:bg-emerald-50 transition-colors" title="모든 페이지 선택">
+                <label className="flex items-center justify-between gap-1.5 cursor-pointer w-full p-2 bg-white border border-emerald-300 rounded-lg shadow-sm hover:bg-emerald-50 transition-colors select-none" draggable={false} onDragStart={(e) => e.preventDefault()} title="모든 페이지 선택">
                   <span className="text-[11px] font-black text-[#059669]">전체선택</span>
                   <input type="checkbox" checked={wbPages.length > 0 && checkedWbPages.length === wbPages.length} onChange={(e) => setCheckedWbPages(e.target.checked ? wbPages : [])} className="w-4 h-4 accent-[#059669]" />
                 </label>
@@ -761,7 +993,13 @@ export default function ProgressPage() {
                   const status = getPageStatus(p, 'wb');
                   const isActive = activeWbPage === p;
                   return (
-                    <div key={p} onClick={() => setActiveWbPage(p)} className={`flex items-center justify-between p-2 rounded-lg border shadow-sm transition-all cursor-pointer group ${isActive ? 'bg-white border-[#059669] ring-1 ring-[#059669]' : 'bg-white/60 border-emerald-200 hover:border-emerald-300'}`}>
+                    <div 
+                      key={p} 
+                      onClick={() => setActiveWbPage(p)} 
+                      draggable={false} 
+                      onDragStart={(e) => e.preventDefault()}
+                      className={`flex items-center justify-between p-2 rounded-lg border shadow-sm transition-all cursor-pointer group select-none ${isActive ? 'bg-white border-[#059669] ring-1 ring-[#059669]' : 'bg-white/60 border-emerald-200 hover:border-emerald-300'}`}
+                    >
                       <div className="flex items-center gap-1.5 shrink-0">
                         <input type="checkbox" checked={checkedWbPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedWbPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 accent-[#059669] cursor-pointer" />
                         <span className={`text-[12px] font-black w-6 text-center ${isActive ? "text-[#059669]" : "text-emerald-700 group-hover:text-[#059669]"}`}>{p}p</span>
@@ -771,7 +1009,7 @@ export default function ProgressPage() {
                         {status === "done" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'wb'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
                         {status === "homework" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'wb'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
                         {status === "partial" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'wb'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); markSinglePageCompleted(p, 'wb'); }} className="group/pbadge w-10 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-[#059669] hover:text-white transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">체크</span></span>}
+                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); markSinglePageCompleted(p, 'wb'); }} className="group/pbadge w-10 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-[#059669] hover:text-white transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">과제</span></span>}
                       </div>
                     </div>
                   );
@@ -780,12 +1018,25 @@ export default function ProgressPage() {
             </div>
 
             <div className="flex-1 flex flex-col min-w-0 bg-transparent relative">
-              <div className="p-3 border-b border-emerald-200 bg-[#f0fdf4] text-xs flex justify-between items-center shadow-sm z-10 shrink-0">
-                <div className="flex items-center gap-2">
-                  <span className="bg-[#059669] text-white px-2.5 py-1 rounded text-xs font-bold">📗 워크북/과제</span>
-                  <span className="text-[#059669] font-extrabold text-sm">{activeWbPage !== null ? `${activeWbPage} Page` : "- Page"}</span>
+              <div className="p-3 border-b border-emerald-200 bg-[#f0fdf4] text-xs flex justify-between items-center shadow-sm z-10 shrink-0 select-none">
+                <div 
+                  className="flex items-center gap-4 cursor-pointer hover:bg-emerald-50 px-3 py-1.5 rounded-lg border border-transparent hover:border-emerald-200 transition-colors group"
+                  onClick={() => openProgressModal('wb')}
+                >
+                  <div className="flex items-center gap-2">
+                    <span className="bg-[#059669] text-white px-2.5 py-1 rounded text-xs font-bold">📗 워크북/과제</span>
+                    <span className="text-[#059669] font-extrabold text-sm">{activeWbPage !== null ? `${activeWbPage} Page` : "- Page"}</span>
+                  </div>
+                  <div className="flex items-center gap-2 border-l border-slate-300 pl-4" title="클릭하여 상세 매트릭스 뷰 보기">
+                    <div className="w-32 h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner relative">
+                       <div className="absolute top-0 left-0 h-full bg-[#059669] transition-all group-hover:bg-emerald-500" style={{ width: `${wbProgress.percent}%` }}></div>
+                    </div>
+                    <span className="text-xs font-black text-[#059669] group-hover:text-emerald-600">{wbProgress.percent}%</span>
+                    <span className="text-[10px] font-bold text-emerald-500 bg-white border border-emerald-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap">매트릭스 뷰 🔍</span>
+                  </div>
                 </div>
-                <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-emerald-300 shadow-sm hover:bg-emerald-50">
+
+                <label className="flex items-center gap-2 cursor-pointer bg-white px-3 py-1.5 rounded-md border border-emerald-300 shadow-sm hover:bg-emerald-50 shrink-0 ml-auto">
                   <input type="checkbox" checked={activeWbPage !== null && groupedWbQs[activeWbPage]?.length > 0 && groupedWbQs[activeWbPage]?.every((q:any) => checkedWbQs.includes(q.tq_id))} onChange={(e) => {
                     const isChecked = e.target.checked;
                     if (!activeWbPage) return;
@@ -797,7 +1048,7 @@ export default function ProgressPage() {
                 </label>
               </div>
 
-              <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-32">
+              <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-6">
                 {!selectedWbId ? <div className="flex h-full items-center justify-center text-slate-400 font-bold">상단에서 워크북/과제를 선택해주세요.</div>
                 : activeWbPage !== null && groupedWbQs[activeWbPage]?.length > 0 ? (
                   <div className="bg-white border border-emerald-200 shadow-sm rounded-xl overflow-hidden">
@@ -825,30 +1076,31 @@ export default function ProgressPage() {
                 ) : <div className="text-center text-emerald-600/50 font-bold p-10">문항이 없습니다.</div>}
               </div>
             </div>
-
-            <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.15)] flex items-center p-2 z-20 gap-2 w-max">
-                <div className="flex items-center gap-1 mr-2 border-r border-slate-200 pr-3">
-                <button onClick={() => handlePageChange(-1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">
-                    <span>←</span> 이전
-                </button>
-                <button onClick={() => handlePageChange(1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">
-                    다음 <span>→</span>
-                </button>
-                </div>
-                <button onClick={() => executeProgressAction("DONE_AND_WB_HW")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
-                  선택항목 진도/과제 일괄 처리
-                </button>
-                <button onClick={() => executeProgressAction("MAIN_HW_AND_WB_HW")} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
-                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
-                  모두 과제 배부
-                </button>
-                <div className="w-px h-6 bg-slate-300 mx-1"></div>
-                <button onClick={() => executeProgressAction("CANCEL")} className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-sm rounded-xl transition-colors shadow-sm">
-                  선택 취소
-                </button>
-              </div>
           </div>
+        </div>
+
+        {/* 🌟 하단 중앙 정적(Static) 제어 컨트롤러 */}
+        <div className="bg-white border-t border-slate-200 p-4 flex items-center justify-center gap-2 shrink-0 z-20 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
+          <div className="flex items-center gap-1 mr-2 border-r border-slate-200 pr-3">
+            <button onClick={() => handlePageChange(-1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">
+                <span>←</span> 이전
+            </button>
+            <button onClick={() => handlePageChange(1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">
+                다음 <span>→</span>
+            </button>
+          </div>
+          <button onClick={() => executeProgressAction("DONE_AND_WB_HW")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
+            선택항목 진도/과제 일괄 처리
+          </button>
+          <button onClick={() => executeProgressAction("MAIN_HW_AND_WB_HW")} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
+            모두 과제 배부
+          </button>
+          <div className="w-px h-6 bg-slate-300 mx-1"></div>
+          <button onClick={() => executeProgressAction("CANCEL")} className="px-4 py-2.5 bg-slate-200 hover:bg-slate-300 text-slate-600 font-bold text-sm rounded-xl transition-colors shadow-sm">
+            선택 취소
+          </button>
         </div>
       </div>
 
@@ -857,6 +1109,13 @@ export default function ProgressPage() {
         question={modalQuestion} 
         onClose={() => setModalQuestion(null)} 
       />
+
+      {progressModalData && (
+         <ProgressDetailModal 
+            data={progressModalData} 
+            onClose={() => setProgressModalData(null)} 
+         />
+      )}
 
       {toastMsg && (
         <div className="fixed top-20 right-6 z-[9999] bg-slate-800 text-white font-bold px-6 py-3 rounded-xl shadow-2xl transition-all duration-300 text-sm animate-bounce">

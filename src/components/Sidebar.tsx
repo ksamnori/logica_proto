@@ -27,10 +27,13 @@ export default function Sidebar() {
     
     setDisplayRole(role);
 
-    const isSA = role === 'SUPER_ADMIN' || pos.includes('최고관리자') || pos.includes('대장');
-    const isPrin = role === 'ADMIN' || pos.includes('원장'); 
-    const isMgr = role === 'MANAGER' || pos.includes('실장');
-    const isFW = isSA || isPrin || isMgr || pos.includes('부원장') || pos.includes('전임강사');
+    // 🌟 [핵심 해결] 강사 뷰(TEACHER) 모드일 때는 pos 텍스트에 '원장'이 남아있더라도 무시합니다.
+    const isTeacherMode = role === 'TEACHER';
+
+    const isSA = !isTeacherMode && (role === 'SUPER_ADMIN' || pos.includes('최고관리자') || pos.includes('대장'));
+    const isPrin = !isTeacherMode && (role === 'ADMIN' || pos.includes('원장')); 
+    const isMgr = !isTeacherMode && (role === 'MANAGER' || pos.includes('실장'));
+    const isFW = isSA || isPrin || isMgr || pos.includes('부원장') || pos.includes('전임강사') || isTeacherMode;
     
     setStrictSuperAdmin(isSA);
     setIsPrincipal(isPrin);
@@ -47,6 +50,7 @@ export default function Sidebar() {
         setTenantName("지점 미배정");
       }
 
+      // 🌟 isSA나 isPrin이 false가 되므로, 강사 모드일 때는 반드시 DB에서 권한을 읽어옵니다.
       if (!(isSA || isPrin) && tId) {
         const { data: permData } = await supabase
           .from('tenant_role_permissions')
@@ -153,7 +157,6 @@ export default function Sidebar() {
       customLabel = 'font-black';
       customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
     } else if (isFactory) {
-      // 🌟 LOGICA Factory 라이트 인더스트리얼 테마 적용
       customBg = active 
         ? 'bg-amber-50 border-amber-200 text-amber-800 shadow-sm' 
         : 'bg-white border-slate-200 text-slate-600 hover:bg-amber-50/50 hover:border-amber-200 hover:text-amber-700 shadow-sm';
