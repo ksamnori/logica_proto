@@ -180,41 +180,63 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     return { newEarned: assignedScore * ratio, isCorrectEq };
   };
 
-  // 🌟 [핵심 변경 2] 문항 노출 오류 수정: 매핑되는 바구니를 정확히 찾고, 완료된 문제는 필터링
   const loadMatrixHomework = async () => {
     try {
       const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio');
       const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
       setGradingCodeMeta(meta);
 
-      const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name)').eq('homework_id', homeworkId).single();
-      if (!baseHw) throw new Error("과제 기준 데이터를 찾을 수 없습니다.");
+      const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name), student_homework_result(student_id)').eq('homework_id', homeworkId).single();
+      if (!baseHw) {
+        alert("과제 기준 데이터를 찾을 수 없습니다.");
+        onBack();
+        return;
+      }
 
       setHeaderInfo({ title: `📚 ${baseHw.homework_title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
 
-      const { data: enrollments } = await supabase.from('enrollment').select('student_id, student(name, status)').eq('class_id', baseHw.class_id);
-      const activeStudents = (enrollments || [])
-        .map((e: any) => {
-          const sObj = Array.isArray(e.student) ? e.student[0] : e.student;
-          return { id: e.student_id, status: sObj?.status, name: sObj?.name };
-        })
-        .filter((s: any) => s.status === '재원')
-        .map((s: any) => ({ id: s.id, name: s.name || '알수없음' }));
+      let validStudentIds: string[] = [];
+      if (baseHw.target_student_id) {
+         validStudentIds.push(baseHw.target_student_id);
+      } else if (baseHw.student_homework_result) {
+         validStudentIds = baseHw.student_homework_result.map((r: any) => r.student_id);
+      }
 
-      // 같은 반, 같은 제목의 과제 모두 가져오기
-      const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
+      if (validStudentIds.length === 0) {
+        alert("이 과제를 배부받은 학생이 없습니다.");
+        onBack();
+        return;
+      }
+
+      const { data: targetStudents } = await supabase.from('student').select('student_id, name, status').in('student_id', validStudentIds);
+
+      let cols = (targetStudents || [])
+        .filter(s => s.status === '재원')
+        .map(s => ({ id: s.student_id, name: s.name || '알수없음' }))
+        .sort((a,b) => a.name.localeCompare(b.name));
       
+      if (!gradeAll && studentIdParam) {
+        cols = cols.filter(c => c.id === studentIdParam);
+      }
+
+      // 🌟 [핵심 변경] 채점할 대상 학생이 없으면 에러 던지지 않고 깔끔하게 뒤로가기
+      if (cols.length === 0) {
+        alert("🎉 해당 과제의 채점이 모두 완료되었습니다!");
+        onBack();
+        return;
+      }
+
+      const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
       const hwIdsToFetchStatus = allHws?.map(h => h.homework_id) || [];
       const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
 
-      // 클릭한 기준 바구니의 완료 상태 확인
       const baseResult = hwResults?.find(r => r.homework_id === baseHw.homework_id);
       const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseResult?.status || '');
 
       const studentHwMap = new Map();
       const globalHw = allHws?.find(h => !h.target_student_id);
       
-      activeStudents.forEach(s => {
+      cols.forEach(s => {
         let studentHws = allHws?.filter(h => h.target_student_id === s.id) || [];
         
         if (studentHws.length === 0 && globalHw) {
@@ -222,13 +244,12 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           return;
         }
         
-        studentHws.sort((a, b) => b.homework_id - a.homework_id); // 최신순 정렬
+        studentHws.sort((a, b) => b.homework_id - a.homework_id); 
 
         let selectedHw = studentHws[0];
         if (s.id === baseHw.target_student_id) {
           selectedHw = baseHw;
         } else {
-          // 다른 학생들 중에서도 "클릭한 바구니와 상태가 동일한" 가장 정확한 바구니를 찾습니다.
           const matched = studentHws.find(h => {
             const r = hwResults?.find(res => res.homework_id === h.homework_id);
             const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
@@ -240,13 +261,14 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         if (selectedHw) studentHwMap.set(s.id, selectedHw);
       });
 
-      let cols = activeStudents.filter(s => studentHwMap.has(s.id)).sort((a,b) => a.name.localeCompare(b.name));
+      let hwTargetQs: any[] = [];
+      try { hwTargetQs = typeof baseHw.target_questions === 'string' ? JSON.parse(baseHw.target_questions) : baseHw.target_questions; } catch(e){}
       
-      if (!gradeAll && studentIdParam) {
-        cols = cols.filter(c => c.id === studentIdParam);
+      if (!hwTargetQs || hwTargetQs.length === 0) {
+        alert("과제에 포함된 문항이 없습니다.");
+        onBack();
+        return;
       }
-
-      if (cols.length === 0) throw new Error("대상 학생이 없습니다.");
 
       const allTqIds = new Set<number>();
       cols.forEach(s => {
@@ -256,13 +278,17 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
         let tqs = safeParseIds(hw.target_questions);
         tqs.forEach((id: number) => {
-          // 💡 "완료된 건 표시하지 말고 새로 배부받은 것만 노출" (단, 조회 목적일 땐 예외)
           if (!isBaseCompleted && completedIds.has(id)) return;
           allTqIds.add(id);
         });
       });
 
-      if (allTqIds.size === 0) throw new Error("과제에 채점할 문항이 없습니다. (모두 완료됨)");
+      // 🌟 [핵심 변경] 모든 문항이 채점완료라면 에러 화면으로 튕기지 않고 기분 좋게 뒤로가기
+      if (allTqIds.size === 0) {
+        alert("🎉 이 과제에 남은 모든 문항의 채점이 완료되었습니다!");
+        onBack();
+        return;
+      }
 
       const tqList = Array.from(allTqIds);
       let tqData: any[] = [];
@@ -296,17 +322,18 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const cellMap = new Map();
       const initialPending: any = {};
 
+      const targetSet = new Set(tqList);
+
       cols.forEach(s => {
         const hw = studentHwMap.get(s.id);
         const res = hwResults?.find(r => r.homework_id === hw.homework_id);
         const completedIds = new Set(safeParseIds(res?.completed_tq_ids));
-        const targetSet = new Set(safeParseIds(hw.target_questions));
+        const hwTargetSet = new Set(safeParseIds(hw.target_questions));
 
         rows.forEach(r => {
           const key = `${s.id}_${r.id}`;
           
-          // 타겟이 아니거나 이미 완료된 문항이면 막음 (채점 불가능하게 블로킹)
-          if (!targetSet.has(r.id) || (!isBaseCompleted && completedIds.has(r.id))) {
+          if (!hwTargetSet.has(r.id) || (!isBaseCompleted && completedIds.has(r.id))) {
             cellMap.set(key, { isBlocked: true });
             return;
           }
@@ -328,7 +355,10 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       setMatrixData({ cols, rows, cellMap });
       setPendingUpdates(initialPending);
 
-    } catch (e: any) { alert(`과제 데이터 로드 실패: ${e.message}`); }
+    } catch (e: any) { 
+      alert(`데이터 로드 실패: ${e.message}`); 
+      onBack();
+    }
   };
 
   const loadMatrixExam = async () => {
@@ -338,7 +368,11 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       setGradingCodeMeta(meta);
 
       const { data: baseEx } = await supabase.from('exam_assignment').select('*, exam_master(*), class(name)').eq('assignment_id', assignmentId).single();
-      if (!baseEx) throw new Error("시험 기준 데이터를 찾을 수 없습니다.");
+      if (!baseEx) {
+        alert("시험 기준 데이터를 찾을 수 없습니다.");
+        onBack();
+        return;
+      }
 
       const m = Array.isArray(baseEx.exam_master) ? baseEx.exam_master[0] : baseEx.exam_master;
       setHeaderInfo({ title: `📝 ${m?.title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: m?.exam_type });
@@ -357,10 +391,18 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         cols = cols.filter(c => c.id === studentIdParam);
       }
 
-      if (cols.length === 0) throw new Error("대상 학생이 없습니다.");
+      if (cols.length === 0) {
+        alert("대상 학생이 없습니다.");
+        onBack();
+        return;
+      }
 
       const { data: items } = await supabase.from('exam_item').select('*').eq('exam_id', m.exam_id).order('sort_order');
-      if (!items || items.length === 0) throw new Error("시험에 포함된 문항이 없습니다.");
+      if (!items || items.length === 0) {
+        alert("시험에 포함된 문항이 없습니다.");
+        onBack();
+        return;
+      }
 
       const qIds = items.map(i => i.question_id);
       let fetchedQuestions: any[] = [];
@@ -406,7 +448,10 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       });
 
       setMatrixData({ cols, rows, cellMap });
-    } catch (error: any) { alert(`시험 데이터 로드 실패: ${error.message}`); }
+    } catch (error: any) { 
+      alert(`데이터 로드 실패: ${error.message}`); 
+      onBack();
+    }
   };
 
   const handleMatrixGrade = (sId: string, rowId: string, code: string) => {

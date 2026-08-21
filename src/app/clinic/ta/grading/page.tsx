@@ -272,7 +272,6 @@ export default function TaGradingPage() {
     } catch (e) { console.error(e); alert("문제지/과제 목록을 불러오지 못했습니다."); } finally { setIsLoadingItems(false); }
   };
 
-  // 🌟 [핵심 수정 1] 인원 수 카운트 오류 해결: 상태(Status)가 동일한 개별 과제들만 그룹으로 묶어 고유 학생 수를 카운트
   const checkGroupGrading = async (item: AssignmentItem) => {
     if (!selectedStudent) return;
     if (activeItem && !confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 시험지를 바꾸시겠습니까?')) return;
@@ -295,18 +294,15 @@ export default function TaGradingPage() {
             const hwIds = hws.map(h => h.homework_id);
             const { data: res } = await supabase.from('student_homework_result').select('homework_id, status').in('homework_id', hwIds);
             
-            // 현재 클릭한 과제 바구니의 상태 파악
             const baseRes = res?.find(r => String(r.homework_id) === String(item.homeworkId));
             const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseRes?.status || '');
 
-            // 동일한 상태(미제출은 미제출끼리, 완료는 완료끼리)인 학생들만 필터링
             const matchingHws = hws.filter(h => {
               const r = res?.find(resItem => resItem.homework_id === h.homework_id);
               const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
               return isComp === isBaseCompleted;
             });
 
-            // 해당 그룹의 고유 학생 수 계산 (중복 배정 방어)
             const uniqueStudents = new Set(matchingHws.map(h => h.target_student_id).filter(Boolean));
             count = uniqueStudents.size > 0 ? uniqueStudents.size : 1;
           }
@@ -322,7 +318,7 @@ export default function TaGradingPage() {
     } catch (e) {
       console.error(e);
       setIsLoadingItems(false);
-      executeSelect(item, false);
+      executeSelect(item, false); 
     }
   };
 
@@ -453,11 +449,40 @@ export default function TaGradingPage() {
           <h1 className="font-lexend text-lg font-bold text-[#002864] tracking-tight leading-none">Logica Clinic <span className="text-slate-300 mx-1">·</span> 조교 채점</h1>
           <div className="flex items-center gap-3 mt-1.5">
             <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
-              <button onClick={() => { setStep('STUDENT'); setPickerOpen(true); }} className={`px-2 py-0.5 rounded transition-all ${pickerOpen && step === 'STUDENT' ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>1. 기준 학생 선택</button>
+              {/* 🌟 상단 1. 버튼 클릭 시 데이터 즉시 새로고침 되도록 수정 */}
+              <button onClick={() => { 
+                setStep('STUDENT'); 
+                setPickerOpen(true); 
+                loadStudents(); 
+              }} className={`px-2 py-0.5 rounded transition-all ${pickerOpen && step === 'STUDENT' ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>
+                1. 기준 학생 선택
+              </button>
               <span className="text-slate-300">→</span>
-              <button onClick={() => { if(!selectedStudent && !activeItem) return alert('먼저 학생을 선택해주세요.'); setStep('ITEM'); setPickerOpen(true); }} className={`px-2 py-0.5 rounded transition-all ${pickerOpen && step === 'ITEM' ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>2. 문제지 선택</button>
+              {/* 🌟 상단 2. 버튼 클릭 시 데이터 즉시 새로고침 되도록 수정 */}
+              <button onClick={() => { 
+                if(!selectedStudent && !activeItem) return alert('먼저 학생을 선택해주세요.'); 
+                
+                let student = selectedStudent;
+                if (!student && activeItem) {
+                  let found = null;
+                  for (const c of groupedClasses) {
+                    const s = c.students.find(st => st.id === activeItem.studentId);
+                    if (s) { found = s; break; }
+                  }
+                  student = found || { id: activeItem.studentId, name: activeItem.studentName, className: '', classId: '', allClassIds: [], pendingExamQ: 0, pendingHwQ: 0, pendingPrintQ: 0 };
+                  setSelectedStudent(student);
+                }
+                
+                setStep('ITEM'); 
+                setPickerOpen(true); 
+                if (student) loadItemsForStudent(student);
+              }} className={`px-2 py-0.5 rounded transition-all ${pickerOpen && step === 'ITEM' ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>
+                2. 문제지 선택
+              </button>
               <span className="text-slate-300">→</span>
-              <button onClick={() => { if(!activeItem) return alert('선택된 문제지가 없습니다.'); setPickerOpen(false); }} className={`px-2 py-0.5 rounded transition-all ${!pickerOpen ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>3. 스프레드시트 채점</button>
+              <button onClick={() => { if(!activeItem) return alert('선택된 문제지가 없습니다.'); setPickerOpen(false); }} className={`px-2 py-0.5 rounded transition-all ${!pickerOpen ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>
+                3. 스프레드시트 채점
+              </button>
             </p>
           </div>
         </div>
@@ -486,7 +511,23 @@ export default function TaGradingPage() {
                   homeworkId={activeItem.homeworkId}
                   studentId={activeItem.studentId}
                   gradeAll={activeItem.gradeAll}
-                  onBack={() => { setActiveItem(null); setPickerOpen(true); }}
+                  onBack={() => { 
+                    // 🌟 채점 완료 시 깔끔하게 이전 학생의 목록으로 돌아가도록 수정
+                    let found = null;
+                    for (const c of groupedClasses) {
+                      const s = c.students.find(st => st.id === activeItem?.studentId);
+                      if (s) { found = s; break; }
+                    }
+                    const student = found || { id: activeItem!.studentId, name: activeItem!.studentName, className: '', classId: '', allClassIds: [], pendingExamQ: 0, pendingHwQ: 0, pendingPrintQ: 0 };
+                    
+                    setSelectedStudent(student);
+                    setActiveItem(null); 
+                    setStep('ITEM');
+                    setPickerOpen(true); 
+                    
+                    loadStudents(); // 배경의 학생 리스트 갱신
+                    loadItemsForStudent(student); // 현재 학생의 과제 목록 갱신
+                  }}
                   onDirtyChange={setActiveDirty}
                 />
               </div>
