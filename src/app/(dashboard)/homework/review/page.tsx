@@ -20,7 +20,16 @@ const safeParseIds = (raw: any): number[] => {
   return [];
 };
 
-type GradeCode = 'O' | 'X' | 'TX' | 'TO' | '☆' | 'B';
+// 💡 [수정] 수식 내 부등호(<, >)가 HTML 태그로 오인되어 깨지는 현상을 막기 위한 유틸리티 함수
+const formatMathTextForWeb = (text: string) => {
+  if (!text) return "";
+  let t = String(text).replace(/</g, ' &lt; ').replace(/>/g, ' &gt; ');
+  t = t.replace(/\\bigcirc/g, '\\circ').replace(/\^{?[○◯]}?/g, '^{\\circ}').replace(/([0-9]+)\s*[○◯]/g, '$1^{\\circ}');
+  return t;
+};
+
+// 💡 'RO' 타입 추가
+type GradeCode = 'O' | 'X' | 'TX' | 'TO' | '☆' | 'B' | 'RO';
 
 function HomeworkReviewContent() {
   const router = useRouter();
@@ -49,7 +58,6 @@ function HomeworkReviewContent() {
     }
   }, [homeworkId, studentId]);
 
-  // 💡 [핵심: 깜빡임 원천 차단] gradingMap(버튼 상태) 변경 시 MathJax 렌더링 스킵
   useEffect(() => {
     const timer = setTimeout(() => {
       if (typeof window !== "undefined" && (window as any).MathJax && (window as any).MathJax.typesetPromise) {
@@ -130,7 +138,7 @@ function HomeworkReviewContent() {
       const m = newMap[q.tq_id];
       if (m) {
         gradedCount++;
-        if (['O', 'TO'].includes(m as string)) correctCount++;
+        if (['O', 'TO', 'RO'].includes(m as string)) correctCount++;
         if (['X', 'TX', '☆', 'B'].includes(m as string)) incorrectIds.push(q.tq_id);
       }
     });
@@ -166,7 +174,7 @@ function HomeworkReviewContent() {
     setSaveStatus("저장 중...");
 
     try {
-      const isCorrect = ['O', 'TO'].includes(mark);
+      const isCorrect = ['O', 'TO', 'RO'].includes(mark);
       const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
 
       const [ { data: existingA }, { data: existingI } ] = await Promise.all([
@@ -210,7 +218,7 @@ function HomeworkReviewContent() {
       targets.forEach(q => newMap[q.tq_id] = mark);
       setGradingMap(newMap);
 
-      const isCorrect = ['O', 'TO'].includes(mark);
+      const isCorrect = ['O', 'TO', 'RO'].includes(mark);
       const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
 
       const [ { data: existingAns }, { data: existingInc } ] = await Promise.all([
@@ -326,6 +334,7 @@ function HomeworkReviewContent() {
               else if (mark === 'TX') rowBg = "bg-[#f97316]/10 border-[#f97316]";
               else if (mark === '☆') rowBg = "bg-[#f59e0b]/10 border-[#f59e0b]";
               else if (mark === 'B') rowBg = "bg-slate-300/30 border-slate-400";
+              else if (mark === 'RO') rowBg = "bg-[#3b82f6]/10 border-[#3b82f6]";
 
               const displayQNum = String(q.question_number || '')
                 .replace(/TWIN/gi, 'T')
@@ -347,15 +356,18 @@ function HomeworkReviewContent() {
                   <div className="flex-1 bg-white/70 px-3 py-2 rounded-lg border border-slate-200 flex items-center gap-3 overflow-hidden shadow-inner">
                     <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-extrabold shrink-0">DB 정답</span>
                     <div className="font-bold text-slate-800 text-[13px] break-all math-text whitespace-pre-wrap max-h-[3.5rem] overflow-y-auto custom-scroll w-full flex items-center">
-                      {q.answer ? <span dangerouslySetInnerHTML={{ __html: `$ ${q.answer} $` }} /> : <span className="text-slate-400 font-normal italic">-</span>}
+                      {/* 💡 [수정] formatMathTextForWeb을 사용하여 정답 텍스트 파싱 깨짐 방지 */}
+                      {q.answer ? <span dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(q.answer)} $` }} /> : <span className="text-slate-400 font-normal italic">-</span>}
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-6 gap-1 shrink-0 w-[300px]">
+                  <div className="grid grid-cols-7 gap-1 shrink-0 w-[350px]">
                     <button onClick={() => handleGrade(q.tq_id, 'O')} className={`h-10 rounded-md font-black text-xs transition-all ${mark === 'O' ? 'bg-[#10b981] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-emerald-50 hover:text-[#10b981] border border-slate-200'}`}>O</button>
                     <button onClick={() => handleGrade(q.tq_id, 'X')} className={`h-10 rounded-md font-black text-xs transition-all ${mark === 'X' ? 'bg-[#ef4444] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-rose-50 hover:text-[#ef4444] border border-slate-200'}`}>X</button>
                     <button onClick={() => handleGrade(q.tq_id, 'TO')} className={`h-10 rounded-md font-bold text-[11px] transition-all ${mark === 'TO' ? 'bg-[#14b8a6] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-teal-50 hover:text-[#14b8a6] border border-slate-200'}`}>TO</button>
                     <button onClick={() => handleGrade(q.tq_id, 'TX')} className={`h-10 rounded-md font-bold text-[11px] transition-all ${mark === 'TX' ? 'bg-[#f97316] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-orange-50 hover:text-[#f97316] border border-slate-200'}`}>TX</button>
+                    {/* 💡 [수정] RO 버튼 위치 이동 (TX와 ☆ 사이) */}
+                    <button onClick={() => handleGrade(q.tq_id, 'RO')} className={`h-10 rounded-md font-bold text-[11px] transition-all ${mark === 'RO' ? 'bg-[#3b82f6] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-blue-50 hover:text-[#3b82f6] border border-slate-200'}`}>RO</button>
                     <button onClick={() => handleGrade(q.tq_id, '☆')} className={`h-10 rounded-md font-black text-sm transition-all ${mark === '☆' ? 'bg-[#f59e0b] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-amber-50 hover:text-[#f59e0b] border border-slate-200'}`}>☆</button>
                     <button onClick={() => handleGrade(q.tq_id, 'B')} className={`h-10 rounded-md font-bold text-xs transition-all ${mark === 'B' ? 'bg-[#64748b] text-white shadow-md transform scale-105' : 'bg-white text-slate-400 hover:bg-slate-100 hover:text-[#64748b] border border-slate-200'}`}>B</button>
                   </div>
@@ -366,7 +378,6 @@ function HomeworkReviewContent() {
           )}
         </div>
 
-        {/* 💡 강제완료 버튼 삭제 및 뒤로가기 버튼 유지 */}
         <div className="mt-6 pt-6 border-t border-slate-300 flex justify-center pb-20 gap-4">
           <button 
             onClick={() => window.location.href = '/learning'} 
@@ -391,7 +402,8 @@ function HomeworkReviewContent() {
                 <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs">질문</span>
                 </h3>
-                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: String(modalQ.question || '-').replace(/\\bigcirc/g, '\\circ').replace(/\n/g, '<br>') }} />
+                {/* 💡 [수정] 모달 내 질문 렌더링 시 formatMathTextForWeb 적용 */}
+                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.question || '-').replace(/\n/g, '<br>') }} />
                 {getCleanUrl(modalQ.image_url) && <img src={getCleanUrl(modalQ.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
               </div>
               
@@ -399,7 +411,8 @@ function HomeworkReviewContent() {
                 <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded text-xs">정답</span>
                 </h3>
-                <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${modalQ.answer || '-'} $` }} />
+                {/* 💡 [수정] 모달 내 정답 렌더링 시 formatMathTextForWeb 적용 */}
+                <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(modalQ.answer || '-')} $` }} />
               </div>
 
             </div>

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 
-// 🌟 안전한 JSON 파싱 함수 (진도율 계산용)
+// 🌟 [추가] 진도율 계산을 위한 안전한 JSON 파싱 함수
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -240,7 +240,6 @@ export default function TeacherDashboardPage() {
       return;
     }
 
-    // 🌟 불필요한 무거운 조인(exam_assignment) 걷어냄
     const { data: classStudents } = await supabase
       .from("student")
       .select("*, parent(*), enrollment(class(name)), consultation_log(created_at)")
@@ -251,7 +250,7 @@ export default function TeacherDashboardPage() {
     const activeStudentIds = (classStudents || []).map((s: any) => s.student_id);
 
     // =========================================================================
-    // 🌟 [핵심 변경 1] 최근 2주(14일) 시험 평균 점수 리얼 데이터
+    // 🌟 최근 2주(14일) 시험 평균 점수 리얼 데이터
     // =========================================================================
     const kstNowMs = Date.now() + 9 * 3600000;
     const twoWeeksAgo = new Date(kstNowMs - 14 * 24 * 3600000).toISOString();
@@ -267,7 +266,7 @@ export default function TeacherDashboardPage() {
       : 0;
 
     // =========================================================================
-    // 🌟 [핵심 변경 2] 최근 1달(30일) 과제 제출률 리얼 데이터
+    // 🌟 최근 1달(30일) 과제 제출률 리얼 데이터
     // =========================================================================
     const oneMonthAgo = new Date(kstNowMs - 30 * 24 * 3600000).toISOString();
     
@@ -299,7 +298,7 @@ export default function TeacherDashboardPage() {
     const hwRate = expectedHwCount > 0 ? Math.round((submittedHwCount / expectedHwCount) * 100) : 0;
 
     // =========================================================================
-    // 🌟 [핵심 변경 3] 주교재 진도율 리얼 데이터 엔진 (이전 구현분 복구)
+    // 🌟 주교재 진도율 리얼 데이터 엔진
     // =========================================================================
     const { data: cbData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId).eq("textbook.book_type", "주교재");
     const bookName = cbData && cbData.length > 0 ? cbData[0].textbook?.title : "주교재 미배정";
@@ -625,8 +624,6 @@ export default function TeacherDashboardPage() {
 
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0 mt-1">
           <div className="flex flex-col gap-3 h-[220px]">
-            
-            {/* 🌟 [UI 개편] 기존의 통합 블록을 시험/과제로 각각 쪼개어 가로 배치했습니다 */}
             <div className="flex gap-3 flex-1">
               <div onClick={() => router.push('/exam')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-blue-300 transition-colors cursor-pointer group">
                 <div className="flex flex-col">
@@ -773,11 +770,12 @@ export default function TeacherDashboardPage() {
                         const logs = [...s.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
                         const recentDate = new Date(logs[0].created_at).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }).replace(/\.$/, '');
                         
+                        // 🌟 [수정] router.push 로 변경
                         consultHtml = (
                           <button 
                             onClick={() => {
                                if (hasAccess('/student') && hasAccess('action_view_consult')) {
-                                  window.open(`/student/${s.student_id}?tab=consult`, '_blank');
+                                  router.push(`/student/${s.student_id}?tab=consult`);
                                } else {
                                   alert("해당 학생의 상담 기록 열람 권한이 없습니다.");
                                }
@@ -792,7 +790,8 @@ export default function TeacherDashboardPage() {
                       return (
                         <tr key={s.student_id} className="hover:bg-blue-50/40 transition-colors border-b border-slate-100">
                           <td className="py-2.5 pl-3 pr-1 w-24">
-                            <div className={`flex items-center gap-2 group w-max ${hasAccess('/student') ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`} onClick={() => hasAccess('/student') ? window.open(`/student/${s.student_id}`, '_blank') : alert("접근 권한이 없습니다.")}>
+                            {/* 🌟 [수정] router.push 로 변경 */}
+                            <div className={`flex items-center gap-2 group w-max ${hasAccess('/student') ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`} onClick={() => hasAccess('/student') ? router.push(`/student/${s.student_id}`) : alert("접근 권한이 없습니다.")}>
                               <div className="w-6 h-6 rounded-full bg-blue-100 text-[#002864] flex items-center justify-center text-[10px] font-black shrink-0 transition-colors group-hover:bg-[#002864] group-hover:text-white">
                                 {s.name.substring(1)}
                               </div>
@@ -808,7 +807,8 @@ export default function TeacherDashboardPage() {
                           <td className="py-2.5 px-1 text-center text-[11px] font-medium text-slate-500 whitespace-nowrap">{parentContact}</td>
                           <td className="py-2.5 px-1 text-center whitespace-nowrap">{consultHtml}</td>
                           <td className="py-2.5 pl-1 pr-3 text-right">
-                            <button onClick={() => hasAccess('/student') ? window.open(`/student/${s.student_id}`, '_blank') : alert("접근 권한이 없습니다.")} className={`text-[10px] font-bold bg-white border border-slate-300 px-2 py-1 rounded transition-colors shadow-sm whitespace-nowrap ${hasAccess('/student') ? 'text-slate-600 hover:bg-slate-50' : 'text-slate-300 cursor-not-allowed'}`}>리포트</button>
+                            {/* 🌟 [수정] router.push 로 변경 */}
+                            <button onClick={() => hasAccess('/student') ? router.push(`/student/${s.student_id}`) : alert("접근 권한이 없습니다.")} className={`text-[10px] font-bold bg-white border border-slate-300 px-2 py-1 rounded transition-colors shadow-sm whitespace-nowrap ${hasAccess('/student') ? 'text-slate-600 hover:bg-slate-50' : 'text-slate-300 cursor-not-allowed'}`}>리포트</button>
                           </td>
                         </tr>
                       );

@@ -83,7 +83,6 @@ export default function ProgressPage() {
 
   const actionQueue = useRef<Promise<void>>(Promise.resolve());
 
-  // 🌟 [핵심 수정] 권한 체크 시 강사 모드일 때 관리자 텍스트 패스 차단
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
@@ -143,7 +142,6 @@ export default function ProgressPage() {
 
   const showToast = (msg: string) => { setToastMsg(msg); setTimeout(() => setToastMsg(""), 2500); };
 
-  // 🌟 [핵심 보강] 목록 조회 시에도 강사 뷰일 경우 본인 담당 반만 노출
   const fetchInitialClasses = async () => {
     const instId = localStorage.getItem("logica_instructor_id") || "";
     const role = localStorage.getItem("logica_instructor_role") || "TEACHER";
@@ -272,7 +270,7 @@ export default function ProgressPage() {
     try {
       const { data: assignments, error } = await supabase
         .from('homework_assignment')
-        .select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids)')
+        .select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)')
         .eq('class_id', classId);
         
       if (error) throw error;
@@ -282,21 +280,37 @@ export default function ProgressPage() {
 
       assignments?.forEach((hw: any) => {
         const targetQs = safeParseIds(hw.target_questions);
-        const validStudentIds = (hw.student_homework_result || []).map((res: any) => res.student_id);
-
-        validStudentIds.forEach((sId: string) => {
+        
+        if (hw.target_student_id) {
           targetQs.forEach((tqId: number) => {
             if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
-            if (tqStudentStatus[tqId][sId] !== 'done') {
-              tqStudentStatus[tqId][sId] = 'homework';
+            if (tqStudentStatus[tqId][hw.target_student_id] !== 'done') {
+              tqStudentStatus[tqId][hw.target_student_id] = 'homework';
             }
           });
-        });
+        } else {
+           studentIds.forEach(sId => {
+              targetQs.forEach((tqId: number) => {
+                if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+                if (tqStudentStatus[tqId][sId] !== 'done') {
+                  tqStudentStatus[tqId][sId] = 'homework';
+                }
+              });
+           });
+        }
 
         hw.student_homework_result?.forEach((res: any) => {
           const sId = res.student_id;
+          const isFullyDone = ['채점완료', '제출완료', '완료'].includes(res.status);
+
+          if (isFullyDone) {
+            targetQs.forEach((tqId: number) => {
+              if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+              tqStudentStatus[tqId][sId] = 'done';
+            });
+          }
+
           const completedQs = safeParseIds(res.completed_tq_ids);
-          
           completedQs.forEach((tqId: number) => {
             if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
             tqStudentStatus[tqId][sId] = 'done';
@@ -310,6 +324,7 @@ export default function ProgressPage() {
         const tqId = Number(tqIdStr);
         let doneCount = 0;
         let hwCount = 0;
+        let partialC = 0;
 
         studentIds.forEach(sId => {
           const st = tqStudentStatus[tqId]?.[sId];
@@ -317,6 +332,7 @@ export default function ProgressPage() {
             newMap[getStatusKey(tqId, sId)] = st; 
             if (st === 'done') doneCount++;
             else if (st === 'homework') hwCount++;
+            else if (st === 'partial') partialC++;
           }
         });
 
@@ -326,7 +342,7 @@ export default function ProgressPage() {
           } else if (doneCount > 0) {
             newMap[getStatusKey(tqId, 'all')] = 'partial';
           } else if (hwCount >= totalStudents) {
-            newMap[getStatusKey(tqId, 'all')] = 'homework';
+            newMap[getStatusKey(tqId, 'all')] = 'partial';
           } else if (hwCount > 0) {
             newMap[getStatusKey(tqId, 'all')] = 'partial';
           }
@@ -389,128 +405,58 @@ export default function ProgressPage() {
       .gte('created_at', `${dateStr}T00:00:00+09:00`)
       .lte('created_at', `${dateStr}T23:59:59.999+09:00`);
 
-    const classWideHw = todayHws?.find(hw => hw.target_student_id === null);
     const individualHws = todayHws?.filter(hw => hw.target_student_id !== null) || [];
+    let baseDueDate = individualHws.length > 0 ? individualHws[0].due_date : nextSessionStr;
 
-    let baseDueDate = classWideHw?.due_date;
-    if (baseDueDate) {
-       const ymdMatch = baseDueDate.match(/^\d{4}-\d{2}-\d{2}/);
-       const ymd = ymdMatch ? ymdMatch[0] : nextSessionStr.split('T')[0];
-       if (ymd < dateStr) {
-          baseDueDate = nextSessionStr; 
-       }
-    } else {
-       baseDueDate = nextSessionStr;
-    }
+    const targetStudentIds = selectedStudentId === 'all' ? enrolledStudentIds : [selectedStudentId];
 
-    if (selectedStudentId === 'all') {
-      if (classWideHw) {
-        const existing = safeParseIds(classWideHw.target_questions);
-        const newTqs = Array.from(new Set([...existing, ...tq_ids]));
-        await supabase.from('homework_assignment').update({ target_questions: newTqs, due_date: baseDueDate }).eq('homework_id', classWideHw.homework_id);
-        
-        const indStudentIds = individualHws.map(hw => hw.target_student_id);
-        const { data: existingResults } = await supabase.from('student_homework_result').select('student_id').eq('homework_id', classWideHw.homework_id);
-        const existingIds = existingResults?.map(r => r.student_id) || [];
-        
-        const missingTargets = enrolledStudentIds.filter(id => !indStudentIds.includes(id) && !existingIds.includes(id));
-        if (missingTargets.length > 0) {
-          await supabase.from('student_homework_result').insert(
-            missingTargets.map(sId => ({ homework_id: classWideHw.homework_id, student_id: sId, status: '미제출', completed_tq_ids: [] }))
-          );
+    for (const stuId of targetStudentIds) {
+      const indHwsForStudent = individualHws.filter(hw => hw.target_student_id === stuId);
+      let targetHwToMerge = null;
+
+      // 🌟 [핵심 변경] 오늘 만든 과제 중에서 아직 완료(채점완료 등)되지 않은 바구니만 찾습니다.
+      for (const hw of indHwsForStudent) {
+        const { data: resData } = await supabase.from('student_homework_result')
+          .select('status')
+          .eq('homework_id', hw.homework_id)
+          .eq('student_id', stuId)
+          .maybeSingle();
+          
+        if (resData && !['채점완료', '제출완료', '완료'].includes(resData.status)) {
+          targetHwToMerge = hw;
+          break; // 병합할 활성(진행중) 과제 발견!
         }
+      }
+      
+      if (targetHwToMerge) {
+        // 병합 (Merge) - 기존 바구니가 살아있다면 문제만 쏙 추가합니다.
+        const existingInd = safeParseIds(targetHwToMerge.target_questions);
+        const combinedTqs = Array.from(new Set([...existingInd, ...tq_ids]));
+        
+        await supabase.from('homework_assignment')
+          .update({ target_questions: combinedTqs, due_date: baseDueDate })
+          .eq('homework_id', targetHwToMerge.homework_id);
+          
       } else {
+        // 새로 생성 (New) - 만약 오늘치 과제가 아예 없거나, 모두 이미 완료 처리되었다면
+        // 새로운 과제 바구니를 분리해서 생성합니다! (이전 숙제의 완료 상태 영구 보존)
         const { data: insData, error: insErr } = await supabase.from('homework_assignment').insert({
-          book_id: bookId, target_questions: tq_ids, class_id: selectedClassId,
+          book_id: bookId, 
+          target_questions: tq_ids, 
+          class_id: selectedClassId, 
+          target_student_id: stuId,
           due_date: baseDueDate, 
           homework_title: expectedTitle
         }).select('homework_id').single();
+        
         if (insErr) throw insErr;
-        
-        const indStudentIds = individualHws.map(hw => hw.target_student_id);
-        const targets = enrolledStudentIds.filter(id => !indStudentIds.includes(id));
-        if (targets.length > 0) {
-          await supabase.from('student_homework_result').insert(
-            targets.map(sId => ({ homework_id: insData.homework_id, student_id: sId, status: '미제출', completed_tq_ids: [] }))
-          );
-        }
-      }
 
-      for (const indHw of individualHws) {
-        const existingInd = safeParseIds(indHw.target_questions);
-        const newIndTqs = Array.from(new Set([...existingInd, ...tq_ids]));
-        await supabase.from('homework_assignment').update({ target_questions: newIndTqs, due_date: baseDueDate }).eq('homework_id', indHw.homework_id);
-      }
-
-    } else {
-      const stuId = selectedStudentId;
-
-      if (classWideHw) {
-        const classTqs = safeParseIds(classWideHw.target_questions);
-
-        const { data: classResults } = await supabase.from('student_homework_result')
-          .select('hw_result_id, student_id, completed_tq_ids')
-          .eq('homework_id', classWideHw.homework_id);
-
-        await supabase.from('student_homework_result').delete().eq('homework_id', classWideHw.homework_id);
-        await supabase.from('homework_assignment').delete().eq('homework_id', classWideHw.homework_id);
-
-        const resultsToProcess: { hw_result_id: any; student_id: any; completed_tq_ids: any; }[] = classResults || [];
-        
-        if (!resultsToProcess.some(r => r.student_id === stuId)) {
-          resultsToProcess.push({ hw_result_id: -1, student_id: stuId, completed_tq_ids: [] });
-        }
-
-        for (const res of resultsToProcess) {
-          const sId = res.student_id;
-          const completed = safeParseIds(res.completed_tq_ids);
-
-          let finalTqs = [...classTqs];
-          
-          const existingIndHw = individualHws.find(hw => hw.target_student_id === sId);
-          if (existingIndHw) {
-            finalTqs = [...finalTqs, ...safeParseIds(existingIndHw.target_questions)];
-            await supabase.from('student_homework_result').delete().eq('homework_id', existingIndHw.homework_id);
-            await supabase.from('homework_assignment').delete().eq('homework_id', existingIndHw.homework_id);
-          }
-
-          if (sId === stuId) {
-            finalTqs = [...finalTqs, ...tq_ids];
-          }
-
-          finalTqs = Array.from(new Set(finalTqs));
-
-          const { data: insData } = await supabase.from('homework_assignment').insert({
-            book_id: bookId, target_questions: finalTqs, class_id: selectedClassId, target_student_id: sId,
-            due_date: baseDueDate, 
-            homework_title: expectedTitle
-          }).select('homework_id').single();
-
-          if (insData) {
-            await supabase.from('student_homework_result').insert({
-              homework_id: insData.homework_id, student_id: sId, status: '미제출', completed_tq_ids: completed
-            });
-          }
-        }
-
-      } else {
-        const indHw = individualHws.find(hw => hw.target_student_id === stuId);
-        if (indHw) {
-          const existingInd = safeParseIds(indHw.target_questions);
-          const combinedTqs = Array.from(new Set([...existingInd, ...tq_ids]));
-          await supabase.from('homework_assignment').update({ target_questions: combinedTqs, due_date: baseDueDate }).eq('homework_id', indHw.homework_id);
-        } else {
-          const { data: insData, error: insErr } = await supabase.from('homework_assignment').insert({
-            book_id: bookId, target_questions: tq_ids, class_id: selectedClassId, target_student_id: stuId,
-            due_date: baseDueDate, 
-            homework_title: expectedTitle
-          }).select('homework_id').single();
-          if (insErr) throw insErr;
-
-          await supabase.from('student_homework_result').insert({ 
-            homework_id: insData.homework_id, student_id: stuId, status: '미제출', completed_tq_ids: [] 
-          });
-        }
+        await supabase.from('student_homework_result').insert({ 
+          homework_id: insData.homework_id, 
+          student_id: stuId, 
+          status: '미제출', 
+          completed_tq_ids: [] 
+        });
       }
     }
   };
@@ -583,10 +529,7 @@ export default function ProgressPage() {
           }
         }
 
-        const isTargetingAll = selectedStudentId === 'all';
-        const isPersonalHw = hw.target_student_id !== null && targetStudentIds.includes(hw.target_student_id);
-
-        if (isTargetingAll || isPersonalHw) {
+        if (hw.target_student_id !== null && targetStudentIds.includes(hw.target_student_id)) {
             const tqArr = safeParseIds(hw.target_questions);
             const remaining = tqArr.filter((id: number) => !tqIds.includes(id));
             const targetChanged = remaining.length !== tqArr.length;
@@ -716,12 +659,17 @@ export default function ProgressPage() {
   const getPageStatus = (pNum: number, type: 'main'|'wb') => {
     const qs = type === 'main' ? (groupedMainQs[pNum] || []) : (groupedWbQs[pNum] || []);
     if (qs.length === 0) return "대기";
-    let doneC = 0, hwC = 0;
+    let doneC = 0, hwC = 0, partialC = 0;
     qs.forEach((q: any) => {
       const st = statusMap[getStatusKey(q.tq_id, selectedStudentId)];
-      if (st === "done") doneC++; if (st === "homework") hwC++;
+      if (st === "done") doneC++; 
+      else if (st === "homework") hwC++;
+      else if (st === "partial") partialC++; 
     });
-    if (doneC === qs.length) return "done"; if (hwC === qs.length) return "homework"; if (doneC > 0 || hwC > 0) return "partial";
+    
+    if (doneC === qs.length) return "done";
+    if (hwC === qs.length) return "homework";
+    if (doneC > 0 || hwC > 0 || partialC > 0) return "partial";
     return "대기";
   };
 
@@ -783,7 +731,7 @@ export default function ProgressPage() {
     if (st === "done") {
       return (
         <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className={`group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors ${type==='wb' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300' : 'bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300'}`}>
-          <span className="group-hover/qbadge:hidden">진도완료</span>
+          <span className="group-hover/qbadge:hidden">{type === 'wb' ? '완료' : '진도완료'}</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
       );

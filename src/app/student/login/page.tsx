@@ -141,6 +141,10 @@ export default function StudentKioskLogin() {
       localStorage.setItem("logica_student_id", result.studentId);
       localStorage.setItem("logica_student_phone", result.phone || "");
       localStorage.setItem("logica_student_name", result.name);
+      // 💡 학생 로그인은 loginStudentAction이 tenant_id를 돌려주는데도 지금까지 아무도
+      // localStorage에 저장하지 않았다 — 그래서 클리닉 화면들이 전부 "hq"(존재하지 않는
+      // tenant_id) 폴백으로 떨어져 uuid 컬럼 비교 쿼리(clinic_seat_layout 등)가 깨졌다.
+      if (result.tenant_id) localStorage.setItem("logica_tenant_id", result.tenant_id);
 
       // 이미 터치 시점에 전체화면이 적용되어 있으므로 바로 넘겨도 튕기지 않습니다!
       router.push("/student/portal");

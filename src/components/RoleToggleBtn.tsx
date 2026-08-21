@@ -2,35 +2,46 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 
 export default function RoleToggleBtn() {
+  const pathname = usePathname(); // 🌟 페이지 이동을 실시간으로 감지합니다.
+  
   const [realRole, setRealRole] = useState("");
   const [currentRole, setCurrentRole] = useState("");
   const [isGodMode, setIsGodMode] = useState(false);
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    const instId = localStorage.getItem("logica_instructor_id") || "";
+    const instId = localStorage.getItem("logica_instructor_id");
+
+    // 🌟 [핵심 버그 수정] 아이디가 없으면(로그아웃 상태) 즉시 버튼을 숨기고 백업 찌꺼기를 날립니다.
+    if (!instId) {
+      setIsGodMode(false);
+      localStorage.removeItem("logica_real_role");
+      localStorage.removeItem("logica_real_role_owner");
+      return;
+    }
+
     const activeRole = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
     
     let originalRole = localStorage.getItem("logica_real_role");
     let originalOwner = localStorage.getItem("logica_real_role_owner");
 
-    // 🌟 [핵심 버그 수정 1] 아이디가 바뀌었다면 (다른 아이디로 접속했다면) 이전 백업 찌꺼기를 완전 초기화!
-    if (originalOwner !== instId) {
+    // 다른 아이디로 재로그인 했다면 이전 백업 찌꺼기 초기화
+    if (originalOwner && originalOwner !== instId) {
       originalRole = null; 
     }
 
-    // 🌟 진짜 권한 백업본이 없으면 현재 상태를 백업하면서 소유자 ID도 같이 묶어둡니다.
+    // 진짜 권한 백업본이 없으면 현재 상태를 백업하면서 소유자 ID도 같이 묶어둡니다.
     if (!originalRole) {
       localStorage.setItem("logica_real_role", activeRole);
       localStorage.setItem("logica_real_role_owner", instId);
       originalRole = activeRole;
     }
 
-    // 🌟 [핵심 버그 수정 2] 대소문자 무시 (.toUpperCase()) 및 직급(Position) 한글 텍스트 동시 검사
-    // (사이드바, 학습관리 페이지 등의 최고관리자 통과 로직과 100% 동일하게 일치시켰습니다.)
+    // 대소문자 무시 및 직급(Position) 한글 텍스트 동시 검사
     const isSA = ["SUPER_ADMIN", "ADMIN"].includes((originalRole || "").toUpperCase());
     const hasAdminPos = pos.includes("최고관리자") || pos.includes("원장") || pos.includes("대장");
     
@@ -38,7 +49,9 @@ export default function RoleToggleBtn() {
     setRealRole(originalRole || "");
     setCurrentRole(activeRole);
     setIsMounted(true);
-  }, []);
+    
+  // 🌟 핵심: 빈 배열이 아니라 pathname을 넣어, 페이지를 이동(로그인/아웃)할 때마다 재검사하도록 강제합니다.
+  }, [pathname]); 
 
   // 렌더링 전이거나, 원장/최고관리자가 아니면 아예 그리지 않습니다.
   if (!isMounted || !isGodMode) return null;
@@ -54,7 +67,7 @@ export default function RoleToggleBtn() {
       alert("👨‍🏫 전임강사 모드로 전환합니다.");
     }
     
-    // 권한 변경 후 즉시 새로고침하여 전체 레이아웃과 플로팅 메뉴 권한을 재평가합니다.
+    // 권한 변경 후 즉시 새로고침하여 전체 레이아웃과 메뉴 권한을 재평가합니다.
     window.location.reload(); 
   };
 

@@ -12,7 +12,7 @@ const DAECHI_TENANT_ID = "1ff4299c-d72b-4d99-97b0-45fee08e3b73";
 interface ClassEditModalProps {
   isOpen: boolean;
   classItem: any;
-  instructors: any[]; // 부모에서 넘어오는 이 목록은 더 이상 쓰지 않습니다!
+  instructors: any[]; 
   currentUser: { instId: string; name: string; isAdmin: boolean };
   onClose: () => void;
   onSuccess: () => void;
@@ -29,18 +29,16 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const [searchKeyword, setSearchKeyword] = useState("");
   const [isSaving, setIsSaving] = useState(false);
 
-  // 🌟 [핵심 변경] 부모 데이터에 의존하지 않고, 대치 본원 강사만 DB에서 직접 가져옵니다.
   const [daechiInstructors, setDaechiInstructors] = useState<any[]>([]);
 
   useEffect(() => {
     if (isOpen) {
-      // 모달이 열릴 때 대치 본원 선생님만 직접 조회
       const fetchDaechiInstructors = async () => {
         const { data } = await supabase
           .from("instructor")
           .select("instructor_id, name")
-          .eq("tenant_id", DAECHI_TENANT_ID) // 🎯 오직 대치 본원만!
-          .eq("status", "재직") // 재직 중인 선생님만 (선택사항)
+          .eq("tenant_id", DAECHI_TENANT_ID) 
+          .eq("status", "재직") 
           .order("name");
         
         if (data) {
@@ -133,14 +131,37 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     const { data: existing } = await supabase.from("enrollment").select("enrollment_id").match({ student_id: selected.student_id, class_id: modalData.class_id });
     if (existing && existing.length > 0) return alert("이미 이 반에 배정된 학생입니다.");
 
-    await supabase.from("enrollment").insert([{ student_id: selected.student_id, class_id: modalData.class_id, start_date: new Date().toISOString().split("T")[0] }]);
+    const { error } = await supabase.from("enrollment").insert([{ student_id: selected.student_id, class_id: modalData.class_id, start_date: new Date().toISOString().split("T")[0] }]);
+    if (error) {
+      return alert("배정 실패: " + error.message);
+    }
+
     setSearchKeyword(""); fetchClassStudents(modalData.class_id);
     onSuccess(); 
   };
 
+  // 🌟 [수정] 개별 학생 제외 시에도 연관 출결 기록(attendance)을 먼저 지워줍니다.
   const removeStudent = async (studentId: string) => {
-    if (!confirm("정말 수강생 목록에서 제외하시겠습니까?")) return;
-    await supabase.from("enrollment").delete().match({ student_id: studentId, class_id: modalData.class_id });
+    if (!confirm("정말 수강생 목록에서 제외하시겠습니까?\n(이 반에서 발생한 해당 학생의 출결 기록도 함께 삭제됩니다.)")) return;
+    
+    // 1. 제외하려는 enrollment_id 찾기
+    const { data: targetEnroll } = await supabase
+      .from("enrollment")
+      .select("enrollment_id")
+      .match({ student_id: studentId, class_id: modalData.class_id })
+      .single();
+
+    // 2. 해당 enrollment_id에 묶인 출결 삭제
+    if (targetEnroll) {
+      await supabase.from("attendance").delete().eq("enrollment_id", targetEnroll.enrollment_id);
+    }
+
+    // 3. 최종 명단(enrollment) 삭제
+    const { error } = await supabase.from("enrollment").delete().match({ student_id: studentId, class_id: modalData.class_id });
+    if (error) {
+      return alert("제외 실패: " + error.message);
+    }
+    
     fetchClassStudents(modalData.class_id);
     onSuccess();
   };
@@ -159,31 +180,100 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         instructor_id: modalData.instructor_id || null, tuition_fee: parseInt(modalData.tuition_fee) || 0
       };
 
-      await supabase.from("class").update(updateData).eq("class_id", modalData.class_id);
+      const { error: updateErr } = await supabase.from("class").update(updateData).eq("class_id", modalData.class_id);
+      if (updateErr) throw updateErr;
+
       await supabase.from("class_schedule").delete().eq("class_id", modalData.class_id);
       
       const insertSchedules = checkedSchedules.map(s => ({
         class_id: modalData.class_id, day_of_week: s.day, start_time: s.start_time, end_time: s.end_time || null
       }));
-      await supabase.from("class_schedule").insert(insertSchedules);
+      
+      const { error: insertErr } = await supabase.from("class_schedule").insert(insertSchedules);
+      if (insertErr) throw insertErr;
 
-      alert("반 정보 및 일정이 성공적으로 저장되었습니다!");
+      alert("✅ 반 정보 및 일정이 성공적으로 저장되었습니다!");
       setIsEditMode(false); 
       onSuccess();
-    } catch (e) { alert("저장 중 오류가 발생했습니다."); } finally { setIsSaving(false); }
+    } catch (e: any) { 
+      console.error(e);
+      alert(`저장 중 오류가 발생했습니다.\n${e.message}`); 
+    } finally { 
+      setIsSaving(false); 
+    }
   };
 
+  // 🌟 [완전삭제 해결 핵심] enrollment_id를 먼저 확보하여 출결 기록부터 완벽하게 삭제합니다.
   const deleteClass = async () => {
-    if (!confirm(`⚠️ 경고: [${modalData.name}] 반을 정말 삭제하시겠습니까?\n절대 복구할 수 없습니다.`)) return;
+    if (!confirm(`⚠️ 경고: [${modalData.name}] 반을 정말 삭제하시겠습니까?\n이 반과 연결된 명단, 시간표, 배정된 교재, 출결 기록, 과제/시험 등이 모두 함께 삭제되며 절대 복구할 수 없습니다.`)) return;
+    
     setIsSaving(true);
     try {
-      await supabase.from("enrollment").delete().eq("class_id", modalData.class_id);
-      await supabase.from("class_schedule").delete().eq("class_id", modalData.class_id);
-      await supabase.from("class").delete().eq("class_id", modalData.class_id);
-      alert("반 정보가 완벽하게 삭제되었습니다.");
+      const cId = modalData.class_id;
+
+      // 1-1. 시험 기록 삭제
+      const { data: exData } = await supabase.from("exam_assignment").select("assignment_id").eq("class_id", cId);
+      if (exData && exData.length > 0) {
+        const exIds = exData.map(e => e.assignment_id);
+        await supabase.from("student_answer").delete().in("exam_assignment_id", exIds);
+        await supabase.from("exam_assignment").delete().eq("class_id", cId);
+      }
+
+      // 1-2. 과제 기록 삭제
+      const { data: hwData } = await supabase.from("homework_assignment").select("homework_id").eq("class_id", cId);
+      if (hwData && hwData.length > 0) {
+        const hwIds = hwData.map(h => h.homework_id);
+        await supabase.from("student_homework_answer").delete().in("homework_id", hwIds);
+        await supabase.from("student_homework_result").delete().in("homework_id", hwIds);
+        await supabase.from("homework_assignment").delete().eq("class_id", cId);
+      }
+
+      // 🌟 1-3. 출결(attendance) 기록 완벽 삭제 (enrollment_id 기반)
+      const { data: enrollData } = await supabase.from("enrollment").select("enrollment_id").eq("class_id", cId);
+      if (enrollData && enrollData.length > 0) {
+        const enrollIds = enrollData.map(e => e.enrollment_id);
+        const { error: attErr } = await supabase.from("attendance").delete().in("enrollment_id", enrollIds);
+        if (attErr) throw new Error(`[출결 기록] 삭제 실패: ${attErr.message}`);
+      }
+      
+      // 혹시 몰라 class_id로도 삭제 시도 (보험용)
+      await supabase.from("attendance").delete().eq("class_id", cId);
+
+      // 1-4. 나머지 브릿지 데이터 완전 청소 (attendance는 이미 지웠으므로 배열에서 뺌)
+      const cleanupTables = [
+        { name: 'class_textbook', label: '교재 배정 내역' },
+        { name: 'class_schedule', label: '시간표' },
+        { name: 'class_holiday', label: '휴강일' },
+        { name: 'class_extra_session', label: '보강 일정' },
+        { name: 'enrollment', label: '수강 명단' }
+      ];
+
+      for (const table of cleanupTables) {
+        const { error } = await supabase.from(table.name).delete().eq("class_id", cId);
+        if (error) {
+          throw new Error(`[${table.label}] 삭제 실패: ${error.message}`);
+        }
+      }
+
+      // 1-5. 학생 테이블에 남아있을 수 있는 class_id 연결 끊기
+      await supabase.from("student").update({ class_id: null }).eq("class_id", cId);
+
+      // 🌟 2. 하위 데이터 청소가 무사히 끝났다면 최종 반 삭제 진행
+      const { error: finalError } = await supabase.from("class").delete().eq("class_id", cId);
+      
+      if (finalError) {
+        throw new Error(`최종 반 삭제 실패: ${finalError.message}`);
+      }
+      
+      alert("✅ 반 정보가 연관 데이터와 함께 완벽하게 삭제되었습니다.");
       onSuccess();
       onClose();
-    } catch (e) { alert("삭제 실패"); } finally { setIsSaving(false); }
+    } catch (e: any) { 
+      console.error(e);
+      alert(`❌ 삭제 실패: 반을 삭제하는 도중 문제가 발생하여 중단되었습니다.\n\n상세 로그: ${e.message}`); 
+    } finally { 
+      setIsSaving(false); 
+    }
   };
 
   if (!isOpen) return null;
@@ -264,7 +354,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               <label className="block text-xs font-bold text-slate-500 mb-1">담당 강사</label>
               <select disabled={!isEditMode} value={modalData.instructor_id || ""} onChange={e => handleModalChange("instructor_id", e.target.value)} className={`w-full px-3 py-2 rounded border border-slate-300 font-bold ${!isEditMode ? 'bg-slate-100' : ''}`}>
                 <option value="">미지정</option>
-                {/* 🌟 [적용됨] 부모 데이터 대신 직접 긁어온 대치 본원 선생님만 노출 */}
                 {daechiInstructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name} 선생님</option>)}
               </select>
             </div>

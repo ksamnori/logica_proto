@@ -20,7 +20,10 @@ export default function StudentShopPage() {
   const [purchasing, setPurchasing] = useState(false);
   const [toast, setToast] = useState('');
 
-  const loadProducts = () => listProducts().then(setProducts).catch(err => console.error('상품 조회 중 오류:', err));
+  const loadProducts = () => {
+    const tenantId = localStorage.getItem('logica_tenant_id') || '';
+    listProducts(tenantId).then(setProducts).catch(err => console.error('상품 조회 중 오류:', err));
+  };
 
   useEffect(() => {
     const sId = localStorage.getItem('logica_student_id');
@@ -50,7 +53,8 @@ export default function StudentShopPage() {
     if (!confirmTarget || purchasing) return;
     setPurchasing(true);
     try {
-      const result = await purchaseProduct(studentInfo.id, studentInfo.name, confirmTarget.id);
+      const tenantId = localStorage.getItem('logica_tenant_id') || '';
+      const result = await purchaseProduct(tenantId, studentInfo.id, studentInfo.name, confirmTarget.id);
       if (result.success) {
         setPoints(await getPointBalance(studentInfo.id));
         loadProducts(); // 재고가 줄었을 수 있으니 다시 불러온다

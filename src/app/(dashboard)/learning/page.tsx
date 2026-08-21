@@ -17,8 +17,9 @@ const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
 const tallyGrading = (counts: Record<string, { o: number; x: number; helped: number }>, key: any, code: string) => {
   if (!counts[key]) counts[key] = { o: 0, x: 0, helped: 0 };
-  if (['O', 'a', 'b', 'c'].includes(code)) counts[key].o++;
-  else if (['X', 'TX', '☆', 'B', 'TO', 'RO'].includes(code)) counts[key].x++;
+  if (['O', 'a', 'b', 'c', 'TO', 'RO'].includes(code)) counts[key].o++;
+  else if (['X', 'TX', '☆', 'B'].includes(code)) counts[key].x++;
+  
   if (code === 'TO' || code === 'TX') counts[key].helped++;
 };
 
@@ -75,7 +76,6 @@ export default function LearningPage() {
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
-  // 🌟 [핵심 수정] 권한 체크 로직: 강사 뷰 모드일 때 관리자 텍스트 프리패스 차단
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -84,7 +84,6 @@ export default function LearningPage() {
       
       const isTeacherMode = role === 'TEACHER';
       
-      // 강사 모드가 아닐 때만 텍스트 기반 관리자 권한을 인정합니다.
       const isGodMode = !isTeacherMode && (
         role === 'SUPER_ADMIN' || role === 'ADMIN' || 
         pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장')
@@ -199,7 +198,6 @@ export default function LearningPage() {
     handleViewChange({ type: 'STUDENT', classId, className, studentId, studentName });
   };
 
-  // 🌟 [핵심 보강] 목록 조회 시에도 강사 모드일 경우 권한 강제 축소
   const fetchBaseData = async () => {
     setIsLoading(true);
     try {
@@ -218,7 +216,6 @@ export default function LearningPage() {
       let classQuery = supabase.from('class').select('class_id, name, level_name').order('name');
       if (tenantId && tenantId !== 'hq') classQuery = classQuery.eq('tenant_id', tenantId);
       
-      // 관리자가 아니면(즉, 강사 뷰일 경우) 담당 강사인 반만 조회
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const { data: classes } = await classQuery;
@@ -367,15 +364,51 @@ export default function LearningPage() {
       const hwIds = hws?.map(h => h.homework_id) || [];
       
       const [{ data: examAns }, { data: hwAns }] = await Promise.all([
-        supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', examIds),
-        supabase.from('student_homework_answer').select('homework_id, grading_code, student_id').in('homework_id', hwIds).eq('student_id', studentId)
+        supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code, earned_score').in('exam_assignment_id', examIds),
+        supabase.from('student_homework_answer').select('homework_id, tq_id, grading_code, student_id, earned_score').in('homework_id', hwIds).eq('student_id', studentId)
       ]);
 
+      const validHwTqIds = new Set<string>();
+      hws?.forEach(hw => {
+        let tqs = [];
+        try { tqs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
+        tqs?.forEach((id: any) => validHwTqIds.add(`${hw.homework_id}_${id}`));
+      });
+
+      const masterIds = exams?.map(e => unwrap(e.exam_master)?.exam_id).filter(Boolean) || [];
+      const { data: examItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', masterIds);
+      const validExamQIds = new Set<string>();
+      examItems?.forEach(item => validExamQIds.add(`${item.exam_id}_${item.question_id}`));
+
+      const assignToMasterMap = new Map<string, string>();
+      exams?.forEach(e => assignToMasterMap.set(e.assignment_id, unwrap(e.exam_master)?.exam_id));
+
+      const dedupExamAns = new Map();
+      examAns?.forEach(a => {
+        const mId = assignToMasterMap.get(a.exam_assignment_id);
+        if (!validExamQIds.has(`${mId}_${a.question_id}`)) return; 
+        const key = `${a.exam_assignment_id}_${a.question_id}`;
+        const existing = dedupExamAns.get(key);
+        if (!existing || Number(a.earned_score || 0) > Number(existing.earned_score || 0) || (!existing.grading_code && a.grading_code)) {
+          dedupExamAns.set(key, a);
+        }
+      });
+
+      const dedupHwAns = new Map();
+      hwAns?.forEach(a => {
+        if (!validHwTqIds.has(`${a.homework_id}_${a.tq_id}`)) return; 
+        const key = `${a.homework_id}_${a.tq_id}`;
+        const existing = dedupHwAns.get(key);
+        if (!existing || Number(a.earned_score || 0) > Number(existing.earned_score || 0) || (!existing.grading_code && a.grading_code)) {
+          dedupHwAns.set(key, a);
+        }
+      });
+
       const exCounts: Record<string, { o: number; x: number; helped: number }> = {};
-      examAns?.forEach(a => tallyGrading(exCounts, a.exam_assignment_id, a.grading_code));
+      dedupExamAns.forEach(a => tallyGrading(exCounts, a.exam_assignment_id, a.grading_code));
 
       const hwCounts: Record<string, { o: number; x: number; helped: number }> = {};
-      hwAns?.forEach(a => tallyGrading(hwCounts, a.homework_id, a.grading_code));
+      dedupHwAns.forEach(a => tallyGrading(hwCounts, a.homework_id, a.grading_code));
 
       let combined: any[] = [];
 
@@ -409,8 +442,6 @@ export default function LearningPage() {
         try { targetQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
         const tb = unwrap(hw.textbook);
         
-        if (!hw.target_student_id && !res) return;
-
         combined.push({
           id: `hw_${hw.homework_id}`,
           type: 'hw',
@@ -463,9 +494,30 @@ export default function LearningPage() {
           const { data } = await query;
           if (data) {
             const assignIds = data.map(d => d.assignment_id);
-            const { data: ans } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', assignIds);
+            
+            const masterIds = data.map(d => unwrap(d.exam_master)?.exam_id).filter(Boolean);
+            const { data: examItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', masterIds);
+            const validExamQIds = new Set<string>();
+            examItems?.forEach(item => validExamQIds.add(`${item.exam_id}_${item.question_id}`));
+
+            const assignToMasterMap = new Map<string, string>();
+            data.forEach(d => assignToMasterMap.set(d.assignment_id, unwrap(d.exam_master)?.exam_id));
+
+            const { data: ans } = await supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code, earned_score').in('exam_assignment_id', assignIds);
+            
+            const dedupAns = new Map();
+            ans?.forEach(a => {
+              const mId = assignToMasterMap.get(a.exam_assignment_id);
+              if (!validExamQIds.has(`${mId}_${a.question_id}`)) return; 
+              const key = `${a.exam_assignment_id}_${a.question_id}`;
+              const existing = dedupAns.get(key);
+              if (!existing || Number(a.earned_score || 0) > Number(existing.earned_score || 0) || (!existing.grading_code && a.grading_code)) {
+                dedupAns.set(key, a);
+              }
+            });
+
             const counts: Record<string, { o: number; x: number; helped: number }> = {};
-            ans?.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
+            dedupAns.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
             
             const enriched = data.map(d => {
                const em = unwrap(d.exam_master);
@@ -493,10 +545,28 @@ export default function LearningPage() {
           const { data: hwData } = await supabase.from('student_homework_result').select('*').in('student_id', chunk);
           
           const hwIds = allHws?.map(h => h.homework_id) || [];
-          const { data: hAns } = await supabase.from('student_homework_answer').select('homework_id, student_id, grading_code').in('homework_id', hwIds).in('student_id', chunk);
           
+          const validHwTqIds = new Set<string>();
+          allHws?.forEach(hw => {
+            let tqs = [];
+            try { tqs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
+            tqs?.forEach((id: any) => validHwTqIds.add(`${hw.homework_id}_${id}`));
+          });
+
+          const { data: hAns } = await supabase.from('student_homework_answer').select('homework_id, student_id, tq_id, grading_code, earned_score').in('homework_id', hwIds).in('student_id', chunk);
+          
+          const dedupHAns = new Map();
+          hAns?.forEach(a => {
+            if (!validHwTqIds.has(`${a.homework_id}_${a.tq_id}`)) return; 
+            const key = `${a.homework_id}_${a.student_id}_${a.tq_id}`;
+            const existing = dedupHAns.get(key);
+            if (!existing || Number(a.earned_score || 0) > Number(existing.earned_score || 0) || (!existing.grading_code && a.grading_code)) {
+              dedupHAns.set(key, a);
+            }
+          });
+
           const hCounts: Record<string, { o: number; x: number; helped: number }> = {};
-          hAns?.forEach(a => tallyGrading(hCounts, `${a.homework_id}_${a.student_id}`, a.grading_code));
+          dedupHAns.forEach(a => tallyGrading(hCounts, `${a.homework_id}_${a.student_id}`, a.grading_code));
 
           const hwResultMap = new Map();
           hwData?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
@@ -531,10 +601,30 @@ export default function LearningPage() {
 
           const { data: examData } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, sub_title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
           const exIds = examData?.map(e => e.assignment_id) || [];
-          const { data: eAns } = await supabase.from('student_answer').select('exam_assignment_id, grading_code').in('exam_assignment_id', exIds);
+          const exMasterIds = examData?.map(e => unwrap(e.exam_master)?.exam_id).filter(Boolean) || [];
+
+          const { data: exItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', exMasterIds);
+          const validExQIds = new Set<string>();
+          exItems?.forEach(item => validExQIds.add(`${item.exam_id}_${item.question_id}`));
+
+          const exAssignToMasterMap = new Map<string, string>();
+          examData?.forEach(e => exAssignToMasterMap.set(e.assignment_id, unwrap(e.exam_master)?.exam_id));
+
+          const { data: eAns } = await supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code, earned_score').in('exam_assignment_id', exIds);
           
+          const dedupEAns = new Map();
+          eAns?.forEach(a => {
+            const mId = exAssignToMasterMap.get(a.exam_assignment_id);
+            if (!validExQIds.has(`${mId}_${a.question_id}`)) return; 
+            const key = `${a.exam_assignment_id}_${a.question_id}`;
+            const existing = dedupEAns.get(key);
+            if (!existing || Number(a.earned_score || 0) > Number(existing.earned_score || 0) || (!existing.grading_code && a.grading_code)) {
+              dedupEAns.set(key, a);
+            }
+          });
+
           const eCounts: Record<string, { o: number; x: number; helped: number }> = {};
-          eAns?.forEach(a => tallyGrading(eCounts, a.exam_assignment_id, a.grading_code));
+          dedupEAns.forEach(a => tallyGrading(eCounts, a.exam_assignment_id, a.grading_code));
 
           const formattedExamHws = (examData || []).map((e:any) => ({
             ...e, is_exam_hw: true, sort_date: e.created_at, class_name: unwrap(e.class)?.name || '반 미지정',
@@ -587,6 +677,7 @@ export default function LearningPage() {
     }
   };
 
+  // 🌟 [핵심 수정] DB 환각 컬럼 제거
   const handleBulkCompleteGlobal = async () => {
     if (globalSelectedBlocks.length === 0) return;
     if (!confirm(`선택한 ${globalSelectedBlocks.length}개의 항목을 강제로 '채점완료' 처리하시겠습니까?`)) return;
@@ -595,15 +686,26 @@ export default function LearningPage() {
       for (const block of globalSelectedBlocks) {
         if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
-          await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
+          const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
+          if (error) throw error;
         } else if (block.startsWith('hw_')) {
           const hwId = Number(block.split('_')[1]);
           const stId = block.split('_')[2];
-          const { data: existing } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', stId).maybeSingle();
+          const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', stId).maybeSingle();
+          if (findErr) throw findErr;
+
           if (existing) {
-            await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
+            const { error } = await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
+            if (error) throw error;
           } else {
-            await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: stId, status: '채점완료', checked_at: new Date().toISOString(), correct_count: 0, incorrect_questions: [] });
+            const { error } = await supabase.from('student_homework_result').insert({
+              homework_id: hwId,
+              student_id: stId,
+              status: '채점완료',
+              checked_at: new Date().toISOString(),
+              completed_tq_ids: [] 
+            });
+            if (error) throw error;
           }
         }
       }
@@ -611,8 +713,9 @@ export default function LearningPage() {
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
-    } catch(e) {
-      alert("처리 중 오류가 발생했습니다.");
+    } catch(e: any) {
+      console.error(e);
+      alert("처리 중 오류가 발생했습니다: " + e.message);
       setIsLoading(false);
     }
   };
@@ -650,7 +753,8 @@ export default function LearningPage() {
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
-    } catch(e) {
+    } catch(e: any) {
+       console.error(e);
        alert("삭제 중 오류가 발생했습니다.");
        setIsLoading(false);
     }
@@ -677,6 +781,7 @@ export default function LearningPage() {
     }
   };
 
+  // 🌟 [핵심 수정] DB 환각 컬럼 제거
   const handleBulkCompleteStudent = async () => {
     if (selectedBlocks.length === 0) return;
     if (!confirm(`선택한 ${selectedBlocks.length}개의 항목을 강제로 '채점완료' 처리하시겠습니까?`)) return;
@@ -685,14 +790,25 @@ export default function LearningPage() {
       for (const block of selectedBlocks) {
         if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
-          await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', assignId);
+          const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', assignId);
+          if (error) throw error;
         } else if (block.startsWith('hw_')) {
           const hwId = Number(block.split('_')[1]);
-          const { data: existing } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', currentView.studentId).maybeSingle();
+          const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', hwId).eq('student_id', currentView.studentId).maybeSingle();
+          if (findErr) throw findErr;
+
           if (existing) {
-            await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
+            const { error } = await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
+            if (error) throw error;
           } else {
-            await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: currentView.studentId, status: '채점완료', checked_at: new Date().toISOString(), correct_count: 0, incorrect_questions: [] });
+            const { error } = await supabase.from('student_homework_result').insert({
+              homework_id: hwId,
+              student_id: currentView.studentId,
+              status: '채점완료',
+              checked_at: new Date().toISOString(),
+              completed_tq_ids: [] 
+            });
+            if (error) throw error;
           }
         }
       }
@@ -700,8 +816,9 @@ export default function LearningPage() {
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId);
       fetchStatsForTab(allStudentsList);
-    } catch(e) {
-       alert("처리 중 오류가 발생했습니다.");
+    } catch(e: any) {
+       console.error(e);
+       alert("처리 중 오류가 발생했습니다: " + e.message);
        setIsLoading(false);
     }
   };
@@ -737,25 +854,38 @@ export default function LearningPage() {
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId);
       fetchStatsForTab(allStudentsList);
-    } catch(e) {
+    } catch(e: any) {
+       console.error(e);
        alert("삭제 중 오류가 발생했습니다.");
        setIsLoading(false);
     }
   };
 
+  // 🌟 [핵심 수정] DB 환각 컬럼 제거
   const handleForceComplete = async (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => {
     e.stopPropagation();
     if (!confirm("이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
     
     try {
       if (type === 'exam' || type === 'print') {
-        await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
+        const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
+        if (error) throw error;
       } else if (type === 'hw') {
-        const { data: existing } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', id).eq('student_id', targetStudentId).maybeSingle();
+        const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', id).eq('student_id', targetStudentId).maybeSingle();
+        if (findErr) throw findErr;
+
         if (existing) {
-          await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
+          const { error } = await supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', existing.hw_result_id);
+          if (error) throw error;
         } else {
-          await supabase.from('student_homework_result').insert({ homework_id: Number(id), student_id: targetStudentId, status: '채점완료', checked_at: new Date().toISOString(), correct_count: 0, incorrect_questions: [] });
+          const { error } = await supabase.from('student_homework_result').insert({
+            homework_id: Number(id),
+            student_id: targetStudentId,
+            status: '채점완료',
+            checked_at: new Date().toISOString(),
+            completed_tq_ids: [] 
+          });
+          if (error) throw error;
         }
       }
       
@@ -763,8 +893,9 @@ export default function LearningPage() {
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId);
       else fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
-    } catch (err) {
-      alert("완료 처리 중 오류가 발생했습니다.");
+    } catch (err: any) {
+      console.error(err);
+      alert("완료 처리 중 오류가 발생했습니다: " + err.message);
     }
   };
 

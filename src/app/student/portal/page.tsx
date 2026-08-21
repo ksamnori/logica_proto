@@ -190,7 +190,7 @@ export default function StudentPortal() {
         const newHwProgress: any = {};
         classes.forEach(c => {
             newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA' };
-            newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [] };
+            newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], overdueAssignmentIds: [] };
         });
 
         const { data: cData } = await supabaseClient.from('class')
@@ -203,21 +203,27 @@ export default function StudentPortal() {
         // 때마다 지나간 회차만큼 자동으로 홀/짝을 갱신한다 — resolveClassWeekType은 idempotent라
         // 여러 화면에서 동시에 호출해도 안전하다.
         const newClassWeekTypes: Record<string, string> = {};
+        // 💡 [미완성 오답프린트/과제프린트 분류] exam_assignment는 homework_assignment와 달리
+        // due_date가 없어서, "이 반의 마지막 처리된 수업 회차 날짜"를 기준으로 그 이전에
+        // 생성됐는데 아직 안 끝난 배정을 미완성으로 친다 — resolveClassWeekType이 반환하는
+        // lastSessionDate를 그 기준으로 쓴다.
+        const lastSessionDateByClassId: Record<string, string | null> = {};
         await Promise.all((cData || []).map(async (c: any) => {
             const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
             try {
-                const { weekType: wt } = await resolveClassWeekType(supabaseClient, {
+                const { weekType: wt, lastSessionDate } = await resolveClassWeekType(supabaseClient, {
                     class_id: c.class_id, class_name: c.name, week_type: c.week_type,
                     week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays,
                     forced_week_type: c.forced_week_type, forced_week_type_date: c.forced_week_type_date,
                 });
                 newClassWeekTypes[c.name] = wt;
+                lastSessionDateByClassId[c.class_id] = lastSessionDate;
             } catch (e) { newClassWeekTypes[c.name] = c.week_type === 'even' ? 'even' : 'odd'; }
         }));
         setClassWeekTypes(newClassWeekTypes);
 
         const { data: examsData } = await supabaseClient.from('exam_assignment')
-            .select('assignment_id, status, class_id, exam_master!inner(exam_type)')
+            .select('assignment_id, status, class_id, created_at, exam_master!inner(exam_type)')
             .eq('student_id', sid);
 
         const classIds = Object.values(nameToId).filter(Boolean);
@@ -242,19 +248,28 @@ export default function StudentPortal() {
 
             let examPending = 0, hwPending = 0, printPending = 0, overduePending = 0;
             let examIds: number[] = [], hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [];
+            const overdueAssignmentIds: number[] = [];
+            const lastSessionDate = lastSessionDateByClassId[cid];
 
             examsData?.forEach((ex: any) => {
                 if (ex.class_id && ex.class_id !== cid) return;
                 const type = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.exam_type : ex.exam_master?.exam_type;
                 const isPending = !['제출완료', '채점완료', '완료'].includes(ex.status);
+                if (!isPending) return;
 
-                if (type === '오답프린트') {
-                    if (isPending) { printPending++; printIds.push(ex.assignment_id); }
-                } else if (type === '과제' || type === '과제프린트') {
-                    if (isPending) { hwPending++; hwExamIds.push(ex.assignment_id); }
-                } else {
-                    if (isPending) { examPending++; examIds.push(ex.assignment_id); }
-                }
+                // 💡 오답프린트/과제(프린트)는 시험(주간테스트)과 달리 마감 개념이 있다 —
+                // 생성된 날짜가 이 반의 마지막 처리된 수업 회차보다 이전인데 아직 안 끝났다면
+                // "다음 수업이 이미 찾아온" 미완성으로 넘긴다(homework_assignment의 due_date
+                // 기반 분류와 동일한 규칙, exam_assignment엔 due_date가 없어 created_at으로 대신함).
+                const createdDateKST = ex.created_at ? new Date(new Date(ex.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0] : null;
+                const isOverdue = (type === '오답프린트' || type === '과제' || type === '과제프린트')
+                    && lastSessionDate && createdDateKST && createdDateKST <= lastSessionDate;
+
+                if (isOverdue) { overduePending++; overdueAssignmentIds.push(ex.assignment_id); return; }
+
+                if (type === '오답프린트') { printPending++; printIds.push(ex.assignment_id); }
+                else if (type === '과제' || type === '과제프린트') { hwPending++; hwExamIds.push(ex.assignment_id); }
+                else { examPending++; examIds.push(ex.assignment_id); }
             });
 
             hwsData?.forEach((hw: any) => {
@@ -279,7 +294,7 @@ export default function StudentPortal() {
             if (roundResults[`${c}::2`]) newBlockStates[c].hw = '제출완료';
             if (roundResults[`${c}::3`]) newBlockStates[c].print = '제출완료';
 
-            newHwProgress[c] = { examIds, hwExamIds, printIds, hwIds, overdueHwIds };
+            newHwProgress[c] = { examIds, hwExamIds, printIds, hwIds, overdueHwIds, overdueAssignmentIds };
         });
 
         setBlockStates(newBlockStates);
@@ -297,7 +312,8 @@ export default function StudentPortal() {
             const channel = supabaseClient.channel(CLINIC_ROOM);
             channelRef.current = channel;
 
-            const allSeats = (await getActiveSeatLayout()).seats.map(s => String(s.number));
+            const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+            const allSeats = (await getActiveSeatLayout(myTenantId)).seats.map(s => String(s.number));
 
             channel.on('presence', { event: 'sync' }, async () => {
                 const state = channel.presenceState();
@@ -458,6 +474,8 @@ export default function StudentPortal() {
         } else if (typeKey === 'overdue') {
             testName = '미완료 과제';
             if (prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
+            if (prog.overdueAssignmentIds?.length > 0) params.append('assignment_ids', prog.overdueAssignmentIds.join(','));
+            params.append('overdue', '1');
         } else if (typeKey === 'print') {
             testName = '오답프린트';
             if (prog.printIds.length > 0) params.append('assignment_id', prog.printIds[0]);
@@ -531,7 +549,7 @@ export default function StudentPortal() {
         const cState = blockStates[className] || {};
         const isDone = cState.overdue !== '미응시';
         const prog = hwProgress[className] || {};
-        const overdueCount = prog.overdueHwIds?.length || 0;
+        const overdueCount = (prog.overdueHwIds?.length || 0) + (prog.overdueAssignmentIds?.length || 0);
 
         const theme = {
             label: '⏰ 미완료 과제',

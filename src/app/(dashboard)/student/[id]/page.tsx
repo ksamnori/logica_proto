@@ -29,7 +29,6 @@ const safeParseIds = (raw: any): number[] => {
   return [];
 };
 
-// 🌟 한국 시간(KST) 기준 오늘 날짜 구하기
 const getTodayKST = () => {
   const d = new Date();
   d.setHours(d.getHours() + 9);
@@ -276,8 +275,9 @@ export default function StudentDetailPage() {
   };
 
   const loadHwList = async () => {
+    // 🌟 [수정] 배부일(created_at)과 마감일(due_date)을 가져오도록 쿼리 수정
     const { data } = await supabase.from("student_homework_result")
-      .select("status, completed_tq_ids, checked_at, homework_assignment(homework_title, target_questions, textbook(title, book_type))")
+      .select("status, completed_tq_ids, checked_at, homework_assignment(homework_title, target_questions, created_at, due_date, textbook(title, book_type))")
       .eq("student_id", studentId)
       .order("checked_at", { ascending: false });
     setHwList(data || []);
@@ -401,7 +401,6 @@ export default function StudentDetailPage() {
     } catch (e) { alert("삭제 실패"); }
   };
 
-  // 🌟 [누락되었던 완전 삭제 기능 복구]
   const deleteStudentData = async () => {
     if (!currentUser.isAdmin) {
       alert("🚫 학생의 모든 데이터를 완전히 삭제하는 기능은 원장 및 관리자만 수행할 수 있습니다.");
@@ -871,8 +870,7 @@ export default function StudentDetailPage() {
                         )}
                       </div>
                     ) : (
-                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-xs text-center">
-                        <svg className="w-10 h-10 text-slate-300 mb-2 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"></path></svg>
+                      <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-xs text-center py-20">
                         우측 달력에서 날짜를 클릭하세요.
                       </div>
                     )}
@@ -1008,9 +1006,15 @@ export default function StudentDetailPage() {
                 <h3 className="font-black text-slate-700 text-[13px] mb-3">과제 제출 및 채점 기록</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   {hwList.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-[11px] bg-slate-50 border border-slate-200 rounded-xl">배부된 과제가 없습니다.</div> :
-                    hwList.map((hw, idx) => {
+                    hwList
+                    .filter(hw => {
+                      const assign = unwrap(hw.homework_assignment);
+                      return assign && assign.homework_title !== '[시스템] 수업 진도 완료 기록';
+                    })
+                    .map((hw, idx) => {
                       const assign = unwrap(hw.homework_assignment);
                       if (!assign) return null;
+                      
                       const qCount = assign.target_questions ? (typeof assign.target_questions === 'string' ? JSON.parse(assign.target_questions).length : assign.target_questions.length) : 0;
                       const compCount = hw.completed_tq_ids ? (typeof hw.completed_tq_ids === 'string' ? JSON.parse(hw.completed_tq_ids).length : hw.completed_tq_ids.length) : 0;
                       
@@ -1019,15 +1023,29 @@ export default function StudentDetailPage() {
                       else if(hw.status.includes('완료')) statusCol = 'bg-emerald-50 text-emerald-600 border border-emerald-200';
                       else if(hw.status.includes('미')) statusCol = 'bg-rose-50 text-rose-500 border border-rose-100';
 
+                      const createdDate = assign.created_at ? new Date(assign.created_at).toLocaleDateString().replace(/\.$/, '') : '-';
+                      const dueDate = assign.due_date ? new Date(assign.due_date).toLocaleDateString().replace(/\.$/, '') : '-';
+                      const checkedDate = hw.checked_at ? new Date(hw.checked_at).toLocaleDateString().replace(/\.$/, '') : '-';
+
                       return (
                         <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 flex flex-col justify-between shadow-sm hover:border-blue-300 transition-colors">
                           <div className="flex justify-between items-start mb-2">
                             <span className="text-[9px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-black border border-slate-200">{unwrap(assign.textbook)?.title || '기타'}</span>
                             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${statusCol}`}>{hw.status}</span>
                           </div>
-                          <h4 className="font-black text-slate-800 text-[12px] mb-3 truncate" title={assign.homework_title}>{assign.homework_title}</h4>
+                          <h4 className="font-black text-slate-800 text-[13px] mb-2 truncate" title={assign.homework_title}>{assign.homework_title}</h4>
+                          
+                          <div className="flex flex-col gap-1 mt-1 mb-3 bg-slate-50 p-2.5 rounded-lg border border-slate-100">
+                             <div className="flex justify-between items-center text-[10px]">
+                               <span className="font-bold text-slate-400">배부일: <span className="text-slate-600">{createdDate}</span></span>
+                               <span className="font-bold text-slate-400">마감일: <span className="text-rose-500">{dueDate}</span></span>
+                             </div>
+                             <div className="flex justify-between items-center text-[10px]">
+                               <span className="font-bold text-slate-400">제출/확인: <span className="text-blue-600">{hw.status === '미제출' ? '-' : checkedDate}</span></span>
+                             </div>
+                          </div>
+
                           <div className="flex justify-between items-end mt-auto pt-2 border-t border-slate-50">
-                            <span className="text-[9px] font-bold text-slate-400">{hw.checked_at ? new Date(hw.checked_at).toLocaleDateString() : '-'}</span>
                             <div className="text-[10px] font-black text-slate-600">진행률 <span className="text-[#002864] ml-0.5">{compCount} / {qCount}</span></div>
                           </div>
                         </div>

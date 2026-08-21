@@ -134,7 +134,7 @@ export default function ClinicViewer() {
 
   const [isStarted, setIsStarted] = useState(false);
   const [studentInfo, setStudentInfo] = useState({ id: '', name: '학생', classes: [] as string[] });
-  const [params, setParams] = useState({ round: 0, className: '', weekType: 'odd', assignmentId: '', homeworkIdsStr: '' });
+  const [params, setParams] = useState({ round: 0, className: '', weekType: 'odd', assignmentId: '', homeworkIdsStr: '', assignmentIdsStr: '', overdue: false });
   const [isTimedRound, setIsTimedRound] = useState(false);
   const [globalExamTitle, setGlobalExamTitle] = useState('과제');
 
@@ -206,7 +206,8 @@ export default function ClinicViewer() {
   const [editorLocked, setEditorLocked] = useState(false);
 
   useEffect(() => {
-    getActiveSeatLayout().then(layout => {
+    const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+    getActiveSeatLayout(myTenantId).then(layout => {
       seatKeysRef.current = layout.seats.map(s => String(s.number));
     });
   }, []);
@@ -230,17 +231,19 @@ export default function ClinicViewer() {
     const weekType = p.get('week') === 'even' ? 'even' : 'odd';
     const assignmentId = p.get('assignment_id') || '';
     const homeworkIdsStr = p.get('homework_ids') || '';
+    const assignmentIdsStr = p.get('assignment_ids') || '';
+    const overdue = p.get('overdue') === '1';
 
     if (!round || isNaN(round) || !className) {
       alert('잘못된 접근입니다. 포털에서 다시 시작해주세요.');
       router.push('/student/portal'); return;
     }
 
-    setParams({ round, className, weekType, assignmentId, homeworkIdsStr });
+    setParams({ round, className, weekType, assignmentId, homeworkIdsStr, assignmentIdsStr, overdue });
     setIsTimedRound(round === 1 || round === 4);
 
     initMathJax();
-    initSessionAndFetch(sId, round, className, weekType, assignmentId, homeworkIdsStr);
+    initSessionAndFetch(sId, round, className, weekType, assignmentId, homeworkIdsStr, assignmentIdsStr);
 
     const handleUnload = () => untrackPresence();
     window.addEventListener('pagehide', handleUnload);
@@ -262,7 +265,7 @@ export default function ClinicViewer() {
     }
   };
 
-  const initSessionAndFetch = async (sId: string, round: number, cls: string, week: string, assignId: string, hwIds: string) => {
+  const initSessionAndFetch = async (sId: string, round: number, cls: string, week: string, assignId: string, hwIds: string, assignIdsStr: string = '') => {
     const today = getKSTDateString();
     const sessionData = await resolveTodaySession(supabaseClient, sId, today);
     clinicSessionStateRef.current = sessionData;
@@ -278,7 +281,7 @@ export default function ClinicViewer() {
     }
 
     if (round === 1 || round === 4) await fetchWeeklyTest(sId, week, cls, assignId);
-    else if (round === 2 || round === 3) await fetchHomework(sId, hwIds, assignId);
+    else if (round === 2 || round === 3) await fetchHomework(sId, hwIds, assignId, assignIdsStr);
     else await fetchIncorrect(sId);
   };
 
@@ -398,19 +401,40 @@ export default function ClinicViewer() {
     return { rows, title };
   };
 
-  const fetchHomework = async (sId: string, hwIdsStr: string, assignId: string = '') => {
+  // 💡 [미완성 과제 병합] "미완료 과제" 카드는 밀린 정규 과제뿐 아니라 밀린 오답프린트/과제프린트
+  // exam_assignment도 함께 모아 하나의 세션으로 묶어야 하는데, 기존 fetchAssignedExamQuestions는
+  // assignment_id 하나만 받는다 — 여러 개를 병렬로 불러 합친다. examAssignmentId는 행마다 그대로
+  // 유지되므로 finalizeExamAssignmentProgress의 assignment별 완료 카운트도 그대로 잘 동작한다.
+  const fetchAssignedExamQuestionsMulti = async (assignIds: string[]) => {
+    const results = await Promise.all(assignIds.map(id => fetchAssignedExamQuestions(id)));
+    const rows = results.flatMap(r => r.rows);
+    const title = results.find(r => r.title)?.title || null;
+    return { rows, title };
+  };
+
+  const fetchHomework = async (sId: string, hwIdsStr: string, assignId: string = '', assignIdsStr: string = '') => {
     try {
       const hwIdsArray = hwIdsStr ? hwIdsStr.split(',').map(Number).filter(n => !isNaN(n)) : [];
+      const assignIdsArray = assignIdsStr ? assignIdsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
       const [{ rows: qs }, { rows: examRows, title: examTitle }] = await Promise.all([
         hwIdsArray.length > 0 ? resolvePendingHomeworkQuestions(supabaseClient, sId, hwIdsArray) : Promise.resolve({ rows: [] }),
-        fetchAssignedExamQuestions(assignId),
+        assignIdsArray.length > 0 ? fetchAssignedExamQuestionsMulti(assignIdsArray) : fetchAssignedExamQuestions(assignId),
       ]);
 
-      if (examRows.length > 0) examAssignmentTotalsRef.current[assignId] = examRows.length;
+      // 💡 이 fetch가 보고하는 "지금 남은 문항 수"로 매번 덮어써야 한다 — StrictMode의 이펙트
+      // 이중 실행이나 재요청 등으로 fetchHomework가 여러 번 불리면 +=로 누적할 경우 실제
+      // 문항 수보다 커져서, finalizeExamAssignmentProgress의 완료 판정(remaining<=0)이
+      // 영영 도달하지 못해 다 풀어도 배정이 "제출완료"로 안 넘어가는 문제가 생긴다.
+      const totalsThisFetch: Record<string, number> = {};
+      examRows.forEach((r: any) => {
+        if (!r.examAssignmentId) return;
+        totalsThisFetch[r.examAssignmentId] = (totalsThisFetch[r.examAssignmentId] || 0) + 1;
+      });
+      Object.assign(examAssignmentTotalsRef.current, totalsThisFetch);
 
       if (qs.length === 0 && examRows.length === 0) { setPendingQCount(`모든 과제를 완료했습니다!`); setQuestions([]); return; }
 
-      setGlobalExamTitle(examTitle || '정규 과제');
+      setGlobalExamTitle(assignIdsArray.length > 0 ? '미완료 과제' : (examTitle || '정규 과제'));
       setPendingQCount(`대기 중인 병합 과제: ${qs.length + examRows.length}문제`);
 
       const mappedHw = qs.map((q:any, i:number) => {
@@ -434,7 +458,8 @@ export default function ClinicViewer() {
 
   const fetchIncorrect = async (sId: string) => {
     try {
-      const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, question_id, source_type, question_db(*)').eq('student_id', sId).is('resolved_at', null).in('status', ['X', 'TX', 'T', '☆', 'B']);
+      // 💡 TO(힌트 후 정답)·RO(재도전 후 정답)도 "완전히 깨끗하게 푼 건 아님"이라 오답노트 재풀이 대상에 포함한다.
+      const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, question_id, source_type, question_db(*)').eq('student_id', sId).is('resolved_at', null).in('status', ['X', 'TX', 'T', '☆', 'B', 'TO', 'RO']);
       if (!records || records.length === 0) { setPendingQCount(`대기 중인 오답: 0문제`); setQuestions([]); return; }
       setPendingQCount(`대기 중인 오답: ${records.length}문제`);
       const mapped = records.filter((r:any) => r.question_db).map((r:any, i:number) => {
@@ -515,7 +540,7 @@ export default function ClinicViewer() {
   const trackPresence = (seat: string, sId: string, sessionState: any) => {
     if (!clinicChannelRef.current) return;
     hasTrackedPresenceRef.current = true;
-    const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? '과제 풀이중' : params.round === 3 ? '미완성 과제 풀이중' : '클리닉 풀이중';
+    const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
     clinicChannelRef.current.track({
       seat, name: studentInfo.name, studentId: sId, classes: studentInfo.classes, activity, updatedAt: Date.now(),
       startedAt: new Date(sessionState.started_at).getTime(), durationMs: sessionState.duration_ms
@@ -759,10 +784,27 @@ export default function ClinicViewer() {
     const results = await Promise.all(questions.map((_, i) => isQuestionCorrect(i)));
     let corrects = 0;
     const incQIds: number[] = [];
-    questions.forEach((q, i) => { if (results[i]) corrects++; else if (q.question_id) incQIds.push(q.question_id); });
+    // 💡 [B(공백) 구분] 시간 초과로 못 푼 문제 중 아예 입력이 없던 것(B)과 틀린 채로 제출된
+    // 것(X)을 구분해야 한다 — B는 saveExamResultsToDB가 이미 구분해서 쓰지만, 아래
+    // generateIncorrectPrint의 초기 upsert가 항상 'X'로 덮어써서 뭉개고 있었다.
+    const statusMap: Record<number, string> = {};
+    questions.forEach((q, i) => {
+      if (results[i]) { corrects++; return; }
+      if (!q.question_id) return;
+      incQIds.push(q.question_id);
+      const isSubj = !(q.options && q.options.length > 0);
+      const mode = answerModes.current[i] || (studentDrawings.current[i] ? 'pen' : 'keypad');
+      const isBlank = isSubj && mode === 'pen' ? !studentDrawings.current[i] : !studentAnswers.current[i];
+      statusMap[q.question_id] = isBlank ? 'B' : 'X';
+    });
     correctSolvedCountRef.current = corrects;
 
-    if (incQIds.length > 0) await generateIncorrectPrint(incQIds, globalExamTitle);
+    // 💡 round2/3(과제·오답 클리닉)는 답할 때마다 이미 TO/TX/RO 등 세분화된 상태를 정확히
+    // 기록해뒀으니 여기서 X로 일괄 덮어쓰면 안 된다 — round1(시험) 타임아웃일 때만 동기화한다.
+    // 미완료 과제(overdue) 세션은 담고 끝나는 자리라 새 오답프린트 자체를 만들지 않는다.
+    if (incQIds.length > 0 && !(params.round === 2 && params.overdue)) {
+      await generateIncorrectPrint(incQIds, globalExamTitle, isTimedRound, statusMap);
+    }
 
     const wholeSessionEnd = sessionExpired || forceAction === 'force_checkout' || forceAction === 'force_checkout_by_ta';
     setLogoutTarget(wholeSessionEnd ? 'login' : 'portal');
@@ -814,11 +856,45 @@ export default function ClinicViewer() {
       setResultModal({ isCorrect: true, note: gotTaHint ? '조교 힌트를 받아 해결했어요.' : null, canRecheck: false });
     } else {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
-      if (gotTaHint && q.record_id) await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', q.record_id);
+      // 💡 [오답노트 재풀이 기록] 힌트 여부와 상관없이, 이 문제가 오답노트에서 온 것이면(record_id 있음)
+      // 이번 시도도 재시도 횟수에 반영한다 — 예전엔 힌트 받았을 때만 기록되고 그냥 틀렸을 땐 아무 기록도 안 남았음.
+      if (q.record_id) await bumpIncorrectRecord(q.record_id, gotTaHint ? 'TX' : 'X', false);
       if (!isTimedRound) await finalizeQuestionProgress(q, false, gotTaHint);
       setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: useAI });
     }
     setIsSubmitting(false);
+  };
+
+  // 💡 [오답노트 재시도 기록] student_incorrect_record는 record_id 하나마다 retry_count를 들고 있는데
+  // 지금까지 아무도 이 값을 안 올려서 (dashboard)/incorrect 페이지의 "재시도 N회" 표시가 항상 0이었다.
+  // 여기서 매 시도(정답/오답 모두)마다 +1 해주고, status/resolved_at도 같이 갱신한다.
+  const bumpIncorrectRecord = async (recordId: number, status: string, resolved: boolean) => {
+    const { data: cur } = await supabaseClient.from('student_incorrect_record').select('retry_count').eq('record_id', recordId).maybeSingle();
+    await supabaseClient.from('student_incorrect_record').update({
+      status,
+      retry_count: (cur?.retry_count || 0) + 1,
+      resolved_at: resolved ? new Date().toISOString() : null,
+    }).eq('record_id', recordId);
+  };
+
+  // 💡 [유니크 제약 대응] student_incorrect_record는 (student_id, question_id)에 유니크 제약이
+  // 있어서, 예전에 한 번 완전히 해결(resolved_at 있음)된 문제가 전혀 다른 과제/시험에서 또
+  // 틀리면 새 행을 insert하는 순간 제약 위반으로 조용히 실패했다(에러 체크가 없어서 티도 안
+  // 남). resolved_at 여부와 상관없이 기존 행을 먼저 찾아 재오픈하고, 정말 없을 때만 insert한다.
+  const upsertIncorrectRecord = async (q: any, status: string): Promise<number | undefined> => {
+    const filterCol = q.tq_id ? 'tq_id' : 'question_id';
+    const filterVal = q.tq_id ?? q.question_id;
+    if (!filterVal) return undefined;
+    const { data: existingRows } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).limit(1);
+    const existing = existingRows?.[0];
+    if (existing) {
+      await supabaseClient.from('student_incorrect_record').update({ status, resolved_at: null }).eq('record_id', existing.record_id);
+      return existing.record_id;
+    }
+    const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert(
+      { student_id: studentInfo.id, tq_id: q.tq_id ?? null, question_id: q.question_id ?? null, source_type: '과제오답', status, resolved_at: null }
+    ).select('record_id').single();
+    return newRecord?.record_id;
   };
 
   const enterAwaitingReview = () => {
@@ -841,18 +917,28 @@ export default function ClinicViewer() {
   const processCorrectAnswer = async (q: any, idx: number, fromRecheck: boolean) => {
     const usedHint = hintState.current[idx] && (hintState.current[idx].level1 || hintState.current[idx].level2);
     const helped = taHintState.current[idx] || usedHint;
-    const newStatus = helped ? 'TO' : 'O';
     const wasWrongBefore = qBoxStatus.current[idx] === 'wrong_red';
 
+    const newStatus = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
+    const isFullyClean = !helped && !wasWrongBefore;
+
+    // 💡 [오답노트 재유입 기준] student_incorrect_record는 (student_id, question_id)에 유니크
+    // 제약이 걸려있어 같은 문제로 두 번째 행을 만들 수 없다 — 그래서 "다음 오답 클리닉에
+    // 다시 흘러들어간다"는 새 행을 만드는 게 아니라, 완전히 깨끗한 정답(O)이 아닌 한(도움을
+    // 받았거나 재도전했다면) 이 행의 resolved_at을 계속 null로 남겨두는 방식으로 구현한다.
+    // 미완료 과제(overdue) 세션은 예외로, TO/RO로 맞혀도 재유입 없이 항상 닫고 끝낸다.
+    const resolved = isFullyClean || params.overdue;
     if (q.record_id) {
-      await supabaseClient.from('student_incorrect_record').update({ status: newStatus, resolved_at: new Date().toISOString() }).eq('record_id', q.record_id);
+      await bumpIncorrectRecord(q.record_id, newStatus, resolved);
     } else {
       const filterCol = q.tq_id ? 'tq_id' : 'question_id';
       const filterVal = q.tq_id ?? q.question_id;
       if (filterVal) {
-        await supabaseClient.from('student_incorrect_record').update({ status: newStatus, resolved_at: new Date().toISOString() }).eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null);
+        const { data: matches } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null);
+        for (const m of (matches || [])) await bumpIncorrectRecord(m.record_id, newStatus, resolved);
       }
     }
+
     if (!isTimedRound) await finalizeQuestionProgress(q, true, helped, wasWrongBefore);
 
     correctSolvedCountRef.current++;
@@ -863,6 +949,7 @@ export default function ClinicViewer() {
     if (nextIdx === null) {
       enterAwaitingReview();
       saveRoundScoreToLocalStorage();
+      flushIncorrectToPrint();
     } else {
       setCurrentQIndex(nextIdx);
       setTimeout(() => initCanvas(nextIdx), 100);
@@ -910,48 +997,40 @@ export default function ClinicViewer() {
         const allDone = tq.every((id:any) => cSet.has(Number(id)));
         await supabaseClient.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined }).eq('hw_result_id', hwRes.hw_result_id);
       }
-    } else if (!q.record_id && (q.tq_id || q.question_id)) {
-      const filterCol = q.tq_id ? 'tq_id' : 'question_id';
-      const filterVal = q.tq_id ?? q.question_id;
-      const { data: existingRecord } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null).maybeSingle();
-      if (!existingRecord) {
-        const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert(
-          { student_id: studentInfo.id, tq_id: q.tq_id ?? null, question_id: q.question_id ?? null, source_type: '과제오답', status: helped ? 'TX' : 'X', resolved_at: null }
-        ).select('record_id').single();
-        if (newRecord) q.record_id = newRecord.record_id;
-      } else {
-        q.record_id = existingRecord.record_id;
-      }
+    }
+    // 💡 [오답노트 등록 기준] 완전히 깨끗한 정답(O)이 아니면 — 틀렸거나(X/TX), 힌트를 받았거나(TO),
+    // 재도전해서 맞혔거나(RO) — 전부 오답노트에 미해결 상태로 등록해서 나중에 다시 뜨게 한다.
+    const isFullyClean = isCorrect && !helped && !retried;
+    // 💡 미완료 과제(overdue) 세션에서는 정답이 TO/RO(도움·재도전)여도 다시 오답 클리닉으로
+    // 흘려보내지 않는다 — 이미 processCorrectAnswer가 그 판단을 내렸으므로 여기서 새로
+    // 만들지 않는다. 틀린 답(X/TX)은 그대로 기록해 남긴다.
+    if (!isFullyClean && !q.record_id && (q.tq_id || q.question_id) && !(params.overdue && isCorrect)) {
+      q.record_id = await upsertIncorrectRecord(q, gradingCode);
     }
   };
 
   const finalizeExamAssignmentProgress = async (q: any, isCorrect: boolean, helped: boolean = false, retried: boolean = false) => {
     if (!q.examAssignmentId) return;
 
+    const gradingCode = isCorrect ? (helped ? 'TO' : (retried ? 'RO' : 'O')) : (helped ? 'TX' : 'X');
+
     if (q.question_id) {
       const myAns = studentAnswers.current[currentQIndex] || '미입력';
       const studentInput = typeof myAns === 'string' && myAns.startsWith('data:image') ? '[손글씨 답안]' : myAns;
-      const gradingCode = isCorrect ? (helped ? 'TO' : (retried ? 'RO' : 'O')) : (helped ? 'TX' : 'X');
       const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id').eq('exam_assignment_id', q.examAssignmentId).eq('student_id', studentInfo.id).eq('question_id', q.question_id).maybeSingle();
       const ansPayload = { exam_assignment_id: q.examAssignmentId, student_id: studentInfo.id, question_id: q.question_id, student_input: studentInput, is_correct: isCorrect, grading_code: gradingCode, grading_status: '대기' };
       if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
       else await supabaseClient.from('student_answer').insert(ansPayload);
     }
 
-    if (!isCorrect) {
-      if (!q.record_id && q.question_id) {
-        const { data: existingRecord } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq('question_id', q.question_id).is('resolved_at', null).maybeSingle();
-        if (!existingRecord) {
-          const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert(
-            { student_id: studentInfo.id, question_id: q.question_id, source_type: '과제오답', status: helped ? 'TX' : 'X', resolved_at: null }
-          ).select('record_id').single();
-          if (newRecord) q.record_id = newRecord.record_id;
-        } else {
-          q.record_id = existingRecord.record_id;
-        }
-      }
-      return;
+    // 💡 [오답노트 등록 기준] 완전히 깨끗한 정답(O)이 아니면 — 틀렸거나(X/TX), 힌트를 받았거나(TO),
+    // 재도전해서 맞혔거나(RO) — 전부 오답노트에 미해결 상태로 등록해서 나중에 다시 뜨게 한다.
+    const isFullyClean = isCorrect && !helped && !retried;
+    if (!isFullyClean && !q.record_id && q.question_id && !(params.overdue && isCorrect)) {
+      q.record_id = await upsertIncorrectRecord(q, gradingCode);
     }
+
+    if (!isCorrect) return;
     const remaining = (examAssignmentTotalsRef.current[q.examAssignmentId] || 1) - 1;
     examAssignmentTotalsRef.current[q.examAssignmentId] = remaining;
     if (remaining <= 0) {
@@ -987,13 +1066,18 @@ export default function ClinicViewer() {
     await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', params.assignmentId);
   };
 
-  const generateIncorrectPrint = async (incQIds: number[], sourceTitle: string) => {
+  // syncIncorrectRecord: round1(시험) 타임아웃 경로에서는 student_incorrect_record에 아직
+  // 아무 기록도 없어 X로 새로 올려야 하지만, round2/3(과제·오답 클리닉)에서는 submitSingleAnswer/
+  // processCorrectAnswer가 이미 TO/TX/RO 등 세분화된 status를 기록해뒀으므로 여기서 X로 덮어쓰면 안 된다.
+  const generateIncorrectPrint = async (incQIds: number[], sourceTitle: string, syncIncorrectRecord: boolean = true, statusMap?: Record<number, string>) => {
     const uIds = [...new Set(incQIds)];
     if (uIds.length === 0) return;
 
-    const incUpserts = uIds.map(qid => ({ student_id: studentInfo.id, question_id: qid, source_type: '시험지', status: 'X', resolved_at: null }));
-    const { error: incErr } = await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
-    if (incErr) console.error('오답 기록 저장 실패:', incErr);
+    if (syncIncorrectRecord) {
+      const incUpserts = uIds.map(qid => ({ student_id: studentInfo.id, question_id: qid, source_type: '시험지', status: statusMap?.[qid] || 'X', resolved_at: null }));
+      const { error: incErr } = await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
+      if (incErr) console.error('오답 기록 저장 실패:', incErr);
+    }
 
     try {
       const { data: cls } = await supabaseClient.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
@@ -1009,6 +1093,23 @@ export default function ClinicViewer() {
       await supabaseClient.from('exam_item').insert(items);
       await supabaseClient.from('exam_assignment').insert({ exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시' });
     } catch(e) { console.error('오답 프린트 생성 중 오류:', e); }
+  };
+
+  // 💡 [오답 클리닉 순환] round2(과제)/round3(오답 클리닉)에서 문제를 전부 풀거나 "나가기"로
+  // 중간에 나갈 때, 이번 회차에서 O(도움 없이 첫 시도 정답)가 아니었던 문제(TX/TO/RO로 바뀐
+  // correct_yellow·retry_yellow, 아직 틀린 wrong_red)를 모아 새 오답프린트로 내보내
+  // student/portal의 round3 "오답" 카드에 다시 뜨게 한다. round1(시험)은 handleTimeUp이 이미
+  // 별도 처리하므로 제외하고, timeIsUp(세션 시간 초과) 경로도 handleTimeUp이 처리하므로 건너뛴다.
+  const flushIncorrectToPrint = async () => {
+    if (params.round !== 2 && params.round !== 3) return;
+    if (timeIsUp) return;
+    if (params.overdue) return; // 💡 미완료 과제는 담고 끝날 뿐, 새 오답프린트를 만들지 않는다.
+    const incQIds: number[] = [];
+    questions.forEach((q, i) => {
+      const st = qBoxStatus.current[i];
+      if ((st === 'correct_yellow' || st === 'retry_yellow' || st === 'wrong_red') && q.question_id) incQIds.push(q.question_id);
+    });
+    if (incQIds.length > 0) await generateIncorrectPrint(incQIds, globalExamTitle, false);
   };
 
   const saveRoundScoreToLocalStorage = () => {
@@ -1173,6 +1274,7 @@ export default function ClinicViewer() {
 
   const leaveAndGoHome = async () => {
     setIsLoggingOut(true);
+    await flushIncorrectToPrint();
     await untrackPresence();
     router.push('/student/portal');
   };
