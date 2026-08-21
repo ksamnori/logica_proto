@@ -16,6 +16,21 @@ const GRADE_CODES: { code: string; title: string }[] = [
 
 const CIRCLED_DIGITS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
 
+const safeParseIds = (raw: any): number[] => {
+  if (!raw) return [];
+  try {
+    let val = raw;
+    if (typeof val === 'string') {
+      if (val === "null" || val.trim() === "") return [];
+      val = JSON.parse(val);
+    }
+    if (Array.isArray(val)) return val.map(Number);
+  } catch (err) {
+    return [];
+  }
+  return [];
+};
+
 const parseOptions = (raw: any): string[] => {
   if (!raw) return [];
   if (Array.isArray(raw)) return raw;
@@ -32,7 +47,6 @@ const isObjectiveQuestion = (q: any) => {
   return CIRCLED_DIGITS.includes(ans);
 };
 
-// 💡 결과를 표시하는 8번째 칸의 배경/글씨색을 결정하는 헬퍼 함수
 const getResultStyle = (code: string | null) => {
   if (!code) return 'bg-white text-slate-400';
   if (['O', 'TO', 'RO'].includes(code)) return 'bg-emerald-50 text-emerald-600';
@@ -166,6 +180,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     return { newEarned: assignedScore * ratio, isCorrectEq };
   };
 
+  // 🌟 [핵심 변경 2] 문항 노출 오류 수정: 매핑되는 바구니를 정확히 찾고, 완료된 문제는 필터링
   const loadMatrixHomework = async () => {
     try {
       const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio');
@@ -186,15 +201,43 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         .filter((s: any) => s.status === '재원')
         .map((s: any) => ({ id: s.id, name: s.name || '알수없음' }));
 
+      // 같은 반, 같은 제목의 과제 모두 가져오기
       const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
       
+      const hwIdsToFetchStatus = allHws?.map(h => h.homework_id) || [];
+      const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
+
+      // 클릭한 기준 바구니의 완료 상태 확인
+      const baseResult = hwResults?.find(r => r.homework_id === baseHw.homework_id);
+      const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseResult?.status || '');
+
       const studentHwMap = new Map();
       const globalHw = allHws?.find(h => !h.target_student_id);
       
       activeStudents.forEach(s => {
-        const specificHw = allHws?.find(h => h.target_student_id === s.id);
-        const hwToUse = specificHw || globalHw;
-        if (hwToUse) studentHwMap.set(s.id, hwToUse);
+        let studentHws = allHws?.filter(h => h.target_student_id === s.id) || [];
+        
+        if (studentHws.length === 0 && globalHw) {
+          studentHwMap.set(s.id, globalHw);
+          return;
+        }
+        
+        studentHws.sort((a, b) => b.homework_id - a.homework_id); // 최신순 정렬
+
+        let selectedHw = studentHws[0];
+        if (s.id === baseHw.target_student_id) {
+          selectedHw = baseHw;
+        } else {
+          // 다른 학생들 중에서도 "클릭한 바구니와 상태가 동일한" 가장 정확한 바구니를 찾습니다.
+          const matched = studentHws.find(h => {
+            const r = hwResults?.find(res => res.homework_id === h.homework_id);
+            const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
+            return isComp === isBaseCompleted;
+          });
+          if (matched) selectedHw = matched;
+        }
+        
+        if (selectedHw) studentHwMap.set(s.id, selectedHw);
       });
 
       let cols = activeStudents.filter(s => studentHwMap.has(s.id)).sort((a,b) => a.name.localeCompare(b.name));
@@ -208,12 +251,18 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const allTqIds = new Set<number>();
       cols.forEach(s => {
         const hw = studentHwMap.get(s.id);
-        let tqs = [];
-        try { tqs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
-        tqs?.forEach((id: any) => allTqIds.add(Number(id)));
+        const res = hwResults?.find(r => r.homework_id === hw.homework_id);
+        const completedIds = new Set(safeParseIds(res?.completed_tq_ids));
+
+        let tqs = safeParseIds(hw.target_questions);
+        tqs.forEach((id: number) => {
+          // 💡 "완료된 건 표시하지 말고 새로 배부받은 것만 노출" (단, 조회 목적일 땐 예외)
+          if (!isBaseCompleted && completedIds.has(id)) return;
+          allTqIds.add(id);
+        });
       });
 
-      if (allTqIds.size === 0) throw new Error("과제에 포함된 문항이 없습니다.");
+      if (allTqIds.size === 0) throw new Error("과제에 채점할 문항이 없습니다. (모두 완료됨)");
 
       const tqList = Array.from(allTqIds);
       let tqData: any[] = [];
@@ -241,22 +290,23 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         };
       });
 
-      const hwIdsToFetch = Array.from(new Set(cols.map(s => studentHwMap.get(s.id).homework_id)));
-      const { data: answers } = await supabase.from('student_homework_answer').select('*').in('homework_id', hwIdsToFetch);
+      const activeHwIds = Array.from(new Set(cols.map(s => studentHwMap.get(s.id).homework_id)));
+      const { data: answers } = await supabase.from('student_homework_answer').select('*').in('homework_id', activeHwIds);
       
       const cellMap = new Map();
       const initialPending: any = {};
 
       cols.forEach(s => {
         const hw = studentHwMap.get(s.id);
-        let targetQs = [];
-        try { targetQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
-        const targetSet = new Set(targetQs.map(Number));
+        const res = hwResults?.find(r => r.homework_id === hw.homework_id);
+        const completedIds = new Set(safeParseIds(res?.completed_tq_ids));
+        const targetSet = new Set(safeParseIds(hw.target_questions));
 
         rows.forEach(r => {
           const key = `${s.id}_${r.id}`;
           
-          if (!targetSet.has(r.id)) {
+          // 타겟이 아니거나 이미 완료된 문항이면 막음 (채점 불가능하게 블로킹)
+          if (!targetSet.has(r.id) || (!isBaseCompleted && completedIds.has(r.id))) {
             cellMap.set(key, { isBlocked: true });
             return;
           }
@@ -561,7 +611,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           <table className="w-max bg-white">
             <thead className="sticky top-0 z-20 shadow-sm">
               <tr>
-                {/* 💡 [수정] 좌측 상단 모서리 폭 150px. */}
                 <th className="sticky left-0 z-30 bg-slate-200 p-2 min-w-[150px] w-[150px] border-r border-b text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
                   <div className="flex justify-between items-end px-1">
                     <span className="text-[11px] font-bold text-slate-500">문항 ⬇</span>
@@ -582,7 +631,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
             <tbody>
               {matrixData.rows.map((r) => (
                 <tr key={r.id} className="hover:bg-slate-50/50">
-                  {/* 💡 [수정] 좌측 행(문항) 헤더 150px. */}
                   <td className="sticky left-0 z-10 bg-white p-2 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-top min-w-[150px] w-[150px]">
                     <div className="flex justify-between items-center mb-1.5 border-b border-slate-100 pb-1.5 px-0.5">
                       <div className="flex items-baseline gap-1.5 min-w-0">
@@ -619,7 +667,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                     
                     return (
                       <td key={key} className="p-2 border-r border-b transition-colors align-middle">
-                        {/* 💡 [수정] 4x2 그리드, 틈 없이 붙어있는 단일 블록처럼 설계. */}
                         <div className="grid grid-cols-4 gap-px bg-slate-300 border border-slate-300 rounded overflow-hidden w-full max-w-[120px] mx-auto shadow-sm">
                           {GRADE_CODES.map(({code}) => (
                             <GradeButton
@@ -628,7 +675,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                               onClick={() => handleMatrixGrade(c.id, r.id, code)}
                             />
                           ))}
-                          {/* 8번째 칸: 현재 상태 출력 */}
                           <div className={`flex items-center justify-center text-[11px] font-black h-[28px] ${getResultStyle(currentCode)}`}>
                             {currentCode || ''}
                           </div>

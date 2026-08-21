@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 
 export default function RoleToggleBtn() {
-  const pathname = usePathname(); // 🌟 페이지 이동을 실시간으로 감지합니다.
+  const pathname = usePathname(); 
   
   const [realRole, setRealRole] = useState("");
   const [currentRole, setCurrentRole] = useState("");
@@ -13,44 +13,60 @@ export default function RoleToggleBtn() {
   const [isMounted, setIsMounted] = useState(false);
 
   useEffect(() => {
-    const instId = localStorage.getItem("logica_instructor_id");
+    // 🌟 [핵심 해결 1] return 당하기 전에 무조건 마운트 완료 상태로 만듭니다.
+    setIsMounted(true); 
 
-    // 🌟 [핵심 버그 수정] 아이디가 없으면(로그아웃 상태) 즉시 버튼을 숨기고 백업 찌꺼기를 날립니다.
-    if (!instId) {
-      setIsGodMode(false);
-      localStorage.removeItem("logica_real_role");
-      localStorage.removeItem("logica_real_role_owner");
-      return;
-    }
+    const checkRoleState = () => {
+      const instId = localStorage.getItem("logica_instructor_id");
 
-    const activeRole = localStorage.getItem("logica_instructor_role") || "";
-    const pos = localStorage.getItem("logica_instructor_position") || "";
+      // 아이디가 없으면(로그아웃 상태) 즉시 버튼을 숨기고 백업 찌꺼기를 날립니다.
+      if (!instId) {
+        setIsGodMode(false);
+        localStorage.removeItem("logica_real_role");
+        localStorage.removeItem("logica_real_role_owner");
+        return;
+      }
+
+      const activeRole = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      
+      let originalRole = localStorage.getItem("logica_real_role");
+      let originalOwner = localStorage.getItem("logica_real_role_owner");
+
+      // 다른 아이디로 재로그인 했다면 이전 백업 찌꺼기 초기화
+      if (originalOwner && originalOwner !== instId) {
+        originalRole = null; 
+      }
+
+      // 진짜 권한 백업본이 없으면 현재 상태를 백업하면서 소유자 ID도 같이 묶어둡니다.
+      if (!originalRole) {
+        localStorage.setItem("logica_real_role", activeRole);
+        localStorage.setItem("logica_real_role_owner", instId);
+        originalRole = activeRole;
+      }
+
+      // 대소문자 무시 및 직급(Position) 한글 텍스트 동시 검사
+      const isSA = ["SUPER_ADMIN", "ADMIN"].includes((originalRole || "").toUpperCase());
+      const hasAdminPos = pos.includes("최고관리자") || pos.includes("원장") || pos.includes("대장");
+      
+      setIsGodMode(isSA || hasAdminPos);
+      setRealRole(originalRole || "");
+      setCurrentRole(activeRole);
+    };
+
+    // 1. Pathname이 변경될 때 즉각 검사
+    checkRoleState();
+
+    // 🌟 [핵심 해결 2] Next.js 빌드 환경의 라우팅 캐시를 뚫기 위한 1초 주기 백그라운드 동기화
+    const interval = setInterval(checkRoleState, 1000);
     
-    let originalRole = localStorage.getItem("logica_real_role");
-    let originalOwner = localStorage.getItem("logica_real_role_owner");
+    // 3. 사용자가 여러 창(탭)을 띄워놓고 한쪽에서 모드를 변경했을 때 동기화
+    window.addEventListener("storage", checkRoleState);
 
-    // 다른 아이디로 재로그인 했다면 이전 백업 찌꺼기 초기화
-    if (originalOwner && originalOwner !== instId) {
-      originalRole = null; 
-    }
-
-    // 진짜 권한 백업본이 없으면 현재 상태를 백업하면서 소유자 ID도 같이 묶어둡니다.
-    if (!originalRole) {
-      localStorage.setItem("logica_real_role", activeRole);
-      localStorage.setItem("logica_real_role_owner", instId);
-      originalRole = activeRole;
-    }
-
-    // 대소문자 무시 및 직급(Position) 한글 텍스트 동시 검사
-    const isSA = ["SUPER_ADMIN", "ADMIN"].includes((originalRole || "").toUpperCase());
-    const hasAdminPos = pos.includes("최고관리자") || pos.includes("원장") || pos.includes("대장");
-    
-    setIsGodMode(isSA || hasAdminPos);
-    setRealRole(originalRole || "");
-    setCurrentRole(activeRole);
-    setIsMounted(true);
-    
-  // 🌟 핵심: 빈 배열이 아니라 pathname을 넣어, 페이지를 이동(로그인/아웃)할 때마다 재검사하도록 강제합니다.
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("storage", checkRoleState);
+    };
   }, [pathname]); 
 
   // 렌더링 전이거나, 원장/최고관리자가 아니면 아예 그리지 않습니다.

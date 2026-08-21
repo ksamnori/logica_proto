@@ -1,9 +1,4 @@
 // src/app/clinic/ta/grading/page.tsx
-//
-// 조교(TA) 전용 채점 페이지. clinic/ta/pad 와 같은 계열로,
-// 강사 로그인 없이 조교가 바로 열어서 쓰는 화면이다.
-// 스프레드시트 뷰(매트릭스)가 도입되어 이제 한 번에 반 전체를 조회하므로
-// 더 이상 좌측 사이드바(패널)에 학생을 하나씩 쌓아두지 않습니다.
 "use client";
 
 import React, { useEffect, useMemo, useState } from "react";
@@ -54,7 +49,7 @@ interface ActiveAssignment {
   homeworkId?: string;
   studentId: string;
   studentName: string;
-  gradeAll: boolean; // 💡 반 전체 동시 채점 여부 전달용
+  gradeAll: boolean; 
 }
 
 const STATUS_STYLE: Record<string, string> = {
@@ -84,7 +79,6 @@ export default function TaGradingPage() {
   const [activeDirty, setActiveDirty] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(true);
   
-  // 💡 동시 채점 확인 팝업 상태
   const [confirmGroup, setConfirmGroup] = useState<{ item: AssignmentItem, count: number } | null>(null);
 
   useEffect(() => { setActiveDirty(false); }, [activeItem]);
@@ -278,7 +272,7 @@ export default function TaGradingPage() {
     } catch (e) { console.error(e); alert("문제지/과제 목록을 불러오지 못했습니다."); } finally { setIsLoadingItems(false); }
   };
 
-  // 💡 항목 선택 시 반 내 동일 문항 보유 여부를 체크하는 함수
+  // 🌟 [핵심 수정 1] 인원 수 카운트 오류 해결: 상태(Status)가 동일한 개별 과제들만 그룹으로 묶어 고유 학생 수를 카운트
   const checkGroupGrading = async (item: AssignmentItem) => {
     if (!selectedStudent) return;
     if (activeItem && !confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 시험지를 바꾸시겠습니까?')) return;
@@ -296,19 +290,30 @@ export default function TaGradingPage() {
         const { data: hw } = await supabase.from('homework_assignment').select('homework_title, class_id').eq('homework_id', item.homeworkId).single();
         if (hw) {
           const { data: hws } = await supabase.from('homework_assignment').select('homework_id, target_student_id').eq('class_id', hw.class_id).eq('homework_title', hw.homework_title);
-          if (hws && hws.some(h => !h.target_student_id)) {
-            // 반 전체 부여 과제일 경우, 해당 반의 재원생 수를 계산
-            const cls = groupedClasses.find(c => c.class_id === hw.class_id);
-            count = cls ? cls.students.length : 1;
-          } else if (hws) {
-            // 개별 부여된 동일 과제가 여러 명일 경우 그 명수 계산
-            count = hws.length;
+          
+          if (hws && hws.length > 0) {
+            const hwIds = hws.map(h => h.homework_id);
+            const { data: res } = await supabase.from('student_homework_result').select('homework_id, status').in('homework_id', hwIds);
+            
+            // 현재 클릭한 과제 바구니의 상태 파악
+            const baseRes = res?.find(r => String(r.homework_id) === String(item.homeworkId));
+            const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseRes?.status || '');
+
+            // 동일한 상태(미제출은 미제출끼리, 완료는 완료끼리)인 학생들만 필터링
+            const matchingHws = hws.filter(h => {
+              const r = res?.find(resItem => resItem.homework_id === h.homework_id);
+              const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
+              return isComp === isBaseCompleted;
+            });
+
+            // 해당 그룹의 고유 학생 수 계산 (중복 배정 방어)
+            const uniqueStudents = new Set(matchingHws.map(h => h.target_student_id).filter(Boolean));
+            count = uniqueStudents.size > 0 ? uniqueStudents.size : 1;
           }
         }
       }
 
       setIsLoadingItems(false);
-      // 자신 이외의 다른 학생이 포함되어 있다면 팝업 표시
       if (count > 1) {
         setConfirmGroup({ item, count });
       } else {
@@ -317,11 +322,10 @@ export default function TaGradingPage() {
     } catch (e) {
       console.error(e);
       setIsLoadingItems(false);
-      executeSelect(item, false); // 에러가 나면 그냥 개별 채점으로 넘김
+      executeSelect(item, false);
     }
   };
 
-  // 💡 선택을 최종 실행하여 매트릭스를 불러오는 함수
   const executeSelect = (item: AssignmentItem, gradeAll: boolean) => {
     setActiveItem(item.kind === 'exam' 
       ? { mode: 'exam', assignmentId: item.assignmentId, studentId: selectedStudent!.id, studentName: selectedStudent!.name, gradeAll }
@@ -489,7 +493,6 @@ export default function TaGradingPage() {
             </div>
           )}
 
-          {/* 문제지 선택 모달 */}
           {pickerOpen && !confirmGroup && (
             <div className={`absolute inset-0 z-20 flex flex-col ${activeItem ? 'bg-slate-900/40 backdrop-blur-sm p-4 sm:p-6' : ''}`}>
               <div className={`flex-1 flex flex-col overflow-hidden min-h-0 ${activeItem ? 'bg-slate-50 rounded-2xl shadow-2xl p-4 sm:p-6 max-w-2xl w-full mx-auto' : 'p-4 sm:p-6'}`}>
@@ -504,7 +507,6 @@ export default function TaGradingPage() {
             </div>
           )}
 
-          {/* 💡 동시 채점 확인 팝업 모달 */}
           {confirmGroup && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
               <div className="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden max-w-md w-full animate-[fadeIn_0.2s_ease-out]">
