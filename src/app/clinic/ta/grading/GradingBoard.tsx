@@ -186,7 +186,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
       setGradingCodeMeta(meta);
 
-      const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name), student_homework_result(student_id)').eq('homework_id', homeworkId).single();
+      const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name)').eq('homework_id', homeworkId).single();
       if (!baseHw) {
         alert("과제 기준 데이터를 찾을 수 없습니다.");
         onBack();
@@ -195,15 +195,45 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       setHeaderInfo({ title: `📚 ${baseHw.homework_title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
 
+      // 🌟 같은 반, 같은 제목의 과제 전체 불러오기
+      const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
+      const hwIdsToFetchStatus = allHws?.map(h => h.homework_id) || [];
+      const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
+
+      // 기준(클릭한) 바구니의 완료 상태 확인
+      const baseResult = hwResults?.find(r => r.homework_id === baseHw.homework_id);
+      const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseResult?.status || '');
+
+      // 🌟 [핵심 변경 1] gradeAll 에 따라 올바른 대상 학생 ID 추출 로직 (동시 채점 버그 해결)
       let validStudentIds: string[] = [];
-      if (baseHw.target_student_id) {
-         validStudentIds.push(baseHw.target_student_id);
-      } else if (baseHw.student_homework_result) {
-         validStudentIds = baseHw.student_homework_result.map((r: any) => r.student_id);
+
+      if (gradeAll) {
+         // 동시채점: 기준 바구니와 상태(진행중/완료)가 동일한 바구니의 주인들을 모조리 수집
+         const matchingHws = allHws?.filter(h => {
+            const r = hwResults?.find(res => res.homework_id === h.homework_id);
+            const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
+            return isComp === isBaseCompleted;
+         }) || [];
+
+         const uniqueIds = new Set<string>();
+         matchingHws.forEach(h => {
+            if (h.target_student_id) uniqueIds.add(h.target_student_id);
+         });
+         validStudentIds = Array.from(uniqueIds);
+         
+         // 글로벌 배부였을 경우의 fallback
+         if (validStudentIds.length === 0) {
+            const { data: enrolls } = await supabase.from('enrollment').select('student_id').eq('class_id', baseHw.class_id);
+            validStudentIds = enrolls?.map(e => e.student_id) || [];
+         }
+      } else {
+         // 개별채점: 타겟 학생 한 명만
+         if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
+         else if (studentIdParam) validStudentIds.push(studentIdParam);
       }
 
       if (validStudentIds.length === 0) {
-        alert("이 과제를 배부받은 학생이 없습니다.");
+        alert("채점할 대상 학생이 없습니다.");
         onBack();
         return;
       }
@@ -219,19 +249,11 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         cols = cols.filter(c => c.id === studentIdParam);
       }
 
-      // 🌟 [핵심 변경] 채점할 대상 학생이 없으면 에러 던지지 않고 깔끔하게 뒤로가기
       if (cols.length === 0) {
         alert("🎉 해당 과제의 채점이 모두 완료되었습니다!");
         onBack();
         return;
       }
-
-      const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
-      const hwIdsToFetchStatus = allHws?.map(h => h.homework_id) || [];
-      const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
-
-      const baseResult = hwResults?.find(r => r.homework_id === baseHw.homework_id);
-      const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseResult?.status || '');
 
       const studentHwMap = new Map();
       const globalHw = allHws?.find(h => !h.target_student_id);
@@ -283,7 +305,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         });
       });
 
-      // 🌟 [핵심 변경] 모든 문항이 채점완료라면 에러 화면으로 튕기지 않고 기분 좋게 뒤로가기
       if (allTqIds.size === 0) {
         alert("🎉 이 과제에 남은 모든 문항의 채점이 완료되었습니다!");
         onBack();

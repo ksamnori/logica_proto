@@ -6,7 +6,7 @@ import React from "react";
 const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
 interface GlobalListProps {
-  currentView: any; // 🌟 추가된 View 상태
+  currentView: any;
   activeTab: string;
   globalList: any[];
   isLoading: boolean;
@@ -21,12 +21,14 @@ interface GlobalListProps {
   handleDeleteExam: (assignmentId: string, studentId: string) => void;
   handleDeleteHomework: (hwId: string, studentId: string) => void;
   handleDeletePrint: (assignmentId: string, examId: string) => void;
+  handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
+  handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string) => void; 
 }
 
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleViewChange, toggleGlobalSelection,
-  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint
+  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2
 }: GlobalListProps) {
   
   return (
@@ -34,7 +36,6 @@ export default function GlobalList({
       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2">
         <div className="flex justify-between items-center">
           <div>
-            {/* 🌟 [수정] 현재 선택된 반(Class) 이름이 있다면 명확하게 표시해 줍니다. */}
             <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
               {currentView.type === 'CLASS' ? (
                 <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : '오답 프린트'}</span> 
@@ -92,7 +93,7 @@ export default function GlobalList({
               let typeBadge = activeTab === 'EXAM' ? "📝 시험" : activeTab === 'INCORRECT' ? "🖨️ 오답프린트" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200";
               let titleStr = activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음';
-              let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.total_questions || 0);
+              let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
               let createdDate = activeTab === 'HOMEWORK' ? (res.sort_date || res.created_at) : res.created_at;
 
               const rowBgClass = isSelected 
@@ -115,7 +116,7 @@ export default function GlobalList({
                   </div>
 
                   <div className="flex items-center gap-2.5 shrink-0 justify-end w-[380px]">
-                    <div className="text-[11px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ}문항</div>
+                    <div className="text-[11px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ || 0}문항</div>
                     
                     <div className="flex flex-row flex-nowrap items-center gap-1.5 shrink-0 w-[120px] justify-center">
                       <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {res.oCount || 0}</span>
@@ -130,11 +131,27 @@ export default function GlobalList({
                       <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 ${statusBadge}`}>{statusStr}</span>
                     </div>
                     
-                    <div className="flex items-center gap-2 shrink-0 border-l border-slate-300 pl-3 w-[100px] justify-end">
-                      {!(activeTab === 'HOMEWORK' && !res.is_exam_hw) && (
-                        <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m.exam_id}&exam_id=${m.exam_id}`, '_blank'); }} className="text-[12px] hover:text-blue-600 transition-colors shrink-0">✏️</button>
+                    <div className="flex items-center gap-2 shrink-0 border-l border-slate-300 pl-3 w-[140px] justify-end">
+                      {/* 🌟 펜(수정) 버튼 */}
+                      {!(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
+                        <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m?.exam_id || ''}&exam_id=${m?.exam_id || ''}`, '_blank'); }} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
+                      ) : (
+                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, res.masterId, res.target_questions || hw?.target_questions, titleStr)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
-                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : activeTab === 'INCORRECT' ? handleDeletePrint(res.assignment_id, m?.exam_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0">🗑️</button>
+                      
+                      {/* 🌟 휴지통 버튼 */}
+                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : activeTab === 'INCORRECT' ? handleDeletePrint(res.assignment_id, m?.exam_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
+                      
+                      {/* 🌟 프린터 버튼 */}
+                      <button 
+                        onClick={(e) => handlePrintItem(e, res.type, res.masterId, res.target_questions || hw.target_questions, titleStr, res.subTitle)} 
+                        className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" 
+                        title="프린트 출력"
+                      >
+                        🖨️
+                      </button>
+
+                      {/* 🌟 상세 버튼 */}
                       <button onClick={(e) => { e.stopPropagation(); window.location.href = activeTab === 'HOMEWORK' && !res.is_exam_hw ? `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}` : `/exam/review?assignment_id=${res.assignment_id}`; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>
                   </div>

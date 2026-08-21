@@ -24,14 +24,13 @@ export default function TaTopBar({ taName, isConnected, hasActiveRequest }: { ta
   };
 
   return (
-    <header className="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-2 shrink-0 shadow-sm z-30">
-      <button
-        onClick={(e) => { guard(e); if (!hasActiveRequest) router.back(); }}
-        className="text-[10px] font-bold bg-slate-100 hover:bg-slate-200 text-slate-500 px-2.5 py-1.5 rounded-lg transition-colors shrink-0"
-      >
-        ← 뒤로
-      </button>
-      <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-6 object-contain shrink-0 mr-1" />
+    <header className="bg-white border-b border-slate-200 px-4 py-2 flex items-center gap-3 shrink-0 shadow-sm z-30">
+      
+      {/* 🌟 로고 클릭 시 /clinic/ta 로 이동 (진행 중인 작업이 있으면 guard가 막아줌) */}
+      <Link href="/clinic/ta" onClick={guard} className="shrink-0 mr-1 flex items-center transition-opacity hover:opacity-80" title="조교 허브로 이동">
+        <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-6 object-contain" />
+      </Link>
+
       <nav className="flex items-center gap-4 h-full self-stretch">
         {TABS.map(tab => {
           const active = pathname === tab.path || pathname.startsWith(tab.path + "/");
@@ -48,14 +47,20 @@ export default function TaTopBar({ taName, isConnected, hasActiveRequest }: { ta
           );
         })}
       </nav>
-      <div className="ml-auto flex items-center gap-2.5">
+
+      <div className="ml-auto flex items-center gap-3">
         {isConnected !== undefined && (
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 mr-1">
             <span className={`w-2 h-2 rounded-full inline-block ${isConnected ? 'bg-green-500 animate-[pulse_1.6s_infinite]' : 'bg-rose-500'}`}></span>
             <span>{isConnected ? '연결됨' : '연결 중...'}</span>
           </div>
         )}
-        <span className="text-[11px] font-bold text-slate-500">{taName} 조교님</span>
+        
+        {/* 🌟 조교 이름 표시 통일 (깔끔한 뱃지 스타일 적용) */}
+        <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-md shadow-sm">
+          <span className="text-[12px]">👨‍🏫</span>
+          <span className="text-[11px] font-black text-[#002864]">{taName} 조교님</span>
+        </div>
       </div>
     </header>
   );
