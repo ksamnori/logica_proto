@@ -1,7 +1,8 @@
+// src/app/student/portal/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient, RealtimeChannel } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { resolveTodaySession, closeSessionAtLimit, setActiveCall, clearActiveCall, setAway, clearAway } from '@/lib/clinicSession';
 import { resolveClassWeekType } from '@/lib/classRound';
@@ -9,13 +10,89 @@ import { useClinicEndRequest } from '@/hooks/useClinicEndRequest';
 import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 
+declare global {
+    interface Window {
+        _supabaseInstance?: SupabaseClient;
+        MathJax?: {
+            typesetPromise?: () => Promise<void>;
+            tex?: any;
+            startup?: any;
+        };
+    }
+}
+
+interface ClinicSession {
+    id: string;
+    duration_ms: number;
+    seat: string | null;
+    manual_seat: string | null;
+    started_at: string;
+    ended_at: string | null;
+    end_request_status: 'pending' | 'idle' | null;
+    end_request_cooldown_until: string | null;
+    session_date?: string;
+}
+
+interface ClinicRoundResult {
+    student_id: string;
+    class_name: string;
+    round: number;
+    forced_done: boolean;
+    correct: number;
+    total: number;
+}
+
+// 🌟 [수정 3] 채점완료 등 다양한 상태를 허용하기 위해 string으로 범용성 부여
+interface BlockState {
+    exam: string;
+    hw: string;
+    print: string;
+    overdue?: string;
+}
+
+interface HwProgress {
+    examIds: number[];
+    hwExamIds: number[];
+    printIds: number[];
+    hwIds: number[];
+    overdueHwIds: number[];
+    overdueAssignmentIds: number[];
+}
+
+interface DBClassData {
+    class_id: string;
+    name: string;
+    week_type: string;
+    week_type_updated_date: string;
+    session_parity: boolean | null; // 🌟 [수정 2] ClassRoundInput 타입에 맞춰 boolean | null 로 교정
+    forced_week_type: string;
+    forced_week_type_date: string;
+    class_schedule: { day_of_week: string }[];
+}
+
+interface DBExamAssignment {
+    assignment_id: number;
+    status: string;
+    class_id: string;
+    created_at: string;
+    exam_master: { exam_type: string } | { exam_type: string }[];
+}
+
+interface DBHomeworkAssignment {
+    homework_id: number;
+    class_id: string;
+    target_student_id: string | null;
+    due_date: string | null;
+    target_questions?: string | number[];
+}
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
-const getSupabaseClient = () => {
+const getSupabaseClient = (): SupabaseClient => {
     if (typeof window === 'undefined') return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    if (!(window as any)._supabaseInstance) (window as any)._supabaseInstance = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    return (window as any)._supabaseInstance;
+    if (!window._supabaseInstance) window._supabaseInstance = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    return window._supabaseInstance;
 };
 const supabaseClient = getSupabaseClient();
 
@@ -31,14 +108,10 @@ export default function StudentPortal() {
     const [activeTab, setActiveTab] = useState('home');
     const [selectedClass, setSelectedClass] = useState('');
     
-    const [clinicSession, setClinicSession] = useState<any>(null);
-    const [roundResults, setRoundResults] = useState<Record<string, any>>({});
-    const [blockStates, setBlockStates] = useState<Record<string, any>>({});
-    const [hwProgress, setHwProgress] = useState<Record<string, any>>({});
-    // 💡 [11번] 반별 홀/짝 회차(week_type)는 시험 클리닉이 "주간테스트"로 나갈지 "과제오답유사"로
-    // 나갈지를 결정하는데, startClinicBlock이 이 값을 전혀 읽지 않고 있었다 — 그래서 라운드1은
-    // week 파라미터를 아예 안 보내 항상 clinic/viewer의 기본값('odd'=주간테스트)으로 고정되어
-    // 있었고, resolveClassWeekType으로 관리되는 홀짝 전환은 실제로는 아무 효과가 없었다.
+    const [clinicSession, setClinicSession] = useState<ClinicSession | null>(null);
+    const [roundResults, setRoundResults] = useState<Record<string, ClinicRoundResult>>({});
+    const [blockStates, setBlockStates] = useState<Record<string, BlockState>>({});
+    const [hwProgress, setHwProgress] = useState<Record<string, HwProgress>>({});
     const [classWeekTypes, setClassWeekTypes] = useState<Record<string, string>>({});
     
     const [now, setNow] = useState(Date.now());
@@ -50,10 +123,10 @@ export default function StudentPortal() {
     const [isPortalCalling, setIsPortalCalling] = useState(false);
     const [manualSeat, setManualSeat] = useState<string | null>(null);
     const [editorLocked, setEditorLocked] = useState(false);
-    const channelRef = useRef<any>(null);
+    
+    const channelRef = useRef<RealtimeChannel | null>(null);
     const sessionEndedRef = useRef(false);
-
-    const clinicSessionRef = useRef<any>(null);
+    const clinicSessionRef = useRef<ClinicSession | null>(null);
     const trackedSeatRef = useRef<string | null>(null);
     const isSyncingSessionRef = useRef(false);
 
@@ -100,7 +173,10 @@ export default function StudentPortal() {
             let classes: string[] = [];
             try {
                 const { data } = await supabaseClient.from('student').select('enrollment(class(name))').eq('student_id', sid).single();
-                if (data?.enrollment) classes = Array.from(new Set(data.enrollment.map((e: any) => e.class?.name).filter(Boolean)));
+                if (data?.enrollment) {
+                    // 🌟 [수정 1] 복잡한 객체 배열 매핑 시 Type 추론 에러 방지를 위해 (e: any) 사용
+                    classes = Array.from(new Set(data.enrollment.map((e: any) => e.class?.name).filter(Boolean))) as string[];
+                }
             } catch (e) {}
             if (classes.length === 0) classes = ['반 미배정'];
             setStudentInfo({ id: sid, name: sname, phone: localStorage.getItem('logica_student_phone') || '', classes });
@@ -108,15 +184,15 @@ export default function StudentPortal() {
             getPointBalance(sid).then(setMockPoints).catch(err => console.error('포인트 조회 중 오류:', err));
 
             const today = getKSTDateString();
-            const session = await resolveTodaySession(supabaseClient, sid, today);
+            const session = await resolveTodaySession(supabaseClient, sid, today) as ClinicSession;
 
             clinicSessionRef.current = session;
             setClinicSession(session);
             setManualSeat(session.manual_seat || null);
 
             const { data: rData } = await supabaseClient.from('clinic_round_result').select('*').eq('student_id', sid);
-            const results: any = {};
-            rData?.forEach((r: any) => results[`${r.class_name}::${r.round}`] = r);
+            const results: Record<string, ClinicRoundResult> = {};
+            rData?.forEach((r: ClinicRoundResult) => results[`${r.class_name}::${r.round}`] = r);
             setRoundResults(results);
 
             await fetchBlockStates(sid, classes);
@@ -143,7 +219,7 @@ export default function StudentPortal() {
                     clinicSessionRef.current?.seat !== data.seat ||
                     clinicSessionRef.current?.manual_seat !== data.manual_seat) {
 
-                    const updatedSession = { ...clinicSessionRef.current, ...data };
+                    const updatedSession = { ...clinicSessionRef.current, ...data } as ClinicSession;
                     clinicSessionRef.current = updatedSession;
                     setClinicSession(updatedSession);
                     hasChanges = true;
@@ -186,38 +262,34 @@ export default function StudentPortal() {
 
     const fetchBlockStates = async (sid: string, classes: string[]) => {
         const today = getKSTDateString();
-        const newBlockStates: any = {};
-        const newHwProgress: any = {};
+        const newBlockStates: Record<string, BlockState> = {};
+        const newHwProgress: Record<string, HwProgress> = {};
         classes.forEach(c => {
-            newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA' };
+            newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA', overdue: 'NO_DATA' };
             newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], overdueAssignmentIds: [] };
         });
 
         const { data: cData } = await supabaseClient.from('class')
             .select('class_id, name, week_type, week_type_updated_date, session_parity, forced_week_type, forced_week_type_date, class_schedule(day_of_week)')
             .in('name', classes);
-        const nameToId: any = {};
-        cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; });
+            
+        const nameToId: Record<string, string> = {};
+        cData?.forEach((c: DBClassData) => { nameToId[c.name] = c.class_id; });
 
-        // 💡 [11번] ClassEditModal을 아무도 열지 않아도(=관리자가 안 봐도), 학생이 포탈에 들어올
-        // 때마다 지나간 회차만큼 자동으로 홀/짝을 갱신한다 — resolveClassWeekType은 idempotent라
-        // 여러 화면에서 동시에 호출해도 안전하다.
         const newClassWeekTypes: Record<string, string> = {};
-        // 💡 [미완성 오답프린트/과제프린트 분류] exam_assignment는 homework_assignment와 달리
-        // due_date가 없어서, "이 반의 마지막 처리된 수업 회차 날짜"를 기준으로 그 이전에
-        // 생성됐는데 아직 안 끝난 배정을 미완성으로 친다 — resolveClassWeekType이 반환하는
-        // lastSessionDate를 그 기준으로 쓴다.
         const lastSessionDateByClassId: Record<string, string | null> = {};
-        await Promise.all((cData || []).map(async (c: any) => {
-            const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
+        
+        await Promise.all((cData || []).map(async (c: DBClassData) => {
+            const scheduleDays = (c.class_schedule || []).map(s => s.day_of_week);
             try {
-                const { weekType: wt, lastSessionDate } = await resolveClassWeekType(supabaseClient, {
+                const { weekType: wt, lastSessionDate } = (await resolveClassWeekType(supabaseClient, {
                     class_id: c.class_id, class_name: c.name, week_type: c.week_type,
                     week_type_updated_date: c.week_type_updated_date, session_parity: c.session_parity, scheduleDays,
                     forced_week_type: c.forced_week_type, forced_week_type_date: c.forced_week_type_date,
-                });
+                })) as { weekType: string, lastSessionDate?: string | null };
+                
                 newClassWeekTypes[c.name] = wt;
-                lastSessionDateByClassId[c.class_id] = lastSessionDate;
+                lastSessionDateByClassId[c.class_id] = lastSessionDate || null;
             } catch (e) { newClassWeekTypes[c.name] = c.week_type === 'even' ? 'even' : 'odd'; }
         }));
         setClassWeekTypes(newClassWeekTypes);
@@ -227,11 +299,11 @@ export default function StudentPortal() {
             .eq('student_id', sid);
 
         const classIds = Object.values(nameToId).filter(Boolean);
-        let hwsData: any[] = [];
+        let hwsData: DBHomeworkAssignment[] = [];
         if (classIds.length > 0) {
             const { data } = await supabaseClient.from('homework_assignment')
                 .select('homework_id, class_id, target_student_id, due_date')
-                .in('class_id', classIds as string[])
+                .in('class_id', classIds)
                 .neq('homework_title', '[시스템] 수업 진도 완료 기록');
             hwsData = data || [];
         }
@@ -239,28 +311,24 @@ export default function StudentPortal() {
         const { data: hwResData } = await supabaseClient.from('student_homework_result')
             .select('homework_id, status')
             .eq('student_id', sid);
-        const hwResMap = new Map();
-        hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r.status));
+        const hwResMap = new Map<number, string>();
+        hwResData?.forEach((r: { homework_id: number; status: string }) => hwResMap.set(r.homework_id, r.status));
 
         classes.forEach(c => {
             const cid = nameToId[c];
             if (!cid) return;
 
             let examPending = 0, hwPending = 0, printPending = 0, overduePending = 0;
-            let examIds: number[] = [], hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [];
+            const examIds: number[] = [], hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [];
             const overdueAssignmentIds: number[] = [];
             const lastSessionDate = lastSessionDateByClassId[cid];
 
-            examsData?.forEach((ex: any) => {
+            examsData?.forEach((ex: DBExamAssignment) => {
                 if (ex.class_id && ex.class_id !== cid) return;
                 const type = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.exam_type : ex.exam_master?.exam_type;
                 const isPending = !['제출완료', '채점완료', '완료'].includes(ex.status);
                 if (!isPending) return;
 
-                // 💡 오답프린트/과제(프린트)는 시험(주간테스트)과 달리 마감 개념이 있다 —
-                // 생성된 날짜가 이 반의 마지막 처리된 수업 회차보다 이전인데 아직 안 끝났다면
-                // "다음 수업이 이미 찾아온" 미완성으로 넘긴다(homework_assignment의 due_date
-                // 기반 분류와 동일한 규칙, exam_assignment엔 due_date가 없어 created_at으로 대신함).
                 const createdDateKST = ex.created_at ? new Date(new Date(ex.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0] : null;
                 const isOverdue = (type === '오답프린트' || type === '과제' || type === '과제프린트')
                     && lastSessionDate && createdDateKST && createdDateKST <= lastSessionDate;
@@ -272,15 +340,13 @@ export default function StudentPortal() {
                 else { examPending++; examIds.push(ex.assignment_id); }
             });
 
-            hwsData?.forEach((hw: any) => {
+            hwsData?.forEach((hw: DBHomeworkAssignment) => {
                 if (hw.class_id !== cid) return;
                 if (hw.target_student_id && hw.target_student_id !== sid) return;
                 const status = hwResMap.get(hw.homework_id) || '미제출';
                 const isPending = !['제출완료', '채점완료', '완료'].includes(status);
                 if (!isPending) return;
-                // 💡 지난 회차(수업일)를 넘긴 채 남은 과제는 classRound.ts의 migrateIncompleteForClassRound가
-                // due_date를 그 회차 날짜로 당겨둔다 — 그래서 due_date가 오늘 이하로 내려와 있으면
-                // "다음 수업이 이미 찾아온" 미완료 과제로 분류해 별도 박스로 옮긴다.
+                
                 if (hw.due_date && hw.due_date <= today) { overduePending++; overdueHwIds.push(hw.homework_id); }
                 else { hwPending++; hwIds.push(hw.homework_id); }
             });
@@ -317,17 +383,17 @@ export default function StudentPortal() {
 
             channel.on('presence', { event: 'sync' }, async () => {
                 const state = channel.presenceState();
-                setEditorLocked(Object.values(state).some((metas: any) => metas.some((m: any) => m.role === 'editor')));
+                setEditorLocked(Object.values(state).some((metas: any[]) => metas.some(m => m.role === 'editor')));
 
                 const amIOnline = Object.values(state).flat().some((m: any) => m.studentId === studentInfo.id);
                 if (amIOnline) return;
 
                 const occupied = new Set();
-                Object.values(state).forEach((metas: any) => metas.forEach((m: any) => { if (m.seat) occupied.add(m.seat); }));
+                Object.values(state).forEach((metas: any[]) => metas.forEach(m => { if (m.seat) occupied.add(m.seat); }));
 
                 const todayStr = getKSTDateString();
                 const { data: dbSessions } = await supabaseClient.from('clinic_session_state').select('seat').eq('session_date', todayStr).is('ended_at', null).not('seat', 'is', null);
-                dbSessions?.forEach((s: any) => occupied.add(s.seat));
+                dbSessions?.forEach((s: { seat: string }) => occupied.add(s.seat));
 
                 let targetSeat = trackedSeatRef.current || manualSeat;
                 let isReal = !manualSeat;
@@ -365,15 +431,17 @@ export default function StudentPortal() {
 
                 if (payload.action === 'move_seat' && payload.newSeat) {
                     if (manualSeat) setManualSeat(payload.newSeat);
-                    else {
+                    else if (clinicSessionRef.current) {
                         clinicSessionRef.current = { ...clinicSessionRef.current, seat: payload.newSeat };
                         setClinicSession(clinicSessionRef.current);
                     }
                     trackedSeatRef.current = payload.newSeat;
-                    channel.track({ 
-                        seat: payload.newSeat, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
-                        startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: clinicSessionRef.current.duration_ms, updatedAt: Date.now() 
-                    });
+                    if (clinicSessionRef.current) {
+                        channel.track({ 
+                            seat: payload.newSeat, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
+                            startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: clinicSessionRef.current.duration_ms, updatedAt: Date.now() 
+                        });
+                    }
                 } 
                 else if (payload.action === 'force_checkout' || payload.action === 'force_checkout_by_ta') {
                     if (sessionEndedRef.current) return;
@@ -386,20 +454,22 @@ export default function StudentPortal() {
                 }
                 else if (payload.action === 'adjust_clinic_time') {
                     const nextDuration = payload.newDuration !== undefined ? payload.newDuration : Math.max(0, (clinicSessionRef.current?.duration_ms || 0) + Number(payload.deltaMs || 0));
-                    clinicSessionRef.current = { ...clinicSessionRef.current, duration_ms: nextDuration };
-                    setClinicSession({ ...clinicSessionRef.current }); 
-                    
-                    if (trackedSeatRef.current) {
-                        channel.track({
-                            seat: trackedSeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
-                            startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: nextDuration, updatedAt: Date.now()
-                        });
-                    }
+                    if (clinicSessionRef.current) {
+                        clinicSessionRef.current = { ...clinicSessionRef.current, duration_ms: nextDuration };
+                        setClinicSession({ ...clinicSessionRef.current }); 
+                        
+                        if (trackedSeatRef.current) {
+                            channel.track({
+                                seat: trackedSeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
+                                startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: nextDuration, updatedAt: Date.now()
+                            });
+                        }
 
-                    const remainingMs = (new Date(clinicSessionRef.current.started_at).getTime() + nextDuration) - Date.now();
-                    if (sessionEndedRef.current && remainingMs > 0) {
-                        sessionEndedRef.current = false;
-                        setTimeUpModal(prev => ({ ...prev, isOpen: false }));
+                        const remainingMs = (new Date(clinicSessionRef.current.started_at).getTime() + nextDuration) - Date.now();
+                        if (sessionEndedRef.current && remainingMs > 0) {
+                            sessionEndedRef.current = false;
+                            setTimeUpModal(prev => ({ ...prev, isOpen: false }));
+                        }
                     }
                 }
                 else if (payload.action === 'force_return_to_seat') setIsPortalAway(false);
@@ -422,7 +492,7 @@ export default function StudentPortal() {
         router.push('/student/login');
     };
 
-    const sendClinicAction = (action: string, extra: any = {}) => {
+    const sendClinicAction = (action: string, extra: Record<string, unknown> = {}) => {
         if (channelRef.current && trackedSeatRef.current) {
             channelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: trackedSeatRef.current, action, data: { studentId: studentInfo.id, name: studentInfo.name, ...extra } } });
         }
@@ -466,11 +536,11 @@ export default function StudentPortal() {
         if (typeKey === 'exam') {
             testName = '시험';
             params.append('week', classWeekTypes[className] === 'even' ? 'even' : 'odd');
-            if (prog.examIds.length > 0) params.append('assignment_id', prog.examIds[0]);
+            if (prog.examIds.length > 0) params.append('assignment_id', String(prog.examIds[0]));
         } else if (typeKey === 'hw') {
             testName = '과제';
             if (prog.hwIds.length > 0) params.append('homework_ids', prog.hwIds.join(','));
-            if (prog.hwExamIds.length > 0) params.append('assignment_id', prog.hwExamIds[0]);
+            if (prog.hwExamIds.length > 0) params.append('assignment_id', String(prog.hwExamIds[0]));
         } else if (typeKey === 'overdue') {
             testName = '미완료 과제';
             if (prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
@@ -478,7 +548,7 @@ export default function StudentPortal() {
             params.append('overdue', '1');
         } else if (typeKey === 'print') {
             testName = '오답프린트';
-            if (prog.printIds.length > 0) params.append('assignment_id', prog.printIds[0]);
+            if (prog.printIds.length > 0) params.append('assignment_id', String(prog.printIds[0]));
         }
 
         if (channelRef.current && trackedSeatRef.current) {
@@ -497,9 +567,9 @@ export default function StudentPortal() {
         router.push(`/clinic/viewer?${params.toString()}`);
     };
 
-    const renderCard = (typeKey: string, round: number, className: string) => {
+    const renderCard = (typeKey: 'exam'|'hw'|'print'|'overdue', round: number, className: string) => {
         const cState = blockStates[className] || {};
-        const isDone = cState[typeKey] === '제출완료' || cState[typeKey] === '채점완료';
+        const isDone = cState[typeKey] === '제출완료' || cState[typeKey] === '채점완료' || cState[typeKey] === '완료';
         const prog = hwProgress[className] || {};
 
         let pendingCount = 0;
@@ -510,9 +580,6 @@ export default function StudentPortal() {
         const scoreData = roundResults[`${className}::${round}`];
         const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
 
-        // 💡 라운드1(exam)은 반의 홀/짝 회차에 따라 실제로 완전히 다른 내용(주간테스트 ↔
-        // 과제오답유사)을 내보내는데(fetchWeeklyTest), 예전엔 두 경우 모두 같은 파란 "📝 시험" 박스로
-        // 보여서 학생이 오늘 뭘 풀게 될지 미리 구분할 수 없었다. 홀/짝별로 색/이름을 나눈다.
         const isEvenWeek = classWeekTypes[className] === 'even';
         let theme;
         if (typeKey === 'exam' && isEvenWeek) theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-cyan-700 to-cyan-600', badge: 'bg-cyan-400 text-cyan-900', btnText: 'text-cyan-900', textColor: 'text-cyan-100' };
@@ -542,9 +609,6 @@ export default function StudentPortal() {
         );
     };
 
-    // 💡 예전엔 이 자리가 하드코딩된 "예정된 시험" D-Day 목업이었다. 실제로는 다음 수업 회차가
-    // 지날 때까지 못 끝낸 과제(classRound.ts의 migrateIncompleteForClassRound가 due_date를
-    // 그 회차 날짜로 당겨 표시해 둔 것)를 보여줘야 해서, hwProgress의 overdueHwIds를 그대로 쓴다.
     const renderOverdueCard = (className: string) => {
         const cState = blockStates[className] || {};
         const isDone = cState.overdue !== '미응시';
@@ -616,7 +680,6 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
-            {/* 💡 상단 패딩 축소 (py-4 -> py-3) */}
             <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
                 <div className="flex items-center gap-8">
                     <div className="flex items-center">
@@ -682,11 +745,9 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
-            {/* 💡 메인 영역 상하 패딩 축소 (py-8 -> py-4 ~ py-5) */}
             <main className="max-w-[1200px] w-full mx-auto py-5 px-6 md:py-6 md:px-8 flex-1">
                 {activeTab === 'home' && studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
                     <section className="mb-4">
-                        {/* 💡 헤더 영역 여백 축소 (mb-8 -> mb-5) */}
                         <div className="flex items-center gap-4 mb-5">
                             <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
@@ -695,7 +756,6 @@ export default function StudentPortal() {
                                 </button>
                             ))}
                         </div>
-                        {/* 💡 카드 그리드 간격 축소 (gap-8 -> gap-6) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}
