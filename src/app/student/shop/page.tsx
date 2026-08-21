@@ -21,8 +21,7 @@ export default function StudentShopPage() {
   const [toast, setToast] = useState('');
 
   const loadProducts = () => {
-    const tenantId = localStorage.getItem('logica_tenant_id') || '';
-    listProducts(tenantId).then(setProducts).catch(err => console.error('상품 조회 중 오류:', err));
+    listProducts().then(setProducts).catch(err => console.error('상품 조회 중 오류:', err));
   };
 
   useEffect(() => {
@@ -53,8 +52,9 @@ export default function StudentShopPage() {
     if (!confirmTarget || purchasing) return;
     setPurchasing(true);
     try {
-      const tenantId = localStorage.getItem('logica_tenant_id') || '';
-      const result = await purchaseProduct(tenantId, studentInfo.id, studentInfo.name, confirmTarget.id);
+      // 🌟 [수정 완료] 4개였던 인자 중 불필요한 tenantId를 제거하고 3개만 전달합니다.
+      const result = await purchaseProduct(studentInfo.id, studentInfo.name, confirmTarget.id);
+      
       if (result.success) {
         setPoints(await getPointBalance(studentInfo.id));
         loadProducts(); // 재고가 줄었을 수 있으니 다시 불러온다
