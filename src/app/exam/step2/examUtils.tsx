@@ -136,6 +136,7 @@ export const getParentSourceText = (parentQ: any, typeLabel: string) => {
   return '';
 };
 
+// 🌟 [누락 복구] 터졌던 원인인 이 함수를 완벽히 살렸습니다!
 export const renderParentRelations = (q: any, parentSourceMap: Record<string, any>) => {
   const ext = extractParentIds(q.parent_relations, q.parent_question_id);
   let lines: string[] = [];
@@ -164,4 +165,55 @@ export const renderParentRelations = (q: any, parentSourceMap: Record<string, an
       })}
     </div>
   );
+};
+
+// 🌟 서브 문항에서 찌꺼기를 날리지 않고 원본 그대로의 (1), (2) 번호를 살리는 로직
+export const processGroupText = (items: any[]) => {
+  if (!items || items.length === 0) return { common: "", remainders: [] };
+  if (items.length === 1) return { common: "", remainders: [items[0].question || items[0].text_question || ""] };
+
+  let strings = items.map(i => i.question || i.text_question || "");
+  if (strings.some(s => !s)) return { common: "", remainders: strings };
+
+  let prefix = strings[0];
+  for (let i = 1; i < strings.length; i++) {
+      let s = strings[i];
+      let j = 0;
+      while (j < prefix.length && j < s.length && prefix[j] === s[j]) j++;
+      prefix = prefix.substring(0, j);
+  }
+
+  let common = prefix;
+  let boundary = Math.max(
+      prefix.lastIndexOf("<br"), prefix.lastIndexOf("</p>"), 
+      prefix.lastIndexOf("</div>"), prefix.lastIndexOf("<table")
+  );
+  
+  if (boundary !== -1) {
+      let endTag = prefix.indexOf(">", boundary);
+      if (endTag !== -1) common = prefix.substring(0, endTag + 1);
+      else common = prefix.substring(0, boundary);
+  } else {
+      let lastPunc = Math.max(prefix.lastIndexOf("."), prefix.lastIndexOf(":"), prefix.lastIndexOf("시오"));
+      if (lastPunc !== -1) {
+          if (prefix[lastPunc] === '오') common = prefix.substring(0, lastPunc + 1); 
+          else common = prefix.substring(0, lastPunc + 1);
+      } else {
+          let lastSpace = prefix.lastIndexOf(" ");
+          if (lastSpace !== -1) common = prefix.substring(0, lastSpace + 1);
+      }
+  }
+
+  let remainders = strings.map(s => {
+      let rem = s.substring(common.length);
+      rem = rem.replace(/^(\s*<br\s*\/?>\s*)+/gi, '').trim();
+      return rem;
+  });
+
+  const textOnlyCommon = common.replace(/<[^>]+>/g, '').trim();
+  if (textOnlyCommon.length < 2) {
+      return { common: "", remainders: strings };
+  }
+
+  return { common, remainders };
 };

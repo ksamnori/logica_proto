@@ -14,8 +14,6 @@ export function useExamData() {
   const [questions, setQuestions] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [showAnswer, setShowAnswer] = useState(false);
-  
-  // 💡 [신규 추가] 현재 모드가 클리닉(오답 프린트) 모드인지 추적하는 상태
   const [isClinicMode, setIsClinicMode] = useState(false);
 
   const [depth5Map, setDepth5Map] = useState<Record<string, string>>({});
@@ -42,7 +40,6 @@ export function useExamData() {
   const [editForm, setEditForm] = useState<any>({});
 
   useEffect(() => {
-    // 💡 초기 로드 시 클리닉 모드인지 판별
     const clinicFlag = sessionStorage.getItem('isClinicMode') === 'true' || searchParams.get('source') === 'clinic_incorrect';
     setIsClinicMode(clinicFlag);
 
@@ -103,13 +100,16 @@ export function useExamData() {
 
   const fetchAndFilterQuestions = async () => {
     setIsLoading(true);
-    // 복원 모드
+
+    // 🌟 1. 뷰어에서 돌아오거나 대시보드에서 [수정]으로 들어올 때, 병합 정보를 100% 살려내는 핵심 로직 복구
     if (sessionStorage.getItem('restoreExamQuestions') === '1' && sessionStorage.getItem('examQuestions')) {
-      sessionStorage.removeItem('restoreExamQuestions');
+      setTimeout(() => sessionStorage.removeItem('restoreExamQuestions'), 1500);
       try {
         const parsedGroups = JSON.parse(sessionStorage.getItem('examQuestions') || "[]");
         const toRealId = (qid: string) => String(qid).replace(/_added_\d+$/, '');
-        const realIds = [...new Set(parsedGroups.flat().map(toRealId))];
+        
+        const flatParsed = parsedGroups.reduce((acc: any[], val: any) => acc.concat(Array.isArray(val) ? val : [val]), []);
+        const realIds = [...new Set(flatParsed.map(toRealId))];
 
         let allData: any[] = [];
         for (let i = 0; i < realIds.length; i += 100) {
@@ -118,26 +118,62 @@ export function useExamData() {
           if (error) throw error;
           if (data) allData = allData.concat(data);
         }
-        const byId = new Map(allData.map(q => [q.question_id, q]));
+        
+        const byId = new Map(allData.map(q => [String(q.question_id), q]));
 
-        const restoredGroups: any[] = [];
-        parsedGroups.forEach((group: any, gIdx: number) => {
+        const mergedTextQuestions = JSON.parse(sessionStorage.getItem('examUserMergedTextQuestions') || '[]');
+        const customGroupMap = new Map<string, string>();
+        mergedTextQuestions.forEach((arr: any[], idx: number) => {
+           const gId = `restored_custom_group_${idx}`;
+           arr.forEach(qid => customGroupMap.set(String(qid), gId));
+        });
+
+        const groupMap = new Map<string, any>();
+        let sortCounter = 0;
+
+        // 🌟 수정으로 들어와서 1차원 배열로 풀려있더라도 customGroupMap 기준으로 다시 묶어냅니다!
+        parsedGroups.forEach((group: any) => {
           const qids = Array.isArray(group) ? group : [group];
-          const items = qids.map((qid: string) => {
+          
+          qids.forEach((qid: string) => {
             const real = byId.get(toRealId(qid));
-            if (!real) return null;
+            if (!real) return;
             const copy = JSON.parse(JSON.stringify(real));
-            copy.question_id = qid;
-            return copy;
-          }).filter(Boolean);
-          if (items.length > 0) {
-            restoredGroups.push({ id: `restored_${gIdx}_${items[0].question_id}`, is_group: items.length > 1, items, sort_order: gIdx });
-          }
+            copy.question_id = qid; 
+            
+            let gId = customGroupMap.get(String(toRealId(qid))) || customGroupMap.get(String(qid));
+            if (!gId) {
+               if (Array.isArray(group)) gId = `array_group_${sortCounter}`;
+               else gId = `single_${qid}_${Math.random()}`;
+            }
+
+            if (!groupMap.has(gId)) {
+              groupMap.set(gId, { 
+                id: gId, 
+                is_merged_text: !!(customGroupMap.get(String(toRealId(qid))) || customGroupMap.get(String(qid))), 
+                items: [], 
+                sort_order: sortCounter 
+              });
+            }
+            groupMap.get(gId).items.push(copy);
+          });
+          sortCounter++;
+        });
+
+        let restoredGroups = Array.from(groupMap.values());
+        restoredGroups.sort((a, b) => a.sort_order - b.sort_order);
+        
+        restoredGroups.forEach((g: any) => {
+          g.items.sort((a: any, b: any) => {
+              if (a.question_id === a.parent_question_id || a.sub_num === 0) return -1;
+              if (b.question_id === b.parent_question_id || b.sub_num === 0) return 1;
+              return (a.sub_num || 0) - (b.sub_num || 0);
+          });
         });
 
         if (restoredGroups.length === 0) throw new Error('복원할 문항을 찾을 수 없습니다.');
 
-        const allItems = restoredGroups.flatMap(g => g.items);
+        const allItems = restoredGroups.reduce((acc, g) => acc.concat(g.items), []);
         await fetchDepthMappings(allItems);
         await fetchParentSources(allItems);
 
@@ -146,7 +182,9 @@ export function useExamData() {
         return;
       } catch (error) {
         console.error(error);
-        alert("편집 중인 문항을 복원하는데 실패했습니다.");
+        alert("이전 문항 데이터를 복원하는데 실패했습니다.");
+        setIsLoading(false);
+        return; 
       }
     }
 
@@ -167,11 +205,22 @@ export function useExamData() {
           sessionStorage.removeItem('editExamId');
         }
 
-        const { data: examData } = await supabase.from('exam_master').select('title').eq('exam_id', loadExamId).single();
+        const { data: examData } = await supabase.from('exam_master').select('title, layout_settings').eq('exam_id', loadExamId).single();
         if (examData && examData.title) {
             const titleToSet = isDuplicate ? `${examData.title} (복제본)` : examData.title;
             sessionStorage.setItem('examTitle', titleToSet);
         }
+
+        let userMergedTextQuestions: any[][] = [];
+        if (examData?.layout_settings?.userMergedTextQuestions) {
+            userMergedTextQuestions = examData.layout_settings.userMergedTextQuestions;
+        }
+
+        const customGroupMap = new Map<string, string>();
+        userMergedTextQuestions.forEach((arr, idx) => {
+            const gId = `custom_group_${idx}`;
+            arr.forEach(qid => customGroupMap.set(String(qid), gId));
+        });
 
         const { data: examItems, error: itemsErr } = await supabase.from('exam_item').select('*').eq('exam_id', loadExamId).order('sort_order');
         if (itemsErr || !examItems || examItems.length === 0) {
@@ -189,22 +238,24 @@ export function useExamData() {
         }
 
         const orderedQuestions = examItems.map((item: any) => {
-          const q = allData.find((qu: any) => qu.question_id === item.question_id);
+          const q = allData.find((qu: any) => String(qu.question_id) === String(item.question_id));
           return q ? { ...q, sort_order: item.sort_order } : null;
         }).filter(Boolean);
 
         let groupMap = new Map();
         orderedQuestions.forEach((q: any) => {
-          const src = String(q.pdf_source || 'UNKNOWN');
-          const page = String(q.detected_page_num || q.final_printed_page || 'U');
-          const baseNumMatch = String(q.question_number || '').match(/\d+/);
-          const baseNum = baseNumMatch ? baseNumMatch[0] : q.question_id;
-          let gId = `${src}_${page}_${baseNum}`;
-
-          if (q.parent_question_id && String(q.parent_question_id) !== 'null' && String(q.parent_question_id).trim() !== '') {
-              gId = `${src}_${page}_${q.parent_question_id}`;
+          let gId = customGroupMap.get(String(q.question_id));
+          
+          if (!gId) {
+              gId = `single_${q.question_id}_${Math.random()}`;
           }
-          if (!groupMap.has(gId)) groupMap.set(gId, { id: gId, items: [], sort_order: q.sort_order });
+
+          if (!groupMap.has(gId)) {
+             groupMap.set(gId, { 
+                id: gId, items: [], sort_order: q.sort_order, 
+                is_merged_text: !!customGroupMap.get(String(q.question_id)) 
+             });
+          }
           groupMap.get(gId).items.push(q);
         });
 
@@ -218,7 +269,7 @@ export function useExamData() {
         });
         allGroups.sort((a, b) => a.sort_order - b.sort_order);
 
-        const allItems = allGroups.flatMap(g => g.items);
+        const allItems = allGroups.reduce((acc, g) => acc.concat(g.items), []);
         await fetchDepthMappings(allItems);
         await fetchParentSources(allItems);
 
@@ -232,7 +283,6 @@ export function useExamData() {
       return;
     }
 
-    // 신규 생성 모드
     const itemIdsStr = sessionStorage.getItem("selectedItemIds");
     if (!itemIdsStr) {
       alert("선택된 단원 정보가 없습니다. Step 1으로 돌아갑니다.");
@@ -299,14 +349,7 @@ export function useExamData() {
 
       let groupMap = new Map();
       filteredData.forEach(q => {
-        const src = String(q.pdf_source || 'UNKNOWN'); 
-        const page = String(q.detected_page_num || q.final_printed_page || 'U');
-        const baseNumMatch = String(q.question_number || '').match(/\d+/);
-        const baseNum = baseNumMatch ? baseNumMatch[0] : q.question_id; 
-        let gId = `${src}_${page}_${baseNum}`;
-        if (q.parent_question_id && String(q.parent_question_id) !== 'null' && String(q.parent_question_id).trim() !== '') {
-            gId = `${src}_${page}_${q.parent_question_id}`;
-        }
+        let gId = `single_${q.question_id}_${Math.random()}`;
         if (!groupMap.has(gId)) groupMap.set(gId, { id: gId, items: [] });
         groupMap.get(gId).items.push(q);
       });
@@ -354,13 +397,13 @@ export function useExamData() {
           }
         }
         if (shortages > 0) {
-          let remaining = Object.values(diffPool).flat().sort(() => 0.5 - Math.random());
+          let remaining = Object.values(diffPool).reduce((acc, val) => acc.concat(val), []).sort(() => 0.5 - Math.random());
           selectedGroups.push(...remaining.splice(0, shortages));
         }
         selectedGroups = selectedGroups.slice(0, qCountReq);
       }
       
-      const allItems = selectedGroups.flatMap(g => g.items);
+      const allItems = selectedGroups.reduce((acc, g) => acc.concat(g.items), []);
       await fetchDepthMappings(allItems);
       await fetchParentSources(allItems);
 
@@ -471,8 +514,8 @@ export function useExamData() {
 
       if (error) throw error;
 
-      const existingIds = new Set(questions.flatMap(g => g.items.map((i: any) => i.question_id)));
-      const filteredData = (data || []).filter((item: any) => !existingIds.has(item.question_id) && item.is_hidden !== true && item.is_hidden !== 'Y' && item.is_hidden !== 'true');
+      const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i: any) => String(i.question_id))), []));
+      const filteredData = (data || []).filter((item: any) => !existingIds.has(String(item.question_id)) && item.is_hidden !== true && item.is_hidden !== 'Y' && item.is_hidden !== 'true');
 
       if (filteredData.length === 0) {
         setIsSearchingTwin(false);
@@ -507,6 +550,13 @@ export function useExamData() {
     if (questions.length === 0) return alert("출제할 문항이 없습니다.");
     sessionStorage.setItem("examQuestions", JSON.stringify(questions.map(g => g.items.map((i:any) => i.question_id))));
     sessionStorage.setItem("qCount", String(questions.length));
+    
+    const userMergedTextQuestions = questions
+      .filter(g => g.is_merged_text)
+      .map(g => g.items.map((i: any) => i.question_id));
+    sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(userMergedTextQuestions));
+
+    sessionStorage.setItem("restoreExamQuestions", "1"); 
     
     const gradeCount: Record<string, number> = {};
     
@@ -580,6 +630,6 @@ export function useExamData() {
     editingId, setEditingId, editForm, setEditForm,
     fetchDepthMappings, fetchParentSources, loadAddTaxonomyTree, goToStep3,
     handleDragStart, handleDragOver, handleDrop, openTwinSearch,
-    isClinicMode // 💡 내보내기에 isClinicMode 포함
+    isClinicMode 
   };
 }

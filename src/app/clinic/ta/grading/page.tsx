@@ -30,7 +30,7 @@ interface ClassInfo {
 
 interface AssignmentItem {
   key: string;
-  kind: 'exam' | 'hw';
+  kind: 'exam' | 'hw' | 'hw_exam' | 'print';
   examType?: string;
   totalQ: number;
   title: string;
@@ -39,6 +39,8 @@ interface AssignmentItem {
   status: string;
   assignmentId?: string;
   homeworkId?: string;
+  masterId?: string;           // 🌟 필수 파라미터 보강
+  target_questions?: any[];    // 🌟 필수 파라미터 보강
 }
 
 type Step = 'STUDENT' | 'ITEM';
@@ -59,6 +61,16 @@ const STATUS_STYLE: Record<string, string> = {
   '응시중': 'bg-blue-100 text-blue-600 border border-blue-200',
   '미응시': 'bg-slate-100 text-slate-500 border border-slate-200',
   '미제출': 'bg-slate-100 text-slate-500 border border-slate-200',
+};
+
+const purgeOldSession = () => {
+  const keysToRemove = [
+    'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
+    'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
+    'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId',
+    'editHomeworkId', 'editExamId', 'duplicateExamId'
+  ];
+  keysToRemove.forEach(k => sessionStorage.removeItem(k));
 };
 
 export default function TaGradingPage() {
@@ -128,7 +140,7 @@ export default function TaGradingPage() {
         const m = Array.isArray(e.exam_master) ? e.exam_master[0] : e.exam_master;
         const qCount = m?.total_questions || 0;
         if (m?.exam_type === '오답프린트') pendingPrintMap[e.student_id] = (pendingPrintMap[e.student_id] || 0) + qCount;
-        else if (m?.exam_type === '과제') pendingHwMap[e.student_id] = (pendingHwMap[e.student_id] || 0) + qCount;
+        else if (m?.exam_type === '과제' || m?.exam_type === '과제프린트') pendingHwMap[e.student_id] = (pendingHwMap[e.student_id] || 0) + qCount;
         else pendingExamMap[e.student_id] = (pendingExamMap[e.student_id] || 0) + qCount;
       });
 
@@ -229,7 +241,7 @@ export default function TaGradingPage() {
     setItems([]);
     try {
       const { data: exams } = await supabase.from('exam_assignment')
-        .select('assignment_id, status, total_score, created_at, exam_master!inner(title, sub_title, exam_type, total_questions)')
+        .select('assignment_id, status, total_score, created_at, exam_master!inner(exam_id, title, sub_title, exam_type, total_questions)')
         .eq('student_id', student.id).neq('exam_master.exam_type', '입학테스트').neq('exam_master.exam_type', '주간테스트')
         .order('created_at', { ascending: false });
 
@@ -237,10 +249,17 @@ export default function TaGradingPage() {
         .filter((e: any) => { const m = Array.isArray(e.exam_master) ? e.exam_master[0] : e.exam_master; return m && (m.total_questions || 0) > 0; })
         .map((e: any) => {
           const m = Array.isArray(e.exam_master) ? e.exam_master[0] : e.exam_master;
+          let kind: 'exam' | 'hw' | 'hw_exam' | 'print' = 'exam';
+          if (m?.exam_type === '과제' || m?.exam_type === '과제프린트') kind = 'hw_exam';
+          else if (m?.exam_type === '오답프린트') kind = 'print';
+
+          const subTitleStr = kind === 'hw_exam' ? '맞춤 과제(프린트)' : (m?.sub_title || '시험');
+          
           return {
-            key: `exam_${e.assignment_id}`, kind: 'exam', examType: m.exam_type, totalQ: m.total_questions || 0,
-            title: m?.title || '제목 없음', subtitle: m?.exam_type === '과제' ? '시험지(과제유형)' : (m?.sub_title || '시험'),
-            date: e.created_at, status: ['채점완료', '완료'].includes(e.status) ? `채점완료 (${e.total_score ?? 0}점)` : (e.status || '미응시'), assignmentId: String(e.assignment_id),
+            key: `exam_${e.assignment_id}`, kind, examType: m.exam_type, totalQ: m.total_questions || 0,
+            title: m?.title || '제목 없음', subtitle: subTitleStr,
+            date: e.created_at, status: ['채점완료', '완료'].includes(e.status) ? `채점완료 (${e.total_score ?? 0}점)` : (e.status || '미응시'), 
+            assignmentId: String(e.assignment_id), masterId: m?.exam_id,
           };
         });
 
@@ -264,7 +283,8 @@ export default function TaGradingPage() {
           const res = resultMap.get(h.homework_id); const tb = Array.isArray(h.textbook) ? h.textbook[0] : h.textbook;
           return {
             key: `hw_${h.homework_id}`, kind: 'hw', totalQ: targetQs.length, title: h.homework_title || '교재 과제',
-            subtitle: tb?.title || '교재', date: h.due_date || h.created_at, status: res?.status || '미제출', homeworkId: String(h.homework_id),
+            subtitle: tb?.title || '교재', date: h.due_date || h.created_at, status: res?.status || '미제출', 
+            homeworkId: String(h.homework_id), target_questions: targetQs
           };
         });
 
@@ -279,32 +299,21 @@ export default function TaGradingPage() {
     setIsLoadingItems(true);
     try {
       let count = 1;
-      if (item.kind === 'exam') {
+      if (['exam', 'hw_exam', 'print'].includes(item.kind)) {
         const { data: ex } = await supabase.from('exam_assignment').select('exam_id, class_id').eq('assignment_id', item.assignmentId).single();
         if (ex) {
           const { count: c } = await supabase.from('exam_assignment').select('*', { count: 'exact', head: true }).eq('exam_id', ex.exam_id).eq('class_id', ex.class_id);
           count = c || 1;
         }
       } else {
-        const { data: hw } = await supabase.from('homework_assignment').select('homework_title, class_id').eq('homework_id', item.homeworkId).single();
+        const { data: hw } = await supabase.from('homework_assignment').select('homework_title, class_id, target_student_id').eq('homework_id', item.homeworkId).single();
         if (hw) {
-          const { data: hws } = await supabase.from('homework_assignment').select('homework_id, target_student_id').eq('class_id', hw.class_id).eq('homework_title', hw.homework_title);
-          
-          if (hws && hws.length > 0) {
-            const hwIds = hws.map(h => h.homework_id);
-            const { data: res } = await supabase.from('student_homework_result').select('homework_id, status').in('homework_id', hwIds);
-            
-            const baseRes = res?.find(r => String(r.homework_id) === String(item.homeworkId));
-            const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseRes?.status || '');
-
-            const matchingHws = hws.filter(h => {
-              const r = res?.find(resItem => resItem.homework_id === h.homework_id);
-              const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
-              return isComp === isBaseCompleted;
-            });
-
-            const uniqueStudents = new Set(matchingHws.map(h => h.target_student_id).filter(Boolean));
-            count = uniqueStudents.size > 0 ? uniqueStudents.size : 1;
+          if (!hw.target_student_id) {
+            const { count: c } = await supabase.from('enrollment').select('*', { count: 'exact', head: true }).eq('class_id', hw.class_id);
+            count = c || 1;
+          } else {
+            const { data: hws } = await supabase.from('homework_assignment').select('homework_id, target_student_id').eq('class_id', hw.class_id).eq('homework_title', hw.homework_title);
+            count = hws ? hws.length : 1;
           }
         }
       }
@@ -323,7 +332,7 @@ export default function TaGradingPage() {
   };
 
   const executeSelect = (item: AssignmentItem, gradeAll: boolean) => {
-    setActiveItem(item.kind === 'exam' 
+    setActiveItem(['exam', 'hw_exam', 'print'].includes(item.kind)
       ? { mode: 'exam', assignmentId: item.assignmentId, studentId: selectedStudent!.id, studentName: selectedStudent!.name, gradeAll }
       : { mode: 'homework', homeworkId: item.homeworkId, studentId: selectedStudent!.id, studentName: selectedStudent!.name, gradeAll }
     );
@@ -353,6 +362,90 @@ export default function TaGradingPage() {
     if (!dateStr) return '-';
     const d = new Date(dateStr);
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  const handleEditExamToStep2 = async (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => {
+    e.stopPropagation();
+    if (!masterId || !assignId) return alert('시험지 정보를 찾을 수 없습니다.');
+    
+    try {
+      setIsLoading(true);
+      const { data: items, error } = await supabase.from('exam_item').select('question_id').eq('exam_id', masterId).order('sort_order');
+      if (error) throw error;
+      
+      const qIds = items?.map(i => String(i.question_id)) || [];
+      if (qIds.length === 0) return alert('연결된 문제 데이터를 찾을 수 없습니다.');
+
+      const { data: masterData } = await supabase.from('exam_master').select('layout_settings').eq('exam_id', masterId).single();
+
+      purgeOldSession();
+
+      const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
+      const finalTitle = title.startsWith('[') ? title : `${safeStudentName}${title || '문제지 수정'}`;
+
+      sessionStorage.setItem('restoreExamQuestions', '1');
+      sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
+      sessionStorage.setItem('examTitle', finalTitle);
+      sessionStorage.setItem('examSubTitle', subTitle || '');
+      sessionStorage.setItem('examType', examType || '오답프린트');
+      
+      if (masterData?.layout_settings?.userMergedTextQuestions) {
+         sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
+      }
+
+      sessionStorage.setItem('editOriginalType', 'exam');
+      sessionStorage.setItem('editOriginalId', String(assignId));
+      sessionStorage.setItem('editMasterId', String(masterId));
+      sessionStorage.setItem('editStudentId', String(studentId));
+      sessionStorage.setItem('editClassId', String(classId));
+
+      window.location.href = '/exam/step2?source=edit';
+    } catch (err: any) {
+      console.error(err);
+      alert('문항 정보를 불러오는 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => {
+    e.stopPropagation();
+    if (!targetQuestions || targetQuestions.length === 0) { alert('수정할 문항이 없습니다.'); return; }
+
+    try {
+      setIsLoading(true);
+      const tqIds = targetQuestions.map(id => Number(id)).filter(id => !isNaN(id));
+      const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', tqIds);
+      if (error) throw error;
+
+      const tqMap = new Map();
+      tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
+      const qIds = tqIds.map(id => tqMap.get(id)).filter(Boolean);
+
+      if (qIds.length === 0) { alert('연결된 문제 데이터를 찾을 수 없습니다.'); return; }
+
+      const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
+      const finalTitle = `${safeStudentName}${title || '과제 문항 수정'}`;
+
+      purgeOldSession();
+
+      sessionStorage.setItem('restoreExamQuestions', '1');
+      sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
+      sessionStorage.setItem('examTitle', finalTitle);
+      sessionStorage.setItem('examSubTitle', subTitle || '교재 과제'); 
+      sessionStorage.setItem('examType', '과제프린트');
+
+      sessionStorage.setItem('editOriginalType', 'hw');
+      sessionStorage.setItem('editOriginalId', String(hwId));
+      sessionStorage.setItem('editStudentId', String(studentId));
+      sessionStorage.setItem('editClassId', String(classId));
+
+      window.location.href = '/exam/step2?source=edit';
+
+    } catch (err: any) {
+      console.error(err);
+      alert('문항 정보를 불러오는 중 오류가 발생했습니다.');
+    } finally { setIsLoading(false); }
   };
 
   if (!ready) return <div className="h-screen bg-slate-100" />;
@@ -409,6 +502,7 @@ export default function TaGradingPage() {
       {step === 'ITEM' && selectedStudent && (
         <div className="max-w-2xl mx-auto h-full flex flex-col w-full">
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mb-3 flex items-center gap-2">
+            <button onClick={() => { setStep('STUDENT'); setSelectedStudent(null); }} className="text-slate-400 hover:text-slate-600 text-xs font-bold mr-1">←</button>
             <span className="text-sm font-black text-[#002864]">👤 {selectedStudent.name}</span>
             <span className="text-[11px] text-slate-400 font-semibold">{selectedStudent.className}</span>
           </div>
@@ -416,22 +510,32 @@ export default function TaGradingPage() {
             {isLoadingItems ? <div className="p-10 text-center text-slate-400 font-bold text-sm">불러오는 중...</div> : items.length === 0 ? <div className="p-10 text-center text-slate-400 font-bold text-sm">이 학생에게 나간 시험지/과제가 없습니다.</div> : (
               items.map(item => {
                 let badgeLabel = '시험'; let badgeColor = 'bg-blue-100 text-blue-700';
-                if (item.kind === 'hw' || item.examType === '과제') { badgeLabel = '과제'; badgeColor = 'bg-amber-100 text-amber-700'; } 
-                else if (item.examType === '오답프린트') { badgeLabel = '오답'; badgeColor = 'bg-emerald-100 text-emerald-700'; }
+                if (item.kind === 'hw' || item.kind === 'hw_exam') { badgeLabel = '과제'; badgeColor = 'bg-amber-100 text-amber-700'; } 
+                else if (item.kind === 'print') { badgeLabel = '오답'; badgeColor = 'bg-emerald-100 text-emerald-700'; }
 
                 return (
-                  <button key={item.key} onClick={() => checkGroupGrading(item)} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3">
-                    <div className="min-w-0">
+                  <div key={item.key} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 group">
+                    <button onClick={() => checkGroupGrading(item)} className="min-w-0 flex-1 text-left">
                       <div className="flex items-center gap-1.5">
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${badgeColor}`}>{badgeLabel}</span>
                         <span className="text-[13px] font-bold text-slate-700 truncate">{item.title}</span>
                       </div>
                       <p className="text-[11px] text-slate-400 font-medium mt-0.5 truncate">{item.subtitle} · {formatDate(item.date)} <span className="font-bold text-slate-500 ml-1">· 총 {item.totalQ}문항</span></p>
+                    </button>
+                    
+                    <div className="flex items-center gap-3 shrink-0">
+                       <span className={`shrink-0 text-[10px] font-extrabold px-2 py-1 rounded whitespace-nowrap ${STATUS_STYLE[item.status] || STATUS_STYLE[item.status.split(' ')[0]] || 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                         {item.status}
+                       </span>
+                       <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                         {['exam', 'print', 'hw_exam'].includes(item.kind) ? (
+                            <button onClick={(e) => handleEditExamToStep2(e, item.assignmentId, item.masterId, item.title, item.subtitle, selectedStudent.name, selectedStudent.id, selectedStudent.classId, item.examType || '오답프린트')} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
+                         ) : (
+                            <button onClick={(e) => handleEditHomeworkToStep2(e, item.kind, item.homeworkId, item.target_questions, item.title, item.subtitle, selectedStudent.name, selectedStudent.id, selectedStudent.classId)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
+                         )}
+                       </div>
                     </div>
-                    <span className={`shrink-0 text-[10px] font-extrabold px-2 py-1 rounded whitespace-nowrap ${STATUS_STYLE[item.status] || STATUS_STYLE[item.status.split(' ')[0]] || 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
-                      {item.status}
-                    </span>
-                  </button>
+                  </div>
                 );
               })
             )}
@@ -449,7 +553,6 @@ export default function TaGradingPage() {
           <h1 className="font-lexend text-lg font-bold text-[#002864] tracking-tight leading-none">Logica Clinic <span className="text-slate-300 mx-1">·</span> 조교 채점</h1>
           <div className="flex items-center gap-3 mt-1.5">
             <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
-              {/* 🌟 상단 1. 버튼 클릭 시 데이터 즉시 새로고침 되도록 수정 */}
               <button onClick={() => { 
                 setStep('STUDENT'); 
                 setPickerOpen(true); 
@@ -458,7 +561,6 @@ export default function TaGradingPage() {
                 1. 기준 학생 선택
               </button>
               <span className="text-slate-300">→</span>
-              {/* 🌟 상단 2. 버튼 클릭 시 데이터 즉시 새로고침 되도록 수정 */}
               <button onClick={() => { 
                 if(!selectedStudent && !activeItem) return alert('먼저 학생을 선택해주세요.'); 
                 
@@ -512,7 +614,6 @@ export default function TaGradingPage() {
                   studentId={activeItem.studentId}
                   gradeAll={activeItem.gradeAll}
                   onBack={() => { 
-                    // 🌟 채점 완료 시 깔끔하게 이전 학생의 목록으로 돌아가도록 수정
                     let found = null;
                     for (const c of groupedClasses) {
                       const s = c.students.find(st => st.id === activeItem?.studentId);
@@ -525,8 +626,8 @@ export default function TaGradingPage() {
                     setStep('ITEM');
                     setPickerOpen(true); 
                     
-                    loadStudents(); // 배경의 학생 리스트 갱신
-                    loadItemsForStudent(student); // 현재 학생의 과제 목록 갱신
+                    loadStudents(); 
+                    loadItemsForStudent(student); 
                   }}
                   onDirtyChange={setActiveDirty}
                 />

@@ -22,7 +22,6 @@ function ExamStep2Content() {
     }
   }, []);
 
-  // 상태 변화 시 MathJax 재렌더링 트리거
   useEffect(() => {
     if ((window as any).MathJax?.typesetPromise) {
       (window as any).MathJax.typesetPromise().catch(() => {});
@@ -42,7 +41,10 @@ function ExamStep2Content() {
         </div>
         <div className="flex space-x-6">
           <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold">1</span><span className="font-bold text-slate-400">조건 및 단원 설정</span></div>
-          <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-[#002864] text-white text-center text-sm font-bold shadow-sm">2</span><span className="font-bold text-[#002864]">문항 뷰어 & 편집</span></div>
+          {/* 🌟 편집기 탭을 눌러도 뒤로 가기 에러를 막을 수 있도록 안전 플래그(Session) 추가 */}
+          <div className="flex items-center space-x-2 cursor-pointer hover:opacity-80" onClick={() => { sessionStorage.setItem("restoreExamQuestions", "1"); router.push('/exam/step2'); }}>
+            <span className="w-6 h-6 rounded-full bg-[#002864] text-white text-center text-sm font-bold shadow-sm">2</span><span className="font-bold text-[#002864]">문항 뷰어 & 편집</span>
+          </div>
           <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold border border-slate-200">3</span><span className="font-bold text-slate-400">시험지 배포</span></div>
         </div>
       </header>

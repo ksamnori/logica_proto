@@ -3,7 +3,6 @@ import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, formatText, getCleanUrl, renderParentRelations } from "./examUtils";
 
-// 💡 [정렬 알고리즘] ID 분해 및 완벽한 숫자 정렬
 const parseId = (id: string) => {
   if (!id) return null;
   const match = String(id).trim().match(/^[\[\s]*([EMH])(\d)(\d)(\d+)(.*)/);
@@ -65,7 +64,6 @@ const sortD1 = (a: string, b: string) => {
   return (weight[a] || 99) - (weight[b] || 99) || sortNumeric(a, b);
 };
 
-// 💡 아코디언 트리 노드 렌더링 (대단원이 Depth 3으로 시작)
 const AddTreeNode = React.memo(({ nodeKey, node, depth, selectedAddIds, toggleAddItem, toggleAddFolder }: any) => {
   const [isOpen, setIsOpen] = useState(depth <= 3);
 
@@ -115,11 +113,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
     handleDragStart, handleDragOver, handleDrop
   } = examData;
 
-  // 💡 [핵심 추가] 상단 버튼 탭을 위한 로컬 상태 관리 (학교 / 학년-학기)
   const [currentAddD1, setCurrentAddD1] = useState<string>('중학교');
   const [currentAddD2, setCurrentAddD2] = useState<string>('');
 
-  // 💡 데이터 로딩 시 또는 상위 탭(D1) 변경 시 하위 탭(D2) 자동 선택 로직
   useEffect(() => {
     if (addMasterData) {
       if (!addMasterData[currentAddD1]) {
@@ -155,6 +151,96 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const moveSelectedToBottom = () => { if(checkedIds.size > 0) setQuestions([...questions.filter((q: any) => !checkedIds.has(q.id)), ...questions.filter((q: any) => checkedIds.has(q.id))]); };
   const deleteSelected = () => { if(checkedIds.size > 0 && confirm("선택한 문항을 삭제하시겠습니까?")) { setQuestions(questions.filter((q: any) => !checkedIds.has(q.id))); setCheckedIds(new Set()); } };
 
+  const mergeSelected = () => {
+    if (checkedIds.size === 0) return alert("병합할 문항을 선택하세요.");
+    setQuestions((prevQs: any[]) => {
+      const newQs = [...prevQs];
+      if (checkedIds.size === 1) {
+        return newQs.map(g => checkedIds.has(g.id) ? { ...g, is_merged_text: true } : g);
+      }
+      if (!confirm("선택한 문항들을 공통 지문을 가진 하나의 묶음 문항으로 병합하시겠습니까?")) return prevQs;
+      const selectedGroups = newQs.filter(g => checkedIds.has(g.id));
+      const unselectedGroups = newQs.filter(g => !checkedIds.has(g.id));
+      
+      const allMergedItems = selectedGroups.reduce((acc: any[], g: any) => acc.concat(g.items), []);
+      const mergedGroup = {
+        id: `merged_${Date.now()}_${allMergedItems[0].question_id}`,
+        is_merged_text: true, 
+        items: allMergedItems,
+        sort_order: selectedGroups[0].sort_order
+      };
+      let insertIndex = newQs.findIndex(g => g.id === selectedGroups[0].id);
+      return [...unselectedGroups.slice(0, insertIndex), mergedGroup, ...unselectedGroups.slice(insertIndex)];
+    });
+    setCheckedIds(new Set());
+    alert('✅ 서브문항 공통 지문 선택 병합이 완료되었습니다!');
+  };
+
+  const autoMergeSubQuestions = () => {
+    if (!confirm("공통 지문이 있는 연속된 서브 문항들을 자동으로 찾아 병합하시겠습니까?")) return;
+    
+    setQuestions((prevQs: any[]) => {
+      const result: any[] = [];
+      let i = 0;
+      
+      const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
+      let mergedCount = 0;
+
+      while (i < prevQs.length) {
+        let currentGroup = { ...prevQs[i], items: [...prevQs[i].items] }; 
+        let j = i + 1;
+        
+        while (j < prevQs.length) {
+          const item1 = currentGroup.items[0];
+          const item2 = prevQs[j].items[0];
+          
+          const text1 = item1.question || item1.text_question || "";
+          const text2 = item2.question || item2.text_question || "";
+          
+          const clean1 = text1.replace(removeNumberingRegex, "$1");
+          const clean2 = text2.replace(removeNumberingRegex, "$1");
+          
+          let k = 0;
+          while (k < clean1.length && k < clean2.length && clean1[k] === clean2[k]) k++;
+          
+          const commonPrefix = clean1.substring(0, k);
+          const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, '').trim();
+          
+          const hasSameParent = item1.parent_question_id && item1.parent_question_id !== 'null' && item1.parent_question_id === item2.parent_question_id;
+          
+          // Taxonomy 검사 완화, 지문 5글자 이상 일치하면 병합
+          if (hasSameParent || textOnlyCommon.length >= 5) {
+            if (!currentGroup.id.startsWith('merged_')) {
+                currentGroup.id = `merged_${Date.now()}_${item1.question_id}`;
+            }
+            currentGroup.items.push(...prevQs[j].items);
+            currentGroup.is_group = true;
+            currentGroup.is_merged_text = true;
+            mergedCount++;
+            j++;
+          } else {
+            break; 
+          }
+        }
+        
+        if (currentGroup.items.length > 1) {
+          currentGroup.is_merged_text = true;
+        }
+        
+        result.push(currentGroup);
+        i = j; 
+      }
+
+      if (mergedCount === 0) {
+          alert("병합할 만한 조건(연속됨 + 5글자 이상 지문 일치 등)을 만족하는 문항이 없습니다.");
+      } else {
+          alert(`✨ 시험지 내의 연속된 서브 문항들이 성공적으로 자동 병합되었습니다!`);
+      }
+      
+      return result;
+    });
+  };
+
   const searchNewQuestions = async () => {
     const selectedCatIds = Array.from(addSelectedCatIds).filter(val => val);
     if (selectedCatIds.length === 0) return alert("검색할 단원이나 유형을 하나 이상 선택해주세요.");
@@ -167,7 +253,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
         if (error) throw error;
         if (data) allSearched = allSearched.concat(data);
       }
-      const existingIds = new Set(questions.flatMap((g: any) => g.items.map((i:any) => i.question_id)));
+      
+      const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i:any) => i.question_id)), []));
       let newQs = allSearched.filter(q => !existingIds.has(q.question_id) && !q.is_hidden && q.is_hidden !== 'Y');
       newQs = newQs.sort(() => 0.5 - Math.random()).slice(0, 50); 
       await fetchDepthMappings(newQs); await fetchParentSources(newQs);
@@ -247,15 +334,17 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   <h4 className="font-bold text-slate-700 text-sm">문제 목록 및 순서</h4>
                   <span className="text-xs font-bold text-blue-500 bg-blue-100 border border-blue-200 px-2 py-1 rounded">✋ 드래그하거나 선택하여 이동</span>
                 </div>
-                <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
-                  <label className="flex items-center space-x-2 px-1 cursor-pointer">
+                <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm overflow-x-auto no-scrollbar">
+                  <label className="flex items-center space-x-2 px-1 cursor-pointer shrink-0">
                     <input type="checkbox" checked={questions.length > 0 && checkedIds.size === questions.length} onChange={(e) => toggleAllChecks(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-[#002864] cursor-pointer" />
-                    <span className="text-[13px] font-extrabold text-slate-600">전체 선택</span>
+                    <span className="text-[13px] font-extrabold text-slate-600 whitespace-nowrap">전체 선택</span>
                   </label>
-                  <div className="flex space-x-1.5">
-                    <button onClick={moveSelectedToTop} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors">↑ 맨 위로</button>
-                    <button onClick={moveSelectedToBottom} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors">↓ 맨 아래로</button>
-                    <button onClick={deleteSelected} className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold rounded border border-rose-200 transition-colors">🗑️ 삭제</button>
+                  <div className="flex space-x-1.5 shrink-0 ml-auto">
+                    <button onClick={moveSelectedToTop} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↑ 맨 위로</button>
+                    <button onClick={moveSelectedToBottom} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↓ 맨 아래로</button>
+                    <button onClick={autoMergeSubQuestions} className="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 병합</button>
+                    <button onClick={mergeSelected} className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[11px] font-bold rounded border border-indigo-200 transition-colors shadow-sm whitespace-nowrap">🔗 선택 병합</button>
+                    <button onClick={deleteSelected} className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold rounded border border-rose-200 transition-colors whitespace-nowrap">🗑️ 삭제</button>
                   </div>
                 </div>
               </div>
@@ -271,19 +360,47 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   else if(diff === '상') diffColor = "border-indigo-500 text-indigo-600";
                   else if(diff === '최상') diffColor = "border-rose-500 text-rose-600";
 
+                  // 🌟 주석을 return 위로 올림으로써 구문 오류를 완벽하게 해결했습니다!
                   return (
-                    <li key={g.id} draggable onDragStart={(e) => handleDragStart(e, idx)} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, idx)}
-                        className={`flex items-center justify-between bg-white hover:bg-blue-50 p-2.5 rounded-xl border transition-all shadow-sm ${draggedIdx === idx ? 'opacity-50 border-blue-400' : 'border-slate-200'}`}>
-                      <div className="flex items-center space-x-2 w-[55%]">
-                        <input type="checkbox" checked={checkedIds.has(g.id)} onChange={(e) => toggleCheck(g.id, e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer" />
-                        <div className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-100 rounded cursor-grab" title="드래그하여 순서 변경"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg></div>
-                        <span className="font-extrabold text-[#002864] text-[15px] w-5 text-center cursor-pointer" onClick={() => document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>{idx + 1}</span>
-                        <div className="flex items-center space-x-1.5 overflow-hidden">
+                    <li key={g.id} 
+                        draggable 
+                        onDragStart={(e) => handleDragStart(e, idx)} 
+                        onDragOver={handleDragOver} 
+                        onDrop={(e) => handleDrop(e, idx)}
+                        onClick={() => toggleCheck(g.id, !checkedIds.has(g.id))}
+                        className={`flex items-center justify-between bg-white hover:bg-blue-50 p-2.5 rounded-xl border transition-all shadow-sm cursor-pointer select-none ${draggedIdx === idx ? 'opacity-50 border-blue-400' : 'border-slate-200'}`}>
+                      <div className="flex items-center space-x-2 w-[55%] pointer-events-none">
+                        
+                        <input type="checkbox" checked={checkedIds.has(g.id)} readOnly className="w-4 h-4 rounded border-slate-300 accent-[#002864] shrink-0" />
+                        
+                        <div className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-100 rounded cursor-grab pointer-events-auto" 
+                             title="드래그하여 순서 변경"
+                             onClick={(e) => e.stopPropagation()}>
+                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                        </div>
+                        
+                        <span className="font-extrabold text-[#002864] text-[15px] w-5 text-center cursor-pointer hover:underline pointer-events-auto" 
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }}>
+                          {idx + 1}
+                        </span>
+                        
+                        <div className="flex items-center space-x-1.5 overflow-hidden pointer-events-none">
                           <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap">{typeName}</span>
                           <span className={`text-[12px] font-extrabold px-1 border-l-2 ${diffColor}`}>{diff}</span>
                         </div>
                       </div>
-                      <div className="text-[12px] text-slate-600 font-bold truncate w-[45%] text-right cursor-pointer" title={depth5Name} onClick={() => document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' })}>{depth5Name}</div>
+                      
+                      <div className="text-[12px] text-slate-600 font-bold truncate w-[45%] text-right cursor-pointer hover:underline pointer-events-auto" 
+                           title={depth5Name} 
+                           onClick={(e) => {
+                             e.stopPropagation();
+                             document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                           }}>
+                        {depth5Name}
+                      </div>
                     </li>
                   );
                 })}
@@ -306,7 +423,6 @@ export default function LeftPanel({ examData }: { examData: any }) {
                 <button onClick={searchNewQuestions} className="px-5 py-2.5 bg-[#002864] text-white text-sm font-extrabold rounded-lg shadow-sm hover:bg-blue-900 transition-colors">문항 검색하기</button>
               </div>
 
-              {/* 💡 [핵심 변경] Step 1 스타일의 상단 탭 및 버튼 영역 추가 */}
               {!addMasterData ? (
                 <div className="flex-1 flex items-center justify-center text-slate-400 font-bold">분류 체계를 불러오는 중...</div>
               ) : (
@@ -330,7 +446,6 @@ export default function LeftPanel({ examData }: { examData: any }) {
                         Object.keys(addMasterData[currentAddD1].children[currentAddD2].children)
                         .sort((a, b) => compareNodes(a, addMasterData[currentAddD1].children[currentAddD2].children[a], b, addMasterData[currentAddD1].children[currentAddD2].children[b]))
                         .map(k => (
-                          // 💡 트리 렌더링 시작을 Depth 3(대단원)으로 지정
                           <AddTreeNode key={k} nodeKey={k} node={addMasterData[currentAddD1].children[currentAddD2].children[k]} depth={3} selectedAddIds={addSelectedCatIds} 
                             toggleAddItem={(id: string, chk: boolean) => setAddSelectedCatIds((prev:any) => { const n = new Set(prev); chk ? n.add(id) : n.delete(id); return n; })} 
                             toggleAddFolder={(node: any, chk: boolean) => { const ids: string[] = []; const trav = (n: any) => { if(n.itemId) ids.push(n.itemId); if(n.children) Object.values(n.children).forEach(trav); }; trav(node); setAddSelectedCatIds((prev:any) => { const n = new Set(prev); ids.forEach((id: string) => chk ? n.add(id) : n.delete(id)); return n; }); }} />

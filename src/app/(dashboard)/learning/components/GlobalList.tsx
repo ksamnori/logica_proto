@@ -14,6 +14,7 @@ interface GlobalListProps {
   handleSelectAllGlobal: () => void;
   handleBulkCompleteGlobal: () => void;
   handleBulkDeleteGlobal: () => void;
+  handleExtractCommonHomework: () => void; // 🌟 추가
   handleViewChange: (view: any) => void;
   toggleGlobalSelection: (id: string) => void;
   formatDateLabel: (dateStr: string, includeTime?: boolean) => string;
@@ -22,13 +23,14 @@ interface GlobalListProps {
   handleDeleteHomework: (hwId: string, studentId: string) => void;
   handleDeletePrint: (assignmentId: string, examId: string) => void;
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
-  handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string) => void; 
+  handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
+  handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
 }
 
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
-  handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleViewChange, toggleGlobalSelection,
-  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2
+  handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleExtractCommonHomework, handleViewChange, toggleGlobalSelection,
+  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2
 }: GlobalListProps) {
   
   return (
@@ -53,6 +55,12 @@ export default function GlobalList({
             <span className="text-[12px] font-bold text-slate-700">전체 선택</span>
           </label>
           <div className="flex items-center gap-1.5">
+            {/* 🌟 다중 선택 시 공통 추출 버튼 노출 */}
+            {activeTab === 'HOMEWORK' && globalSelectedBlocks.length >= 2 && (
+              <button onClick={handleExtractCommonHomework} className="px-3 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-[11px] transition-colors whitespace-nowrap shadow-sm mr-2 animate-pulse">
+                🔗 공통 과제 분리
+              </button>
+            )}
             <button onClick={handleBulkCompleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap">
               ✅ 선택 완료처리 ({globalSelectedBlocks.length})
             </button>
@@ -102,6 +110,15 @@ export default function GlobalList({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
+              let detailHref = '';
+              if (activeTab === 'HOMEWORK' && !res.is_exam_hw) {
+                detailHref = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`;
+              } else if (res.is_exam_hw) {
+                detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
+              } else {
+                detailHref = `/exam/review?assignment_id=${res.assignment_id}`;
+              }
+
               return (
                 <div key={`${itemId}_${idx}`} onClick={() => toggleGlobalSelection(itemId)} className={`border-2 rounded-xl p-2 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}>
                   <div className="flex items-center gap-2 w-1/2 min-w-0 shrink-0 flex-1">
@@ -132,27 +149,17 @@ export default function GlobalList({
                     </div>
                     
                     <div className="flex items-center gap-2 shrink-0 border-l border-slate-300 pl-3 w-[140px] justify-end">
-                      {/* 🌟 펜(수정) 버튼 */}
                       {!(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
-                        <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?id=${m?.exam_id || ''}&exam_id=${m?.exam_id || ''}`, '_blank'); }} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
+                        <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
                       ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, res.masterId, res.target_questions || hw?.target_questions, titleStr)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
+                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      {/* 🌟 휴지통 버튼 */}
                       <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : activeTab === 'INCORRECT' ? handleDeletePrint(res.assignment_id, m?.exam_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
-                      {/* 🌟 프린터 버튼 */}
-                      <button 
-                        onClick={(e) => handlePrintItem(e, res.type, res.masterId, res.target_questions || hw.target_questions, titleStr, res.subTitle)} 
-                        className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" 
-                        title="프린트 출력"
-                      >
-                        🖨️
-                      </button>
+                      <button onClick={(e) => handlePrintItem(e, res.type, res.masterId, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 출력">🖨️</button>
 
-                      {/* 🌟 상세 버튼 */}
-                      <button onClick={(e) => { e.stopPropagation(); window.location.href = activeTab === 'HOMEWORK' && !res.is_exam_hw ? `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}` : `/exam/review?assignment_id=${res.assignment_id}`; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
+                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>
                   </div>
                 </div>

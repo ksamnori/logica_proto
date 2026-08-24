@@ -238,84 +238,6 @@ export default function ExamViewerPage() {
             return q ? { ...q, sort_order: item.sort_order } : null;
         }).filter(Boolean) || [];
 
-        // 🌟 [누락 복구] DB 로드 시 병합 정보를 해독하여 문항들을 묶어주는 핵심 로직[cite: 10]
-        let userMergedTextQuestions: any[][] = [];
-        if (dbLayoutSettings && dbLayoutSettings.userMergedTextQuestions) {
-           userMergedTextQuestions = dbLayoutSettings.userMergedTextQuestions;
-        }
-
-        const customGroupMap = new Map<string, string>();
-        userMergedTextQuestions.forEach((arr: any[], idx: number) => {
-            const gId = `custom_group_${idx}`;
-            arr.forEach(qid => customGroupMap.set(String(qid), gId));
-        });
-
-        const groupMap = new Map<string, any>();
-        orderedQuestions.forEach((q: any) => {
-           let gId = customGroupMap.get(String(q.question_id));
-           if (!gId) {
-               gId = `single_${q.question_id}_${Math.random()}`;
-           }
-
-           if (!groupMap.has(gId)) {
-              groupMap.set(gId, {
-                 id: gId,
-                 questions: [],
-                 repQ: q,
-                 is_merged_text: !!customGroupMap.get(String(q.question_id))
-              });
-           }
-           groupMap.get(gId).questions.push(q);
-        });
-
-        const groups = Array.from(groupMap.values());
-        groups.forEach((g: any, idx: number) => {
-           g.sort_order = idx + 1;
-           g.displayNum = idx + 1;
-        });
-
-        // 레이아웃 초기화
-        let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
-        let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
-
-        if (dbLayoutSettings) {
-          const s = typeof dbLayoutSettings === 'string' ? JSON.parse(dbLayoutSettings) : dbLayoutSettings;
-          if (s.column) initialCol = parseInt(s.column);
-          if (s.split) initialSplit = parseInt(s.split);
-          if (s.titleMode) initialTitleMode = s.titleMode;
-          if (s.template) initialTmpl = s.template;
-          if (s.numberColor) cNum = s.numberColor;
-          if (s.titleColor) cTit = s.titleColor;
-          if (s.lineColor) cLin = s.lineColor;
-          if (s.examDate) eDate = s.examDate;
-        }
-
-        setExamTitle(title);
-        setDisplayBadge(badge);
-        setLayoutType(lType);
-        setIsAdmissionLock(lType === '입학테스트');
-        if (wWeek) setTestWeek(wWeek);
-        if (wGrade) setWeeklyTargetGrade(wGrade);
-
-        setColumns(initialCol); setSplits(initialSplit); setTitleMode(initialTitleMode); setTemplate(initialTmpl);
-        setColorNum(cNum); setColorTitle(cTit); setColorLine(cLin); setExamDate(eDate);
-
-        hasUnsavedChangesRef.current = false; // 기존 DB 로드이므로 변경점 없음
-
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge };
-
-        // 🌟 [누락 복구] 폰트를 기다린 후 뷰어 렌더링 호출
-        Promise.all([
-          document.fonts.load("400 17px 'NanumSquare'"),
-          document.fonts.load("700 17px 'NanumSquare'"),
-          document.fonts.load("normal 42px 'CJU_Medium'")
-        ]).catch(() => {}).finally(() => {
-          if (lType === '입학테스트') renderAdmissionTestPages();
-          else remeasureAndRender(initialCol, initialSplit, initialTitleMode, initialTmpl, eDate, title, badge);
-        });
-
-        return; // DB 로드 후 안전하게 종료 (아래 Session 로드 로직 건너뜀)
-
       } else if (sessionStorage.getItem('examQuestions')) {
         isNew = true;
         isNewExamRef.current = true;
@@ -987,6 +909,7 @@ export default function ExamViewerPage() {
     setTestWeek(getISOWeekKST(new Date(d + 'T00:00:00Z')));
   };
 
+  // 🌟 [핵심 업데이트] 분리 명령(`splitHomeworkIds`)을 받아 안전하게 처리하고 자동 다중 배부!
   const saveExam = async (skipNav: boolean = false): Promise<boolean> => {
     setIsSaving(true);
     try {
@@ -1024,6 +947,7 @@ export default function ExamViewerPage() {
       let targetStudentId = sessionStorage.getItem('clinicTargetStudentId') || sessionStorage.getItem('editStudentId');
       let targetClassId = sessionStorage.getItem('clinicTargetClassId') || sessionStorage.getItem('editClassId');
 
+      // 1. 단일 원본 파기 로직 (일반 수정 시 기존 과제 삭제)
       if (editOriginalType === 'hw' && editOriginalId) {
           const hwNum = Number(editOriginalId);
           const { data: origHw } = await supabase.from('homework_assignment').select('*').eq('homework_id', hwNum).single();
@@ -1044,9 +968,11 @@ export default function ExamViewerPage() {
 
       let examId = currentExamIdRef.current;
 
+      // 새 마스터로 굽기 (수정 모드이거나, 분리/복제 모드일 때)
       const splitHwIdsStr = sessionStorage.getItem('splitHomeworkIds');
       if (isNewExamRef.current || editOriginalId || splitHwIdsStr) {
         if (rebuildExamIdRef.current) {
+          // 기존 시험지(Exam)를 덮어씀 (채점 이력 보존)
           const { error: rebuildErr } = await supabase.from('exam_master').update({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
@@ -1057,6 +983,7 @@ export default function ExamViewerPage() {
           examId = rebuildExamIdRef.current;
           await supabase.from('exam_item').delete().eq('exam_id', examId);
         } else {
+          // 아예 새로운 시험지 생성 (원본 과제가 삭제되었거나 공통 추출로 신규 발급 시)
           const { data, error: insertErr } = await supabase.from('exam_master').insert({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
@@ -1079,7 +1006,9 @@ export default function ExamViewerPage() {
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
 
+      // 🌟 [핵심] 2. 다중 원본 분리(Split) 적용 - 새 마스터가 성공적으로 구워진 뒤에만 안전하게 기존 과제를 쪼갭니다!
       const splitCommonTqIdsStr = sessionStorage.getItem('splitCommonTqIds');
+      
       if (splitHwIdsStr && splitCommonTqIdsStr) {
           const splitHwIds = JSON.parse(splitHwIdsStr);
           const splitCommonTqIds = JSON.parse(splitCommonTqIdsStr);
@@ -1101,6 +1030,7 @@ export default function ExamViewerPage() {
           }
       }
 
+      // 🌟 [핵심] 3. 학생 다중 배부 로직 (클리닉 모드이거나, 공통 분리 모드일 때 모두 자동 배부)
       const multiStudentsStr = sessionStorage.getItem('clinicTargetStudentIds');
       const targetStudents = multiStudentsStr ? JSON.parse(multiStudentsStr) : (targetStudentId ? [targetStudentId] : []);
       
@@ -1128,6 +1058,7 @@ export default function ExamViewerPage() {
       currentExamIdRef.current = examId; 
       setSavedExamId(examId); 
       
+      // 깔끔한 세션 정리
       const keysToRemove = [
         'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
         'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',

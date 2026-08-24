@@ -18,12 +18,99 @@ interface ActionProps {
   fetchStatsForTab: (all: StudentInfo[]) => void;
 }
 
+const safeParseIds = (raw: any): number[] => {
+  if (!raw) return [];
+  try {
+    let val = raw;
+    if (typeof val === 'string') {
+      if (val === "null" || val.trim() === "") return [];
+      val = JSON.parse(val);
+    }
+    if (Array.isArray(val)) return val.map(Number);
+  } catch (err) {
+    return [];
+  }
+  return [];
+};
+
+const purgeOldSession = () => {
+  const keysToRemove = [
+    'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
+    'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
+    'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
+    'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds'
+  ];
+  keysToRemove.forEach(k => sessionStorage.removeItem(k));
+};
+
 export function useLearningActions({
   currentView, activeTab, allStudentsList,
   selectedBlocks, setSelectedBlocks, globalSelectedBlocks, setGlobalSelectedBlocks,
   setIsLoading, setIsGeneratingPrint, setDateFilter,
   fetchStudentTimeline, fetchGlobalListForTab, fetchStatsForTab
 }: ActionProps) {
+
+  // 🌟 [핵심 수정] 즉시 삭제하지 않고(지연), 뷰어에 분리할 정보를 안전하게 전달만 합니다!
+  const handleExtractCommonHomework = async () => {
+    const hwBlocks = globalSelectedBlocks.length > 0 ? globalSelectedBlocks : selectedBlocks;
+    const validBlocks = hwBlocks.filter(b => b.startsWith('hw_') && !b.startsWith('hw_exam_'));
+    
+    if (validBlocks.length < 2) return alert("공통 과제를 추출하려면 2개 이상의 교재 과제(📚)를 선택해주세요.");
+    if (!confirm(`선택하신 ${validBlocks.length}명의 과제에서 공통 문항을 추출하여 병합용 새 과제로 분리하시겠습니까?\n(나머지 추가/개별 문항은 기존처럼 각 학생의 과제로 남습니다.)`)) return;
+
+    setIsLoading(true);
+    try {
+      const hwIds = [...new Set(validBlocks.map(b => Number(b.split('_')[1])))];
+      const studentIds = [...new Set(validBlocks.map(b => b.split('_')[2]))];
+
+      const { data: hwData, error } = await supabase.from('homework_assignment').select('*').in('homework_id', hwIds);
+      if (error || !hwData) throw error;
+
+      let commonTqIds: number[] = [];
+      hwData.forEach((hw, idx) => {
+        const tqs = safeParseIds(hw.target_questions);
+        if (idx === 0) commonTqIds = [...tqs];
+        else commonTqIds = commonTqIds.filter(id => tqs.includes(id));
+      });
+
+      if (commonTqIds.length === 0) {
+        setIsLoading(false);
+        return alert("선택하신 과제들 사이에 공통된 문항이 하나도 없습니다.");
+      }
+
+      const firstHw = hwData[0];
+      const classId = firstHw.class_id;
+
+      // 🚫 기존의 DB 즉각 삭제(delete) 로직을 전부 뺐습니다. (데이터 보호)
+
+      const { data: tqData } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', commonTqIds);
+      const tqMap = new Map();
+      tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
+      const qIds = commonTqIds.map(id => tqMap.get(id)).filter(Boolean);
+
+      purgeOldSession();
+
+      sessionStorage.setItem('restoreExamQuestions', '1');
+      sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
+      sessionStorage.setItem('examTitle', '[공통 과제] ' + firstHw.homework_title);
+      sessionStorage.setItem('examSubTitle', '공통 과제 (병합/편집용)'); 
+      sessionStorage.setItem('examType', '과제프린트');
+
+      // 🌟 뷰어에서 "저장(Save)"을 누를 때 쪼개도록 세션에 명령어를 담아 보냅니다.
+      sessionStorage.setItem('splitHomeworkIds', JSON.stringify(hwIds));
+      sessionStorage.setItem('splitCommonTqIds', JSON.stringify(commonTqIds));
+      sessionStorage.setItem('clinicTargetStudentIds', JSON.stringify(studentIds)); 
+      sessionStorage.setItem('editClassId', String(classId));
+
+      alert(`공통 문항(${commonTqIds.length}개)이 성공적으로 분리되었습니다!\n확인을 누르시면 스텝2로 이동하여 공통 과제를 편집합니다.`);
+      window.location.href = '/exam/step2?source=edit';
+
+    } catch (err: any) {
+      console.error(err);
+      alert('공통 문항 추출 중 오류가 발생했습니다.');
+      setIsLoading(false);
+    }
+  };
 
   const handleBulkCompleteGlobal = async () => {
     if (globalSelectedBlocks.length === 0) return;
@@ -182,7 +269,7 @@ export function useLearningActions({
     if (!confirm("이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
     
     try {
-      if (type === 'exam' || type === 'print') {
+      if (type === 'exam' || type === 'print' || type === 'hw_exam') {
         const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
         if (error) throw error;
       } else if (type === 'hw') {
@@ -275,13 +362,12 @@ export function useLearningActions({
 
         if (qIds.length === 0) { alert('해당 과제에 연결된 실제 문항 데이터를 찾을 수 없습니다.'); return; }
 
+        purgeOldSession();
+        
         sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
         sessionStorage.setItem('examTitle', title || '교재 과제');
         sessionStorage.setItem('examSubTitle', subTitle || '과제 프린트');
         sessionStorage.setItem('examType', '과제프린트');
-        sessionStorage.removeItem('editExamId');
-        sessionStorage.removeItem('duplicateExamId');
-        sessionStorage.removeItem('isClinicMode');
         
         window.open('/exam/viewer', '_blank');
       } catch (err: any) {
@@ -295,9 +381,8 @@ export function useLearningActions({
     }
   };
 
-  const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string) => {
+  const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => {
     e.stopPropagation();
-    if (type !== 'hw') return;
     if (!targetQuestions || targetQuestions.length === 0) { alert('수정할 문항이 없습니다.'); return; }
 
     try {
@@ -312,17 +397,72 @@ export function useLearningActions({
 
       if (qIds.length === 0) { alert('연결된 문제 데이터를 찾을 수 없습니다.'); return; }
 
+      const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
+      const finalTitle = `${safeStudentName}${title || '과제 문항 수정'}`;
+
+      purgeOldSession();
+
       sessionStorage.setItem('restoreExamQuestions', '1');
       sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
-      sessionStorage.setItem('examTitle', title || '과제 문항 수정');
-      sessionStorage.setItem('editHomeworkId', String(hwId)); 
+      sessionStorage.setItem('examTitle', finalTitle);
+      sessionStorage.setItem('examSubTitle', subTitle || '교재 과제'); 
+      sessionStorage.setItem('examType', '과제프린트');
 
-      window.location.href = '/exam/step2?source=homework_edit';
+      sessionStorage.setItem('editOriginalType', 'hw');
+      sessionStorage.setItem('editOriginalId', String(hwId));
+      sessionStorage.setItem('editStudentId', String(studentId));
+      sessionStorage.setItem('editClassId', String(classId));
+
+      window.location.href = '/exam/step2?source=edit';
 
     } catch (err: any) {
       console.error(err);
       alert('문항 정보를 불러오는 중 오류가 발생했습니다.');
     } finally { setIsLoading(false); }
+  };
+
+  const handleEditExamToStep2 = async (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => {
+    e.stopPropagation();
+    if (!masterId || !assignId) return alert('시험지 정보를 찾을 수 없습니다.');
+    
+    try {
+      setIsLoading(true);
+      const { data: items, error } = await supabase.from('exam_item').select('question_id').eq('exam_id', masterId).order('sort_order');
+      if (error) throw error;
+      
+      const qIds = items?.map(i => String(i.question_id)) || [];
+      if (qIds.length === 0) return alert('연결된 문제 데이터를 찾을 수 없습니다.');
+
+      const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
+      const finalTitle = title.startsWith('[') ? title : `${safeStudentName}${title || '문제지 수정'}`;
+
+      const { data: masterData } = await supabase.from('exam_master').select('layout_settings').eq('exam_id', masterId).single();
+
+      purgeOldSession();
+
+      sessionStorage.setItem('restoreExamQuestions', '1');
+      sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
+      sessionStorage.setItem('examTitle', finalTitle);
+      sessionStorage.setItem('examSubTitle', subTitle || '');
+      sessionStorage.setItem('examType', examType || '오답프린트');
+      
+      if (masterData?.layout_settings?.userMergedTextQuestions) {
+         sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
+      }
+
+      sessionStorage.setItem('editOriginalType', 'exam');
+      sessionStorage.setItem('editOriginalId', String(assignId));
+      sessionStorage.setItem('editMasterId', String(masterId));
+      sessionStorage.setItem('editStudentId', String(studentId));
+      sessionStorage.setItem('editClassId', String(classId));
+
+      window.location.href = '/exam/step2?source=edit';
+    } catch (err: any) {
+      console.error(err);
+      alert('문항 정보를 불러오는 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleGenerateIncorrectPrint = async () => {
@@ -393,6 +533,7 @@ export function useLearningActions({
   return {
     handleForceComplete, handleDeleteExam, handleEditHomeworkTitle,
     handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2,
+    handleEditExamToStep2, handleExtractCommonHomework, // 🌟 모듈 연동
     handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleBulkCompleteStudent,
     handleBulkDeleteStudent, handleGenerateIncorrectPrint
   };

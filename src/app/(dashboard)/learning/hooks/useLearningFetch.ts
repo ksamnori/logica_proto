@@ -141,10 +141,23 @@ export function useLearningFetch() {
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
         
-        const { data: stats } = await supabase.from('exam_assignment').select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)').in('student_id', chunk).neq('exam_master.exam_type', '과제').neq('exam_master.exam_type', '오답프린트');
-        if (stats) {
-          fetchedStats = [...fetchedStats, ...stats.map(s => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'EXAM'}))];
-          stats.forEach(s => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+        // 🌟 [오류 해결] .in 구문을 쓰지 않고 가져와서 JS에서 안전하게 필터링합니다.
+        const { data: rawExams } = await supabase.from('exam_assignment')
+          .select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
+          .in('student_id', chunk);
+
+        if (rawExams) {
+          const examOnly = rawExams.filter((s: any) => s.exam_master?.exam_type !== '과제' && s.exam_master?.exam_type !== '과제프린트' && s.exam_master?.exam_type !== '오답프린트');
+          fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'EXAM'}))];
+          examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+
+          const hwExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '과제' || s.exam_master?.exam_type === '과제프린트');
+          fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'HW'}))];
+          hwExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+
+          const printExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '오답프린트');
+          fetchedStats = [...fetchedStats, ...printExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'PRINT'}))];
+          printExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
         }
         
         const { data: allHws } = await supabase.from('homework_assignment').select('homework_id, class_id, homework_title, target_student_id, target_questions, created_at, due_date').in('class_id', classIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
@@ -175,18 +188,6 @@ export function useLearningFetch() {
              });
           }
         });
-
-        const { data: examStats } = await supabase.from('exam_assignment').select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
-        if (examStats) {
-          fetchedStats = [...fetchedStats, ...examStats.map(s => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'HW'}))];
-          examStats.forEach(s => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
-        }
-
-        const { data: printStats } = await supabase.from('exam_assignment').select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '오답프린트');
-        if (printStats) {
-          fetchedStats = [...fetchedStats, ...printStats.map(s => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'PRINT'}))];
-          printStats.forEach(s => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
-        }
       }
       setCurrentStats(fetchedStats);
       setClassCalendarEvents(allCalEvents); 
@@ -253,7 +254,7 @@ export function useLearningFetch() {
         const m = unwrap(ex.exam_master);
         combined.push({
           id: `${m?.exam_type === '오답프린트' ? 'print' : 'exam'}_${ex.assignment_id}`,
-          type: m?.exam_type === '오답프린트' ? 'print' : (m?.exam_type === '과제' ? 'hw_exam' : 'exam'),
+          type: m?.exam_type === '오답프린트' ? 'print' : (['과제', '과제프린트'].includes(m?.exam_type) ? 'hw_exam' : 'exam'),
           realId: ex.assignment_id, masterId: m?.exam_id, title: m?.title || '제목 없음', subTitle: m?.sub_title, 
           date: ex.created_at, status: ex.status, total: m?.total_questions || 0, score: ex.total_score || 0,
           oCount: exCounts[ex.assignment_id]?.o || 0, xCount: exCounts[ex.assignment_id]?.x || 0, helpedCount: exCounts[ex.assignment_id]?.helped || 0,
@@ -297,20 +298,25 @@ export function useLearningFetch() {
         const chunk = studentIds.slice(i, i + chunkSize);
 
         if (tab === 'EXAM' || tab === 'INCORRECT') {
-          let query = supabase.from('exam_assignment').select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)').in('student_id', chunk);
-          if (tab === 'EXAM') query = query.neq('exam_master.exam_type', '과제').neq('exam_master.exam_type', '오답프린트');
-          else query = query.eq('exam_master.exam_type', '오답프린트');
+          const { data: rawExams } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)').in('student_id', chunk);
           
-          const { data } = await query;
-          if (data) {
-            const assignIds = data.map(d => d.assignment_id);
-            const masterIds = data.map(d => unwrap(d.exam_master)?.exam_id).filter(Boolean);
+          if (rawExams) {
+            let data = [];
+            // 🌟 [오류 해결] JS 단에서 필터링
+            if (tab === 'EXAM') {
+               data = rawExams.filter((d: any) => d.exam_master?.exam_type !== '과제' && d.exam_master?.exam_type !== '과제프린트' && d.exam_master?.exam_type !== '오답프린트');
+            } else {
+               data = rawExams.filter((d: any) => d.exam_master?.exam_type === '오답프린트');
+            }
+
+            const assignIds = data.map((d: any) => d.assignment_id);
+            const masterIds = data.map((d: any) => unwrap(d.exam_master)?.exam_id).filter(Boolean);
             const { data: examItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', masterIds);
             const validExamQIds = new Set<string>();
             examItems?.forEach(item => validExamQIds.add(`${item.exam_id}_${item.question_id}`));
 
             const assignToMasterMap = new Map<string, string>();
-            data.forEach(d => assignToMasterMap.set(d.assignment_id, unwrap(d.exam_master)?.exam_id));
+            data.forEach((d: any) => assignToMasterMap.set(d.assignment_id, unwrap(d.exam_master)?.exam_id));
 
             const { data: ans } = await supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code, earned_score').in('exam_assignment_id', assignIds);
             
@@ -326,10 +332,12 @@ export function useLearningFetch() {
             const counts: Record<string, { o: number; x: number; helped: number }> = {};
             dedupAns.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
             
-            const enriched = data.map(d => {
+            const enriched = data.map((d: any) => {
                const em = unwrap(d.exam_master); const cls = unwrap(d.class); const stu = unwrap(d.student);
                return {
-                 ...d, masterId: em?.exam_id, type: em?.exam_type === '오답프린트' ? 'print' : (em?.exam_type === '과제' ? 'hw_exam' : 'exam'), is_exam_hw: false,
+                 ...d, masterId: em?.exam_id, 
+                 type: em?.exam_type === '오답프린트' ? 'print' : (['과제', '과제프린트'].includes(em?.exam_type) ? 'hw_exam' : 'exam'), 
+                 is_exam_hw: false,
                  oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0, helpedCount: counts[d.assignment_id]?.helped || 0,
                  totalQ: em?.total_questions || 0, class_name: cls?.name || '반 미지정', student: { name: stu?.name || '알수없음' },
                  title: em?.title || '제목 없음', subTitle: em?.sub_title, sort_date: d.created_at
@@ -397,16 +405,22 @@ export function useLearningFetch() {
             }
           });
 
-          const { data: examData } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, sub_title, total_questions)').in('student_id', chunk).eq('exam_master.exam_type', '과제');
-          const exIds = examData?.map(e => e.assignment_id) || [];
-          const exMasterIds = examData?.map(e => unwrap(e.exam_master)?.exam_id).filter(Boolean) || [];
+          // 🌟 [오류 해결] JS 단에서 필터링
+          const { data: rawExamHws } = await supabase.from('exam_assignment')
+            .select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)')
+            .in('student_id', chunk);
+
+          const examData = rawExamHws?.filter((d: any) => d.exam_master?.exam_type === '과제' || d.exam_master?.exam_type === '과제프린트') || [];
+
+          const exIds = examData.map((e: any) => e.assignment_id);
+          const exMasterIds = examData.map((e: any) => unwrap(e.exam_master)?.exam_id).filter(Boolean);
 
           const { data: exItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', exMasterIds);
           const validExQIds = new Set<string>();
           exItems?.forEach(item => validExQIds.add(`${item.exam_id}_${item.question_id}`));
 
           const exAssignToMasterMap = new Map<string, string>();
-          examData?.forEach(e => exAssignToMasterMap.set(e.assignment_id, unwrap(e.exam_master)?.exam_id));
+          examData.forEach((e: any) => exAssignToMasterMap.set(e.assignment_id, unwrap(e.exam_master)?.exam_id));
 
           const { data: eAns } = await supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code, earned_score').in('exam_assignment_id', exIds);
           
@@ -422,12 +436,13 @@ export function useLearningFetch() {
           const eCounts: Record<string, { o: number; x: number; helped: number }> = {};
           dedupEAns.forEach(a => tallyGrading(eCounts, a.exam_assignment_id, a.grading_code));
 
-          const formattedExamHws = (examData || []).map((e:any) => {
+          const formattedExamHws = examData.map((e:any) => {
             const em = unwrap(e.exam_master);
             return {
               ...e, masterId: em?.exam_id, type: 'hw_exam', is_exam_hw: true, sort_date: e.created_at, class_name: unwrap(e.class)?.name || '반 미지정',
               student: { name: unwrap(e.student)?.name || '알수없음' },
-              oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, helpedCount: eCounts[e.assignment_id]?.helped || 0, totalQ: em?.total_questions || 0
+              oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, helpedCount: eCounts[e.assignment_id]?.helped || 0, totalQ: em?.total_questions || 0,
+              title: em?.title || '제목 없음', subTitle: em?.sub_title
             };
           });
           list = [...list, ...formattedExamHws];

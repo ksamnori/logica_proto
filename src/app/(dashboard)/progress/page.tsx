@@ -268,11 +268,25 @@ export default function ProgressPage() {
 
   const loadStatusMapDB = async (classId: string, studentIds: string[]) => {
     try {
+      // 1. 기존 교재 과제(Homework) 불러오기
       const { data: assignments, error } = await supabase
         .from('homework_assignment')
         .select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)')
         .eq('class_id', classId);
         
+      // 2. 과제프린트로 변환된 데이터(Exam)도 함께 불러오기!
+      const { data: examAssignments } = await supabase
+        .from('exam_assignment')
+        .select(`
+          assignment_id, student_id, status,
+          exam_master!inner(
+            exam_type,
+            exam_item(question_id)
+          )
+        `)
+        .eq('class_id', classId)
+        .in('exam_master.exam_type', ['과제', '과제프린트']);
+
       if (error) throw error;
 
       const newMap: { [key: string]: string } = {};
@@ -316,6 +330,46 @@ export default function ProgressPage() {
             tqStudentStatus[tqId][sId] = 'done';
           });
         });
+      });
+
+      // 🌟 [핵심 버그 수정] allQuestions 배열 상태에 의존하지 않고, 직접 DB에서 맵핑하여 뱃지가 절대 안 날아가게 방어!
+      const examQuestionIds = new Set<number>();
+      examAssignments?.forEach((ea: any) => {
+         const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
+         const items = m?.exam_item || [];
+         items.forEach((item: any) => {
+             if (item.question_id) examQuestionIds.add(item.question_id);
+         });
+      });
+
+      const qIdToTqId = new Map<number, number>();
+      if (examQuestionIds.size > 0) {
+          const { data: tqMapping } = await supabase
+              .from('textbook_question')
+              .select('tq_id, question_id')
+              .in('question_id', Array.from(examQuestionIds));
+          
+          tqMapping?.forEach(t => {
+              if (t.question_id) qIdToTqId.set(t.question_id, t.tq_id);
+          });
+      }
+
+      examAssignments?.forEach((ea: any) => {
+         const sId = ea.student_id;
+         const isDone = ['채점완료', '제출완료', '완료'].includes(ea.status);
+         const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
+         const items = m?.exam_item || [];
+
+         items.forEach((item: any) => {
+             const tqId = qIdToTqId.get(item.question_id);
+             if (tqId) {
+                 if (!tqStudentStatus[tqId]) tqStudentStatus[tqId] = {};
+                 const currentSt = tqStudentStatus[tqId][sId];
+                 if (currentSt !== 'done') {
+                     tqStudentStatus[tqId][sId] = isDone ? 'done' : 'homework';
+                 }
+             }
+         });
       });
 
       const totalStudents = studentIds.length;
@@ -414,7 +468,6 @@ export default function ProgressPage() {
       const indHwsForStudent = individualHws.filter(hw => hw.target_student_id === stuId);
       let targetHwToMerge = null;
 
-      // 🌟 [핵심 변경] 오늘 만든 과제 중에서 아직 완료(채점완료 등)되지 않은 바구니만 찾습니다.
       for (const hw of indHwsForStudent) {
         const { data: resData } = await supabase.from('student_homework_result')
           .select('status')
@@ -424,12 +477,11 @@ export default function ProgressPage() {
           
         if (resData && !['채점완료', '제출완료', '완료'].includes(resData.status)) {
           targetHwToMerge = hw;
-          break; // 병합할 활성(진행중) 과제 발견!
+          break; 
         }
       }
       
       if (targetHwToMerge) {
-        // 병합 (Merge) - 기존 바구니가 살아있다면 문제만 쏙 추가합니다.
         const existingInd = safeParseIds(targetHwToMerge.target_questions);
         const combinedTqs = Array.from(new Set([...existingInd, ...tq_ids]));
         
@@ -438,8 +490,6 @@ export default function ProgressPage() {
           .eq('homework_id', targetHwToMerge.homework_id);
           
       } else {
-        // 새로 생성 (New) - 만약 오늘치 과제가 아예 없거나, 모두 이미 완료 처리되었다면
-        // 새로운 과제 바구니를 분리해서 생성합니다! (이전 숙제의 완료 상태 영구 보존)
         const { data: insData, error: insErr } = await supabase.from('homework_assignment').insert({
           book_id: bookId, 
           target_questions: tq_ids, 
@@ -1027,7 +1077,6 @@ export default function ProgressPage() {
           </div>
         </div>
 
-        {/* 🌟 하단 중앙 정적(Static) 제어 컨트롤러 */}
         <div className="bg-white border-t border-slate-200 p-4 flex items-center justify-center gap-2 shrink-0 z-20 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
           <div className="flex items-center gap-1 mr-2 border-r border-slate-200 pr-3">
             <button onClick={() => handlePageChange(-1)} className="px-4 py-2.5 text-slate-600 font-bold text-sm hover:text-slate-900 transition-colors flex items-center gap-1 rounded-lg hover:bg-slate-100">

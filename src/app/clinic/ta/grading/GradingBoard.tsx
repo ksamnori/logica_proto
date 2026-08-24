@@ -195,41 +195,40 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       setHeaderInfo({ title: `📚 ${baseHw.homework_title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
 
-      // 🌟 같은 반, 같은 제목의 과제 전체 불러오기
       const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
       const hwIdsToFetchStatus = allHws?.map(h => h.homework_id) || [];
       const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
 
-      // 기준(클릭한) 바구니의 완료 상태 확인
       const baseResult = hwResults?.find(r => r.homework_id === baseHw.homework_id);
       const isBaseCompleted = ['채점완료', '제출완료', '완료'].includes(baseResult?.status || '');
 
-      // 🌟 [핵심 변경 1] gradeAll 에 따라 올바른 대상 학생 ID 추출 로직 (동시 채점 버그 해결)
       let validStudentIds: string[] = [];
 
       if (gradeAll) {
-         // 동시채점: 기준 바구니와 상태(진행중/완료)가 동일한 바구니의 주인들을 모조리 수집
-         const matchingHws = allHws?.filter(h => {
-            const r = hwResults?.find(res => res.homework_id === h.homework_id);
-            const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
-            return isComp === isBaseCompleted;
-         }) || [];
+        const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseHw.class_id);
+        const classStudentIds = enrolls?.filter((e: any) => {
+          const s = Array.isArray(e.student) ? e.student[0] : e.student;
+          return s?.status === '재원';
+        }).map(e => e.student_id) || [];
 
-         const uniqueIds = new Set<string>();
-         matchingHws.forEach(h => {
-            if (h.target_student_id) uniqueIds.add(h.target_student_id);
-         });
-         validStudentIds = Array.from(uniqueIds);
-         
-         // 글로벌 배부였을 경우의 fallback
-         if (validStudentIds.length === 0) {
-            const { data: enrolls } = await supabase.from('enrollment').select('student_id').eq('class_id', baseHw.class_id);
-            validStudentIds = enrolls?.map(e => e.student_id) || [];
-         }
+        classStudentIds.forEach(sId => {
+          let studentHws = allHws?.filter(h => h.target_student_id === sId) || [];
+          const globalHw = allHws?.find(h => !h.target_student_id);
+          
+          let targetHw = studentHws.length > 0 ? studentHws[0] : globalHw;
+          if (sId === baseHw.target_student_id) targetHw = baseHw;
+
+          if (targetHw) {
+            const res = hwResults?.find(r => r.homework_id === targetHw.homework_id && r.student_id === sId);
+            const isComp = ['채점완료', '제출완료', '완료'].includes(res?.status || '');
+            if (isComp === isBaseCompleted) {
+              validStudentIds.push(sId);
+            }
+          }
+        });
       } else {
-         // 개별채점: 타겟 학생 한 명만
-         if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
-         else if (studentIdParam) validStudentIds.push(studentIdParam);
+        if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
+        else if (studentIdParam) validStudentIds.push(studentIdParam);
       }
 
       if (validStudentIds.length === 0) {
@@ -260,14 +259,11 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       
       cols.forEach(s => {
         let studentHws = allHws?.filter(h => h.target_student_id === s.id) || [];
-        
         if (studentHws.length === 0 && globalHw) {
           studentHwMap.set(s.id, globalHw);
           return;
         }
-        
         studentHws.sort((a, b) => b.homework_id - a.homework_id); 
-
         let selectedHw = studentHws[0];
         if (s.id === baseHw.target_student_id) {
           selectedHw = baseHw;
@@ -279,7 +275,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           });
           if (matched) selectedHw = matched;
         }
-        
         if (selectedHw) studentHwMap.set(s.id, selectedHw);
       });
 
@@ -324,15 +319,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         return String(a.question_number || '').localeCompare(String(b.question_number || ''), undefined, { numeric: true });
       });
 
-      const rows = tqData.map((tq: any) => {
+      // 기존 교재과제는 순서대로 1번, 2번 출력
+      const rows = tqData.map((tq: any, index: number) => {
         const q = tq.question_db || {};
         return {
           id: tq.tq_id,
           qId: q.question_id,
-          displayNum: String(tq.question_number || q.question_number || '').replace(/TWIN/gi, 'T').replace(/SIMILAR/gi, 'S').replace(/CLINIC/gi, 'C'),
-          pageNum: tq.page_number || q.page_number,
+          displayNum: `${index + 1}`,
+          pageNum: tq.page_number || q.page_number || q.final_printed_page || q.detected_page_num || null,
           answer: tq.answer || q.answer,
-          fullQuestion: { items: [{ question: { ...q, question: tq.question || q.question, answer: tq.answer || q.answer } }] },
+          fullQuestion: { displayQNum: `${index + 1}`, items: [{ question: { ...q, question: tq.question || q.question, answer: tq.answer || q.answer } }] },
           assignedScore: 100 / (tqData.length || 1)
         };
       });
@@ -399,14 +395,25 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       setHeaderInfo({ title: `📝 ${m?.title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: m?.exam_type });
 
       const { data: allAssigns } = await supabase.from('exam_assignment').select('*, student(name)').eq('exam_id', m.exam_id).eq('class_id', baseEx.class_id);
-      let cols = (allAssigns || []).map((a: any) => {
-        const sObj = Array.isArray(a.student) ? a.student[0] : a.student;
-        return {
-          id: a.student_id,
-          name: sObj?.name || '알수없음',
-          assignmentId: a.assignment_id
-        };
-      }).sort((a: any, b: any) => a.name.localeCompare(b.name));
+      
+      const isBaseCompleted = ['채점완료', '완료'].includes(baseEx.status);
+
+      let cols = (allAssigns || [])
+        .filter((a: any) => {
+           if (gradeAll) {
+              const isComp = ['채점완료', '완료'].includes(a.status);
+              return isComp === isBaseCompleted;
+           }
+           return true;
+        })
+        .map((a: any) => {
+          const sObj = Array.isArray(a.student) ? a.student[0] : a.student;
+          return {
+            id: a.student_id,
+            name: sObj?.name || '알수없음',
+            assignmentId: a.assignment_id
+          };
+        }).sort((a: any, b: any) => a.name.localeCompare(b.name));
 
       if (!gradeAll && studentIdParam) {
         cols = cols.filter(c => c.id === studentIdParam);
@@ -430,19 +437,52 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       for (let i = 0; i < qIds.length; i += 150) {
         const chunk = qIds.slice(i, i + 150);
         const { data } = await supabase.from('question_db').select('*').in('question_id', chunk);
-        if (data) fetchedQuestions = [...fetchedQuestions, ...data];
+        if(data) fetchedQuestions = [...fetchedQuestions, ...data];
       }
 
       const qMap: any = {}; fetchedQuestions.forEach(q => qMap[q.question_id] = q);
 
-      const rows = items.map(item => {
+      // 🌟 [핵심 변경] 저장된 병합 정보(layout_settings.userMergedTextQuestions)를 존중하여 번호 부여
+      let userMergedTextQuestions: any[][] = [];
+      if (m?.layout_settings?.userMergedTextQuestions) {
+          userMergedTextQuestions = m.layout_settings.userMergedTextQuestions;
+      }
+
+      const customGroupMap = new Map<string, string>();
+      userMergedTextQuestions.forEach((arr, idx) => {
+          const gId = `custom_group_${idx}`;
+          arr.forEach(qid => customGroupMap.set(String(qid), gId));
+      });
+
+      let mainNum = 0;
+      let currentGroupId: string | null = null;
+      let subNum = 1;
+
+      const rows = items.map((item, index) => {
         const q = qMap[item.question_id] || {};
+        
+        let gId = customGroupMap.get(String(item.question_id));
+        if (!gId) gId = `single_${item.question_id}_${Math.random()}`; // 병합되지 않았으면 무조건 단독 카운팅
+
+        if (gId !== currentGroupId) {
+            mainNum++;
+            currentGroupId = gId;
+            subNum = 1;
+        } else {
+            subNum++;
+        }
+
+        const isMerged = gId.startsWith('custom_group_');
+        const displayNum = isMerged ? `${mainNum}. (${subNum})` : `${mainNum}`;
+
+        const pageInfo = q.page_number || q.final_printed_page || q.detected_page_num || null;
+
         return {
           id: item.question_id,
-          displayNum: item.sort_order,
-          pageNum: q.page_number || null,
+          displayNum,
+          pageNum: pageInfo,
           answer: q.answer,
-          fullQuestion: { items: [{ question: q }] },
+          fullQuestion: { displayQNum: displayNum, items: [{ question: q }] },
           assignedScore: item.assigned_score || (100 / items.length)
         };
       });
@@ -653,7 +693,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50 w-full font-pretendard">
-      {/* 헤더 */}
       <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm">
         <div>
           <h2 className="text-[14px] font-black text-[#002864] flex items-center gap-1.5">{headerInfo.title}</h2>
@@ -669,7 +708,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         </div>
       </div>
 
-      {/* 매트릭스 뷰 */}
       <div className="flex-1 overflow-auto custom-scroll relative bg-slate-100/50">
         {matrixData.cols.length === 0 ? (
           <div className="flex items-center justify-center h-full text-slate-400 font-bold text-sm">데이터를 불러오는 중입니다...</div>
@@ -702,7 +740,9 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                       <div className="flex items-baseline gap-1.5 min-w-0">
                         {r.pageNum && <span className="text-[10px] font-bold text-slate-400">{r.pageNum}p</span>}
                         {r.pageNum && <span className="text-[10px] text-slate-300">|</span>}
-                        <span className="text-[12px] font-black text-[#002864] truncate">{r.displayNum}번</span>
+                        <span className="text-[12px] font-black text-[#002864] truncate whitespace-nowrap">
+                          {r.displayNum}{r.displayNum.includes('(') ? '' : '번'}
+                        </span>
                       </div>
                       <button onClick={()=>setModalQ(r.fullQuestion)} className="text-[11px] text-slate-400 hover:text-blue-500 font-bold px-1 transition-colors" title="상세 보기">🔍</button>
                     </div>
@@ -720,7 +760,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                     </div>
                   </td>
                   
-                  {/* 채점 셀 */}
                   {matrixData.cols.map(c => {
                     const key = `${c.id}_${r.id}`;
                     const cell = matrixData.cellMap.get(key);
@@ -759,36 +798,30 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
-              <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> 문항 상세 및 해설 뷰어</h2>
+              <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> {modalQ.displayQNum || modalQ.items?.[0]?.question?.question_number}번 문항 상세</h2>
               <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
             <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
+              
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
-                {modalQ.items.map((row: any, idx: number) => {
-                  const q = row.question;
-                  return (
-                    <div key={idx} className="mb-4">
-                      <div dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(q.question) }} className="math-text text-slate-700 font-medium whitespace-pre-wrap" />
-                      {getCleanUrl(q.image_url) && <img src={getCleanUrl(q.image_url)} className="max-w-full mt-2 rounded-lg border border-slate-200" alt="Q" />}
-                    </div>
-                  );
-                })}
+                <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
+                  <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs">질문</span>
+                </h3>
+                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.items?.[0]?.question?.question || '-').replace(/\n/g, '<br>') }} />
+                {getCleanUrl(modalQ.items?.[0]?.question?.image_url) && <img src={getCleanUrl(modalQ.items[0].question.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
               </div>
+              
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
-                {modalQ.items.map((row: any, idx: number) => {
-                  const q = row.question;
-                  return (
-                    <div key={idx} className="mb-4">
-                      <div dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(q.answer) }} className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" />
-                      {getCleanUrl(q.answer_image_url) && <img src={getCleanUrl(q.answer_image_url)} className="max-w-xs mt-2 rounded border border-slate-200" alt="A" />}
-                    </div>
-                  );
-                })}
+                <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3 flex items-center gap-2">
+                  <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded text-xs">정답</span>
+                </h3>
+                <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(modalQ.items?.[0]?.question?.answer || '-')} $` }} />
               </div>
+
             </div>
-            <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0"><button onClick={() => setModalQ(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm">닫기</button></div>
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
+              <button onClick={() => setModalQ(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm">닫기</button>
+            </div>
           </div>
         </div>
       )}
