@@ -20,14 +20,14 @@ export default function AdmissionAnalyticsPage() {
   const [selectedExamId, setSelectedExamId] = useState<string>("");
   const [excludeTest, setExcludeTest] = useState<boolean>(true);
   
+  // 🌟 [수정] 날짜 및 시간 필터 상태
+  const [selectedDate, setSelectedDate] = useState<string>("all");
+  const [selectedTime, setSelectedTime] = useState<string>("all"); 
+  
   const [modalQ, setModalQ] = useState<any>(null);
+  const [modalStudent, setModalStudent] = useState<any>(null);
 
-  const [reportStats, setReportStats] = useState<{
-    summary: { totalStudents: number; averageScore: string; highestScore: number } | null;
-    questionStats: any[];
-    studentList: any[];
-  }>({ summary: null, questionStats: [], studentList: [] });
-
+  const [rawExamData, setRawExamData] = useState<any>(null);
   const [examAssignments, setExamAssignments] = useState<any[]>([]);
 
   const chartRef = useRef<HTMLCanvasElement>(null);
@@ -57,7 +57,7 @@ export default function AdmissionAnalyticsPage() {
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [modalQ, reportStats]);
+  }, [modalQ, modalStudent, rawExamData, selectedDate, selectedTime]);
 
   const getCleanUrl = (url: string) => {
     if (!url || url === 'null') return '';
@@ -84,7 +84,7 @@ export default function AdmissionAnalyticsPage() {
           .select('assignment_id, total_score, exam_id, student(name), exam_master!inner(title, sub_title, exam_type)')
           .eq('status', '채점완료')
           .eq('exam_master.exam_type', '입학테스트')
-          .limit(5000);
+          .limit(10000);
 
         if (error) throw error;
         setExamAssignments(data || []);
@@ -112,38 +112,38 @@ export default function AdmissionAnalyticsPage() {
   }, []);
 
   useEffect(() => {
-    const fetchDetailedStats = async () => {
+    const fetchRawStats = async () => {
       if (!selectedExamId) return;
       setIsLoading(true);
+      
+      // 시험지가 변경되면 필터 상태 완전 초기화
+      setSelectedDate("all");
+      setSelectedTime("all");
 
       try {
+        // 🌟 [핵심 변경] 기 등록된 시험 세션(admission_session, exam_session) 정보를 조인하여 가져옴
         const { data: assigns, error: aErr } = await supabase
           .from('exam_assignment')
-          .select('assignment_id, total_score, student!inner(name, grade)')
+          .select('assignment_id, total_score, student!inner(name, grade), admission_session(test_date, start_time), exam_session(test_date)')
           .eq('exam_id', selectedExamId)
-          .eq('status', '채점완료');
+          .eq('status', '채점완료')
+          .limit(10000);
           
         if (aErr) throw aErr;
-
-        let filteredAssigns = assigns || [];
-        
-        if (excludeTest) {
-          filteredAssigns = filteredAssigns.filter((a: any) => {
-            const name = Array.isArray(a.student) ? a.student[0]?.name : a.student?.name;
-            return name && !name.includes('테스트') && !name.toLowerCase().includes('test');
-          });
-        }
-
-        const assignIds = filteredAssigns.map(a => a.assignment_id);
+        const rawAssigns = assigns || [];
+        const assignIds = rawAssigns.map(a => a.assignment_id);
 
         let allAnswers: any[] = [];
-        const chunkSize = 200;
+        const chunkSize = 50; 
         for (let i = 0; i < assignIds.length; i += chunkSize) {
           const chunk = assignIds.slice(i, i + chunkSize);
-          const { data: ansChunk } = await supabase
+          const { data: ansChunk, error: ansErr } = await supabase
             .from('student_answer')
-            .select('exam_assignment_id, question_id, is_correct, earned_score')
-            .in('exam_assignment_id', chunk);
+            .select('exam_assignment_id, question_id, is_correct, earned_score, grading_code')
+            .in('exam_assignment_id', chunk)
+            .limit(10000);
+          
+          if (ansErr) console.error("답안 로드 오류:", ansErr);
           if (ansChunk) allAnswers.push(...ansChunk);
         }
 
@@ -151,7 +151,8 @@ export default function AdmissionAnalyticsPage() {
           .from('exam_item')
           .select('question_id, sort_order, assigned_score')
           .eq('exam_id', selectedExamId)
-          .order('sort_order');
+          .order('sort_order')
+          .limit(2000);
           
         if (iErr) throw iErr;
         const itemsData = items || [];
@@ -191,108 +192,11 @@ export default function AdmissionAnalyticsPage() {
           if (q.tq_id) qMap[String(q.tq_id)] = q;
         });
 
-        const groupMap = new Map();
-        const groups: any[] = [];
-
-        itemsData.forEach(item => {
-          const q = qMap[String(item.question_id)] || {};
-          const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : item.question_id;
-          const parentId = q.parent_question_id || q.parent_tq_id;
-
-          let gId = `q_${baseNum}`;
-          if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') {
-            gId = `parent_${parentId}`;
-          }
-
-          if (!groupMap.has(gId)) {
-            const newG = { id: gId, sort_order: item.sort_order, items: [] };
-            groupMap.set(gId, newG);
-            groups.push(newG);
-          }
-          groupMap.get(gId).items.push({
-            ...item,
-            parentId: parentId,
-            question_number: q.question_number,
-            sub_num: q.sub_num || 0,
-            questionContent: q.question,
-            imageUrl: q.image_url,
-            answerContent: q.answer
-          });
-        });
-
-        groups.forEach(g => {
-          g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
-          g.items.sort((a:any, b:any) => {
-            const subA = a.sub_num || 0;
-            const subB = b.sub_num || 0;
-            if (a.question_id === a.parentId || subA === 0) return -1;
-            if (b.question_id === b.parentId || subB === 0) return 1;
-            return subA - subB;
-          });
-        });
-        groups.sort((a, b) => a.sort_order - b.sort_order);
-
-        const questionStatsArray: any[] = [];
-        groups.forEach((g, gIdx) => {
-          const logicalMainNum = gIdx + 1;
-          const isMulti = g.items.length > 1;
-
-          let maxScore = Math.max(...g.items.map((i:any) => parseFloat(i.assigned_score) || 0));
-          if (isNaN(maxScore) || maxScore === 0) maxScore = 100 / groups.length;
-          const subScore = maxScore / g.items.length;
-
-          g.items.forEach((item: any, subIdx: number) => {
-            const logicalNumber = isMulti ? `${logicalMainNum}-${subIdx + 1}` : `${logicalMainNum}`;
-            let totalCount = 0;
-            let correctCount = 0;
-
-            allAnswers.forEach(ans => {
-              if (String(ans.question_id) === String(item.question_id)) {
-                totalCount += 1;
-                const isCor = ans.is_correct === true || String(ans.is_correct).toLowerCase() === 'true';
-                const earned = parseFloat(ans.earned_score) || 0;
-                
-                if (isCor || earned >= (subScore - 0.01)) {
-                  correctCount += 1;
-                }
-              }
-            });
-
-            const rate = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
-
-            questionStatsArray.push({
-              questionId: item.question_id,
-              logicalNumber,
-              assignedScore: subScore,
-              correctRate: rate,
-              totalCount,
-              correctCount,
-              questionContent: item.questionContent,
-              imageUrl: item.imageUrl,
-              answerContent: item.answerContent
-            });
-          });
-        });
-
-        const totalStudents = filteredAssigns.length;
-        const totalScoreSum = filteredAssigns.reduce((acc, cur) => acc + (Number(cur.total_score) || 0), 0);
-        const averageScore = totalStudents > 0 ? (totalScoreSum / totalStudents).toFixed(1) : "0.0";
-        const highestScore = totalStudents > 0 ? Math.max(...filteredAssigns.map(a => Number(a.total_score) || 0)) : 0;
-
-        const studentStatsList = filteredAssigns.map((a: any) => {
-          const st = Array.isArray(a.student) ? a.student[0] : a.student;
-          return {
-            assignmentId: a.assignment_id,
-            studentName: st?.name || "알 수 없음",
-            grade: st?.grade || "-",
-            totalScore: Number(a.total_score || 0)
-          };
-        }).sort((a, b) => b.totalScore - a.totalScore);
-
-        setReportStats({
-          summary: { totalStudents, averageScore, highestScore },
-          questionStats: questionStatsArray,
-          studentList: studentStatsList
+        setRawExamData({
+          assigns: rawAssigns,
+          answers: allAnswers,
+          itemsData: itemsData,
+          qMap: qMap
         });
 
       } catch (err: any) {
@@ -302,8 +206,177 @@ export default function AdmissionAnalyticsPage() {
       }
     };
 
-    fetchDetailedStats();
-  }, [selectedExamId, excludeTest]);
+    fetchRawStats();
+  }, [selectedExamId]);
+
+  // 🌟 세션의 날짜/시간 파싱 헬퍼 함수
+  const extractDateTime = (a: any) => {
+    let dStr = '';
+    let tStr = '';
+    if (a.admission_session) {
+        dStr = a.admission_session.test_date || '';
+        tStr = a.admission_session.start_time?.substring(0, 5) || '';
+    } else if (a.exam_session && a.exam_session.test_date) {
+        const dateObj = new Date(a.exam_session.test_date);
+        const yyyy = dateObj.getFullYear();
+        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const dd = String(dateObj.getDate()).padStart(2, '0');
+        const hh = String(dateObj.getHours()).padStart(2, '0');
+        const min = String(dateObj.getMinutes()).padStart(2, '0');
+        dStr = `${yyyy}-${mm}-${dd}`;
+        tStr = `${hh}:${min}`;
+    }
+    return { dStr, tStr };
+  };
+
+  const reportStats = useMemo(() => {
+    if (!rawExamData) return { summary: null, questionStats: [], studentList: [], availableDates: [], availableTimes: [] };
+
+    const { assigns, answers, itemsData, qMap } = rawExamData;
+    let filteredAssigns = [...assigns];
+
+    if (excludeTest) {
+      filteredAssigns = filteredAssigns.filter((a: any) => {
+        const name = Array.isArray(a.student) ? a.student[0]?.name : a.student?.name;
+        return name && !name.includes('테스트') && !name.toLowerCase().includes('test');
+      });
+    }
+
+    // 🌟 가용 날짜 추출
+    const availableDates = Array.from(
+      new Set(filteredAssigns.map((a: any) => extractDateTime(a).dStr))
+    ).filter(Boolean).sort((a: any, b: any) => b.localeCompare(a)); 
+
+    // 🌟 가용 시간 추출 (선택된 날짜가 있다면 해당 날짜의 시간만 추출)
+    const availableTimes = Array.from(
+      new Set(
+        filteredAssigns
+          .filter((a: any) => selectedDate === "all" || extractDateTime(a).dStr === selectedDate)
+          .map((a: any) => extractDateTime(a).tStr)
+      )
+    ).filter(Boolean).sort();
+
+    // 🌟 날짜 및 시간 필터 적용
+    if (selectedDate !== "all") {
+      filteredAssigns = filteredAssigns.filter((a: any) => extractDateTime(a).dStr === selectedDate);
+    }
+    if (selectedTime !== "all") {
+      filteredAssigns = filteredAssigns.filter((a: any) => extractDateTime(a).tStr === selectedTime);
+    }
+
+    const activeAssignIds = new Set(filteredAssigns.map((a: any) => a.assignment_id));
+
+    const groupMap = new Map();
+    const groups: any[] = [];
+
+    itemsData.forEach((item: any) => {
+      const q = qMap[String(item.question_id)] || {};
+      const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : item.question_id;
+      const parentId = q.parent_question_id || q.parent_tq_id;
+
+      let gId = `q_${baseNum}`;
+      if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') {
+        gId = `parent_${parentId}`;
+      }
+
+      if (!groupMap.has(gId)) {
+        const newG = { id: gId, sort_order: item.sort_order, items: [] };
+        groupMap.set(gId, newG);
+        groups.push(newG);
+      }
+      groupMap.get(gId).items.push({
+        ...item,
+        parentId: parentId,
+        question_number: q.question_number,
+        sub_num: q.sub_num || 0,
+        questionContent: q.question,
+        imageUrl: q.image_url,
+        answerContent: q.answer
+      });
+    });
+
+    groups.forEach(g => {
+      g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
+      g.items.sort((a:any, b:any) => {
+        const subA = a.sub_num || 0;
+        const subB = b.sub_num || 0;
+        if (a.question_id === a.parentId || subA === 0) return -1;
+        if (b.question_id === b.parentId || subB === 0) return 1;
+        return subA - subB;
+      });
+    });
+    groups.sort((a, b) => a.sort_order - b.sort_order);
+
+    const totalStudents = filteredAssigns.length;
+    const totalScoreSum = filteredAssigns.reduce((acc: number, cur: any) => acc + (Number(cur.total_score) || 0), 0);
+    const averageScore = totalStudents > 0 ? (totalScoreSum / totalStudents).toFixed(1) : "0.0";
+    const highestScore = totalStudents > 0 ? Math.max(...filteredAssigns.map((a: any) => Number(a.total_score) || 0)) : 0;
+
+    const questionStatsArray: any[] = [];
+    groups.forEach((g, gIdx) => {
+      const logicalMainNum = gIdx + 1;
+      const isMulti = g.items.length > 1;
+
+      let maxScore = Math.max(...g.items.map((i:any) => parseFloat(i.assigned_score) || 0));
+      if (isNaN(maxScore) || maxScore === 0) maxScore = 100 / groups.length;
+      const subScore = maxScore / g.items.length;
+
+      g.items.forEach((item: any, subIdx: number) => {
+        const logicalNumber = isMulti ? `${logicalMainNum}-${subIdx + 1}` : `${logicalMainNum}`;
+        const correctAssignIds = new Set<number>();
+
+        answers.forEach((ans: any) => {
+          if (activeAssignIds.has(ans.exam_assignment_id) && String(ans.question_id) === String(item.question_id)) {
+            const isCor = ans.is_correct === true || String(ans.is_correct).toLowerCase() === 'true';
+            const earned = parseFloat(ans.earned_score) || 0;
+            if (isCor || earned >= (subScore - 0.01)) {
+              correctAssignIds.add(ans.exam_assignment_id);
+            }
+          }
+        });
+
+        const correctCount = correctAssignIds.size;
+        const totalCount = totalStudents; 
+        const rate = totalCount > 0 ? (correctCount / totalCount) * 100 : 0;
+
+        questionStatsArray.push({
+          questionId: item.question_id,
+          logicalNumber,
+          assignedScore: subScore,
+          correctRate: rate,
+          totalCount,
+          correctCount,
+          questionContent: item.questionContent,
+          imageUrl: item.imageUrl,
+          answerContent: item.answerContent
+        });
+      });
+    });
+
+    const studentStatsList = filteredAssigns.map((a: any) => {
+      const st = Array.isArray(a.student) ? a.student[0] : a.student;
+      const myAnswers = answers.filter((ans: any) => ans.exam_assignment_id === a.assignment_id);
+      const { dStr, tStr } = extractDateTime(a); // 🌟 기 등록된 시험 방의 날짜와 시간 적용
+
+      return {
+        assignmentId: a.assignment_id,
+        studentName: st?.name || "알 수 없음",
+        grade: st?.grade || "-",
+        totalScore: Number(a.total_score || 0),
+        dateStr: dStr || "-",
+        timeStr: tStr || "-",
+        answers: myAnswers
+      };
+    }).sort((a: any, b: any) => b.totalScore - a.totalScore);
+
+    return {
+      summary: { totalStudents, averageScore, highestScore },
+      questionStats: questionStatsArray,
+      studentList: studentStatsList,
+      availableDates,
+      availableTimes
+    };
+  }, [rawExamData, excludeTest, selectedDate, selectedTime]);
 
   const semesterStats = useMemo(() => {
     const map = new Map();
@@ -372,7 +445,6 @@ export default function AdmissionAnalyticsPage() {
     };
   }, [semesterStats, selectedExamId, examList]);
 
-  // 🌟 2단 분할을 위한 데이터 슬라이싱 로직
   const midPoint = Math.ceil((reportStats?.questionStats?.length || 0) / 2);
   const leftStats = reportStats.questionStats.slice(0, midPoint);
   const rightStats = reportStats.questionStats.slice(midPoint);
@@ -385,18 +457,18 @@ export default function AdmissionAnalyticsPage() {
   return (
     <div className="flex h-screen overflow-hidden bg-[#f1f5f9] w-full">
       <main className="flex-1 overflow-y-auto custom-scroll p-4 sm:p-8 relative">
-        <div className="max-w-[1400px] w-full mx-auto relative pb-24 space-y-6">
+        <div className="max-w-[1500px] w-full mx-auto relative pb-24 space-y-6">
           
-          <div className="bg-[#002864] text-white p-6 rounded-2xl shadow-md flex justify-between items-center no-print shrink-0">
+          <div className="bg-[#002864] text-white p-6 rounded-2xl shadow-md flex justify-between items-center no-print shrink-0 flex-wrap gap-4">
             <div>
               <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-sm mb-3 transition-colors bg-blue-900/40 px-3 py-1.5 rounded-lg border border-blue-800/50 w-fit shadow-sm">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
               </button>
               <h1 className="text-2xl font-bold tracking-tight">📊 입학 진단평가 종합 대시보드</h1>
-              <p className="text-blue-200 text-sm mt-1">학기별 성취도 추이와 문항별 정답률을 심층 분석합니다.</p>
+              <p className="text-blue-200 text-sm mt-1">기 등록된 시험 방의 날짜 및 시간을 기준으로 성취도를 분석합니다.</p>
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 flex-wrap justify-end">
               <label className="flex items-center space-x-2 cursor-pointer bg-blue-900/50 px-3 py-2.5 rounded-lg border border-blue-800 transition-colors hover:bg-blue-800/80 shadow-inner">
                 <input 
                   type="checkbox" 
@@ -407,12 +479,37 @@ export default function AdmissionAnalyticsPage() {
                 <span className="text-sm font-bold text-blue-100">테스트 계정 제외</span>
               </label>
 
-              <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-3 shadow-inner">
-                <span className="pl-2 text-sm font-bold text-blue-200">대상 시험지</span>
+              {/* 🌟 [신규] 날짜 및 시간 듀얼 필터 */}
+              <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
+                <span className="pl-1 text-sm font-bold text-blue-200">응시 일시</span>
+                <select 
+                  value={selectedDate} 
+                  onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime("all"); }}
+                  className="bg-white text-slate-800 font-extrabold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="all">전체 누적 날짜</option>
+                  {reportStats.availableDates?.map(date => (
+                    <option key={date} value={date}>{date}</option>
+                  ))}
+                </select>
+                <select 
+                  value={selectedTime} 
+                  onChange={(e) => setSelectedTime(e.target.value)}
+                  className="bg-white text-slate-800 font-extrabold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="all">전체 시간</option>
+                  {reportStats.availableTimes?.map(time => (
+                    <option key={time} value={time}>{time}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
+                <span className="pl-1 text-sm font-bold text-blue-200">대상 시험지</span>
                 <select 
                   value={selectedExamId} 
                   onChange={(e) => setSelectedExamId(e.target.value)}
-                  className="bg-white text-slate-800 font-extrabold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-64 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
+                  className="bg-white text-slate-800 font-extrabold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-48 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   {examList.length === 0 ? <option value="">분석 가능한 시험지가 없습니다.</option> : null}
                   {examList.map(exam => (
@@ -433,30 +530,30 @@ export default function AdmissionAnalyticsPage() {
               {/* 1. KPI 영역 */}
               <div className="grid grid-cols-3 gap-4 shrink-0">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center relative overflow-hidden transition-transform hover:-translate-y-1">
-                  {excludeTest && <div className="absolute top-2 left-2 text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-200">필터 적용</div>}
-                  <span className="text-slate-500 font-bold text-sm mb-1">현재 시험지 응시 인원</span>
+                  {(excludeTest || selectedDate !== "all") && <div className="absolute top-2 left-2 text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-200">필터 적용됨</div>}
+                  <span className="text-slate-500 font-bold text-sm mb-1">조건 내 응시 인원</span>
                   <span className="text-3xl font-black text-[#002864]">
                     {isLoading ? "-" : reportStats.summary?.totalStudents || 0} <span className="text-lg font-bold text-slate-400">명</span>
                   </span>
                 </div>
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center transition-transform hover:-translate-y-1">
-                  <span className="text-slate-500 font-bold text-sm mb-1">현재 시험지 평균</span>
+                  <span className="text-slate-500 font-bold text-sm mb-1">조건 내 평균 점수</span>
                   <span className="text-3xl font-black text-emerald-600">
                     {isLoading ? "-" : reportStats.summary?.averageScore || 0} <span className="text-lg font-bold text-slate-400">점</span>
                   </span>
                 </div>
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center transition-transform hover:-translate-y-1">
-                  <span className="text-slate-500 font-bold text-sm mb-1">현재 시험지 최고점</span>
+                  <span className="text-slate-500 font-bold text-sm mb-1">조건 내 최고점</span>
                   <span className="text-3xl font-black text-rose-500">
                     {isLoading ? "-" : reportStats.summary?.highestScore || 0} <span className="text-lg font-bold text-slate-400">점</span>
                   </span>
                 </div>
               </div>
 
-              {/* 2. 차트 영역 (높이 축소 h-52) */}
+              {/* 2. 차트 영역 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
                 <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex items-center justify-between">
-                  <h3 className="font-extrabold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이</h3>
+                  <h3 className="font-extrabold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (누적)</h3>
                   <span className="text-[10px] text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">현재 선택: 초록색</span>
                 </div>
                 <div className="w-full h-52 p-4 relative">
@@ -471,7 +568,7 @@ export default function AdmissionAnalyticsPage() {
               {/* 3. 정답률 2단 분할 테이블 영역 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                 <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex justify-between items-center shrink-0">
-                  <h3 className="font-extrabold text-slate-800 text-[15px]">📈 문항별 분할 배점 & 정답률</h3>
+                  <h3 className="font-extrabold text-slate-800 text-[15px]">📈 필터 조건 내 문항 정답률</h3>
                   {isLoading && <span className="text-[11px] font-bold text-emerald-600 animate-pulse bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">업데이트 중...</span>}
                 </div>
                 
@@ -481,7 +578,6 @@ export default function AdmissionAnalyticsPage() {
                       <table className="w-full text-left border-collapse min-w-max">
                         <thead className="bg-slate-100/40 text-slate-500 border-b border-slate-200 sticky top-0 z-10">
                           <tr>
-                            {/* 🌟 공간 확보 및 줄바꿈 방지(whitespace-nowrap) 처리 */}
                             <th className="py-2.5 px-2 text-center font-bold text-[11px] w-[60px] whitespace-nowrap">문항</th>
                             <th className="py-2.5 px-2 text-center font-bold text-[11px] w-[50px] whitespace-nowrap">배점</th>
                             <th className="py-2.5 px-3 font-bold text-[11px] whitespace-nowrap">정답률 분포 시각화</th>
@@ -490,7 +586,7 @@ export default function AdmissionAnalyticsPage() {
                         </thead>
                         <tbody className="divide-y divide-slate-100">
                           {statsChunk.length === 0 && !isLoading ? (
-                            <tr><td colSpan={4} className="p-6 text-center text-slate-400 font-bold text-xs">구성 문항이 없습니다.</td></tr>
+                            <tr><td colSpan={4} className="p-6 text-center text-slate-400 font-bold text-xs">조건에 맞는 응시 기록이 없습니다.</td></tr>
                           ) : (
                             statsChunk.map((q, idx) => {
                               const rateColor = q.correctRate >= 70 ? 'bg-emerald-500' : q.correctRate >= 40 ? 'bg-amber-400' : 'bg-rose-500';
@@ -504,12 +600,10 @@ export default function AdmissionAnalyticsPage() {
                                       <span className="font-extrabold text-slate-800 text-[13px] w-6 text-left">{q.logicalNumber}</span>
                                     </div>
                                   </td>
-                                  {/* 🌟 텍스트 무조건 가로 출력 (whitespace-nowrap) */}
                                   <td className="py-2.5 px-2 text-center text-[12px] font-bold text-slate-500 bg-slate-50/40 whitespace-nowrap">
                                     {q.assignedScore.toFixed(1)}
                                   </td>
                                   <td className="py-2.5 px-3 align-middle">
-                                    {/* 🌟 막대 최대 길이(max-w) 제한으로 과도한 늘어남 방지 */}
                                     <div className="w-full max-w-[150px] bg-slate-200 rounded-full h-[6px] relative group cursor-pointer shadow-inner">
                                       <div className={`${rateColor} h-[6px] rounded-full transition-all duration-700 ease-out shadow-sm`} style={{ width: `${q.correctRate}%` }}></div>
                                       <div className="hidden group-hover:flex absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded shadow-md z-20 font-bold items-center gap-1">
@@ -546,20 +640,30 @@ export default function AdmissionAnalyticsPage() {
                     <div className="text-center text-slate-400 py-10 font-bold text-sm border-2 border-dashed border-slate-200 rounded-xl">해당 시험지의 응시자 기록이 없습니다.</div>
                   ) : (
                     reportStats.studentList.map((st, index) => (
-                      <div key={st.assignmentId} className="bg-white border border-slate-200 rounded-xl p-3.5 flex items-center justify-between shadow-sm hover:border-emerald-400 hover:shadow-md transition-all group">
+                      <div 
+                        key={st.assignmentId} 
+                        onClick={() => setModalStudent(st)}
+                        className="bg-white border border-slate-200 rounded-xl p-3.5 flex items-center justify-between shadow-sm hover:border-emerald-400 hover:shadow-md transition-all group cursor-pointer"
+                        title="클릭하여 학생별 문항 정오표 보기"
+                      >
                         <div className="flex items-center gap-3">
                           <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-black shrink-0 shadow-sm ${index < 3 ? 'bg-gradient-to-br from-amber-200 to-amber-100 text-amber-700 border border-amber-300' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
                             {index + 1}
                           </div>
                           <div className="flex flex-col min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="font-extrabold text-slate-800 truncate text-[15px]">{st.studentName}</span>
+                              <span className="font-extrabold text-slate-800 truncate text-[15px] group-hover:text-emerald-700 transition-colors">{st.studentName}</span>
                             </div>
-                            <span className="text-[10px] text-slate-500 font-bold mt-0.5">{st.grade}</span>
+                            <div className="flex items-center gap-1.5 mt-1.5">
+                              <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200/60 shadow-sm whitespace-nowrap">
+                                🗓️ {st.dateStr} ⏰ {st.timeStr}
+                              </span>
+                            </div>
                           </div>
                         </div>
-                        <div className="font-black text-xl text-emerald-600 shrink-0 ml-2 group-hover:scale-110 transition-transform origin-right">
-                          {st.totalScore}<span className="text-[13px] text-slate-400 font-bold ml-0.5">점</span>
+                        <div className="font-black text-xl text-emerald-600 shrink-0 ml-2 group-hover:scale-110 transition-transform origin-right flex flex-col items-end">
+                          <div>{st.totalScore}<span className="text-[13px] text-slate-400 font-bold ml-0.5">점</span></div>
+                          <span className="text-[10px] text-slate-400 font-medium group-hover:text-emerald-500 transition-colors whitespace-nowrap mt-1">상세표 👆</span>
                         </div>
                       </div>
                     ))
@@ -571,9 +675,79 @@ export default function AdmissionAnalyticsPage() {
           </div>
         </div>
 
-        {/* 🔍 문항 상세 뷰 모달 */}
+        {/* 👨‍🎓 [2] 학생별 상세 채점 결과 검증 모달 */}
+        {modalStudent && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 no-print animate-in fade-in zoom-in duration-200">
+            <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+              <div className="bg-emerald-700 p-5 text-white flex justify-between items-center shrink-0 shadow-sm">
+                <div>
+                  <h2 className="font-black text-xl flex items-center gap-2">👨‍🎓 {modalStudent.studentName} 학생 상세 채점표</h2>
+                  <p className="text-emerald-200 text-sm mt-1 font-bold">응시 일시: {modalStudent.dateStr} {modalStudent.timeStr} (원천 데이터 검증)</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div className="text-right">
+                    <span className="text-emerald-200 text-xs font-bold">총점</span>
+                    <div className="text-3xl font-black">{modalStudent.totalScore}점</div>
+                  </div>
+                  <button onClick={() => setModalStudent(null)} className="text-white hover:text-emerald-300 font-bold text-4xl leading-none transition-colors ml-2">&times;</button>
+                </div>
+              </div>
+              
+              <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50">
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
+                  {reportStats.questionStats.map((q, idx) => {
+                    const ans = modalStudent.answers.find((a: any) => String(a.question_id) === String(q.questionId));
+                    const earnedScore = ans ? parseFloat(ans.earned_score) || 0 : 0;
+                    const isCor = ans ? (ans.is_correct === true || String(ans.is_correct).toLowerCase() === 'true') : false;
+                    
+                    const isFull = isCor || earnedScore >= (q.assignedScore - 0.01);
+                    const isPartial = !isFull && earnedScore > 0;
+
+                    let bgClass = "bg-white border-slate-200 hover:border-slate-300";
+                    let icon = <span className="text-rose-500 font-black text-xl">X</span>;
+                    
+                    if (isFull) {
+                      bgClass = "bg-emerald-50 border-emerald-300 hover:border-emerald-400";
+                      icon = <span className="text-emerald-500 font-black text-xl">O</span>;
+                    } else if (isPartial) {
+                      bgClass = "bg-amber-50 border-amber-300 hover:border-amber-400";
+                      icon = <span className="text-amber-500 font-black text-xl">△</span>;
+                    }
+
+                    return (
+                      <div 
+                        key={idx} 
+                        onClick={() => setModalQ(q)} // 🌟 클릭 시 문제 보기 모달 띄움
+                        className={`border rounded-xl p-3 flex flex-col items-center justify-center shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${bgClass}`}
+                        title={`클릭하여 문항 ${q.logicalNumber} 내용 보기`}
+                      >
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <span className="text-xs font-bold text-slate-500">문항 {q.logicalNumber}</span>
+                          <span className="text-[10px] grayscale opacity-50">🔍</span>
+                        </div>
+                        <div className="mb-2">{icon}</div>
+                        <div className="text-[11px] font-black text-slate-700 bg-white/60 px-2 py-1 rounded border border-slate-200/50 w-full text-center">
+                          득점: {earnedScore.toFixed(1)} / {q.assignedScore.toFixed(1)}
+                        </div>
+                        {ans?.grading_code && (
+                          <div className="text-[9px] font-bold text-slate-400 mt-1">코드: {ans.grading_code}</div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="p-4 bg-slate-100 border-t border-slate-200 flex justify-end shrink-0">
+                <button onClick={() => setModalStudent(null)} className="px-8 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-md transition-all hover:-translate-y-0.5">닫기</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 🔍 [1] 문항 상세 뷰 모달 (z-[70]으로 상단 배치) */}
         {modalQ && (
-          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print animate-in fade-in zoom-in duration-200">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 no-print animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
               <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0 shadow-sm">
                 <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> 문항 {modalQ.logicalNumber} 상세 뷰어</h2>
