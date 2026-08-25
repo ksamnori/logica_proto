@@ -198,9 +198,11 @@ export default function AiRecordModal({ onClose, onSuccess }: AiRecordModalProps
     setUiError("");
     try {
       const formData = new FormData();
-      formData.append("audio", audioBlob, "meeting_record.webm");
+      // 💡 클로바 API는 파일 필드명을 'media'로 기대하므로 audio -> media 로 변경합니다.
+      formData.append("media", audioBlob, "meeting_record.webm");
 
-      const sttRes = await fetch('/api/stt-diarization', {
+      // 💡 엔드포인트를 클로바 스피치 라우트로 변경합니다.
+      const sttRes = await fetch('/api/clova-speech', {
         method: 'POST',
         body: formData,
       });
@@ -208,9 +210,11 @@ export default function AiRecordModal({ onClose, onSuccess }: AiRecordModalProps
       const sttData = await sttRes.json();
       if (!sttData.success) throw new Error(sttData.error || "STT 변환 실패");
       
-      const transcriptArray = sttData.transcript || [];
+      // 💡 클로바 스피치는 결과를 'segments'라는 배열로 내려줍니다.
+      const transcriptArray = sttData.segments || [];
       setSttTranscript(transcriptArray); 
 
+      // 화자 분리된 텍스트를 AI(GPT 등)가 요약하기 좋게 한 줄씩 병합
       const textForAi = transcriptArray.map((t:any) => `${t.speaker}: ${t.text}`).join('\n');
       
       if (!textForAi.trim()) {
@@ -219,6 +223,7 @@ export default function AiRecordModal({ onClose, onSuccess }: AiRecordModalProps
         return;
       }
       
+      // 이후 요약 및 Action Item 추출 로직은 기존과 동일하게 유지!
       const aiRes = await fetch('/api/ai-minutes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
