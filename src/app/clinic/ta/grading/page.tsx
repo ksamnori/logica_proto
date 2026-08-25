@@ -39,18 +39,20 @@ interface AssignmentItem {
   status: string;
   assignmentId?: string;
   homeworkId?: string;
-  masterId?: string;           // 🌟 필수 파라미터 보강
-  target_questions?: any[];    // 🌟 필수 파라미터 보강
+  masterId?: string;
+  target_questions?: any[];
 }
 
 type Step = 'STUDENT' | 'ITEM';
 
-interface ActiveAssignment {
+interface Panel {
+  id: string;
   mode: 'exam' | 'homework';
   assignmentId?: string;
   homeworkId?: string;
   studentId: string;
   studentName: string;
+  title: string;
   gradeAll: boolean; 
 }
 
@@ -87,13 +89,48 @@ export default function TaGradingPage() {
   const [items, setItems] = useState<AssignmentItem[]>([]);
   const [isLoadingItems, setIsLoadingItems] = useState(false);
 
-  const [activeItem, setActiveItem] = useState<ActiveAssignment | null>(null);
+  // 🌟 [핵심 변경 1] sessionStorage를 활용한 패널 및 선택 상태 복원 로직
+  const [panels, setPanels] = useState<Panel[]>([]);
+  const [activePanelId, setActivePanelId] = useState<string | null>(null);
+  const [isStateLoaded, setIsStateLoaded] = useState(false);
+
   const [activeDirty, setActiveDirty] = useState(false);
   const [pickerOpen, setPickerOpen] = useState(true);
-  
-  const [confirmGroup, setConfirmGroup] = useState<{ item: AssignmentItem, count: number } | null>(null);
 
-  useEffect(() => { setActiveDirty(false); }, [activeItem]);
+  const [confirmGroup, setConfirmGroup] = useState<{ item: AssignmentItem, count: number, student: StudentInfo } | null>(null);
+
+  // 🌟 초기 마운트 시 저장된 세션 상태 복원
+  useEffect(() => {
+    const savedPanels = sessionStorage.getItem('logica_ta_panels');
+    const savedActive = sessionStorage.getItem('logica_ta_active_panel');
+    let loadedPanels = [];
+    if (savedPanels) {
+      try {
+        loadedPanels = JSON.parse(savedPanels);
+        setPanels(loadedPanels);
+      } catch (e) {}
+    }
+    if (savedActive) setActivePanelId(savedActive);
+    
+    // 복원된 패널이 있으면 바로 채점 보드가 보이도록 픽커 닫기
+    if (loadedPanels.length > 0) setPickerOpen(false); 
+    
+    setIsStateLoaded(true);
+  }, []);
+
+  // 🌟 상태 변경 시 세션 자동 백업
+  useEffect(() => {
+    if (!isStateLoaded) return;
+    if (panels.length > 0) sessionStorage.setItem('logica_ta_panels', JSON.stringify(panels));
+    else sessionStorage.removeItem('logica_ta_panels');
+  }, [panels, isStateLoaded]);
+
+  useEffect(() => {
+    if (!isStateLoaded) return;
+    if (activePanelId) sessionStorage.setItem('logica_ta_active_panel', activePanelId);
+    else sessionStorage.removeItem('logica_ta_active_panel');
+    setActiveDirty(false);
+  }, [activePanelId, isStateLoaded]);
 
   useEffect(() => {
     if (taName) loadStudents();
@@ -292,9 +329,8 @@ export default function TaGradingPage() {
     } catch (e) { console.error(e); alert("문제지/과제 목록을 불러오지 못했습니다."); } finally { setIsLoadingItems(false); }
   };
 
-  const checkGroupGrading = async (item: AssignmentItem) => {
-    if (!selectedStudent) return;
-    if (activeItem && !confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 시험지를 바꾸시겠습니까?')) return;
+  const checkGroupGrading = async (item: AssignmentItem, student: StudentInfo) => {
+    if (student.id === activePanelId && !confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 시험지를 바꾸시겠습니까?')) return;
 
     setIsLoadingItems(true);
     try {
@@ -320,22 +356,39 @@ export default function TaGradingPage() {
 
       setIsLoadingItems(false);
       if (count > 1) {
-        setConfirmGroup({ item, count });
+        setConfirmGroup({ item, count, student });
       } else {
-        executeSelect(item, false);
+        executeSelect(item, student, false);
       }
     } catch (e) {
       console.error(e);
       setIsLoadingItems(false);
-      executeSelect(item, false); 
+      executeSelect(item, student, false); 
     }
   };
 
-  const executeSelect = (item: AssignmentItem, gradeAll: boolean) => {
-    setActiveItem(['exam', 'hw_exam', 'print'].includes(item.kind)
-      ? { mode: 'exam', assignmentId: item.assignmentId, studentId: selectedStudent!.id, studentName: selectedStudent!.name, gradeAll }
-      : { mode: 'homework', homeworkId: item.homeworkId, studentId: selectedStudent!.id, studentName: selectedStudent!.name, gradeAll }
-    );
+  const executeSelect = (item: AssignmentItem, student: StudentInfo, gradeAll: boolean) => {
+    const panelId = gradeAll ? `group_${item.assignmentId || item.homeworkId}` : student.id;
+
+    const panel: Panel = {
+      id: panelId,
+      mode: ['exam', 'hw_exam', 'print'].includes(item.kind) ? 'exam' : 'homework',
+      assignmentId: item.assignmentId,
+      homeworkId: item.homeworkId,
+      studentId: student.id,
+      studentName: student.name,
+      title: item.title,
+      gradeAll
+    };
+
+    setPanels(prev => {
+      const idx = prev.findIndex(p => p.id === panel.id);
+      if (idx === -1) return [...prev, panel];
+      const next = [...prev];
+      next[idx] = panel;
+      return next;
+    });
+    setActivePanelId(panel.id);
     setConfirmGroup(null);
     setPickerOpen(false);
     setStep('STUDENT');
@@ -344,14 +397,33 @@ export default function TaGradingPage() {
 
   const confirmLeaveIfDirty = (message: string) => !activeDirty || confirm(message);
 
-  const openItemPickerForActive = () => {
+  const closePanel = (id: string) => {
+    if (id === activePanelId && !confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 닫으시겠습니까?')) return;
+    const next = panels.filter(p => p.id !== id);
+    setPanels(next);
+    if (activePanelId === id) setActivePanelId(next[0]?.id ?? null);
+  };
+
+  const switchPanel = (id: string) => {
+    if (id === activePanelId) return;
+    if (!confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 다른 탭으로 이동하시겠습니까?')) return;
+    setActivePanelId(id);
+  };
+
+  const openPicker = () => {
+    setStep('STUDENT');
+    setSelectedStudent(null);
+    setPickerOpen(true);
+  };
+
+  const openItemPickerForPanel = (panel: Panel) => {
     if (!confirmLeaveIfDirty('저장되지 않은 채점 내용이 있습니다. 저장하지 않고 시험지 선택 화면으로 이동하시겠습니까?')) return;
     let found: StudentInfo | null = null;
     for (const c of groupedClasses) {
-      const s = c.students.find(st => st.id === activeItem?.studentId);
+      const s = c.students.find(st => st.id === panel.studentId);
       if (s) { found = s; break; }
     }
-    const student: StudentInfo = found || { id: activeItem!.studentId, name: activeItem!.studentName, className: '', classId: '', allClassIds: [], pendingExamQ: 0, pendingHwQ: 0, pendingPrintQ: 0 };
+    const student: StudentInfo = found || { id: panel.studentId, name: panel.studentName, className: '', classId: '', allClassIds: [], pendingExamQ: 0, pendingHwQ: 0, pendingPrintQ: 0 };
     setSelectedStudent(student);
     setStep('ITEM');
     setPickerOpen(true);
@@ -448,7 +520,9 @@ export default function TaGradingPage() {
     } finally { setIsLoading(false); }
   };
 
-  if (!ready) return <div className="h-screen bg-slate-100" />;
+  if (!ready || !isStateLoaded) return <div className="h-screen bg-slate-100" />;
+
+  const activePanel = panels.find(p => p.id === activePanelId) || null;
 
   const pickerBlock = (
     <>
@@ -477,18 +551,22 @@ export default function TaGradingPage() {
                     </button>
                     {isOpen && (
                       <div className="flex flex-col bg-slate-50/50">
-                        {c.students.map(s => (
-                          <button key={s.id} onClick={() => handleSelectStudent(s)} className="w-full text-left pl-9 pr-4 py-2.5 text-[12px] font-bold text-slate-600 hover:bg-blue-50 hover:text-[#002864] transition-colors border-t border-slate-100/80 flex items-center justify-between gap-2">
-                            <span className="flex items-center gap-2 truncate">
-                              👤 {s.name}
-                              <div className="flex items-center gap-1 shrink-0">
-                                {s.pendingExamQ > 0 && <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-blue-200">{s.pendingExamQ}</span>}
-                                {s.pendingHwQ > 0 && <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-amber-200">{s.pendingHwQ}</span>}
-                                {s.pendingPrintQ > 0 && <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-emerald-200">{s.pendingPrintQ}</span>}
-                              </div>
-                            </span>
-                          </button>
-                        ))}
+                        {c.students.map(s => {
+                          const alreadyOpen = panels.some(p => p.studentId === s.id && !p.gradeAll);
+                          return (
+                            <button key={s.id} onClick={() => handleSelectStudent(s)} className="w-full text-left pl-9 pr-4 py-2.5 text-[12px] font-bold text-slate-600 hover:bg-blue-50 hover:text-[#002864] transition-colors border-t border-slate-100/80 flex items-center justify-between gap-2">
+                              <span className="flex items-center gap-2 truncate">
+                                👤 {s.name}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  {s.pendingExamQ > 0 && <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-blue-200">{s.pendingExamQ}</span>}
+                                  {s.pendingHwQ > 0 && <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-amber-200">{s.pendingHwQ}</span>}
+                                  {s.pendingPrintQ > 0 && <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-emerald-200">{s.pendingPrintQ}</span>}
+                                </div>
+                              </span>
+                              {alreadyOpen && <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">채점 중</span>}
+                            </button>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -513,12 +591,19 @@ export default function TaGradingPage() {
                 if (item.kind === 'hw' || item.kind === 'hw_exam') { badgeLabel = '과제'; badgeColor = 'bg-amber-100 text-amber-700'; } 
                 else if (item.kind === 'print') { badgeLabel = '오답'; badgeColor = 'bg-emerald-100 text-emerald-700'; }
 
+                const existingPanel = panels.find(p => p.studentId === selectedStudent.id && !p.gradeAll);
+                const isCurrentlyLoaded = !!existingPanel && (
+                  (item.kind === 'exam' && existingPanel.mode === 'exam' && existingPanel.assignmentId === item.assignmentId) ||
+                  (item.kind === 'hw' && existingPanel.mode === 'homework' && existingPanel.homeworkId === item.homeworkId)
+                );
+
                 return (
                   <div key={item.key} className="w-full text-left px-4 py-3 hover:bg-slate-50 transition-colors flex items-center justify-between gap-3 group">
-                    <button onClick={() => checkGroupGrading(item)} className="min-w-0 flex-1 text-left">
+                    <button onClick={() => checkGroupGrading(item, selectedStudent)} className="min-w-0 flex-1 text-left">
                       <div className="flex items-center gap-1.5">
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${badgeColor}`}>{badgeLabel}</span>
                         <span className="text-[13px] font-bold text-slate-700 truncate">{item.title}</span>
+                        {isCurrentlyLoaded && <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">보는 중</span>}
                       </div>
                       <p className="text-[11px] text-slate-400 font-medium mt-0.5 truncate">{item.subtitle} · {formatDate(item.date)} <span className="font-bold text-slate-500 ml-1">· 총 {item.totalQ}문항</span></p>
                     </button>
@@ -549,98 +634,107 @@ export default function TaGradingPage() {
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50 font-pretendard">
       <TaTopBar taName={taName} />
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0 shadow-sm z-10">
-        <div className="flex flex-col">
+        <div>
           <h1 className="font-lexend text-lg font-bold text-[#002864] tracking-tight leading-none">Logica Clinic <span className="text-slate-300 mx-1">·</span> 조교 채점</h1>
-          <div className="flex items-center gap-3 mt-1.5">
-            <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
-              <button onClick={() => { 
-                setStep('STUDENT'); 
-                setPickerOpen(true); 
-                loadStudents(); 
-              }} className={`px-2 py-0.5 rounded transition-all ${pickerOpen && step === 'STUDENT' ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>
-                1. 기준 학생 선택
-              </button>
-              <span className="text-slate-300">→</span>
-              <button onClick={() => { 
-                if(!selectedStudent && !activeItem) return alert('먼저 학생을 선택해주세요.'); 
-                
-                let student = selectedStudent;
-                if (!student && activeItem) {
-                  let found = null;
-                  for (const c of groupedClasses) {
-                    const s = c.students.find(st => st.id === activeItem.studentId);
-                    if (s) { found = s; break; }
-                  }
-                  student = found || { id: activeItem.studentId, name: activeItem.studentName, className: '', classId: '', allClassIds: [], pendingExamQ: 0, pendingHwQ: 0, pendingPrintQ: 0 };
-                  setSelectedStudent(student);
-                }
-                
-                setStep('ITEM'); 
-                setPickerOpen(true); 
-                if (student) loadItemsForStudent(student);
-              }} className={`px-2 py-0.5 rounded transition-all ${pickerOpen && step === 'ITEM' ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>
-                2. 문제지 선택
-              </button>
-              <span className="text-slate-300">→</span>
-              <button onClick={() => { if(!activeItem) return alert('선택된 문제지가 없습니다.'); setPickerOpen(false); }} className={`px-2 py-0.5 rounded transition-all ${!pickerOpen ? 'bg-[#002864] text-white font-bold shadow-sm' : 'hover:bg-slate-100 hover:text-slate-600'}`}>
-                3. 스프레드시트 채점
-              </button>
+          {panels.length === 0 ? (
+            <p className="text-[11px] text-slate-400 font-medium mt-1">
+              <span className={step === 'STUDENT' ? 'text-[#002864] font-bold' : ''}>1. 학생 선택</span>
+              <span className="mx-1.5">→</span>
+              <span className={step === 'ITEM' ? 'text-[#002864] font-bold' : ''}>2. 문제지 선택</span>
+              <span className="mx-1.5">→</span>
+              <span>3. 채점</span>
             </p>
-          </div>
+          ) : (
+            <p className="text-[11px] text-slate-400 font-medium mt-1">
+              <span className="text-[#002864] font-bold">{panels.length}개</span> 패널 대기 중 — 왼쪽 바에서 탭을 눌러 전환하세요
+            </p>
+          )}
         </div>
       </header>
 
       <div className="flex-1 overflow-hidden relative flex">
+        {panels.length > 0 && (
+          <div className="w-[180px] shrink-0 bg-white border-r border-slate-200 flex flex-col overflow-hidden">
+            <div className="shrink-0 px-3 py-1 border-b border-slate-100">
+              <span className="text-[8px] font-black text-slate-400 tracking-wide">열려있는 패널 {panels.length}개</span>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scroll p-1.5 space-y-0.5">
+              {panels.map(panel => {
+                const isActive = activePanelId === panel.id;
+                return (
+                  <button
+                    key={panel.id}
+                    onClick={() => switchPanel(panel.id)}
+                    title={`${panel.gradeAll ? '[그룹]' : ''} ${panel.studentName} · ${panel.title || '제목 없음'}`}
+                    className={`group relative w-full text-left rounded-md pl-2 pr-5 py-1 transition-colors border-l-[3px] ${isActive ? 'bg-blue-50 border-l-[#002864]' : 'bg-white border-l-transparent hover:bg-slate-50'}`}
+                  >
+                    <div className="flex items-center gap-1 min-w-0">
+                      <span className={`shrink-0 text-[7px] font-black px-1 rounded ${panel.gradeAll ? 'bg-rose-100 text-rose-600' : (panel.mode === 'exam' ? 'bg-indigo-100 text-indigo-600' : 'bg-amber-100 text-amber-700')}`}>
+                        {panel.gradeAll ? '그룹' : (panel.mode === 'exam' ? '시험' : '과제')}
+                      </span>
+                      <span className={`shrink-0 max-w-[50px] text-[10px] font-black truncate ${isActive ? 'text-[#002864]' : 'text-slate-700'}`}>
+                        {panel.gradeAll ? '👥 반 전체' : `👤 ${panel.studentName}`}
+                      </span>
+                      <span className="min-w-0 flex-1 text-[8px] text-slate-400 font-semibold truncate">· {panel.title || '제목 없음'}</span>
+                    </div>
+                    <span
+                      onClick={e => { e.stopPropagation(); closePanel(panel.id); }}
+                      title="이 탭 닫기"
+                      className="absolute top-1/2 -translate-y-1/2 right-1 shrink-0 text-[11px] leading-none font-bold px-0.5 text-slate-300 hover:text-rose-500"
+                    >×</span>
+                  </button>
+                );
+              })}
+            </div>
+            <div className="shrink-0 p-1.5 border-t border-slate-100">
+              <button onClick={openPicker} className="w-full text-[9px] font-black bg-[#002864] hover:bg-blue-900 text-white rounded-md px-1.5 py-1 transition-colors">
+                + 채점 패널 추가
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-hidden relative">
-          {!activeItem ? (
+          {panels.length === 0 ? (
             <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm px-6 text-center">
               학생과 문제지를 골라 채점을 시작하세요.
             </div>
-          ) : (
+          ) : activePanel ? (
             <div className="h-full flex flex-col bg-slate-100">
               <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-2">
                 <span className="text-[12px] font-black text-[#002864] truncate">
-                  👤 {activeItem.studentName} 학생 기준 {activeItem.gradeAll ? '전체 조망 중' : '개별 조회 중'}
+                  {activePanel.gradeAll ? `👥 [반 전체] ${activePanel.studentName} 학생 기준 동시 채점 중` : `👤 ${activePanel.studentName} 개별 채점 중`}
                 </span>
-                <button onClick={openItemPickerForActive} className="shrink-0 text-[10px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2 py-1 transition-colors">
-                  🔄 다른 문제지 선택
-                </button>
+                {!activePanel.gradeAll && (
+                  <button onClick={() => openItemPickerForPanel(activePanel)} className="shrink-0 text-[10px] font-bold text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-md px-2 py-1 transition-colors">
+                    🔄 시험지 바꾸기
+                  </button>
+                )}
               </div>
               <div className="flex-1 overflow-hidden">
                 <GradingBoard
-                  mode={activeItem.mode}
-                  assignmentId={activeItem.assignmentId}
-                  homeworkId={activeItem.homeworkId}
-                  studentId={activeItem.studentId}
-                  gradeAll={activeItem.gradeAll}
-                  onBack={() => { 
-                    let found = null;
-                    for (const c of groupedClasses) {
-                      const s = c.students.find(st => st.id === activeItem?.studentId);
-                      if (s) { found = s; break; }
-                    }
-                    const student = found || { id: activeItem!.studentId, name: activeItem!.studentName, className: '', classId: '', allClassIds: [], pendingExamQ: 0, pendingHwQ: 0, pendingPrintQ: 0 };
-                    
-                    setSelectedStudent(student);
-                    setActiveItem(null); 
-                    setStep('ITEM');
-                    setPickerOpen(true); 
-                    
-                    loadStudents(); 
-                    loadItemsForStudent(student); 
-                  }}
+                  mode={activePanel.mode}
+                  assignmentId={activePanel.assignmentId}
+                  homeworkId={activePanel.homeworkId}
+                  studentId={activePanel.studentId}
+                  gradeAll={activePanel.gradeAll}
+                  onBack={() => closePanel(activePanel.id)}
                   onDirtyChange={setActiveDirty}
                 />
               </div>
             </div>
+          ) : (
+            <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm px-6 text-center">
+              왼쪽에서 채점할 패널을 선택하세요.
+            </div>
           )}
 
           {pickerOpen && !confirmGroup && (
-            <div className={`absolute inset-0 z-20 flex flex-col ${activeItem ? 'bg-slate-900/40 backdrop-blur-sm p-4 sm:p-6' : ''}`}>
-              <div className={`flex-1 flex flex-col overflow-hidden min-h-0 ${activeItem ? 'bg-slate-50 rounded-2xl shadow-2xl p-4 sm:p-6 max-w-2xl w-full mx-auto' : 'p-4 sm:p-6'}`}>
-                {activeItem && (
+            <div className={`absolute inset-0 z-20 flex flex-col ${panels.length > 0 ? 'bg-slate-900/40 backdrop-blur-sm p-4 sm:p-6' : ''}`}>
+              <div className={`flex-1 flex flex-col overflow-hidden min-h-0 ${panels.length > 0 ? 'bg-slate-50 rounded-2xl shadow-2xl p-4 sm:p-6 max-w-2xl w-full mx-auto' : 'p-4 sm:p-6'}`}>
+                {panels.length > 0 && (
                   <div className="flex justify-between items-center mb-2 shrink-0">
-                    <span className="text-xs font-bold text-slate-400">새롭게 채점할 문제지를 다시 골라주세요</span>
+                    <span className="text-xs font-bold text-slate-400">채점할 학생 및 항목을 새로 골라주세요</span>
                     <button onClick={() => setPickerOpen(false)} className="text-xs font-bold text-slate-400 hover:text-slate-600">닫기 ✕</button>
                   </div>
                 )}
@@ -649,6 +743,7 @@ export default function TaGradingPage() {
             </div>
           )}
 
+          {/* 그룹 채점 모달 */}
           {confirmGroup && (
             <div className="absolute inset-0 z-30 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
               <div className="bg-white rounded-2xl shadow-2xl flex flex-col overflow-hidden max-w-md w-full animate-[fadeIn_0.2s_ease-out]">
@@ -667,11 +762,11 @@ export default function TaGradingPage() {
                   </p>
                 </div>
                 <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-center gap-3 shrink-0">
-                  <button onClick={() => executeSelect(confirmGroup.item, false)} className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-lg shadow-sm transition-colors text-sm">
-                    👤 {selectedStudent?.name} 학생만 채점
+                  <button onClick={() => executeSelect(confirmGroup.item, confirmGroup.student, false)} className="px-5 py-2.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-lg shadow-sm transition-colors text-sm">
+                    👤 {confirmGroup.student.name} 학생만
                   </button>
-                  <button onClick={() => executeSelect(confirmGroup.item, true)} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm transition-colors text-sm">
-                    👥 반 전체 동시 채점
+                  <button onClick={() => executeSelect(confirmGroup.item, confirmGroup.student, true)} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm transition-colors text-sm">
+                    👥 반 전체 뷰로 열기
                   </button>
                 </div>
               </div>

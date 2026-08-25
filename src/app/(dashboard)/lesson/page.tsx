@@ -250,6 +250,7 @@ export default function LessonPage() {
     setClasses(data || []);
   };
 
+  // 🌟 [핵심 개선] 어디서든 완료된 기록을 중복 스캔하여 100% 진도율에 반영하는 함수
   const fetchClassAssignedBooks = async (cls: any) => {
     try {
       const classId = cls.class_id;
@@ -270,13 +271,15 @@ export default function LessonPage() {
 
       const assignedBookIds = data.map(cb => cb.book_id);
       
-      // 🌟 [핵심 버그 수정] 모달에서 문제와 정답을 띄우기 위해 누락되었던 전체 데이터를 스캔하도록 select("*") 로 복구!
       const { data: qData } = await supabase.from("textbook_question").select("*").in("book_id", assignedBookIds);
       const questionsData = qData || [];
 
       const bookPagesMap: Record<string, number[]> = {};
       const bookPageTqsMap: Record<string, Record<number, number[]>> = {};
       const groupedQsMap: Record<string, Record<number, any[]>> = {};
+
+      // 문항 번호 맵핑용 역참조 사전
+      const qIdToTqId = new Map<number, number>();
 
       assignedBookIds.forEach(bId => { 
         bookPagesMap[bId] = [];
@@ -285,6 +288,7 @@ export default function LessonPage() {
       });
 
       questionsData.forEach(q => {
+        if (q.question_id) qIdToTqId.set(q.question_id, q.tq_id);
         const pNum = Number(q.page_number) || 0;
         if (!bookPageTqsMap[q.book_id][pNum]) {
           bookPageTqsMap[q.book_id][pNum] = [];
@@ -299,50 +303,100 @@ export default function LessonPage() {
         bookPagesMap[bId].sort((a, b) => a - b);
       });
 
-      const studentDoneTqs: Record<string, Record<string, Set<number>>> = {};
-      assignedBookIds.forEach(bId => {
-        studentDoneTqs[bId] = {};
-        currentClassStudents.forEach((stu: StudentBasicInfo) => {
-          studentDoneTqs[bId][stu.id] = new Set();
-        });
-      });
-
       const globalStatusMap: Record<string, string> = {};
+      const sIds = currentClassStudents.map(s => s.id);
 
-      const { data: assignments } = await supabase.from("homework_assignment")
-        .select("book_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids)")
-        .eq("class_id", classId)
-        .in("book_id", assignedBookIds);
+      if (sIds.length > 0) {
+        // 1. 기존 homework_assignment 기반 상태 계산 (안전하게 병합)
+        const { data: assignments } = await supabase.from("homework_assignment")
+          .select("book_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)")
+          .eq("class_id", classId)
+          .in("book_id", assignedBookIds);
 
-      assignments?.forEach(hw => {
-        const bId = hw.book_id;
-        if (!bId) return;
+        assignments?.forEach(hw => {
+          const bId = hw.book_id;
+          if (!bId) return;
 
-        const targetQs = safeParseIds(hw.target_questions);
-        const isClassWide = !hw.target_student_id;
-        const targetStudentIds = isClassWide ? currentClassStudents.map(s => s.id) : [hw.target_student_id];
+          const targetQs = safeParseIds(hw.target_questions);
+          const isClassWide = !hw.target_student_id;
+          const targetStudentIds = isClassWide ? sIds : [hw.target_student_id];
 
-        targetStudentIds.forEach((sId: string) => {
-          if (studentDoneTqs[bId][sId]) {
+          targetStudentIds.forEach((sId: string) => {
             targetQs.forEach(tqId => {
-              studentDoneTqs[bId][sId].add(tqId);
               globalStatusMap[`${classId}_${tqId}_${sId}`] = 'homework'; 
             });
-          }
-        });
+          });
 
-        hw.student_homework_result?.forEach((res: any) => {
-          const sId = res.student_id;
-          const completedQs = safeParseIds(res.completed_tq_ids);
-          
-          if (studentDoneTqs[bId][sId]) {
-            completedQs.forEach(tqId => {
-              studentDoneTqs[bId][sId].add(tqId);
+          hw.student_homework_result?.forEach((res: any) => {
+            const sId = res.student_id;
+            const parsedCompleted = safeParseIds(res.completed_tq_ids);
+            const isFullyCompleted = ['채점완료', '제출완료', '완료'].includes(res.status);
+            
+            // 🌟 주/부교재 보존 & 워크북 강제완료 둘 다 만족하는 로직
+            let completedQs = parsedCompleted;
+            if (isFullyCompleted) {
+               if (targetQs.length > 0) {
+                   completedQs = Array.from(new Set([...targetQs, ...parsedCompleted]));
+               }
+            }
+
+            completedQs.forEach((tqId: number) => {
               globalStatusMap[`${classId}_${tqId}_${sId}`] = 'done'; 
             });
-          }
+          });
         });
-      });
+
+        // 2. 다른 시험/프린트로 병합된 문항들 (exam_assignment) 추적
+        const { data: exAssigns } = await supabase.from('exam_assignment')
+          .select('assignment_id, student_id, status, exam_id')
+          .in('student_id', sIds);
+        
+        const eIds = [...new Set(exAssigns?.map(a => a.exam_id).filter(Boolean))];
+        if (eIds.length > 0) {
+            const { data: eItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', eIds);
+            const examQMap = new Map<string, number[]>();
+            eItems?.forEach(item => {
+                if (!examQMap.has(item.exam_id)) examQMap.set(item.exam_id, []);
+                examQMap.get(item.exam_id)!.push(item.question_id);
+            });
+
+            exAssigns?.forEach(assign => {
+                const qIdsInExam = examQMap.get(assign.exam_id) || [];
+                const isCompleted = ['채점완료', '제출완료', '완료'].includes(assign.status);
+
+                qIdsInExam.forEach(qId => {
+                    const tqId = qIdToTqId.get(qId);
+                    if (tqId) {
+                        const curStatus = globalStatusMap[`${classId}_${tqId}_${assign.student_id}`];
+                        if (isCompleted) {
+                            globalStatusMap[`${classId}_${tqId}_${assign.student_id}`] = 'done';
+                        } else if (curStatus !== 'done') {
+                            globalStatusMap[`${classId}_${tqId}_${assign.student_id}`] = 'homework';
+                        }
+                    }
+                });
+            });
+        }
+
+        // 3. 개별 문항별 가장 확실한 중복 체크 (어디서든 O, TO, RO 처리됐다면 무조건 완료로 덮어쓰기)
+        const [ { data: hwAns }, { data: exAns } ] = await Promise.all([
+            supabase.from('student_homework_answer').select('tq_id, student_id, is_correct, grading_code').in('student_id', sIds),
+            supabase.from('student_answer').select('question_id, student_id, is_correct, grading_code').in('student_id', sIds)
+        ]);
+
+        hwAns?.forEach(ans => {
+            if (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct) {
+                globalStatusMap[`${classId}_${ans.tq_id}_${ans.student_id}`] = 'done';
+            }
+        });
+
+        exAns?.forEach(ans => {
+            const tqId = qIdToTqId.get(ans.question_id);
+            if (tqId && (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct)) {
+                globalStatusMap[`${classId}_${tqId}_${ans.student_id}`] = 'done';
+            }
+        });
+      }
 
       const booksWithStats = data.map(cb => {
         const bId = cb.book_id;
@@ -941,7 +995,6 @@ export default function LessonPage() {
         onSuccess={() => fetchClassAssignedBooks(selectedClass)} 
       />
 
-      {/* 🌟 팝업 창 연동 */}
       {progressModalData && (
          <ProgressDetailModal 
             data={progressModalData} 

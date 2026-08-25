@@ -18,8 +18,10 @@ const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 interface ClassWeekCalendarProps {
   classId: string;
   className: string;
-  scheduleDays: string[]; // 예: ['화', '목']
   canEdit: boolean;
+  // 💡 상위(ClassEditModal)에서 수업 요일을 수정해 저장할 때마다 값을 바꿔서, 방금 DB에 반영된
+  // 정규 요일을 이 컴포넌트가 즉시 다시 읽어오게 만드는 트리거. (classId는 그대로라 재조회가 안 걸림)
+  scheduleRefreshKey?: number;
 }
 
 type DayMeta = {
@@ -30,13 +32,16 @@ type DayMeta = {
   isExtra: boolean;
   extraId?: string;
   extraReason?: string;
+  extraStartTime?: string | null;
+  extraEndTime?: string | null;
+  extraReplacesHolidayId?: string | null;
   isScheduledWeekday: boolean; // 정규 수업 요일인지(휴일 여부와 무관)
   isRegularSession: boolean; // 정규 요일이고 휴일이 아님(실제로 회차로 잡히는지)
   isSession: boolean; // isRegularSession || isExtra
   weekTypeAtSession?: "odd" | "even"; // 이 회차가 속한 홀/짝 (session일 때만)
 };
 
-export default function ClassWeekCalendar({ classId, className, scheduleDays, canEdit }: ClassWeekCalendarProps) {
+export default function ClassWeekCalendar({ classId, className, canEdit, scheduleRefreshKey }: ClassWeekCalendarProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [weekType, setWeekType] = useState<string | null>(null);
   const [weekTypeUpdatedDate, setWeekTypeUpdatedDate] = useState<string | null>(null);
@@ -44,26 +49,38 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
   const [forcedWeekTypeDate, setForcedWeekTypeDate] = useState<string | null>(null);
   const [holidays, setHolidays] = useState<any[]>([]);
   const [extraSessions, setExtraSessions] = useState<any[]>([]);
+  // 💡 [버그 수정] 이전엔 이 컴포넌트가 부모(ClassEditModal)의 "저장 전" 수정 초안(scheduleDays prop)을
+  // 그대로 정규 요일 판정에 썼다 — 그래서 관리자가 요일 체크박스를 만지작거리다 저장하지 않고 휴일/보강을
+  // 지정하면, 실제 DB에 저장된 정규 요일과 안 맞는 휴일/보강 기록이 생겨버렸다(실제로 발견된 사례:
+  // 저장된 정규 요일은 월/금인데 화요일 휴일 + 일/목 보강이 남아있었음). 항상 DB에 저장된 class_schedule을
+  // 직접 조회해서 판정 기준으로 삼는다.
+  const [scheduleDays, setScheduleDays] = useState<string[]>([]);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [reasonDraft, setReasonDraft] = useState("");
+  // 보강 시작/종료 시간. 비워두면 시간 없이 저장됨(parent 쪽에서 정규 수업 시간을 예상으로 대신 보여줌).
+  const [extraStartTime, setExtraStartTime] = useState("");
+  const [extraEndTime, setExtraEndTime] = useState("");
   const [isBusy, setIsBusy] = useState(false);
   // 💡 "휴일 지정 -> 보강일 선택" 2단계 흐름의 1단계에서 방금 휴일로 지정한 날짜를 들고 있다가,
   // 2단계에서 다른 날짜를 보강일로 지정하는 순간 둘을 묶어 학부모 채팅방에 한 번에 안내한다.
   const [pendingHolidayDate, setPendingHolidayDate] = useState<string | null>(null);
 
   const loadAll = async () => {
-    const [{ data: cRow }, { data: hRows }, { data: eRows }] = await Promise.all([
+    const [{ data: cRow }, { data: hRows }, { data: eRows }, { data: sRows }] = await Promise.all([
       supabase.from("class").select("week_type, week_type_updated_date, session_parity, forced_week_type, forced_week_type_date").eq("class_id", classId).maybeSingle(),
       supabase.from("class_holiday").select("*").eq("class_id", classId).order("holiday_date", { ascending: true }),
       supabase.from("class_extra_session").select("*").eq("class_id", classId).order("session_date", { ascending: true }),
+      supabase.from("class_schedule").select("day_of_week").eq("class_id", classId),
     ]);
     setHolidays(hRows || []);
     setExtraSessions(eRows || []);
+    const persistedScheduleDays = (sRows || []).map((s: any) => s.day_of_week);
+    setScheduleDays(persistedScheduleDays);
 
     if (cRow) {
       const { weekType: wt } = await resolveClassWeekType(supabase, {
         class_id: classId, class_name: className, week_type: cRow.week_type,
-        week_type_updated_date: cRow.week_type_updated_date, session_parity: cRow.session_parity, scheduleDays,
+        week_type_updated_date: cRow.week_type_updated_date, session_parity: cRow.session_parity, scheduleDays: persistedScheduleDays,
         forced_week_type: cRow.forced_week_type, forced_week_type_date: cRow.forced_week_type_date,
       });
       // resolveClassWeekType이 DB를 이미 갱신했을 수 있으니 최신값을 다시 읽는다.
@@ -78,7 +95,7 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
   useEffect(() => {
     if (classId) loadAll();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [classId]);
+  }, [classId, scheduleRefreshKey]);
 
   const holidaySet = useMemo(() => new Map(holidays.map((h: any) => [h.holiday_date, h])), [holidays]);
   const extraSet = useMemo(() => new Map(extraSessions.map((e: any) => [e.session_date, e])), [extraSessions]);
@@ -106,6 +123,9 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
       map.set(ymd, {
         ymd, isHoliday: !!holiday, holidayId: holiday?.id, holidayReason: holiday?.reason,
         isExtra: !!extra, extraId: extra?.id, extraReason: extra?.reason,
+        extraStartTime: extra?.start_time ? String(extra.start_time).slice(0, 5) : null,
+        extraEndTime: extra?.end_time ? String(extra.end_time).slice(0, 5) : null,
+        extraReplacesHolidayId: extra?.replaces_holiday_id ?? null,
         isScheduledWeekday, isRegularSession, isSession, weekTypeAtSession: undefined,
       });
     }
@@ -204,7 +224,7 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
 
   // 💡 보강일 없이 그냥 휴일 지정만으로 끝내고 싶을 때(예: 자율학습으로 대체, 보강 자체가 필요
   // 없는 경우) — 안내는 안 보내고 대기 상태만 벗어난다. 이미 만든 휴일 기록은 그대로 둔다.
-  const cancelPendingHoliday = () => { setPendingHolidayDate(null); setReasonDraft(""); };
+  const cancelPendingHoliday = () => { setPendingHolidayDate(null); setReasonDraft(""); setExtraStartTime(""); setExtraEndTime(""); };
 
   // 💡 2단계: pendingHolidayDate로 잡아둔 휴일과, 지금 선택한 날짜(보강일)를 묶어 보강일로 등록하고
   // 학부모 채팅방에 "OO일 휴일 → OO일 보강" 안내를 한 번만 보낸다. 이미 뭔가 있는 날(정규 수업일 ·
@@ -215,13 +235,17 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
     if (selectedMeta.isHoliday || selectedMeta.isRegularSession || selectedMeta.isExtra) return;
     setIsBusy(true);
     try {
-      const { error } = await setClassExtraSession(supabase, classId, selectedDate, reasonDraft);
+      const pendingHolidayId = holidaySet.get(pendingHolidayDate)?.id ?? null;
+      const { error } = await setClassExtraSession(supabase, classId, selectedDate, reasonDraft, extraStartTime, extraEndTime, pendingHolidayId);
       if (error) { alert("보강일 등록 중 오류: " + error.message); return; }
       const hWeekday = DAY_LABELS[new Date(pendingHolidayDate + "T00:00:00Z").getUTCDay()];
       const mWeekday = DAY_LABELS[new Date(selectedDate + "T00:00:00Z").getUTCDay()];
-      await notifyParents(`[${className}] 안내: ${pendingHolidayDate}(${hWeekday}) 수업이 휴일로 변경되어 ${selectedDate}(${mWeekday})로 보강합니다.${reasonDraft ? ` (사유: ${reasonDraft})` : ""}`);
+      const timeNote = extraStartTime ? ` ${extraStartTime}${extraEndTime ? `~${extraEndTime}` : ""}` : "";
+      await notifyParents(`[${className}] 안내: ${pendingHolidayDate}(${hWeekday}) 수업이 휴일로 변경되어 ${selectedDate}(${mWeekday})${timeNote}로 보강합니다.${reasonDraft ? ` (사유: ${reasonDraft})` : ""}`);
       setPendingHolidayDate(null);
       setReasonDraft("");
+      setExtraStartTime("");
+      setExtraEndTime("");
       await loadAll();
     } finally { setIsBusy(false); }
   };
@@ -275,11 +299,25 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
   // 💡 보강일 지정은 이제 항상 "휴일 지정 -> 보강일 선택"(finalizeMakeup) 경로로만 새로 만들어진다 —
   // 아무 평일이나 눌러서 곧바로 독립적으로 보강일을 만드는 건 더 이상 허용하지 않는다. 이 함수는
   // 이미 보강일로 지정된 날짜를 해제할 때만 쓴다.
+  //
+  // 💡 [버그 수정] 보강만 취소하고 원래 휴일은 그대로 두면, 정규 수업일이 휴일로 빠진 채 대체할 보강도
+  // 없는 상태가 되어 그 반 수업 한 회차가 통째로 사라져버렸다. finalizeMakeup이 남겨둔
+  // replaces_holiday_id로 원래 휴일을 찾아, 보강을 취소할 때 그 휴일도 같이 복원(해제)할지 물어본다.
   const removeExtraSession = async () => {
     if (!selectedMeta?.isExtra || !selectedMeta.extraId) return;
+    const linkedHoliday = selectedMeta.extraReplacesHolidayId
+      ? holidays.find((h: any) => h.id === selectedMeta.extraReplacesHolidayId)
+      : null;
+
+    const confirmMsg = linkedHoliday
+      ? `이 보강을 취소하면 원래 휴일이었던 ${linkedHoliday.holiday_date}도 함께 복원(정상 수업일로 되돌림)됩니다. 계속할까요?`
+      : "이 보강을 취소합니다. 연결된 휴일 정보가 없어 보강만 취소되니, 필요하면 원래 휴일 날짜를 직접 확인해주세요. 계속할까요?";
+    if (!confirm(confirmMsg)) return;
+
     setIsBusy(true);
     try {
       await removeClassExtraSession(supabase, selectedMeta.extraId);
+      if (linkedHoliday) await removeClassHoliday(supabase, linkedHoliday.id);
       setReasonDraft("");
       await loadAll();
     } finally { setIsBusy(false); }
@@ -322,10 +360,10 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
               return (
                 <div
                   key={ymd}
-                  onClick={() => { setSelectedDate(isSelected ? null : ymd); if (!pendingHolidayDate) setReasonDraft(""); }}
-                  className={`h-12 flex flex-col items-center pt-1 cursor-pointer rounded-lg border transition-all ${cellCls}`}
+                  onClick={() => { setSelectedDate(isSelected ? null : ymd); if (!pendingHolidayDate) { setReasonDraft(""); setExtraStartTime(""); setExtraEndTime(""); } }}
+                  className={`h-12 flex flex-col items-center pt-1 cursor-pointer rounded-lg border transition-all ${cellCls} ${isToday && !isSelected ? "ring-2 ring-inset ring-indigo-300" : ""}`}
                 >
-                  <span className={`text-[11px] font-bold ${isToday && !isSelected ? "text-rose-600 underline" : ""}`}>{day}</span>
+                  <span className="text-[11px] font-bold">{day}</span>
                   <div className="flex gap-0.5 mt-0.5 items-center">
                     {meta.isHoliday && <span className="text-[9px] leading-none">🚫</span>}
                     {meta.isExtra && <span className="text-[9px] leading-none">➕</span>}
@@ -371,7 +409,10 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
               </div>
               <p className="text-[11px] text-slate-500 font-bold mb-2">
                 {selectedMeta.isHoliday ? `휴일${selectedMeta.holidayReason ? ` — ${selectedMeta.holidayReason}` : ""}`
-                  : selectedMeta.isExtra ? `보강일${selectedMeta.extraReason ? ` — ${selectedMeta.extraReason}` : ""}`
+                  : selectedMeta.isExtra ? (() => {
+                      const timeLabel = selectedMeta.extraStartTime ? ` ${selectedMeta.extraStartTime}${selectedMeta.extraEndTime ? `~${selectedMeta.extraEndTime}` : ""}` : "";
+                      return `보강일${timeLabel}${selectedMeta.extraReason ? ` — ${selectedMeta.extraReason}` : ""}`;
+                    })()
                   : selectedMeta.isRegularSession ? "정규 수업일"
                   : "정규 수업 요일이 아닙니다"}
                 {selectedMeta.weekTypeAtSession && ` · ${selectedMeta.weekTypeAtSession === "odd" ? "주간테스트" : "과제오답유사"} 회차`}
@@ -380,6 +421,11 @@ export default function ClassWeekCalendar({ classId, className, scheduleDays, ca
                 // 💡 2단계(보강일 선택) 중에는 다른 조작(휴일/보강 개별 토글, 회차 강제 배정)이
                 // 끼어들면 안내 문구가 뭘 가리키는지 헷갈리므로, 이 날을 보강일로 확정하는 것 하나만 보여준다.
                 <div className="flex flex-col gap-2">
+                  <div className="flex items-center gap-2">
+                    <input type="time" value={extraStartTime} onChange={e => setExtraStartTime(e.target.value)} className="flex-1 px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
+                    <span className="text-slate-400 text-xs">~</span>
+                    <input type="time" value={extraEndTime} onChange={e => setExtraEndTime(e.target.value)} className="flex-1 px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
+                  </div>
                   <input type="text" value={reasonDraft} onChange={e => setReasonDraft(e.target.value)} placeholder="사유 (선택)" className="px-2 py-1.5 rounded border border-slate-300 text-xs font-bold" />
                   <button disabled={isBusy || selectedMeta.isHoliday || selectedMeta.isRegularSession || selectedMeta.isExtra} onClick={finalizeMakeup} className="w-full py-1.5 rounded text-xs font-bold shadow-sm disabled:opacity-50 bg-violet-600 text-white hover:bg-violet-700">
                     📨 이 날로 보강 지정 + 학부모 안내 발송

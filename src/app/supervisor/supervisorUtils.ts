@@ -54,10 +54,3 @@ export const formatHM = (ms: number) => {
 
 // 시각(HH:MM) 표시 (클리닉 이용 기록의 시작/종료 시각용)
 export const formatClockTime = (ms: number) => new Date(ms).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
-
-// 🌟 [추가] TypeScript 빌드 에러 해결을 위한 인터페이스 정의
-export interface ClassRoundResult {
-    weekType: string;
-    lastSessionDate?: string | null;
-    [key: string]: any; 
-}

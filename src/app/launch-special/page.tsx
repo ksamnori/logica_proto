@@ -10,7 +10,9 @@ export default function LaunchSpecialClassPage() {
   const [form, setForm] = useState({
     levelCode: "SS", course: "", daysCode: "", period: "", ym: "",
     name: "", targetGrade: "", instructorId: "", status: "예정",
-    capacity: 15 // 🌟 특강반 기본 정원 15명
+    capacity: 15,
+    // 🌟 특강/메이크업용 추가 필드: 시작일, 종료일, 총 회차
+    startDate: "", endDate: "", totalSessions: ""
   });
   
   const [schedules, setSchedules] = useState(
@@ -59,7 +61,7 @@ export default function LaunchSpecialClassPage() {
   };
 
   const registerClass = async () => {
-    const { levelCode, course, daysCode, period, ym, name, targetGrade, instructorId, status, capacity } = form;
+    const { levelCode, course, daysCode, period, ym, name, targetGrade, instructorId, status, capacity, startDate, endDate, totalSessions } = form;
     const checkedSchedules = schedules.filter(s => s.checked);
 
     if (!course || !daysCode || !period || !ym || !name || !instructorId || checkedSchedules.length === 0) {
@@ -89,6 +91,12 @@ export default function LaunchSpecialClassPage() {
       
       const finalCode = `${basePrefix}${nextAlphabet}${ym}`;
       const levelName = { SS: "특강", WS: "특강", MU: "메이크업", LE: "메이크업" }[levelCode] || "특강";
+      
+      // 🌟 레벨 코드에 따른 자동 class_type 지정 로직
+      let determinedClassType = "SPECIAL"; // 기본값 특강
+      if (levelCode === "MU" || levelCode === "LE") {
+        determinedClassType = "MAKEUP";
+      }
 
       const { data: newClass, error: classErr } = await supabase.from('class').insert([{
         code: finalCode, 
@@ -98,8 +106,13 @@ export default function LaunchSpecialClassPage() {
         schedule_days: checkedSchedules.map(s => s.day).join(', '), 
         instructor_id: instructorId, 
         status: status,
-        capacity: capacity, // 🌟 DB 저장 항목에 추가
-        tenant_id: myTenantId
+        capacity: capacity,
+        tenant_id: myTenantId,
+        // 🌟 신규 컬럼 데이터 삽입
+        class_type: determinedClassType,
+        start_date: startDate || null,
+        end_date: endDate || null,
+        total_sessions: totalSessions ? parseInt(totalSessions) : null
       }]).select().single();
 
       if (classErr) throw classErr;
@@ -184,6 +197,22 @@ export default function LaunchSpecialClassPage() {
                   {instructors.map(i => <option key={i.instructor_id} value={i.instructor_id}>{i.name} ({i.position})</option>)}
                 </select>
               </div>
+              
+              {/* 🌟 추가된 특강 기간 및 회차 설정 섹션 */}
+              <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-4 grid grid-cols-3 gap-4">
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-1">시작 일자</label>
+                   <input type="date" value={form.startDate} onChange={e => setForm({...form, startDate: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600 font-bold" />
+                </div>
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-1">종료 일자</label>
+                   <input type="date" value={form.endDate} onChange={e => setForm({...form, endDate: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600 font-bold" />
+                </div>
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-1">총 회차 (세션 수)</label>
+                   <input type="number" min="1" value={form.totalSessions} onChange={e => setForm({...form, totalSessions: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600 font-bold" placeholder="예: 12" />
+                </div>
+              </div>
 
               <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-lg p-4">
                 <label className="block text-sm font-bold text-slate-700 mb-3">실제 수업 요일 및 시간 설정 <span className="text-red-500">*</span></label>
@@ -213,7 +242,6 @@ export default function LaunchSpecialClassPage() {
                 </select>
               </div>
               
-              {/* 🌟 정원 선택 드롭다운 추가 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">정원 (명)</label>
                 <select value={form.capacity} onChange={e => setForm({...form, capacity: Number(e.target.value)})} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-600 font-bold">

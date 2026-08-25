@@ -21,7 +21,7 @@ interface StudentTimelineProps {
   handleBulkCompleteStudent: () => void;
   handleBulkDeleteStudent: () => void;
   handleGenerateIncorrectPrint: () => void;
-  handleExtractCommonHomework: () => void; // 🌟 추가
+  handleExtractCommonHomework: () => void; 
   isGeneratingPrint: boolean;
   formatDateLabel: (dateStr: string, includeTime?: boolean) => string;
   handleForceComplete: (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => void;
@@ -520,7 +520,6 @@ export default function StudentTimeline({
               <span className="text-[13px] font-bold text-slate-700">전체 선택</span>
             </label>
             <div className="w-px h-4 bg-slate-300 mx-1"></div>
-            {/* 🌟 선택 시 공통 추출 버튼 노출 */}
             {activeTab === 'HOMEWORK' && selectedBlocks.length >= 2 && (
               <button onClick={handleExtractCommonHomework} className="px-3 py-1.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-[12px] transition-colors shadow-sm mr-1 animate-pulse">
                 🔗 공통 과제 분리
@@ -792,8 +791,9 @@ export default function StudentTimeline({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80'
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
+              // 🌟 [수정] 오답프린트 항목도 homework/review로 라우팅되도록 변경
               let detailHref = '';
-              if (item.type === 'hw_exam') {
+              if (item.type === 'hw_exam' || item.type === 'print') {
                 detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
               } else if (item.type === 'hw') {
                 detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;

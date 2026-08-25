@@ -238,7 +238,6 @@ export default function ExamViewerPage() {
             return q ? { ...q, sort_order: item.sort_order } : null;
         }).filter(Boolean) || [];
 
-        // 🌟 [누락 복구] DB 로드 시 병합 정보를 해독하여 문항들을 묶어주는 핵심 로직[cite: 10]
         let userMergedTextQuestions: any[][] = [];
         if (dbLayoutSettings && dbLayoutSettings.userMergedTextQuestions) {
            userMergedTextQuestions = dbLayoutSettings.userMergedTextQuestions;
@@ -274,7 +273,6 @@ export default function ExamViewerPage() {
            g.displayNum = idx + 1;
         });
 
-        // 레이아웃 초기화
         let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
         let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
 
@@ -300,11 +298,10 @@ export default function ExamViewerPage() {
         setColumns(initialCol); setSplits(initialSplit); setTitleMode(initialTitleMode); setTemplate(initialTmpl);
         setColorNum(cNum); setColorTitle(cTit); setColorLine(cLin); setExamDate(eDate);
 
-        hasUnsavedChangesRef.current = false; // 기존 DB 로드이므로 변경점 없음
+        hasUnsavedChangesRef.current = false; 
 
         examStateRef.current = { groups, examTitle: title, displayBadge: badge };
 
-        // 🌟 [누락 복구] 폰트를 기다린 후 뷰어 렌더링 호출
         Promise.all([
           document.fonts.load("400 17px 'NanumSquare'"),
           document.fonts.load("700 17px 'NanumSquare'"),
@@ -314,7 +311,7 @@ export default function ExamViewerPage() {
           else remeasureAndRender(initialCol, initialSplit, initialTitleMode, initialTmpl, eDate, title, badge);
         });
 
-        return; // DB 로드 후 안전하게 종료 (아래 Session 로드 로직 건너뜀)
+        return; 
 
       } else if (sessionStorage.getItem('examQuestions')) {
         isNew = true;
@@ -322,11 +319,12 @@ export default function ExamViewerPage() {
         
         const editOriginalType = sessionStorage.getItem('editOriginalType');
         const editOriginalId = sessionStorage.getItem('editOriginalId');
-        
+        const editMasterId = sessionStorage.getItem('editMasterId'); 
+
         let loadExamId = null;
         if (editOriginalType === 'exam') {
-            loadExamId = editOriginalId;
-            rebuildExamIdRef.current = editOriginalId;
+            loadExamId = editMasterId; 
+            rebuildExamIdRef.current = editMasterId; 
         } else {
             rebuildExamIdRef.current = null;
         }
@@ -476,7 +474,8 @@ export default function ExamViewerPage() {
             const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
             
-            subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+            // 🌟 서브 문항 간격을 mt-16 으로 확대
+            subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
         });
 
         wrap.innerHTML = `<div class="flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
@@ -556,7 +555,8 @@ export default function ExamViewerPage() {
             const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
             
-            subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+            // 🌟 서브 문항 간격을 mt-16 으로 확대
+            subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
         });
         const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
         
@@ -753,7 +753,9 @@ export default function ExamViewerPage() {
                     }
                     const prefix = ''; 
                     const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
-                    subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+                    
+                    // 🌟 서브 문항 간격을 mt-16 으로 확대
+                    subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
                 });
                 
                 const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
@@ -1020,7 +1022,8 @@ export default function ExamViewerPage() {
 
       const editOriginalType = sessionStorage.getItem('editOriginalType');
       const editOriginalId = sessionStorage.getItem('editOriginalId');
-      
+      const editMasterId = sessionStorage.getItem('editMasterId'); 
+
       let targetStudentId = sessionStorage.getItem('clinicTargetStudentId') || sessionStorage.getItem('editStudentId');
       let targetClassId = sessionStorage.getItem('clinicTargetClassId') || sessionStorage.getItem('editClassId');
 
@@ -1225,18 +1228,6 @@ export default function ExamViewerPage() {
         currentExamId={currentExamIdRef.current} 
         onAttemptLeave={attemptLeave} 
       />
-
-      <div className="absolute top-0 left-0 w-full h-20 pointer-events-none z-50">
-        <div className="flex justify-center h-full items-center pl-[250px]">
-          <div className="flex space-x-6 pointer-events-auto">
-            <div className="flex items-center space-x-2 opacity-50"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold">1</span><span className="font-bold text-slate-400">조건 및 단원 설정</span></div>
-            <div className="flex items-center space-x-2 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => { sessionStorage.setItem("restoreExamQuestions", "1"); router.push('/exam/step2'); }}>
-              <span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold border border-slate-200">2</span><span className="font-bold text-slate-400">문항 뷰어 & 편집</span>
-            </div>
-            <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-[#002864] text-white text-center text-sm font-bold shadow-sm">3</span><span className="font-bold text-[#002864]">시험지 배포</span></div>
-          </div>
-        </div>
-      </div>
 
       <div className="content-row flex flex-1 min-h-0 relative">
         <ViewerSidebar 

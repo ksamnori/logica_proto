@@ -84,7 +84,7 @@ export default function LeftPanel({ data }: { data: any }) {
                                         </div>
                                     )}
                                     <div className="text-[10px] text-slate-400 font-semibold mt-2 pt-2 border-t border-slate-100">
-                                        누적 처리 <span className="text-slate-600 font-bold">{taStats[ta.name]?.total || 0}건</span> · 힌트 {taStats[ta.name]?.hint || 0} · 넘어가기 {taStats[ta.name]?.skip || 0}
+                                        누적 처리 <span className="text-slate-600 font-bold">{taStats[ta.clientId]?.total || 0}건</span> · 힌트 {taStats[ta.clientId]?.hint || 0} · 넘어가기 {taStats[ta.clientId]?.skip || 0}
                                     </div>
                                 </div>
                             ))}
@@ -94,15 +94,15 @@ export default function LeftPanel({ data }: { data: any }) {
             ) : (
                 <div className="flex-1 overflow-y-auto p-3 bg-slate-50">
                     <p className="text-[10px] text-slate-400 font-bold mb-3 px-1">💡 빈자리에 끌어다 놓으면 시간을 예약할 수 있어요. 학생이 실제 로그인하면 자동으로 배정됩니다.</p>
-                    {Object.entries(allStudents).map(([cName, stds]: [string, any]) => (
-                        <div key={cName} className="mb-2">
-                            <button onClick={() => toggleClass(cName)} className="w-full flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 font-bold text-[12px] text-slate-700 hover:bg-slate-100 shadow-sm transition-colors">
-                                <span>{cName} <span className="text-xs text-indigo-500 ml-1">({stds.length})</span></span>
-                                <span className="text-slate-400 text-xs">{expandedClasses[cName] ? '▲' : '▼'}</span>
+                    {Object.entries(allStudents).map(([cKey, group]: [string, any]) => (
+                        <div key={cKey} className="mb-2">
+                            <button onClick={() => toggleClass(cKey)} className="w-full flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 font-bold text-[12px] text-slate-700 hover:bg-slate-100 shadow-sm transition-colors">
+                                <span>{group.label} <span className="text-xs text-indigo-500 ml-1">({group.students.length})</span></span>
+                                <span className="text-slate-400 text-xs">{expandedClasses[cKey] ? '▲' : '▼'}</span>
                             </button>
-                            {expandedClasses[cName] && (
+                            {expandedClasses[cKey] && (
                                 <div className="pl-2 pr-1 py-2 space-y-1.5">
-                                    {stds.map((st: any) => {
+                                    {group.students.map((st: any) => {
                                         const matched: any = Object.values(activeStudents).find((s: any) => s.studentId === st.id);
                                         const isSeated = !!matched;
                                         return (

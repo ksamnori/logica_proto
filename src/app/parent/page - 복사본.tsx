@@ -226,7 +226,7 @@ export default function ParentPortalPage() {
       // 4. 💡 해당 부모 배열(pids)에 하나라도 속한 자녀를 모조리 불러옵니다. (.in 사용)
       const { data: sData, error } = await supabase
         .from("student")
-        .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
+        .select("*, enrollment(class(name, class_schedule(day_of_week, start_time))), exam_assignment(total_score, status, created_at), attendance(attendance_date, status)")
         .in("parent_id", pids);
 
       if (!error && sData && sData.length > 0) {

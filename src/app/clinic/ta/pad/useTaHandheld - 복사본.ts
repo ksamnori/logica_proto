@@ -32,7 +32,6 @@ export interface CallData {
 export interface RecheckData {
   seat: string; studentId?: string; uid: string; qNum: number; name: string; classes: string[];
   questionText: string; correctAnswer: string; imageDataUrl: string; recognizedText: string; aiExplanation: string; aiConfidence: number | null; requestedAt: number;
-  initial?: boolean;
 }
 
 const getSupabaseClient = () => {
@@ -391,7 +390,7 @@ export function useTaHandheld() {
             questionText: r.questionText || '', correctAnswer: r.correctAnswer || '',
             imageDataUrl: r.imageDataUrl || '', recognizedText: r.recognizedText || '',
             aiExplanation: r.aiExplanation || '', aiConfidence: r.aiConfidence ?? null,
-            requestedAt: r.requestedAt || Date.now(), initial: !!r.initial,
+            requestedAt: r.requestedAt || Date.now(),
           };
         }
       });
@@ -506,7 +505,7 @@ export function useTaHandheld() {
         questionText: data.questionText || '', correctAnswer: data.correctAnswer || '',
         imageDataUrl: data.imageDataUrl || '', recognizedText: data.recognizedText || '',
         aiExplanation: data.aiExplanation || '', aiConfidence: data.aiConfidence ?? null,
-        requestedAt: Date.now(), initial: !!data.initial,
+        requestedAt: Date.now(),
       };
     }
     flushState();
@@ -599,7 +598,7 @@ export function useTaHandheld() {
     // 💡 일반 호출(포털에서 누른 호출)은 qNum이 숫자가 아니라 문자열 'general'이다. 여기서 Number()로
     // 캐스팅하면 NaN이 되어, 이 broadcast를 받는 다른 조교 패드/감독관 화면의 로컬 상태 키('general')와
     // 안 맞아서 그 화면에서는 호출 표시가 즉시 안 지워진다(다음 DB 폴링 때야 뒤늦게 정리됨).
-    sendToStudent(c.seat, 'force_cancel_call', { qNum: c.qNum, mark: markState[selectedCallKey], taName: taName, taClientId: taClientId });
+    sendToStudent(c.seat, 'force_cancel_call', { qNum: c.qNum, mark: markState[selectedCallKey], taName: taName });
 
     const sid = activeStudentsRef.current[c.seat]?.sessionId;
     if (sid) clearActiveCall(supabaseClient, sid, c.qNum);

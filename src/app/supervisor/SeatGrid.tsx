@@ -53,6 +53,42 @@ export default function SeatGrid({ data }: { data: any }) {
         setReservationTime(`${String(resHour).padStart(2, '0')}:${String(Math.min(59, Math.max(0, num))).padStart(2, '0')}`);
     };
 
+    // 💡 round=1(주간테스트) 제출완료 화면에서 건 재확인 요청(deferredWrite)은 학생이 이미 홈으로
+    // 나갔을 수 있어, 학생 클라이언트가 브로드캐스트를 받아야만 오답노트를 갱신하는 기존 방식(다른
+    // 라운드의 실시간 재확인)에 기댈 수 없다. 여기서 조교 쪽이 직접 DB를 갱신해 학생 접속 여부와
+    // 무관하게 반영되도록 한다. 실시간(라이브) 재확인은 원래대로 학생 클라이언트가 처리하므로 건드리지 않는다.
+    const resolveRecheckAsCorrect = async () => {
+        const seat = recheckModal.seat!;
+        const uid = recheckModal.uid!;
+        const st = activeStudents[seat];
+        const payload = st?.rechecks?.[uid];
+        const sid = st?.sessionId;
+
+        if (payload?.deferredWrite) {
+            const now = new Date().toISOString();
+            if (payload.recordId) {
+                await supabaseClient.from('student_incorrect_record').update({ status: 'O', resolved_at: now }).eq('record_id', payload.recordId);
+            } else if (st?.studentId && (payload.tqId || payload.questionId)) {
+                const filterCol = payload.tqId ? 'tq_id' : 'question_id';
+                const filterVal = payload.tqId ?? payload.questionId;
+                await supabaseClient.from('student_incorrect_record').update({ status: 'O', resolved_at: now }).eq('student_id', st.studentId).eq(filterCol, filterVal).is('resolved_at', null);
+            }
+            if (payload.examAssignmentId && payload.questionId && st?.studentId) {
+                await supabaseClient.from('student_answer').update({ is_correct: true, grading_code: 'O' }).eq('exam_assignment_id', payload.examAssignmentId).eq('student_id', st.studentId).eq('question_id', payload.questionId);
+                const { data: rows } = await supabaseClient.from('student_answer').select('is_correct').eq('exam_assignment_id', payload.examAssignmentId).eq('student_id', st.studentId);
+                if (rows && rows.length > 0) {
+                    const total = Math.round((rows.filter((r: any) => r.is_correct).length / rows.length) * 100);
+                    await supabaseClient.from('exam_assignment').update({ total_score: total }).eq('assignment_id', payload.examAssignmentId);
+                }
+            }
+        }
+
+        if (sid && uid) clearActiveRecheck(supabaseClient, sid, uid);
+        sendToStudent(seat, 'resolve_recheck', { uid, verdict: 'correct' });
+        removeLogsByTypeAndSeat('recheck', seat, Number(uid));
+        setRecheckModal({ isOpen: false, seat: null, uid: null });
+    };
+
     return (
         <main className="flex-1 p-6 bg-slate-200 overflow-y-auto relative">
             <div className="w-full" style={{ aspectRatio: `${cw} / ${ch}` }}>
@@ -175,7 +211,7 @@ export default function SeatGrid({ data }: { data: any }) {
                         </div>
                         <div className="flex gap-2 p-4 border-t border-slate-100">
                             <button onClick={() => { const sid = activeStudents[recheckModal.seat!]?.sessionId; if (sid && recheckModal.uid) clearActiveRecheck(supabaseClient, sid, recheckModal.uid); sendToStudent(recheckModal.seat!, 'resolve_recheck', { uid: recheckModal.uid, verdict: 'incorrect' }); removeLogsByTypeAndSeat('recheck', recheckModal.seat!, Number(recheckModal.uid)); setRecheckModal({ isOpen: false, seat: null, uid: null }); }} className="flex-1 bg-rose-50 text-rose-600 font-bold py-3 rounded-xl">❌ 오답</button>
-                            <button onClick={() => { const sid = activeStudents[recheckModal.seat!]?.sessionId; if (sid && recheckModal.uid) clearActiveRecheck(supabaseClient, sid, recheckModal.uid); sendToStudent(recheckModal.seat!, 'resolve_recheck', { uid: recheckModal.uid, verdict: 'correct' }); removeLogsByTypeAndSeat('recheck', recheckModal.seat!, Number(recheckModal.uid)); setRecheckModal({ isOpen: false, seat: null, uid: null }); }} className="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl">✅ 정답</button>
+                            <button onClick={resolveRecheckAsCorrect} className="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl">✅ 정답</button>
                         </div>
                     </div>
                 </div>

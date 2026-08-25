@@ -100,8 +100,10 @@ export default function LaunchRegularClassPage() {
         schedule_days: checkedSchedules.map(s => s.day).join(', '), 
         instructor_id: instructorId, 
         status: status,
-        capacity: capacity, // 🌟 DB 저장 항목에 추가
-        tenant_id: myTenantId
+        capacity: capacity,
+        tenant_id: myTenantId,
+        // 🌟 정규반으로 고정하여 저장
+        class_type: 'REGULAR'
       }]).select().single();
 
       if (classErr) throw classErr;
@@ -215,7 +217,6 @@ export default function LaunchRegularClassPage() {
                 </select>
               </div>
               
-              {/* 🌟 정원 선택 드롭다운 추가 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">정원 (명)</label>
                 <select value={form.capacity} onChange={e => setForm({...form, capacity: Number(e.target.value)})} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold">

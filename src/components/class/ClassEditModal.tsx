@@ -28,6 +28,9 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const [searchGrade, setSearchGrade] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [isSaving, setIsSaving] = useState(false);
+  // 💡 요일을 수정해 저장할 때마다 값을 바꿔서, 방금 DB에 반영된 정규 요일을
+  // ClassWeekCalendar가 즉시 다시 읽어오게 만드는 트리거.
+  const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
 
   const [daechiInstructors, setDaechiInstructors] = useState<any[]>([]);
 
@@ -174,11 +177,17 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     setIsSaving(true);
     try {
       const scheduleDaysArr = checkedSchedules.map(s => s.day);
-      const updateData = {
+      const updateData: any = {
         code: modalData.code, name: modalData.name, target_grade: modalData.target_grade,
         schedule_days: scheduleDaysArr.join(", "), status: modalData.status,
         instructor_id: modalData.instructor_id || null, tuition_fee: parseInt(modalData.tuition_fee) || 0
       };
+
+      if (modalData.class_type === 'SPECIAL' || modalData.class_type === 'MAKEUP') {
+        updateData.start_date = modalData.start_date || null;
+        updateData.end_date = modalData.end_date || null;
+        updateData.total_sessions = modalData.total_sessions ? parseInt(modalData.total_sessions) : null;
+      }
 
       const { error: updateErr } = await supabase.from("class").update(updateData).eq("class_id", modalData.class_id);
       if (updateErr) throw updateErr;
@@ -193,7 +202,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       if (insertErr) throw insertErr;
 
       alert("✅ 반 정보 및 일정이 성공적으로 저장되었습니다!");
-      setIsEditMode(false); 
+      setIsEditMode(false);
+      setScheduleRefreshKey(k => k + 1);
       onSuccess();
     } catch (e: any) { 
       console.error(e);
@@ -279,6 +289,70 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   if (!isOpen) return null;
 
   const canEdit = currentUser.isAdmin || String(modalData.instructor_id) === String(currentUser.instId);
+  const isSpecialOrMakeup = modalData.class_type === 'SPECIAL' || modalData.class_type === 'MAKEUP';
+
+  // 🌟 특강/메이크업용 상세 일정 산출 로직
+  const renderSpecialClassDates = () => {
+    if (!modalData.start_date || !modalData.end_date) return null;
+    
+    const daysMap: any = { "일": 0, "월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 6 };
+    const checkedSchedules = modalSchedules.filter(s => s.checked);
+    if (checkedSchedules.length === 0) return null;
+
+    const parseDateLocal = (ymd: string) => {
+      const [y, m, d] = ymd.split('-').map(Number);
+      return new Date(y, m - 1, d);
+    };
+
+    const start = parseDateLocal(modalData.start_date);
+    const end = parseDateLocal(modalData.end_date);
+    const dates = [];
+
+    const diffTime = Math.abs(end.getTime() - start.getTime());
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
+    if (start > end || diffDays > 365) return <p className="text-sm text-rose-500 font-bold p-2 mt-2 border border-rose-200 bg-rose-50 rounded-lg text-center">기간 설정이 올바르지 않거나 너무 깁니다.</p>;
+
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+      const dayNum = d.getDay();
+      const schedule = checkedSchedules.find(s => daysMap[s.day] === dayNum);
+      if (schedule) {
+        dates.push({
+          dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+          day: schedule.day,
+          start_time: schedule.start_time,
+          end_time: schedule.end_time
+        });
+      }
+    }
+
+    return (
+      <div className="mt-3 max-h-48 overflow-y-auto custom-scroll border border-indigo-100 rounded-lg shadow-inner">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-indigo-100/50 sticky top-0">
+            <tr>
+              <th className="py-2 px-3 font-bold text-indigo-800 border-b border-indigo-100">회차</th>
+              <th className="py-2 px-3 font-bold text-indigo-800 border-b border-indigo-100">날짜</th>
+              <th className="py-2 px-3 font-bold text-indigo-800 border-b border-indigo-100">시간</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-indigo-50 bg-white">
+            {dates.map((item, idx) => (
+              <tr key={item.dateStr} className="hover:bg-indigo-50/30 transition-colors">
+                <td className="py-2 px-3 text-indigo-400 font-bold">{idx + 1}회차</td>
+                <td className="py-2 px-3 text-indigo-700 font-bold">{item.dateStr} ({item.day})</td>
+                <td className="py-2 px-3 text-slate-600 font-bold">{item.start_time || '-'} ~ {item.end_time || '-'}</td>
+              </tr>
+            ))}
+            {dates.length === 0 && (
+              <tr>
+                <td colSpan={3} className="py-4 text-center text-indigo-400 font-bold">해당 기간 내에 수업일이 없습니다.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    );
+  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -314,6 +388,24 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               </div>
             </div>
 
+            {/* 🌟 특강/메이크업용 기간/회차 표시 및 수정 영역 */}
+            {isSpecialOrMakeup && (
+              <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-4 grid grid-cols-3 gap-4">
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-1">시작 일자</label>
+                   <input type="date" value={modalData.start_date || ""} readOnly={!isEditMode} onChange={e => handleModalChange("start_date", e.target.value)} className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-bold ${!isEditMode ? 'bg-slate-100' : 'focus:outline-none focus:ring-2 focus:ring-indigo-600'}`} />
+                </div>
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-1">종료 일자</label>
+                   <input type="date" value={modalData.end_date || ""} readOnly={!isEditMode} onChange={e => handleModalChange("end_date", e.target.value)} className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-bold ${!isEditMode ? 'bg-slate-100' : 'focus:outline-none focus:ring-2 focus:ring-indigo-600'}`} />
+                </div>
+                <div>
+                   <label className="block text-sm font-bold text-slate-700 mb-1">총 회차 (세션 수)</label>
+                   <input type="number" min="1" value={modalData.total_sessions || ""} readOnly={!isEditMode} onChange={e => handleModalChange("total_sessions", e.target.value)} className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-bold ${!isEditMode ? 'bg-slate-100' : 'focus:outline-none focus:ring-2 focus:ring-indigo-600'}`} placeholder="예: 12" />
+                </div>
+              </div>
+            )}
+
             <div className="col-span-2 bg-slate-50 border border-slate-200 rounded-lg p-4">
               <label className="block text-xs font-bold text-slate-500 mb-3">수업 요일 및 시간 설정</label>
               <div className="flex flex-col gap-2">
@@ -335,14 +427,30 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               </div>
             </div>
 
-            {modalData.class_id && (
-              <ClassWeekCalendar 
+            {/* 🌟 조건부 렌더링: 정규반(REGULAR)일 때만 클리닉 달력을 표시하고, 특강/보강은 요약 정보만 표시 */}
+            {modalData.class_id && !isSpecialOrMakeup ? (
+              <ClassWeekCalendar
                 classId={modalData.class_id}
                 className={modalData.name}
-                scheduleDays={modalSchedules.filter(s => s.checked).map(s => s.day)}
                 canEdit={canEdit}
+                scheduleRefreshKey={scheduleRefreshKey}
               />
-            )}
+            ) : modalData.class_id && isSpecialOrMakeup ? (
+              <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
+                <label className="block text-xs font-bold text-indigo-700 mb-2">클래스 일정 안내 (특강/보강)</label>
+                <div className="text-sm font-bold text-slate-700">
+                  {modalData.start_date && modalData.end_date ? (
+                    <p>📅 기간: {modalData.start_date} ~ {modalData.end_date} (총 {modalData.total_sessions || '-'}회)</p>
+                  ) : (
+                    <p className="text-slate-500">📅 시작/종료 일자가 설정되지 않았습니다.</p>
+                  )}
+                  {renderSpecialClassDates()}
+                  <div className="mt-3 text-[11px] font-bold text-indigo-400">
+                    * 특강 및 메이크업 클래스는 클리닉 배정 달력이 지원되지 않습니다.
+                  </div>
+                </div>
+              </div>
+            ) : null}
 
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>

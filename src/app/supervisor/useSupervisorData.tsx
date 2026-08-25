@@ -21,7 +21,7 @@ export function useSupervisorData() {
     const [isMounted, setIsMounted] = useState(false);
     
     const [leftTab, setLeftTab] = useState<'ta' | 'students' | 'records'>('ta');
-    const [allStudents, setAllStudents] = useState<Record<string, any[]>>({});
+    const [allStudents, setAllStudents] = useState<Record<string, { label: string; students: any[] }>>({});
     const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
 
     const [clinicRecords, setClinicRecords] = useState<Record<string, any>>({});
@@ -136,17 +136,22 @@ export function useSupervisorData() {
         if (!isAuthorized) return;
         
         const fetchAllStudents = async () => {
-            const { data } = await supabaseClient.from('student').select('student_id, name, enrollment(class(name))');
+            const { data } = await supabaseClient.from('student').select('student_id, name, enrollment(class(name, code))');
             if (data) {
-                const grouped: Record<string, any[]> = {};
+                const grouped: Record<string, { label: string; students: any[] }> = {};
                 data.forEach((s: any) => {
-                    const classes = s.enrollment?.map((e: any) => e.class?.name).filter(Boolean) || [];
-                    const cName = classes.length > 0 ? classes[0] : '반 미배정';
-                    if (!grouped[cName]) grouped[cName] = [];
-                    grouped[cName].push({ id: s.student_id, name: s.name, classes });
+                    const classEntries = s.enrollment?.map((e: any) => e.class).filter(Boolean) || [];
+                    const classes = classEntries.map((c: any) => c.name);
+                    const firstClass = classEntries[0];
+                    const cLabel = firstClass ? firstClass.name : '반 미배정';
+                    const cKey = firstClass ? `${firstClass.name}::${firstClass.code || ''}` : '반 미배정';
+                    if (!grouped[cKey]) grouped[cKey] = { label: cLabel, students: [] };
+                    grouped[cKey].students.push({ id: s.student_id, name: s.name, classes });
                 });
-                const sortedGrouped: Record<string, any[]> = {};
-                Object.keys(grouped).sort().forEach(k => { sortedGrouped[k] = grouped[k].sort((a, b) => a.name.localeCompare(b.name)); });
+                const sortedGrouped: Record<string, { label: string; students: any[] }> = {};
+                Object.keys(grouped).sort((a, b) => grouped[a].label.localeCompare(grouped[b].label)).forEach(k => {
+                    sortedGrouped[k] = { label: grouped[k].label, students: grouped[k].students.sort((a, b) => a.name.localeCompare(b.name)) };
+                });
                 setAllStudents(sortedGrouped);
                 if (Object.keys(sortedGrouped).length > 0) setExpandedClasses({ [Object.keys(sortedGrouped)[0]]: true });
             }
@@ -409,10 +414,9 @@ export function useSupervisorData() {
         return () => clearInterval(dbCrossValidationInterval);
     }, [isAuthorized, isMounted, updateStudents, appendLog, removeLogsByTypeAndSeat]);
 
-    const recordTaStat = (name: string, mark: string) => {
+    const recordTaStat = (key: string, mark: string) => {
         setTaStats(prev => {
             const next = { ...prev };
-            const key = name || '이름 미상';
             if (!next[key]) next[key] = { total: 0, hint: 0, skip: 0 };
             next[key].total++;
             if (mark === 'hint') next[key].hint++; else if (mark === 'skip') next[key].skip++;
@@ -421,7 +425,7 @@ export function useSupervisorData() {
     };
 
     const handleTaActionFromOtherScreen = (payload: any) => {
-        const { seat, action, qNum, taName, mark } = payload;
+        const { seat, action, qNum, taName, taClientId, mark } = payload;
         const currentStudents = { ...studentsRef.current };
 
         if (action === 'force_cancel_call') {
@@ -429,7 +433,7 @@ export function useSupervisorData() {
             if (Object.keys(currentStudents[seat]?.calls || {}).length === 0) currentStudents[seat].status = 'idle';
             removeLogsByTypeAndSeat('call', seat, qNum);
             appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출해제', `[${seat}] ${qNum}번 문항 지도 종료`, `${taName || '총책임자'} · ${mark === 'hint' ? '힌트 제공 후 종료' : mark === 'skip' ? '설명 없이 넘어감' : '지도 종료'}`);
-            recordTaStat(taName || '총책임자', mark);
+            recordTaStat(taClientId || taName || '총책임자', mark);
         } else if (action === 'force_return_to_seat') {
             if (currentStudents[seat]) { currentStudents[seat].status = 'idle'; currentStudents[seat].awaySince = null; }
             removeLogsByTypeAndSeat('away', seat);
@@ -800,7 +804,9 @@ export function useSupervisorData() {
                 if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
                 if (Object.keys(currentStudents[seat]?.calls || {}).length === 0) currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
-                sendToStudent(seat, 'force_cancel_call', { qNum: Number(qNum) });
+                // 💡 일반 호출(포털 호출)은 qNum이 'general' 문자열이라 Number()로 바꾸면 NaN이 되어
+                // 다른 조교 패드 화면에서 이 broadcast를 받아도 키가 안 맞아 호출 표시가 안 지워진다.
+                sendToStudent(seat, 'force_cancel_call', { qNum });
                 recordTaStat('총책임자', '');
                 if (currentStudents[seat]?.sessionId) clearActiveCall(supabaseClient, currentStudents[seat].sessionId, qNum);
             }

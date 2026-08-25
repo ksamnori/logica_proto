@@ -27,6 +27,16 @@ const formatMathTextForWeb = (text: string) => {
   return t;
 };
 
+const getCleanUrl = (url: string) => {
+  if (!url || url === 'null') return '';
+  let validUrl = url;
+  if (typeof validUrl === 'string' && validUrl.trim().startsWith('[')) { try { validUrl = JSON.parse(validUrl)[0]; } catch(e) {} }
+  if (validUrl && validUrl !== 'null' && !validUrl.startsWith('http') && !validUrl.startsWith('data:image')) { 
+    validUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/question_images/${validUrl}`; 
+  }
+  return validUrl;
+};
+
 const processGroupText = (items: any[]) => {
   if (!items || items.length === 0) return { common: "", remainders: [] };
   if (items.length === 1) return { common: "", remainders: [items[0].question || items[0].text_question || ""] };
@@ -98,7 +108,14 @@ function HomeworkReviewContent() {
   
   const [groups, setGroups] = useState<any[]>([]);
   const [gradingMap, setGradingMap] = useState<Record<number, GradeCode | null>>({});
+  
+  // 🌟 [추가] 학생의 필기/텍스트 답안을 보관할 상태
+  const [studentInputMap, setStudentInputMap] = useState<Record<number, string | null>>({});
+  
   const [modalQ, setModalQ] = useState<any>(null);
+  
+  // 🌟 [추가] 학생 답안 확인 모달 상태
+  const [modalStudentAns, setModalStudentAns] = useState<{ qNum: string; input: string | null } | null>(null);
 
   const hwResultIdRef = useRef<number | null>(null);
   const mathJaxRef = useRef<boolean>(false);
@@ -117,7 +134,7 @@ function HomeworkReviewContent() {
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [isLoading, groups, modalQ]);
+  }, [isLoading, groups, modalQ, modalStudentAns]);
 
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -141,12 +158,12 @@ function HomeworkReviewContent() {
         const [ { data: stuData }, { data: aData }, { data: ansData } ] = await Promise.all([
           supabase.from('student').select('name, grade').eq('student_id', studentId).single(),
           supabase.from('exam_assignment').select('*, exam_master(*), class(name)').eq('assignment_id', assignmentId).single(),
-          supabase.from('student_answer').select('question_id, grading_code').eq('exam_assignment_id', assignmentId)
+          supabase.from('student_answer').select('question_id, grading_code, student_input').eq('exam_assignment_id', assignmentId) // student_input 추가
         ]);
 
         const em = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
         setStudentInfo(stuData);
-        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: '맞춤 과제프린트' } });
+        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: '맞춤 오답/과제프린트' } });
         setHwResult({ status: aData.status, hw_result_id: aData.assignment_id }); 
         
         const { data: items } = await supabase.from('exam_item').select('question_id, sort_order').eq('exam_id', em.exam_id).order('sort_order');
@@ -201,8 +218,15 @@ function HomeworkReviewContent() {
         setGroups(builtGroups);
 
         const initialGrading: Record<any, GradeCode | null> = {};
-        ansData?.forEach(a => { if(a.grading_code) initialGrading[a.question_id] = a.grading_code as GradeCode; });
+        const initialInputMap: Record<any, string | null> = {};
+
+        ansData?.forEach(a => { 
+          if(a.grading_code) initialGrading[a.question_id] = a.grading_code as GradeCode; 
+          if(a.student_input) initialInputMap[a.question_id] = a.student_input;
+        });
+        
         setGradingMap(initialGrading);
+        setStudentInputMap(initialInputMap);
         setIsLoading(false);
         return;
       }
@@ -212,7 +236,7 @@ function HomeworkReviewContent() {
         supabase.from('student').select('name, grade').eq('student_id', studentId).single(),
         supabase.from('homework_assignment').select('*, textbook(title), class(name)').eq('homework_id', homeworkId).single(),
         supabase.from('student_homework_result').select('*').eq('homework_id', homeworkId).eq('student_id', studentId).maybeSingle(),
-        supabase.from('student_homework_answer').select('tq_id, grading_code').eq('homework_id', homeworkId).eq('student_id', studentId)
+        supabase.from('student_homework_answer').select('tq_id, grading_code, student_input').eq('homework_id', homeworkId).eq('student_id', studentId)
       ]);
 
       setStudentInfo(stuData);
@@ -239,8 +263,13 @@ function HomeworkReviewContent() {
           setGroups(builtGroups);
           
           const initialGrading: Record<number, GradeCode | null> = {};
+          const initialInputMap: Record<number, string | null> = {};
+
           if (ansData && ansData.length > 0) {
-            ansData.forEach(a => { if (a.grading_code) initialGrading[a.tq_id] = a.grading_code as GradeCode; });
+            ansData.forEach(a => { 
+              if (a.grading_code) initialGrading[a.tq_id] = a.grading_code as GradeCode; 
+              if (a.student_input) initialInputMap[a.tq_id] = a.student_input;
+            });
           } else if (resData && resData.incorrect_questions) {
             const inc = safeParseIds(resData.incorrect_questions);
             tqIds.forEach(id => {
@@ -248,7 +277,9 @@ function HomeworkReviewContent() {
               else if (resData.status === '채점완료') initialGrading[id] = 'O';
             });
           }
+          
           setGradingMap(initialGrading);
+          setStudentInputMap(initialInputMap);
         }
       }
     } catch (e) {
@@ -440,16 +471,6 @@ function HomeworkReviewContent() {
     }
   };
 
-  const getCleanUrl = (url: string) => {
-    if (!url || url === 'null') return '';
-    let validUrl = url;
-    if (typeof validUrl === 'string' && validUrl.trim().startsWith('[')) { try { validUrl = JSON.parse(validUrl)[0]; } catch(e) {} }
-    if (validUrl && validUrl !== 'null' && !validUrl.startsWith('http') && !validUrl.startsWith('data:image')) { 
-      validUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/question_images/${validUrl}`; 
-    }
-    return validUrl;
-  };
-
   if (isLoading) {
     return <div className="h-screen flex items-center justify-center bg-slate-50 font-bold text-slate-400">데이터를 불러오는 중입니다...</div>;
   }
@@ -462,7 +483,7 @@ function HomeworkReviewContent() {
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden font-pretendard">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-4">
-          <button onClick={() => window.location.href = '/learning'} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
+          <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
           </button>
           <div className="w-px h-6 bg-slate-300"></div>
@@ -491,7 +512,7 @@ function HomeworkReviewContent() {
       </header>
 
       <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 shrink-0 flex justify-between items-center shadow-inner">
-        <span className="text-xs font-bold text-slate-500">교재명: <span className="text-slate-800">{homeworkInfo?.textbook?.title || '-'}</span></span>
+        <span className="text-xs font-bold text-slate-500">항목명: <span className="text-slate-800">{homeworkInfo?.textbook?.title || '-'}</span></span>
         <div className="flex gap-2">
           <button onClick={() => setAllRemaining('O')} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-bold hover:bg-emerald-100 transition-colors shadow-sm">
             ✅ 미채점 전체 정답 (O)
@@ -520,6 +541,7 @@ function HomeworkReviewContent() {
 
                   {g.items.map((q: any, subIdx: number) => {
                     const mark = gradingMap[q.tq_id];
+                    const hasStudentInput = studentInputMap[q.tq_id] && studentInputMap[q.tq_id] !== '미입력';
                     
                     let rowBg = "bg-white hover:bg-slate-50";
                     if (mark === 'O') rowBg = "bg-[#10b981]/10";
@@ -534,9 +556,18 @@ function HomeworkReviewContent() {
 
                     return (
                       <div key={q.tq_id} className={`flex items-center p-4 gap-4 ${subIdx > 0 ? 'border-t border-slate-100' : ''} ${rowBg} transition-colors`}>
-                        <div className="flex flex-col items-center justify-center shrink-0 w-16 gap-1">
+                        <div className="flex flex-col items-center justify-center shrink-0 w-16 gap-1.5">
                           <span className="text-[#002864] font-black text-[18px] whitespace-nowrap">{q.displayQNum}</span>
                           <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full" title="출처 페이지">{q.page_number || q.final_printed_page || q.detected_page_num || '-'}p</span>
+                          
+                          {/* 🌟 [수정] 학생 제출 답안 보기 버튼 */}
+                          <button 
+                            onClick={() => setModalStudentAns({ qNum: q.displayQNum || q.question_number, input: studentInputMap[q.tq_id] || null })} 
+                            className={`text-[10px] font-bold py-1 px-1.5 rounded shadow-sm transition-colors w-full mt-1 flex items-center justify-center gap-1 ${hasStudentInput ? 'bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-600' : 'bg-slate-50 border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
+                            title="학생이 제출한 필기/텍스트 답안 보기"
+                          >
+                            📝 답안
+                          </button>
                         </div>
 
                         <div className="flex-1 bg-white/60 px-4 py-3 rounded-lg border border-slate-200 flex flex-col gap-2 overflow-hidden shadow-inner">
@@ -552,8 +583,12 @@ function HomeworkReviewContent() {
                           </div>
                         </div>
 
-                        <div className="flex flex-col items-center gap-2 shrink-0 w-[50px]">
-                           <button onClick={() => setModalQ(q)} className="bg-white border border-slate-300 hover:bg-slate-100 hover:border-slate-400 text-slate-600 text-[11px] font-bold p-1.5 rounded shadow-sm transition-colors w-full" title="상세 해설 보기">🔍 풀이</button>
+                        {/* 🌟 [수정] 풀이 돋보기 버튼 가로 정렬 */}
+                        <div className="flex items-center justify-center shrink-0 px-2">
+                           <button onClick={() => setModalQ(q)} className="w-[42px] h-[48px] flex flex-col items-center justify-center gap-0.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg shadow-sm transition-colors" title="상세 해설 보기">
+                             <span className="text-[14px] leading-none">🔍</span>
+                             <span className="text-[10px] font-extrabold leading-none">풀이</span>
+                           </button>
                         </div>
 
                         <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[120px]">
@@ -576,15 +611,16 @@ function HomeworkReviewContent() {
 
         <div className="mt-6 pt-6 border-t border-slate-300 flex justify-center pb-20 gap-4">
           <button 
-            onClick={() => window.location.href = '/learning'} 
+            onClick={() => router.back()} 
             className="bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
-            이전 화면으로 (다음 학생 채점)
+            이전 화면으로 돌아가기
           </button>
         </div>
       </main>
 
+      {/* 해설 보기 팝업 */}
       {modalQ && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -612,6 +648,30 @@ function HomeworkReviewContent() {
             </div>
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
               <button onClick={() => setModalQ(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 [추가] 학생 답안 팝업 모달 */}
+      {modalStudentAns && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="bg-indigo-600 p-4 text-white flex justify-between items-center shrink-0">
+              <h2 className="font-bold text-lg flex items-center gap-2"><span>📝</span> {modalStudentAns.qNum}번 학생 제출 답안</h2>
+              <button onClick={() => setModalStudentAns(null)} className="text-white hover:text-indigo-200 font-bold text-2xl leading-none">&times;</button>
+            </div>
+            <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 flex justify-center items-center text-center">
+              {!modalStudentAns.input || modalStudentAns.input === '미입력' ? (
+                <span className="text-slate-400 font-bold text-sm">제출된 답안이 없습니다 (미입력).</span>
+              ) : (modalStudentAns.input.startsWith('data:image') || /\.(jpeg|jpg|gif|png|svg|webp)$/i.test(modalStudentAns.input) || /^[\w-]+\.[\w]+$/.test(modalStudentAns.input) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(modalStudentAns.input)) ? (
+                <img src={getCleanUrl(modalStudentAns.input)} alt="student_answer" className="max-w-full rounded-lg border border-slate-200 shadow-sm mix-blend-multiply" />
+              ) : (
+                <div className="math-text text-slate-800 font-bold text-xl whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalStudentAns.input) }} />
+              )}
+            </div>
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
+              <button onClick={() => setModalStudentAns(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm transition-colors">닫기</button>
             </div>
           </div>
         </div>

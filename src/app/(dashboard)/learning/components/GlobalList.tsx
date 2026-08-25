@@ -14,7 +14,7 @@ interface GlobalListProps {
   handleSelectAllGlobal: () => void;
   handleBulkCompleteGlobal: () => void;
   handleBulkDeleteGlobal: () => void;
-  handleExtractCommonHomework: () => void; // 🌟 추가
+  handleExtractCommonHomework: () => void; 
   handleViewChange: (view: any) => void;
   toggleGlobalSelection: (id: string) => void;
   formatDateLabel: (dateStr: string, includeTime?: boolean) => string;
@@ -55,7 +55,6 @@ export default function GlobalList({
             <span className="text-[12px] font-bold text-slate-700">전체 선택</span>
           </label>
           <div className="flex items-center gap-1.5">
-            {/* 🌟 다중 선택 시 공통 추출 버튼 노출 */}
             {activeTab === 'HOMEWORK' && globalSelectedBlocks.length >= 2 && (
               <button onClick={handleExtractCommonHomework} className="px-3 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-[11px] transition-colors whitespace-nowrap shadow-sm mr-2 animate-pulse">
                 🔗 공통 과제 분리
@@ -110,10 +109,11 @@ export default function GlobalList({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
+              // 🌟 [수정] 오답프린트(INCORRECT) 탭도 homework/review 페이지 레이아웃으로 라우팅되도록 변경
               let detailHref = '';
               if (activeTab === 'HOMEWORK' && !res.is_exam_hw) {
                 detailHref = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`;
-              } else if (res.is_exam_hw) {
+              } else if (res.is_exam_hw || activeTab === 'INCORRECT') {
                 detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
               } else {
                 detailHref = `/exam/review?assignment_id=${res.assignment_id}`;
