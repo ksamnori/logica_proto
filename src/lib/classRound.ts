@@ -146,8 +146,11 @@ export async function removeClassHoliday(supabase: any, id: string) {
   return supabase.from('class_holiday').delete().eq('id', id);
 }
 
-export async function setClassExtraSession(supabase: any, classId: string, sessionDate: string, reason: string) {
-  return supabase.from('class_extra_session').upsert({ class_id: classId, session_date: sessionDate, reason }, { onConflict: 'class_id,session_date' });
+export async function setClassExtraSession(supabase: any, classId: string, sessionDate: string, reason: string, startTime?: string | null, endTime?: string | null, replacesHolidayId?: string | null) {
+  return supabase.from('class_extra_session').upsert(
+    { class_id: classId, session_date: sessionDate, reason, start_time: startTime || null, end_time: endTime || null, replaces_holiday_id: replacesHolidayId || null },
+    { onConflict: 'class_id,session_date' }
+  );
 }
 
 export async function removeClassExtraSession(supabase: any, id: string) {
