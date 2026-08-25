@@ -46,7 +46,7 @@ export default function VisualMapperPage() {
   
   const [isLoading, setIsLoading] = useState(false);
 
-  const [selectedMainId, setSelectedMainId] = useState<string | null>(null);
+  const [selectedMainIds, setSelectedMainIds] = useState<string[]>([]);
   const [selectedWbIds, setSelectedWbIds] = useState<string[]>([]);
   const [mappings, setMappings] = useState<Record<string, string[]>>({});
 
@@ -94,7 +94,7 @@ export default function VisualMapperPage() {
 
   useEffect(() => {
     if (selectedMainBookId) fetchMainQuestions(selectedMainBookId);
-    else { setMainQuestions([]); setMappings({}); setSelectedMainId(null); setSelectedWbIds([]); }
+    else { setMainQuestions([]); setMappings({}); setSelectedMainIds([]); setSelectedWbIds([]); }
   }, [selectedMainBookId]);
 
   useEffect(() => {
@@ -115,7 +115,7 @@ export default function VisualMapperPage() {
     };
     const timer = setTimeout(renderMath, 150);
     return () => clearTimeout(timer);
-  }, [mainQuestions, wbQuestions1, wbQuestions2, mappings, selectedMainId]);
+  }, [mainQuestions, wbQuestions1, wbQuestions2, mappings, selectedMainIds]);
 
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -159,7 +159,7 @@ export default function VisualMapperPage() {
       });
       setMappings(initialMap);
       setMainQuestions(mainData || []);
-      setSelectedMainId(null); setSelectedWbIds([]);
+      setSelectedMainIds([]); setSelectedWbIds([]);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
@@ -254,19 +254,85 @@ export default function VisualMapperPage() {
   };
 
   const handleMainClick = (idStr: string) => {
-    setSelectedMainId(idStr);
-    setSelectedWbIds(mappings[idStr] || []);
+    setSelectedMainIds(prev => {
+      const isSelected = prev.includes(idStr);
+      const newSelected = isSelected ? prev.filter(id => id !== idStr) : [...prev, idStr];
+      
+      if (newSelected.length === 1) {
+        setSelectedWbIds(mappings[newSelected[0]] || []);
+      } else if (newSelected.length === 0) {
+        setSelectedWbIds([]);
+      }
+      return newSelected;
+    });
+  };
+
+  // 🌟 3단 전체(본교재+꼬리1+꼬리2)를 동시에 스크롤 타겟팅하는 마스터 함수
+  const handleFocusFamily = (tqIdStr: string, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    
+    setSelectedMainIds([tqIdStr]); // 단일 포커싱으로 강제 전환
+    const similarWbIds = mappings[tqIdStr] || [];
+    setSelectedWbIds(similarWbIds);
+    
+    const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === tqIdStr);
+    const mainQuestionId = mainQ ? String(mainQ.question_id).trim() : null;
+
+    setTimeout(() => {
+      // 1. 본교재 스크롤
+      const mainEl = document.getElementById(`main-q-${tqIdStr}`);
+      if (mainEl) mainEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+      // 2 & 3. 꼬리 1, 2 스크롤
+      if (mainQuestionId) {
+        const targetWb1 = wbQuestions1.find(wq => 
+          similarWbIds.includes(wq.question_id) || 
+          (wq.parent_question_id && String(wq.parent_question_id).trim() === mainQuestionId)
+        );
+        if (targetWb1) {
+          const wb1El = document.getElementById(`wb1-q-${targetWb1.question_id}`);
+          if (wb1El) wb1El.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+        
+        const targetWb2 = wbQuestions2.find(wq => 
+          similarWbIds.includes(wq.question_id) || 
+          (wq.parent_question_id && String(wq.parent_question_id).trim() === mainQuestionId)
+        );
+        if (targetWb2) {
+          const wb2El = document.getElementById(`wb2-q-${targetWb2.question_id}`);
+          if (wb2El) wb2El.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }
+    }, 100);
+  };
+
+  const onFindTwinParent = (parentQId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const parentMq = mainQuestions.find(mq => String(mq.question_id).trim() === String(parentQId).trim());
+    
+    if (parentMq) {
+      handleFocusFamily(parentMq.tq_id.toString());
+    } else {
+      alert("해당 부모(본교재) 문항이 현재 선택된 본교재 내에 없거나 아직 로드되지 않았습니다.");
+    }
   };
 
   const handleWbClick = (uuid: string) => {
-    if (!selectedMainId) return alert("💡 수동으로 묶으려면 먼저 맨 왼쪽의 '본교재 문항'을 하나 클릭해주세요!");
+    if (selectedMainIds.length === 0) return alert("💡 묶어줄 '본교재 문항'을 먼저 한 개 이상 클릭해주세요!");
     setSelectedWbIds(prev => prev.includes(uuid) ? prev.filter(id => id !== uuid) : [...prev, uuid]);
   };
 
-  // 🔗 1. 일반 수평 연결 (유사/과제용)
+  // 🔗 1. 일반 수평 연결 (유사/과제용) - 다중 병합(Union) 지원
   const handleLink = () => {
-    if (!selectedMainId) return;
-    setMappings(prev => ({ ...prev, [selectedMainId]: selectedWbIds }));
+    if (selectedMainIds.length === 0) return;
+    
+    setMappings(prev => {
+      const newMap = { ...prev };
+      selectedMainIds.forEach(mId => {
+        newMap[mId] = Array.from(new Set([...(newMap[mId] || []), ...selectedWbIds]));
+      });
+      return newMap;
+    });
     
     moveToNextMainQuestion();
   };
@@ -274,20 +340,28 @@ export default function VisualMapperPage() {
   const handleUnlink = (mainIdStr: string, e: React.MouseEvent) => {
     e.stopPropagation();
     setMappings(prev => { const newMap = { ...prev }; delete newMap[mainIdStr]; return newMap; });
-    if (selectedMainId === mainIdStr) setSelectedWbIds([]);
+    if (selectedMainIds.includes(mainIdStr) && selectedMainIds.length === 1) {
+      setSelectedWbIds([]);
+    }
   };
 
   // 👯 2. 수직 쌍둥이 묶기 (강제 종속)
   const handleTwinLink = async () => {
-    if (!selectedMainId || selectedWbIds.length === 0) return;
+    if (selectedMainIds.length === 0 || selectedWbIds.length === 0) return;
+    
+    if (selectedMainIds.length > 1) {
+      return alert("⚠️ 쌍둥이(수직 편입) 처리는 오직 '1개의 본교재 문항'을 기준으로만 가능합니다.\n본교재를 1개만 체크한 상태에서 진행해주세요.");
+    }
+
+    const mainIdToLink = selectedMainIds[0];
+
     if (!confirm(`선택한 ${selectedWbIds.length}개의 문항을 본교재 문항의 '쌍둥이(자식)'로 영구 편입하시겠습니까?\n\n⚠️ 주의: 이 작업은 즉시 마스터 DB에 반영되며, 이후 분류 편집기에서 쌍둥이 트리 구조로 묶이게 됩니다.`)) return;
 
     setIsLoading(true);
     try {
-      const mainQ = mainQuestions.find(q => q.tq_id.toString() === selectedMainId);
+      const mainQ = mainQuestions.find(q => q.tq_id.toString() === mainIdToLink);
       if (!mainQ) throw new Error("본교재 문항을 찾을 수 없습니다.");
 
-      // 선택된 워크북 문항들의 부모 ID를 강제로 덮어씌움
       const { error } = await supabase.from('question_db')
         .update({
            parent_question_id: mainQ.question_id,
@@ -297,7 +371,6 @@ export default function VisualMapperPage() {
 
       if (error) throw error;
 
-      // 수평 연결(similar_tq_ids)에서는 빼주는 것이 논리적으로 깔끔함
       setMappings(prev => {
         const newMap = { ...prev };
         for (const key in newMap) {
@@ -308,7 +381,6 @@ export default function VisualMapperPage() {
 
       alert("✅ 쌍둥이 편입이 완료되었습니다!");
       
-      // 상태 갱신을 위해 데이터 리로드
       if (selectedWbSource1) fetchWbQuestions(selectedWbSource1, setWbQuestions1);
       if (selectedWbSource2) fetchWbQuestions(selectedWbSource2, setWbQuestions2);
 
@@ -321,14 +393,13 @@ export default function VisualMapperPage() {
     }
   };
 
-  // 👯 쌍둥이 종속 해제
   const handleUnlinkTwin = async (wbQuestionId: string, e: React.MouseEvent) => {
     e.stopPropagation();
     if (!confirm("이 문항의 쌍둥이 종속 관계를 해제하시겠습니까? (원본 유실로 처리됩니다)")) return;
     setIsLoading(true);
     try {
       const { error } = await supabase.from('question_db')
-        .update({ parent_question_id: null }) // 고아 상태로 만듦
+        .update({ parent_question_id: null })
         .eq('question_id', wbQuestionId);
       if (error) throw error;
       
@@ -342,14 +413,16 @@ export default function VisualMapperPage() {
   };
 
   const moveToNextMainQuestion = () => {
-    const currentIndex = mainQuestions.findIndex(q => q.tq_id.toString() === selectedMainId);
+    if (selectedMainIds.length === 0) return;
+    
+    const lastSelectedId = selectedMainIds[selectedMainIds.length - 1];
+    const currentIndex = mainQuestions.findIndex(q => q.tq_id.toString() === lastSelectedId);
+    
     if (currentIndex >= 0 && currentIndex < mainQuestions.length - 1) {
       const nextId = mainQuestions[currentIndex + 1].tq_id.toString();
-      setSelectedMainId(nextId);
-      setSelectedWbIds(mappings[nextId] || []);
-      setTimeout(() => { const el = document.getElementById(`main-q-${nextId}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
+      handleFocusFamily(nextId);
     } else {
-      setSelectedMainId(null); setSelectedWbIds([]);
+      setSelectedMainIds([]); setSelectedWbIds([]);
     }
   };
 
@@ -373,11 +446,10 @@ export default function VisualMapperPage() {
     } catch (err: any) { alert("저장 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
-  const getMappedMainIdForWb = (wbUuid: string) => {
-    for (const [mId, wIds] of Object.entries(mappings)) {
-      if (wIds.includes(wbUuid)) return mId;
-    }
-    return null;
+  const getMappedMainIdsForWb = (wbUuid: string) => {
+    return Object.entries(mappings)
+      .filter(([mId, wIds]) => wIds.includes(wbUuid))
+      .map(([mId, _]) => mId);
   };
 
   const filteredWorkbooks1 = workbooks.filter(book => (book || "").toLowerCase().includes(wbFilterText1.toLowerCase()));
@@ -456,35 +528,66 @@ export default function VisualMapperPage() {
         <div className="flex-[1.2] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-indigo-100/80 border-b border-indigo-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-indigo-900 text-sm">📘 허브: 본교재 문항</h2>
-            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-md">수동 연결 시 기준 클릭</span>
+            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-md">다중 선택 가능</span>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll bg-slate-50/50">
             {!selectedMainBookId ? <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm">본교재를 선택해주세요.</div>
             : mainQuestions.length === 0 ? <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm">등록된 문항이 없습니다.</div>
             : mainQuestions.map(q => {
                 const qIdStr = q.tq_id.toString();
-                const isSelected = selectedMainId === qIdStr;
+                const isSelected = selectedMainIds.includes(qIdStr);
                 const mappedWbs = mappings[qIdStr] || [];
                 const hasMapping = mappedWbs.length > 0;
                 const taxDepth = getTaxParts(q.taxonomy_id).length;
 
+                const myTwinsInWb = [...wbQuestions1, ...wbQuestions2].filter(wq => 
+                  wq.parent_question_id && String(wq.parent_question_id).trim() === String(q.question_id).trim()
+                );
+                const hasTwins = myTwinsInWb.length > 0;
+
                 return (
-                  <div id={`main-q-${qIdStr}`} key={qIdStr} onClick={() => handleMainClick(qIdStr)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-transparent bg-white hover:border-indigo-300 hover:shadow-md'}`}>
-                    {isSelected && <div className="absolute left-0 top-0 w-1.5 h-full bg-indigo-500"></div>}
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[12px] font-black text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">{q.page_number}p</span>
-                        <span className="text-sm font-black text-indigo-900 ml-1">{q.question_number}</span>
-                        {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm hidden 2xl:inline-block">Depth {taxDepth}</span>}
+                  <div id={`main-q-${qIdStr}`} key={qIdStr} onClick={() => handleMainClick(qIdStr)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-indigo-500 bg-indigo-50' : 'border-transparent bg-white hover:border-indigo-300 hover:shadow-md'}`}>
+                    
+                    <div className="flex flex-col justify-start pt-1 shrink-0">
+                      <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-slate-300 bg-white'}`}>
+                        {isSelected && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
                       </div>
-                      {hasMapping && (
-                        <div className="flex items-center gap-2 z-10 relative">
-                          <span className="text-[10px] font-extrabold text-white bg-blue-500 px-2 py-0.5 rounded-full shadow-sm">{mappedWbs.length}개 수평연결됨</span>
-                          <button onClick={(e) => handleUnlink(qIdStr, e)} className="text-[10px] font-bold text-slate-400 hover:text-rose-600 underline">초기화</button>
-                        </div>
-                      )}
                     </div>
-                    <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">{q.question}</div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-start mb-2">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-[12px] font-black text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">{q.page_number}p</span>
+                          <span className="text-sm font-black text-indigo-900 ml-1">{q.question_number}</span>
+                          {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm hidden 2xl:inline-block">Depth {taxDepth}</span>}
+                          
+                          {/* 🌟 뱃지를 클릭 가능한 버튼으로 변경하여 타겟팅 연동 */}
+                          {hasTwins && (
+                            <button 
+                              onClick={(e) => handleFocusFamily(qIdStr, e)}
+                              className="text-[10px] font-extrabold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full shadow-sm ml-1 flex items-center gap-1 hover:bg-rose-100 hover:border-rose-300 transition-colors z-10 relative"
+                              title="클릭 시 꼬리 문항으로 스크롤 이동합니다"
+                            >
+                              <span>👯</span>쌍둥이 {myTwinsInWb.length}개 <span className="text-[11px] leading-none opacity-70">🔍</span>
+                            </button>
+                          )}
+                        </div>
+                        {hasMapping && (
+                          <div className="flex items-center gap-2 z-10 relative">
+                            {/* 🌟 수평 연결 뱃지도 클릭 가능한 버튼으로 변경 */}
+                            <button 
+                              onClick={(e) => handleFocusFamily(qIdStr, e)}
+                              className="text-[10px] font-extrabold text-white bg-blue-500 px-2 py-0.5 rounded-full shadow-sm hover:bg-blue-600 transition-colors flex items-center gap-1"
+                              title="클릭 시 꼬리 문항으로 스크롤 이동합니다"
+                            >
+                              {mappedWbs.length}개 수평연결됨 <span className="text-[11px] leading-none opacity-80">🔍</span>
+                            </button>
+                            <button onClick={(e) => handleUnlink(qIdStr, e)} className="text-[10px] font-bold text-slate-400 hover:text-rose-600 underline">초기화</button>
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">{q.question}</div>
+                    </div>
                   </div>
                 );
               })}
@@ -495,27 +598,27 @@ export default function VisualMapperPage() {
         <div className="w-20 flex flex-col justify-center items-center shrink-0 z-10 gap-3">
           
           <div className="bg-white p-2 rounded-2xl shadow-md border border-slate-200 flex flex-col gap-2 relative w-full">
-            <button onClick={handleLink} disabled={!selectedMainId || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainId && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-indigo-500 to-blue-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+            <button onClick={handleLink} disabled={selectedMainIds.length === 0 || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainIds.length > 0 && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-indigo-500 to-blue-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
               <svg className="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
               <span className="text-[10px] font-black">수평 연결</span>
             </button>
             <div className="text-center mt-0.5 mb-1">
-              <div className="text-[9px] font-black text-indigo-600">유사/과제용</div>
+              <div className="text-[9px] font-black text-indigo-600 leading-tight">유사/과제<br/>(다중 병합)</div>
             </div>
           </div>
 
           <div className="bg-white p-2 rounded-2xl shadow-md border border-rose-200 flex flex-col gap-2 relative w-full">
-            <button onClick={handleTwinLink} disabled={!selectedMainId || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainId && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-rose-500 to-fuchsia-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+            <button onClick={handleTwinLink} disabled={selectedMainIds.length !== 1 || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainIds.length === 1 && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-rose-500 to-fuchsia-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
               <span className="text-lg mb-0.5">👯</span>
               <span className="text-[10px] font-black">수직 편입</span>
             </button>
             <div className="text-center mt-0.5 mb-1">
-              <div className="text-[9px] font-black text-rose-600">쌍둥이화</div>
+              <div className="text-[9px] font-black text-rose-600 leading-tight">쌍둥이화<br/>(1개만 가능)</div>
             </div>
           </div>
 
           <div className="text-center mt-2">
-            <span className="text-[10px] font-bold text-slate-400">선택됨</span>
+            <span className="text-[10px] font-bold text-slate-400">꼬리 선택됨</span>
             <div className="text-sm font-black text-slate-700">{selectedWbIds.length}개</div>
           </div>
 
@@ -532,16 +635,19 @@ export default function VisualMapperPage() {
             : wbQuestions1.map(q => {
                 const qUuid = q.question_id;
                 const isSelected = selectedWbIds.includes(qUuid);
-                const mappedMainId = getMappedMainIdForWb(qUuid);
-                const isMappedToOther = mappedMainId && mappedMainId !== selectedMainId;
+                
+                const mappedMainIds = getMappedMainIdsForWb(qUuid);
+                const isMappedToCurrentSelection = selectedMainIds.some(id => mappedMainIds.includes(id));
+                const isMappedToOther = mappedMainIds.length > 0 && !isMappedToCurrentSelection;
 
-                // 🌟 수직 쌍둥이 정보 뱃지 로직
                 const isTwin = q.parent_question_id && String(q.parent_question_id).trim().toLowerCase() !== 'null';
-                const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === selectedMainId);
-                const isMyTwin = isTwin && mainQ && String(q.parent_question_id).trim() === String(mainQ.question_id).trim();
+                const isMyTwin = isTwin && selectedMainIds.some(mId => {
+                  const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === mId);
+                  return mainQ && String(q.parent_question_id).trim() === String(mainQ.question_id).trim();
+                });
 
                 return (
-                  <div key={qUuid} onClick={() => handleWbClick(qUuid)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-emerald-500 bg-emerald-50' : 'border-transparent bg-white hover:border-emerald-300 hover:shadow-md'} ${isMappedToOther ? 'opacity-40 grayscale' : ''}`}>
+                  <div id={`wb1-q-${qUuid}`} key={qUuid} onClick={() => handleWbClick(qUuid)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-emerald-500 bg-emerald-50' : 'border-transparent bg-white hover:border-emerald-300 hover:shadow-md'} ${isMappedToOther ? 'opacity-40 grayscale' : ''}`}>
                     <div className="flex flex-col justify-start pt-1 shrink-0">
                       <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-slate-300 bg-white'}`}>
                         {isSelected && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
@@ -561,8 +667,24 @@ export default function VisualMapperPage() {
                               <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-[9px] font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
                             </div>
                           )}
-                          {isTwin && !isMyTwin && <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">타문항 쌍둥이</span>}
-                          {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shrink-0">수평 연결됨</span>}
+                          {isTwin && !isMyTwin && (
+                            <button 
+                              onClick={(e) => onFindTwinParent(q.parent_question_id, e)} 
+                              className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              title="본교재의 쌍둥이 부모 위치로 이동합니다"
+                            >
+                              타문항 쌍둥이 <span className="text-[11px] leading-none">🔍</span>
+                            </button>
+                          )}
+                          {isMappedToOther && (
+                            <button 
+                              onClick={(e) => handleFocusFamily(mappedMainIds[0], e)} 
+                              className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              title="본교재의 수평 연결 기준 위치로 이동합니다"
+                            >
+                              타문항 연결 <span className="text-[11px] leading-none">🔍</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">{q.question}</div>
@@ -584,16 +706,19 @@ export default function VisualMapperPage() {
             : wbQuestions2.map(q => {
                 const qUuid = q.question_id;
                 const isSelected = selectedWbIds.includes(qUuid);
-                const mappedMainId = getMappedMainIdForWb(qUuid);
-                const isMappedToOther = mappedMainId && mappedMainId !== selectedMainId;
+                
+                const mappedMainIds = getMappedMainIdsForWb(qUuid);
+                const isMappedToCurrentSelection = selectedMainIds.some(id => mappedMainIds.includes(id));
+                const isMappedToOther = mappedMainIds.length > 0 && !isMappedToCurrentSelection;
 
-                // 🌟 수직 쌍둥이 정보 뱃지 로직
                 const isTwin = q.parent_question_id && String(q.parent_question_id).trim().toLowerCase() !== 'null';
-                const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === selectedMainId);
-                const isMyTwin = isTwin && mainQ && String(q.parent_question_id).trim() === String(mainQ.question_id).trim();
+                const isMyTwin = isTwin && selectedMainIds.some(mId => {
+                  const mainQ = mainQuestions.find(mq => mq.tq_id.toString() === mId);
+                  return mainQ && String(q.parent_question_id).trim() === String(mainQ.question_id).trim();
+                });
 
                 return (
-                  <div key={qUuid} onClick={() => handleWbClick(qUuid)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-violet-500 bg-violet-50' : 'border-transparent bg-white hover:border-violet-300 hover:shadow-md'} ${isMappedToOther ? 'opacity-40 grayscale' : ''}`}>
+                  <div id={`wb2-q-${qUuid}`} key={qUuid} onClick={() => handleWbClick(qUuid)} className={`p-3 rounded-xl border-2 transition-all cursor-pointer shadow-sm relative overflow-hidden flex items-stretch gap-2 ${isSelected ? 'border-violet-500 bg-violet-50' : 'border-transparent bg-white hover:border-violet-300 hover:shadow-md'} ${isMappedToOther ? 'opacity-40 grayscale' : ''}`}>
                     <div className="flex flex-col justify-start pt-1 shrink-0">
                       <div className={`w-4 h-4 rounded border flex items-center justify-center ${isSelected ? 'bg-violet-500 border-violet-500 text-white' : 'border-slate-300 bg-white'}`}>
                         {isSelected && <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
@@ -613,8 +738,24 @@ export default function VisualMapperPage() {
                               <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-[9px] font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
                             </div>
                           )}
-                          {isTwin && !isMyTwin && <span className="text-[9px] font-bold text-slate-500 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 shrink-0">타문항 쌍둥이</span>}
-                          {isMappedToOther && <span className="text-[9px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shrink-0">수평 연결됨</span>}
+                          {isTwin && !isMyTwin && (
+                            <button 
+                              onClick={(e) => onFindTwinParent(q.parent_question_id, e)} 
+                              className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              title="본교재의 쌍둥이 부모 위치로 이동합니다"
+                            >
+                              타문항 쌍둥이 <span className="text-[11px] leading-none">🔍</span>
+                            </button>
+                          )}
+                          {isMappedToOther && (
+                            <button 
+                              onClick={(e) => handleFocusFamily(mappedMainIds[0], e)} 
+                              className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              title="본교재의 수평 연결 기준 위치로 이동합니다"
+                            >
+                              타문항 연결 <span className="text-[11px] leading-none">🔍</span>
+                            </button>
+                          )}
                         </div>
                       </div>
                       <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">{q.question}</div>

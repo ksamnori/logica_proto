@@ -670,7 +670,7 @@ export default function StudentTimeline({
                     <ul className="border border-slate-200 rounded-lg overflow-hidden">
                       {filteredTimeline.filter(item => selectedBlocks.includes(item.id)).map(item => (
                         <li key={item.id} className="px-4 py-3 border-b last:border-0 border-slate-100 flex items-center justify-between hover:bg-slate-50">
-                          <span className="font-bold text-sm text-slate-700 truncate w-3/4">{item.title}</span>
+                          <span className="font-bold text-sm text-slate-700 truncate w-3/4">{(item.title || '').replace(/^\[시스템\]\s*/, '')}</span>
                           <span className="text-xs font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100 shadow-sm">오답 {item.xCount}개</span>
                         </li>
                       ))}
@@ -791,7 +791,6 @@ export default function StudentTimeline({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80'
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
-              // 🌟 [수정] 오답프린트 항목도 homework/review로 라우팅되도록 변경
               let detailHref = '';
               if (item.type === 'hw_exam' || item.type === 'print') {
                 detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
@@ -800,6 +799,9 @@ export default function StudentTimeline({
               } else {
                 detailHref = `/exam/review?assignment_id=${item.realId}`;
               }
+
+              // 🌟 렌더링 시점에만 [시스템] 텍스트 제거
+              const displayTitle = (item.title || '제목 없음').replace(/^\[시스템\]\s*/, '');
 
               return (
                 <div key={`${item.id}_${idx}`} onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
@@ -818,8 +820,8 @@ export default function StudentTimeline({
                           {item.subTitle}
                         </span>
                       )}
-                      <div className="font-extrabold text-[14px] truncate" title={item.title || '제목 없음'}>
-                        {item.title || '제목 없음'}
+                      <div className="font-extrabold text-[14px] truncate" title={displayTitle}>
+                        {displayTitle}
                       </div>
                     </div>
                   </div>

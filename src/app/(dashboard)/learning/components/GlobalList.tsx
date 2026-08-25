@@ -99,7 +99,9 @@ export default function GlobalList({
 
               let typeBadge = activeTab === 'EXAM' ? "📝 시험" : activeTab === 'INCORRECT' ? "🖨️ 오답프린트" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200";
-              let titleStr = activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음';
+              
+              // 🌟 렌더링 시점에만 [시스템] 텍스트 제거
+              let titleStr = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음').replace(/^\[시스템\]\s*/, '');
               let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
               let createdDate = activeTab === 'HOMEWORK' ? (res.sort_date || res.created_at) : res.created_at;
 
@@ -109,7 +111,6 @@ export default function GlobalList({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
-              // 🌟 [수정] 오답프린트(INCORRECT) 탭도 homework/review 페이지 레이아웃으로 라우팅되도록 변경
               let detailHref = '';
               if (activeTab === 'HOMEWORK' && !res.is_exam_hw) {
                 detailHref = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`;
