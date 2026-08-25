@@ -36,6 +36,7 @@ export default function StudentEditModal({
     school: "", 
     grade: "", 
     phone: "",
+    passwordHash: "", // 💡 비밀번호 상태 추가
     parentId: "", 
     parentName: "", 
     parentRel: "", 
@@ -62,6 +63,7 @@ export default function StudentEditModal({
         school: student.school || "", 
         grade: student.grade || "", 
         phone: student.phone || "",
+        passwordHash: student.password_hash || "", // 💡 기존 DB 비밀번호 불러오기
         parentId: student.parent_id || parentObj?.parent_id || "", 
         parentName: parentObj?.name || "", 
         parentRel: parentObj?.relationship || "", 
@@ -80,6 +82,12 @@ export default function StudentEditModal({
   };
 
   const submitEditStudent = async () => {
+    // 💡 비밀번호 자릿수 검증 (값이 비어있지 않은데 4자리가 아닌 경우 차단)
+    if (editForm.passwordHash && editForm.passwordHash.length !== 4) {
+      alert("비밀번호(PIN)는 숫자 4자리로 설정해주세요.");
+      return;
+    }
+
     setIsSaving(true);
     try {
       let finalParentId = editForm.parentId || null;
@@ -145,7 +153,7 @@ export default function StudentEditModal({
         }
       }
 
-      // 학생 정보 완벽 업데이트
+      // 💡 학생 정보 완벽 업데이트 (+ password_hash 추가)
       const studentUpdates = { 
         name: editForm.name, 
         gender: editForm.gender || null, 
@@ -153,6 +161,7 @@ export default function StudentEditModal({
         school: editForm.school, 
         grade: editForm.grade, 
         phone: editForm.phone,
+        password_hash: editForm.passwordHash || null, // 입력란을 비우면 DB에서도 null로 처리
         parent_id: finalParentId
       };
 
@@ -356,6 +365,30 @@ export default function StudentEditModal({
                   value={editForm.phone} 
                   onChange={e => setEditForm({...editForm, phone: formatPhone(e.target.value)})} 
                   className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                />
+              </div>
+
+              {/* 💡 신규 추가된 비밀번호(PIN) 입력 필드 (학교와 학생 연락처 바로 아래 줄에 위치) */}
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
+                  비밀번호 (PIN 4자리)
+                  {editForm.passwordHash ? (
+                    <span className="text-[10px] text-blue-500 font-normal">설정됨</span>
+                  ) : (
+                    <span className="text-[10px] text-amber-500 font-normal">미설정</span>
+                  )}
+                </label>
+                <input 
+                  type="text" 
+                  maxLength={4}
+                  placeholder="미설정 (0000 등으로 자동 로그인됨)"
+                  value={editForm.passwordHash} 
+                  onChange={e => {
+                    // 숫자만 입력 가능하도록 정규식 처리
+                    const onlyNums = e.target.value.replace(/[^0-9]/g, '');
+                    setEditForm({...editForm, passwordHash: onlyNums});
+                  }} 
+                  className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864] placeholder:text-slate-300 placeholder:font-normal" 
                 />
               </div>
               

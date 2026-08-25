@@ -82,7 +82,19 @@ export async function loginStudentAction(studentId: string, passwordInput: strin
 
     if (error || !data) return { success: false, message: "학생 정보를 찾을 수 없습니다." };
     
-    if (data.password_hash !== passwordInput) return { success: false, message: "비밀번호가 다릅니다." };
+    // 💡 [추가된 로직] 비밀번호가 없거나 비어있을 때 "0000"이면 통과시킵니다.
+    const isPasswordEmpty = !data.password_hash || data.password_hash.trim() === "";
+    let isAuthorized = false;
+
+    if (isPasswordEmpty && passwordInput === "0000") {
+      isAuthorized = true;
+    } else if (data.password_hash === passwordInput) {
+      isAuthorized = true;
+    }
+
+    if (!isAuthorized) {
+      return { success: false, message: "비밀번호가 다릅니다." };
+    }
     
     return { 
       success: true, 

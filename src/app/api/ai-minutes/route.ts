@@ -2,10 +2,9 @@
 import { NextResponse } from 'next/server';
 import OpenAI from 'openai';
 
-// OpenAI 인스턴스 초기화 (환경 변수에서 자동으로 키를 읽어옵니다)
 const openai = new OpenAI();
 
-const SYSTEM_PROMPT = `너는 학원(Academy) 운영 및 학습 관리 시스템(LMS) 'Logica'의 최고 수준 AI 회의록 분석 비서야.
+const BASE_SYSTEM_PROMPT = `너는 학원(Academy) 운영 및 학습 관리 시스템(LMS) 'Logica'의 최고 수준 AI 회의록 분석 비서야.
 제공되는 텍스트는 [주간 강사 회의]의 음성 인식(STT) 기록이야.
 아래의 JSON 포맷 규칙에 맞춰서 회의 내용을 분석하고 구조화해 줘. 텍스트 외의 다른 말은 절대 덧붙이지 마.
 
@@ -36,7 +35,8 @@ const SYSTEM_PROMPT = `너는 학원(Academy) 운영 및 학습 관리 시스템
 
 export async function POST(request: Request) {
   try {
-    const { transcript } = await request.json();
+    // 💡 프론트엔드에서 attendees(참석자) 정보도 함께 받아옵니다.
+    const { transcript, attendees } = await request.json();
 
     if (!transcript) {
       return NextResponse.json(
@@ -45,19 +45,19 @@ export async function POST(request: Request) {
       );
     }
 
+    // 💡 동적 프롬프트 생성: AI에게 실제 참석자 이름을 알려주고 매핑을 지시합니다.
+    const dynamicPrompt = `이 회의의 실제 참석자는 [ ${attendees || '미정'} ] 입니다. 대화의 문맥과 화자들의 호칭을 파악하여, 화자 A, 화자 B 등의 식별자를 이 참석자들의 실제 이름으로 자동 매핑해서 요약해 주세요.\n\n${BASE_SYSTEM_PROMPT}`;
+
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini", // 가성비와 속도가 가장 뛰어난 최신 경량 모델
+      model: "gpt-4o-mini", 
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
+        { role: "system", content: dynamicPrompt },
         { role: "user", content: transcript }
       ],
-      // 💡 [핵심] OpenAI가 무조건 JSON 형태로만 응답하도록 강제합니다.
       response_format: { type: "json_object" }, 
-      // 💡 창의적인 소설을 쓰지 않고 사실(녹음 기록)에만 기반하도록 온도를 낮춥니다.
       temperature: 0.2, 
     });
 
-    // OpenAI의 응답 텍스트를 꺼내서 JSON 객체로 파싱합니다.
     const rawContent = completion.choices[0].message.content;
     const parsedData = JSON.parse(rawContent || "{}");
 
