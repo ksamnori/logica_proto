@@ -169,7 +169,13 @@ export default function StudentDetailPage() {
 
   const loadClasses = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
-    let query = supabase.from("class").select("class_id, name, level_name").eq("status", "예정");
+    
+    // 🌟 [수정됨] 상태가 "예정"인 반만 부르던 것을 "종료", "폐강"이 아닌 모든 반을 부르도록 변경
+    let query = supabase.from("class")
+      .select("class_id, name, level_name")
+      .neq("status", "종료")
+      .neq("status", "폐강");
+      
     if (tId) query = query.eq("tenant_id", tId);
     const { data } = await query.order("name");
     setAllClasses(data || []);

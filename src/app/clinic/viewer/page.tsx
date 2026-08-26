@@ -4,17 +4,19 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import { resolveTodaySession, closeSessionAtLimit, setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway } from "@/lib/clinicSession";
+import { resolveTodaySession, closeSessionAtLimit, setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway, checkAndBumpToggleCooldown } from "@/lib/clinicSession";
+import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from "@/hooks/useToggleCooldown";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { awardClinicMinutePoints, spendPoints } from "@/app/actions/shopPoints";
 import { resolvePendingHomeworkQuestions, BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
+import { getISOWeekKST } from "@/lib/classRound";
 import PointBadge from "@/components/clinic/PointBadge";
 
 import {
   SUPABASE_URL, SUPABASE_ANON_KEY, CLINIC_ROOM, ROUND1_TIME_LIMIT_SECONDS,
-  GEMINI_API_KEY_STORAGE_KEY, GEMINI_MODEL_STORAGE_KEY, DEFAULT_GEMINI_MODEL,
   PEN_COLORS, ERASER_WIDTH_MULTIPLIER, getKSTDateString, formatMathTextForWeb,
-  getCleanUrl, hydrateHintState, saveHintState, textbookHintFields, keypadAnswersMatch
+  getCleanUrl, hydrateHintState, saveHintState, textbookHintFields, keypadAnswersMatch,
+  isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion, combineDbHints
 } from "./utils";
 import { QuestionDisplay } from "./components/QuestionDisplay";
 import { HintRevealBox } from "./components/HintRevealBox";
@@ -59,6 +61,7 @@ export default function ClinicViewer() {
   const studentAnswers = useRef<Record<number, string | null>>({});
   const studentDrawings = useRef<Record<number, string>>({});
   const keypadAnswers = useRef<Record<number, string>>({});
+  const keypadCursor = useRef<Record<number, number>>({});
   const answerModes = useRef<Record<number, 'keypad' | 'pen'>>({});
   const callState = useRef<Record<number, boolean>>({});
   const recheckState = useRef<Record<number, 'pending' | null>>({});
@@ -66,6 +69,7 @@ export default function ClinicViewer() {
   const hintState = useRef<Record<number, any>>({});
   const qBoxStatus = useRef<Record<number, 'correct_blue' | 'correct_yellow' | 'retry_yellow' | 'wrong_red'>>({});
   const penGradeCache = useRef<Record<number, boolean>>({});
+  const penGradeMetaCache = useRef<Record<number, any>>({});
   const penGradeInFlight = useRef<Record<number, Promise<void> | undefined>>({});
   const hintRequestInFlightRef = useRef(false);
 
@@ -76,15 +80,17 @@ export default function ClinicViewer() {
   const [hintPanelExpanded, setHintPanelExpanded] = useState(true);
   const [myAwayActive, setMyAwayActive] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const callCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
+  const awayCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
 
-  // 모달 관리 상태
+  // 모달 상태 관리
   const [resultModal, setResultModal] = useState<any>(null);
   const [recheckToast, setRecheckToast] = useState("");
   const [timeUpModal, setTimeUpModal] = useState(false);
   const [sessionTimeUpModal, setSessionTimeUpModal] = useState(false);
   const [submitConfirmModal, setSubmitConfirmModal] = useState(false);
   const [submitResultModal, setSubmitResultModal] = useState(false);
-  const [geminiModalOpen, setGeminiModalOpen] = useState(false);
+  const [pendingRecheckReview, setPendingRecheckReview] = useState<any[]>([]);
   const [hintModal, setHintModal] = useState<any>(null);
   const [emptyState, setEmptyState] = useState<any>(null);
   const [awaitingReview, setAwaitingReview] = useState(false);
@@ -92,6 +98,8 @@ export default function ClinicViewer() {
   const [autoLeaveSec, setAutoLeaveSec] = useState(10);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutTarget, setLogoutTarget] = useState<'portal' | 'login'>('portal');
+  const [sessionInfo, setSessionInfo] = useState<any>(null);
+  const [geminiModalOpen, setGeminiModalOpen] = useState(false);
 
   const optionsRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -155,7 +163,43 @@ export default function ClinicViewer() {
     };
   }, []);
 
-  // 🌟 [핵심 기능 1] 기존에 제출한 정답(손글씨 포함)과 채점 상태 완벽 복원
+  useEffect(() => {
+    if (questions.length === 0) return;
+    const draft = clinicSessionStateRef.current?.draft_progress;
+    if (!draft) return;
+    if (draft.round !== params.round || draft.className !== params.className || draft.weekType !== params.weekType ||
+        draft.assignmentId !== params.assignmentId || draft.homeworkIdsStr !== params.homeworkIdsStr) return;
+    const idx = draft.qIndex;
+    if (idx < 0 || idx >= questions.length) return;
+
+    const q = questions[idx];
+    if (draft.mode === 'pen') {
+      studentDrawings.current[idx] = draft.answer;
+      studentAnswers.current[idx] = draft.answer;
+    } else if (isObjectiveQuestion(q)) {
+      studentAnswers.current[idx] = draft.answer;
+    } else {
+      keypadAnswers.current[idx] = draft.answer;
+    }
+    setCurrentQIndex(idx);
+    forceUpdate();
+    if (draft.mode === 'pen') setTimeout(() => initCanvas(idx), 50);
+
+    clinicSessionStateRef.current.draft_progress = null;
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) supabaseClient.from('clinic_session_state').update({ draft_progress: null }).eq('id', sid).then();
+  }, [questions, params]);
+
+  const initMathJax = () => {
+    if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
+      mathJaxRef.current = true;
+      (window as any).MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]], processEscapes: true }, chtml: { displayAlign: 'left' } };
+      const script = document.createElement("script"); script.id = "MathJax-script"; script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"; script.async = true;
+      script.onload = () => { (window as any).MathJax?.typesetPromise?.().catch((err: any) => console.error("MathJax 타이프셋 에러:", err)); };
+      document.head.appendChild(script);
+    }
+  };
+
   const loadExistingAnswers = async (sId: string, qs: any[]) => {
     if (qs.length === 0) return;
     const examAssignIds = [...new Set(qs.map(q => q.examAssignmentId).filter(Boolean))];
@@ -209,7 +253,6 @@ export default function ClinicViewer() {
     forceUpdate();
   };
 
-  // 🌟 [핵심 기능 2] 조교의 실시간 채점 반영 리스너 (타입 명시 & 100% 감지)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
 
@@ -236,6 +279,10 @@ export default function ClinicViewer() {
         setRecheckToast(`🎉 조교님이 ${idx + 1}번을 정답(${newCode}) 처리했어요!`);
         setTimeout(() => setRecheckToast(""), 4000);
         if (recheckState.current[idx] === 'pending') recheckState.current[idx] = null;
+        
+        // 🌟 실시간 채점으로 정답 처리되었으므로 즉각적으로 화면 넘김 처리 (삭제 안함)
+        processCorrectAnswer(questions[idx], idx, true);
+        
       } else if (!isCorrect && wasCorrect) {
         qBoxStatus.current[idx] = 'wrong_red';
         correctSolvedCountRef.current = Math.max(0, correctSolvedCountRef.current - 1);
@@ -264,28 +311,27 @@ export default function ClinicViewer() {
     return () => { supabaseClient.removeChannel(channel); };
   }, [studentInfo.id, questions]);
 
-  const initMathJax = () => {
-    if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
-      mathJaxRef.current = true;
-      (window as any).MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]], processEscapes: true }, chtml: { displayAlign: 'left' } };
-      const script = document.createElement("script"); script.id = "MathJax-script"; script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"; script.async = true;
-      script.onload = () => { (window as any).MathJax?.typesetPromise?.().catch((err: any) => console.error("MathJax 타이프셋 에러:", err)); };
-      document.head.appendChild(script);
-    }
-  };
-
   const initSessionAndFetch = async (sId: string, round: number, cls: string, week: string, assignId: string, hwIds: string, assignIdsStr: string = '') => {
     const today = getKSTDateString();
-    const sessionData = await resolveTodaySession(supabaseClient, sId, today);
+    const kioskSeat = localStorage.getItem('logica_kiosk_seat') || undefined;
+    const sessionData = await resolveTodaySession(supabaseClient, sId, today, kioskSeat);
     clinicSessionStateRef.current = sessionData;
+    setSessionInfo(sessionData);
+    
+    if (sessionData.call_cooldown_until && new Date(sessionData.call_cooldown_until).getTime() > Date.now()) {
+      callCooldown.startUntil(new Date(sessionData.call_cooldown_until).getTime());
+    }
+    if (sessionData.away_cooldown_until && new Date(sessionData.away_cooldown_until).getTime() > Date.now()) {
+      awayCooldown.startUntil(new Date(sessionData.away_cooldown_until).getTime());
+    }
 
+    await assignSeatDirectly(sId, sessionData);
     await connectChannel(sId, sessionData);
-    assignSeatDirectly(sId, sessionData);
 
     const { data: eData } = await supabaseClient.from('enrollment').select('class(name)').eq('student_id', sId);
     if (eData) {
       const cNames = Array.from(new Set(eData.map((e:any) => e.class?.name).filter(Boolean))) as string[];
-      setStudentInfo(prev => ({ ...prev, classes: cNames.length ? cNames : [cls] }));
+      setStudentInfo(prev => ({ ...prev, id: sId, classes: cNames.length ? cNames : [cls] }));
     }
 
     if (round === 1 || round === 4) await fetchWeeklyTest(sId, week, cls, assignId);
@@ -304,28 +350,44 @@ export default function ClinicViewer() {
         qIds.length > 0 ? supabaseClient.from('question_db').select('*').in('question_id', qIds) : Promise.resolve({ data: [] }),
         tqIds.length > 0 ? supabaseClient.from('textbook_question').select('*, textbook(book_type, title)').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
       ]);
-      const qDbMap = new Map<any, any>((qDbRows || []).map((q:any) => [q.question_id, q]));
+      
+      const tqQIds = (tqRows || []).map((tq: any) => tq.question_id).filter(Boolean);
+      const allQIds = [...new Set([...qIds, ...tqQIds])];
+      const { data: allQDbRows } = allQIds.length > 0 ? await supabaseClient.from('question_db').select('*').in('question_id', allQIds) : { data: [] };
+
+      const qDbMap = new Map<any, any>((allQDbRows || []).map((q:any) => [q.question_id, q]));
       const tqMap = new Map<any, any>((tqRows || []).map((tq:any) => [tq.tq_id, tq]));
 
       const mapped: any[] = [];
       records.forEach((r:any) => {
         if (r.question_id && qDbMap.has(r.question_id)) {
           const q = qDbMap.get(r.question_id);
+          const dbHint = combineDbHints(q.step_1_concept, q.step_2_approach);
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: q.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(q.question),
             imageUrl: getCleanUrl(q.image_url), options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
-            answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '', hints: [q.step_1_concept || "개념 힌트 없음", q.step_2_approach || "접근법 힌트 없음"]
+            answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '',
+            hintText: dbHint,
+            aiGradable: q.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
           });
         } else if (r.tq_id && tqMap.has(r.tq_id)) {
           const tq = tqMap.get(r.tq_id);
           const raw = tq.raw_metadata || {};
+          const freshQ: any = qDbMap.get(tq.question_id) || {};
+          const dbHint = combineDbHints(freshQ.step_1_concept || raw.step_1_concept, freshQ.step_2_approach || raw.step_2_approach);
+          const tbFields = textbookHintFields(tq.textbook?.book_type);
+          
           mapped.push({
-            index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, tq_id: tq.tq_id,
+            index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, tq_id: tq.tq_id, question_id: tq.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
             imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
-            answer: String(tq.answer || '').trim(), explanation: raw.explanation || raw.solution || '', ...textbookHintFields(tq.textbook?.book_type),
-            bookId: tq.book_id, bookType: tq.textbook?.book_type, bookTitle: tq.textbook?.title
+            answer: String(tq.answer || '').trim(), explanation: raw.explanation || raw.solution || '',
+            hintText: dbHint || tbFields.hintText,
+            hasHint: !!dbHint || tbFields.hasHint,
+            needsAiHint: !dbHint && tbFields.needsAiHint,
+            bookId: tq.book_id, bookType: tq.textbook?.book_type, bookTitle: tq.textbook?.title,
+            aiGradable: tq.ai_gradable !== false
           });
         }
       });
@@ -358,11 +420,15 @@ export default function ClinicViewer() {
       }
 
       if (!matchedExamId) {
-        const { data: sData } = await supabaseClient.from('student').select('grade').eq('student_id', sId).maybeSingle();
-        const myGradeLabel = sData?.grade ? (parseInt(sData.grade) >= 1 && parseInt(sData.grade) <= 6 ? `초등학교 ${sData.grade}학년` : parseInt(sData.grade) >= 7 && parseInt(sData.grade) <= 9 ? `중학교 ${parseInt(sData.grade) - 6}학년` : `고등학교 ${parseInt(sData.grade) - 9}학년`) : '';
-        const { data: exams } = await supabaseClient.from('exam_master').select('exam_id, title, major_grade').eq('exam_type', examType).order('created_at', { ascending: false });
-        const matched = (exams || []).find((e:any) => e.major_grade === myGradeLabel || String(e.major_grade) === String(sData?.grade));
-        if (matched) { matchedExamId = matched.exam_id; matchedTitle = matched.title; }
+        const { data: classData } = await supabaseClient.from('class').select('target_grade').eq('name', cls).maybeSingle();
+        const myTargetGrade = classData?.target_grade || '';
+
+        if (myTargetGrade) {
+          const thisWeek = getISOWeekKST();
+          const { data: exams } = await supabaseClient.from('exam_master').select('exam_id, title, target_grade, test_week').eq('exam_type', examType).eq('test_week', thisWeek).eq('target_grade', myTargetGrade).order('created_at', { ascending: false }).limit(1);
+          const matched = exams?.[0];
+          if (matched) { matchedExamId = matched.exam_id; matchedTitle = matched.title; }
+        }
       }
 
       if (!matchedAssignId && matchedExamId) {
@@ -382,14 +448,18 @@ export default function ClinicViewer() {
       if (validItems.length === 0) { setPendingQCount(`이번 주 ${displayLabel}: 문제 없음`); setQuestions([]); return; }
 
       setPendingQCount(`이번 주 ${displayLabel}: ${validItems.length}문제 (20분 제한)`);
-      const mapped = validItems.map((it:any, i:number) => ({
-        index: i, uid: 'rq' + i + '_' + Date.now(), question_id: it.question_db.question_id, record_id: null,
-        examAssignmentId: matchedAssignId,
-        source: matchedTitle || `이번 주 ${displayLabel}`, questionText: formatMathTextForWeb(it.question_db.question),
-        imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
-        answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
-        hints: [it.question_db.step_1_concept || "개념 힌트 없음", it.question_db.step_2_approach || "접근법 힌트 없음"]
-      }));
+      const mapped = validItems.map((it:any, i:number) => {
+        const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
+        return {
+          index: i, uid: 'rq' + i + '_' + Date.now(), question_id: it.question_db.question_id, record_id: null,
+          examAssignmentId: matchedAssignId,
+          source: matchedTitle || `이번 주 ${displayLabel}`, questionText: formatMathTextForWeb(it.question_db.question),
+          imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
+          answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
+          hintText: dbHint,
+          aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
+        };
+      });
       totalQuestionsInRoundRef.current = mapped.length;
       hintState.current = hydrateHintState(sId, mapped);
 
@@ -408,14 +478,18 @@ export default function ClinicViewer() {
     const title = data.exam_master?.title || null;
 
     const bookType = data.exam_master?.exam_type === '오답프린트' ? '오답' : '기타';
-    const rows = validItems.map((it: any) => ({
-      examAssignmentId: assignId, question_id: it.question_db.question_id,
-      bookId: Number(assignId), bookType, bookTitle: title || '배정된 과제',
-      source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
-      imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
-      answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
-      hints: [it.question_db.step_1_concept || "개념 힌트 없음", it.question_db.step_2_approach || "접근법 힌트 없음"],
-    }));
+    const rows = validItems.map((it: any) => {
+      const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
+      return {
+        examAssignmentId: assignId, question_id: it.question_db.question_id,
+        bookId: Number(assignId), bookType, bookTitle: title || '배정된 과제',
+        source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
+        imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
+        answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
+        hintText: dbHint,
+        aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
+      };
+    });
     return { rows, title };
   };
 
@@ -447,14 +521,28 @@ export default function ClinicViewer() {
       setGlobalExamTitle(assignIdsArray.length > 0 ? '미완료 과제' : (examTitle || '정규 과제'));
       setPendingQCount(`대기 중인 병합 과제: ${qs.length + examRows.length}문제`);
 
+      const hwQIds = qs.map((q: any) => q.question_id).filter(Boolean);
+      const { data: freshQDb } = hwQIds.length > 0 
+        ? await supabaseClient.from('question_db').select('question_id, step_1_concept, step_2_approach').in('question_id', hwQIds)
+        : { data: [] };
+      const freshQDbMap = new Map((freshQDb || []).map((q: any) => [q.question_id, q]));
+
       const mappedHw = qs.map((q:any, i:number) => {
         const raw = q.raw_metadata || {};
+        const freshQ: any = freshQDbMap.get(q.question_id) || {};
+        const dbHint = combineDbHints(freshQ.step_1_concept || raw.step_1_concept, freshQ.step_2_approach || raw.step_2_approach);
+        const tbFields = textbookHintFields(q.bookType);
+
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: q.homeworkId, tq_id: q.tq_id, question_id: q.question_id,
           source: q.homeworkTitle || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
           imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || q.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
-          answer: String(q.answer || '').trim(), explanation: raw.explanation || raw.solution || '', ...textbookHintFields(q.bookType),
-          bookId: q.book_id, bookType: q.bookType, bookTitle: q.bookTitle
+          answer: String(q.answer || '').trim(), explanation: raw.explanation || raw.solution || '', 
+          hintText: dbHint || tbFields.hintText,
+          hasHint: !!dbHint || tbFields.hasHint,
+          needsAiHint: !dbHint && tbFields.needsAiHint,
+          bookId: q.book_id, bookType: q.bookType, bookTitle: q.bookTitle,
+          aiGradable: q.ai_gradable !== false
         };
       });
       const mappedExam = examRows.map((q: any, i: number) => ({ ...q, index: mappedHw.length + i, uid: 'rq' + (mappedHw.length + i) + '_' + Date.now() }));
@@ -475,11 +563,14 @@ export default function ClinicViewer() {
       setPendingQCount(`대기 중인 오답: ${records.length}문제`);
       const mapped = records.filter((r:any) => r.question_db).map((r:any, i:number) => {
         const q = r.question_db;
+        const dbHint = combineDbHints(q.step_1_concept, q.step_2_approach);
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), record_id: r.record_id, question_id: q.question_id,
           source: r.source_type || '오답노트', questionText: formatMathTextForWeb(q.question),
           imageUrl: getCleanUrl(q.image_url), options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
-          answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '', hints: [q.step_1_concept || "개념 힌트 없음", q.step_2_approach || "접근법 힌트 없음"]
+          answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '', 
+          hintText: dbHint,
+          aiGradable: q.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
         };
       });
       totalQuestionsInRoundRef.current = mapped.length;
@@ -589,6 +680,30 @@ export default function ClinicViewer() {
       }
     } else if (payload.action === 'force_return_to_seat') {
       setMyAwayActive(false);
+    } else if (payload.action === 'relocated_away') {
+      if (payload.seat !== mySeatRef.current) return;
+
+      const sid = clinicSessionStateRef.current?.id;
+      const q = questions[currentQIndex];
+      if (sid && q) {
+        const isObjective = isObjectiveQuestion(q);
+        const mode = isObjective ? null : getAnswerMode(currentQIndex, q);
+        const answer = isObjective ? studentAnswers.current[currentQIndex]
+          : mode === 'pen' ? studentDrawings.current[currentQIndex]
+          : keypadAnswers.current[currentQIndex];
+        if (answer) {
+          const draft = { round: params.round, className: params.className, weekType: params.weekType, assignmentId: params.assignmentId, homeworkIdsStr: params.homeworkIdsStr, qIndex: currentQIndex, answer, mode: mode || 'objective', savedAt: Date.now() };
+          supabaseClient.from('clinic_session_state').update({ draft_progress: draft }).eq('id', sid).then();
+        }
+      }
+
+      if (isTimedRound) persistExamAnswersToDB();
+
+      untrackPresence();
+      localStorage.removeItem('logica_student_id');
+      localStorage.removeItem('logica_student_name');
+      localStorage.removeItem('logica_student_phone');
+      router.push('/student/login');
     } else if (payload.action === 'release_to_portal' && payload.seat === mySeatRef.current) {
       setAwaitingReview(false);
     } else if (payload.action === 'force_checkout' || payload.action === 'force_checkout_by_ta') {
@@ -605,6 +720,30 @@ export default function ClinicViewer() {
       if (clinicSessionStateRef.current) {
         clinicSessionStateRef.current.duration_ms = Math.max(0, clinicSessionStateRef.current.duration_ms + dMs);
         trackPresence(mySeatRef.current!, sId, clinicSessionStateRef.current);
+      }
+    } else if (payload.action === 'resolve_recheck' && payload.seat === mySeatRef.current) {
+      const idx = questions.findIndex(q => q.uid === payload.uid);
+      if (idx === -1 || recheckState.current[idx] !== 'pending') return;
+
+      const isReviewItem = pendingRecheckReview.some(r => r.uid === payload.uid);
+      if (isReviewItem) {
+        recheckState.current[idx] = null;
+        setPendingRecheckReview(prev => prev.map(r => r.uid === payload.uid ? { ...r, resolved: true, verdict: payload.verdict } : r));
+        setRecheckToast(payload.verdict === 'correct' ? '🎉 조교가 정답으로 확인했어요!' : '조교 확인 결과 오답이 맞습니다.');
+        setTimeout(() => setRecheckToast(""), 4000);
+        return;
+      }
+
+      const q = questions[idx];
+      if (payload.verdict === 'correct') {
+        processCorrectAnswer(q, idx, true);
+      } else {
+        recheckState.current[idx] = null;
+        qBoxStatus.current[idx] = 'wrong_red';
+        delete studentDrawings.current[idx]; delete keypadAnswers.current[idx]; delete keypadCursor.current[idx]; studentAnswers.current[idx] = null;
+        setRecheckToast('조교 확인 결과 오답이 맞습니다. 다시 풀어보세요.'); setTimeout(() => setRecheckToast(""), 4000);
+        forceUpdate();
+        setTimeout(() => initCanvas(idx), 50);
       }
     }
   };
@@ -663,19 +802,17 @@ export default function ClinicViewer() {
     const beat = async () => {
       const sid = clinicSessionStateRef.current?.id;
       if (!sid || cancelled) return;
+
+      const { data } = await supabaseClient.from('clinic_session_state').select('duration_ms').eq('id', sid).maybeSingle();
+      if (data && clinicSessionStateRef.current) {
+        clinicSessionStateRef.current.duration_ms = data.duration_ms;
+      }
       await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
     };
     beat();
     const iv = setInterval(beat, 15000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [studentInfo.id]);
-
-  useEffect(() => {
-    const mj = (window as any).MathJax;
-    if (mj && mj.typesetPromise && optionsRef.current) {
-      mj.typesetPromise([optionsRef.current]).catch((err: any) => console.error("MathJax 타이프셋 에러:", err));
-    }
-  }, [currentQIndex, questions[currentQIndex]?.options]);
 
   const hasActiveCallForGuard = Object.values(callState.current).some(v => v);
   const hasPendingRecheckForGuard = Object.values(recheckState.current).some(v => v === 'pending');
@@ -732,16 +869,50 @@ export default function ClinicViewer() {
     setTimeout(() => { if ((window as any).MathJax) (window as any).MathJax.typesetPromise(); initCanvas(0); }, 100);
   };
 
+  const getAnswerMode = (idx: number, q: any): 'pen' | 'keypad' => {
+    const explicit = answerModes.current[idx];
+    if (explicit) return explicit;
+    if (studentDrawings.current[idx]) return 'pen';
+    if (q && !isKeypadEnterable(q.answer)) return 'pen';
+    return 'keypad';
+  };
+
+  const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string): Promise<any> => {
+    const res = await fetch('/api/clinic-grade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl: dataUrl, correct, questionText: qText }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'API 오류');
+    return data;
+  };
+
+  const generateAiHint = async (qText: string): Promise<string> => {
+    try {
+      const res = await fetch('/api/clinic-hint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionText: qText }),
+      });
+      if (!res.ok) throw new Error('API 오류');
+      const data = await res.json();
+      return (data.hint || '').trim() || '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
+    } catch (e) {
+      return '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
+    }
+  };
+
   const ensurePenGraded = useCallback((idx: number): Promise<void> => {
     if (penGradeCache.current[idx] !== undefined) return Promise.resolve();
     if (penGradeInFlight.current[idx]) return penGradeInFlight.current[idx];
     const q = questions[idx];
-    const isSubj = q && !(q.options && q.options.length > 0);
-    const mode = answerModes.current[idx] || (studentDrawings.current[idx] ? 'pen' : 'keypad');
+    const isSubj = q && !isObjectiveQuestion(q);
+    const mode = getAnswerMode(idx, q);
     const drawing = studentDrawings.current[idx];
     if (!q || !isSubj || mode !== 'pen' || !drawing) return Promise.resolve();
     const p = gradeHandwrittenAnswerWithGemini(drawing, q.answer, q.questionText)
-      .then(meta => { penGradeCache.current[idx] = !!meta.is_correct; })
+      .then((meta: any) => { penGradeCache.current[idx] = !!meta.is_correct; penGradeMetaCache.current[idx] = meta; })
       .catch(() => {})
       .finally(() => { delete penGradeInFlight.current[idx]; });
     penGradeInFlight.current[idx] = p;
@@ -751,13 +922,14 @@ export default function ClinicViewer() {
   const isQuestionCorrect = useCallback(async (idx: number): Promise<boolean> => {
     const q = questions[idx];
     if (!q) return false;
-    const isSubj = !(q.options && q.options.length > 0);
-    const mode = answerModes.current[idx] || (studentDrawings.current[idx] ? 'pen' : 'keypad');
+    const isSubj = !isObjectiveQuestion(q);
+    const mode = getAnswerMode(idx, q);
     if (isSubj && mode === 'pen') {
       await ensurePenGraded(idx);
       return !!penGradeCache.current[idx];
     }
-    return keypadAnswersMatch(studentAnswers.current[idx], q.answer);
+    if (isSubj) return keypadAnswersMatch(studentAnswers.current[idx], q.answer);
+    return mcAnswersMatch(studentAnswers.current[idx], q.answer);
   }, [questions, ensurePenGraded]);
 
   useEffect(() => {
@@ -776,8 +948,8 @@ export default function ClinicViewer() {
       if (results[i]) { corrects++; return; }
       if (!q.question_id) return;
       incQIds.push(q.question_id);
-      const isSubj = !(q.options && q.options.length > 0);
-      const mode = answerModes.current[i] || (studentDrawings.current[i] ? 'pen' : 'keypad');
+      const isSubj = !isObjectiveQuestion(q);
+      const mode = getAnswerMode(i, q);
       const isBlank = isSubj && mode === 'pen' ? !studentDrawings.current[i] : !studentAnswers.current[i];
       statusMap[q.question_id] = isBlank ? 'B' : 'X';
     });
@@ -790,27 +962,55 @@ export default function ClinicViewer() {
     const wholeSessionEnd = sessionExpired || forceAction === 'force_checkout' || forceAction === 'force_checkout_by_ta';
     setLogoutTarget(wholeSessionEnd ? 'login' : 'portal');
 
+    const reviewList: any[] = [];
+    if (isTimedRound && !forceAction) {
+      questions.forEach((q, i) => {
+        if (results[i]) return;
+        const isSubj = !isObjectiveQuestion(q);
+        if (!isSubj || getAnswerMode(i, q) !== 'pen') return;
+        const meta = penGradeMetaCache.current[i];
+        const recordId = q.record_id || null; 
+        reviewList.push({
+          idx: i, uid: q.uid, qNum: i + 1, questionText: q.questionText, correctAnswer: q.answer,
+          imageDataUrl: studentDrawings.current[i] || null,
+          recognizedText: meta?.recognized_text || '', aiExplanation: meta?.explanation || '', aiConfidence: meta?.confidence ?? null,
+          recordId, tqId: q.tq_id ?? null, questionId: q.question_id ?? null,
+          examAssignmentId: q.question_id && params.assignmentId ? params.assignmentId : null,
+          requested: false, resolved: false,
+        });
+      });
+    }
+    setPendingRecheckReview(reviewList);
+
+    if (isTimedRound) await saveExamResultsToDB();
+
     if (forceAction) {
       setSessionTimeUpModal(true);
     } else if (isTimedRound) {
-      await saveExamResultsToDB();
       setSubmitResultModal(true);
     } else {
       setSessionTimeUpModal(true);
     }
 
-    let sec = 10; setAutoLeaveSec(sec);
-    const itv = setInterval(() => { sec--; setAutoLeaveSec(sec); if (sec <= 0) { clearInterval(itv); (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); } }, 1000);
+    if (reviewList.length === 0) {
+      let sec = 10; setAutoLeaveSec(sec);
+      const itv = setInterval(() => { sec--; setAutoLeaveSec(sec); if (sec <= 0) { clearInterval(itv); (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); } }, 1000);
+    }
   };
 
   const submitSingleAnswer = async () => {
     if (isSubmitting || timeIsUp || callState.current[currentQIndex] || recheckState.current[currentQIndex] === 'pending') return;
     const q = questions[currentQIndex];
-    const isSubjective = !(q.options && q.options.length > 0);
-    const useAI = isSubjective && (answerModes.current[currentQIndex] || (studentDrawings.current[currentQIndex] ? 'pen' : 'keypad')) === 'pen';
+    const isSubjective = !isObjectiveQuestion(q);
+    const useAI = isSubjective && getAnswerMode(currentQIndex, q) === 'pen';
     const myAns = studentAnswers.current[currentQIndex];
 
     if (!myAns) { alert(useAI ? "답을 먼저 그려주세요!" : "정답을 먼저 입력해주세요!"); return; }
+
+    if (useAI && q.aiGradable === false) {
+      requestManualGradingDirect(currentQIndex, q, myAns);
+      return;
+    }
 
     setIsSubmitting(true);
     let isCorrect = false; let gradingMeta: any = null;
@@ -821,12 +1021,13 @@ export default function ClinicViewer() {
         isCorrect = !!gradingMeta.is_correct;
       } catch (err: any) {
         setIsSubmitting(false);
-        if (err.message.includes('API 키가 설정되지')) setGeminiModalOpen(true);
-        else alert('AI 채점 중 문제 발생:\n' + err.message);
+        alert('채점 중 문제 발생:\n' + err.message);
         return;
       }
-    } else {
+    } else if (isSubjective) {
       isCorrect = keypadAnswersMatch(myAns, q.answer);
+    } else {
+      isCorrect = mcAnswersMatch(myAns, q.answer);
     }
 
     lastGradingContextRef.current = useAI ? { idx: currentQIndex, uid: q.uid, q, imageDataUrl: myAns, gradingMeta } : null;
@@ -835,38 +1036,40 @@ export default function ClinicViewer() {
     if (isCorrect) {
       await processCorrectAnswer(q, currentQIndex, false);
       setResultModal({ isCorrect: true, note: gotTaHint ? '조교 힌트를 받아 해결했어요.' : null, canRecheck: false });
+    } else if (useAI) {
+      if (gotTaHint && q.record_id) await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', q.record_id);
+      recheckState.current[currentQIndex] = 'pending';
+      const payload = {
+        uid: q.uid, qNum: currentQIndex + 1, questionText: q.questionText, correctAnswer: q.answer,
+        imageDataUrl: myAns, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '',
+        aiConfidence: gradingMeta?.confidence || null, initial: true,
+      };
+      sendAction('recheck_request', payload);
+      const sid = clinicSessionStateRef.current?.id;
+      if (sid) setActiveRecheck(supabaseClient, sid, q.uid, payload);
+      setRecheckToast('✏️ 조교 선생님이 확인하고 있어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
+      forceUpdate();
     } else {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
       if (q.record_id) await bumpIncorrectRecord(q.record_id, gotTaHint ? 'TX' : 'X', false);
       if (!isTimedRound) await finalizeQuestionProgress(q, false, gotTaHint);
-      setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: useAI });
+      setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
     }
     setIsSubmitting(false);
   };
 
-  const bumpIncorrectRecord = async (recordId: number, status: string, resolved: boolean) => {
-    const { data: cur } = await supabaseClient.from('student_incorrect_record').select('retry_count').eq('record_id', recordId).maybeSingle();
-    await supabaseClient.from('student_incorrect_record').update({
-      status,
-      retry_count: (cur?.retry_count || 0) + 1,
-      resolved_at: resolved ? new Date().toISOString() : null,
-    }).eq('record_id', recordId);
-  };
-
-  const upsertIncorrectRecord = async (q: any, status: string): Promise<number | undefined> => {
-    const filterCol = q.tq_id ? 'tq_id' : 'question_id';
-    const filterVal = q.tq_id ?? q.question_id;
-    if (!filterVal) return undefined;
-    const { data: existingRows } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).limit(1);
-    const existing = existingRows?.[0];
-    if (existing) {
-      await supabaseClient.from('student_incorrect_record').update({ status, resolved_at: null }).eq('record_id', existing.record_id);
-      return existing.record_id;
-    }
-    const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert(
-      { student_id: studentInfo.id, tq_id: q.tq_id ?? null, question_id: q.question_id ?? null, source_type: '과제오답', status, resolved_at: null }
-    ).select('record_id').single();
-    return newRecord?.record_id;
+  const requestManualGradingDirect = (idx: number, q: any, imageDataUrl: string) => {
+    recheckState.current[idx] = 'pending';
+    const payload = {
+      uid: q.uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer,
+      imageDataUrl, recognizedText: '', aiExplanation: '', aiConfidence: null, initial: true,
+    };
+    sendAction('recheck_request', payload);
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) setActiveRecheck(supabaseClient, sid, q.uid, payload);
+    setRecheckToast('✏️ 이 문제는 선생님이 직접 확인해요. 잠시만 기다려주세요.');
+    setTimeout(() => setRecheckToast(""), 4000);
+    forceUpdate();
   };
 
   const enterAwaitingReview = () => {
@@ -886,15 +1089,17 @@ export default function ClinicViewer() {
     return null;
   };
 
+  // 🌟 정답 처리 시 롤백: 배열에서 요소를 삭제하지 않고, 파란색/노란색으로 체크 마크만 남기며 다음 문제로 넘어감.
   const processCorrectAnswer = async (q: any, idx: number, fromRecheck: boolean) => {
-    const usedHint = hintState.current[idx] && (hintState.current[idx].level1 || hintState.current[idx].level2);
+    const usedHint = hintState.current[idx] && hintState.current[idx].revealed;
     const helped = taHintState.current[idx] || usedHint;
     const wasWrongBefore = qBoxStatus.current[idx] === 'wrong_red';
 
     const newStatus = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
-    const isFullyClean = !helped && !wasWrongBefore;
+    
+    // 🌟 배열 삭제 롤백: DB에는 완벽히 '해결(resolved)' 처리하여 포탈 숫자에서 차감되도록 함
+    const resolved = true; 
 
-    const resolved = isFullyClean || params.overdue;
     if (q.record_id) {
       await bumpIncorrectRecord(q.record_id, newStatus, resolved);
     } else {
@@ -909,6 +1114,8 @@ export default function ClinicViewer() {
     if (!isTimedRound) await finalizeQuestionProgress(q, true, helped, wasWrongBefore);
 
     correctSolvedCountRef.current++;
+
+    // 🌟 화면에서 삭제하는 로직(splice)을 제거하고 색깔만 업데이트
     qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
 
     const nextIdx = findNextUnresolvedIndex(idx);
@@ -923,19 +1130,18 @@ export default function ClinicViewer() {
     forceUpdate();
   };
 
-  const requestRecheck = () => {
-    if (!lastGradingContextRef.current) return;
-    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
-    setResultModal(null);
-    recheckState.current[idx] = 'pending';
-    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
+  const requestRecheckForReviewItem = (item: any) => {
+    recheckState.current[item.idx] = 'pending';
+    const recheckPayload = {
+      uid: item.uid, qNum: item.qNum, questionText: item.questionText, correctAnswer: item.correctAnswer,
+      imageDataUrl: item.imageDataUrl, recognizedText: item.recognizedText, aiExplanation: item.aiExplanation, aiConfidence: item.aiConfidence,
+      recordId: item.recordId, tqId: item.tqId, questionId: item.questionId, examAssignmentId: item.examAssignmentId,
+      deferredWrite: true,
+    };
     sendAction('recheck_request', recheckPayload);
     const sid = clinicSessionStateRef.current?.id;
-    if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
-    lastGradingContextRef.current = null;
-    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.'); 
-    setTimeout(() => setRecheckToast(""), 4000);
-    forceUpdate();
+    if (sid) setActiveRecheck(supabaseClient, sid, item.uid, recheckPayload);
+    setPendingRecheckReview(prev => prev.map(r => r.uid === item.uid ? { ...r, requested: true } : r));
   };
 
   const finalizeHomeworkProgress = async (q: any, isCorrect: boolean, helped: boolean = false, retried: boolean = false) => {
@@ -1004,8 +1210,8 @@ export default function ClinicViewer() {
     else await finalizeHomeworkProgress(q, isCorrect, helped, retried);
   };
 
-  const saveExamResultsToDB = async () => {
-    if (!isTimedRound || !params.assignmentId) return;
+  const persistExamAnswersToDB = async (): Promise<number> => {
+    if (!isTimedRound || !params.assignmentId) return 0;
     await supabaseClient.from('student_answer').delete().eq('exam_assignment_id', params.assignmentId).eq('student_id', studentInfo.id);
 
     const inserts: any[] = []; const incUpserts: any[] = []; let totalScore = 0;
@@ -1024,6 +1230,12 @@ export default function ClinicViewer() {
 
     if (inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
     if (incUpserts.length > 0) await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
+    return totalScore;
+  };
+
+  const saveExamResultsToDB = async () => {
+    if (!isTimedRound || !params.assignmentId) return;
+    const totalScore = await persistExamAnswersToDB();
     await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', params.assignmentId);
   };
 
@@ -1033,24 +1245,22 @@ export default function ClinicViewer() {
 
     if (syncIncorrectRecord) {
       const incUpserts = uIds.map(qid => ({ student_id: studentInfo.id, question_id: qid, source_type: '시험지', status: statusMap?.[qid] || 'X', resolved_at: null }));
-      const { error: incErr } = await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
-      if (incErr) console.error('오답 기록 저장 실패:', incErr);
+      await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
     }
 
     try {
       const { data: cls } = await supabaseClient.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
       let instId = cls?.class?.instructor_id;
       if (!instId) { const { data: fb } = await supabaseClient.from('instructor').select('instructor_id').limit(1).maybeSingle(); instId = fb?.instructor_id; }
-      if (!instId) { console.error('오답 프린트 생성 실패: 담당 강사를 찾을 수 없습니다.'); return; }
+      if (!instId) return;
 
       const title = `[${studentInfo.name}] ${sourceTitle} 오답 프린트`;
-      const { data: ex, error: exErr } = await supabaseClient.from('exam_master').insert({ title, exam_type: '오답프린트', instructor_id: instId, total_questions: uIds.length }).select().single();
-      if (exErr || !ex) { console.error('오답 프린트 생성 실패:', exErr); return; }
-
+      const { data: ex } = await supabaseClient.from('exam_master').insert({ title, exam_type: '오답프린트', instructor_id: instId, total_questions: uIds.length }).select().single();
+      
       const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round(100 / uIds.length) }));
       await supabaseClient.from('exam_item').insert(items);
       await supabaseClient.from('exam_assignment').insert({ exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시' });
-    } catch(e) { console.error('오답 프린트 생성 중 오류:', e); }
+    } catch(e) {}
   };
 
   const flushIncorrectToPrint = async () => {
@@ -1063,6 +1273,43 @@ export default function ClinicViewer() {
       if ((st === 'correct_yellow' || st === 'retry_yellow' || st === 'wrong_red') && q.question_id) incQIds.push(q.question_id);
     });
     if (incQIds.length > 0) await generateIncorrectPrint(incQIds, globalExamTitle, false);
+  };
+
+  const bumpIncorrectRecord = async (recordId: number, status: string, resolved: boolean) => {
+    const { data: cur } = await supabaseClient.from('student_incorrect_record').select('retry_count').eq('record_id', recordId).maybeSingle();
+    await supabaseClient.from('student_incorrect_record').update({
+      status, retry_count: (cur?.retry_count || 0) + 1, resolved_at: resolved ? new Date().toISOString() : null,
+    }).eq('record_id', recordId);
+  };
+
+  const upsertIncorrectRecord = async (q: any, status: string): Promise<number | undefined> => {
+    const filterCol = q.tq_id ? 'tq_id' : 'question_id';
+    const filterVal = q.tq_id ?? q.question_id;
+    if (!filterVal) return undefined;
+    const { data: existingRows } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).limit(1);
+    if (existingRows?.[0]) {
+      await supabaseClient.from('student_incorrect_record').update({ status, resolved_at: null }).eq('record_id', existingRows[0].record_id);
+      return existingRows[0].record_id;
+    }
+    const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert(
+      { student_id: studentInfo.id, tq_id: q.tq_id ?? null, question_id: q.question_id ?? null, source_type: '과제오답', status, resolved_at: null }
+    ).select('record_id').single();
+    return newRecord?.record_id;
+  };
+
+  const requestRecheck = () => {
+    if (!lastGradingContextRef.current) return;
+    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
+    setResultModal(null);
+    recheckState.current[idx] = 'pending';
+    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
+    sendAction('recheck_request', recheckPayload);
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
+    lastGradingContextRef.current = null;
+    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.'); 
+    setTimeout(() => setRecheckToast(""), 4000);
+    forceUpdate();
   };
 
   const saveRoundScoreToLocalStorage = () => {
@@ -1106,7 +1353,6 @@ export default function ClinicViewer() {
       if (!isDrawing.current) return;
       isDrawing.current = false;
       try { if (e?.pointerId != null) canvas.releasePointerCapture(e.pointerId); } catch (err) {}
-      
       studentDrawings.current[idx] = canvas.toDataURL('image/webp', 0.5); 
       studentAnswers.current[idx] = studentDrawings.current[idx];
     };
@@ -1114,89 +1360,32 @@ export default function ClinicViewer() {
     canvas.onpointerdown = startDraw; canvas.onpointermove = draw; canvas.onpointerup = stopDraw; canvas.onpointercancel = stopDraw;
   };
 
-  const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string) => {
-    const key = localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY);
-    if (!key) throw new Error('API 키가 설정되지 않았습니다.');
-    const model = localStorage.getItem(GEMINI_MODEL_STORAGE_KEY) || DEFAULT_GEMINI_MODEL;
-    const base64 = dataUrl.split(',')[1];
-
-    const prompt = `당신은 수학 채점자입니다. 이미지 속 손글씨 답안을 채점하세요.
-
-문제: ${qText.replace(/<[^>]+>/g, '')}
-정답(원문): "${correct}"
-
-지침:
-- 이미지의 옅은 회색 격자 배경은 무시하고, 학생이 손으로 쓴 잉크(펜) 자국만 답으로 읽으세요.
-- 학생이 답을 지우거나 위에 덧쓴 경우, 최종적으로 남긴 것으로 보이는 답을 기준으로 판단하세요.
-- 표기 형식이 정답과 다르더라도 수학적으로 동일하면 정답으로 처리하세요 (예: "4"와 "4.0", "1/2"와 "0.5", "-3"과 "－3").
-- 글씨가 불명확해서 여러 숫자/기호로 읽힐 수 있으면, 가장 가능성 높은 해석을 recognized_text에 적고 confidence를 낮게 주세요.
-- 반드시 아래 JSON 스키마의 필드명을 정확히 그대로 사용해 응답하세요.`;
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }, { inline_data: { mime_type: 'image/webp', data: base64 } }] }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              recognized_text: { type: 'STRING', description: '이미지에서 인식한 학생의 답' },
-              is_correct: { type: 'BOOLEAN', description: '정답 여부' },
-              confidence: { type: 'NUMBER', description: '인식 확신도 0~1' },
-              explanation: { type: 'STRING', description: '판단 이유' }
-            },
-            required: ['recognized_text', 'is_correct', 'confidence', 'explanation']
-          },
-          temperature: 0
-        }
-      })
-    });
-    if (!res.ok) throw new Error('API 오류');
-    const data = await res.json();
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    return JSON.parse(text.replace(/```json|```/g, '').trim());
-  };
-
-  const AI_HINT_MOCK: Record<1 | 2, string> = {
-    1: '문제에서 주어진 조건을 다시 한 번 차근차근 읽고, 어떤 개념을 써야 할지 떠올려보세요.',
-    2: '주어진 조건들을 식으로 정리한 뒤, 구하려는 값을 중심으로 순서를 세워 풀어보세요.'
-  };
-  const generateAiHint = async (qText: string, level: 1 | 2): Promise<string> => {
-    const key = localStorage.getItem(GEMINI_API_KEY_STORAGE_KEY);
-    if (!key) return AI_HINT_MOCK[level];
-    const model = localStorage.getItem(GEMINI_MODEL_STORAGE_KEY) || DEFAULT_GEMINI_MODEL;
-    const levelInstruction = level === 1
-      ? '정답을 직접 알려주지 말고, 이 문제를 풀기 위해 떠올려야 할 "핵심 개념"을 1~2문장으로 짧게 알려주세요.'
-      : '정답을 직접 알려주지 말고, 이 문제를 어떤 순서/방법으로 접근하면 좋을지 구체적인 풀이 방향을 2~3문장으로 알려주세요.';
-    const prompt = `당신은 초중고 수학 과외 선생님입니다. 아래 문제에 대한 단계별 힌트를 작성하세요.\n\n문제: ${qText.replace(/<[^>]+>/g, '')}\n\n${levelInstruction}\n정답이나 최종 계산 결과는 절대 언급하지 마세요.`;
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': key },
-        body: JSON.stringify({ contents: [{ role: 'user', parts: [{ text: prompt }] }], generationConfig: { temperature: 0.4 } })
-      });
-      if (!res.ok) throw new Error('API 오류');
-      const data = await res.json();
-      const text = (data.candidates?.[0]?.content?.parts?.[0]?.text || '').trim();
-      return text || AI_HINT_MOCK[level];
-    } catch (e) {
-      return AI_HINT_MOCK[level];
-    }
-  };
-
   const pressKeypad = (key: string) => {
-    let cur = keypadAnswers.current[currentQIndex] || '';
-    if (key === 'back') cur = cur.slice(0, -1);
-    else if (key === 'clear') cur = '';
-    else if (key === ',') cur += ', ';
-    else cur += key;
-    keypadAnswers.current[currentQIndex] = cur;
-    studentAnswers.current[currentQIndex] = cur.trim() || null;
+    const idx = currentQIndex;
+    let cur = keypadAnswers.current[idx] || '';
+    let pos = keypadCursor.current[idx] ?? cur.length;
+    pos = Math.max(0, Math.min(pos, cur.length));
+
+    if (key === 'back') {
+      if (pos > 0) { cur = cur.slice(0, pos - 1) + cur.slice(pos); pos -= 1; }
+    } else if (key === 'clear') {
+      cur = ''; pos = 0;
+    } else {
+      const insert = key === ',' ? ', ' : key;
+      cur = cur.slice(0, pos) + insert + cur.slice(pos);
+      pos += insert.length;
+    }
+
+    keypadAnswers.current[idx] = cur;
+    keypadCursor.current[idx] = pos;
+    studentAnswers.current[idx] = cur.trim() || null;
     forceUpdate();
   };
 
   const toggleAnswerMode = () => {
-    const mode = answerModes.current[currentQIndex] === 'pen' ? 'keypad' : 'pen';
+    const current = getAnswerMode(currentQIndex, questions[currentQIndex]);
+    const mode = current === 'pen' ? 'keypad' : 'pen';
+    if (mode === 'keypad' && !isKeypadEnterable(questions[currentQIndex]?.answer)) return;
     answerModes.current[currentQIndex] = mode;
     studentAnswers.current[currentQIndex] = mode === 'pen' ? (studentDrawings.current[currentQIndex] || null) : (keypadAnswers.current[currentQIndex] || null);
     forceUpdate();
@@ -1275,13 +1464,24 @@ export default function ClinicViewer() {
           <button onClick={startClinic} disabled={questions.length === 0} className="w-full bg-[#002864] hover:bg-blue-950 text-white font-bold py-4 rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed">
             {questions.length > 0 ? (isTimedRound ? '⏱️ 20분 타이머 시작하기' : '🚀 풀이 시작하기') : '풀 문제가 없습니다!'}
           </button>
+
+          {questions.length === 0 && (
+            <div className="flex gap-3 mt-6">
+              <button onClick={() => router.back()} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 rounded-xl transition-all">
+                이전 화면으로
+              </button>
+              <button onClick={leaveAndGoHome} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-md transition-all">
+                홈으로 가기
+              </button>
+            </div>
+          )}
         </div>
       </div>
     );
   }
 
-  const isSubjective = q && !(q.options && q.options.length > 0);
-  const curAnsMode = answerModes.current[currentQIndex] || (studentDrawings.current[currentQIndex] ? 'pen' : 'keypad');
+  const isSubjective = q && !isObjectiveQuestion(q);
+  const curAnsMode = getAnswerMode(currentQIndex, q);
   const isCall = !!callState.current[currentQIndex];
   const isRecheck = recheckState.current[currentQIndex] === 'pending';
 
@@ -1345,7 +1545,10 @@ export default function ClinicViewer() {
                 <p className="text-xs font-bold text-slate-400">확인이 끝나면 자동으로 넘어가요.</p>
               </div>
             ) : (
-              <button onClick={leaveAndGoHome} className="mt-6 bg-[#002864] hover:bg-blue-900 text-white font-bold px-8 py-3 rounded-xl shadow-md transition-all">홈으로 돌아가기</button>
+              <div className="flex gap-3 mt-6">
+                <button onClick={() => router.back()} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-8 py-3 rounded-xl transition-all">이전 화면으로</button>
+                <button onClick={leaveAndGoHome} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-8 py-3 rounded-xl shadow-md transition-all">홈으로 돌아가기</button>
+              </div>
             )}
           </div>
         )}
@@ -1382,29 +1585,29 @@ export default function ClinicViewer() {
 
               {!isTimedRound && (
                 <div className="absolute left-0 right-0 bottom-0 z-30 p-5 bg-blue-50/95 backdrop-blur-sm border-t border-blue-100 rounded-b-2xl shadow-[0_-8px_20px_-6px_rgba(15,23,42,0.18)]">
-                  {q.hasHint !== false && (
-                    <div className="flex justify-between items-center mb-3">
-                      <span className="text-sm font-bold text-blue-800 flex items-center gap-1">💡 AI 단계별 힌트</span>
-                      {hintState.current[currentQIndex]?.revealed?.length > 0 && (
-                        <button onClick={() => setHintPanelExpanded(!hintPanelExpanded)} className="flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md bg-blue-100 text-blue-600 text-[11px] font-bold shrink-0">
-                          {hintPanelExpanded ? '힌트 접기' : '힌트 펼치기'}
-                          <span className={`text-[10px] transition-transform ${hintPanelExpanded ? 'rotate-180' : ''}`}>▲</span>
-                        </button>
-                      )}
+                  {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
+                    <div className="flex justify-end items-center mb-2">
+                      <button onClick={() => setHintPanelExpanded(!hintPanelExpanded)} className="flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md bg-blue-100 text-blue-600 text-[11px] font-bold shrink-0">
+                        {hintPanelExpanded ? '힌트 접기' : '힌트 펼치기'}
+                        <span className={`text-[10px] transition-transform ${hintPanelExpanded ? 'rotate-180' : ''}`}>▲</span>
+                      </button>
                     </div>
                   )}
                   <div className="flex gap-2">
                     {q.hasHint !== false && (
-                      <>
-                        <button onClick={() => setHintModal({ level: 1, cost: 10 })} disabled={hintState.current[currentQIndex]?.level1} className={`flex-1 border text-sm font-bold py-3 rounded shadow-sm transition-colors ${hintState.current[currentQIndex]?.level1 ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white border-blue-200 hover:bg-blue-100 text-blue-700'}`}>{hintState.current[currentQIndex]?.level1 ? "1단계 힌트 열람 완료" : "1단계 개념 힌트 (-10P)"}</button>
-                        <button onClick={() => setHintModal({ level: 2, cost: 30 })} disabled={!hintState.current[currentQIndex]?.level1 || hintState.current[currentQIndex]?.level2} className={`flex-1 border text-sm font-bold py-3 rounded shadow-sm transition-colors ${hintState.current[currentQIndex]?.level2 ? 'bg-slate-100 text-slate-400' : hintState.current[currentQIndex]?.level1 ? 'bg-white border-blue-200 hover:bg-blue-100 text-blue-700' : 'opacity-50 cursor-not-allowed bg-slate-100 text-slate-400'}`}>{hintState.current[currentQIndex]?.level2 ? "2단계 힌트 열람 완료" : "2단계 접근 방법 (-30P)"}</button>
-                      </>
+                      <button 
+                        onClick={() => setHintModal({ cost: 30 })} 
+                        disabled={hintState.current[currentQIndex]?.revealed} 
+                        className={`flex-1 border text-sm font-bold py-3 rounded shadow-sm transition-colors ${hintState.current[currentQIndex]?.revealed ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white border-blue-200 hover:bg-blue-100 text-blue-700'}`}
+                      >
+                        {hintState.current[currentQIndex]?.revealed ? "💡 힌트 열람 완료" : "💡 힌트 열람하기 (-30P)"}
+                      </button>
                     )}
-                    <button onClick={() => { const next = !myAwayActive; setMyAwayActive(next); sendAction(next ? 'away' : 'cancel_away'); const sid = clinicSessionStateRef.current?.id; if (sid) (next ? setAway : clearAway)(supabaseClient, sid); }} disabled={!myAwayActive && Object.values(callState.current).some(v=>v)} className={`shrink-0 border text-sm font-bold py-3 px-4 rounded shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{myAwayActive ? '↩️ 자리 복귀' : '🚶 자리비움'}</button>
+                    <button onClick={async () => { if (awayCooldown.isActive) return; const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'away'); awayCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { awayCooldown.start(); } const next = !myAwayActive; setMyAwayActive(next); sendAction(next ? 'away' : 'cancel_away'); if (sid) (next ? setAway : clearAway)(supabaseClient, sid); }} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-sm font-bold py-3 px-4 rounded shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 자리비움'}</button>
                   </div>
-                  {q.hasHint !== false && hintState.current[currentQIndex]?.revealed?.length > 0 && (
+                  {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
                     <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-[260px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                      <HintRevealBox revealed={hintState.current[currentQIndex].revealed} />
+                      <HintRevealBox revealedText={hintState.current[currentQIndex].hintText} />
                     </div>
                   )}
                 </div>
@@ -1471,7 +1674,7 @@ export default function ClinicViewer() {
                 {(isCall || isRecheck) && (
                   <div className="absolute inset-0 z-20 bg-white/50 flex flex-col items-center pt-2 backdrop-blur-[1px]">
                     <div className={`border text-xs font-bold rounded-lg p-3 text-center w-[90%] shadow-sm ${isCall ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-indigo-50 border-indigo-200 text-indigo-600'}`}>
-                      {isCall ? <>🙋 호출 중에는 정답을 입력할 수 없어요<br/>조교가 올 때까지 잠시 기다려주세요.</> : <>🕐 조교에게 재확인을 요청했어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</>}
+                      {isCall ? <>🙋 호출 중에는 정답을 입력할 수 없어요<br/>조교가 올 때까지 잠시 기다려주세요.</> : q.aiGradable === false ? <>✏️ 조교 선생님이 확인하고 있어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</> : <>🕐 조교에게 재확인을 요청했어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</>}
                     </div>
                   </div>
                 )}
@@ -1504,29 +1707,56 @@ export default function ClinicViewer() {
                           <button onClick={toggleEraser} className={`flex-1 text-sm font-bold py-2.5 rounded-lg ${isEraserMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>🧽 {isEraserMode ? '지우개 사용 중' : '지우개'}</button>
                           <button onClick={() => { delete studentDrawings.current[currentQIndex]; studentAnswers.current[currentQIndex] = null; if(canvasRef.current && ctxRef.current) { const c = canvasRef.current; const dpr = window.devicePixelRatio || 1; ctxRef.current.clearRect(0,0,c.width,c.height); drawWritableHint(ctxRef.current, c.width / dpr, c.height / dpr); } }} className="flex-1 text-sm font-bold text-rose-500 bg-rose-50 py-2.5 rounded-lg">🗑️ 전체 지우기</button>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setGeminiModalOpen(true)} className="shrink-0 w-9 h-9 rounded-lg bg-slate-100 text-slate-400 hover:text-slate-600 flex items-center justify-center">⚙️</button>
-                          <button onClick={toggleAnswerMode} className="flex-1 text-sm font-bold text-[#002864] bg-blue-50 py-2.5 rounded-lg">🔢 키패드로 전환</button>
+                        <div className="flex items-center gap-2 mt-2">
+                          <button onClick={toggleAnswerMode} className="flex-1 text-base font-black text-[#002864] bg-blue-50 py-3 rounded-xl border border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center justify-center gap-2">
+                            <span className="text-xl">🔢</span> 키패드 모드로 전환
+                          </button>
                         </div>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-medium text-center">🤖 채점은 제미나이(Gemini) AI가 도와줘요</p>
+                      <p className="text-[10px] text-slate-400 font-medium text-center">
+                        {isKeypadEnterable(q?.answer) ? '🤖 손글씨 답안은 자동으로 채점돼요' : '✍️ 이 문제는 정답 형식상 손글씨로만 답할 수 있어요'}
+                      </p>
                     </div>
                   ) : (
                     <div className="w-full flex flex-col gap-2">
                       <div className="flex items-center justify-between gap-2">
                         <label className="text-xs font-bold text-slate-400">🔢 정답을 입력해주세요</label>
                         <div className="flex items-center gap-1.5">
-                          <button onClick={() => setKeypadCollapsed(!keypadCollapsed)} className="w-5 h-5 rounded-md bg-slate-100 text-slate-500 flex items-center justify-center"><span className={`text-[9px] transition-transform ${keypadCollapsed ? 'rotate-180' : ''}`}>◁</span></button>
-                          <button onClick={toggleAnswerMode} className="text-[10px] font-bold text-[#002864] bg-blue-50 px-1.5 py-0.5 rounded">✍️ 손글씨</button>
+                          <button onClick={() => setKeypadCollapsed(!keypadCollapsed)} className="w-6 h-6 rounded-md bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors"><span className={`text-[10px] font-bold transition-transform ${keypadCollapsed ? 'rotate-180' : ''}`}>◁</span></button>
+                          <button onClick={toggleAnswerMode} className="text-sm font-black text-[#002864] bg-blue-50 px-4 py-2 rounded-lg border border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center gap-1">
+                            <span className="text-lg">✍️</span> 손글씨로 풀기
+                          </button>
                         </div>
                       </div>
-                      <input readOnly value={keypadAnswers.current[currentQIndex] || ''} className="w-full text-lg font-extrabold text-right px-3 py-1.5 border-2 border-slate-200 rounded-lg bg-slate-50 text-slate-800 outline-none" placeholder="0" />
-                      <div className={`overflow-hidden transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[260px] opacity-100'}`}>
+                      {(() => {
+                        const idx = currentQIndex;
+                        const kpVal = keypadAnswers.current[idx] || '';
+                        const kpPos = Math.max(0, Math.min(keypadCursor.current[idx] ?? kpVal.length, kpVal.length));
+                        const moveCursor = (pos: number) => { keypadCursor.current[idx] = pos; forceUpdate(); };
+                        return (
+                          <div className="w-full min-h-[2.375rem] text-lg font-extrabold text-right px-3 py-1.5 border-2 border-slate-200 rounded-lg bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
+                            {kpVal ? (
+                              <>
+                                <span onClick={() => moveCursor(0)} className="inline-block w-1.5 self-stretch" />
+                                {kpVal.split('').map((ch, i) => (
+                                  <React.Fragment key={i}>
+                                    {i === kpPos && <span className="inline-block w-[2px] h-5 bg-[#002864] mx-px animate-pulse" />}
+                                    <span onClick={() => moveCursor(i + 1)} className="hover:bg-blue-100 rounded-sm">{ch}</span>
+                                  </React.Fragment>
+                                ))}
+                                {kpPos === kpVal.length && <span className="inline-block w-[2px] h-5 bg-[#002864] mx-px animate-pulse" />}
+                              </>
+                            ) : <span className="text-slate-300 font-normal">0</span>}
+                          </div>
+                        );
+                      })()}
+                      <div className={`overflow-hidden transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[320px] opacity-100'}`}>
                         <div className="grid grid-cols-4 gap-1.5 pt-1">
+                          <button onClick={() => pressKeypad(' ')} className="col-span-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-500 text-xs hover:bg-slate-200 transition-colors">대분수 ␣ (띄어쓰기)</button>
                           {['7','8','9','back','4','5','6','clear','1','2','3','-','0','.','/'].map(k => (
-                            <button key={k} onClick={() => pressKeypad(k)} className={`py-2.5 rounded-lg font-bold ${k==='back' ? 'bg-slate-100 text-slate-500 text-sm' : k==='clear' ? 'bg-rose-50 text-rose-500 text-sm' : k==='0' ? 'col-span-2 bg-slate-50 text-slate-700 text-lg' : k==='-' || k==='.' || k==='/' ? 'bg-slate-100 text-slate-500 text-base' : 'bg-slate-50 text-slate-700 text-lg'}`}>{k === 'back' ? '⌫' : k === 'clear' ? 'C' : k === '/' ? '분수 /' : k}</button>
+                            <button key={k} onClick={() => pressKeypad(k)} className={`py-2.5 rounded-lg font-bold transition-colors ${k==='back' ? 'bg-slate-200 text-slate-600 text-sm hover:bg-slate-300' : k==='clear' ? 'bg-rose-100 text-rose-600 text-sm hover:bg-rose-200' : k==='0' ? 'col-span-2 bg-slate-50 text-slate-700 text-lg hover:bg-slate-100 shadow-sm' : k==='-' || k==='.' || k==='/' ? 'bg-slate-100 text-slate-600 text-base hover:bg-slate-200 shadow-sm' : 'bg-slate-50 text-slate-700 text-lg hover:bg-slate-100 shadow-sm'}`}>{k === 'back' ? '⌫' : k === 'clear' ? 'C' : k === '/' ? '분수 /' : k}</button>
                           ))}
-                          <button onClick={() => pressKeypad(',')} className="col-span-4 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-500 text-xs">쉼표 추가 ( , )</button>
+                          <button onClick={() => pressKeypad(',')} className="col-span-4 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-500 text-xs hover:bg-slate-200 transition-colors">쉼표 추가 ( , )</button>
                         </div>
                       </div>
                     </div>
@@ -1540,7 +1770,7 @@ export default function ClinicViewer() {
                     <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                       {isSubmitting ? '채점 중...' : '✅ 정답 입력'}
                     </button>
-                    <button onClick={() => { if(!callState.current[currentQIndex] && myAwayActive){ alert('자리비움 중에는 호출 불가합니다.'); return;} const willCall = !callState.current[currentQIndex]; callState.current[currentQIndex] = willCall; forceUpdate(); const callPayload = { qNum: currentQIndex + 1, questionText: q.questionText, imageUrl: q.imageUrl, options: q.options, answer: q.answer, explanation: q.explanation, source: q.source }; sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 }); const sid = clinicSessionStateRef.current?.id; if (sid) (willCall ? setActiveCall(supabaseClient, sid, currentQIndex + 1, callPayload) : clearActiveCall(supabaseClient, sid, currentQIndex + 1)); }} disabled={timeIsUp || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>{isCall ? '🚨 호출 취소' : '🙋 호출'}</button>
+                    <button onClick={async () => { if (callCooldown.isActive) return; if(!callState.current[currentQIndex] && myAwayActive){ alert('자리비움 중에는 호출 불가합니다.'); return;} const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'call'); callCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { callCooldown.start(); } const willCall = !callState.current[currentQIndex]; callState.current[currentQIndex] = willCall; forceUpdate(); const callPayload = { qNum: currentQIndex + 1, questionText: q.questionText, imageUrl: q.imageUrl, options: q.options, answer: q.answer, explanation: q.explanation, source: q.source }; sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 }); if (sid) (willCall ? setActiveCall(supabaseClient, sid, currentQIndex + 1, callPayload) : clearActiveCall(supabaseClient, sid, currentQIndex + 1)); }} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>{callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 호출 취소' : '🙋 호출'}</button>
                   </div>
                 </div>
               )}
@@ -1549,7 +1779,6 @@ export default function ClinicViewer() {
         )}
       </main>
 
-      {/* 분리된 모달 일괄 관리 컴포넌트 */}
       <ViewerModals
         hintModal={hintModal}
         setHintModal={setHintModal}
@@ -1557,27 +1786,28 @@ export default function ClinicViewer() {
           if (hintRequestInFlightRef.current) return;
           hintRequestInFlightRef.current = true;
           try {
-            const level = hintModal.level as 1 | 2; 
             const cost = hintModal.cost;
-            const key = `level${level}` as 'level1' | 'level2';
-            if (hintState.current[currentQIndex]?.[key]) { setHintModal(null); return; }
+            if (hintState.current[currentQIndex]?.revealed) { setHintModal(null); return; }
             setHintModal((prev: any) => prev && { ...prev, loading: true });
             
-            let hintText = q.hints[level - 1];
-            if (q.needsAiHint) {
-              hintText = await generateAiHint(q.questionText, level);
+            let finalHintText = q.hintText;
+            if (!finalHintText && q.needsAiHint) {
+              finalHintText = await generateAiHint(q.questionText);
+            } else if (!finalHintText) {
+              finalHintText = "등록된 힌트가 없습니다.";
             }
+
             const res = await spendPoints(studentInfo.id, cost);
             if (!res.success) { setHintModal(null); alert(res.message || '포인트가 부족합니다.'); return; }
             setPoints(res.balance);
             
-            const hq = hintState.current[currentQIndex] || { level1: false, level2: false, revealed: [] };
-            hq[key] = true; 
-            hq.revealed = [...hq.revealed, { level, text: hintText }];
+            const hq = hintState.current[currentQIndex] || { revealed: false, hintText: '' };
+            hq.revealed = true; 
+            hq.hintText = finalHintText;
             hintState.current[currentQIndex] = hq; 
             saveHintState(studentInfo.id, q, hq);
             setHintPanelExpanded(true);
-            sendAction('hint', { qNum: currentQIndex + 1, level });
+            sendAction('hint', { qNum: currentQIndex + 1, level: 1 });
             setHintModal(null); 
             forceUpdate();
           } finally {
@@ -1590,6 +1820,7 @@ export default function ClinicViewer() {
           studentAnswers.current[currentQIndex] = null;
           delete studentDrawings.current[currentQIndex];
           delete keypadAnswers.current[currentQIndex];
+          delete keypadCursor.current[currentQIndex];
           forceUpdate();
           setTimeout(() => initCanvas(currentQIndex), 50);
         }}
@@ -1600,8 +1831,8 @@ export default function ClinicViewer() {
         setSubmitConfirmModal={setSubmitConfirmModal}
         onSubmitConfirm={() => handleTimeUp()}
         submitResultModal={submitResultModal}
-        geminiModalOpen={geminiModalOpen}
-        setGeminiModalOpen={setGeminiModalOpen}
+        pendingRecheckReview={pendingRecheckReview}
+        requestRecheckForReviewItem={requestRecheckForReviewItem}
         recheckToast={recheckToast}
         autoLeaveSec={autoLeaveSec}
         correctSolvedCount={correctSolvedCountRef.current}

@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { supabaseClient, CLINIC_ROOM, getKSTDateString, DEFAULT_CLINIC_DURATION_MS, LOG_AUTO_EXPIRE_MS, PENDING_GUARD_MS, HEARTBEAT_TIMEOUT_MS, formatDuration } from './supervisorUtils';
 import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStudent, END_REQUEST_COOLDOWN_MS, clearActiveCall, clearActiveRecheck, clearAway } from '@/lib/clinicSession';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
+import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
 import { Seat, SEAT_LAYOUT_UPDATED_EVENT, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
 
 const PERSIST_UNTIL_RESOLVED_TYPES = ['call', 'away', 'recheck', 'end_request'];
@@ -42,7 +43,15 @@ export function useSupervisorData() {
     const studentsRef = useRef<Record<string, any>>({});
     const channelRef = useRef<any>(null);
 
+    // 💡 좌석 이동(드래그) 시 목적지에 실제 패드가 등록돼 있는지 확인하기 위한 좌석번호 집합.
+    // 등록 안 된 좌석으로 이동시키면 relocated_in을 받아줄 화면이 세상에 없어서 학생이
+    // 그대로 붕 뜬다 — handlePointerUp에서 이 ref로 드롭 직전에 막는다.
+    const registeredSeatsRef = useRef<Set<string>>(new Set());
+
     const pendingMovesRef = useRef<Record<string, any>>({});
+    // 💡 좌석 이동을 연달아 실수로 두 번 거는 걸 막기 위한 짧은 디바운스 타임스탬프.
+    // DB에 남길 필요 없이 이 관제 화면(탭) 안에서만 기억하면 충분하다.
+    const lastRelocateAtRef = useRef<number>(0);
     const pendingDeletesRef = useRef<Record<string, number>>({});
     const pendingTimeAdjustRef = useRef<Record<string, any>>({});
     const syncPresenceRef = useRef<any>(null);
@@ -66,6 +75,9 @@ export function useSupervisorData() {
             setCanvasHeight(layout.canvasHeight);
             setSeatWidth(layout.seatWidth);
             setSeatHeight(layout.seatHeight);
+        });
+        listPadDevicesByTenant().then(deviceBySeat => {
+            registeredSeatsRef.current = new Set(Object.keys(deviceBySeat));
         });
     }, []);
 
@@ -649,18 +661,44 @@ export function useSupervisorData() {
 
             if (cell) {
                 const targetSeat = cell.getAttribute('data-seat')!;
-                if (targetSeat !== draggedSeat && !studentsRef.current[targetSeat]) {
+                if (targetSeat !== draggedSeat && !studentsRef.current[targetSeat] && !registeredSeatsRef.current.has(targetSeat)) {
+                    alert(`${targetSeat}번 좌석엔 등록된 패드가 없습니다. 학생이 인계받을 화면이 없어 이동할 수 없습니다.\n먼저 /clinic-pad-registry에서 그 좌석에 패드를 등록해주세요.`);
+                } else if (targetSeat !== draggedSeat && !studentsRef.current[targetSeat]) {
                     const studentId = studentsRef.current[draggedSeat!]?.studentId;
+                    const sessionId = studentsRef.current[draggedSeat!]?.sessionId;
                     const sName = studentsRef.current[draggedSeat!]?.name || '학생';
-                    
-                    if (window.confirm(`${sName} 학생을 ${draggedSeat}에서 ${targetSeat}으로 이동하시겠습니까?`)) {
-                        if (studentId) supabaseClient.from('clinic_session_state').update({ seat: targetSeat, manual_seat: targetSeat }).eq('student_id', studentId).then();
-                        const currentStudents = { ...studentsRef.current };
-                        currentStudents[targetSeat] = currentStudents[draggedSeat!];
-                        delete currentStudents[draggedSeat!];
-                        updateStudents(currentStudents);
-                        sendToStudent(draggedSeat!, 'move_seat', { newSeat: targetSeat });
-                        pendingMovesRef.current[draggedSeat!] = { newSeat: targetSeat, expiresAt: Date.now() + 3000 };
+
+                    if (studentId && sessionId) {
+                        // 💡 방금 건 이동을 관제 화면이 아직 반영하기 전에(폴링 주기 5초) 또 조작하는
+                        // 실수만 막으면 되는 짧은 디바운스다 — 물리적으로 학생이 이동을 완료하는
+                        // 시간은 쿨다운 길이로 막을 수 있는 게 아니라서(목적지가 계속 비어 보이므로
+                        // 재시도 자체는 계속 통과된다), 폴링 주기에 맞춰 최소한으로 잡는다.
+                        // DB에 남기지 않고 이 관제 화면(탭) 메모리에서만 관리한다.
+                        const RELOCATE_DEBOUNCE_MS = 5000;
+                        const sinceLastRelocate = Date.now() - lastRelocateAtRef.current;
+                        if (sinceLastRelocate < RELOCATE_DEBOUNCE_MS) {
+                            const remainingSec = Math.ceil((RELOCATE_DEBOUNCE_MS - sinceLastRelocate) / 1000);
+                            alert(`방금 다른 좌석 이동이 있었습니다. ${remainingSec}초 후 다시 시도해주세요.`);
+                        } else if (window.confirm(`${sName} 학생을 ${draggedSeat}에서 ${targetSeat}으로 이동하시겠습니까?\n(실제로 그 자리 패드에서 이어받아야 이동이 완료됩니다)`)) {
+                            // 💡 좌석이 이제 패드에 물리적으로 고정돼 있어서, 여기서 seat 컬럼을 바로 덮어써도
+                            // 학생이 실제로 그 패드 앞으로 이동한 게 아니다. 그래서 DB의 seat는 목적지 패드가
+                            // 토큰으로 실제 인계를 완료할 때(loginTransferAction) 확정하고, 여기서는 (1) 원래
+                            // 패드 화면을 로그아웃시키고 (2) 목적지 패드가 자동 로그인할 수 있게 1분짜리
+                            // 1회용 토큰만 발급해 방송한다.
+                            // 💡 student_id로 걸면 예전 날짜에 정상적으로 안 닫힌(ended_at이 null로 남은) 과거
+                            // 세션 행들까지 전부 걸려서, loginTransferAction의 조회가 행 여러 개와 매치돼
+                            // "만료됨"이 아니라 "요청 없음"으로 잘못 보이는 문제가 있었다 — 지금 옮기는 바로
+                            // 그 세션 행(id)에만 정확히 건다.
+                            const token = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`;
+                            const expiresAt = new Date(Date.now() + 60000).toISOString();
+                            lastRelocateAtRef.current = Date.now();
+                            await supabaseClient.from('clinic_session_state')
+                                .update({ transfer_token: token, transfer_token_expires_at: expiresAt })
+                                .eq('id', sessionId);
+                            sendToStudent(draggedSeat!, 'relocated_away', {});
+                            sendToStudent(targetSeat, 'relocated_in', { studentId, name: sName, token });
+                            appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '좌석이동', `${sName} 학생`, `[${draggedSeat}] → [${targetSeat}] 이동 요청 — 목적지 패드에서 인계 대기 중`);
+                        }
                     }
                 } else if (studentsRef.current[targetSeat] && targetSeat !== draggedSeat) {
                     alert('빈 자리로만 옮길 수 있습니다.');
@@ -682,8 +720,13 @@ export function useSupervisorData() {
     const handlePointerDown = (e: React.PointerEvent, seat: string) => {
         if (e.button !== 0 || !activeStudents[seat] || (e.target as HTMLElement).closest('button')) return;
         const st = activeStudents[seat];
-        if (st.type !== 'reserved' && st.status && st.status !== 'idle') {
-            const statusLabel = st.status === 'away' ? '자리비움' : st.status === 'call' ? '호출' : st.status === 'hint' ? '힌트 진행' : st.status === 'submitted' ? '제출' : st.status;
+        // 💡 채점 대기(재확인 요청)는 st.status를 안 건드리는 별도 필드(st.rechecks)라서, 원래
+        // 이 가드가 호출/자리비움/제출만 체크하고 채점 대기는 놓치고 있었다 — 그 상태로 이동시키면
+        // 재확인 결과 알림을 받을 화면이 없어져서(포탈은 이동 후 도착지라 이 통지를 못 받았다)
+        // 학생이 채점 결과를 영영 모르고 지나갈 수 있었다. 여기서 같이 막는다.
+        const hasPendingRecheck = !!(st.rechecks && Object.keys(st.rechecks).length > 0);
+        if (st.type !== 'reserved' && ((st.status && st.status !== 'idle') || hasPendingRecheck)) {
+            const statusLabel = hasPendingRecheck ? '채점 대기' : st.status === 'away' ? '자리비움' : st.status === 'call' ? '호출' : st.status === 'hint' ? '힌트 진행' : st.status === 'submitted' ? '제출' : st.status;
             alert(`[${statusLabel}] 상태인 학생은 자리를 이동할 수 없습니다. 상태 해제 후 다시 시도해주세요.`);
             return;
         }

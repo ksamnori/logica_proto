@@ -1,3 +1,4 @@
+// src/app/student/portal/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from 'react';
@@ -35,10 +36,6 @@ export default function StudentPortal() {
     const [roundResults, setRoundResults] = useState<Record<string, any>>({});
     const [blockStates, setBlockStates] = useState<Record<string, any>>({});
     const [hwProgress, setHwProgress] = useState<Record<string, any>>({});
-    // 💡 [11번] 반별 홀/짝 회차(week_type)는 시험 클리닉이 "주간테스트"로 나갈지 "과제오답유사"로
-    // 나갈지를 결정하는데, startClinicBlock이 이 값을 전혀 읽지 않고 있었다 — 그래서 라운드1은
-    // week 파라미터를 아예 안 보내 항상 clinic/viewer의 기본값('odd'=주간테스트)으로 고정되어
-    // 있었고, resolveClassWeekType으로 관리되는 홀짝 전환은 실제로는 아무 효과가 없었다.
     const [classWeekTypes, setClassWeekTypes] = useState<Record<string, string>>({});
     
     const [now, setNow] = useState(Date.now());
@@ -111,16 +108,12 @@ export default function StudentPortal() {
             getPointBalance(sid).then(setMockPoints).catch(err => console.error('포인트 조회 중 오류:', err));
 
             const today = getKSTDateString();
-            // 💡 로그인 화면에서 이 기기(키오스크 패드)가 고정 등록된 좌석을 미리 읽어 저장해뒀다면
-            // 그 번호를 그대로 넘겨서 좌석 검색 없이 고정시킨다. 없으면(일반 브라우저 접속 등)
-            // 기존처럼 undefined로 넘어가 아래 presence 기반 좌석배정이 그대로 동작한다.
             const kioskSeat = localStorage.getItem('logica_kiosk_seat') || undefined;
             const session = await resolveTodaySession(supabaseClient, sid, today, kioskSeat);
 
             clinicSessionRef.current = session;
             setClinicSession(session);
             setManualSeat(session.manual_seat || null);
-            // 새로고침으로 클라이언트 쿨다운이 초기화돼도, 서버에 남아있는 실제 쿨다운 시각으로 복원한다.
             if (session.call_cooldown_until && new Date(session.call_cooldown_until).getTime() > Date.now()) {
                 callCooldown.startUntil(new Date(session.call_cooldown_until).getTime());
             }
@@ -139,9 +132,6 @@ export default function StudentPortal() {
         initData();
     }, [router]);
 
-    // 💡 클리닉(clinic/viewer)에서 숙제/시험을 풀고 포탈로 돌아와도 fetchBlockStates가 최초
-    // 마운트 시 한 번만 실행돼서, 방금 끝낸 항목이 여전히 "미응시"로 보이는 문제가 있었다 —
-    // 탭이 다시 보이거나 포커스를 받을 때마다 최신 상태로 다시 불러온다.
     useEffect(() => {
         if (!studentInfo.id) return;
         const refresh = () => {
@@ -214,11 +204,6 @@ export default function StudentPortal() {
         return () => { cancelled = true; if (timer) clearTimeout(timer); };
     }, [studentInfo.id, isMounted, manualSeat]);
 
-    // 💡 clinic/viewer는 15초마다 last_seen_at을 갱신해서 수퍼바이저의 45초 하트비트 타임아웃을
-    // 피하는데, 포탈은 이 갱신이 전혀 없었다 — 그래서 학생이 라운드를 끝내고 포탈로 돌아와 다음
-    // 활동을 고르는 지극히 정상적인 시간 동안 last_seen_at이 멈춰있다가 45초 뒤 "비정상종료"로
-    // 오판정되어 세션이 강제종료되고 좌석이 빈 자리로 풀렸다. clinic/viewer와 동일한 패턴(매
-    // tick마다 ref에서 sid를 새로 읽고, 언마운트 시 확실히 정리)으로 포탈에도 추가한다.
     useEffect(() => {
         if (!studentInfo.id) return;
         let cancelled = false;
@@ -237,8 +222,12 @@ export default function StudentPortal() {
         const newBlockStates: any = {};
         const newHwProgress: any = {};
         classes.forEach(c => {
-            newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA' };
-            newHwProgress[c] = { examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [] };
+            newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA', overdue: 'NO_DATA' };
+            newHwProgress[c] = { 
+                examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], 
+                examTitle: '', hwTitle: '', printTitle: '', overdueTitle: '',
+                examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0
+            };
         });
 
         const { data: cData } = await supabaseClient.from('class')
@@ -247,9 +236,6 @@ export default function StudentPortal() {
         const nameToId: any = {};
         cData?.forEach((c: any) => { nameToId[c.name] = c.class_id; });
 
-        // 💡 [11번] ClassEditModal을 아무도 열지 않아도(=관리자가 안 봐도), 학생이 포탈에 들어올
-        // 때마다 지나간 회차만큼 자동으로 홀/짝을 갱신한다 — resolveClassWeekType은 idempotent라
-        // 여러 화면에서 동시에 호출해도 안전하다.
         const newClassWeekTypes: Record<string, string> = {};
         await Promise.all((cData || []).map(async (c: any) => {
             const scheduleDays = (c.class_schedule || []).map((s: any) => s.day_of_week);
@@ -265,24 +251,49 @@ export default function StudentPortal() {
         setClassWeekTypes(newClassWeekTypes);
 
         const { data: examsData } = await supabaseClient.from('exam_assignment')
-            .select('assignment_id, status, class_id, exam_master!inner(exam_type)')
+            .select('assignment_id, status, class_id, exam_master!inner(exam_type, title, total_questions)')
             .eq('student_id', sid);
 
         const classIds = Object.values(nameToId).filter(Boolean);
         let hwsData: any[] = [];
         if (classIds.length > 0) {
             const { data } = await supabaseClient.from('homework_assignment')
-                .select('homework_id, class_id, target_student_id, due_date')
+                .select('homework_id, class_id, target_student_id, due_date, homework_title, target_questions')
                 .in('class_id', classIds as string[])
                 .neq('homework_title', '[시스템] 수업 진도 완료 기록');
             hwsData = data || [];
         }
 
+        // 🌟 수정: completed_tq_ids를 함께 불러와 이미 푼 문제를 정확하게 차감할 수 있도록 합니다.
         const { data: hwResData } = await supabaseClient.from('student_homework_result')
-            .select('homework_id, status')
+            .select('homework_id, status, completed_tq_ids')
             .eq('student_id', sid);
         const hwResMap = new Map();
-        hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r.status));
+        hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r));
+
+        let incorrectQCount = 0;
+        const { data: incorrectRecords } = await supabaseClient.from('student_incorrect_record')
+            .select('record_id, tq_id, question_id')
+            .eq('student_id', sid).eq('source_type', '과제오답').is('resolved_at', null);
+
+        if (incorrectRecords && incorrectRecords.length > 0) {
+            const qIds = [...new Set(incorrectRecords.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
+            const tqIds = [...new Set(incorrectRecords.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))];
+
+            const [{ data: qDbRows }, { data: tqRows }] = await Promise.all([
+                qIds.length > 0 ? supabaseClient.from('question_db').select('question_id').in('question_id', qIds) : Promise.resolve({ data: [] }),
+                tqIds.length > 0 ? supabaseClient.from('textbook_question').select('tq_id').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
+            ]);
+
+            const validQIds = new Set((qDbRows || []).map((q:any) => q.question_id));
+            const validTqIds = new Set((tqRows || []).map((tq:any) => tq.tq_id));
+
+            incorrectQCount = incorrectRecords.filter((r:any) => {
+                if (r.question_id && validQIds.has(r.question_id)) return true;
+                if (r.tq_id && validTqIds.has(r.tq_id)) return true;
+                return false;
+            }).length;
+        }
 
         classes.forEach(c => {
             const cid = nameToId[c];
@@ -290,32 +301,72 @@ export default function StudentPortal() {
 
             let examPending = 0, hwPending = 0, printPending = 0, overduePending = 0;
             let examIds: number[] = [], hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [];
+            
+            let eTitles: string[] = [], hTitles: string[] = [], pTitles: string[] = [], oTitles: string[] = [];
+            let eCount = 0, hCount = 0, pCount = 0, oCount = 0;
+
+            const isEvenWeek = newClassWeekTypes[c] === 'even';
+
+            if (isEvenWeek) {
+                if (incorrectQCount > 0) {
+                    examPending = 1; 
+                    eCount = incorrectQCount;
+                    eTitles.push('과제 오답 유사');
+                }
+            }
 
             examsData?.forEach((ex: any) => {
                 if (ex.class_id && ex.class_id !== cid) return;
                 const type = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.exam_type : ex.exam_master?.exam_type;
+                const title = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.title : ex.exam_master?.title;
+                const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 const isPending = !['제출완료', '채점완료', '완료'].includes(ex.status);
 
                 if (type === '오답프린트') {
-                    if (isPending) { printPending++; printIds.push(ex.assignment_id); }
+                    if (isPending) { 
+                        printPending++; printIds.push(ex.assignment_id); 
+                        pTitles.push(title); pCount += (tq || 0); 
+                    }
                 } else if (type === '과제' || type === '과제프린트') {
-                    if (isPending) { hwPending++; hwExamIds.push(ex.assignment_id); }
-                } else {
-                    if (isPending) { examPending++; examIds.push(ex.assignment_id); }
+                    if (isPending) { 
+                        hwPending++; hwExamIds.push(ex.assignment_id); 
+                        hTitles.push(title); hCount += (tq || 0); 
+                    }
+                } else if (!isEvenWeek) { 
+                    if (isPending) { 
+                        examPending++; examIds.push(ex.assignment_id); 
+                        eTitles.push(title); eCount += (tq || 0); 
+                    }
                 }
             });
 
             hwsData?.forEach((hw: any) => {
                 if (hw.class_id !== cid) return;
                 if (hw.target_student_id && hw.target_student_id !== sid) return;
-                const status = hwResMap.get(hw.homework_id) || '미제출';
+                
+                const resObj = hwResMap.get(hw.homework_id);
+                const status = resObj?.status || '미제출';
                 const isPending = !['제출완료', '채점완료', '완료'].includes(status);
                 if (!isPending) return;
-                // 💡 지난 회차(수업일)를 넘긴 채 남은 과제는 classRound.ts의 migrateIncompleteForClassRound가
-                // due_date를 그 회차 날짜로 당겨둔다 — 그래서 due_date가 오늘 이하로 내려와 있으면
-                // "다음 수업이 이미 찾아온" 미완료 과제로 분류해 별도 박스로 옮긴다.
-                if (hw.due_date && hw.due_date <= today) { overduePending++; overdueHwIds.push(hw.homework_id); }
-                else { hwPending++; hwIds.push(hw.homework_id); }
+                
+                let tqLen = 0;
+                try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
+
+                // 🌟 실제 남은 문제 수 계산 로직
+                let compLen = 0;
+                if (resObj && resObj.completed_tq_ids) {
+                    try { compLen = typeof resObj.completed_tq_ids === 'string' ? JSON.parse(resObj.completed_tq_ids).length : (resObj.completed_tq_ids.length || 0); } catch(e){}
+                }
+                const remain = Math.max(0, tqLen - compLen);
+                if (remain === 0) return; // 이미 다 풀었으면 제외
+
+                if (hw.due_date && hw.due_date <= today) { 
+                    overduePending++; overdueHwIds.push(hw.homework_id); 
+                    oTitles.push(hw.homework_title); oCount += remain; 
+                } else { 
+                    hwPending++; hwIds.push(hw.homework_id); 
+                    hTitles.push(hw.homework_title); hCount += remain; 
+                }
             });
 
             newBlockStates[c].exam = examPending > 0 ? '미응시' : '제출완료';
@@ -327,7 +378,19 @@ export default function StudentPortal() {
             if (roundResults[`${c}::2`]) newBlockStates[c].hw = '제출완료';
             if (roundResults[`${c}::3`]) newBlockStates[c].print = '제출완료';
 
-            newHwProgress[c] = { examIds, hwExamIds, printIds, hwIds, overdueHwIds };
+            // 배열 내 중복 제거 후 "외 N건" 텍스트 만들기
+            const getShortTitle = (titles: string[]) => {
+                const unique = [...new Set(titles)].filter(Boolean);
+                if (unique.length === 0) return '';
+                if (unique.length === 1) return unique[0];
+                return `${unique[0]} 외 ${unique.length - 1}건`;
+            };
+
+            newHwProgress[c] = { 
+                examIds, hwExamIds, printIds, hwIds, overdueHwIds,
+                examTitle: getShortTitle(eTitles), hwTitle: getShortTitle(hTitles), printTitle: getShortTitle(pTitles), overdueTitle: getShortTitle(oTitles),
+                examQCount: eCount, hwQCount: hCount, printQCount: pCount, overdueQCount: oCount
+            };
         });
 
         setBlockStates(newBlockStates);
@@ -342,10 +405,6 @@ export default function StudentPortal() {
                 await supabaseClient.removeChannel(channelRef.current);
                 channelRef.current = null;
             }
-            // 🌟 [핵심 보안 패치 유지] 다른 화면들(수퍼바이저/조교 패드/클리닉 뷰어)과 동일하게
-            // 소속 지점(tenant_id)의 클리닉 방으로 격리해서 연결한다 — 안 그러면 이 화면에서 보내는
-            // 호출/자리비움 등 브로드캐스트가 tenant가 붙은 방을 듣는 수퍼바이저/조교 패드에 전혀
-            // 도달하지 않고, 반대로 그쪽에서 보내는 처리완료 신호도 이 화면에 도달하지 않는다.
             const myTenantId = localStorage.getItem('logica_tenant_id') || 'hq';
             const channel = supabaseClient.channel(`${CLINIC_ROOM}_${myTenantId}`);
             channelRef.current = channel;
@@ -442,8 +501,6 @@ export default function StudentPortal() {
                 else if (payload.action === 'force_return_to_seat') setIsPortalAway(false);
                 else if (payload.action === 'force_cancel_call') setIsPortalCalling(false);
                 else if (payload.action === 'relocated_away') {
-                    // 💡 수퍼바이저가 이 학생을 다른 패드로 이동시켰다 — 오늘 이용시간(세션)은 유지한 채
-                    // 이 화면(예전 패드)만 로그아웃 상태로 되돌린다. 새 패드에서 자동으로 세션을 이어받는다.
                     if (channelRef.current) channelRef.current.untrack();
                     localStorage.removeItem('logica_student_id');
                     localStorage.removeItem('logica_student_name');
@@ -451,13 +508,6 @@ export default function StudentPortal() {
                     router.push('/student/login');
                 }
                 else if (payload.action === 'resolve_recheck') {
-                    // 💡 clinic/viewer는 재확인 결과를 받으면 화면에 토스트를 띄우는데, 포탈은 이 액션
-                    // 자체를 안 듣고 있어서 좌석 이동 등으로 뷰어가 아니라 포탈에 있을 때 재확인 결과를
-                    // 놓쳤다 — 알림만이라도 뜨게 한다. 정답 확정 시 포인트/오답기록 반영은 뷰어에서만
-                    // 하는(questions 데이터가 있어야 하는) 로직이라 여기서는 재현하지 않는다 — 그래서
-                    // 재확인 대기 중인 학생은 애초에 이동을 막아서(handlePointerDown 가드) 이 경로를
-                    // 정상 흐름에서는 안 타게 만들어뒀다. 이건 그 가드를 우회하는 예외 상황을 위한
-                    // 최후 방어선이다.
                     setRecheckToast(payload.verdict === 'correct' ? '🎉 조교가 정답으로 확인했어요! (자세한 내용은 클리닉에서 확인해주세요)' : '조교 확인 결과 오답이 맞습니다.');
                     setTimeout(() => setRecheckToast(""), 4000);
                 }
@@ -573,36 +623,37 @@ export default function StudentPortal() {
         const isDone = cState[typeKey] === '제출완료' || cState[typeKey] === '채점완료';
         const prog = hwProgress[className] || {};
 
-        let pendingCount = 0;
-        if (typeKey === 'exam') pendingCount = prog.examIds?.length || 0;
-        else if (typeKey === 'hw') pendingCount = (prog.hwIds?.length || 0) + (prog.hwExamIds?.length || 0);
-        else if (typeKey === 'print') pendingCount = prog.printIds?.length || 0;
+        let qCount = 0;
+        let titleName = '';
+        if (typeKey === 'exam') { qCount = prog.examQCount; titleName = prog.examTitle; }
+        else if (typeKey === 'hw') { qCount = prog.hwQCount; titleName = prog.hwTitle; }
+        else if (typeKey === 'print') { qCount = prog.printQCount; titleName = prog.printTitle; }
 
         const scoreData = roundResults[`${className}::${round}`];
         const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
 
-        // 💡 라운드1(exam)은 반의 홀/짝 회차에 따라 실제로 완전히 다른 내용(주간테스트 ↔
-        // 과제오답유사)을 내보내는데(fetchWeeklyTest), 예전엔 두 경우 모두 같은 파란 "📝 시험" 박스로
-        // 보여서 학생이 오늘 뭘 풀게 될지 미리 구분할 수 없었다. 홀/짝별로 색/이름을 나눈다.
         const isEvenWeek = classWeekTypes[className] === 'even';
         let theme;
-        if (typeKey === 'exam' && isEvenWeek) theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-cyan-700 to-cyan-600', badge: 'bg-cyan-400 text-cyan-900', btnText: 'text-cyan-900', textColor: 'text-cyan-100' };
-        else if (typeKey === 'exam') theme = { label: '📝 주간테스트', desc: '이번 주 주간테스트를 응시합니다.', bg: 'bg-gradient-to-br from-[#002864] to-blue-800', badge: 'bg-blue-500 text-white', btnText: 'text-[#002864]', textColor: 'text-blue-200' };
-        else if (typeKey === 'hw') theme = { label: '📚 과제', desc: '미제출 과제 문항을 학습합니다.', bg: 'bg-gradient-to-br from-amber-600 to-amber-500', badge: 'bg-amber-400 text-amber-900', btnText: 'text-amber-900', textColor: 'text-amber-100' };
-        else theme = { label: '🖨️ 오답', desc: '틀린 문제들만 모아 다시 풉니다.', bg: 'bg-gradient-to-br from-emerald-700 to-emerald-600', badge: 'bg-emerald-400 text-emerald-900', btnText: 'text-emerald-900', textColor: 'text-emerald-100' };
+        if (typeKey === 'exam' && isEvenWeek) theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-cyan-700 to-cyan-600', badge: 'bg-cyan-400 text-cyan-900', btnText: 'text-cyan-900', textColor: 'text-cyan-100', accent: 'text-cyan-200' };
+        else if (typeKey === 'exam') theme = { label: '📝 주간테스트', desc: '이번 주 주간테스트를 응시합니다.', bg: 'bg-gradient-to-br from-[#002864] to-blue-800', badge: 'bg-blue-500 text-white', btnText: 'text-[#002864]', textColor: 'text-blue-200', accent: 'text-blue-300' };
+        else if (typeKey === 'hw') theme = { label: '📚 과제', desc: '미제출 과제 문항을 학습합니다.', bg: 'bg-gradient-to-br from-amber-600 to-amber-500', badge: 'bg-amber-400 text-amber-900', btnText: 'text-amber-900', textColor: 'text-amber-100', accent: 'text-amber-200' };
+        else theme = { label: '🖨️ 오답', desc: '틀린 문제들만 모아 다시 풉니다.', bg: 'bg-gradient-to-br from-emerald-700 to-emerald-600', badge: 'bg-emerald-400 text-emerald-900', btnText: 'text-emerald-900', textColor: 'text-emerald-100', accent: 'text-emerald-200' };
 
         return (
             <div key={`${className}-${typeKey}`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[240px] md:min-h-[260px] justify-between`}>
                 {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-[12px] font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ {scoreLabel}</span>}
                 <div>
-                    <div className="flex justify-between items-start mb-5 relative z-10">
+                    {/* 🌟 수정사항 반영: 간격 조절 및 남은 문제 수 출력 */}
+                    <div className="flex justify-between items-start mb-3 relative z-10">
                         <span className={`text-[12px] font-black ${theme.badge} px-2.5 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
-                        {!isDone && pendingCount > 0 && <span className={`text-sm font-bold ${theme.textColor}`}>남은 항목: {pendingCount}건</span>}
+                        {!isDone && qCount > 0 && <span className={`text-sm font-bold ${theme.textColor} bg-black/10 px-2 py-0.5 rounded-md`}>남은 문제: {qCount}</span>}
                     </div>
-                    <h3 className="text-2xl font-black mb-2 relative z-10">{theme.label.replace(/[^가-힣 ]/g, '').trim()} 클리닉</h3>
-                    <p className={`text-base ${theme.textColor} font-medium relative z-10`}>{theme.desc}</p>
+                    {/* 🌟 수정사항 반영: 문제지 제목 텍스트 크기 최적화 및 배치 */}
+                    <h3 className="text-xl md:text-2xl font-black mb-1 relative z-10 leading-tight">{theme.label.replace(/[^가-힣 ]/g, '').trim()} 클리닉</h3>
+                    {!isDone && titleName && <p className={`text-[12px] md:text-[13px] font-bold ${theme.accent} mb-1.5 relative z-10 truncate`} title={titleName}>{titleName}</p>}
+                    <p className={`text-sm md:text-base ${theme.textColor} font-medium relative z-10 mt-1 line-clamp-2 leading-snug`}>{theme.desc}</p>
                 </div>
-                <div className="flex items-center justify-end relative z-10">
+                <div className="flex items-center justify-end relative z-10 mt-2">
                     {isDone ? 
                         <button disabled className={`bg-white/70 ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>완료됨</button> 
                     : 
@@ -613,14 +664,12 @@ export default function StudentPortal() {
         );
     };
 
-    // 💡 예전엔 이 자리가 하드코딩된 "예정된 시험" D-Day 목업이었다. 실제로는 다음 수업 회차가
-    // 지날 때까지 못 끝낸 과제(classRound.ts의 migrateIncompleteForClassRound가 due_date를
-    // 그 회차 날짜로 당겨 표시해 둔 것)를 보여줘야 해서, hwProgress의 overdueHwIds를 그대로 쓴다.
     const renderOverdueCard = (className: string) => {
         const cState = blockStates[className] || {};
         const isDone = cState.overdue !== '미응시';
         const prog = hwProgress[className] || {};
-        const overdueCount = prog.overdueHwIds?.length || 0;
+        const qCount = prog.overdueQCount || 0;
+        const titleName = prog.overdueTitle || '';
 
         const theme = {
             label: '⏰ 미완료 과제',
@@ -628,21 +677,23 @@ export default function StudentPortal() {
             bg: 'bg-gradient-to-br from-violet-700 to-violet-600',
             badge: 'bg-violet-400 text-violet-900',
             btnText: 'text-violet-900',
-            textColor: 'text-violet-100'
+            textColor: 'text-violet-100',
+            accent: 'text-violet-300'
         };
 
         return (
             <div key={`${className}-overdue`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[240px] md:min-h-[260px] justify-between`}>
                 {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-[12px] font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
                 <div>
-                    <div className="flex justify-between items-start mb-5 relative z-10">
+                    <div className="flex justify-between items-start mb-3 relative z-10">
                         <span className={`text-[12px] font-black ${theme.badge} px-2.5 py-1.5 rounded-lg shadow-sm flex items-center`}>{theme.label}</span>
-                        {!isDone && overdueCount > 0 && <span className={`text-sm font-bold ${theme.textColor}`}>남은 항목: {overdueCount}건</span>}
+                        {!isDone && qCount > 0 && <span className={`text-sm font-bold ${theme.textColor} bg-black/10 px-2 py-0.5 rounded-md`}>남은 문제: {qCount}</span>}
                     </div>
-                    <h3 className="text-2xl font-black mb-2 relative z-10">미완료 과제 클리닉</h3>
-                    <p className={`text-base ${theme.textColor} font-medium relative z-10`}>{theme.desc}</p>
+                    <h3 className="text-xl md:text-2xl font-black mb-1 relative z-10 leading-tight">미완료 과제 클리닉</h3>
+                    {!isDone && titleName && <p className={`text-[12px] md:text-[13px] font-bold ${theme.accent} mb-1.5 relative z-10 truncate`} title={titleName}>{titleName}</p>}
+                    <p className={`text-sm md:text-base ${theme.textColor} font-medium relative z-10 mt-1 line-clamp-2 leading-snug`}>{theme.desc}</p>
                 </div>
-                <div className="flex items-center justify-end relative z-10">
+                <div className="flex items-center justify-end relative z-10 mt-2">
                     {isDone ?
                         <button disabled className={`bg-white/70 ${theme.btnText} font-black px-6 py-3 text-base rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
                     :
@@ -687,7 +738,6 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
-            {/* 💡 상단 패딩 축소 (py-4 -> py-3) */}
             <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
                 <div className="flex items-center gap-8">
                     <div className="flex items-center">
@@ -747,11 +797,9 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
-            {/* 💡 메인 영역 상하 패딩 축소 (py-8 -> py-4 ~ py-5) */}
             <main className="max-w-[1200px] w-full mx-auto py-5 px-6 md:py-6 md:px-8 flex-1">
                 {studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
                     <section className="mb-4">
-                        {/* 💡 헤더 영역 여백 축소 (mb-8 -> mb-5) */}
                         <div className="flex items-center gap-4 mb-5">
                             <h2 className="text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
@@ -760,7 +808,6 @@ export default function StudentPortal() {
                                 </button>
                             ))}
                         </div>
-                        {/* 💡 카드 그리드 간격 축소 (gap-8 -> gap-6) */}
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}

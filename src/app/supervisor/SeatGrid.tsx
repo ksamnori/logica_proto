@@ -21,7 +21,6 @@ export default function SeatGrid({ data }: { data: any }) {
     const ch = canvasHeight || DEFAULT_CANVAS_H;
     const CARD_W = seatWidth || DEFAULT_SEAT_CARD_W;
     const CARD_H = seatHeight || DEFAULT_SEAT_CARD_H;
-    // 좌석끼리 딱 붙어 겹쳐 보이지 않도록, 실제 카드는 격자 칸보다 살짝 작게 그려서 사이에 여백을 둔다.
     const GAP = 10;
     const RENDER_W = Math.max(20, CARD_W - GAP);
     const RENDER_H = Math.max(20, CARD_H - GAP);
@@ -53,10 +52,6 @@ export default function SeatGrid({ data }: { data: any }) {
         setReservationTime(`${String(resHour).padStart(2, '0')}:${String(Math.min(59, Math.max(0, num))).padStart(2, '0')}`);
     };
 
-    // 💡 round=1(주간테스트) 제출완료 화면에서 건 재확인 요청(deferredWrite)은 학생이 이미 홈으로
-    // 나갔을 수 있어, 학생 클라이언트가 브로드캐스트를 받아야만 오답노트를 갱신하는 기존 방식(다른
-    // 라운드의 실시간 재확인)에 기댈 수 없다. 여기서 조교 쪽이 직접 DB를 갱신해 학생 접속 여부와
-    // 무관하게 반영되도록 한다. 실시간(라이브) 재확인은 원래대로 학생 클라이언트가 처리하므로 건드리지 않는다.
     const resolveRecheckAsCorrect = async () => {
         const seat = recheckModal.seat!;
         const uid = recheckModal.uid!;
@@ -99,18 +94,7 @@ export default function SeatGrid({ data }: { data: any }) {
                 renderSeat={(seatObj, scale) => {
                     const seat = String(seatObj.number);
                     const student = activeStudents[seat];
-                    // 💡 data-seat는 실제 화면에 보이는 크기(RENDER_W*scale)와 정확히 같은 크기의
-                    // 바깥 껍데기에만 둔다. 카드 내용물은 그 안에서 transform:scale로 축소/확대되는데,
-                    // transform은 레이아웃 크기에는 영향을 안 주기 때문에, data-seat를 (스케일 적용
-                    // 전) 원래 크기 요소에 두면 elementsFromPoint가 화면에는 안 보이는 훨씬 넓은
-                    // 영역까지 "이 좌석"으로 잘못 인식해서, 드래그 중 뜨는 보라색 하이라이트 박스가
-                    // 실제 카드보다 훨씬 크고 엉뚱한 위치에 그려지는 버그가 있었다.
                     const outerStyle = { width: RENDER_W * scale, height: RENDER_H * scale } as const;
-                    // 💡 hover:shadow-md 등 CSS transition이 걸린 요소에 transform:scale까지 같이
-                    // 있으면, 호버할 때 브라우저가 텍스트를 다시 래스터화하면서 글씨 크기가 잠깐
-                    // 깨져 보이는 경우가 있다. willChange/backfaceVisibility로 이 요소를 별도 레이어에
-                    // 고정해서 재래스터화를 막는다(아래 className도 transition-all 대신 색상/그림자만
-                    // 트랜지션하도록 좁혀서 transform 자체는 절대 애니메이션 대상이 되지 않게 한다).
                     const innerStyle = { width: RENDER_W, height: RENDER_H, transform: `scale(${scale})`, transformOrigin: 'top left', willChange: 'transform', backfaceVisibility: 'hidden' } as const;
                     if (!student) {
                         return (
@@ -207,7 +191,18 @@ export default function SeatGrid({ data }: { data: any }) {
                             <button onClick={() => setRecheckModal({ isOpen: false, seat: null, uid: null })} className="text-white/80 hover:text-white">✕</button>
                         </div>
                         <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                            <img className="w-full rounded-lg border border-slate-200" src={activeStudents[recheckModal.seat!]?.rechecks?.[recheckModal.uid!]?.imageDataUrl || ''} alt="답안" />
+                            {/* 🌟 텅 빈 이미지 src 에러를 막는 조건부 렌더링 적용 */}
+                            {activeStudents[recheckModal.seat!]?.rechecks?.[recheckModal.uid!]?.imageDataUrl ? (
+                                <img 
+                                    className="w-full rounded-lg border border-slate-200" 
+                                    src={activeStudents[recheckModal.seat!]?.rechecks?.[recheckModal.uid!]?.imageDataUrl} 
+                                    alt="답안" 
+                                />
+                            ) : (
+                                <div className="text-center text-sm font-bold text-slate-400 py-8 bg-slate-50 rounded-lg border border-slate-200">
+                                    키패드로 입력된 정답입니다. (이미지 없음)
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-2 p-4 border-t border-slate-100">
                             <button onClick={() => { const sid = activeStudents[recheckModal.seat!]?.sessionId; if (sid && recheckModal.uid) clearActiveRecheck(supabaseClient, sid, recheckModal.uid); sendToStudent(recheckModal.seat!, 'resolve_recheck', { uid: recheckModal.uid, verdict: 'incorrect' }); removeLogsByTypeAndSeat('recheck', recheckModal.seat!, Number(recheckModal.uid)); setRecheckModal({ isOpen: false, seat: null, uid: null }); }} className="flex-1 bg-rose-50 text-rose-600 font-bold py-3 rounded-xl">❌ 오답</button>

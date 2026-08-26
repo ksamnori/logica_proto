@@ -25,6 +25,50 @@ const getTaxParts = (taxId: string | null | undefined) => {
   return taxId.split('-');
 };
 
+const formatQNum = (qNum: string | number, subNum?: string | number) => {
+  let numStr = String(qNum || "");
+  if (subNum !== undefined && subNum !== null && String(subNum).trim() !== "") {
+    numStr = `${numStr}-${subNum}`;
+  }
+  return numStr.replace(/-0$/, '');
+};
+
+// 🌟 추가됨: 사람의 시각과 동일하게 숫자를 분리해서 비교하는 자연 정렬(Natural Sort) 알고리즘
+const parseNatural = (str: string) => {
+  return String(str || "")
+    .match(/(\d+)|(\D+)/g)
+    ?.map(part => {
+      const num = parseInt(part, 10);
+      return isNaN(num) ? part : num;
+    }) || [];
+};
+
+const compareNatural = (strA: string, strB: string) => {
+  const partsA = parseNatural(strA);
+  const partsB = parseNatural(strB);
+  
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const partA = partsA[i];
+    const partB = partsB[i];
+    
+    // 길이가 다를 때 짧은 쪽이 먼저 옴 (예: 21 이 21-1 보다 먼저)
+    if (partA === undefined) return -1;
+    if (partB === undefined) return 1;
+    
+    if (typeof partA === 'number' && typeof partB === 'number') {
+      if (partA !== partB) return partA - partB; // 숫자 비교
+    } else if (typeof partA === 'string' && typeof partB === 'string') {
+      const cmp = String(partA).localeCompare(String(partB));
+      if (cmp !== 0) return cmp; // 문자 비교
+    } else {
+      // 숫자와 문자가 섞였을 때는 무조건 숫자가 먼저 오게 처리
+      return typeof partA === 'number' ? -1 : 1;
+    }
+  }
+  return 0;
+};
+
 export default function VisualMapperPage() {
   const router = useRouter();
 
@@ -143,11 +187,24 @@ export default function VisualMapperPage() {
     setIsLoading(true);
     try {
       const { data: mainData } = await supabase.from("textbook_question")
-        .select("*").eq("book_id", mainId)
-        .order("page_number", { ascending: true }).order("tq_id", { ascending: true });
+        .select("*").eq("book_id", mainId);
+      
+      const sortedMainData = (mainData || []).sort((a, b) => {
+        // 1. 페이지 우선 비교
+        const pageA = parseInt(String(a.page_number));
+        const pA = isNaN(pageA) ? 99999 : pageA;
+        const pageB = parseInt(String(b.page_number));
+        const pB = isNaN(pageB) ? 99999 : pageB;
+        if (pA !== pB) return pA - pB;
+
+        // 2. 🌟 자연 정렬 비교 (화면에 보이는 포맷을 기준으로)
+        const dispA = formatQNum(a.question_number, a.sub_num);
+        const dispB = formatQNum(b.question_number, b.sub_num);
+        return compareNatural(dispA, dispB);
+      });
       
       const initialMap: Record<string, string[]> = {};
-      mainData?.forEach(mq => {
+      sortedMainData.forEach(mq => {
         if (mq.similar_tq_ids) {
           try {
             let parsed = typeof mq.similar_tq_ids === 'string' ? JSON.parse(mq.similar_tq_ids) : mq.similar_tq_ids;
@@ -158,7 +215,7 @@ export default function VisualMapperPage() {
         }
       });
       setMappings(initialMap);
-      setMainQuestions(mainData || []);
+      setMainQuestions(sortedMainData);
       setSelectedMainIds([]); setSelectedWbIds([]);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
@@ -169,17 +226,22 @@ export default function VisualMapperPage() {
       const { data: wbData } = await supabase.from("question_db").select("*").eq("source_book_name", source);
 
       const sortedWbData = (wbData || []).sort((a, b) => {
-        const pageA = parseInt(String(a.final_printed_page)) || a.detected_page_num || 99999;
-        const pageB = parseInt(String(b.final_printed_page)) || b.detected_page_num || 99999;
+        // 1. 페이지 우선 비교 (인쇄된 페이지 > 감지된 페이지)
+        const parsePage = (p1: any, p2: any) => {
+          const v1 = parseInt(String(p1));
+          if (!isNaN(v1) && v1 > 0) return v1;
+          const v2 = parseInt(String(p2));
+          if (!isNaN(v2) && v2 > 0) return v2;
+          return 99999;
+        };
+        const pageA = parsePage(a.final_printed_page, a.detected_page_num);
+        const pageB = parsePage(b.final_printed_page, b.detected_page_num);
         if (pageA !== pageB) return pageA - pageB;
         
-        const qNumA = parseInt(String(a.question_number).replace(/[^0-9]/g, '')) || 99999;
-        const qNumB = parseInt(String(b.question_number).replace(/[^0-9]/g, '')) || 99999;
-        if (qNumA !== qNumB) return qNumA - qNumB;
-        
-        const subA = a.sub_num || 0;
-        const subB = b.sub_num || 0;
-        return subA - subB;
+        // 2. 🌟 자연 정렬 비교 (화면에 보이는 포맷을 기준으로)
+        const dispA = formatQNum(a.question_number, a.sub_num);
+        const dispB = formatQNum(b.question_number, b.sub_num);
+        return compareNatural(dispA, dispB);
       });
       setter(sortedWbData);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
@@ -267,11 +329,10 @@ export default function VisualMapperPage() {
     });
   };
 
-  // 🌟 3단 전체(본교재+꼬리1+꼬리2)를 동시에 스크롤 타겟팅하는 마스터 함수
   const handleFocusFamily = (tqIdStr: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     
-    setSelectedMainIds([tqIdStr]); // 단일 포커싱으로 강제 전환
+    setSelectedMainIds([tqIdStr]);
     const similarWbIds = mappings[tqIdStr] || [];
     setSelectedWbIds(similarWbIds);
     
@@ -279,11 +340,9 @@ export default function VisualMapperPage() {
     const mainQuestionId = mainQ ? String(mainQ.question_id).trim() : null;
 
     setTimeout(() => {
-      // 1. 본교재 스크롤
       const mainEl = document.getElementById(`main-q-${tqIdStr}`);
       if (mainEl) mainEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
-      // 2 & 3. 꼬리 1, 2 스크롤
       if (mainQuestionId) {
         const targetWb1 = wbQuestions1.find(wq => 
           similarWbIds.includes(wq.question_id) || 
@@ -322,7 +381,47 @@ export default function VisualMapperPage() {
     setSelectedWbIds(prev => prev.includes(uuid) ? prev.filter(id => id !== uuid) : [...prev, uuid]);
   };
 
-  // 🔗 1. 일반 수평 연결 (유사/과제용) - 다중 병합(Union) 지원
+  const handleToggleSelectAllMain = () => {
+    if (mainQuestions.length === 0) return;
+    const allMainIds = mainQuestions.map(q => q.tq_id.toString());
+    const isAllSelected = allMainIds.every(id => selectedMainIds.includes(id));
+    
+    if (isAllSelected) {
+      setSelectedMainIds(prev => prev.filter(id => !allMainIds.includes(id)));
+      setSelectedWbIds([]);
+    } else {
+      setSelectedMainIds(Array.from(new Set([...selectedMainIds, ...allMainIds])));
+    }
+  };
+
+  const handleToggleSelectAllWb1 = () => {
+    if (wbQuestions1.length === 0) return;
+    if (selectedMainIds.length === 0) return alert("💡 묶어줄 '본교재 문항'을 먼저 한 개 이상 클릭해주세요!");
+    
+    const allWb1Ids = wbQuestions1.map(q => q.question_id);
+    const isAllSelected = allWb1Ids.every(id => selectedWbIds.includes(id));
+
+    if (isAllSelected) {
+      setSelectedWbIds(prev => prev.filter(id => !allWb1Ids.includes(id)));
+    } else {
+      setSelectedWbIds(prev => Array.from(new Set([...prev, ...allWb1Ids])));
+    }
+  };
+
+  const handleToggleSelectAllWb2 = () => {
+    if (wbQuestions2.length === 0) return;
+    if (selectedMainIds.length === 0) return alert("💡 묶어줄 '본교재 문항'을 먼저 한 개 이상 클릭해주세요!");
+    
+    const allWb2Ids = wbQuestions2.map(q => q.question_id);
+    const isAllSelected = allWb2Ids.every(id => selectedWbIds.includes(id));
+
+    if (isAllSelected) {
+      setSelectedWbIds(prev => prev.filter(id => !allWb2Ids.includes(id)));
+    } else {
+      setSelectedWbIds(prev => Array.from(new Set([...prev, ...allWb2Ids])));
+    }
+  };
+
   const handleLink = () => {
     if (selectedMainIds.length === 0) return;
     
@@ -345,17 +444,16 @@ export default function VisualMapperPage() {
     }
   };
 
-  // 👯 2. 수직 쌍둥이 묶기 (강제 종속)
   const handleTwinLink = async () => {
     if (selectedMainIds.length === 0 || selectedWbIds.length === 0) return;
     
     if (selectedMainIds.length > 1) {
-      return alert("⚠️ 쌍둥이(수직 편입) 처리는 오직 '1개의 본교재 문항'을 기준으로만 가능합니다.\n본교재를 1개만 체크한 상태에서 진행해주세요.");
+      return alert("⚠️ 1:N 쌍둥이 처리는 오직 '1개의 본교재 문항'을 기준으로만 가능합니다.\n본교재를 1개만 체크한 상태에서 진행해주세요.");
     }
 
     const mainIdToLink = selectedMainIds[0];
 
-    if (!confirm(`선택한 ${selectedWbIds.length}개의 문항을 본교재 문항의 '쌍둥이(자식)'로 영구 편입하시겠습니까?\n\n⚠️ 주의: 이 작업은 즉시 마스터 DB에 반영되며, 이후 분류 편집기에서 쌍둥이 트리 구조로 묶이게 됩니다.`)) return;
+    if (!confirm(`선택한 ${selectedWbIds.length}개의 문항을 본교재 문항의 '쌍둥이(자식)'로 영구 편입하시겠습니까?\n\n⚠️ 주의: 이 작업은 즉시 마스터 DB에 반영됩니다.`)) return;
 
     setIsLoading(true);
     try {
@@ -388,6 +486,62 @@ export default function VisualMapperPage() {
 
     } catch (e: any) {
       alert("쌍둥이 묶기 실패: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleMultiTwinLink = async () => {
+    if (selectedMainIds.length === 0 || selectedWbIds.length === 0) return;
+
+    if (selectedMainIds.length !== selectedWbIds.length) {
+      return alert(`좌측 본교재 ${selectedMainIds.length}개, 우측 부교재 ${selectedWbIds.length}개가 선택되었습니다.\n1:1 매칭을 위해서는 좌우 선택 개수가 동일해야 합니다.`);
+    }
+
+    if (!confirm(`선택하신 ${selectedMainIds.length}쌍의 문항을 클릭한 순서대로 각각 1:1 쌍둥이로 영구 편입하시겠습니까?`)) return;
+
+    setIsLoading(true);
+    try {
+      const updatePromises = selectedMainIds.map((tqIdStr, index) => {
+        const wbId = selectedWbIds[index];
+        const mainQ = mainQuestions.find(q => q.tq_id.toString() === tqIdStr);
+
+        if (!mainQ) throw new Error("본교재 문항 데이터를 찾을 수 없습니다.");
+
+        return supabase.from('question_db')
+          .update({
+            parent_question_id: mainQ.question_id,
+            derivation_type: 'TWIN'
+          })
+          .eq('question_id', wbId);
+      });
+
+      const results = await Promise.all(updatePromises);
+      const errors = results.filter(r => r.error).map(r => r.error);
+      
+      if (errors.length > 0) {
+        console.error("Errors:", errors);
+        throw new Error("일부 항목 저장 중 오류가 발생했습니다.");
+      }
+
+      setMappings(prev => {
+        const newMap = { ...prev };
+        for (const key in newMap) {
+          newMap[key] = newMap[key].filter(id => !selectedWbIds.includes(id));
+        }
+        return newMap;
+      });
+
+      alert("✅ 1:1 다중 쌍둥이 편입이 완료되었습니다!");
+      
+      if (selectedWbSource1) fetchWbQuestions(selectedWbSource1, setWbQuestions1);
+      if (selectedWbSource2) fetchWbQuestions(selectedWbSource2, setWbQuestions2);
+
+      setSelectedMainIds([]);
+      setSelectedWbIds([]);
+
+    } catch (e: any) {
+      alert("1:1 쌍둥이 묶기 실패: " + e.message);
     } finally {
       setIsLoading(false);
     }
@@ -454,6 +608,10 @@ export default function VisualMapperPage() {
 
   const filteredWorkbooks1 = workbooks.filter(book => (book || "").toLowerCase().includes(wbFilterText1.toLowerCase()));
   const filteredWorkbooks2 = workbooks.filter(book => (book || "").toLowerCase().includes(wbFilterText2.toLowerCase()));
+
+  const isMainAllSelected = mainQuestions.length > 0 && mainQuestions.every(q => selectedMainIds.includes(q.tq_id.toString()));
+  const isWb1AllSelected = wbQuestions1.length > 0 && wbQuestions1.every(q => selectedWbIds.includes(q.question_id));
+  const isWb2AllSelected = wbQuestions2.length > 0 && wbQuestions2.every(q => selectedWbIds.includes(q.question_id));
 
   if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">권한 확인 중...</div>;
   if (isAuthorized === false) return null;
@@ -528,7 +686,12 @@ export default function VisualMapperPage() {
         <div className="flex-[1.2] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-indigo-100/80 border-b border-indigo-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-indigo-900 text-sm">📘 허브: 본교재 문항</h2>
-            <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-1 rounded-md">다중 선택 가능</span>
+            <button 
+              onClick={handleToggleSelectAllMain} 
+              className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${isMainAllSelected ? 'bg-indigo-500 text-white border-indigo-500 hover:bg-indigo-600' : 'text-indigo-600 bg-indigo-50 border-indigo-200 hover:bg-indigo-100'}`}
+            >
+              {isMainAllSelected ? '전체해제' : '전체선택'}
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll bg-slate-50/50">
             {!selectedMainBookId ? <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm">본교재를 선택해주세요.</div>
@@ -558,10 +721,9 @@ export default function VisualMapperPage() {
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-2 flex-wrap">
                           <span className="text-[12px] font-black text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">{q.page_number}p</span>
-                          <span className="text-sm font-black text-indigo-900 ml-1">{q.question_number}</span>
+                          <span className="text-sm font-black text-indigo-900 ml-1">{formatQNum(q.question_number, q.sub_num)}</span>
                           {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm hidden 2xl:inline-block">Depth {taxDepth}</span>}
                           
-                          {/* 🌟 뱃지를 클릭 가능한 버튼으로 변경하여 타겟팅 연동 */}
                           {hasTwins && (
                             <button 
                               onClick={(e) => handleFocusFamily(qIdStr, e)}
@@ -574,7 +736,6 @@ export default function VisualMapperPage() {
                         </div>
                         {hasMapping && (
                           <div className="flex items-center gap-2 z-10 relative">
-                            {/* 🌟 수평 연결 뱃지도 클릭 가능한 버튼으로 변경 */}
                             <button 
                               onClick={(e) => handleFocusFamily(qIdStr, e)}
                               className="text-[10px] font-extrabold text-white bg-blue-500 px-2 py-0.5 rounded-full shadow-sm hover:bg-blue-600 transition-colors flex items-center gap-1"
@@ -617,6 +778,16 @@ export default function VisualMapperPage() {
             </div>
           </div>
 
+          <div className="bg-white p-2 rounded-2xl shadow-md border border-amber-200 flex flex-col gap-2 relative w-full">
+            <button onClick={handleMultiTwinLink} disabled={selectedMainIds.length === 0 || selectedMainIds.length !== selectedWbIds.length} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainIds.length > 0 && selectedMainIds.length === selectedWbIds.length ? 'bg-gradient-to-br from-amber-500 to-orange-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
+              <span className="text-lg mb-0.5">🧬</span>
+              <span className="text-[10px] font-black">1:1 쌍둥이</span>
+            </button>
+            <div className="text-center mt-0.5 mb-1">
+              <div className="text-[9px] font-black text-amber-600 leading-tight">다중 선택<br/>순서 매칭</div>
+            </div>
+          </div>
+
           <div className="text-center mt-2">
             <span className="text-[10px] font-bold text-slate-400">꼬리 선택됨</span>
             <div className="text-sm font-black text-slate-700">{selectedWbIds.length}개</div>
@@ -628,6 +799,12 @@ export default function VisualMapperPage() {
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-emerald-100/80 border-b border-emerald-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-emerald-900 text-sm truncate">📗 꼬리 1</h2>
+            <button 
+              onClick={handleToggleSelectAllWb1} 
+              className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${isWb1AllSelected ? 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
+            >
+              {isWb1AllSelected ? '전체해제' : '전체선택'}
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll bg-slate-50/50">
             {!selectedWbSource1 ? <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm text-center">선택 대기중</div>
@@ -657,7 +834,7 @@ export default function VisualMapperPage() {
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[12px] font-black text-white bg-emerald-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
-                          <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>{q.question_number}-{q.sub_num}</span>
+                          <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>{formatQNum(q.question_number, q.sub_num)}</span>
                         </div>
                         
                         <div className="flex items-center gap-1">
@@ -699,6 +876,12 @@ export default function VisualMapperPage() {
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-violet-100/80 border-b border-violet-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-violet-900 text-sm truncate">📙 꼬리 2</h2>
+            <button 
+              onClick={handleToggleSelectAllWb2} 
+              className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${isWb2AllSelected ? 'bg-violet-500 text-white border-violet-500 hover:bg-violet-600' : 'text-violet-600 bg-violet-50 border-violet-200 hover:bg-violet-100'}`}
+            >
+              {isWb2AllSelected ? '전체해제' : '전체선택'}
+            </button>
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll bg-slate-50/50">
             {!selectedWbSource2 ? <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm text-center">선택 대기중</div>
@@ -728,7 +911,7 @@ export default function VisualMapperPage() {
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
                           <span className="text-[12px] font-black text-white bg-violet-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
-                          <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{q.question_number}-{q.sub_num}</span>
+                          <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{formatQNum(q.question_number, q.sub_num)}</span>
                         </div>
                         
                         <div className="flex items-center gap-1">

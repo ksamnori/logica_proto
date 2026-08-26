@@ -298,6 +298,8 @@ export default function ExamViewerPage() {
         setColumns(initialCol); setSplits(initialSplit); setTitleMode(initialTitleMode); setTemplate(initialTmpl);
         setColorNum(cNum); setColorTitle(cTit); setColorLine(cLin); setExamDate(eDate);
 
+        // 🌟 수정: 뷰어에 바로 진입했을 때, 이전에 분배되었더라도 강제 수정 안내창 띄우지 않음. 
+        // 그냥 hasUnsavedChanges는 무조건 false로 잡음
         hasUnsavedChangesRef.current = false; 
 
         examStateRef.current = { groups, examTitle: title, displayBadge: badge };

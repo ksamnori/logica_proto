@@ -39,6 +39,84 @@ export const getCleanUrl = (url: string) => {
   return validUrl;
 };
 
+export const CIRCLED_DIGITS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+
+export const isObjectiveQuestion = (q: any) => {
+  if (!q) return false;
+  if (q.options && q.options.length > 0) return true;
+  const ans = String(q.answer ?? '').trim().replace(/\$/g, '').trim();
+  return CIRCLED_DIGITS.includes(ans);
+};
+
+export const matchLeadingKeypadToken = (s: string): { token: string; value: number } | null => {
+  let m = s.match(/^(-?\d+)\\d?frac\s*\{\s*(-?\d+)\s*\}\s*\{\s*(-?\d+)\s*\}/);
+  if (m) {
+    const whole = parseFloat(m[1]), num = parseFloat(m[2]), den = parseFloat(m[3]);
+    return den ? { token: m[0], value: whole + (whole < 0 ? -1 : 1) * (num / den) } : null;
+  }
+  m = s.match(/^\\d?frac\s*\{\s*(-?\d+)\s*\}\s*\{\s*(-?\d+)\s*\}/);
+  if (m) {
+    const num = parseFloat(m[1]), den = parseFloat(m[2]);
+    return den ? { token: m[0], value: num / den } : null;
+  }
+  m = s.match(/^(-?\d+)\s+(\d+)\/(\d+)/);
+  if (m) {
+    const whole = parseFloat(m[1]), num = parseFloat(m[2]), den = parseFloat(m[3]);
+    return den ? { token: m[0], value: whole + (whole < 0 ? -1 : 1) * (num / den) } : null;
+  }
+  const numPart = String.raw`-?\d{1,3}(?:,\d{3})+(?:\.\d+)?|-?\d+(?:\.\d+)?`;
+  m = s.match(new RegExp(`^(?:${numPart})(?:\\/(?:${numPart}))?`));
+  if (!m) return null;
+  const tok = m[0].replace(/,/g, '');
+  const value = tok.includes('/') ? parseFloat(tok.split('/')[0]) / parseFloat(tok.split('/')[1]) : parseFloat(tok);
+  return { token: m[0], value };
+};
+
+export const parseKeypadNumber = (raw: string | null | undefined): number | null => {
+  const s = String(raw ?? '').trim().replace(/\$/g, '').trim();
+  return matchLeadingKeypadToken(s)?.value ?? null;
+};
+
+export const splitAnswerParts = (s: string) => s.split(/,(?!\d)/).map(p => p.trim());
+
+export const isKeypadEnterable = (correctAns: string | null | undefined): boolean => {
+  const b = String(correctAns ?? '').trim();
+  if (!b) return false;
+  return splitAnswerParts(b).every(part => {
+    const s = part.replace(/\$/g, '').trim();
+    const m = matchLeadingKeypadToken(s);
+    if (!m) return false;
+    return !/\d/.test(s.slice(m.token.length));
+  });
+};
+
+export const keypadAnswersMatch = (myAns: string | null, correctAns: string) => {
+  if (!myAns) return false;
+  const a = String(myAns).trim(); const b = String(correctAns).trim();
+  if (a === b) return true;
+
+  const aParts = splitAnswerParts(a);
+  const bParts = splitAnswerParts(b);
+  if (aParts.length !== bParts.length) {
+    const v1 = parseKeypadNumber(a); const v2 = parseKeypadNumber(b);
+    return v1 !== null && v2 !== null && v1 === v2;
+  }
+  return aParts.every((part, i) => {
+    const v1 = parseKeypadNumber(part); const v2 = parseKeypadNumber(bParts[i]);
+    return v1 !== null && v2 !== null && v1 === v2;
+  });
+};
+
+export const mcAnswersMatch = (myAns: string | null, correctAns: string) => {
+  if (!myAns) return false;
+  const b = String(correctAns ?? '').trim().replace(/\$/g, '').trim();
+  if (myAns === b) return true;
+  const circledIdx = CIRCLED_DIGITS.indexOf(b);
+  if (circledIdx !== -1) return myAns === String(circledIdx + 1);
+  const n = parseInt(b, 10);
+  return !Number.isNaN(n) && myAns === String(n);
+};
+
 export const hintStorageKey = (sId: string, q: any) => `logica_hint_${sId}_${q.question_id ?? 'q'}_${q.tq_id ?? 'tq'}`;
 
 export const hydrateHintState = (sId: string, mapped: any[]): Record<number, any> => {
@@ -59,21 +137,22 @@ export const saveHintState = (sId: string, q: any, hq: any) => {
 };
 
 export const NO_HINT_BOOK_TYPES = ['주교재', '부교재'];
+
 export const textbookHintFields = (bookType: string | null | undefined) => {
   if (bookType && NO_HINT_BOOK_TYPES.includes(bookType)) {
-    return { hasHint: false, needsAiHint: false, hints: ['교재 문제라 힌트가 없습니다.', '교재 문제라 힌트가 없습니다.'] };
+    return { hasHint: false, needsAiHint: false, hintText: '교재 문제라 힌트가 없습니다.' };
   }
-  return { hasHint: true, needsAiHint: true, hints: ['', ''] };
+  return { hasHint: true, needsAiHint: true, hintText: null };
 };
 
-export const keypadAnswersMatch = (myAns: string | null, correctAns: string) => {
-  if (!myAns) return false;
-  const a = String(myAns).trim(); const b = String(correctAns).trim();
-  if (a === b) return true;
-  const m1 = a.match(/^-?\d+(?:\.\d+)?(?:\/-?\d+(?:\.\d+)?)?/);
-  const m2 = b.match(/^-?\d+(?:\.\d+)?(?:\/-?\d+(?:\.\d+)?)?/);
-  if (!m1 || !m2) return false;
-  const p1 = m1[0].includes('/') ? parseFloat(m1[0].split('/')[0])/parseFloat(m1[0].split('/')[1]) : parseFloat(m1[0]);
-  const p2 = m2[0].includes('/') ? parseFloat(m2[0].split('/')[0])/parseFloat(m2[0].split('/')[1]) : parseFloat(m2[0]);
-  return p1 === p2;
+// 🌟 DB에 저장된 빈칸(" ", "null" 텍스트 등)을 완벽하게 걸러내어, 실제 데이터가 있을 때만 HTML로 병합합니다.
+export const combineDbHints = (step1: any, step2: any) => {
+  const s1 = String(step1 || '').trim();
+  const s2 = String(step2 || '').trim();
+  
+  if ((!s1 || s1 === 'null' || s1 === 'undefined') && (!s2 || s2 === 'null' || s2 === 'undefined')) {
+    return null;
+  }
+  
+  return `<b>[개념]</b><br/>${s1 && s1 !== 'null' && s1 !== 'undefined' ? s1 : '생략됨'}<br/><br/><b>[접근법]</b><br/>${s2 && s2 !== 'null' && s2 !== 'undefined' ? s2 : '생략됨'}`;
 };

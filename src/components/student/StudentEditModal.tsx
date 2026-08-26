@@ -19,6 +19,9 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+// 🌟 필터링을 위한 레벨 배열 정의
+const LEVEL_FILTERS = ["전체", "Ultimate", "Master", "Apex", "Titan", "Horizon", "특강", "메이크업/보강"];
+
 export default function StudentEditModal({ 
   isOpen, 
   studentId, 
@@ -36,15 +39,19 @@ export default function StudentEditModal({
     school: "", 
     grade: "", 
     phone: "",
-    passwordHash: "", // 💡 비밀번호 상태 추가
+    passwordHash: "",
     parentId: "", 
     parentName: "", 
     parentRel: "", 
     parentPhone: "", 
     newClassId: ""
   });
+  
   const [isSaving, setIsSaving] = useState(false);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  
+  // 🌟 레벨 필터 상태 추가
+  const [levelFilter, setLevelFilter] = useState("전체");
 
   useEffect(() => {
     const role = localStorage.getItem("logica_instructor_role") || "";
@@ -63,14 +70,14 @@ export default function StudentEditModal({
         school: student.school || "", 
         grade: student.grade || "", 
         phone: student.phone || "",
-        passwordHash: student.password_hash || "", // 💡 기존 DB 비밀번호 불러오기
+        passwordHash: student.password_hash || "", 
         parentId: student.parent_id || parentObj?.parent_id || "", 
         parentName: parentObj?.name || "", 
         parentRel: parentObj?.relationship || "", 
-        // 더미 번호인 경우 화면에는 빈칸으로 보여줍니다.
         parentPhone: parentObj?.phone?.includes('unassigned') ? "" : (parentObj?.phone || ""), 
         newClassId: ""
       });
+      setLevelFilter("전체"); // 모달 열릴 때 필터 초기화
     }
   }, [isOpen, student]);
 
@@ -82,7 +89,6 @@ export default function StudentEditModal({
   };
 
   const submitEditStudent = async () => {
-    // 💡 비밀번호 자릿수 검증 (값이 비어있지 않은데 4자리가 아닌 경우 차단)
     if (editForm.passwordHash && editForm.passwordHash.length !== 4) {
       alert("비밀번호(PIN)는 숫자 4자리로 설정해주세요.");
       return;
@@ -95,13 +101,10 @@ export default function StudentEditModal({
       const inputName = editForm.parentName.trim();
       const inputRel = editForm.parentRel.trim();
 
-      // 🌟 [핵심 변경] 연락처 입력 여부와 관계없이 완벽하게 동작하는 우회/연결 로직
       if (!inputPhone && !inputName && !inputRel) {
-        // 학부모 정보가 아예 비워져 있다면 연결 해제
         finalParentId = null;
       } else {
         if (inputPhone) {
-          // 1. 번호가 입력된 경우: 기존 학부모 스캔 및 연결
           const { data: existingParent } = await supabase
             .from("parent")
             .select("parent_id")
@@ -131,16 +134,13 @@ export default function StudentEditModal({
             finalParentId = newParent.parent_id;
           }
         } else {
-          // 2. 번호가 비워져 있는 경우 (하지만 이름/관계는 입력됨)
           if (finalParentId) {
-            // 기존 학부모 업데이트: 번호 갱신은 생략하여 NOT NULL 위반 방지
             const { error: pUpdateErr } = await supabase
               .from("parent")
               .update({ name: inputName, relationship: inputRel })
               .eq("parent_id", finalParentId);
             if (pUpdateErr) throw pUpdateErr;
           } else {
-            // 신규 생성인데 번호가 없는 경우: DB 에러를 막기 위한 임시 더미 번호 강제 주입
             const dummyPhone = `unassigned_${Date.now()}`;
             const { data: newParent, error: pInsertErr } = await supabase
               .from("parent")
@@ -153,7 +153,6 @@ export default function StudentEditModal({
         }
       }
 
-      // 💡 학생 정보 완벽 업데이트 (+ password_hash 추가)
       const studentUpdates = { 
         name: editForm.name, 
         gender: editForm.gender || null, 
@@ -161,7 +160,7 @@ export default function StudentEditModal({
         school: editForm.school, 
         grade: editForm.grade, 
         phone: editForm.phone,
-        password_hash: editForm.passwordHash || null, // 입력란을 비우면 DB에서도 null로 처리
+        password_hash: editForm.passwordHash || null, 
         parent_id: finalParentId
       };
 
@@ -177,7 +176,6 @@ export default function StudentEditModal({
       onClose();
     } catch (e: any) { 
       console.error("업데이트 에러 세부정보:", e);
-      // 에러 메시지 텍스트 강제 추출 안전장치
       const errMsg = e.message || e.details || JSON.stringify(e) || "알 수 없는 에러";
       
       if (errMsg.includes("unique constraint") || e.code === "23505") {
@@ -264,6 +262,32 @@ export default function StudentEditModal({
       setIsSaving(false);
     }
   };
+
+  // 🌟 [핵심 변경] SS, WS(특강) / MU, LE(보강) 학원 명명 규칙 반영 필터 로직
+  const filteredClasses = allClasses.filter(c => {
+    if (levelFilter === "전체") return true;
+    
+    const upperName = c.name?.toUpperCase() || '';
+    const targetStr = `${c.level_name || ''} ${c.name || ''}`.toUpperCase();
+    
+    if (levelFilter === "Ultimate") return targetStr.includes("ULTIMATE") || targetStr.includes("U반") || c.level_name?.toUpperCase() === "U" || upperName.endsWith(" U");
+    if (levelFilter === "Master") return targetStr.includes("MASTER") || targetStr.includes("M반") || c.level_name?.toUpperCase() === "M" || upperName.endsWith(" M");
+    if (levelFilter === "Apex") return targetStr.includes("APEX") || targetStr.includes("A반") || c.level_name?.toUpperCase() === "A" || upperName.endsWith(" A");
+    if (levelFilter === "Titan") return targetStr.includes("TITAN") || targetStr.includes("T반") || c.level_name?.toUpperCase() === "T" || upperName.endsWith(" T");
+    if (levelFilter === "Horizon") return targetStr.includes("HORIZON") || targetStr.includes("H반") || c.level_name?.toUpperCase() === "H" || upperName.endsWith(" H");
+    
+    // 특강: 반 이름이 SS나 WS로 시작하거나 레벨명/이름에 '특강'이 들어간 경우
+    if (levelFilter === "특강") {
+      return upperName.startsWith("SS") || upperName.startsWith("WS") || targetStr.includes("특강");
+    }
+    
+    // 메이크업/보강: 반 이름이 MU나 LE로 시작하거나 레벨명/이름에 '메이크업', '보강'이 들어간 경우
+    if (levelFilter === "메이크업/보강") {
+      return upperName.startsWith("MU") || upperName.startsWith("LE") || targetStr.includes("메이크업") || targetStr.includes("보강");
+    }
+    
+    return targetStr.includes(levelFilter.toUpperCase());
+  });
 
   if (!isOpen) return null;
 
@@ -368,7 +392,6 @@ export default function StudentEditModal({
                 />
               </div>
 
-              {/* 💡 신규 추가된 비밀번호(PIN) 입력 필드 (학교와 학생 연락처 바로 아래 줄에 위치) */}
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
                   비밀번호 (PIN 4자리)
@@ -384,7 +407,6 @@ export default function StudentEditModal({
                   placeholder="미설정 (0000 등으로 자동 로그인됨)"
                   value={editForm.passwordHash} 
                   onChange={e => {
-                    // 숫자만 입력 가능하도록 정규식 처리
                     const onlyNums = e.target.value.replace(/[^0-9]/g, '');
                     setEditForm({...editForm, passwordHash: onlyNums});
                   }} 
@@ -404,6 +426,7 @@ export default function StudentEditModal({
                       <li key={e.enrollment_id} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
                         <span className="text-sm font-bold text-[#002864]">{e.class?.name || '미배정'}</span>
                         <button 
+                          type="button"
                           onClick={() => removeEnrollment(e.enrollment_id)} 
                           className="px-2.5 py-1 bg-rose-50 text-rose-500 rounded hover:bg-rose-100 transition-colors text-xs font-bold border border-rose-100"
                         >
@@ -413,21 +436,45 @@ export default function StudentEditModal({
                     ))
                   )}
                 </ul>
+                
                 <label className="block text-xs font-bold text-slate-600 mb-2 border-t border-blue-200 pt-3">새 수강반 배정 추가</label>
+                
+                {/* 🌟 반 레벨 필터링 칩 영역 */}
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {LEVEL_FILTERS.map(lvl => (
+                    <button
+                      key={lvl}
+                      type="button"
+                      onClick={() => { 
+                        setLevelFilter(lvl); 
+                        setEditForm({...editForm, newClassId: ""}); // 필터 변경 시 선택 초기화
+                      }}
+                      className={`px-2.5 py-1 text-[11px] font-bold rounded border transition-colors ${
+                        levelFilter === lvl 
+                          ? 'bg-[#002864] text-white border-[#002864]' 
+                          : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {lvl}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="flex gap-2">
                   <select 
                     value={editForm.newClassId} 
                     onChange={e => setEditForm({...editForm, newClassId: e.target.value})} 
                     className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864]"
                   >
-                    <option value="">선택 안함</option>
-                    {allClasses.map(c => (
+                    <option value="">{filteredClasses.length === 0 ? "해당 레벨의 반이 없습니다" : "반 선택"}</option>
+                    {filteredClasses.map(c => (
                       <option key={c.class_id} value={c.class_id.toString()}>
                         {c.name} ({c.level_name})
                       </option>
                     ))}
                   </select>
                   <button 
+                    type="button"
                     onClick={addEnrollment} 
                     className="shrink-0 px-4 py-2 bg-[#002864] text-white font-bold rounded-lg text-xs hover:bg-blue-900 transition-colors"
                   >

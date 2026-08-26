@@ -336,14 +336,17 @@ export default function StudentTimeline({
       } else if (modalTab === 'SELECTED') {
           let tempQIds: string[] = [];
           for (const block of selectedBlocks) {
+            // 시험 및 오답프린트 계열
             if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_')) {
-              const assignId = block.split('_').pop();
+              const assignId = block.split('_').reverse()[1]; // 아이디가 exam_{assignId}_{studentId} 형태
               const { data: ans } = await supabaseClient.from('student_answer')
                 .select('question_id')
                 .eq('exam_assignment_id', assignId)
                 .in('grading_code', ['X', 'TX', '☆', 'B']);
               ans?.forEach(a => { if (a.question_id) tempQIds.push(a.question_id); });
-            } else if (block.startsWith('hw_')) {
+            } 
+            // 일반 교재 과제 계열
+            else if (block.startsWith('hw_')) {
               const hwId = block.split('_')[1];
               const { data: hwAns } = await supabaseClient.from('student_homework_answer')
                 .select('tq_id, question_id')
@@ -393,10 +396,10 @@ export default function StudentTimeline({
   const handleEditAndCreate = async () => {
     if (matchedCache.length === 0) return alert("추출 조건에 부합하는 문제가 없습니다. 세팅을 확인해주세요.");
 
-    let subTitle = '맞춤 오답';
-    if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
-    else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
-    else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
+    let subTitle = '맞춤 오답 복습';
+    if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형 복습';
+    else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답 복습';
+    else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답 복습';
 
     sessionStorage.clear();
     
@@ -424,14 +427,14 @@ export default function StudentTimeline({
 
     try {
       const instId = localStorage.getItem('logica_instructor_id');
-      if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다. 다시 로그인 해주세요.");
+      if (!instId) throw new Error("로그인 정보를 찾을 수 기 없습니다. 다시 로그인 해주세요.");
 
       const examTitle = `[맞춤 오답 클리닉] ${currentView?.studentName} 학생`;
 
-      let subTitle = '맞춤 오답';
-      if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형';
-      else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답';
-      else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답';
+      let subTitle = '맞춤 오답 복습';
+      if (modalTab === 'TAXONOMY') subTitle = '단원별 취약 유형 복습';
+      else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답 복습';
+      else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답 복습';
 
       const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
         title: examTitle,
@@ -530,19 +533,19 @@ export default function StudentTimeline({
           </div>
 
           <div className="flex items-center gap-2 pr-1">
-            <span className="text-[12px] font-bold text-slate-500 mr-1 flex items-center gap-1">🖨️ 오답 프린트 생성 <span className="text-slate-300 ml-1">|</span></span>
+            <span className="text-[12px] font-bold text-slate-500 mr-1 flex items-center gap-1">🖨️ 맞춤 오답 프린트 생성기 <span className="text-slate-300 ml-1">|</span></span>
             
             {selectedBlocks.length > 0 && (
               <button 
                 onClick={() => openModal('SELECTED')} 
                 className="px-3 py-1.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[12px] transition-all shadow-sm"
               >
-                학습지별 오답
+                학습지별 오답 추출
               </button>
             )}
             
-            <button onClick={() => openModal('TAXONOMY')} className="px-3 py-1.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] transition-all shadow-sm">유형별 오답</button>
-            <button onClick={() => openModal('PERIOD')} className="px-3 py-1.5 rounded bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 font-bold text-[12px] transition-all shadow-sm">기간별 오답</button>
+            <button onClick={() => openModal('TAXONOMY')} className="px-3 py-1.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] transition-all shadow-sm">유형별 약점 추출</button>
+            <button onClick={() => openModal('PERIOD')} className="px-3 py-1.5 rounded bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 font-bold text-[12px] transition-all shadow-sm">기간별 오답 추출</button>
           </div>
         </div>
       </div>
@@ -606,6 +609,7 @@ export default function StudentTimeline({
 
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
             <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+              <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs border border-blue-200">생성 마법사</span>
               {currentView?.studentName} 학생 맞춤 클리닉 출제
             </h2>
             <button onClick={() => setModalTab(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -665,13 +669,13 @@ export default function StudentTimeline({
                 {modalTab === 'SELECTED' && (
                   <div>
                     <div className="flex justify-between items-center mb-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200">
-                      <span className="text-xs font-bold text-slate-600">타임라인에서 선택된 학습지 <span className="text-rose-500">{selectedBlocks.length}개</span></span>
+                      <span className="text-xs font-bold text-slate-600">타임라인에서 선택된 학습지 <span className="text-rose-500 font-black">{selectedBlocks.length}개</span>의 오답을 추출합니다.</span>
                     </div>
-                    <ul className="border border-slate-200 rounded-lg overflow-hidden">
+                    <ul className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
                       {filteredTimeline.filter(item => selectedBlocks.includes(item.id)).map(item => (
-                        <li key={item.id} className="px-4 py-3 border-b last:border-0 border-slate-100 flex items-center justify-between hover:bg-slate-50">
+                        <li key={item.id} className="px-4 py-3 border-b last:border-0 border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors">
                           <span className="font-bold text-sm text-slate-700 truncate w-3/4">{(item.title || '').replace(/^\[시스템\]\s*/, '')}</span>
-                          <span className="text-xs font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100 shadow-sm">오답 {item.xCount}개</span>
+                          <span className="text-xs font-black text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100 shadow-sm">미해결 오답 {item.xCount}개</span>
                         </li>
                       ))}
                     </ul>
@@ -735,7 +739,7 @@ export default function StudentTimeline({
                   <span className="font-extrabold text-slate-800 text-base">최종 출제 문항 수</span>
                   <div className="flex items-end mt-1 h-12">
                     {isCalculating ? (
-                      <span className="font-black text-2xl text-sky-500 tracking-tighter animate-pulse mb-1">계산 중...</span>
+                      <span className="font-black text-2xl text-sky-500 tracking-tighter animate-pulse mb-1">매칭 중...</span>
                     ) : (
                       <>
                         <span className="font-black text-4xl text-[#002864] tracking-tighter">{matchedCache.length}</span>
@@ -747,7 +751,7 @@ export default function StudentTimeline({
 
                 <div className="flex gap-2 w-full mt-4">
                   <button onClick={handleEditAndCreate} disabled={matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-white border border-slate-300 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-slate-600 disabled:opacity-50">편집 후 만들기</button>
-                  <button onClick={handleCreatePrint} disabled={isEngineRunning || matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-extrabold text-white disabled:opacity-50">바로 만들기</button>
+                  <button onClick={handleCreatePrint} disabled={isEngineRunning || matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-extrabold text-white disabled:opacity-50">바로 배부하기</button>
                 </div>
               </div>
             </div>
@@ -790,15 +794,6 @@ export default function StudentTimeline({
                 : isCompleted
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80'
                   : 'bg-white border-slate-200 hover:border-[#002864]';
-
-              let detailHref = '';
-              if (item.type === 'hw_exam' || item.type === 'print') {
-                detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
-              } else if (item.type === 'hw') {
-                detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
-              } else {
-                detailHref = `/exam/review?assignment_id=${item.realId}`;
-              }
 
               // 🌟 렌더링 시점에만 [시스템] 텍스트 제거
               const displayTitle = (item.title || '제목 없음').replace(/^\[시스템\]\s*/, '');
@@ -845,22 +840,36 @@ export default function StudentTimeline({
 
                     <div className="flex items-center gap-2.5 shrink-0 border-l border-slate-300 pl-4 w-[160px] justify-end">
                       {item.type === 'exam' || item.type === 'print' || item.type === 'hw_exam' ? (
-                        <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, item.title, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
+                        <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
                       ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, item.title, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
+                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
                       
                       <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print') handleDeletePrint(item.realId, item.masterId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
+                      {/* 🌟 프린트 버튼: type과 상관 없이 모두 뷰어를 열도록 수정됨 */}
                       <button 
-                        onClick={(e) => handlePrintItem(e, item.type, item.masterId, item.target_questions, item.title, item.subTitle)} 
+                        onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : 'print'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
                         className="text-[15px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" 
                         title="프린트 출력"
                       >
                         🖨️
                       </button>
 
-                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-3 py-1.5 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
+                      <button onClick={(e) => { 
+                          e.stopPropagation(); 
+                          let detailHref = '';
+                          if (item.type === 'hw_exam' || item.type === 'print') {
+                            detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
+                          } else if (item.type === 'hw') {
+                            detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
+                          } else {
+                            detailHref = `/exam/review?assignment_id=${item.realId}`;
+                          }
+                          window.location.href = detailHref; 
+                        }} 
+                        className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-3 py-1.5 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap"
+                      >상세 ➔</button>
                     </div>
                   </div>
                 </div>

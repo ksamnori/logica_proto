@@ -101,7 +101,8 @@ export default function GlobalList({
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
               // 🌟 렌더링 시점에만 [시스템] 텍스트 제거
-              let titleStr = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음').replace(/^\[시스템\]\s*/, '');
+              let rawTitle = activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음';
+              let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
               let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
               let createdDate = activeTab === 'HOMEWORK' ? (res.sort_date || res.created_at) : res.created_at;
 
@@ -158,7 +159,8 @@ export default function GlobalList({
                       
                       <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : activeTab === 'INCORRECT' ? handleDeletePrint(res.assignment_id, m?.exam_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
-                      <button onClick={(e) => handlePrintItem(e, res.type, res.masterId, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 출력">🖨️</button>
+                      {/* 🌟 기존 handlePrintItem 호출 -> 모든 경우 동일하게 뷰어를 열도록 통일됨 (useLearningActions 내부에서 처리됨) */}
+                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : 'print'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 출력">🖨️</button>
 
                       <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>
