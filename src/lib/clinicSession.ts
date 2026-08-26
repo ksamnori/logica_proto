@@ -6,6 +6,7 @@
 export const DEFAULT_CLINIC_SESSION_DURATION_MS = 60 * 60 * 1000; // 첫 클리닉: 60분
 export const RENEWAL_CLINIC_SESSION_DURATION_MS = 30 * 60 * 1000; // 재이용(2회차 이상): 30분
 export const END_REQUEST_COOLDOWN_MS = 5 * 60 * 1000; // 종료 요청 거부/취소 후 재요청 쿨타임
+export const TOGGLE_COOLDOWN_MS = 10 * 1000; // 호출/자리비움 연타 방지 쿨다운 (useToggleCooldown과 값을 맞춘다)
 
 export function isSessionExpired(session: { started_at: string; duration_ms: number } | null | undefined, now = Date.now()) {
     if (!session) return false;
@@ -23,12 +24,36 @@ async function fetchLatestSession(supabaseClient: any, studentId: string, todayS
     return rows?.[0] || null;
 }
 
+// 💡 세션을 닫는 경로(closeSessionAtLimit=시간초과 자동종료, 하트비트 타임아웃)는 전부 그 순간에
+// 학생/수퍼바이저 화면이 켜져있어야만 동작한다 — 탭이 갑자기 닫히거나 기기 전원이 나가면 아무도
+// 그 세션을 안 닫아준다. resolveTodaySession은 원래 "오늘" 날짜만 조회해서, 지나간 날짜의 미종료
+// 세션은 이후로 다시 들여다볼 방법이 없어 ended_at이 null인 채로 영원히 쌓였다. 학생이 새로 접속할
+// 때(=여기)마다 그 학생의 지나간 날짜 미종료 세션을 자연 만료 시각(started_at+duration_ms)으로
+// 정리해서, 서버 크론 없이도 다음 접속 시점에 자동으로 청소되게 한다.
+async function closeStaleSessions(supabaseClient: any, studentId: string, todayStr: string) {
+    const { data: staleRows } = await supabaseClient
+        .from('clinic_session_state')
+        .select('id, started_at, duration_ms')
+        .eq('student_id', studentId)
+        .is('ended_at', null)
+        .neq('session_date', todayStr);
+    if (!staleRows || staleRows.length === 0) return;
+    await Promise.all(staleRows.map((row: any) => {
+        const endedAt = new Date(new Date(row.started_at).getTime() + row.duration_ms).toISOString();
+        return supabaseClient.from('clinic_session_state').update({ seat: null, manual_seat: null, ended_at: endedAt }).eq('id', row.id);
+    }));
+}
+
 // 오늘 학생의 최신 세션을 가져오거나, 없거나 이미 시간이 다 지났으면 새로 만든다(재이용은 30분).
-export async function resolveTodaySession(supabaseClient: any, studentId: string, todayStr: string) {
+// fixedSeat: 키오스크 패드처럼 좌석이 기기에 고정된 경우, 그 좌석 번호를 그대로 강제한다
+// (빈 좌석을 찾는 경쟁 로직 없이 항상 이 값을 쓴다). 안 넘기면 기존처럼 seat: null로 시작해서
+// 화면 쪽 좌석배정 로직(assignSeatDirectly 등)이 나중에 채운다.
+export async function resolveTodaySession(supabaseClient: any, studentId: string, todayStr: string, fixedSeat?: string | null) {
+    await closeStaleSessions(supabaseClient, studentId, todayStr);
     const latest = await fetchLatestSession(supabaseClient, studentId, todayStr);
 
     if (!latest) {
-        const fresh = { student_id: studentId, session_date: todayStr, session_no: 1, started_at: new Date().toISOString(), duration_ms: DEFAULT_CLINIC_SESSION_DURATION_MS, seat: null, manual_seat: null, ended_at: null };
+        const fresh = { student_id: studentId, session_date: todayStr, session_no: 1, started_at: new Date().toISOString(), duration_ms: DEFAULT_CLINIC_SESSION_DURATION_MS, seat: fixedSeat || null, manual_seat: null, ended_at: null };
         const { data: inserted } = await supabaseClient.from('clinic_session_state').insert(fresh).select().single();
         // 💡 같은 학생 화면이 거의 동시에 두 번 마운트되면(React strict mode의 effect 중복 실행,
         // 새로고침 겹침 등) 둘 다 "오늘 세션 없음"을 보고 동시에 insert를 시도할 수 있다. 이때 진
@@ -42,9 +67,16 @@ export async function resolveTodaySession(supabaseClient: any, studentId: string
     if (latest.ended_at || isSessionExpired(latest)) {
         // 방금 끝난 회차는 좌석을 반납하고 종료 시각을 남겨 기록을 완결시킨다.
         await supabaseClient.from('clinic_session_state').update({ seat: null, ended_at: latest.ended_at || new Date().toISOString() }).eq('id', latest.id);
-        const fresh = { student_id: studentId, session_date: todayStr, session_no: latest.session_no + 1, started_at: new Date().toISOString(), duration_ms: RENEWAL_CLINIC_SESSION_DURATION_MS, seat: null, manual_seat: latest.manual_seat || null, ended_at: null };
+        const fresh = { student_id: studentId, session_date: todayStr, session_no: latest.session_no + 1, started_at: new Date().toISOString(), duration_ms: RENEWAL_CLINIC_SESSION_DURATION_MS, seat: fixedSeat || null, manual_seat: latest.manual_seat || null, ended_at: null };
         const { data: inserted } = await supabaseClient.from('clinic_session_state').insert(fresh).select().single();
         return inserted || await fetchLatestSession(supabaseClient, studentId, todayStr) || fresh;
+    }
+
+    // 이미 진행 중인 세션인데 저장된 좌석이 지금 로그인한 패드의 고정 좌석과 다르면(예: 관리자가
+    // 이 패드를 다른 좌석에 재등록했다) 다음 로그인 시점에 스스로 맞춰준다.
+    if (fixedSeat && latest.seat !== fixedSeat) {
+        await supabaseClient.from('clinic_session_state').update({ seat: fixedSeat }).eq('id', latest.id);
+        return { ...latest, seat: fixedSeat };
     }
 
     return latest;
@@ -146,6 +178,25 @@ export async function clearActiveRecheck(supabaseClient: any, sessionId: string,
     const activeRechecks = { ...(row?.active_rechecks || {}) };
     delete activeRechecks[uid];
     await supabaseClient.from('clinic_session_state').update({ active_rechecks: activeRechecks }).eq('id', sessionId);
+}
+
+// 호출/자리비움은 학생이 직접 누르는 토글이라, 클라이언트 쿨다운(useToggleCooldown)만으로는
+// 새로고침하면 풀려버린다. 그래서 여기서도 쿨다운 시각을 확인/기록한다 — requestEndSession과
+// 동일한 패턴(읽고 아직 안 지났으면 거부, 지났으면 새 쿨다운을 걸고 통과).
+// 💡 조교/수퍼바이저가 clearActiveCall/clearAway를 호출해 처리하는 경로는 이 가드를 거치지 않는다
+// (학생의 연타 방지와 무관한 정상 처리라서 여기서 막으면 안 된다) — 그래서 setActiveCall/clearActiveCall/
+// setAway/clearAway 내부가 아니라, 학생이 직접 누르는 화면(clinic/viewer, student/portal)에서만
+// 이 함수를 먼저 호출하고 통과했을 때만 저 함수들을 부르게 한다.
+export async function checkAndBumpToggleCooldown(supabaseClient: any, sessionId: string, kind: 'call' | 'away'): Promise<{ ok: boolean; cooldownUntil: string }> {
+    const column = kind === 'call' ? 'call_cooldown_until' : 'away_cooldown_until';
+    const { data: row } = await supabaseClient.from('clinic_session_state').select(column).eq('id', sessionId).maybeSingle();
+    const current = row?.[column] as string | null | undefined;
+    if (current && new Date(current).getTime() > Date.now()) {
+        return { ok: false, cooldownUntil: current };
+    }
+    const cooldownUntil = new Date(Date.now() + TOGGLE_COOLDOWN_MS).toISOString();
+    await supabaseClient.from('clinic_session_state').update({ [column]: cooldownUntil }).eq('id', sessionId);
+    return { ok: true, cooldownUntil };
 }
 
 // 자리비움 시작/해제를 DB에도 남긴다.

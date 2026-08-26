@@ -141,7 +141,10 @@ export default function TeacherDashboardPage() {
       .select("*, class_schedule(day_of_week, start_time, end_time)")
       .eq("instructor_id", instId);
 
-    const sortedClasses = (classes || []).sort((a: any, b: any) => {
+    // 🌟 [수정] 종료된 반 필터링 추가
+    const activeClasses = (classes || []).filter((c: any) => c.status !== "종료" && c.status !== "폐강");
+
+    const sortedClasses = activeClasses.sort((a: any, b: any) => {
       const order = ["Ultimate", "Master", "Apex", "Titan", "Horizon", "여름 및 겨울 특강", "메이크업 및 보강"];
       let idxA = order.indexOf(a.level_name); let idxB = order.indexOf(b.level_name);
       if (idxA === -1) idxA = 999; if (idxB === -1) idxB = 999;
@@ -154,8 +157,9 @@ export default function TeacherDashboardPage() {
       setSelectedClassId(sortedClasses[0].class_id);
     }
 
-    const { data: classIds } = await supabase.from("class").select("class_id").eq("instructor_id", instId);
-    const cIds = classIds?.map((c: any) => c.class_id) || [];
+    // 🌟 [수정] CS 요청 등을 불러오기 위한 ID 조회 시에도 종료된 반 필터링 적용
+    const { data: classIds } = await supabase.from("class").select("class_id, status").eq("instructor_id", instId);
+    const cIds = classIds?.filter((c: any) => c.status !== "종료" && c.status !== "폐강").map((c: any) => c.class_id) || [];
     
     if (cIds.length > 0) {
       const { data: enrolls } = await supabase.from("enrollment").select("student_id").in("class_id", cIds);

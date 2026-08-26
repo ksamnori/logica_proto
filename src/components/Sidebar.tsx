@@ -287,6 +287,7 @@ export default function Sidebar() {
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
             <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
+            <MenuItem path="/clinic-pad-registry" label="키오스크 패드 등록" full />
             <MenuItem path="/permission" label="권한 관리" />
             <MenuItem path="/instructor" label="강사 관리" />
             <MenuItem path="/academy-info" label="학원 정보 설정" full />
