@@ -20,9 +20,11 @@ export default function ExamListPage() {
   const [exams, setExams] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // === 필터 상태 ===
+  // === 🌟 4분류 메인 탭 필터 상태 ===
+  const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>('ALL');
+
+  // === 서브 필터 상태 ===
   const [filterGrade, setFilterGrade] = useState("ALL");
-  const [filterType, setFilterType] = useState("ALL");
   const [filterCreator, setFilterCreator] = useState("ALL");
 
   // === 모달 상태 ===
@@ -33,7 +35,7 @@ export default function ExamListPage() {
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [canDeleteExam, setCanDeleteExam] = useState(false);
 
-  // 🌟 [보안 로직 추가] 컴포넌트 마운트 시 즉시 권한부터 검사합니다!
+  // 🌟 컴포넌트 마운트 시 권한 검사
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -47,7 +49,7 @@ export default function ExamListPage() {
 
       if (isGodMode) {
         setIsAuthorized(true);
-        setCanDeleteExam(true); // 최고관리자급은 삭제 무조건 허용
+        setCanDeleteExam(true);
         return;
       }
 
@@ -64,13 +66,11 @@ export default function ExamListPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      // 시험지 관리 메뉴 접근 권한이 없다면 가차없이 쫓아냅니다.
       if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/exam-list"))) {
         alert("⛔ 문제지 보관함에 접근할 권한이 없습니다.");
         router.replace("/home");
       } else {
         setIsAuthorized(true);
-        // 🌟 [핵심] 삭제 권한이 메뉴 리스트(allowed_menus)에 포함되어 있는지 확인
         if (data.allowed_menus.includes('action_delete_exam')) {
           setCanDeleteExam(true);
         }
@@ -80,7 +80,6 @@ export default function ExamListPage() {
     checkAccess();
   }, [router]);
 
-  // 권한이 통과되었을 때만 데이터를 불러옵니다.
   useEffect(() => {
     if (isAuthorized) {
       loadExams();
@@ -99,7 +98,6 @@ export default function ExamListPage() {
     const result = await getExamsAction();
     
     if (result.success) {
-      // 🚨 [보안 강화] 혹시 모를 타 지점 데이터 유출을 막기 위해 내 지점(tenant_id)의 시험지만 렌더링되도록 격리!
       let fetchedExams = result.data || [];
       if (tenantId && tenantId !== 'hq') {
          fetchedExams = fetchedExams.filter((e: any) => !e.tenant_id || e.tenant_id === tenantId);
@@ -112,7 +110,6 @@ export default function ExamListPage() {
   };
 
   const uniqueGrades = useMemo(() => Array.from(new Set(exams.map(e => e.major_grade).filter(Boolean))).sort(), [exams]);
-  const uniqueTypes = useMemo(() => Array.from(new Set(exams.map(e => e.exam_type || '평가'))).sort(), [exams]);
   const uniqueCreators = useMemo(() => {
     return Array.from(new Set(exams.map(e => {
       const instructor = Array.isArray(e.instructor) ? e.instructor[0] : e.instructor;
@@ -120,25 +117,37 @@ export default function ExamListPage() {
     }))).sort();
   }, [exams]);
 
+  // 🌟 4분류 탭과 서브 필터를 동시에 적용하여 데이터 필터링
   const filteredExams = useMemo(() => {
     return exams.filter(exam => {
+      const typeStr = exam.exam_type || '평가';
+      
+      let matchMainTab = true;
+      if (mainTab === 'EXAM') {
+        matchMainTab = !['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(typeStr);
+      } else if (mainTab === 'HOMEWORK') {
+        matchMainTab = ['과제', '과제프린트'].includes(typeStr);
+      } else if (mainTab === 'INCORRECT') {
+        matchMainTab = ['오답프린트', '오답'].includes(typeStr);
+      } else if (mainTab === 'SIMILAR') {
+        matchMainTab = ['오답유사', '과제오답유사'].includes(typeStr);
+      }
+
       const matchGrade = filterGrade === 'ALL' || exam.major_grade === filterGrade;
-      const matchType = filterType === 'ALL' || (exam.exam_type || '평가') === filterType;
       
       const instructor = Array.isArray(exam.instructor) ? exam.instructor[0] : exam.instructor;
       const creatorName = instructor?.name || '시스템 선생님';
-      
       const matchCreator = filterCreator === 'ALL' || creatorName === filterCreator;
-      return matchGrade && matchType && matchCreator;
+      
+      return matchMainTab && matchGrade && matchCreator;
     });
-  }, [exams, filterGrade, filterType, filterCreator]);
+  }, [exams, mainTab, filterGrade, filterCreator]);
 
   const resetFilters = () => {
-    setFilterGrade("ALL"); setFilterType("ALL"); setFilterCreator("ALL");
+    setMainTab("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL");
   };
 
   const deleteExam = async (examId: string, examType: string, assignCount: number) => {
-    // 🌟 [이중 보안] 혹시라도 버튼이 노출되었을 경우를 대비해 함수 내부에서 다시 한번 컷!
     if (!isSuperAdmin && !canDeleteExam) {
       alert("⛔ 출제된 문제지를 삭제할 권한이 없습니다.\n(원장님이 부여한 삭제 권한이 필요합니다.)");
       return;
@@ -146,9 +155,10 @@ export default function ExamListPage() {
 
     if (!confirm("⚠️ 이 문제지를 정말 삭제하시겠습니까?\n(삭제하면 복구할 수 없습니다.)")) return;
     
-    if (examType === '오답프린트') {
+    // 오답 및 오답유사 프린트는 자동 배부되므로 복수 삭제 방지
+    if (['오답프린트', '오답', '오답유사', '과제오답유사'].includes(examType)) {
       if (assignCount >= 2) {
-        alert("🚨 2명 이상의 학생에게 배부된 오답 프린트는 직접 삭제할 수 없습니다!\n(다른 학생의 채점 기록이 함께 증발하는 것을 방지합니다.)\n\n해당 학생의 타임라인에서 개별적으로 배부 취소(삭제)를 진행해 주세요.");
+        alert("🚨 2명 이상의 학생에게 배부된 개인 맞춤 프린트는 직접 삭제할 수 없습니다!\n(다른 학생의 채점 기록이 함께 증발하는 것을 방지합니다.)\n\n해당 학생의 타임라인에서 개별적으로 배부 취소(삭제)를 진행해 주세요.");
         return;
       }
 
@@ -164,11 +174,11 @@ export default function ExamListPage() {
         await supabase.from('exam_item').delete().eq('exam_id', examId);
         await supabase.from('exam_master').delete().eq('exam_id', examId);
 
-        alert("🗑️ 맞춤 오답 프린트가 완전히 파기되었습니다.");
+        alert("🗑️ 맞춤 프린트가 완전히 파기되었습니다.");
         loadExams();
         return; 
       } catch (err: any) {
-        alert("오답 프린트 삭제 중 오류가 발생했습니다: " + err.message);
+        alert("프린트 삭제 중 오류가 발생했습니다: " + err.message);
         return;
       }
     }
@@ -206,35 +216,65 @@ export default function ExamListPage() {
     router.push(`/exam/step2?duplicate_exam_id=${examId}`);
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null; 
   }
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-6 overflow-hidden relative">
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-5 overflow-hidden relative">
       
       <div className="flex justify-between items-end shrink-0">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">📝 생성된 문제지 보관함</h2>
-          <p className="text-sm font-bold text-slate-400 mt-1">출제된 모든 시험지와 학생들의 채점 및 출제 현황을 관리합니다.</p>
+          <h2 className="text-xl font-bold text-slate-800">📝 문제지 보관함</h2>
+          <p className="text-sm font-bold text-slate-400 mt-1">출제된 모든 시험지, 과제, 맞춤형 오답/유사 프린트를 분류별로 조회하고 관리합니다.</p>
         </div>
       </div>
 
-      <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 shrink-0 flex-wrap justify-between">
+      <div className="bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 flex-wrap gap-4">
+        
+        {/* 🌟 4분류 메인 탭 필터 (학생 대시보드와 동일한 UI/UX 구조) */}
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl shadow-inner">
+          <button 
+            onClick={() => setMainTab('ALL')} 
+            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'ALL' ? 'bg-white text-slate-800 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
+          >
+            전체 보기
+          </button>
+          <div className="w-px h-5 bg-slate-300 mx-0.5"></div>
+          <button 
+            onClick={() => setMainTab('EXAM')} 
+            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
+          >
+            💯 정규 시험
+          </button>
+          <button 
+            onClick={() => setMainTab('HOMEWORK')} 
+            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'HOMEWORK' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'}`}
+          >
+            📝 문제지 과제
+          </button>
+          <button 
+            onClick={() => setMainTab('INCORRECT')} 
+            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'INCORRECT' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'}`}
+          >
+            ❌ 오답 복습
+          </button>
+          <button 
+            onClick={() => setMainTab('SIMILAR')} 
+            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-md' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50'}`}
+          >
+            🔄 쌍둥이/유사
+          </button>
+        </div>
+
         <div className="flex items-center gap-3">
-          <span className="font-bold text-slate-600 text-sm mr-2">🔍 검색 필터</span>
           <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
             <option value="ALL">학년 전체</option>
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g as string}</option>)}
-          </select>
-          <select value={filterType} onChange={e => setFilterType(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
-            <option value="ALL">유형 전체</option>
-            {uniqueTypes.map(t => <option key={t} value={t as string}>{t as string}</option>)}
           </select>
           <select value={filterCreator} onChange={e => setFilterCreator(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
             <option value="ALL">출제자 전체</option>
@@ -243,11 +283,11 @@ export default function ExamListPage() {
           <button onClick={resetFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-lg transition-colors border border-slate-300 flex items-center gap-1">
             🔄 초기화
           </button>
+          <button onClick={createNewExam} className="ml-2 px-5 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm flex items-center gap-2">
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
+            새 문제지
+          </button>
         </div>
-        <button onClick={createNewExam} className="px-5 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm flex items-center gap-2">
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
-          새 문제지 만들기
-        </button>
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden min-h-0">
@@ -256,7 +296,7 @@ export default function ExamListPage() {
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-24">학년 범위</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-28">유형</th>
+                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-28">유형 속성</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm">시험지 제목 및 범위</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">생성일</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">출제자</th>
@@ -265,9 +305,9 @@ export default function ExamListPage() {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {isLoading ? (
-                <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">로딩 중...</td></tr>
+                <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">데이터를 불러오는 중입니다...</td></tr>
               ) : filteredExams.length === 0 ? (
-                <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">조건에 맞는 문제지가 없습니다.</td></tr>
+                <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">해당 조건의 문제지가 없습니다.</td></tr>
               ) : (
                 filteredExams.map(exam => {
                   const instructor = Array.isArray(exam.instructor) ? exam.instructor[0] : exam.instructor;
@@ -285,18 +325,34 @@ export default function ExamListPage() {
                   const createdTime = new Date(exam.created_at).getTime();
                   const isNew = !isNaN(createdTime) && ((Date.now() - createdTime) / (1000 * 3600 * 24)) <= 2;
 
+                  // 🌟 4분류 컬러링
+                  let typeColorClass = "bg-slate-100 text-slate-600 border-slate-200";
+                  const typeStr = exam.exam_type || '평가';
+                  
+                  if (!['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(typeStr)) {
+                    typeColorClass = "bg-blue-50 text-blue-600 border-blue-200";
+                  } else if (['과제', '과제프린트'].includes(typeStr)) {
+                    typeColorClass = "bg-amber-50 text-amber-600 border-amber-200";
+                  } else if (['오답프린트', '오답'].includes(typeStr)) {
+                    typeColorClass = "bg-emerald-50 text-emerald-600 border-emerald-200";
+                  } else if (['오답유사', '과제오답유사'].includes(typeStr)) {
+                    typeColorClass = "bg-violet-50 text-violet-600 border-violet-200";
+                  }
+
                   return (
-                    <tr key={exam.exam_id} className="hover:bg-blue-50/30 transition-colors border-b border-slate-100">
+                    <tr key={exam.exam_id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
                       <td className="py-4 px-5 text-center"><span className="font-extrabold text-slate-600 text-sm">{targetGrade}</span></td>
-                      <td className="py-4 px-5 text-center"><span className="bg-slate-100 border border-slate-200 text-slate-600 px-2.5 py-1 rounded text-xs font-bold shadow-sm">{exam.exam_type || '평가'}</span></td>
+                      <td className="py-4 px-5 text-center">
+                        <span className={`px-2.5 py-1 rounded text-xs font-extrabold shadow-sm border ${typeColorClass}`}>{typeStr}</span>
+                      </td>
                       <td className="py-4 px-5">
-                        <div className="flex items-center gap-2 mb-1">
-                          <button onClick={() => router.push(`/exam/viewer?exam_id=${exam.exam_id}`)} className="font-extrabold text-[#002864] text-[15px] hover:underline hover:text-blue-600 transition-colors text-left">{exam.title}</button>
-                          {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded text-[11px] font-extrabold shadow-sm">{exam.sub_title}</span>}
-                          {isNew && <span className="text-[10px] font-black text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100">NEW</span>}
+                        <div className="flex items-center gap-2 mb-1 min-w-0">
+                          <button onClick={() => router.push(`/exam/viewer?exam_id=${exam.exam_id}`)} className="font-extrabold text-slate-800 text-[15px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
+                          {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded text-[11px] font-extrabold shadow-sm shrink-0">{exam.sub_title}</span>}
+                          {isNew && <span className="text-[10px] font-black text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">NEW</span>}
                         </div>
-                        <div className="text-[12px] font-bold text-amber-600 tracking-tight flex items-center gap-1.5">
-                          <span>{exam.total_questions || 0}문제</span><span className="text-amber-300">|</span><span>{diff}</span><span className="text-amber-300">|</span><span className="truncate max-w-[250px]" title={scope}>{scope}</span>
+                        <div className="text-[12px] font-bold text-slate-500 tracking-tight flex items-center gap-1.5">
+                          <span>{exam.total_questions || 0}문제</span><span className="text-slate-300">|</span><span>{diff}</span><span className="text-slate-300">|</span><span className="truncate max-w-[250px]" title={scope}>{scope}</span>
                         </div>
                       </td>
                       <td className="py-4 px-5 text-center text-slate-500 font-bold text-xs">{formatDate(exam.created_at)}</td>
@@ -331,7 +387,6 @@ export default function ExamListPage() {
                             복제후수정
                           </button>
                           
-                          {/* 🌟 [수정] 삭제 권한이 없으면 삭제 버튼 자체를 렌더링하지 않음 */}
                           {canDeleteExam && (
                             <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
                               삭제

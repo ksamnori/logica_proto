@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 
-// 🌟 [추가] 진도율 계산을 위한 안전한 JSON 파싱 함수
+// 🌟 진도율 계산을 위한 안전한 JSON 파싱 함수
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -36,7 +36,8 @@ export default function TeacherDashboardPage() {
   const [classStats, setClassStats] = useState({ avgScore: 0, hwRate: 0, bookName: "-", bookProgress: 0 });
   
   const [upcomingSchedule, setUpcomingSchedule] = useState<{ type: string; title: string; time: string } | null>(null);
-  const [upcomingExam, setUpcomingExam] = useState<{ title: string; time: string } | null>(null);
+  // 🌟 입학테스트 대신 보강/클리닉 일정 상태로 교체
+  const [upcomingMakeup, setUpcomingMakeup] = useState<{ title: string; time: string } | null>(null);
 
   const [csRequests, setCsRequests] = useState<any[]>([]);
   const [memos, setMemos] = useState<any[]>([]);
@@ -141,7 +142,6 @@ export default function TeacherDashboardPage() {
       .select("*, class_schedule(day_of_week, start_time, end_time)")
       .eq("instructor_id", instId);
 
-    // 🌟 [수정] 종료된 반 필터링 추가
     const activeClasses = (classes || []).filter((c: any) => c.status !== "종료" && c.status !== "폐강");
 
     const sortedClasses = activeClasses.sort((a: any, b: any) => {
@@ -157,7 +157,6 @@ export default function TeacherDashboardPage() {
       setSelectedClassId(sortedClasses[0].class_id);
     }
 
-    // 🌟 [수정] CS 요청 등을 불러오기 위한 ID 조회 시에도 종료된 반 필터링 적용
     const { data: classIds } = await supabase.from("class").select("class_id, status").eq("instructor_id", instId);
     const cIds = classIds?.filter((c: any) => c.status !== "종료" && c.status !== "폐강").map((c: any) => c.class_id) || [];
     
@@ -181,23 +180,24 @@ export default function TeacherDashboardPage() {
     const todayStr = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
 
     try {
-      const { data: exams } = await supabase
-        .from("admission_session")
-        .select("title, test_date, start_time")
-        .gte("test_date", todayStr)
-        .order("test_date", { ascending: true })
-        .order("start_time", { ascending: true })
+      // 🌟 입학테스트를 덜어내고, 보강/클리닉(Makeup) 일정으로 대체
+      const { data: makeups } = await supabase
+        .from("agenda")
+        .select("title, meeting_date")
+        .in('source', ['Makeup', 'Clinic', '보강', '클리닉'])
+        .gte("meeting_date", todayStr)
+        .order("meeting_date", { ascending: true })
         .limit(1);
 
-      if (exams && exams.length > 0) {
-        const d = exams[0].test_date.split("-");
-        const t = exams[0].start_time ? exams[0].start_time.substring(0, 5) : "";
-        setUpcomingExam({
-          title: exams[0].title,
-          time: `${d[1]}.${d[2]} ${t}`
+      if (makeups && makeups.length > 0) {
+        const dateObj = new Date(makeups[0].meeting_date);
+        const timeStr = `${String(dateObj.getHours()).padStart(2,'0')}:${String(dateObj.getMinutes()).padStart(2,'0')}`;
+        setUpcomingMakeup({
+          title: makeups[0].title,
+          time: timeStr !== '00:00' ? `${dateObj.getMonth()+1}.${dateObj.getDate()} ${timeStr}` : `${dateObj.getMonth()+1}.${dateObj.getDate()}`
         });
       } else {
-        setUpcomingExam(null);
+        setUpcomingMakeup(null);
       }
 
       const { data: schedules } = await supabase
@@ -253,9 +253,6 @@ export default function TeacherDashboardPage() {
     setStudents((classStudents || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
     const activeStudentIds = (classStudents || []).map((s: any) => s.student_id);
 
-    // =========================================================================
-    // 🌟 최근 2주(14일) 시험 평균 점수 리얼 데이터
-    // =========================================================================
     const kstNowMs = Date.now() + 9 * 3600000;
     const twoWeeksAgo = new Date(kstNowMs - 14 * 24 * 3600000).toISOString();
     
@@ -269,9 +266,6 @@ export default function TeacherDashboardPage() {
       ? Math.round(exams.reduce((acc, curr) => acc + (curr.total_score || 0), 0) / exams.length) 
       : 0;
 
-    // =========================================================================
-    // 🌟 최근 1달(30일) 과제 제출률 리얼 데이터
-    // =========================================================================
     const oneMonthAgo = new Date(kstNowMs - 30 * 24 * 3600000).toISOString();
     
     const { data: hws } = await supabase.from('homework_assignment')
@@ -301,9 +295,6 @@ export default function TeacherDashboardPage() {
     }
     const hwRate = expectedHwCount > 0 ? Math.round((submittedHwCount / expectedHwCount) * 100) : 0;
 
-    // =========================================================================
-    // 🌟 주교재 진도율 리얼 데이터 엔진
-    // =========================================================================
     const { data: cbData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId).eq("textbook.book_type", "주교재");
     const bookName = cbData && cbData.length > 0 ? cbData[0].textbook?.title : "주교재 미배정";
     
@@ -629,10 +620,12 @@ export default function TeacherDashboardPage() {
         <section className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 shrink-0 mt-1">
           <div className="flex flex-col gap-3 h-[220px]">
             <div className="flex gap-3 flex-1">
-              <div onClick={() => router.push('/exam')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-blue-300 transition-colors cursor-pointer group">
+              
+              {/* 🌟 1. 시험 성취도 박스 클릭 시 -> 학습 결과의 EXAM 탭으로 이동 */}
+              <div onClick={() => router.push(`/class-report?class_id=${selectedClassId}&tab=EXAM`)} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-blue-300 transition-colors cursor-pointer group">
                 <div className="flex flex-col">
                   <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-blue-100">최근 2주</span>
-                  <span className="text-[11px] font-bold text-slate-600">시험 성취도 (평균)</span>
+                  <span className="text-[11px] font-bold text-slate-600 group-hover:text-blue-600 transition-colors">시험 성취도 🔍</span>
                 </div>
                 <div className="text-right mt-1 flex items-end justify-end gap-0.5">
                   <span className="text-2xl font-black text-slate-800 group-hover:text-blue-600 transition-colors leading-none">{classStats.avgScore > 0 ? classStats.avgScore : "-"}</span>
@@ -640,16 +633,18 @@ export default function TeacherDashboardPage() {
                 </div>
               </div>
               
-              <div onClick={() => router.push('/learning')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-amber-300 transition-colors cursor-pointer group">
+              {/* 🌟 2. 과제 제출률 박스 클릭 시 -> 학습 결과의 HW 탭으로 이동 */}
+              <div onClick={() => router.push(`/class-report?class_id=${selectedClassId}&tab=HW`)} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-amber-300 transition-colors cursor-pointer group">
                 <div className="flex flex-col">
                   <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-amber-100">최근 1달</span>
-                  <span className="text-[11px] font-bold text-slate-600">과제 제출률</span>
+                  <span className="text-[11px] font-bold text-slate-600 group-hover:text-amber-600 transition-colors">과제 제출률 🔍</span>
                 </div>
                 <div className="text-right mt-1 flex items-end justify-end gap-0.5">
                   <span className="text-2xl font-black text-amber-500 group-hover:text-amber-600 transition-colors leading-none">{classStats.hwRate}</span>
                   <span className="text-[11px] font-bold text-amber-400 mb-0.5">%</span>
                 </div>
               </div>
+
             </div>
             
             <div onClick={() => router.push('/progress')} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-center hover:border-emerald-300 transition-colors cursor-pointer">
@@ -680,17 +675,20 @@ export default function TeacherDashboardPage() {
                    <span className="text-xs font-bold text-indigo-400">예정된 회의 일정이 없습니다.</span>
                 )}
               </div>
-              <div onClick={() => hasAccess('/admission') ? router.push('/admission') : alert("접근 권한이 없습니다.")} className={`flex flex-col justify-center bg-amber-50 p-3 rounded-xl border border-amber-100 transition-colors h-[68px] ${hasAccess('/admission') ? 'cursor-pointer hover:bg-amber-100' : 'cursor-not-allowed opacity-70'}`}>
-                <span className="text-[10px] font-bold text-amber-500 mb-1">📝 임박한 입학테스트</span>
-                {upcomingExam ? (
+              
+              {/* 🌟 3. 입학테스트 대신 '임박한 보강/클리닉' 일정으로 교체 적용 완료 */}
+              <div onClick={() => hasAccess('/makeup') ? router.push('/makeup') : alert("접근 권한이 없습니다.")} className={`flex flex-col justify-center bg-emerald-50 p-3 rounded-xl border border-emerald-100 transition-colors h-[68px] ${hasAccess('/makeup') ? 'cursor-pointer hover:bg-emerald-100' : 'cursor-not-allowed opacity-70'}`}>
+                <span className="text-[10px] font-bold text-emerald-500 mb-1">🏥 임박한 보강/클리닉</span>
+                {upcomingMakeup ? (
                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-black bg-white text-amber-600 px-1.5 py-0.5 rounded border border-amber-200 shrink-0">{upcomingExam.time}</span>
-                      <span className="text-sm font-bold text-amber-800 truncate leading-tight" title={upcomingExam.title}>{upcomingExam.title}</span>
+                      <span className="text-xs font-black bg-white text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">{upcomingMakeup.time}</span>
+                      <span className="text-sm font-bold text-emerald-800 truncate leading-tight" title={upcomingMakeup.title}>{upcomingMakeup.title}</span>
                    </div>
                 ) : (
-                   <span className="text-xs font-bold text-amber-400">예정된 테스트가 없습니다.</span>
+                   <span className="text-xs font-bold text-emerald-400">예정된 보강 일정이 없습니다.</span>
                 )}
               </div>
+
             </div>
           </div>
 
@@ -774,7 +772,6 @@ export default function TeacherDashboardPage() {
                         const logs = [...s.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
                         const recentDate = new Date(logs[0].created_at).toLocaleDateString('ko-KR', { year: '2-digit', month: '2-digit', day: '2-digit' }).replace(/\.$/, '');
                         
-                        // 🌟 [수정] router.push 로 변경
                         consultHtml = (
                           <button 
                             onClick={() => {
@@ -794,7 +791,6 @@ export default function TeacherDashboardPage() {
                       return (
                         <tr key={s.student_id} className="hover:bg-blue-50/40 transition-colors border-b border-slate-100">
                           <td className="py-2.5 pl-3 pr-1 w-24">
-                            {/* 🌟 [수정] router.push 로 변경 */}
                             <div className={`flex items-center gap-2 group w-max ${hasAccess('/student') ? 'cursor-pointer' : 'cursor-not-allowed opacity-80'}`} onClick={() => hasAccess('/student') ? router.push(`/student/${s.student_id}`) : alert("접근 권한이 없습니다.")}>
                               <div className="w-6 h-6 rounded-full bg-blue-100 text-[#002864] flex items-center justify-center text-[10px] font-black shrink-0 transition-colors group-hover:bg-[#002864] group-hover:text-white">
                                 {s.name.substring(1)}
@@ -811,7 +807,6 @@ export default function TeacherDashboardPage() {
                           <td className="py-2.5 px-1 text-center text-[11px] font-medium text-slate-500 whitespace-nowrap">{parentContact}</td>
                           <td className="py-2.5 px-1 text-center whitespace-nowrap">{consultHtml}</td>
                           <td className="py-2.5 pl-1 pr-3 text-right">
-                            {/* 🌟 [수정] router.push 로 변경 */}
                             <button onClick={() => hasAccess('/student') ? router.push(`/student/${s.student_id}`) : alert("접근 권한이 없습니다.")} className={`text-[10px] font-bold bg-white border border-slate-300 px-2 py-1 rounded transition-colors shadow-sm whitespace-nowrap ${hasAccess('/student') ? 'text-slate-600 hover:bg-slate-50' : 'text-slate-300 cursor-not-allowed'}`}>리포트</button>
                           </td>
                         </tr>

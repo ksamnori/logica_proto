@@ -8,7 +8,7 @@ import { LEVEL_ORDER } from "../hooks/useLearningFetch";
 interface LearningSidebarProps {
   currentView: ViewState;
   groupedClasses: Record<string, ClassInfo[]>;
-  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; }>;
+  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; }>;
   isLoading: boolean;
   handleViewChange: (view: ViewState) => void;
   handleStudentClick: (studentId: string, studentName: string, classId: string, className: string) => void;
@@ -27,7 +27,6 @@ export default function LearningSidebar({
   const [expandedClasses, setExpandedClasses] = useState<string[]>([]);
   const [isAllExpanded, setIsAllExpanded] = useState(false);
 
-  // 🌟 View가 바뀌었을 때 자동으로 아코디언 열어주기
   useEffect(() => {
     if (currentView.type === 'STUDENT' || currentView.type === 'CLASS') {
       const cId = currentView.classId;
@@ -116,19 +115,30 @@ export default function LearningSidebar({
                               {!c.students || c.students.length === 0 ? <div className="py-3 text-center text-[10px] text-slate-400 font-bold bg-slate-50/50">학생 없음</div> : (
                                 c.students.map(s => {
                                   if (!s) return null;
-                                  const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
+                                  const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0 };
                                   const displayExamQ = allStats.examQ;
                                   const displayHwQ = allStats.hwQ;
                                   const displayPrintQ = allStats.printQ;
+                                  const displaySimilarQ = allStats.similarQ;
                                   const isStudentActive = currentView.studentId === s.id && currentView.classId === c.class_id;
 
                                   return (
                                     <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full flex items-center justify-between pl-8 pr-3 py-2 text-[11px] font-bold transition-colors border-l-4 ${isStudentActive ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'text-slate-500 hover:bg-slate-50 hover:text-blue-700 border-transparent'}`}>
-                                      <span className="truncate">{isStudentActive ? '👉 ' : ''}{s.name}</span>
+                                      <span className="truncate text-left flex-1 min-w-0">{isStudentActive ? '👉 ' : ''}{s.name}</span>
+                                      
                                       <div className="flex items-center gap-1 shrink-0 ml-1.5">
-                                        {displayExamQ > 0 && <span className="bg-blue-100 text-blue-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="시험 미해결 문항">{displayExamQ}</span>}
-                                        {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
-                                        {displayPrintQ > 0 && <span className="bg-emerald-100 text-emerald-700 px-1 py-0.5 min-w-[18px] text-center rounded-full shadow-sm text-[9px] font-black" title="오답 미해결 문항">{displayPrintQ}</span>}
+                                        <div className="w-[18px] flex justify-center">
+                                          {displayExamQ > 0 && <span className="bg-blue-100 text-blue-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="시험 미해결 문항">{displayExamQ}</span>}
+                                        </div>
+                                        <div className="w-[18px] flex justify-center">
+                                          {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
+                                        </div>
+                                        <div className="w-[18px] flex justify-center">
+                                          {displayPrintQ > 0 && <span className="bg-emerald-100 text-emerald-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="오답 미해결 문항">{displayPrintQ}</span>}
+                                        </div>
+                                        <div className="w-[18px] flex justify-center">
+                                          {displaySimilarQ > 0 && <span className="bg-violet-100 text-violet-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="오답유사 미해결 문항">{displaySimilarQ}</span>}
+                                        </div>
                                       </div>
                                     </button>
                                   );

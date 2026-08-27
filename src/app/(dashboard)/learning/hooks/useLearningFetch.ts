@@ -141,23 +141,26 @@ export function useLearningFetch() {
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
         
-        // 🌟 [오류 해결] .in 구문을 쓰지 않고 가져와서 JS에서 안전하게 필터링합니다.
         const { data: rawExams } = await supabase.from('exam_assignment')
           .select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
           .in('student_id', chunk);
 
         if (rawExams) {
-          const examOnly = rawExams.filter((s: any) => s.exam_master?.exam_type !== '과제' && s.exam_master?.exam_type !== '과제프린트' && s.exam_master?.exam_type !== '오답프린트');
+          const examOnly = rawExams.filter((s: any) => !['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'EXAM'}))];
           examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const hwExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '과제' || s.exam_master?.exam_type === '과제프린트');
+          const hwExams = rawExams.filter((s: any) => ['과제', '과제프린트'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'HW'}))];
           hwExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const printExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '오답프린트');
+          const printExams = rawExams.filter((s: any) => ['오답프린트', '오답'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...printExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'PRINT'}))];
           printExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+
+          const similarExams = rawExams.filter((s: any) => ['오답유사', '과제오답유사'].includes(s.exam_master?.exam_type));
+          fetchedStats = [...fetchedStats, ...similarExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'SIMILAR'}))];
+          similarExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'similar', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
         }
         
         const { data: allHws } = await supabase.from('homework_assignment').select('homework_id, class_id, homework_title, target_student_id, target_questions, created_at, due_date').in('class_id', classIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
@@ -252,9 +255,14 @@ export function useLearningFetch() {
       let combined: any[] = [];
       exams?.forEach(ex => {
         const m = unwrap(ex.exam_master);
+        let type = 'exam';
+        if (['오답프린트', '오답'].includes(m?.exam_type)) type = 'print';
+        else if (['과제', '과제프린트'].includes(m?.exam_type)) type = 'hw_exam';
+        else if (['오답유사', '과제오답유사'].includes(m?.exam_type)) type = 'similar';
+
         combined.push({
-          id: `${m?.exam_type === '오답프린트' ? 'print' : 'exam'}_${ex.assignment_id}`,
-          type: m?.exam_type === '오답프린트' ? 'print' : (['과제', '과제프린트'].includes(m?.exam_type) ? 'hw_exam' : 'exam'),
+          id: `${type}_${ex.assignment_id}`,
+          type: type,
           realId: ex.assignment_id, masterId: m?.exam_id, title: m?.title || '제목 없음', subTitle: m?.sub_title, 
           date: ex.created_at, status: ex.status, total: m?.total_questions || 0, score: ex.total_score || 0,
           oCount: exCounts[ex.assignment_id]?.o || 0, xCount: exCounts[ex.assignment_id]?.x || 0, helpedCount: exCounts[ex.assignment_id]?.helped || 0,
@@ -297,16 +305,17 @@ export function useLearningFetch() {
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
 
-        if (tab === 'EXAM' || tab === 'INCORRECT') {
+        if (tab === 'EXAM' || tab === 'INCORRECT' || tab === 'SIMILAR') {
           const { data: rawExams } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)').in('student_id', chunk);
           
           if (rawExams) {
-            let data = [];
-            // 🌟 [오류 해결] JS 단에서 필터링
+            let data: any[] = []; 
             if (tab === 'EXAM') {
-               data = rawExams.filter((d: any) => d.exam_master?.exam_type !== '과제' && d.exam_master?.exam_type !== '과제프린트' && d.exam_master?.exam_type !== '오답프린트');
-            } else {
-               data = rawExams.filter((d: any) => d.exam_master?.exam_type === '오답프린트');
+               data = rawExams.filter((d: any) => !['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(d.exam_master?.exam_type));
+            } else if (tab === 'INCORRECT') {
+               data = rawExams.filter((d: any) => ['오답프린트', '오답'].includes(d.exam_master?.exam_type));
+            } else if (tab === 'SIMILAR') {
+               data = rawExams.filter((d: any) => ['오답유사', '과제오답유사'].includes(d.exam_master?.exam_type));
             }
 
             const assignIds = data.map((d: any) => d.assignment_id);
@@ -336,7 +345,7 @@ export function useLearningFetch() {
                const em = unwrap(d.exam_master); const cls = unwrap(d.class); const stu = unwrap(d.student);
                return {
                  ...d, masterId: em?.exam_id, 
-                 type: em?.exam_type === '오답프린트' ? 'print' : (['과제', '과제프린트'].includes(em?.exam_type) ? 'hw_exam' : 'exam'), 
+                 type: ['오답프린트', '오답'].includes(em?.exam_type) ? 'print' : (['오답유사', '과제오답유사'].includes(em?.exam_type) ? 'similar' : (['과제', '과제프린트'].includes(em?.exam_type) ? 'hw_exam' : 'exam')), 
                  is_exam_hw: false,
                  oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0, helpedCount: counts[d.assignment_id]?.helped || 0,
                  totalQ: em?.total_questions || 0, class_name: cls?.name || '반 미지정', student: { name: stu?.name || '알수없음' },
@@ -405,7 +414,6 @@ export function useLearningFetch() {
             }
           });
 
-          // 🌟 [오류 해결] JS 단에서 필터링
           const { data: rawExamHws } = await supabase.from('exam_assignment')
             .select('assignment_id, status, created_at, student_id, class_id, class(name), student(name), exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)')
             .in('student_id', chunk);

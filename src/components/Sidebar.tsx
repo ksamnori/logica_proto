@@ -62,7 +62,7 @@ export default function Sidebar() {
         if (permData && permData.allowed_menus) {
           setAllowedMenus(permData.allowed_menus);
         } else {
-          setAllowedMenus(['/home', '/student', '/class', '/learning', '/progress', '/makeup', '/minutes', '/task', '/cs', '/supply', '/exam-list', '/admission']);
+          setAllowedMenus(['/home', '/student', '/class', '/lesson', '/progress', '/learning', '/class-report', '/makeup', '/minutes', '/task', '/cs', '/supply', '/exam-list', '/admission']);
         }
       }
       setIsLoadingPerms(false);
@@ -95,15 +95,15 @@ export default function Sidebar() {
   }, [displayRole]);
 
   const canAccess = (path: string) => {
-    // 🌟 [핵심 수정] 게스트(GUEST) 계정은 조교 전용 도구에 접근할 수 없도록 최상단에서 먼저 차단합니다.
+    // 게스트(GUEST) 계정은 조교 전용 도구에 접근할 수 없도록 최상단에서 먼저 차단
     if (displayRole === 'GUEST' && path === '/ta-tools') return false;
 
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true;
 
-    // 🌟 조교(TA) 전용 메뉴는 TA 역할 계정에게 항상 열어준다
+    // 조교(TA) 전용 메뉴는 TA 역할 계정에게 항상 열어준다
     if (path === '/ta-tools' && displayRole === 'TA') return true;
 
-    // 🌟 팩토리 메뉴 권한 처리
+    // 팩토리 메뉴 권한 처리
     const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
     if (factoryPaths.includes(path) && isFactoryWorker) return true;
 
@@ -128,6 +128,7 @@ export default function Sidebar() {
       );
     }
 
+    // 기본 테마 (교재 관리 등 특정 색상이 지정되지 않은 메뉴들에 적용)
     let customBg = active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
     let customLabel = active ? 'font-black' : 'font-bold';
     let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
@@ -136,10 +137,16 @@ export default function Sidebar() {
       customBg = active ? 'bg-[#002864] border-[#001f4d] text-white shadow-md' : 'bg-blue-50/50 border-blue-100 text-[#002864] hover:bg-blue-100 hover:border-blue-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-blue-200 font-medium' : 'text-blue-400 font-medium';
-    } else if (path === '/learning') {
+    } else if (path === '/learning') { 
+      // 학습 관리 (에메랄드)
       customBg = active ? 'bg-emerald-500 border-emerald-600 text-white shadow-md' : 'bg-emerald-50/50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-emerald-100 font-medium' : 'text-emerald-500 font-medium';
+    } else if (path === '/class-report') {
+      // 🌟 학습 결과 분리 및 신규 색상 (청록색 / Teal) 적용
+      customBg = active ? 'bg-teal-500 border-teal-600 text-white shadow-md' : 'bg-teal-50/50 border-teal-100 text-teal-700 hover:bg-teal-100 hover:border-teal-200 shadow-sm';
+      customLabel = 'font-black';
+      customDesc = active ? 'text-teal-100 font-medium' : 'text-teal-500 font-medium';
     } else if (path === '/exam-list') {
       customBg = active ? 'bg-violet-500 border-violet-600 text-white shadow-md' : 'bg-violet-50/50 border-violet-100 text-violet-700 hover:bg-violet-100 hover:border-violet-200 shadow-sm';
       customLabel = 'font-black';
@@ -207,16 +214,19 @@ export default function Sidebar() {
 
       <nav className="flex-1 py-5 overflow-y-auto custom-scroll">
 
+        {/* 🌟 1. 학원 관리 */}
         <MenuSection title="학원 관리" icon="🏫">
-          <MenuItem path="/home" label="홈(대시보드)" />
+          <MenuItem path="/home" label="홈 (대시보드)" full />
           <MenuItem path="/student" label="학생 관리" />
           <MenuItem path="/class" label="반 관리" />
-          <MenuItem path="/lesson" label="교재 관리" />
         </MenuSection>
 
+        {/* 🌟 2. 수업 관리 (요청하신 순서 및 짝맞춤 반영) */}
         <MenuSection title="수업 관리" icon="👨‍🏫">
-          <MenuItem path="/learning" label="학습 관리" desc="시험 · 과제 · 오답" full />
+          <MenuItem path="/lesson" label="교재 관리" />
           <MenuItem path="/progress" label="진도 관리" />
+          <MenuItem path="/learning" label="학습 관리" desc="(시험·과제·오답·유사)" full />
+          <MenuItem path="/class-report" label="학습 결과" />
           <MenuItem path="/makeup" label="보강 관리" />
         </MenuSection>
 
@@ -243,9 +253,8 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* 🌟 LOGICA Factory 라이트 인더스트리얼 테마 영역 */}
+        {/* LOGICA Factory 라이트 인더스트리얼 테마 영역 */}
         <div className="mx-3 mb-6 bg-slate-50/80 rounded-xl pt-4 pb-3 border border-slate-200 shadow-sm relative overflow-hidden group">
-          {/* 노란색/진회색 공장 안전 경계선 데코레이션 (기존보다 밝고 부드럽게) */}
           <div className="absolute top-0 left-0 w-full h-1.5 bg-[repeating-linear-gradient(45deg,#fcd34d,#fcd34d_8px,#475569_8px,#475569_16px)] opacity-50"></div>
 
           <div className="px-3 flex items-center gap-2 mb-3 mt-1">

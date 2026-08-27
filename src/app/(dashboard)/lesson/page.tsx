@@ -169,14 +169,24 @@ export default function LessonPage() {
       return;
     }
 
-    const { data, error } = await supabase
-      .from("textbook")
-      .select("*")
-      .or(`tenant_id.eq.${validTenantId},tenant_id.is.null`)
-      .order("created_at", { ascending: false });
-      
-    if (error) console.error("교재 로드 에러:", error);
-    setMasterBooks(data || []);
+    // 🌟 [버그 픽스] 교재 마스터 목록도 데이터가 많아질 것을 대비해 1000개 단위 우회 루프 적용
+    let allBooks: any[] = [];
+    let from = 0;
+    while(true) {
+        const { data, error } = await supabase
+          .from("textbook")
+          .select("*")
+          .or(`tenant_id.eq.${validTenantId},tenant_id.is.null`)
+          .order("created_at", { ascending: false })
+          .range(from, from + 999);
+          
+        if (error) { console.error("교재 로드 에러:", error); break; }
+        if (!data || data.length === 0) break;
+        allBooks.push(...data);
+        if (data.length < 1000) break;
+        from += 1000;
+    }
+    setMasterBooks(allBooks);
   };
 
   const createDummyBook = async () => {
@@ -250,7 +260,6 @@ export default function LessonPage() {
     setClasses(data || []);
   };
 
-  // 🌟 [핵심 개선] 어디서든 완료된 기록을 중복 스캔하여 100% 진도율에 반영하는 함수
   const fetchClassAssignedBooks = async (cls: any) => {
     try {
       const classId = cls.class_id;
@@ -271,14 +280,26 @@ export default function LessonPage() {
 
       const assignedBookIds = data.map(cb => cb.book_id);
       
-      const { data: qData } = await supabase.from("textbook_question").select("*").in("book_id", assignedBookIds);
-      const questionsData = qData || [];
+      // 🌟 [핵심 버그 픽스] 교재 데이터가 1,000건을 넘어가면 누락되던 현상을 while 무한루프 페이지네이션으로 원천 차단
+      let questionsData: any[] = [];
+      for (const bId of assignedBookIds) {
+          let from = 0;
+          while (true) {
+              const { data: qChunk } = await supabase.from("textbook_question")
+                .select("*")
+                .eq("book_id", bId)
+                .range(from, from + 999);
+              if (!qChunk || qChunk.length === 0) break;
+              questionsData.push(...qChunk);
+              if (qChunk.length < 1000) break; // 1,000개 미만이면 마지막 페이지이므로 종료
+              from += 1000;
+          }
+      }
 
       const bookPagesMap: Record<string, number[]> = {};
       const bookPageTqsMap: Record<string, Record<number, number[]>> = {};
       const groupedQsMap: Record<string, Record<number, any[]>> = {};
 
-      // 문항 번호 맵핑용 역참조 사전
       const qIdToTqId = new Map<number, number>();
 
       assignedBookIds.forEach(bId => { 
@@ -307,7 +328,6 @@ export default function LessonPage() {
       const sIds = currentClassStudents.map(s => s.id);
 
       if (sIds.length > 0) {
-        // 1. 기존 homework_assignment 기반 상태 계산 (안전하게 병합)
         const { data: assignments } = await supabase.from("homework_assignment")
           .select("book_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)")
           .eq("class_id", classId)
@@ -332,7 +352,6 @@ export default function LessonPage() {
             const parsedCompleted = safeParseIds(res.completed_tq_ids);
             const isFullyCompleted = ['채점완료', '제출완료', '완료'].includes(res.status);
             
-            // 🌟 주/부교재 보존 & 워크북 강제완료 둘 다 만족하는 로직
             let completedQs = parsedCompleted;
             if (isFullyCompleted) {
                if (targetQs.length > 0) {
@@ -346,21 +365,45 @@ export default function LessonPage() {
           });
         });
 
-        // 2. 다른 시험/프린트로 병합된 문항들 (exam_assignment) 추적
-        const { data: exAssigns } = await supabase.from('exam_assignment')
-          .select('assignment_id, student_id, status, exam_id')
-          .in('student_id', sIds);
+        // 🌟 [버그 픽스] 타겟 시험지도 1000줄 제한 우회 적용
+        let exAssigns: any[] = [];
+        let fromEA = 0;
+        while(true) {
+            const { data: chunk } = await supabase.from('exam_assignment')
+                .select('assignment_id, student_id, status, exam_id')
+                .in('student_id', sIds)
+                .range(fromEA, fromEA + 999);
+            if (!chunk || chunk.length === 0) break;
+            exAssigns.push(...chunk);
+            if (chunk.length < 1000) break;
+            fromEA += 1000;
+        }
         
-        const eIds = [...new Set(exAssigns?.map(a => a.exam_id).filter(Boolean))];
+        const eIds = [...new Set(exAssigns.map(a => a.exam_id).filter(Boolean))];
         if (eIds.length > 0) {
-            const { data: eItems } = await supabase.from('exam_item').select('exam_id, question_id').in('exam_id', eIds);
+            let eItems: any[] = [];
+            for (let i = 0; i < eIds.length; i += 100) {
+                const chunkIds = eIds.slice(i, i + 100);
+                let fromEI = 0;
+                while(true) {
+                    const { data: chunk } = await supabase.from('exam_item')
+                       .select('exam_id, question_id')
+                       .in('exam_id', chunkIds)
+                       .range(fromEI, fromEI + 999);
+                    if (!chunk || chunk.length === 0) break;
+                    eItems.push(...chunk);
+                    if (chunk.length < 1000) break;
+                    fromEI += 1000;
+                }
+            }
+
             const examQMap = new Map<string, number[]>();
-            eItems?.forEach(item => {
+            eItems.forEach(item => {
                 if (!examQMap.has(item.exam_id)) examQMap.set(item.exam_id, []);
                 examQMap.get(item.exam_id)!.push(item.question_id);
             });
 
-            exAssigns?.forEach(assign => {
+            exAssigns.forEach(assign => {
                 const qIdsInExam = examQMap.get(assign.exam_id) || [];
                 const isCompleted = ['채점완료', '제출완료', '완료'].includes(assign.status);
 
@@ -378,19 +421,40 @@ export default function LessonPage() {
             });
         }
 
-        // 3. 개별 문항별 가장 확실한 중복 체크 (어디서든 O, TO, RO 처리됐다면 무조건 완료로 덮어쓰기)
-        const [ { data: hwAns }, { data: exAns } ] = await Promise.all([
-            supabase.from('student_homework_answer').select('tq_id, student_id, is_correct, grading_code').in('student_id', sIds),
-            supabase.from('student_answer').select('question_id, student_id, is_correct, grading_code').in('student_id', sIds)
-        ]);
+        // 🌟 [버그 픽스] 정답 기록도 1000줄 넘으면 잘리므로 싹 다 긁어오도록 조치
+        let hwAns: any[] = [];
+        let fromHw = 0;
+        while(true) {
+            const { data: chunk } = await supabase.from('student_homework_answer')
+               .select('tq_id, student_id, is_correct, grading_code')
+               .in('student_id', sIds)
+               .range(fromHw, fromHw + 999);
+            if (!chunk || chunk.length === 0) break;
+            hwAns.push(...chunk);
+            if (chunk.length < 1000) break;
+            fromHw += 1000;
+        }
 
-        hwAns?.forEach(ans => {
+        let exAns: any[] = [];
+        let fromEx = 0;
+        while(true) {
+            const { data: chunk } = await supabase.from('student_answer')
+               .select('question_id, student_id, is_correct, grading_code')
+               .in('student_id', sIds)
+               .range(fromEx, fromEx + 999);
+            if (!chunk || chunk.length === 0) break;
+            exAns.push(...chunk);
+            if (chunk.length < 1000) break;
+            fromEx += 1000;
+        }
+
+        hwAns.forEach(ans => {
             if (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct) {
                 globalStatusMap[`${classId}_${ans.tq_id}_${ans.student_id}`] = 'done';
             }
         });
 
-        exAns?.forEach(ans => {
+        exAns.forEach(ans => {
             const tqId = qIdToTqId.get(ans.question_id);
             if (tqId && (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct)) {
                 globalStatusMap[`${classId}_${tqId}_${ans.student_id}`] = 'done';

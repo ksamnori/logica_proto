@@ -1,6 +1,7 @@
 // src/app/(dashboard)/learning/hooks/useLearningActions.ts
 import { supabase } from "@/lib/supabase";
 import { StudentInfo, ViewState, TabType } from "../types";
+import { toast } from "react-toastify"; // 🌟 토스트 임포트
 
 interface ActionProps {
   currentView: ViewState;
@@ -50,64 +51,79 @@ export function useLearningActions({
   fetchStudentTimeline, fetchGlobalListForTab, fetchStatsForTab
 }: ActionProps) {
 
-  // 🌟 [핵심 수정] 즉시 삭제하지 않고(지연), 뷰어에 분리할 정보를 안전하게 전달만 합니다!
+  // 🌟 [원상 복구] 기존 작동하던 라우팅 방식(/homework/step2, /exam/step2) 유지
   const handleExtractCommonHomework = async () => {
-    const hwBlocks = globalSelectedBlocks.length > 0 ? globalSelectedBlocks : selectedBlocks;
-    const validBlocks = hwBlocks.filter(b => b.startsWith('hw_') && !b.startsWith('hw_exam_'));
+    const listToUse = currentView.type === 'STUDENT' ? selectedBlocks : globalSelectedBlocks;
+    const isStudentView = currentView.type === 'STUDENT';
     
-    if (validBlocks.length < 2) return alert("공통 과제를 추출하려면 2개 이상의 교재 과제(📚)를 선택해주세요.");
-    if (!confirm(`선택하신 ${validBlocks.length}명의 과제에서 공통 문항을 추출하여 병합용 새 과제로 분리하시겠습니까?\n(나머지 추가/개별 문항은 기존처럼 각 학생의 과제로 남습니다.)`)) return;
-
+    if (listToUse.length < 2) {
+      toast.warning("공통 문항을 추출할 2개 이상의 과제를 선택해주세요.");
+      return;
+    }
+    
+    const hwIds = listToUse.map(b => b.startsWith('hw_exam_') ? b.split('_')[2] : b.split('_')[1]);
+    
     setIsLoading(true);
     try {
-      const hwIds = [...new Set(validBlocks.map(b => Number(b.split('_')[1])))];
-      const studentIds = [...new Set(validBlocks.map(b => b.split('_')[2]))];
+      const { data: assignments, error } = await supabase.from('homework_assignment')
+        .select('homework_id, target_questions, is_exam_hw')
+        .in('homework_id', hwIds);
+        
+      if (error || !assignments) throw new Error("과제 정보를 불러올 수 없습니다.");
 
-      const { data: hwData, error } = await supabase.from('homework_assignment').select('*').in('homework_id', hwIds);
-      if (error || !hwData) throw error;
+      const isMixed = assignments.some(a => a.is_exam_hw) && assignments.some(a => !a.is_exam_hw);
+      if (isMixed) throw new Error("교재 기반 과제와 문제지 기반 과제는 함께 병합할 수 없습니다. 같은 종류끼리만 선택해주세요.");
 
-      let commonTqIds: number[] = [];
-      hwData.forEach((hw, idx) => {
-        const tqs = safeParseIds(hw.target_questions);
-        if (idx === 0) commonTqIds = [...tqs];
-        else commonTqIds = commonTqIds.filter(id => tqs.includes(id));
+      let allQuestions: any[] = [];
+      
+      assignments.forEach(a => {
+        let tq = typeof a.target_questions === 'string' ? JSON.parse(a.target_questions) : a.target_questions;
+        if (Array.isArray(tq)) allQuestions.push(...tq);
       });
-
-      if (commonTqIds.length === 0) {
+      
+      const counts: Record<string, number> = {};
+      allQuestions.forEach(q => counts[q] = (counts[q] || 0) + 1);
+      
+      const commonQuestions = Object.keys(counts).filter(q => counts[q] === assignments.length);
+      
+      if (commonQuestions.length === 0) {
         setIsLoading(false);
-        return alert("선택하신 과제들 사이에 공통된 문항이 하나도 없습니다.");
+        toast.error("선택된 과제들 사이에 공통된 문항이 없습니다.");
+        return;
       }
 
-      const firstHw = hwData[0];
-      const classId = firstHw.class_id;
-
-      // 🚫 기존의 DB 즉각 삭제(delete) 로직을 전부 뺐습니다. (데이터 보호)
-
-      const { data: tqData } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', commonTqIds);
-      const tqMap = new Map();
-      tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
-      const qIds = commonTqIds.map(id => tqMap.get(id)).filter(Boolean);
-
-      purgeOldSession();
-
-      sessionStorage.setItem('restoreExamQuestions', '1');
-      sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
-      sessionStorage.setItem('examTitle', '[공통 과제] ' + firstHw.homework_title);
-      sessionStorage.setItem('examSubTitle', '공통 과제 (병합/편집용)'); 
-      sessionStorage.setItem('examType', '과제프린트');
-
-      // 🌟 뷰어에서 "저장(Save)"을 누를 때 쪼개도록 세션에 명령어를 담아 보냅니다.
-      sessionStorage.setItem('splitHomeworkIds', JSON.stringify(hwIds));
-      sessionStorage.setItem('splitCommonTqIds', JSON.stringify(commonTqIds));
-      sessionStorage.setItem('clinicTargetStudentIds', JSON.stringify(studentIds)); 
-      sessionStorage.setItem('editClassId', String(classId));
-
-      alert(`공통 문항(${commonTqIds.length}개)이 성공적으로 분리되었습니다!\n확인을 누르시면 스텝2로 이동하여 공통 과제를 편집합니다.`);
-      window.location.href = '/exam/step2?source=edit';
-
+      sessionStorage.clear();
+      
+      if (assignments[0].is_exam_hw) {
+        sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions));
+        sessionStorage.setItem('examTitle', '[병합] 오답 및 유사 문제 프린트');
+        sessionStorage.setItem('examType', '과제프린트');
+        
+        if (isStudentView) {
+          sessionStorage.setItem('clinicTargetStudentId', currentView.studentId);
+          sessionStorage.setItem('clinicTargetClassId', currentView.classId || '');
+          sessionStorage.setItem('isClinicMode', 'true');
+        } else {
+          sessionStorage.setItem('isClinicMode', 'false');
+        }
+        window.location.href = '/exam/step2';
+      } else {
+        sessionStorage.setItem('hwQuestions', JSON.stringify(commonQuestions));
+        sessionStorage.setItem('hwTitle', '[병합] 복습 및 오답 교재 과제');
+        
+        if (isStudentView) {
+          sessionStorage.setItem('clinicTargetStudentId', currentView.studentId);
+          sessionStorage.setItem('clinicTargetClassId', currentView.classId || '');
+          sessionStorage.setItem('isClinicMode', 'true');
+        } else {
+          sessionStorage.setItem('isClinicMode', 'false');
+        }
+        window.location.href = '/homework/step2';
+      }
+      
     } catch (err: any) {
       console.error(err);
-      alert('공통 문항 추출 중 오류가 발생했습니다.');
+      toast.error(err.message || "오류가 발생했습니다.");
       setIsLoading(false);
     }
   };
@@ -118,7 +134,8 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of globalSelectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('hw_exam_')) {
+        // 🌟 4분류 (similar_ 추가)
+        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
           if (error) throw error;
@@ -139,13 +156,13 @@ export function useLearningActions({
           }
         }
       }
-      alert("✅ 선택 항목이 일괄 완료처리 되었습니다.");
+      toast.success("✅ 선택 항목이 일괄 완료처리 되었습니다.");
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch(e: any) {
       console.error(e);
-      alert("처리 중 오류가 발생했습니다: " + e.message);
+      toast.error("처리 중 오류가 발생했습니다.");
       setIsLoading(false);
     }
   };
@@ -160,7 +177,7 @@ export function useLearningActions({
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           await supabase.from('student_answer').delete().eq('exam_assignment_id', aId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', aId);
-        } else if (block.startsWith('print_')) {
+        } else if (block.startsWith('print_') || block.startsWith('similar_')) {
           const assignId = block.split('_')[1];
           const {data} = await supabase.from('exam_assignment').select('exam_id').eq('assignment_id', assignId).single();
           if(data) {
@@ -178,13 +195,13 @@ export function useLearningActions({
           if (count === 0) await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
         }
       }
-      alert("🗑️ 선택 항목이 삭제되었습니다.");
+      toast.success("🗑️ 선택 항목이 삭제되었습니다.");
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch(e: any) {
        console.error(e);
-       alert("삭제 중 오류가 발생했습니다.");
+       toast.error("삭제 중 오류가 발생했습니다.");
        setIsLoading(false);
     }
   };
@@ -195,7 +212,7 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', assignId);
           if (error) throw error;
@@ -215,13 +232,13 @@ export function useLearningActions({
           }
         }
       }
-      alert("✅ 선택 항목이 일괄 완료처리 되었습니다.");
+      toast.success("✅ 선택 항목이 일괄 완료처리 되었습니다.");
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch(e: any) {
        console.error(e);
-       alert("처리 중 오류가 발생했습니다: " + e.message);
+       toast.error("처리 중 오류가 발생했습니다.");
        setIsLoading(false);
     }
   };
@@ -236,7 +253,7 @@ export function useLearningActions({
           const assignId = block.split('_').pop();
           await supabase.from('student_answer').delete().eq('exam_assignment_id', assignId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', assignId);
-        } else if (block.startsWith('print_')) {
+        } else if (block.startsWith('print_') || block.startsWith('similar_')) {
           const assignId = block.split('_')[1];
           const {data} = await supabase.from('exam_assignment').select('exam_id').eq('assignment_id', assignId).single();
           if(data) {
@@ -253,13 +270,13 @@ export function useLearningActions({
           if (count === 0) await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
         }
       }
-      alert("🗑️ 선택 항목이 삭제되었습니다.");
+      toast.success("🗑️ 선택 항목이 삭제되었습니다.");
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch(e: any) {
        console.error(e);
-       alert("삭제 중 오류가 발생했습니다.");
+       toast.error("삭제 중 오류가 발생했습니다.");
        setIsLoading(false);
     }
   };
@@ -269,7 +286,7 @@ export function useLearningActions({
     if (!confirm("이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
     
     try {
-      if (type === 'exam' || type === 'print' || type === 'hw_exam') {
+      if (type === 'exam' || type === 'print' || type === 'similar' || type === 'hw_exam') {
         const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
         if (error) throw error;
       } else if (type === 'hw') {
@@ -287,13 +304,13 @@ export function useLearningActions({
         }
       }
       
-      alert("✅ 채점 완료 처리되었습니다.");
+      toast.success("✅ 채점 완료 처리되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
     } catch (err: any) {
       console.error(err);
-      alert("완료 처리 중 오류가 발생했습니다: " + err.message);
+      toast.error("완료 처리 중 오류가 발생했습니다.");
     }
   };
 
@@ -303,10 +320,11 @@ export function useLearningActions({
       await supabase.from('student_answer').delete().eq('exam_assignment_id', assignmentId);
       await supabase.from('exam_assignment').delete().eq('assignment_id', assignmentId);
       
+      toast.success("🗑️ 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
       fetchStatsForTab(allStudentsList);
-    } catch (e) { alert("삭제 실패"); }
+    } catch (e) { toast.error("삭제 실패"); }
   };
 
   const handleEditHomeworkTitle = async (hwId: string, oldTitle: string) => {
@@ -314,9 +332,10 @@ export function useLearningActions({
     if (!newTitle || newTitle.trim() === '' || newTitle === oldTitle) return;
     try {
       await supabase.from('homework_assignment').update({ homework_title: newTitle.trim() }).eq('homework_id', hwId);
+      toast.success("제목이 수정되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab('HOMEWORK', allStudentsList);
-    } catch (e) { alert("수정 실패"); }
+    } catch (e) { toast.error("수정 실패"); }
   };
 
   const handleDeleteHomework = async (hwId: string, studentId: string) => {
@@ -326,45 +345,59 @@ export function useLearningActions({
       await supabase.from('student_homework_result').delete().eq('homework_id', hwId);
       await supabase.from('homework_assignment').delete().eq('homework_id', hwId);
       
+      toast.success("🗑️ 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab('HOMEWORK', allStudentsList);
       fetchStatsForTab(allStudentsList);
-    } catch (e) { alert("삭제 실패"); }
+    } catch (e) { toast.error("삭제 실패"); }
   };
 
   const handleDeletePrint = async (assignmentId: string, examId: string) => {
-    if (!confirm("해당 오답 프린트를 완전히 삭제하시겠습니까?")) return;
+    if (!confirm("해당 프린트를 완전히 삭제하시겠습니까?")) return;
     try {
       await supabase.from('student_answer').delete().eq('exam_assignment_id', assignmentId);
       await supabase.from('exam_assignment').delete().eq('assignment_id', assignmentId);
       await supabase.from('exam_item').delete().eq('exam_id', examId);
       await supabase.from('exam_master').delete().eq('exam_id', examId);
       
+      toast.success("🗑️ 프린트가 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
-      else fetchGlobalListForTab('INCORRECT', allStudentsList);
-    } catch (e) { alert("삭제 실패"); }
+      else {
+        if (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') fetchGlobalListForTab(activeTab, allStudentsList);
+      }
+    } catch (e) { toast.error("삭제 실패"); }
   };
 
+  // 🌟 [원상 복구] 정상 작동하던 오리지널 페이지 렌더링 호출
   const handlePrintItem = async (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => {
     e.stopPropagation();
     
+    let qIds: any[] = [];
+    if (targetQuestions) {
+        if (typeof targetQuestions === 'string') {
+            try { qIds = JSON.parse(targetQuestions); } catch(err){}
+        } else if (Array.isArray(targetQuestions)) {
+            qIds = targetQuestions;
+        }
+    }
+    
     if (type === 'hw') {
-      if (!targetQuestions || targetQuestions.length === 0) { alert('출력할 문항이 없습니다.'); return; }
+      if (qIds.length === 0) { toast.warning('출력할 문항이 없습니다.'); return; }
       try {
         setIsLoading(true);
-        const tqIds = targetQuestions.map(id => Number(id)).filter(id => !isNaN(id));
+        const tqIds = qIds.map(id => Number(id)).filter(id => !isNaN(id));
         const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', tqIds);
         if (error) throw error;
 
         const tqMap = new Map();
         tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
-        const qIds = tqIds.map(id => tqMap.get(id)).filter(Boolean);
+        const finalQIds = tqIds.map(id => tqMap.get(id)).filter(Boolean);
 
-        if (qIds.length === 0) { alert('해당 과제에 연결된 실제 문항 데이터를 찾을 수 없습니다.'); return; }
+        if (finalQIds.length === 0) { toast.error('해당 과제에 연결된 실제 문항 데이터를 찾을 수 없습니다.'); return; }
 
         purgeOldSession();
         
-        sessionStorage.setItem('examQuestions', JSON.stringify(qIds));
+        sessionStorage.setItem('examQuestions', JSON.stringify(finalQIds));
         sessionStorage.setItem('examTitle', title || '교재 과제');
         sessionStorage.setItem('examSubTitle', subTitle || '과제 프린트');
         sessionStorage.setItem('examType', '과제프린트');
@@ -372,18 +405,19 @@ export function useLearningActions({
         window.open('/exam/viewer', '_blank');
       } catch (err: any) {
         console.error(err);
-        alert('프린트 문항 정보를 불러오는 중 오류가 발생했습니다.');
+        toast.error('프린트 문항 정보를 불러오는 중 오류가 발생했습니다.');
       } finally { setIsLoading(false); }
       
     } else {
-      if (!masterId) { alert('시험지 정보를 찾을 수 없습니다.'); return; }
+      if (!masterId) { toast.error('시험지 정보를 찾을 수 없습니다.'); return; }
       window.open(`/exam/viewer?exam_id=${masterId}`, '_blank');
     }
   };
 
+  // 🌟 [원상 복구] 교재 과제 편집 시 /homework/step2 로 정상 이동
   const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => {
     e.stopPropagation();
-    if (!targetQuestions || targetQuestions.length === 0) { alert('수정할 문항이 없습니다.'); return; }
+    if (!targetQuestions || targetQuestions.length === 0) { toast.warning('수정할 문항이 없습니다.'); return; }
 
     try {
       setIsLoading(true);
@@ -395,7 +429,7 @@ export function useLearningActions({
       tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
       const qIds = tqIds.map(id => tqMap.get(id)).filter(Boolean);
 
-      if (qIds.length === 0) { alert('연결된 문제 데이터를 찾을 수 없습니다.'); return; }
+      if (qIds.length === 0) { toast.error('연결된 문제 데이터를 찾을 수 없습니다.'); return; }
 
       const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
       const finalTitle = `${safeStudentName}${title || '과제 문항 수정'}`;
@@ -413,17 +447,18 @@ export function useLearningActions({
       sessionStorage.setItem('editStudentId', String(studentId));
       sessionStorage.setItem('editClassId', String(classId));
 
-      window.location.href = '/exam/step2?source=edit';
+      window.location.href = '/homework/step2';
 
     } catch (err: any) {
       console.error(err);
-      alert('문항 정보를 불러오는 중 오류가 발생했습니다.');
+      toast.error('문항 정보를 불러오는 중 오류가 발생했습니다.');
     } finally { setIsLoading(false); }
   };
 
+  // 🌟 [원상 복구] 시험지 편집 시 /exam/step2 로 정상 이동
   const handleEditExamToStep2 = async (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => {
     e.stopPropagation();
-    if (!masterId || !assignId) return alert('시험지 정보를 찾을 수 없습니다.');
+    if (!masterId || !assignId) return toast.error('시험지 정보를 찾을 수 없습니다.');
     
     try {
       setIsLoading(true);
@@ -431,7 +466,7 @@ export function useLearningActions({
       if (error) throw error;
       
       const qIds = items?.map(i => String(i.question_id)) || [];
-      if (qIds.length === 0) return alert('연결된 문제 데이터를 찾을 수 없습니다.');
+      if (qIds.length === 0) return toast.error('연결된 문제 데이터를 찾을 수 없습니다.');
 
       const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
       const finalTitle = title.startsWith('[') ? title : `${safeStudentName}${title || '문제지 수정'}`;
@@ -456,84 +491,23 @@ export function useLearningActions({
       sessionStorage.setItem('editStudentId', String(studentId));
       sessionStorage.setItem('editClassId', String(classId));
 
-      window.location.href = '/exam/step2?source=edit';
+      window.location.href = '/exam/step2';
     } catch (err: any) {
       console.error(err);
-      alert('문항 정보를 불러오는 중 오류가 발생했습니다.');
+      toast.error('문항 정보를 불러오는 중 오류가 발생했습니다.');
     } finally {
       setIsLoading(false);
     }
   };
 
   const handleGenerateIncorrectPrint = async () => {
-    if (selectedBlocks.length === 0) { alert('오답 프린트로 묶을 블록을 하나 이상 선택해주세요.'); return; }
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
-
-    setIsGeneratingPrint(true);
-    try {
-      let targetQIds: number[] = [];
-      for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_')) {
-          const assignId = block.split('_').pop();
-          const { data: ans } = await supabase.from('student_answer').select('question_id, grading_code').eq('exam_assignment_id', assignId).in('grading_code', ['X', 'TX', '☆', 'B']);
-          ans?.forEach(a => { if(a.question_id) targetQIds.push(a.question_id); });
-        }
-        else if (block.startsWith('hw_')) {
-          const hwId = block.split('_')[1];
-          const { data: hwAns } = await supabase.from('student_homework_answer').select('tq_id, grading_code').eq('homework_id', hwId).eq('student_id', currentView.studentId).in('grading_code', ['X', 'TX', '☆', 'B']);
-          if (hwAns && hwAns.length > 0) {
-            const tqIds = hwAns.map(a => a.tq_id);
-            const { data: tqs } = await supabase.from('textbook_question').select('question_id').in('tq_id', tqIds);
-            tqs?.forEach(t => { if(t.question_id) targetQIds.push(t.question_id); });
-          }
-        }
-      }
-
-      targetQIds = [...new Set(targetQIds)];
-      if (targetQIds.length > 0) {
-        const { data: records } = await supabase.from('student_incorrect_record').select('question_id').eq('student_id', currentView.studentId).is('resolved_at', null).in('question_id', targetQIds);
-        targetQIds = records?.map(r => r.question_id) || [];
-      }
-
-      if (targetQIds.length === 0) {
-        alert('선택하신 항목들에는 아직 미해결 상태인 오답 문항(X, TX, 별, 빈칸)이 존재하지 않습니다.\n(모두 해결되었거나 원래 틀린 문제가 없습니다.)');
-        setIsGeneratingPrint(false);
-        return;
-      }
-
-      const todayStr = new Date().toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
-      const title = `[${currentView.studentName}] 통합 오답 프린트 (${todayStr})`;
-      const { data: inst } = await supabase.from('class').select('instructor_id').eq('class_id', currentView.classId).single();
-      const instId = inst?.instructor_id || localStorage.getItem('logica_instructor_id');
-
-      const { data: exMaster, error: exErr } = await supabase.from('exam_master').insert({
-        title, exam_type: '오답프린트', instructor_id: instId, total_questions: targetQIds.length, tenant_id: myTenantId
-      }).select().single();
-
-      if (exErr) throw exErr;
-
-      const items = targetQIds.map((qid, idx) => ({
-        exam_id: exMaster.exam_id, question_id: qid, sort_order: idx + 1, assigned_score: Math.round(100 / targetQIds.length)
-      }));
-      await supabase.from('exam_item').insert(items);
-      await supabase.from('exam_assignment').insert({
-        exam_id: exMaster.exam_id, student_id: currentView.studentId, class_id: currentView.classId, status: '미응시'
-      });
-
-      alert(`🎉 오답 프린트가 완성되었습니다! (총 ${targetQIds.length}문항)\n\n오답 관리 탭이나 문제지 보관함에서 확인 가능합니다.`);
-      setSelectedBlocks([]);
-      setDateFilter('ALL');
-    } catch (e: any) {
-      console.error(e);
-      alert('오답 프린트 생성 중 오류가 발생했습니다: ' + e.message);
-    } finally { setIsGeneratingPrint(false); }
+    // 내부 StudentTimeline의 마법사 로직으로 이전됨.
   };
 
   return {
     handleForceComplete, handleDeleteExam, handleEditHomeworkTitle,
     handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2,
-    handleEditExamToStep2, handleExtractCommonHomework, // 🌟 모듈 연동
+    handleEditExamToStep2, handleExtractCommonHomework,
     handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleBulkCompleteStudent,
     handleBulkDeleteStudent, handleGenerateIncorrectPrint
   };

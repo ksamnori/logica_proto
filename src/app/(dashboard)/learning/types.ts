@@ -1,5 +1,4 @@
 // src/app/(dashboard)/learning/types.ts
-
 export interface StudentInfo {
   id: string;
   name: string;
@@ -23,4 +22,5 @@ export interface ViewState {
   studentName: string;
 }
 
-export type TabType = 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT';
+// 🌟 'SIMILAR' 탭 추가
+export type TabType = 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR';

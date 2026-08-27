@@ -11,7 +11,7 @@ interface StudentDashboardProps {
   handleViewChange: (view: any) => void;
   handleStudentClick: (studentId: string, studentName: string, classId: string, className: string) => void;
   groupedClasses: Record<string, any[]>;
-  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; }>;
+  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; }>;
   LEVEL_ORDER: string[];
 }
 
@@ -19,32 +19,28 @@ export default function StudentDashboard({
   handleStudentClick, groupedClasses, studentStatsMap, LEVEL_ORDER, currentView
 }: StudentDashboardProps) {
 
-  // 🌟 미해결 항목이 있는 학생들만 추출하여 '해야 할 일(To-Do)' 액션 리스트 생성
   const actionList = useMemo(() => {
     const list: any[] = [];
     let totalExam = 0;
     let totalHw = 0;
     let totalPrint = 0;
+    let totalSimilar = 0;
     
-    // 💡 [핵심 버그 수정] 다중 수강생 중복 방지 (Key 중복 및 카운트 뻥튀기 차단)
     const processedStudentIds = new Set<string>();
 
     LEVEL_ORDER.forEach(lvl => {
       const classes = groupedClasses[lvl] || [];
       classes.forEach(cls => {
-        // 현재 뷰가 특정 반을 선택한 상태라면 그 반 학생들만 필터링
         if (currentView.type === 'CLASS' && currentView.classId !== cls.class_id) return;
 
         cls.students.forEach((stu: any) => {
-          // 이미 리스트에 추가된 다중 수강생이라면 무시하고 넘어감
           if (processedStudentIds.has(stu.id)) return;
 
-          // page.tsx에서 내려주는 studentStatsMap을 활용해 실시간 미해결 건수 스캔
-          const stats = studentStatsMap[`${stu.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0 };
-          const totalPending = stats.examQ + stats.hwQ + stats.printQ;
+          const stats = studentStatsMap[`${stu.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0 };
+          const totalPending = stats.examQ + stats.hwQ + stats.printQ + stats.similarQ;
           
           if (totalPending > 0) {
-            processedStudentIds.add(stu.id); // 처리 명단에 등록
+            processedStudentIds.add(stu.id); 
             list.push({
               id: stu.id,
               name: stu.name,
@@ -56,28 +52,27 @@ export default function StudentDashboard({
             totalExam += stats.examQ;
             totalHw += stats.hwQ;
             totalPrint += stats.printQ;
+            totalSimilar += stats.similarQ;
           }
         });
       });
     });
 
-    // 🚨 미해결 항목 총합이 많은 학생 순으로 내림차순 정렬 (가장 급한 학생이 맨 위로)
     list.sort((a, b) => {
-      const aTotal = a.stats.examQ + a.stats.hwQ + a.stats.printQ;
-      const bTotal = b.stats.examQ + b.stats.hwQ + b.stats.printQ;
+      const aTotal = a.stats.examQ + a.stats.hwQ + a.stats.printQ + a.stats.similarQ;
+      const bTotal = b.stats.examQ + b.stats.hwQ + b.stats.printQ + b.stats.similarQ;
       if (bTotal !== aTotal) return bTotal - aTotal;
       return a.name.localeCompare(b.name);
     });
 
-    return { list, totalExam, totalHw, totalPrint };
+    return { list, totalExam, totalHw, totalPrint, totalSimilar };
   }, [groupedClasses, studentStatsMap, LEVEL_ORDER, currentView]);
 
-  const { list, totalExam, totalHw, totalPrint } = actionList;
+  const { list, totalExam, totalHw, totalPrint, totalSimilar } = actionList;
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50">
       
-      {/* 🚀 상단 요약 현황판 헤더 */}
       <div className="px-8 py-6 border-b border-slate-200 bg-white flex justify-between items-end shrink-0 shadow-sm z-10">
         <div>
           <h2 className="text-2xl font-black text-rose-600 tracking-tight flex items-center gap-2">
@@ -93,23 +88,27 @@ export default function StudentDashboard({
           </p>
         </div>
         
-        <div className="flex gap-4">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-5 py-3 flex flex-col items-center min-w-[110px] shadow-sm">
-            <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 미해결 시험</span>
+        {/* 🌟 4분류 요약 박스 */}
+        <div className="flex gap-4 overflow-x-auto pb-1">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+            <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 시험</span>
             <span className="text-2xl font-black text-blue-700">{totalExam}<span className="text-sm ml-0.5">건</span></span>
           </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 flex flex-col items-center min-w-[110px] shadow-sm">
-            <span className="text-[11px] font-extrabold text-amber-600 mb-1">📝 미해결 과제</span>
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+            <span className="text-[11px] font-extrabold text-amber-600 mb-1">📝 과제</span>
             <span className="text-2xl font-black text-amber-700">{totalHw}<span className="text-sm ml-0.5">건</span></span>
           </div>
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-5 py-3 flex flex-col items-center min-w-[110px] shadow-sm">
-            <span className="text-[11px] font-extrabold text-emerald-600 mb-1">❌ 오답 미해결</span>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+            <span className="text-[11px] font-extrabold text-emerald-600 mb-1">❌ 오답</span>
             <span className="text-2xl font-black text-emerald-700">{totalPrint}<span className="text-sm ml-0.5">건</span></span>
+          </div>
+          <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+            <span className="text-[11px] font-extrabold text-violet-600 mb-1">🔄 유사</span>
+            <span className="text-2xl font-black text-violet-700">{totalSimilar}<span className="text-sm ml-0.5">건</span></span>
           </div>
         </div>
       </div>
 
-      {/* 🚀 메인 미해결 리스트 테이블 */}
       <div className="flex-1 overflow-y-auto custom-scroll p-6 sm:p-8">
         {list.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-slate-400 font-bold bg-white border border-slate-200 rounded-2xl shadow-sm">
@@ -125,10 +124,11 @@ export default function StudentDashboard({
                   <th className="py-3.5 px-6 w-16 text-center">순위</th>
                   <th className="py-3.5 px-6 w-48">수강반</th>
                   <th className="py-3.5 px-6 w-32">학생명</th>
-                  <th className="py-3.5 px-6 text-center text-blue-700">시험</th>
-                  <th className="py-3.5 px-6 text-center text-amber-700">과제</th>
-                  <th className="py-3.5 px-6 text-center text-emerald-700">오답 프린트</th>
-                  <th className="py-3.5 px-6 w-36 text-center">관리 액션</th>
+                  <th className="py-3.5 px-3 text-center text-blue-700">시험</th>
+                  <th className="py-3.5 px-3 text-center text-amber-700">과제</th>
+                  <th className="py-3.5 px-3 text-center text-emerald-700">오답</th>
+                  <th className="py-3.5 px-3 text-center text-violet-700">유사</th>
+                  <th className="py-3.5 px-6 w-32 text-center">관리 액션</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -145,25 +145,31 @@ export default function StudentDashboard({
                     <td className="py-3.5 px-6 font-black text-slate-800 text-[14px]">
                       {stu.name}
                     </td>
-                    <td className="py-3.5 px-6 text-center">
+                    <td className="py-3.5 px-3 text-center">
                       {stu.stats.examQ > 0 ? (
                         <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-blue-200">{stu.stats.examQ}</span>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
-                    <td className="py-3.5 px-6 text-center">
+                    <td className="py-3.5 px-3 text-center">
                       {stu.stats.hwQ > 0 ? (
                         <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-amber-200">{stu.stats.hwQ}</span>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
-                    <td className="py-3.5 px-6 text-center">
+                    <td className="py-3.5 px-3 text-center">
                       {stu.stats.printQ > 0 ? (
                         <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-emerald-200">{stu.stats.printQ}</span>
+                      ) : <span className="text-slate-300 font-medium text-xs">-</span>}
+                    </td>
+                    {/* 🌟 4분류: 유사 문제 셀 추가 */}
+                    <td className="py-3.5 px-3 text-center">
+                      {stu.stats.similarQ > 0 ? (
+                        <span className="inline-flex items-center justify-center bg-violet-100 text-violet-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-violet-200">{stu.stats.similarQ}</span>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     <td className="py-3.5 px-6 text-center">
                       <button 
                         onClick={() => handleStudentClick(stu.id, stu.name, stu.classId, stu.className)}
-                        className="bg-rose-500 hover:bg-rose-600 text-white px-4 py-2.5 rounded-lg text-[11px] font-black transition-colors shadow-sm w-full flex items-center justify-center gap-1.5 opacity-90 group-hover:opacity-100 group-hover:-translate-y-0.5"
+                        className="bg-rose-500 hover:bg-rose-600 text-white px-3 py-2 rounded-lg text-[11px] font-black transition-colors shadow-sm w-full flex items-center justify-center gap-1.5 opacity-90 group-hover:opacity-100 group-hover:-translate-y-0.5"
                       >
                         정리하기 ➔
                       </button>
