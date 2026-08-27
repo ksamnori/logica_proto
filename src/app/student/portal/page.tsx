@@ -271,7 +271,29 @@ export default function StudentPortal() {
         const hwResMap = new Map();
         hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r));
 
-        // 🌟 수정: 오답 기록함에서 억지로 문제를 긁어와 유령 시험지를 생성하던 코드를 완전히 삭제했습니다!
+        let incorrectQCount = 0;
+        const { data: incorrectRecords } = await supabaseClient.from('student_incorrect_record')
+            .select('record_id, tq_id, question_id')
+            .eq('student_id', sid).eq('source_type', '과제오답').is('resolved_at', null);
+
+        if (incorrectRecords && incorrectRecords.length > 0) {
+            const qIds = [...new Set(incorrectRecords.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
+            const tqIds = [...new Set(incorrectRecords.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))];
+
+            const [{ data: qDbRows }, { data: tqRows }] = await Promise.all([
+                qIds.length > 0 ? supabaseClient.from('question_db').select('question_id').in('question_id', qIds) : Promise.resolve({ data: [] }),
+                tqIds.length > 0 ? supabaseClient.from('textbook_question').select('tq_id').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
+            ]);
+
+            const validQIds = new Set((qDbRows || []).map((q:any) => q.question_id));
+            const validTqIds = new Set((tqRows || []).map((tq:any) => tq.tq_id));
+
+            incorrectQCount = incorrectRecords.filter((r:any) => {
+                if (r.question_id && validQIds.has(r.question_id)) return true;
+                if (r.tq_id && validTqIds.has(r.tq_id)) return true;
+                return false;
+            }).length;
+        }
 
         classes.forEach(c => {
             const cid = nameToId[c];
@@ -324,7 +346,6 @@ export default function StudentPortal() {
                 }
             });
 
-            // 🌟 수정: 배부된 '오답유사' 계열의 시험지가 존재할 때만 hasSimilar를 활성화합니다.
             const hasSimilar = similarExamPending > 0;
             const hasRegular = regularExamPending > 0;
 
@@ -546,6 +567,22 @@ export default function StudentPortal() {
             await channelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: trackedSeatRef.current, action: 'depart', data: { studentId: studentInfo.id, name: studentInfo.name } } });
             await channelRef.current.untrack();
         }
+
+        // 🌟 전역 처리: 클리닉이 최종 종료될 때 열어보지 않은 과제까지 모조리 '미완료(Overdue)'로 강제 이관
+        const allPendingHwIds: number[] = [];
+        Object.values(hwProgress).forEach((prog: any) => {
+            if (prog.hwIds && prog.hwIds.length > 0) {
+                allPendingHwIds.push(...prog.hwIds);
+            }
+        });
+        
+        if (allPendingHwIds.length > 0) {
+            const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+            await supabaseClient.from('homework_assignment')
+                .update({ due_date: yesterday })
+                .in('homework_id', allPendingHwIds);
+        }
+
         localStorage.removeItem('logica_student_id');
         localStorage.removeItem('logica_student_name');
         localStorage.removeItem('logica_student_phone');
@@ -647,7 +684,6 @@ export default function StudentPortal() {
         router.push(`/clinic/viewer?${params.toString()}`);
     };
 
-    // 🌟 반응형 12인치 와이드 사이즈 업스케일링 적용
     const renderCard = (typeKey: string, round: number, className: string) => {
         const cState = blockStates[className] || {};
         const isDone = cState[typeKey] === '제출완료' || cState[typeKey] === '채점완료';
@@ -679,36 +715,36 @@ export default function StudentPortal() {
         else theme = { label: '🖨️ 오답', desc: '틀린 문제들만 모아 다시 풉니다.', bg: 'bg-gradient-to-br from-emerald-700 to-emerald-600', badge: 'bg-emerald-400 text-emerald-900', btnText: 'text-emerald-900', textColor: 'text-emerald-100', accent: 'text-emerald-200' };
 
         return (
-            <div key={`${className}-${typeKey}`} className={`w-full ${theme.bg} rounded-[2rem] p-8 md:p-12 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[280px] md:min-h-[360px] justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
+            <div key={`${className}-${typeKey}`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[220px] md:min-h-[240px] justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
                 {isLocked && <div className="absolute inset-0 bg-slate-900/10 z-0"></div>}
                 
-                {isDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText} text-sm font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ {scoreLabel}</span>}
+                {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-xs md:text-sm font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ {scoreLabel}</span>}
                 
                 <div className="relative z-10">
-                    <div className="flex justify-between items-start mb-4 md:mb-6">
-                        <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
+                    <div className="flex justify-between items-start mb-3">
+                        <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
                             {isLocked ? '🔒 잠김' : theme.label}
                         </span>
-                        {!isDone && qCount > 0 && <span className={`text-base md:text-lg font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3 py-1 md:py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
+                        {!isDone && qCount > 0 && <span className={`text-xs md:text-sm font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-2.5 py-1 rounded-md`}>남은 문제: {qCount}</span>}
                     </div>
-                    <h3 className={`text-3xl md:text-4xl lg:text-5xl font-black mb-3 leading-tight ${isLocked ? 'text-white/90' : ''}`}>
+                    <h3 className={`text-xl md:text-2xl font-black mb-1 leading-tight ${isLocked ? 'text-white/90' : ''}`}>
                         {theme.label.replace(/[^가-힣 ]/g, '').trim()} 클리닉
                     </h3>
-                    {!isDone && titleName && <p className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70' : theme.accent} mb-2 truncate`} title={titleName}>{titleName}</p>}
-                    <p className={`text-base md:text-lg lg:text-xl ${isLocked ? 'text-white/70' : theme.textColor} font-medium mt-2 line-clamp-2 leading-snug`}>
+                    {!isDone && titleName && <p className={`text-[11px] md:text-xs font-bold ${isLocked ? 'text-white/70' : theme.accent} mb-1.5 truncate`} title={titleName}>{titleName}</p>}
+                    <p className={`text-sm font-medium mt-1 line-clamp-2 leading-snug ${isLocked ? 'text-white/70' : theme.textColor}`}>
                         {isLocked ? '첫 번째 학습을 먼저 완료해주세요.' : theme.desc}
                     </p>
                 </div>
                 
-                <div className="flex items-center justify-end relative z-10 mt-6 md:mt-8">
+                <div className="flex items-center justify-end relative z-10 mt-3 md:mt-4">
                     {isDone ? 
-                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-8 md:px-10 py-4 md:py-5 text-lg md:text-2xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>완료됨</button> 
+                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>완료됨</button> 
                     : isLocked ?
-                        <button disabled className="bg-black/20 text-white/80 font-black px-8 md:px-10 py-4 md:py-5 text-lg md:text-2xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2">
+                        <button disabled className="bg-black/20 text-white/80 font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-sm cursor-not-allowed flex items-center gap-2">
                             <span>🔒</span> 잠김
                         </button>
                     : 
-                        <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-8 md:px-10 py-4 md:py-5 text-lg md:text-2xl rounded-2xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>응시하기</button>
+                        <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>응시하기</button>
                     }
                 </div>
             </div>
@@ -737,34 +773,34 @@ export default function StudentPortal() {
         };
 
         return (
-            <div key={`${className}-overdue`} className={`w-full ${theme.bg} rounded-[2rem] p-8 md:p-12 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[280px] md:min-h-[360px] justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
+            <div key={`${className}-overdue`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[220px] md:min-h-[240px] justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
                 {isLocked && <div className="absolute inset-0 bg-slate-900/10 z-0"></div>}
                 
-                {isDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText} text-sm font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
+                {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-xs md:text-sm font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
                 
                 <div className="relative z-10">
-                    <div className="flex justify-between items-start mb-4 md:mb-6">
-                        <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
+                    <div className="flex justify-between items-start mb-3">
+                        <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
                             {isLocked ? '🔒 잠김' : theme.label}
                         </span>
-                        {!isDone && qCount > 0 && <span className={`text-base md:text-lg font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3 py-1 md:py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
+                        {!isDone && qCount > 0 && <span className={`text-xs md:text-sm font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-2.5 py-1 rounded-md`}>남은 문제: {qCount}</span>}
                     </div>
-                    <h3 className={`text-3xl md:text-4xl lg:text-5xl font-black mb-3 leading-tight ${isLocked ? 'text-white/90' : ''}`}>미완료 과제 클리닉</h3>
-                    {!isDone && titleName && <p className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70' : theme.accent} mb-2 truncate`} title={titleName}>{titleName}</p>}
-                    <p className={`text-base md:text-lg lg:text-xl ${isLocked ? 'text-white/70' : theme.textColor} font-medium mt-2 line-clamp-2 leading-snug`}>
+                    <h3 className={`text-xl md:text-2xl font-black mb-1 leading-tight ${isLocked ? 'text-white/90' : ''}`}>미완료 과제 클리닉</h3>
+                    {!isDone && titleName && <p className={`text-[11px] md:text-xs font-bold ${isLocked ? 'text-white/70' : theme.accent} mb-1.5 truncate`} title={titleName}>{titleName}</p>}
+                    <p className={`text-sm font-medium mt-1 line-clamp-2 leading-snug ${isLocked ? 'text-white/70' : theme.textColor}`}>
                         {isLocked ? '첫 번째 학습을 먼저 완료해주세요.' : theme.desc}
                     </p>
                 </div>
                 
-                <div className="flex items-center justify-end relative z-10 mt-6 md:mt-8">
+                <div className="flex items-center justify-end relative z-10 mt-3 md:mt-4">
                     {isDone ?
-                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-8 md:px-10 py-4 md:py-5 text-lg md:text-2xl rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
+                        <button disabled className={`bg-white/70 ${theme.btnText} font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
                     : isLocked ?
-                        <button disabled className="bg-black/20 text-white/80 font-black px-8 md:px-10 py-4 md:py-5 text-lg md:text-2xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2">
+                        <button disabled className="bg-black/20 text-white/80 font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-sm cursor-not-allowed flex items-center gap-2">
                             <span>🔒</span> 잠김
                         </button>
                     :
-                        <button onClick={() => startClinicBlock(className, 2, 'overdue')} className={`bg-white ${theme.btnText} font-black px-8 md:px-10 py-4 md:py-5 text-lg md:text-2xl rounded-2xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>학습하기</button>
+                        <button onClick={() => startClinicBlock(className, 2, 'overdue')} className={`bg-white ${theme.btnText} font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>학습하기</button>
                     }
                 </div>
             </div>
@@ -805,58 +841,58 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
-            <nav className="bg-white px-6 md:px-8 py-3 md:py-4 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
-                <div className="flex items-center gap-8">
+            <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+                <div className="flex items-center gap-6">
                     <div className="flex items-center">
-                        <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-8 md:h-12 object-contain" />
-                        <span className="ml-2 text-blue-500 font-bold text-sm md:text-lg">Student</span>
+                        <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-8 object-contain" />
+                        <span className="ml-2 text-blue-500 font-bold text-sm">Student</span>
                     </div>
                 </div>
-                <div className="flex items-center gap-4">
+                <div className="flex items-center gap-3 md:gap-4">
                     {isSameDay && (
-                        <div className={`flex items-center gap-1.5 border rounded-full px-4 md:px-5 py-2 md:py-2.5 shadow-sm transition-colors ${isUrgent ? 'bg-rose-100 border-rose-300 animate-pulse' : 'bg-indigo-50 border-indigo-200'}`}>
-                            <span className="text-indigo-500 text-sm md:text-lg">🕐</span>
-                            <span className="text-sm md:text-lg font-black font-lexend text-indigo-600">{isMounted && remainingMs <= 0 ? '종료' : `${m}:${String(s).padStart(2, '0')}`}</span>
+                        <div className={`flex items-center gap-1.5 border rounded-full px-3 py-1.5 shadow-sm transition-colors ${isUrgent ? 'bg-rose-100 border-rose-300 animate-pulse' : 'bg-indigo-50 border-indigo-200'}`}>
+                            <span className="text-indigo-500 text-sm">🕐</span>
+                            <span className="text-sm font-black font-lexend text-indigo-600">{isMounted && remainingMs <= 0 ? '종료' : `${m}:${String(s).padStart(2, '0')}`}</span>
                         </div>
                     )}
                     {isSameDay && (
-                        <button onClick={togglePortalAway} disabled={isPortalCalling || awayCooldown.isActive} className={`text-sm md:text-base font-bold rounded-full px-4 md:px-5 py-2 md:py-2.5 border shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isPortalAway ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                        <button onClick={togglePortalAway} disabled={isPortalCalling || awayCooldown.isActive} className={`text-xs font-bold rounded-full px-3.5 py-1.5 border shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isPortalAway ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
                             {awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : isPortalAway ? '↩️ 자리 복귀' : '🚶 자리비움'}
                         </button>
                     )}
                     {isSameDay && (
-                        <button onClick={togglePortalCall} disabled={isPortalAway || callCooldown.isActive} className={`text-sm md:text-base font-bold rounded-full px-4 md:px-5 py-2 md:py-2.5 border shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isPortalCalling ? 'bg-rose-600 border-rose-600 text-white animate-pulse' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                        <button onClick={togglePortalCall} disabled={isPortalAway || callCooldown.isActive} className={`text-xs font-bold rounded-full px-3.5 py-1.5 border shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isPortalCalling ? 'bg-rose-600 border-rose-600 text-white animate-pulse' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
                             {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isPortalCalling ? '🚨 호출 취소' : '🙋 조교 호출'}
                         </button>
                     )}
 
-                    <button onClick={toggleFullScreen} className="flex items-center gap-2 bg-slate-100 border border-slate-200 rounded-full px-4 md:px-5 py-2 md:py-2.5 cursor-pointer hover:bg-slate-200 transition-colors shadow-sm hidden sm:flex">
-                        <span className="text-sm md:text-base font-bold text-slate-600">{isFullscreen ? '🗗 기본화면' : '📺 전체화면'}</span>
+                    <button onClick={toggleFullScreen} className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-slate-200 transition-colors shadow-sm hidden sm:flex">
+                        <span className="text-xs font-bold text-slate-600">{isFullscreen ? '🗗 기본화면' : '📺 전체화면'}</span>
                     </button>
 
-                    <button onClick={() => router.push('/student/shop')} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 md:px-5 py-2 md:py-2.5 cursor-pointer hover:bg-amber-100 transition-colors shadow-sm">
-                        <span className="text-amber-500 text-base md:text-lg font-black font-lexend">{mockPoints.toLocaleString()} P</span>
-                        <span className="text-xs md:text-sm font-bold text-amber-700 bg-amber-200 px-2 rounded-full">상점 가기 🛒</span>
+                    <button onClick={() => router.push('/student/shop')} className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-amber-100 transition-colors shadow-sm">
+                        <span className="text-amber-500 text-sm font-black font-lexend">{mockPoints.toLocaleString()} P</span>
+                        <span className="text-[10px] font-bold text-amber-700 bg-amber-200 px-1.5 rounded-full">상점 가기 🛒</span>
                     </button>
-                    <div className="w-px h-8 bg-slate-200 mx-2"></div>
-                    <div className="flex items-center gap-3 md:gap-5">
+                    <div className="w-px h-5 bg-slate-200 mx-1"></div>
+                    <div className="flex items-center gap-3">
                         <div className="text-right">
-                            <p className="text-base md:text-lg font-bold text-slate-800">{studentInfo.name} 학생</p>
-                            <p className="text-xs md:text-sm font-bold text-emerald-500 mt-0.5">{studentInfo.classes.join(', ')}</p>
+                            <p className="text-sm font-bold text-slate-800">{studentInfo.name} 학생</p>
+                            <p className="text-[11px] font-bold text-emerald-500 mt-0.5">{studentInfo.classes.join(', ')}</p>
                         </div>
-                        <div className="w-12 h-12 md:w-14 md:h-14 rounded-full bg-[#002864] text-white flex items-center justify-center text-2xl md:text-3xl shadow-md">👦🏻</div>
+                        <div className="w-10 h-10 rounded-full bg-[#002864] text-white flex items-center justify-center text-xl shadow-md">👦🏻</div>
                         {endRequest.state === 'idle' && (
-                            <button onClick={() => setEndRequestConfirmOpen(true)} className="text-sm md:text-base font-bold text-slate-400 hover:text-rose-500 border border-slate-200 hover:border-rose-300 rounded-full px-4 md:px-5 py-2 md:py-2.5 transition-colors">
+                            <button onClick={() => setEndRequestConfirmOpen(true)} className="text-xs font-bold text-slate-400 hover:text-rose-500 border border-slate-200 hover:border-rose-300 rounded-full px-3 py-1.5 transition-colors">
                                 클리닉 종료 요청
                             </button>
                         )}
                         {endRequest.state === 'pending' && (
-                            <button onClick={endRequest.cancelRequest} className="text-sm md:text-base font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-4 md:px-5 py-2 md:py-2.5 animate-pulse">
+                            <button onClick={endRequest.cancelRequest} className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 animate-pulse">
                                 ⏳ 요청 취소
                             </button>
                         )}
                         {endRequest.state === 'cooldown' && (
-                            <span className="text-sm md:text-base font-bold text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-4 md:px-5 py-2 md:py-2.5">
+                            <span className="text-xs font-bold text-slate-400 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5">
                                 재요청까지 {Math.floor(endRequest.cooldownRemainingMs / 60000)}:{String(Math.floor(endRequest.cooldownRemainingMs / 1000) % 60).padStart(2, '0')}
                             </span>
                         )}
@@ -864,18 +900,18 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
-            <main className="max-w-[1920px] w-full mx-auto py-8 px-8 md:py-10 md:px-12 flex-1 flex flex-col justify-center">
+            <main className="max-w-[1280px] w-full mx-auto py-6 px-6 md:py-8 md:px-8 flex-1">
                 {studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
-                    <section className="mb-4 w-full">
-                        <div className="flex items-center gap-4 mb-6 md:mb-10">
-                            <h2 className="text-4xl lg:text-5xl font-black text-slate-800 flex items-center gap-4">🚀 오늘의 학습 클리닉</h2>
+                    <section className="mb-4">
+                        <div className="flex items-center gap-4 mb-6">
+                            <h2 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
-                                <button key={cls} onClick={() => setSelectedClass(cls)} className={`text-lg md:text-xl font-black px-6 md:px-8 py-3 md:py-4 rounded-full shadow-sm transition-colors inline-flex items-center gap-2 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                <button key={cls} onClick={() => setSelectedClass(cls)} className={`text-sm md:text-base font-black px-5 py-2 rounded-full shadow-sm transition-colors inline-flex items-center gap-1.5 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
                                     <span>🏫</span>{cls}
                                 </button>
                             ))}
                         </div>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 md:gap-10 xl:gap-12 w-full">
+                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}
                             {renderOverdueCard(selectedClass)}
@@ -886,31 +922,31 @@ export default function StudentPortal() {
             </main>
 
             {recheckToast && (
-                <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-base md:text-lg font-bold px-6 py-4 rounded-2xl shadow-xl z-[80]">
+                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-sm font-bold px-5 py-3 rounded-xl shadow-lg z-[80]">
                     {recheckToast}
                 </div>
             )}
 
             {timeUpModal.isOpen && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[80]">
-                    <div className="bg-white rounded-[2rem] shadow-2xl p-16 w-full max-w-lg text-center">
-                        <div className="text-8xl mb-8">{timeUpModal.icon}</div>
-                        <h3 className="text-4xl font-black text-slate-800 mb-6">{timeUpModal.title}</h3>
-                        <p className="text-xl text-slate-500 font-bold mb-10 whitespace-pre-wrap">{timeUpModal.desc}</p>
-                        <button onClick={finalizeAndGoToLogin} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold px-8 py-6 rounded-2xl text-2xl shadow-sm transition-transform hover:scale-105">확인</button>
+                    <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-sm text-center">
+                        <div className="text-7xl mb-4">{timeUpModal.icon}</div>
+                        <h3 className="text-2xl font-black text-slate-800 mb-3">{timeUpModal.title}</h3>
+                        <p className="text-base text-slate-500 font-bold mb-6 whitespace-pre-wrap">{timeUpModal.desc}</p>
+                        <button onClick={finalizeAndGoToLogin} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm">확인</button>
                     </div>
                 </div>
             )}
 
             {endRequestConfirmOpen && (
                 <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[80]">
-                    <div className="bg-white rounded-[2rem] shadow-2xl p-12 w-full max-w-lg text-center">
-                        <div className="text-7xl mb-8">🚪</div>
-                        <h3 className="text-3xl font-extrabold text-slate-800 mb-6">클리닉 종료 요청</h3>
-                        <p className="text-lg text-slate-600 mb-12">클리닉 종료를 요청하시겠습니까?<br/>조교가 승인해야 종료됩니다.</p>
-                        <div className="flex gap-6">
-                            <button onClick={() => setEndRequestConfirmOpen(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-xl py-5 rounded-2xl hover:bg-slate-200 transition-colors">취소</button>
-                            <button onClick={() => { endRequest.requestEnd(); setEndRequestConfirmOpen(false); }} className="flex-1 bg-rose-600 text-white font-bold text-xl py-5 rounded-2xl hover:bg-rose-700 transition-colors shadow-sm hover:scale-105">요청하기</button>
+                    <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm text-center">
+                        <div className="text-5xl mb-4">🚪</div>
+                        <h3 className="text-xl font-extrabold text-slate-800 mb-4">클리닉 종료 요청</h3>
+                        <p className="text-sm text-slate-600 mb-8">클리닉 종료를 요청하시겠습니까?<br/>조교가 승인해야 종료됩니다.</p>
+                        <div className="flex gap-4">
+                            <button onClick={() => setEndRequestConfirmOpen(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-base py-3 rounded-xl hover:bg-slate-200 transition-colors">취소</button>
+                            <button onClick={() => { endRequest.requestEnd(); setEndRequestConfirmOpen(false); }} className="flex-1 bg-rose-600 text-white font-bold text-base py-3 rounded-xl hover:bg-rose-700 transition-colors shadow-sm">요청하기</button>
                         </div>
                     </div>
                 </div>

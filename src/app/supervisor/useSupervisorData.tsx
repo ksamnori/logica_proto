@@ -129,17 +129,13 @@ export function useSupervisorData() {
         return logId;
     }, []);
 
-    // 🌟 [핵심 변경] 고유번호(uid)를 기준으로 개별 삭제가 가능하도록 필터 로직을 대폭 강화했습니다!
     const removeLogsByTypeAndSeat = useCallback((type: string, seat: string, qNum?: any, uid?: string | null) => {
         setLogs(prev => prev.filter(l => {
             const matchSeatAndType = l.data?.seat === seat && l.type === type;
-            if (!matchSeatAndType) return true; // 다르면 무조건 살려둡니다.
-
-            // 💡 특정 문항 번호(qNum)나 고유번호(uid)가 전달되었다면, 정확히 그 녀석만 삭제합니다.
+            if (!matchSeatAndType) return true;
             if (qNum != null && l.data?.qNum !== qNum) return true;
             if (uid != null && l.data?.uid !== uid) return true;
-
-            return false; // 정확히 타겟팅된 로그만 삭제합니다.
+            return false;
         }));
     }, []);
 
@@ -386,7 +382,6 @@ export function useSupervisorData() {
                     Object.keys(st.rechecks).forEach(uid => {
                         if (dbRechecks[uid]) return;
                         delete st.rechecks[uid];
-                        // 🌟 [핵심 변경] 삭제 시 어떤 문항(uid)인지 핀셋 타겟팅하여 알림 삭제
                         removeLogsByTypeAndSeat('recheck', targetSeat, null, uid);
                         isModified = true;
                     });
@@ -463,7 +458,6 @@ export function useSupervisorData() {
                 delete currentStudents[seat]; pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
         } else if (action === 'resolve_recheck') {
-            // 🌟 [핵심 추가] 다른 탭/패드에서 재확인을 완료했을 때, 정확히 그 uid의 알림만 삭제합니다!
             if (currentStudents[seat] && currentStudents[seat].rechecks) {
                 delete currentStudents[seat].rechecks[uid];
             }
