@@ -43,14 +43,8 @@ export function useSupervisorData() {
     const studentsRef = useRef<Record<string, any>>({});
     const channelRef = useRef<any>(null);
 
-    // 💡 좌석 이동(드래그) 시 목적지에 실제 패드가 등록돼 있는지 확인하기 위한 좌석번호 집합.
-    // 등록 안 된 좌석으로 이동시키면 relocated_in을 받아줄 화면이 세상에 없어서 학생이
-    // 그대로 붕 뜬다 — handlePointerUp에서 이 ref로 드롭 직전에 막는다.
     const registeredSeatsRef = useRef<Set<string>>(new Set());
-
     const pendingMovesRef = useRef<Record<string, any>>({});
-    // 💡 좌석 이동을 연달아 실수로 두 번 거는 걸 막기 위한 짧은 디바운스 타임스탬프.
-    // DB에 남길 필요 없이 이 관제 화면(탭) 안에서만 기억하면 충분하다.
     const lastRelocateAtRef = useRef<number>(0);
     const pendingDeletesRef = useRef<Record<string, number>>({});
     const pendingTimeAdjustRef = useRef<Record<string, any>>({});
@@ -135,8 +129,18 @@ export function useSupervisorData() {
         return logId;
     }, []);
 
-    const removeLogsByTypeAndSeat = useCallback((type: string, seat: string, qNum?: number) => {
-        setLogs(prev => prev.filter(l => !(l.data?.seat === seat && l.type === type && (!qNum || l.data?.qNum === qNum))));
+    // 🌟 [핵심 변경] 고유번호(uid)를 기준으로 개별 삭제가 가능하도록 필터 로직을 대폭 강화했습니다!
+    const removeLogsByTypeAndSeat = useCallback((type: string, seat: string, qNum?: any, uid?: string | null) => {
+        setLogs(prev => prev.filter(l => {
+            const matchSeatAndType = l.data?.seat === seat && l.type === type;
+            if (!matchSeatAndType) return true; // 다르면 무조건 살려둡니다.
+
+            // 💡 특정 문항 번호(qNum)나 고유번호(uid)가 전달되었다면, 정확히 그 녀석만 삭제합니다.
+            if (qNum != null && l.data?.qNum !== qNum) return true;
+            if (uid != null && l.data?.uid !== uid) return true;
+
+            return false; // 정확히 타겟팅된 로그만 삭제합니다.
+        }));
     }, []);
 
     const sendToStudent = (seat: string, action: string, extra = {}) => {
@@ -251,7 +255,6 @@ export function useSupervisorData() {
         return () => clearInterval(interval);
     }, [isAuthorized, leftTab, fetchClinicRecords]);
 
-    // 🌟 [핵심 복구 완료!] 실수로 지워졌던 아코디언 토글 함수 원상복구
     const toggleRecordExpand = useCallback((studentId: string) => {
         setExpandedRecords(prev => ({ ...prev, [studentId]: !prev[studentId] }));
     }, []);
@@ -383,7 +386,8 @@ export function useSupervisorData() {
                     Object.keys(st.rechecks).forEach(uid => {
                         if (dbRechecks[uid]) return;
                         delete st.rechecks[uid];
-                        removeLogsByTypeAndSeat('recheck', targetSeat);
+                        // 🌟 [핵심 변경] 삭제 시 어떤 문항(uid)인지 핀셋 타겟팅하여 알림 삭제
+                        removeLogsByTypeAndSeat('recheck', targetSeat, null, uid);
                         isModified = true;
                     });
 
@@ -437,7 +441,7 @@ export function useSupervisorData() {
     };
 
     const handleTaActionFromOtherScreen = (payload: any) => {
-        const { seat, action, qNum, taName, taClientId, mark } = payload;
+        const { seat, action, qNum, taName, taClientId, mark, uid } = payload;
         const currentStudents = { ...studentsRef.current };
 
         if (action === 'force_cancel_call') {
@@ -458,6 +462,12 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat);
                 delete currentStudents[seat]; pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
+        } else if (action === 'resolve_recheck') {
+            // 🌟 [핵심 추가] 다른 탭/패드에서 재확인을 완료했을 때, 정확히 그 uid의 알림만 삭제합니다!
+            if (currentStudents[seat] && currentStudents[seat].rechecks) {
+                delete currentStudents[seat].rechecks[uid];
+            }
+            removeLogsByTypeAndSeat('recheck', seat, null, uid);
         }
         updateStudents(currentStudents);
     };
@@ -465,7 +475,6 @@ export function useSupervisorData() {
     useEffect(() => {
         if (!isAuthorized) return;
         
-        // 🌟 [핵심 보안 패치 유지] 실시간 채널 방 이름에 지점 꼬리표를 붙입니다!
         const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
         const channelName = `${CLINIC_ROOM}_${myTenantId}`;
         
@@ -669,26 +678,12 @@ export function useSupervisorData() {
                     const sName = studentsRef.current[draggedSeat!]?.name || '학생';
 
                     if (studentId && sessionId) {
-                        // 💡 방금 건 이동을 관제 화면이 아직 반영하기 전에(폴링 주기 5초) 또 조작하는
-                        // 실수만 막으면 되는 짧은 디바운스다 — 물리적으로 학생이 이동을 완료하는
-                        // 시간은 쿨다운 길이로 막을 수 있는 게 아니라서(목적지가 계속 비어 보이므로
-                        // 재시도 자체는 계속 통과된다), 폴링 주기에 맞춰 최소한으로 잡는다.
-                        // DB에 남기지 않고 이 관제 화면(탭) 메모리에서만 관리한다.
                         const RELOCATE_DEBOUNCE_MS = 5000;
                         const sinceLastRelocate = Date.now() - lastRelocateAtRef.current;
                         if (sinceLastRelocate < RELOCATE_DEBOUNCE_MS) {
                             const remainingSec = Math.ceil((RELOCATE_DEBOUNCE_MS - sinceLastRelocate) / 1000);
                             alert(`방금 다른 좌석 이동이 있었습니다. ${remainingSec}초 후 다시 시도해주세요.`);
                         } else if (window.confirm(`${sName} 학생을 ${draggedSeat}에서 ${targetSeat}으로 이동하시겠습니까?\n(실제로 그 자리 패드에서 이어받아야 이동이 완료됩니다)`)) {
-                            // 💡 좌석이 이제 패드에 물리적으로 고정돼 있어서, 여기서 seat 컬럼을 바로 덮어써도
-                            // 학생이 실제로 그 패드 앞으로 이동한 게 아니다. 그래서 DB의 seat는 목적지 패드가
-                            // 토큰으로 실제 인계를 완료할 때(loginTransferAction) 확정하고, 여기서는 (1) 원래
-                            // 패드 화면을 로그아웃시키고 (2) 목적지 패드가 자동 로그인할 수 있게 1분짜리
-                            // 1회용 토큰만 발급해 방송한다.
-                            // 💡 student_id로 걸면 예전 날짜에 정상적으로 안 닫힌(ended_at이 null로 남은) 과거
-                            // 세션 행들까지 전부 걸려서, loginTransferAction의 조회가 행 여러 개와 매치돼
-                            // "만료됨"이 아니라 "요청 없음"으로 잘못 보이는 문제가 있었다 — 지금 옮기는 바로
-                            // 그 세션 행(id)에만 정확히 건다.
                             const token = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}_${Math.random()}`;
                             const expiresAt = new Date(Date.now() + 60000).toISOString();
                             lastRelocateAtRef.current = Date.now();
@@ -720,10 +715,6 @@ export function useSupervisorData() {
     const handlePointerDown = (e: React.PointerEvent, seat: string) => {
         if (e.button !== 0 || !activeStudents[seat] || (e.target as HTMLElement).closest('button')) return;
         const st = activeStudents[seat];
-        // 💡 채점 대기(재확인 요청)는 st.status를 안 건드리는 별도 필드(st.rechecks)라서, 원래
-        // 이 가드가 호출/자리비움/제출만 체크하고 채점 대기는 놓치고 있었다 — 그 상태로 이동시키면
-        // 재확인 결과 알림을 받을 화면이 없어져서(포탈은 이동 후 도착지라 이 통지를 못 받았다)
-        // 학생이 채점 결과를 영영 모르고 지나갈 수 있었다. 여기서 같이 막는다.
         const hasPendingRecheck = !!(st.rechecks && Object.keys(st.rechecks).length > 0);
         if (st.type !== 'reserved' && ((st.status && st.status !== 'idle') || hasPendingRecheck)) {
             const statusLabel = hasPendingRecheck ? '채점 대기' : st.status === 'away' ? '자리비움' : st.status === 'call' ? '호출' : st.status === 'hint' ? '힌트 진행' : st.status === 'submitted' ? '제출' : st.status;
@@ -847,8 +838,6 @@ export function useSupervisorData() {
                 if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
                 if (Object.keys(currentStudents[seat]?.calls || {}).length === 0) currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
-                // 💡 일반 호출(포털 호출)은 qNum이 'general' 문자열이라 Number()로 바꾸면 NaN이 되어
-                // 다른 조교 패드 화면에서 이 broadcast를 받아도 키가 안 맞아 호출 표시가 안 지워진다.
                 sendToStudent(seat, 'force_cancel_call', { qNum });
                 recordTaStat('총책임자', '');
                 if (currentStudents[seat]?.sessionId) clearActiveCall(supabaseClient, currentStudents[seat].sessionId, qNum);

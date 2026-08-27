@@ -389,7 +389,6 @@ export default function ClinicViewer() {
 
       if (mapped.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
       
-      // 🌟 오답유사는 실시간 채점을 위해 타이머/일괄제출 모드를 해제합니다.
       setIsTimedRound(false);
       
       setGlobalExamTitle('이번 주 과제오답유사');
@@ -1370,7 +1369,6 @@ export default function ClinicViewer() {
       try { if (e?.pointerId != null) canvas.releasePointerCapture(e.pointerId); } catch (err) {}
       studentDrawings.current[idx] = canvas.toDataURL('image/webp', 0.5); 
       studentAnswers.current[idx] = studentDrawings.current[idx];
-      // 🌟 [추가] 펜으로 답을 그리자마자 즉시 네비게이션 버튼에 점이 찍히도록 렌더링 강제 업데이트
       forceUpdate();
     };
 
@@ -1471,23 +1469,24 @@ export default function ClinicViewer() {
   if (!isStarted) {
     return (
       <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard">
-        <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-lg text-center animate-[fadeIn_0.3s_ease-out]">
-          <div className="font-lexend text-4xl font-black text-[#002864] tracking-tighter mb-4">Logica Clinic</div>
-          <p className="text-sm text-slate-500 font-bold mb-8">{isTimedRound ? '그동안의 노력을 테스트해보세요!' : params.round===3?'이번 회차 전에 끝내지 못한 과제를 마무리해봐요!':'배부된 과제를 풀어봐요!'}</p>
-          <div className="mb-8 bg-slate-50 border border-slate-200 rounded-xl p-5">
-            <p className="text-xs font-bold text-slate-400 mb-1">학생 이름</p><p className="text-2xl font-extrabold text-slate-800">{studentInfo.name}</p>
-            <div className="mt-4"><span className="text-xs font-bold text-rose-500 bg-rose-100 px-3 py-1.5 rounded-full">{pendingQCount}</span></div>
+        <div className="bg-white rounded-[2rem] shadow-2xl p-10 md:p-14 w-full max-w-2xl text-center animate-[fadeIn_0.3s_ease-out]">
+          <div className="font-lexend text-5xl md:text-6xl font-black text-[#002864] tracking-tighter mb-6">Logica Clinic</div>
+          <p className="text-lg md:text-xl text-slate-500 font-bold mb-10">{isTimedRound ? '그동안의 노력을 테스트해보세요!' : params.round===3?'이번 회차 전에 끝내지 못한 과제를 마무리해봐요!':'배부된 과제를 풀어봐요!'}</p>
+          <div className="mb-10 bg-slate-50 border border-slate-200 rounded-2xl p-6 md:p-8">
+            <p className="text-sm md:text-base font-bold text-slate-400 mb-2">학생 이름</p>
+            <p className="text-3xl md:text-4xl font-extrabold text-slate-800">{studentInfo.name}</p>
+            <div className="mt-6"><span className="text-sm md:text-base font-bold text-rose-500 bg-rose-100 px-4 py-2 rounded-full">{pendingQCount}</span></div>
           </div>
-          <button onClick={startClinic} disabled={questions.length === 0} className="w-full bg-[#002864] hover:bg-blue-950 text-white font-bold py-4 rounded-xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+          <button onClick={startClinic} disabled={questions.length === 0} className="w-full bg-[#002864] hover:bg-blue-950 text-white font-bold py-5 md:py-6 text-xl md:text-2xl rounded-2xl shadow-md transition-all disabled:opacity-50 disabled:cursor-not-allowed">
             {questions.length > 0 ? (isTimedRound ? '⏱️ 20분 타이머 시작하기' : '🚀 풀이 시작하기') : '풀 문제가 없습니다!'}
           </button>
 
           {questions.length === 0 && (
-            <div className="flex gap-3 mt-6">
-              <button onClick={() => router.back()} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-3 rounded-xl transition-all">
+            <div className="flex gap-4 mt-8">
+              <button onClick={() => router.back()} className="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold py-4 md:py-5 text-lg md:text-xl rounded-2xl transition-all">
                 이전 화면으로
               </button>
-              <button onClick={leaveAndGoHome} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-3 rounded-xl shadow-md transition-all">
+              <button onClick={leaveAndGoHome} className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold py-4 md:py-5 text-lg md:text-xl rounded-2xl shadow-md transition-all">
                 홈으로 가기
               </button>
             </div>
@@ -1507,86 +1506,86 @@ export default function ClinicViewer() {
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none">
       {isLoggingOut && (
         <div className="fixed inset-0 bg-slate-900/85 z-[9999] flex flex-col items-center justify-center text-white text-center px-8 backdrop-blur-md animate-[fadeIn_0.2s_ease-out]">
-          <span className="text-6xl mb-4 animate-bounce">👋</span>
-          <div className="font-lexend tracking-tight font-bold text-2xl">안전하게 나가는 중입니다...</div>
-          <div className="text-sm mt-3 text-slate-300">잠시 후 자동으로 이동합니다.</div>
+          <span className="text-8xl mb-6 animate-bounce">👋</span>
+          <div className="font-lexend tracking-tight font-bold text-4xl">안전하게 나가는 중입니다...</div>
+          <div className="text-lg mt-4 text-slate-300">잠시 후 자동으로 이동합니다.</div>
         </div>
       )}
 
       {editorLocked && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 text-center max-w-sm">
-            <div className="text-4xl mb-3">🔒</div>
-            <h3 className="text-lg font-extrabold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
-            <p className="text-sm text-slate-500">관리자가 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
+          <div className="bg-white rounded-3xl shadow-2xl p-10 text-center max-w-md">
+            <div className="text-6xl mb-4">🔒</div>
+            <h3 className="text-2xl font-extrabold text-slate-800 mb-3">좌석 배치 수정 중입니다</h3>
+            <p className="text-base text-slate-500">관리자가 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
           </div>
         </div>
       )}
 
-      <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center shrink-0">
-        <div className="flex items-center gap-4">
-          <div className="font-lexend text-2xl font-bold text-[#002864] tracking-tighter">Logica</div>
-          <div className="w-px h-6 bg-slate-300"></div>
-          <h1 className="text-lg font-bold text-slate-800"><span>{studentInfo.name}</span>의 맞춤 오답 클리닉</h1>
+      <header className="bg-white shadow-sm px-8 py-5 flex justify-between items-center shrink-0 z-20">
+        <div className="flex items-center gap-5">
+          <div className="font-lexend text-3xl font-bold text-[#002864] tracking-tighter">Logica</div>
+          <div className="w-px h-8 bg-slate-300"></div>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-800"><span>{studentInfo.name}</span>의 맞춤 오답 클리닉</h1>
         </div>
-        <div className="flex items-center gap-4">
-          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-sm transition-colors ${isClinicUrgent ? 'bg-rose-100 border-rose-300 animate-pulse text-rose-600' : 'bg-indigo-50 border border-indigo-200 text-indigo-600'}`} title="전체 이용 가능 시간">
-            <span className="text-lg">🕐</span><span className="font-lexend font-black">{clinicRemainingStr}</span>
+        <div className="flex items-center gap-5">
+          <div className={`flex items-center gap-2 px-4 py-2 rounded-full shadow-sm transition-colors ${isClinicUrgent ? 'bg-rose-100 border-rose-300 animate-pulse text-rose-600' : 'bg-indigo-50 border border-indigo-200 text-indigo-600'}`} title="전체 이용 가능 시간">
+            <span className="text-2xl">🕐</span><span className="text-lg md:text-xl font-lexend font-black">{clinicRemainingStr}</span>
           </div>
           {isTimedRound && (
-            <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-sm ${roundRemainingSec <= 60 ? 'bg-rose-100 animate-pulse text-rose-600' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>
-              <span className="text-lg">⏱️</span><span className="font-lexend font-black">{String(Math.floor(roundRemainingSec/60)).padStart(2,'0')}:{String(roundRemainingSec%60).padStart(2,'0')}</span>
+            <div className={`flex items-center gap-2 px-4 py-2 rounded-full shadow-sm ${roundRemainingSec <= 60 ? 'bg-rose-100 animate-pulse text-rose-600' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>
+              <span className="text-2xl">⏱️</span><span className="text-lg md:text-xl font-lexend font-black">{String(Math.floor(roundRemainingSec/60)).padStart(2,'0')}:{String(roundRemainingSec%60).padStart(2,'0')}</span>
             </div>
           )}
           <PointBadge points={points} className="bg-yellow-50 border-yellow-200 text-yellow-700" />
           {params.round !== 1 && !awaitingReview && (
             <>
-              <div className="w-px h-4 bg-slate-300"></div>
-              <button onClick={requestLeaveToHome} className="text-sm font-bold text-slate-400 hover:text-slate-600 transition-colors">나가기</button>
+              <div className="w-px h-6 bg-slate-300"></div>
+              <button onClick={requestLeaveToHome} className="text-lg font-bold text-slate-400 hover:text-slate-600 transition-colors">나가기</button>
             </>
           )}
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden p-6 flex justify-center relative">
+      <main className="flex-1 overflow-hidden p-6 md:p-8 flex justify-center relative">
         {emptyState && (
           <div className="absolute inset-0 bg-slate-100 flex flex-col items-center justify-center z-50 animate-[fadeIn_0.3s_ease-out]">
-            <span className="text-6xl mb-4">🎉</span>
-            <h2 className="text-2xl font-extrabold text-slate-700">{emptyState.title}</h2>
-            <p className="text-slate-500 font-medium mt-2">
+            <span className="text-8xl mb-6">🎉</span>
+            <h2 className="text-4xl font-extrabold text-slate-700">{emptyState.title}</h2>
+            <p className="text-xl text-slate-500 font-medium mt-4">
               {emptyState.awaited ? (awaitingReview ? '선생님이 결과를 확인하고 있어요. 잠시만 기다려주세요.' : '확인이 끝났어요! 홈으로 돌아가세요.') : emptyState.desc}
             </p>
-            {isTimedRound && <p className="text-sm font-bold text-[#002864] bg-white border border-slate-200 rounded-full px-4 py-1.5 mt-4 shadow-sm">정답률 {correctSolvedCountRef.current}/{totalQuestionsInRoundRef.current}</p>}
+            {isTimedRound && <p className="text-xl font-bold text-[#002864] bg-white border border-slate-200 rounded-full px-6 py-2 mt-6 shadow-sm">정답률 {correctSolvedCountRef.current}/{totalQuestionsInRoundRef.current}</p>}
             {awaitingReview ? (
-              <div className="mt-6 flex flex-col items-center gap-3">
-                <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
-                <p className="text-xs font-bold text-slate-400">확인이 끝나면 자동으로 넘어가요.</p>
+              <div className="mt-8 flex flex-col items-center gap-4">
+                <div className="w-12 h-12 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+                <p className="text-base font-bold text-slate-400">확인이 끝나면 자동으로 넘어가요.</p>
               </div>
             ) : (
-              <div className="flex gap-3 mt-6">
-                <button onClick={() => router.back()} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-8 py-3 rounded-xl transition-all">이전 화면으로</button>
-                <button onClick={leaveAndGoHome} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-8 py-3 rounded-xl shadow-md transition-all">홈으로 돌아가기</button>
+              <div className="flex gap-4 mt-10">
+                <button onClick={() => router.back()} className="bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold px-10 py-4 text-xl rounded-2xl transition-all">이전 화면으로</button>
+                <button onClick={leaveAndGoHome} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-10 py-4 text-xl rounded-2xl shadow-md transition-all">홈으로 돌아가기</button>
               </div>
             )}
           </div>
         )}
 
         {q && !emptyState && (
-          <div className="w-full max-w-7xl grid grid-cols-10 gap-6 h-full relative">
-            <div className="col-span-6 bg-white rounded-2xl shadow-md flex flex-col overflow-hidden border border-slate-200 relative">
-              <div className="flex items-center gap-2 p-6 border-b border-slate-100 bg-slate-50 shrink-0">
-                <span className="text-3xl font-extrabold text-[#002864] w-14">{String(currentQIndex + 1).padStart(2, '0')}</span>
-                <h2 className="text-sm font-bold text-slate-500 bg-white border border-slate-200 px-3 py-1 rounded-full shadow-sm">원본: {q.source}</h2>
+          <div className="w-full max-w-[1920px] grid grid-cols-10 gap-8 md:gap-10 h-full relative">
+            <div className="col-span-6 bg-white rounded-3xl shadow-lg flex flex-col overflow-hidden border border-slate-200 relative">
+              <div className="flex items-center gap-3 p-8 border-b border-slate-100 bg-slate-50 shrink-0">
+                <span className="text-5xl font-extrabold text-[#002864] w-20">{String(currentQIndex + 1).padStart(2, '0')}</span>
+                <h2 className="text-base font-bold text-slate-500 bg-white border border-slate-200 px-4 py-1.5 rounded-full shadow-sm">원본: {q.source}</h2>
                 {q.bookType && (
-                  <span className={`text-xs font-black px-2.5 py-1 rounded-full border shadow-sm ${BOOK_TYPE_COLORS[q.bookType]?.pill || 'bg-slate-100 text-slate-600 border-slate-200'}`}>{q.bookType}</span>
+                  <span className={`text-sm font-black px-3 py-1.5 rounded-full border shadow-sm ${BOOK_TYPE_COLORS[q.bookType]?.pill || 'bg-slate-100 text-slate-600 border-slate-200'}`}>{q.bookType}</span>
                 )}
                 {isSubjective && curAnsMode === 'pen' && (
-                  <span className="ml-auto shrink-0 bg-[#002864] text-white text-[11px] font-bold px-3 py-1.5 rounded-full shadow-sm">✍️ 여기에 풀이를 쓸 수 있어요</span>
+                  <span className="ml-auto shrink-0 bg-[#002864] text-white text-sm font-bold px-4 py-2 rounded-full shadow-sm">✍️ 여기에 풀이를 쓸 수 있어요</span>
                 )}
               </div>
 
               <div className="flex-1 relative overflow-hidden">
-                <div className={`h-full overflow-y-auto custom-scrollbar p-8 ${!isTimedRound ? 'pb-40' : ''}`}>
+                <div className={`h-full overflow-y-auto custom-scrollbar p-10 md:p-12 ${!isTimedRound ? 'pb-40' : ''}`}>
                   <div className="relative min-h-full">
                     <div className={`transition-opacity ${isSubjective && curAnsMode === 'pen' ? 'opacity-30' : ''}`}>
                       <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} />
@@ -1598,33 +1597,33 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
-              {isCall && <div className="bg-rose-50 border-t border-rose-100 px-5 py-2.5 text-center text-sm font-extrabold text-rose-600 shrink-0">🚨 {currentQIndex + 1}번 문제를 호출했습니다.</div>}
-              {taHintState.current[currentQIndex] && <div className="bg-amber-50 border-t border-amber-100 px-5 py-2 text-center text-xs font-bold text-amber-600 shrink-0">🧑‍🏫 조교에게 힌트를 받았어요. 이어서 풀어 제출해보세요!</div>}
+              {isCall && <div className="bg-rose-50 border-t border-rose-100 px-6 py-4 text-center text-lg font-extrabold text-rose-600 shrink-0">🚨 {currentQIndex + 1}번 문제를 호출했습니다.</div>}
+              {taHintState.current[currentQIndex] && <div className="bg-amber-50 border-t border-amber-100 px-6 py-3 text-center text-base font-bold text-amber-600 shrink-0">🧑‍🏫 조교에게 힌트를 받았어요. 이어서 풀어 제출해보세요!</div>}
 
               {!isTimedRound && (
-                <div className="absolute left-0 right-0 bottom-0 z-30 p-5 bg-blue-50/95 backdrop-blur-sm border-t border-blue-100 rounded-b-2xl shadow-[0_-8px_20px_-6px_rgba(15,23,42,0.18)]">
+                <div className="absolute left-0 right-0 bottom-0 z-30 p-6 bg-blue-50/95 backdrop-blur-sm border-t border-blue-100 rounded-b-3xl shadow-[0_-12px_30px_-10px_rgba(15,23,42,0.18)]">
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
-                    <div className="flex justify-end items-center mb-2">
-                      <button onClick={() => setHintPanelExpanded(!hintPanelExpanded)} className="flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md bg-blue-100 text-blue-600 text-[11px] font-bold shrink-0">
+                    <div className="flex justify-end items-center mb-3">
+                      <button onClick={() => setHintPanelExpanded(!hintPanelExpanded)} className="flex items-center gap-1 pl-3 pr-2 py-1.5 rounded-lg bg-blue-100 text-blue-600 text-sm font-bold shrink-0">
                         {hintPanelExpanded ? '힌트 접기' : '힌트 펼치기'}
-                        <span className={`text-[10px] transition-transform ${hintPanelExpanded ? 'rotate-180' : ''}`}>▲</span>
+                        <span className={`text-xs transition-transform ${hintPanelExpanded ? 'rotate-180' : ''}`}>▲</span>
                       </button>
                     </div>
                   )}
-                  <div className="flex gap-2">
+                  <div className="flex gap-4">
                     {q.hasHint !== false && (
                       <button 
                         onClick={() => setHintModal({ cost: 30 })} 
                         disabled={hintState.current[currentQIndex]?.revealed} 
-                        className={`flex-1 border text-sm font-bold py-3 rounded shadow-sm transition-colors ${hintState.current[currentQIndex]?.revealed ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white border-blue-200 hover:bg-blue-100 text-blue-700'}`}
+                        className={`flex-1 border text-lg py-4 rounded-xl shadow-sm font-bold transition-colors ${hintState.current[currentQIndex]?.revealed ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white border-blue-200 hover:bg-blue-100 text-blue-700'}`}
                       >
                         {hintState.current[currentQIndex]?.revealed ? "💡 힌트 열람 완료" : "💡 힌트 열람하기 (-30P)"}
                       </button>
                     )}
-                    <button onClick={async () => { if (awayCooldown.isActive) return; const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'away'); awayCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { awayCooldown.start(); } const next = !myAwayActive; setMyAwayActive(next); sendAction(next ? 'away' : 'cancel_away'); if (sid) (next ? setAway : clearAway)(supabaseClient, sid); }} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-sm font-bold py-3 px-4 rounded shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 자리비움'}</button>
+                    <button onClick={async () => { if (awayCooldown.isActive) return; const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'away'); awayCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { awayCooldown.start(); } const next = !myAwayActive; setMyAwayActive(next); sendAction(next ? 'away' : 'cancel_away'); if (sid) (next ? setAway : clearAway)(supabaseClient, sid); }} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-lg font-bold py-4 px-6 rounded-xl shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 자리비움'}</button>
                   </div>
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
-                    <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-[260px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                    <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-[400px] opacity-100' : 'max-h-0 opacity-0'}`}>
                       <HintRevealBox revealedText={hintState.current[currentQIndex].hintText} />
                     </div>
                   )}
@@ -1632,29 +1631,29 @@ export default function ClinicViewer() {
               )}
             </div>
 
-            <div className="col-span-4 flex flex-col gap-4 min-h-0 overflow-y-auto custom-scrollbar">
-              <div className="bg-white rounded-2xl shadow-md p-6 border border-slate-200 shrink-0 relative">
+            <div className="col-span-4 flex flex-col gap-6 min-h-0 overflow-y-auto custom-scrollbar">
+              <div className="bg-white rounded-3xl shadow-lg p-8 border border-slate-200 shrink-0 relative">
                 {availableBooks.length > 0 && (
-                  <div className="flex flex-wrap gap-1.5 mb-4 pb-4 border-b border-slate-100">
-                    <button onClick={() => switchBookFilter('all')} className={`text-xs font-black px-2.5 py-1.5 rounded-full border shadow-sm transition-colors ${bookFilter === 'all' ? 'bg-[#002864] border-[#002864] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                  <div className="flex flex-wrap gap-2 mb-6 pb-6 border-b border-slate-100">
+                    <button onClick={() => switchBookFilter('all')} className={`text-sm font-black px-4 py-2 rounded-xl border shadow-sm transition-colors ${bookFilter === 'all' ? 'bg-[#002864] border-[#002864] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
                       전체 <span className="font-normal opacity-80">{questions.length}</span>
                     </button>
                     {availableBooks.map(b => (
-                      <button key={b.bookType} onClick={() => switchBookFilter(b.bookType as string)} className={`text-xs font-black px-2.5 py-1.5 rounded-full border shadow-sm transition-colors ${bookFilter === b.bookType ? `${BOOK_TYPE_COLORS[b.bookType || '']?.pill || 'bg-slate-800 text-white border-slate-800'} ring-2 ring-offset-1 ring-[#002864]/30` : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                      <button key={b.bookType} onClick={() => switchBookFilter(b.bookType as string)} className={`text-sm font-black px-4 py-2 rounded-xl border shadow-sm transition-colors ${bookFilter === b.bookType ? `${BOOK_TYPE_COLORS[b.bookType || '']?.pill || 'bg-slate-800 text-white border-slate-800'} ring-2 ring-offset-1 ring-[#002864]/30` : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
                         {b.bookType} <span className="font-normal opacity-80">{b.count}</span>
                       </button>
                     ))}
                   </div>
                 )}
-                <h3 className="font-bold text-slate-700 mb-4 text-center text-sm">
+                <h3 className="font-bold text-slate-700 mb-5 text-center text-lg">
                   문항 이동{' '}
                   <span className="text-slate-400 font-normal">
                     {bookFilter === 'all' ? `(총 ${questions.length}문항)` : `(${visibleIndices.length}문항 · 전체 ${questions.length}문항 중)`}
                   </span>
                 </h3>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => questionNavScrollRef.current?.scrollBy({ left: -170, behavior: 'smooth' })} className="shrink-0 w-8 h-16 rounded-lg bg-slate-100 text-slate-500 font-bold text-xl flex items-center justify-center hover:bg-slate-200">‹</button>
-                  <div ref={questionNavScrollRef} className="flex flex-nowrap gap-3 overflow-x-auto custom-scrollbar pb-1 scroll-smooth">
+                <div className="flex items-center gap-3">
+                  <button onClick={() => questionNavScrollRef.current?.scrollBy({ left: -200, behavior: 'smooth' })} className="shrink-0 w-12 h-20 rounded-xl bg-slate-100 text-slate-500 font-bold text-3xl flex items-center justify-center hover:bg-slate-200">‹</button>
+                  <div ref={questionNavScrollRef} className="flex flex-nowrap gap-4 overflow-x-auto custom-scrollbar pb-2 scroll-smooth">
                     {visibleIndices.map(i => {
                       const status = qBoxStatus.current[i];
                       const hasAnswer = studentAnswers.current[i] && studentAnswers.current[i] !== '미입력';
@@ -1677,90 +1676,89 @@ export default function ClinicViewer() {
                       } else if (status) {
                         cls = statusPalette[status].light;
                       } else if (hasAnswer) {
-                        // 🌟 [추가] 채점되지는 않았지만 답을 입력한 흔적이 있는 경우 회색으로 채워줌
                         cls = 'bg-slate-200 border-slate-300 text-slate-700';
                       } else {
                         cls = 'border-slate-200 text-slate-500 hover:bg-slate-50';
                       }
 
                       return (
-                        <button key={i} onClick={() => { setCurrentQIndex(i); setTimeout(() => initCanvas(i), 50); forceUpdate(); }} className={`relative w-16 h-16 shrink-0 border-2 rounded-lg font-extrabold text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
+                        <button key={i} onClick={() => { setCurrentQIndex(i); setTimeout(() => initCanvas(i), 50); forceUpdate(); }} className={`relative w-20 h-20 md:w-24 md:h-24 shrink-0 border-[3px] rounded-xl font-black text-3xl md:text-4xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
                           {!isCalled && symbol ? symbol : i + 1}
                           
-                          {/* 🌟 [추가] 답을 입력했다면 우측 상단에 선명한 녹색 점(Dot)을 표시 */}
+                          {/* 🌟 답변 입력 흔적 Dot 사이즈업 */}
                           {!isCalled && !status && hasAnswer && (
-                            <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm border border-white"></span>
+                            <span className="absolute top-2 right-2 w-3 h-3 md:w-4 md:h-4 rounded-full bg-emerald-500 shadow-sm border-2 border-white"></span>
                           )}
 
-                          {!isCalled && symbol && <span className={`absolute -bottom-1 -right-1 rounded px-0.5 text-[9px] font-bold leading-none ${isCurrent ? 'bg-white/90 text-slate-700' : 'bg-white/80 text-slate-500 opacity-80'}`}>{i + 1}</span>}
+                          {!isCalled && symbol && <span className={`absolute -bottom-1 -right-1 rounded px-1.5 py-0.5 text-xs md:text-sm font-bold leading-none ${isCurrent ? 'bg-white/90 text-slate-700' : 'bg-white/80 text-slate-500 opacity-80'}`}>{i + 1}</span>}
                         </button>
                       );
                     })}
                   </div>
-                  <button onClick={() => questionNavScrollRef.current?.scrollBy({ left: 170, behavior: 'smooth' })} className="shrink-0 w-8 h-16 rounded-lg bg-slate-100 text-slate-500 font-bold text-xl flex items-center justify-center hover:bg-slate-200">›</button>
+                  <button onClick={() => questionNavScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })} className="shrink-0 w-12 h-20 rounded-xl bg-slate-100 text-slate-500 font-bold text-3xl flex items-center justify-center hover:bg-slate-200">›</button>
                 </div>
                 {params.round === 1 && (
-                  <button onClick={() => setSubmitConfirmModal(true)} disabled={timeIsUp} className="w-full mt-4 bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow-sm transition-colors text-sm disabled:opacity-40 disabled:cursor-not-allowed">
+                  <button onClick={() => setSubmitConfirmModal(true)} disabled={timeIsUp} className="w-full mt-6 bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 md:py-5 rounded-xl shadow-sm transition-colors text-lg md:text-xl disabled:opacity-40 disabled:cursor-not-allowed">
                     📮 전체 제출하기
                   </button>
                 )}
               </div>
 
-              <div className="bg-white rounded-2xl shadow-md p-4 flex-1 flex flex-col border border-slate-200 relative overflow-hidden">
+              <div className="bg-white rounded-3xl shadow-lg p-6 md:p-8 flex-1 flex flex-col border border-slate-200 relative overflow-hidden">
                 {(isCall || isRecheck) && (
-                  <div className="absolute inset-0 z-20 bg-white/50 flex flex-col items-center pt-2 backdrop-blur-[1px]">
-                    <div className={`border text-xs font-bold rounded-lg p-3 text-center w-[90%] shadow-sm ${isCall ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-indigo-50 border-indigo-200 text-indigo-600'}`}>
+                  <div className="absolute inset-0 z-20 bg-white/50 flex flex-col items-center pt-4 backdrop-blur-[2px]">
+                    <div className={`border text-base font-bold rounded-xl p-5 text-center w-[90%] shadow-sm ${isCall ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-indigo-50 border-indigo-200 text-indigo-600'}`}>
                       {isCall ? <>🙋 호출 중에는 정답을 입력할 수 없어요<br/>조교가 올 때까지 잠시 기다려주세요.</> : q.aiGradable === false ? <>✏️ 조교 선생님이 확인하고 있어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</> : <>🕐 조교에게 재확인을 요청했어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</>}
                     </div>
                   </div>
                 )}
 
-                <h3 className="font-bold text-slate-700 mb-2 text-center text-sm"><span className="text-[#002864] text-lg font-black mr-1">{currentQIndex + 1}</span>번 정답 입력</h3>
-                <div ref={optionsRef} className="flex flex-col gap-2 flex-1 min-h-0 overflow-y-auto">
+                <h3 className="font-bold text-slate-700 mb-4 text-center text-lg"><span className="text-[#002864] text-2xl font-black mr-1">{currentQIndex + 1}</span>번 정답 입력</h3>
+                <div ref={optionsRef} className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto">
                   {q.options && q.options.length > 0 ? (
                     q.options.map((opt: string, oIdx: number) => (
-                      <label key={oIdx} className={`w-full px-4 py-3 border-2 rounded-lg text-left font-bold cursor-pointer transition-colors flex gap-3 shadow-sm items-center ${studentAnswers.current[currentQIndex] === String(oIdx + 1) ? 'bg-[#002864] border-[#002864] text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
+                      <label key={oIdx} className={`w-full px-6 py-4 border-2 rounded-xl text-left font-bold cursor-pointer transition-colors flex gap-4 shadow-sm items-center text-xl ${studentAnswers.current[currentQIndex] === String(oIdx + 1) ? 'bg-[#002864] border-[#002864] text-white' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
                         <input type="radio" name="omr" className="hidden" checked={studentAnswers.current[currentQIndex] === String(oIdx + 1)} onChange={() => { studentAnswers.current[currentQIndex] = String(oIdx + 1); forceUpdate(); }} />
-                        <span className={`w-6 h-6 rounded-full flex items-center justify-center text-xs shrink-0 ${studentAnswers.current[currentQIndex] === String(oIdx + 1) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>{oIdx + 1}</span>
+                        <span className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 ${studentAnswers.current[currentQIndex] === String(oIdx + 1) ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500'}`}>{oIdx + 1}</span>
                         <span className="font-myungjo" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(opt) }} />
                       </label>
                     ))
                   ) : curAnsMode === 'pen' ? (
-                    <div className="w-full h-full flex flex-col gap-4 items-center justify-center">
-                      <p className="text-xs font-bold text-slate-400 text-center">✍️ 왼쪽 문제 위에 풀이 과정과 정답을 바로 그려주세요</p>
-                      <div className="w-full flex flex-col gap-3">
-                        <div className="flex items-center justify-center gap-2">
-                          <button onClick={() => { const w = Math.max(1, currentPenWidth - 1); setCurrentPenWidth(w); if(ctxRef.current) ctxRef.current.lineWidth = isEraserMode ? w * ERASER_WIDTH_MULTIPLIER : w; }} className="w-9 h-9 rounded-lg bg-slate-100 text-slate-500 font-bold text-lg">−</button>
-                          <span className="text-xs font-bold text-slate-500 w-6 text-center">{currentPenWidth}</span>
-                          <button onClick={() => { const w = Math.min(10, currentPenWidth + 1); setCurrentPenWidth(w); if(ctxRef.current) ctxRef.current.lineWidth = isEraserMode ? w * ERASER_WIDTH_MULTIPLIER : w; }} className="w-9 h-9 rounded-lg bg-slate-100 text-slate-500 font-bold text-lg">+</button>
+                    <div className="w-full h-full flex flex-col gap-6 items-center justify-center">
+                      <p className="text-base md:text-lg font-bold text-slate-400 text-center">✍️ 왼쪽 문제 위에 풀이 과정과 정답을 바로 그려주세요</p>
+                      <div className="w-full flex flex-col gap-4">
+                        <div className="flex items-center justify-center gap-4">
+                          <button onClick={() => { const w = Math.max(1, currentPenWidth - 1); setCurrentPenWidth(w); if(ctxRef.current) ctxRef.current.lineWidth = isEraserMode ? w * ERASER_WIDTH_MULTIPLIER : w; }} className="w-14 h-14 rounded-xl bg-slate-100 text-slate-500 font-bold text-3xl">−</button>
+                          <span className="text-xl font-bold text-slate-500 w-10 text-center">{currentPenWidth}</span>
+                          <button onClick={() => { const w = Math.min(10, currentPenWidth + 1); setCurrentPenWidth(w); if(ctxRef.current) ctxRef.current.lineWidth = isEraserMode ? w * ERASER_WIDTH_MULTIPLIER : w; }} className="w-14 h-14 rounded-xl bg-slate-100 text-slate-500 font-bold text-3xl">+</button>
                         </div>
-                        <div className={`flex items-center justify-center gap-2 transition-opacity ${isEraserMode ? 'opacity-30 pointer-events-none' : ''}`}>
+                        <div className={`flex items-center justify-center gap-4 transition-opacity ${isEraserMode ? 'opacity-30 pointer-events-none' : ''}`}>
                           {PEN_COLORS.map(color => (
-                            <button key={color} onClick={() => { setCurrentPenColor(color); if(ctxRef.current) ctxRef.current.strokeStyle = color; }} className={`w-7 h-7 rounded-full border-2 transition-transform ${currentPenColor === color ? 'border-[#002864] scale-110' : 'border-white'} shadow-sm`} style={{ backgroundColor: color }}></button>
+                            <button key={color} onClick={() => { setCurrentPenColor(color); if(ctxRef.current) ctxRef.current.strokeStyle = color; }} className={`w-12 h-12 rounded-full border-4 transition-transform ${currentPenColor === color ? 'border-[#002864] scale-110' : 'border-white'} shadow-sm`} style={{ backgroundColor: color }}></button>
                           ))}
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={toggleEraser} className={`flex-1 text-sm font-bold py-2.5 rounded-lg ${isEraserMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>🧽 {isEraserMode ? '지우개 사용 중' : '지우개'}</button>
-                          <button onClick={() => { delete studentDrawings.current[currentQIndex]; studentAnswers.current[currentQIndex] = null; forceUpdate(); if(canvasRef.current && ctxRef.current) { const c = canvasRef.current; const dpr = window.devicePixelRatio || 1; ctxRef.current.clearRect(0,0,c.width,c.height); drawWritableHint(ctxRef.current, c.width / dpr, c.height / dpr); } }} className="flex-1 text-sm font-bold text-rose-500 bg-rose-50 py-2.5 rounded-lg">🗑️ 전체 지우기</button>
+                        <div className="flex items-center gap-4 mt-2">
+                          <button onClick={toggleEraser} className={`flex-1 text-xl font-bold py-4 rounded-xl ${isEraserMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>🧽 {isEraserMode ? '지우개 사용 중' : '지우개'}</button>
+                          <button onClick={() => { delete studentDrawings.current[currentQIndex]; studentAnswers.current[currentQIndex] = null; forceUpdate(); if(canvasRef.current && ctxRef.current) { const c = canvasRef.current; const dpr = window.devicePixelRatio || 1; ctxRef.current.clearRect(0,0,c.width,c.height); drawWritableHint(ctxRef.current, c.width / dpr, c.height / dpr); } }} className="flex-1 text-xl font-bold text-rose-500 bg-rose-50 py-4 rounded-xl">🗑️ 전체 지우기</button>
                         </div>
-                        <div className="flex items-center gap-2 mt-2">
-                          <button onClick={toggleAnswerMode} className="flex-1 text-base font-black text-[#002864] bg-blue-50 py-3 rounded-xl border border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center justify-center gap-2">
-                            <span className="text-xl">🔢</span> 키패드 모드로 전환
+                        <div className="flex items-center gap-4 mt-4 w-full">
+                          <button onClick={toggleAnswerMode} className="flex-1 text-2xl font-black text-[#002864] bg-blue-50 py-5 rounded-2xl border-2 border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center justify-center gap-3">
+                            <span className="text-3xl">🔢</span> 키패드 모드로 전환
                           </button>
                         </div>
                       </div>
-                      <p className="text-[10px] text-slate-400 font-medium text-center">
+                      <p className="text-sm text-slate-400 font-medium text-center mt-2">
                         {isKeypadEnterable(q?.answer) ? '🤖 손글씨 답안은 자동으로 채점돼요' : '✍️ 이 문제는 정답 형식상 손글씨로만 답할 수 있어요'}
                       </p>
                     </div>
                   ) : (
-                    <div className="w-full flex flex-col gap-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <label className="text-xs font-bold text-slate-400">🔢 정답을 입력해주세요</label>
-                        <div className="flex items-center gap-1.5">
-                          <button onClick={() => setKeypadCollapsed(!keypadCollapsed)} className="w-6 h-6 rounded-md bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors"><span className={`text-[10px] font-bold transition-transform ${keypadCollapsed ? 'rotate-180' : ''}`}>◁</span></button>
-                          <button onClick={toggleAnswerMode} className="text-sm font-black text-[#002864] bg-blue-50 px-4 py-2 rounded-lg border border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center gap-1">
-                            <span className="text-lg">✍️</span> 손글씨로 풀기
+                    <div className="w-full flex flex-col gap-3 h-full">
+                      <div className="flex items-center justify-between gap-3">
+                        <label className="text-base font-bold text-slate-400">🔢 정답을 입력해주세요</label>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setKeypadCollapsed(!keypadCollapsed)} className="w-10 h-10 rounded-lg bg-slate-100 text-slate-500 flex items-center justify-center hover:bg-slate-200 transition-colors"><span className={`text-sm font-bold transition-transform ${keypadCollapsed ? 'rotate-180' : ''}`}>◁</span></button>
+                          <button onClick={toggleAnswerMode} className="text-lg font-black text-[#002864] bg-blue-50 px-6 py-3 rounded-xl border border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center gap-2">
+                            <span className="text-2xl">✍️</span> 손글씨로 풀기
                           </button>
                         </div>
                       </div>
@@ -1770,29 +1768,29 @@ export default function ClinicViewer() {
                         const kpPos = Math.max(0, Math.min(keypadCursor.current[idx] ?? kpVal.length, kpVal.length));
                         const moveCursor = (pos: number) => { keypadCursor.current[idx] = pos; forceUpdate(); };
                         return (
-                          <div className="w-full min-h-[2.375rem] text-lg font-extrabold text-right px-3 py-1.5 border-2 border-slate-200 rounded-lg bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
+                          <div className="w-full min-h-[4rem] text-4xl font-extrabold text-right px-6 py-4 border-[3px] border-slate-200 rounded-2xl bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
                             {kpVal ? (
                               <>
-                                <span onClick={() => moveCursor(0)} className="inline-block w-1.5 self-stretch" />
+                                <span onClick={() => moveCursor(0)} className="inline-block w-2 self-stretch" />
                                 {kpVal.split('').map((ch, i) => (
                                   <React.Fragment key={i}>
-                                    {i === kpPos && <span className="inline-block w-[2px] h-5 bg-[#002864] mx-px animate-pulse" />}
-                                    <span onClick={() => moveCursor(i + 1)} className="hover:bg-blue-100 rounded-sm">{ch}</span>
+                                    {i === kpPos && <span className="inline-block w-[3px] h-8 bg-[#002864] mx-0.5 animate-pulse" />}
+                                    <span onClick={() => moveCursor(i + 1)} className="hover:bg-blue-100 rounded-md px-0.5">{ch}</span>
                                   </React.Fragment>
                                 ))}
-                                {kpPos === kpVal.length && <span className="inline-block w-[2px] h-5 bg-[#002864] mx-px animate-pulse" />}
+                                {kpPos === kpVal.length && <span className="inline-block w-[3px] h-8 bg-[#002864] mx-0.5 animate-pulse" />}
                               </>
                             ) : <span className="text-slate-300 font-normal">0</span>}
                           </div>
                         );
                       })()}
-                      <div className={`overflow-hidden transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[320px] opacity-100'}`}>
-                        <div className="grid grid-cols-4 gap-1.5 pt-1">
-                          <button onClick={() => pressKeypad(' ')} className="col-span-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-500 text-xs hover:bg-slate-200 transition-colors">대분수 ␣ (띄어쓰기)</button>
+                      <div className={`flex flex-col flex-1 overflow-hidden transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[800px] opacity-100'}`}>
+                        <div className="grid grid-cols-4 gap-3 pt-3 flex-1">
+                          <button onClick={() => pressKeypad(' ')} className="col-span-4 py-4 md:py-5 rounded-2xl font-bold bg-slate-100 text-slate-500 text-lg hover:bg-slate-200 transition-colors">대분수 ␣ (띄어쓰기)</button>
                           {['7','8','9','back','4','5','6','clear','1','2','3','-','0','.','/'].map(k => (
-                            <button key={k} onClick={() => pressKeypad(k)} className={`py-2.5 rounded-lg font-bold transition-colors ${k==='back' ? 'bg-slate-200 text-slate-600 text-sm hover:bg-slate-300' : k==='clear' ? 'bg-rose-100 text-rose-600 text-sm hover:bg-rose-200' : k==='0' ? 'col-span-2 bg-slate-50 text-slate-700 text-lg hover:bg-slate-100 shadow-sm' : k==='-' || k==='.' || k==='/' ? 'bg-slate-100 text-slate-600 text-base hover:bg-slate-200 shadow-sm' : 'bg-slate-50 text-slate-700 text-lg hover:bg-slate-100 shadow-sm'}`}>{k === 'back' ? '⌫' : k === 'clear' ? 'C' : k === '/' ? '분수 /' : k}</button>
+                            <button key={k} onClick={() => pressKeypad(k)} className={`py-6 md:py-8 rounded-2xl font-black transition-colors shadow-sm ${k==='back' ? 'bg-slate-200 text-slate-600 text-2xl hover:bg-slate-300' : k==='clear' ? 'bg-rose-100 text-rose-600 text-2xl hover:bg-rose-200' : k==='0' ? 'col-span-2 bg-slate-50 text-slate-700 text-4xl hover:bg-slate-100' : k==='-' || k==='.' || k==='/' ? 'bg-slate-100 text-slate-600 text-3xl hover:bg-slate-200' : 'bg-slate-50 text-slate-700 text-4xl hover:bg-slate-100'}`}>{k === 'back' ? '⌫' : k === 'clear' ? 'C' : k === '/' ? '분수 /' : k}</button>
                           ))}
-                          <button onClick={() => pressKeypad(',')} className="col-span-4 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-500 text-xs hover:bg-slate-200 transition-colors">쉼표 추가 ( , )</button>
+                          <button onClick={() => pressKeypad(',')} className="col-span-4 py-4 rounded-2xl font-bold bg-slate-100 text-slate-500 text-lg hover:bg-slate-200 transition-colors">쉼표 추가 ( , )</button>
                         </div>
                       </div>
                     </div>
@@ -1801,12 +1799,12 @@ export default function ClinicViewer() {
               </div>
 
               {!isTimedRound && (
-                <div className="flex flex-col gap-3 mt-auto shrink-0">
-                  <div className="flex gap-3 w-full">
-                    <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting || isCurrentAlreadyCorrect} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                <div className="flex flex-col gap-4 mt-auto shrink-0">
+                  <div className="flex gap-4 w-full">
+                    <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting || isCurrentAlreadyCorrect} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-2xl py-6 md:py-8 rounded-2xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
                       {isCurrentAlreadyCorrect ? '✅ 정답 완료' : isSubmitting ? '채점 중...' : '✅ 정답 입력'}
                     </button>
-                    <button onClick={async () => { if (callCooldown.isActive) return; if(!callState.current[currentQIndex] && myAwayActive){ alert('자리비움 중에는 호출 불가합니다.'); return;} const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'call'); callCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { callCooldown.start(); } const willCall = !callState.current[currentQIndex]; callState.current[currentQIndex] = willCall; forceUpdate(); const callPayload = { qNum: currentQIndex + 1, questionText: q.questionText, imageUrl: q.imageUrl, options: q.options, answer: q.answer, explanation: q.explanation, source: q.source }; sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 }); if (sid) (willCall ? setActiveCall(supabaseClient, sid, currentQIndex + 1, callPayload) : clearActiveCall(supabaseClient, sid, currentQIndex + 1)); }} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>{callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 호출 취소' : '🙋 호출'}</button>
+                    <button onClick={async () => { if (callCooldown.isActive) return; if(!callState.current[currentQIndex] && myAwayActive){ alert('자리비움 중에는 호출 불가합니다.'); return;} const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'call'); callCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { callCooldown.start(); } const willCall = !callState.current[currentQIndex]; callState.current[currentQIndex] = willCall; forceUpdate(); const callPayload = { qNum: currentQIndex + 1, questionText: q.questionText, imageUrl: q.imageUrl, options: q.options, answer: q.answer, explanation: q.explanation, source: q.source }; sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 }); if (sid) (willCall ? setActiveCall(supabaseClient, sid, currentQIndex + 1, callPayload) : clearActiveCall(supabaseClient, sid, currentQIndex + 1)); }} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-2xl py-6 md:py-8 rounded-2xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>{callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 호출 취소' : '🙋 호출'}</button>
                   </div>
                 </div>
               )}
