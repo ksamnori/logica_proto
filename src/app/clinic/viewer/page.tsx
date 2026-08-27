@@ -83,7 +83,6 @@ export default function ClinicViewer() {
   const callCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
   const awayCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
 
-  // 모달 상태 관리
   const [resultModal, setResultModal] = useState<any>(null);
   const [recheckToast, setRecheckToast] = useState("");
   const [timeUpModal, setTimeUpModal] = useState(false);
@@ -99,7 +98,6 @@ export default function ClinicViewer() {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [logoutTarget, setLogoutTarget] = useState<'portal' | 'login'>('portal');
   const [sessionInfo, setSessionInfo] = useState<any>(null);
-  const [geminiModalOpen, setGeminiModalOpen] = useState(false);
 
   const optionsRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -274,13 +272,10 @@ export default function ClinicViewer() {
       const wasCorrect = ['correct_blue', 'correct_yellow', 'retry_yellow'].includes(currentStatus);
 
       if (isCorrect && !wasCorrect) {
-        qBoxStatus.current[idx] = (newCode === 'TO' || newCode === 'RO') ? 'correct_yellow' : 'correct_blue';
-        correctSolvedCountRef.current++;
         setRecheckToast(`🎉 조교님이 ${idx + 1}번을 정답(${newCode}) 처리했어요!`);
         setTimeout(() => setRecheckToast(""), 4000);
         if (recheckState.current[idx] === 'pending') recheckState.current[idx] = null;
         
-        // 🌟 실시간 채점으로 정답 처리되었으므로 즉각적으로 화면 넘김 처리 (삭제 안함)
         processCorrectAnswer(questions[idx], idx, true);
         
       } else if (!isCorrect && wasCorrect) {
@@ -393,6 +388,10 @@ export default function ClinicViewer() {
       });
 
       if (mapped.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
+      
+      // 🌟 오답유사는 실시간 채점을 위해 타이머/일괄제출 모드를 해제합니다.
+      setIsTimedRound(false);
+      
       setGlobalExamTitle('이번 주 과제오답유사');
       setPendingQCount(`이번 주 과제오답유사: ${mapped.length}문제`);
       totalQuestionsInRoundRef.current = mapped.length;
@@ -404,40 +403,53 @@ export default function ClinicViewer() {
   };
 
   const fetchWeeklyTest = async (sId: string, week: string, cls: string, assignId: string) => {
-    if (week === 'even') return fetchHomeworkSimilarIncorrect(sId);
     try {
       let matchedExamId = null; let matchedTitle = null; let matchedAssignId = assignId;
-      const examType = '주간테스트';
-      let displayLabel = examType;
+      let displayLabel = '시험';
 
       if (matchedAssignId) {
-        const { data } = await supabaseClient.from('exam_assignment').select('exam_id, exam_master!inner(title, exam_type)').eq('assignment_id', matchedAssignId).eq('exam_master.exam_type', examType).maybeSingle();
+        const { data } = await supabaseClient.from('exam_assignment')
+          .select('exam_id, exam_master(title, exam_type)')
+          .eq('assignment_id', matchedAssignId)
+          .eq('student_id', sId)
+          .maybeSingle();
+
         if (data && data.exam_id) {
           matchedExamId = data.exam_id;
           matchedTitle = data.exam_master?.title;
-          displayLabel = data.exam_master?.exam_type || displayLabel;
+          displayLabel = data.exam_master?.exam_type || '시험';
+        }
+      }
+
+      if (!matchedExamId && week === 'even') {
+        return fetchHomeworkSimilarIncorrect(sId);
+      }
+
+      if (!matchedExamId) {
+        const { data: cData } = await supabaseClient.from('class').select('class_id').eq('name', cls).maybeSingle();
+
+        let query = supabaseClient.from('exam_assignment')
+          .select('assignment_id, exam_id, exam_master!inner(title, exam_type)')
+          .eq('student_id', sId)
+          .not('exam_master.exam_type', 'in', '("과제", "과제프린트", "오답프린트", "오답유사", "과제오답유사")')
+          .not('status', 'in', '("제출완료", "채점완료", "완료")');
+
+        if (cData?.class_id) {
+           query = query.eq('class_id', cData.class_id);
+        }
+
+        const { data } = await query.order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+        if (data) {
+          matchedAssignId = String(data.assignment_id);
+          matchedExamId = data.exam_id;
+          matchedTitle = data.exam_master?.title;
+          displayLabel = data.exam_master?.exam_type || '시험';
         }
       }
 
       if (!matchedExamId) {
-        const { data: classData } = await supabaseClient.from('class').select('target_grade').eq('name', cls).maybeSingle();
-        const myTargetGrade = classData?.target_grade || '';
-
-        if (myTargetGrade) {
-          const thisWeek = getISOWeekKST();
-          const { data: exams } = await supabaseClient.from('exam_master').select('exam_id, title, target_grade, test_week').eq('exam_type', examType).eq('test_week', thisWeek).eq('target_grade', myTargetGrade).order('created_at', { ascending: false }).limit(1);
-          const matched = exams?.[0];
-          if (matched) { matchedExamId = matched.exam_id; matchedTitle = matched.title; }
-        }
-      }
-
-      if (!matchedAssignId && matchedExamId) {
-        const { data: aData } = await supabaseClient.from('exam_assignment').select('assignment_id').eq('exam_id', matchedExamId).eq('student_id', sId).maybeSingle();
-        if (aData) matchedAssignId = String(aData.assignment_id);
-      }
-
-      if (!matchedExamId) {
-        setPendingQCount(`이번 주 ${displayLabel}: 없음`);
+        setPendingQCount(`이번 주 시험: 없음`);
         setQuestions([]); return;
       }
 
@@ -999,7 +1011,10 @@ export default function ClinicViewer() {
   };
 
   const submitSingleAnswer = async () => {
-    if (isSubmitting || timeIsUp || callState.current[currentQIndex] || recheckState.current[currentQIndex] === 'pending') return;
+    const isAlreadyCorrect = qBoxStatus.current[currentQIndex] === 'correct_blue' || qBoxStatus.current[currentQIndex] === 'correct_yellow' || qBoxStatus.current[currentQIndex] === 'retry_yellow';
+    
+    if (isSubmitting || timeIsUp || callState.current[currentQIndex] || recheckState.current[currentQIndex] === 'pending' || isAlreadyCorrect) return;
+    
     const q = questions[currentQIndex];
     const isSubjective = !isObjectiveQuestion(q);
     const useAI = isSubjective && getAnswerMode(currentQIndex, q) === 'pen';
@@ -1089,16 +1104,21 @@ export default function ClinicViewer() {
     return null;
   };
 
-  // 🌟 정답 처리 시 롤백: 배열에서 요소를 삭제하지 않고, 파란색/노란색으로 체크 마크만 남기며 다음 문제로 넘어감.
   const processCorrectAnswer = async (q: any, idx: number, fromRecheck: boolean) => {
+    const currentStatus = qBoxStatus.current[idx];
+    const isAlreadyCorrect = currentStatus === 'correct_blue' || currentStatus === 'correct_yellow' || currentStatus === 'retry_yellow';
+    if (isAlreadyCorrect) return; 
+
     const usedHint = hintState.current[idx] && hintState.current[idx].revealed;
     const helped = taHintState.current[idx] || usedHint;
-    const wasWrongBefore = qBoxStatus.current[idx] === 'wrong_red';
+    const wasWrongBefore = currentStatus === 'wrong_red';
 
     const newStatus = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
-    
-    // 🌟 배열 삭제 롤백: DB에는 완벽히 '해결(resolved)' 처리하여 포탈 숫자에서 차감되도록 함
     const resolved = true; 
+
+    correctSolvedCountRef.current++;
+    qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
+    forceUpdate();
 
     if (q.record_id) {
       await bumpIncorrectRecord(q.record_id, newStatus, resolved);
@@ -1113,11 +1133,6 @@ export default function ClinicViewer() {
 
     if (!isTimedRound) await finalizeQuestionProgress(q, true, helped, wasWrongBefore);
 
-    correctSolvedCountRef.current++;
-
-    // 🌟 화면에서 삭제하는 로직(splice)을 제거하고 색깔만 업데이트
-    qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
-
     const nextIdx = findNextUnresolvedIndex(idx);
     if (nextIdx === null) {
       enterAwaitingReview();
@@ -1127,6 +1142,26 @@ export default function ClinicViewer() {
       setCurrentQIndex(nextIdx);
       setTimeout(() => initCanvas(nextIdx), 100);
     }
+    forceUpdate();
+  };
+
+  const saveRoundScoreToLocalStorage = () => {
+    const key = `logica_clinic_${studentInfo.id}_${params.className}_round${params.round}_score`;
+    try { localStorage.setItem(key, JSON.stringify({ correct: correctSolvedCountRef.current, total: totalQuestionsInRoundRef.current, savedAt: new Date().toISOString() })); } catch(e){}
+  };
+
+  const requestRecheck = () => {
+    if (!lastGradingContextRef.current) return;
+    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
+    setResultModal(null);
+    recheckState.current[idx] = 'pending';
+    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
+    sendAction('recheck_request', recheckPayload);
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
+    lastGradingContextRef.current = null;
+    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.');
+    setTimeout(() => setRecheckToast(""), 4000);
     forceUpdate();
   };
 
@@ -1297,26 +1332,6 @@ export default function ClinicViewer() {
     return newRecord?.record_id;
   };
 
-  const requestRecheck = () => {
-    if (!lastGradingContextRef.current) return;
-    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
-    setResultModal(null);
-    recheckState.current[idx] = 'pending';
-    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
-    sendAction('recheck_request', recheckPayload);
-    const sid = clinicSessionStateRef.current?.id;
-    if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
-    lastGradingContextRef.current = null;
-    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.'); 
-    setTimeout(() => setRecheckToast(""), 4000);
-    forceUpdate();
-  };
-
-  const saveRoundScoreToLocalStorage = () => {
-    const key = `logica_clinic_${studentInfo.id}_${params.className}_round${params.round}_score`;
-    try { localStorage.setItem(key, JSON.stringify({ correct: correctSolvedCountRef.current, total: totalQuestionsInRoundRef.current, savedAt: new Date().toISOString() })); } catch(e){}
-  };
-
   const drawWritableHint = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
     ctx.save(); ctx.fillStyle = 'rgba(28,37,48,0.08)';
     for (let x = 16; x < w; x += 32) { for (let y = 16; y < h; y += 32) { ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill(); } }
@@ -1355,6 +1370,8 @@ export default function ClinicViewer() {
       try { if (e?.pointerId != null) canvas.releasePointerCapture(e.pointerId); } catch (err) {}
       studentDrawings.current[idx] = canvas.toDataURL('image/webp', 0.5); 
       studentAnswers.current[idx] = studentDrawings.current[idx];
+      // 🌟 [추가] 펜으로 답을 그리자마자 즉시 네비게이션 버튼에 점이 찍히도록 렌더링 강제 업데이트
+      forceUpdate();
     };
 
     canvas.onpointerdown = startDraw; canvas.onpointermove = draw; canvas.onpointerup = stopDraw; canvas.onpointercancel = stopDraw;
@@ -1484,6 +1501,7 @@ export default function ClinicViewer() {
   const curAnsMode = getAnswerMode(currentQIndex, q);
   const isCall = !!callState.current[currentQIndex];
   const isRecheck = recheckState.current[currentQIndex] === 'pending';
+  const isCurrentAlreadyCorrect = qBoxStatus.current[currentQIndex] === 'correct_blue' || qBoxStatus.current[currentQIndex] === 'correct_yellow' || qBoxStatus.current[currentQIndex] === 'retry_yellow';
 
   return (
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none">
@@ -1639,6 +1657,8 @@ export default function ClinicViewer() {
                   <div ref={questionNavScrollRef} className="flex flex-nowrap gap-3 overflow-x-auto custom-scrollbar pb-1 scroll-smooth">
                     {visibleIndices.map(i => {
                       const status = qBoxStatus.current[i];
+                      const hasAnswer = studentAnswers.current[i] && studentAnswers.current[i] !== '미입력';
+
                       const symbol = status === 'wrong_red' ? 'X' : (status === 'retry_yellow' || status === 'correct_yellow') ? '△' : status === 'correct_blue' ? 'O' : null;
                       const statusPalette: Record<string, { light: string; solid: string }> = {
                         wrong_red: { light: 'bg-rose-50 border-rose-300 text-rose-500', solid: 'bg-rose-600 border-rose-600 text-white' },
@@ -1648,14 +1668,30 @@ export default function ClinicViewer() {
                       };
                       const isCalled = !!callState.current[i];
                       const isCurrent = i === currentQIndex;
-                      const cls = isCalled
-                        ? (isCurrent ? 'bg-red-600 border-red-600 text-white' : 'bg-red-100 border-red-300 text-red-700')
-                        : isCurrent
-                          ? (status ? `${statusPalette[status].solid} ring-2 ring-offset-2 ring-[#002864]/50` : 'bg-[#002864] border-[#002864] text-white')
-                          : (status ? statusPalette[status].light : 'border-slate-200 text-slate-500 hover:bg-slate-50');
+                      
+                      let cls = '';
+                      if (isCalled) {
+                        cls = isCurrent ? 'bg-red-600 border-red-600 text-white' : 'bg-red-100 border-red-300 text-red-700';
+                      } else if (isCurrent) {
+                        cls = status ? `${statusPalette[status].solid} ring-2 ring-offset-2 ring-[#002864]/50` : 'bg-[#002864] border-[#002864] text-white';
+                      } else if (status) {
+                        cls = statusPalette[status].light;
+                      } else if (hasAnswer) {
+                        // 🌟 [추가] 채점되지는 않았지만 답을 입력한 흔적이 있는 경우 회색으로 채워줌
+                        cls = 'bg-slate-200 border-slate-300 text-slate-700';
+                      } else {
+                        cls = 'border-slate-200 text-slate-500 hover:bg-slate-50';
+                      }
+
                       return (
                         <button key={i} onClick={() => { setCurrentQIndex(i); setTimeout(() => initCanvas(i), 50); forceUpdate(); }} className={`relative w-16 h-16 shrink-0 border-2 rounded-lg font-extrabold text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
                           {!isCalled && symbol ? symbol : i + 1}
+                          
+                          {/* 🌟 [추가] 답을 입력했다면 우측 상단에 선명한 녹색 점(Dot)을 표시 */}
+                          {!isCalled && !status && hasAnswer && (
+                            <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 rounded-full bg-emerald-500 shadow-sm border border-white"></span>
+                          )}
+
                           {!isCalled && symbol && <span className={`absolute -bottom-1 -right-1 rounded px-0.5 text-[9px] font-bold leading-none ${isCurrent ? 'bg-white/90 text-slate-700' : 'bg-white/80 text-slate-500 opacity-80'}`}>{i + 1}</span>}
                         </button>
                       );
@@ -1705,7 +1741,7 @@ export default function ClinicViewer() {
                         </div>
                         <div className="flex items-center gap-2">
                           <button onClick={toggleEraser} className={`flex-1 text-sm font-bold py-2.5 rounded-lg ${isEraserMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>🧽 {isEraserMode ? '지우개 사용 중' : '지우개'}</button>
-                          <button onClick={() => { delete studentDrawings.current[currentQIndex]; studentAnswers.current[currentQIndex] = null; if(canvasRef.current && ctxRef.current) { const c = canvasRef.current; const dpr = window.devicePixelRatio || 1; ctxRef.current.clearRect(0,0,c.width,c.height); drawWritableHint(ctxRef.current, c.width / dpr, c.height / dpr); } }} className="flex-1 text-sm font-bold text-rose-500 bg-rose-50 py-2.5 rounded-lg">🗑️ 전체 지우기</button>
+                          <button onClick={() => { delete studentDrawings.current[currentQIndex]; studentAnswers.current[currentQIndex] = null; forceUpdate(); if(canvasRef.current && ctxRef.current) { const c = canvasRef.current; const dpr = window.devicePixelRatio || 1; ctxRef.current.clearRect(0,0,c.width,c.height); drawWritableHint(ctxRef.current, c.width / dpr, c.height / dpr); } }} className="flex-1 text-sm font-bold text-rose-500 bg-rose-50 py-2.5 rounded-lg">🗑️ 전체 지우기</button>
                         </div>
                         <div className="flex items-center gap-2 mt-2">
                           <button onClick={toggleAnswerMode} className="flex-1 text-base font-black text-[#002864] bg-blue-50 py-3 rounded-xl border border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center justify-center gap-2">
@@ -1767,8 +1803,8 @@ export default function ClinicViewer() {
               {!isTimedRound && (
                 <div className="flex flex-col gap-3 mt-auto shrink-0">
                   <div className="flex gap-3 w-full">
-                    <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                      {isSubmitting ? '채점 중...' : '✅ 정답 입력'}
+                    <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting || isCurrentAlreadyCorrect} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+                      {isCurrentAlreadyCorrect ? '✅ 정답 완료' : isSubmitting ? '채점 중...' : '✅ 정답 입력'}
                     </button>
                     <button onClick={async () => { if (callCooldown.isActive) return; if(!callState.current[currentQIndex] && myAwayActive){ alert('자리비움 중에는 호출 불가합니다.'); return;} const sid = clinicSessionStateRef.current?.id; if (sid) { const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'call'); callCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime()); if (!cooldown.ok) return; } else { callCooldown.start(); } const willCall = !callState.current[currentQIndex]; callState.current[currentQIndex] = willCall; forceUpdate(); const callPayload = { qNum: currentQIndex + 1, questionText: q.questionText, imageUrl: q.imageUrl, options: q.options, answer: q.answer, explanation: q.explanation, source: q.source }; sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 }); if (sid) (willCall ? setActiveCall(supabaseClient, sid, currentQIndex + 1, callPayload) : clearActiveCall(supabaseClient, sid, currentQIndex + 1)); }} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-lg py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>{callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 호출 취소' : '🙋 호출'}</button>
                   </div>
