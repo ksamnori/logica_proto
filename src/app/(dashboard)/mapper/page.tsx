@@ -33,7 +33,6 @@ const formatQNum = (qNum: string | number, subNum?: string | number) => {
   return numStr.replace(/-0$/, '');
 };
 
-// 🌟 추가됨: 사람의 시각과 동일하게 숫자를 분리해서 비교하는 자연 정렬(Natural Sort) 알고리즘
 const parseNatural = (str: string) => {
   return String(str || "")
     .match(/(\d+)|(\D+)/g)
@@ -52,17 +51,15 @@ const compareNatural = (strA: string, strB: string) => {
     const partA = partsA[i];
     const partB = partsB[i];
     
-    // 길이가 다를 때 짧은 쪽이 먼저 옴 (예: 21 이 21-1 보다 먼저)
     if (partA === undefined) return -1;
     if (partB === undefined) return 1;
     
     if (typeof partA === 'number' && typeof partB === 'number') {
-      if (partA !== partB) return partA - partB; // 숫자 비교
+      if (partA !== partB) return partA - partB; 
     } else if (typeof partA === 'string' && typeof partB === 'string') {
       const cmp = String(partA).localeCompare(String(partB));
-      if (cmp !== 0) return cmp; // 문자 비교
+      if (cmp !== 0) return cmp; 
     } else {
-      // 숫자와 문자가 섞였을 때는 무조건 숫자가 먼저 오게 처리
       return typeof partA === 'number' ? -1 : 1;
     }
   }
@@ -190,14 +187,12 @@ export default function VisualMapperPage() {
         .select("*").eq("book_id", mainId);
       
       const sortedMainData = (mainData || []).sort((a, b) => {
-        // 1. 페이지 우선 비교
         const pageA = parseInt(String(a.page_number));
         const pA = isNaN(pageA) ? 99999 : pageA;
         const pageB = parseInt(String(b.page_number));
         const pB = isNaN(pageB) ? 99999 : pageB;
         if (pA !== pB) return pA - pB;
 
-        // 2. 🌟 자연 정렬 비교 (화면에 보이는 포맷을 기준으로)
         const dispA = formatQNum(a.question_number, a.sub_num);
         const dispB = formatQNum(b.question_number, b.sub_num);
         return compareNatural(dispA, dispB);
@@ -226,7 +221,6 @@ export default function VisualMapperPage() {
       const { data: wbData } = await supabase.from("question_db").select("*").eq("source_book_name", source);
 
       const sortedWbData = (wbData || []).sort((a, b) => {
-        // 1. 페이지 우선 비교 (인쇄된 페이지 > 감지된 페이지)
         const parsePage = (p1: any, p2: any) => {
           const v1 = parseInt(String(p1));
           if (!isNaN(v1) && v1 > 0) return v1;
@@ -238,7 +232,6 @@ export default function VisualMapperPage() {
         const pageB = parsePage(b.final_printed_page, b.detected_page_num);
         if (pageA !== pageB) return pageA - pageB;
         
-        // 2. 🌟 자연 정렬 비교 (화면에 보이는 포맷을 기준으로)
         const dispA = formatQNum(a.question_number, a.sub_num);
         const dispB = formatQNum(b.question_number, b.sub_num);
         return compareNatural(dispA, dispB);
@@ -491,6 +484,7 @@ export default function VisualMapperPage() {
     }
   };
 
+  // 🌟 [핵심 변경] Promise.all 대신 안전한 순차 처리(Sequential Loop)를 적용하여 DB 락/충돌 원천 차단
   const handleMultiTwinLink = async () => {
     if (selectedMainIds.length === 0 || selectedWbIds.length === 0) return;
 
@@ -502,26 +496,33 @@ export default function VisualMapperPage() {
 
     setIsLoading(true);
     try {
-      const updatePromises = selectedMainIds.map((tqIdStr, index) => {
-        const wbId = selectedWbIds[index];
+      let errorMessages = [];
+
+      for (let i = 0; i < selectedMainIds.length; i++) {
+        const tqIdStr = selectedMainIds[i];
+        const wbId = selectedWbIds[i];
         const mainQ = mainQuestions.find(q => q.tq_id.toString() === tqIdStr);
 
-        if (!mainQ) throw new Error("본교재 문항 데이터를 찾을 수 없습니다.");
+        if (!mainQ) {
+          errorMessages.push(`본교재 문항(${tqIdStr}) 데이터 누락`);
+          continue;
+        }
 
-        return supabase.from('question_db')
+        const { error } = await supabase.from('question_db')
           .update({
             parent_question_id: mainQ.question_id,
             derivation_type: 'TWIN'
           })
           .eq('question_id', wbId);
-      });
 
-      const results = await Promise.all(updatePromises);
-      const errors = results.filter(r => r.error).map(r => r.error);
-      
-      if (errors.length > 0) {
-        console.error("Errors:", errors);
-        throw new Error("일부 항목 저장 중 오류가 발생했습니다.");
+        if (error) {
+          errorMessages.push(error.message);
+        }
+      }
+
+      if (errorMessages.length > 0) {
+        console.error("DB 업데이트 에러 발생:", errorMessages);
+        throw new Error("일부 항목 저장 중 오류가 발생했습니다: " + errorMessages[0]);
       }
 
       setMappings(prev => {
@@ -641,7 +642,6 @@ export default function VisualMapperPage() {
         </div>
       </div>
 
-      {/* 🚀 3단 교재 선택 필터 영역 */}
       <div className="bg-white px-6 py-4 border border-slate-200 rounded-xl grid grid-cols-1 xl:grid-cols-3 gap-4 mb-4 shrink-0 shadow-sm">
         
         {/* 본교재 선택 */}
@@ -679,7 +679,6 @@ export default function VisualMapperPage() {
 
       </div>
 
-      {/* 🚀 4열(3단 리스트 + 버튼) 컨텐츠 영역 */}
       <div className="flex-1 flex gap-3 overflow-hidden min-h-0">
         
         {/* ======================= 왼쪽: 본교재 리스트 ======================= */}
