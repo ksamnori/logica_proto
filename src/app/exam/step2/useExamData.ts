@@ -101,7 +101,6 @@ export function useExamData() {
   const fetchAndFilterQuestions = async () => {
     setIsLoading(true);
 
-    // 🌟 1. 뷰어에서 돌아오거나 대시보드에서 [수정]으로 들어올 때, 병합 정보를 100% 살려내는 핵심 로직 복구
     if (sessionStorage.getItem('restoreExamQuestions') === '1' && sessionStorage.getItem('examQuestions')) {
       setTimeout(() => sessionStorage.removeItem('restoreExamQuestions'), 1500);
       try {
@@ -131,7 +130,6 @@ export function useExamData() {
         const groupMap = new Map<string, any>();
         let sortCounter = 0;
 
-        // 🌟 수정으로 들어와서 1차원 배열로 풀려있더라도 customGroupMap 기준으로 다시 묶어냅니다!
         parsedGroups.forEach((group: any) => {
           const qids = Array.isArray(group) ? group : [group];
           
@@ -327,7 +325,16 @@ export function useExamData() {
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
+        
+        // 🌟 [핵심 필터링 추가] 정규교과/사고력 모드일 때 '테스트' 관련 문항 배제
         if (examMode !== "test") {
+          const isTestQuestion = 
+            String(q.pdf_source || '').includes('테스트') || 
+            String(q.source_book_name || '').includes('테스트') || 
+            String(q.book_name || '').includes('테스트');
+            
+          if (isTestQuestion) return false;
+
           const pt = String(q.problem_type || '').toUpperCase();
           let isObj = false, isSubj = false, isEssay = false;
           if (pt === 'SUBJECTIVE' || pt === 'SHORT_ANSWER') isSubj = true;
@@ -335,6 +342,7 @@ export function useExamData() {
           else isObj = true; 
           if ((isObj && !pTypes.obj) || (isSubj && !pTypes.subj) || (isEssay && !pTypes.essay)) return false;
         }
+        
         if (isRateFilterActive) {
           if (q.solving_probability === null || q.solving_probability === undefined) return true;
           if (q.solving_probability > rateMax || q.solving_probability < rateMin) return false;

@@ -397,6 +397,7 @@ export function useSupervisorData() {
                 }
             }
 
+            // 🌟 하트비트 시간 초과 시 정상 세션 종료(퇴실)로 부드럽게 처리
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
                 const sinceLastSeen = Date.now() - new Date(dbRecord.last_seen_at).getTime();
@@ -404,7 +405,10 @@ export function useSupervisorData() {
 
                 const st = current[seat];
                 endTodaySession(supabaseClient, dbRecord.student_id, todayStr);
-                appendLog('border-orange-500', 'bg-orange-100 text-orange-700', '비정상종료', `[${seat}] ${st.name} 응답 없음`, `하트비트가 끊겨 비정상 종료로 처리되었습니다 (정상 로그아웃 아님).`);
+                
+                // 🌟 [수정] 비정상종료 대신 안전한 퇴실완료 로그로 남깁니다
+                appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '세션마감', `[${seat}] ${st.name} 퇴실`, `기기 연결이 해제되어 세션이 마감되었습니다.`);
+                
                 removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
                 delete current[seat];
                 dbSeats.delete(seat);
@@ -482,11 +486,12 @@ export function useSupervisorData() {
                 const st = { ...studentsRef.current };
                 const activeSeat = Object.keys(st).find(s => st[s].studentId === data.studentId) || seat;
 
+                // 🌟 [수정] depart 신호가 왔을 때 화면에서 깜빡거리며 사라지지 않도록 방어
                 if (action === 'depart') {
                     if (st[activeSeat]) {
-                        endTodaySession(supabaseClient, st[activeSeat].studentId, getKSTDateString());
-                        appendLog('border-slate-800', 'bg-slate-900 text-white', '퇴실완료', `[${activeSeat}] ${st[activeSeat].name} 퇴실`, `정상 로그아웃 되었습니다.`);
-                        delete st[activeSeat];
+                        appendLog('border-indigo-400', 'bg-indigo-50 text-indigo-600', '화면전환', `[${activeSeat}] ${st[activeSeat].name} 이동`, `포탈로 이동했거나 대기 중입니다.`);
+                        // 세션 종료(endTodaySession)나 UI(delete st) 삭제는 하지 않습니다.
+                        // (진짜 로그아웃일 경우 하트비트 타임아웃이 알아서 부드럽게 세션마감 처리합니다)
                     }
                 } else if (st[activeSeat]) {
                     if (action === 'update_activity') { 
@@ -829,15 +834,12 @@ export function useSupervisorData() {
         const st = studentsRef.current[seat];
         if (!st) return;
 
-        // 1. 브로드캐스트로 학생 화면 잠금 즉시 해제
         sendToStudent(seat, 'resolve_recheck', { uid, verdict });
 
-        // 2. DB에서 재확인 상태 완전히 삭제 (핵심 패치)
         if (st.sessionId) {
             await clearActiveRecheck(supabaseClient, st.sessionId, uid);
         }
 
-        // 3. 관리자 화면 상태 정리
         const currentStudents = { ...studentsRef.current };
         if (currentStudents[seat] && currentStudents[seat].rechecks) {
             delete currentStudents[seat].rechecks[uid];

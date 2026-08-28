@@ -20,6 +20,7 @@ export default function SupervisorDashboard() {
         seats, editorLocked
     } = supervisorData;
 
+    // 로그인한 선생님 정보 상태 관리
     const [instructorInfo, setInstructorInfo] = useState({ name: '', position: '' });
 
     useEffect(() => {
@@ -35,10 +36,11 @@ export default function SupervisorDashboard() {
             localStorage.removeItem('logica_instructor_role');
             localStorage.removeItem('logica_instructor_position');
             localStorage.removeItem('logica_instructor_name');
-            router.push('/');
+            router.push('/'); // 프로젝트의 기본 로그인 페이지 경로로 알맞게 변경 가능합니다.
         }
     };
 
+    // 1. 권한을 확인하고 있는 로딩 상태
     if (isAuthorized === null) {
         return (
             <div className="h-screen flex items-center justify-center bg-slate-200 font-['Pretendard']">
@@ -51,6 +53,7 @@ export default function SupervisorDashboard() {
         );
     }
 
+    // 2. 권한이 없는 경우 (접근 거부)
     if (isAuthorized === false) {
         return (
             <div className="h-screen flex items-center justify-center bg-slate-200 font-['Pretendard']">
@@ -58,6 +61,7 @@ export default function SupervisorDashboard() {
                     <div className="text-5xl mb-4">⛔</div>
                     <h2 className="text-2xl font-extrabold text-rose-600 mb-2">접근 권한 없음</h2>
                     <p className="text-sm text-slate-600 mb-6 font-bold leading-relaxed">{authMessage}</p>
+                    {/* 👑 수정됨: 안내 문구에 최고관리자 추가 */}
                     <p className="text-xs text-slate-400 mb-6">수퍼바이저 대시보드는 <span className="text-[#002864] font-extrabold">최고관리자</span>, <span className="text-[#002864] font-extrabold">원장</span> 및 <span className="text-[#002864] font-extrabold">실장</span> 권한만 접속할 수 있습니다.</p>
                     <button onClick={() => window.history.back()} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow-md transition-colors">이전 화면으로 돌아가기</button>
                 </div>
@@ -65,6 +69,7 @@ export default function SupervisorDashboard() {
         );
     }
 
+    // 3. 정상 접속 (대시보드 렌더링)
     const studentCount = Object.keys(activeStudents).length;
     const vacantCount = Math.max(0, seats.length - studentCount);
     let callingCount = 0, hintingCount = 0, awayCount = 0, timeUrgentCount = 0;
@@ -99,6 +104,13 @@ export default function SupervisorDashboard() {
                 ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
             `}} />
 
+            {/* 마우스 고스트 영역 (드래그 시 사용) — 잡은 카드의 실제 위치/크기에서 그대로 나타나서
+                커서의 그 지점을 계속 따라다니도록, 초기 위치를 ghostRect로 지정한다.
+                💡 바깥 껍데기는 화면에 보이던 크기(ghostRect.width/height) 그대로 두고, 안쪽 내용물만
+                원래 크기로 그린 뒤 ghostRect.scale만큼 다시 축소한다 — 카드 본체와 똑같은 배율이라
+                손으로 잡는 순간 글씨가 갑자기 커 보이거나 위치가 어긋나는 일이 없다. (예전에 걸려
+                있던 scale-105는 중심 기준으로 박스 자체를 부풀려서 커서 잡은 지점과 어긋나 보이게
+                했으므로 제거했다.) */}
             {draggedSeat && activeStudents[draggedSeat] && ghostRect && (
                 <div id="drag-ghost" className="fixed pointer-events-none z-[9999] opacity-[0.65] shadow-2xl bg-white border border-slate-200 rounded-xl overflow-hidden"
                      style={{ left: ghostRect.left, top: ghostRect.top, width: ghostRect.width, height: ghostRect.height }}>
@@ -108,6 +120,8 @@ export default function SupervisorDashboard() {
                     </div>
                 </div>
             )}
+            {/* 💡 실제 좌석 칸(예약 카드)과 같은 크기·레이아웃으로 보이도록, ghostRect 자체가 이미
+                화면에 그려진 좌석 칸의 실제 픽셀 크기(scale:1)라 별도 축소 없이 그대로 쓴다. */}
             {draggedListStudent && ghostRect && (
                 <div id="drag-ghost" className="fixed pointer-events-none z-[9999] opacity-[0.85] shadow-2xl border-2 border-dashed border-indigo-300 bg-indigo-50/80 rounded-xl p-2 flex flex-col justify-center overflow-hidden"
                      style={{ left: ghostRect.left, top: ghostRect.top, width: ghostRect.width, height: ghostRect.height }}>
@@ -124,49 +138,43 @@ export default function SupervisorDashboard() {
                 </div>
             )}
 
-            {/* 🌟 다크 테마가 적용된 세련된 헤더로 전면 개편 */}
-            <header className="bg-slate-900 border-b border-slate-800 text-white px-6 py-3 flex justify-between items-center z-20 shrink-0 shadow-lg">
-                <div className="flex items-center gap-4">
-                    <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center shadow-inner shadow-indigo-400/50">
-                        <span className="text-xl">📡</span>
-                    </div>
-                    <div>
-                        <h1 className="text-lg font-black tracking-tight text-white flex items-center gap-2">
-                            Logica Clinic <span className="font-medium text-slate-400">|</span> 관제탑
-                        </h1>
-                        <p className="text-[11px] text-slate-400 font-medium mt-0.5 tracking-tight">전체 좌석 현황 모니터링 및 실시간 제어 시스템</p>
-                    </div>
+            <header className="bg-gradient-to-r from-[#002864] to-[#013a8f] text-white px-5 py-2 flex justify-between items-center shadow-md z-20 shrink-0">
+                <div>
+                    <h1 className="text-[15px] font-bold leading-tight">Logica Clinic <span className="text-blue-300 mx-1">—</span> 총책임자 대시보드</h1>
+                    <p className="text-[10px] text-blue-300/80 mt-0.5 leading-tight">전체 클리닉 통합 관제 · Supabase Realtime 기반 · 💡 학생 카드를 드래그해서 빈 자리에 놓으면 좌석을 옮길 수 있어요</p>
                 </div>
 
-                <div className="flex items-center gap-5">
-                    {/* Status Badges */}
-                    <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-xl border border-slate-700/50">
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-[11px] font-bold text-slate-300 shadow-sm"><span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0"></span>조교 {Object.keys(activeTAs).length}</div>
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-[11px] font-bold text-slate-300 shadow-sm"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>학생 {studentCount}</div>
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-[11px] font-bold text-slate-300 shadow-sm"><span className="w-2 h-2 rounded-full bg-slate-500 shrink-0"></span>공석 {vacantCount}</div>
-                        <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/20 border border-rose-500/30 text-[11px] font-bold text-rose-300 shadow-sm"><span className="text-rose-400">🚨</span>호출 {callingCount}</div>
+                <div className="flex items-center gap-3">
+                    {/* 현황 배지 */}
+                    <div className="flex items-center gap-1 flex-wrap justify-end">
+                        <div className="flex items-center gap-1 bg-white/[0.07] px-2 py-1 rounded-lg text-[11px] font-semibold leading-none"><span className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0"></span> 조교 {Object.keys(activeTAs).length}명</div>
+                        <div className="flex items-center gap-1 bg-white/[0.07] px-2 py-1 rounded-lg text-[11px] font-semibold leading-none"><span className="w-1.5 h-1.5 rounded-full bg-blue-300 shrink-0"></span> 학생 {studentCount}명</div>
+                        <div className="flex items-center gap-1 bg-white/[0.07] px-2 py-1 rounded-lg text-[11px] font-semibold leading-none"><span className="w-1.5 h-1.5 rounded-full bg-slate-400 shrink-0"></span> 공석 {vacantCount}석</div>
+                        <div className="flex items-center gap-1 bg-rose-500/15 px-2 py-1 rounded-lg text-[11px] font-semibold leading-none">🚨 호출대기 {callingCount}건</div>
                     </div>
 
-                    {/* Uptime */}
-                    <div className="flex items-center gap-3 bg-slate-800/50 pl-4 pr-3 py-1.5 rounded-xl border border-slate-700/50 hidden xl:flex">
-                        <div className="text-right">
-                            <div className="text-xs font-black font-mono text-slate-200">{isMounted ? new Date(now).toLocaleTimeString('ko-KR', { hour12: false }) : '--:--:--'}</div>
-                            <div className="text-[9px] text-slate-500 font-bold">UPTIME {isMounted ? formatDuration(now - startedAt) : '00:00'}</div>
+                    <div className="w-px h-5 bg-white/15 mx-0.5 hidden 2xl:block"></div>
+
+                    {/* 가동 시간 */}
+                    <div className="text-right flex items-center gap-2 hidden xl:flex">
+                        <div>
+                            <div className="text-sm font-bold font-mono leading-tight">{isMounted ? new Date(now).toLocaleTimeString('ko-KR', { hour12: false }) : '--:--:--'}</div>
+                            <div className="text-[9px] text-blue-300/80 leading-tight">가동 시간 <span>{isMounted ? formatDuration(now - startedAt) : '00:00'}</span></div>
                         </div>
-                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${connectionStatus === 'connected' ? 'bg-emerald-500 dot-live' : connectionStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
+                        <span className={`w-2 h-2 rounded-full shrink-0 dot-live ${connectionStatus === 'connected' ? 'bg-green-500' : connectionStatus === 'error' ? 'bg-rose-500' : 'bg-slate-400'}`}></span>
                     </div>
 
-                    {/* Profile & Actions */}
-                    <div className="flex items-center gap-3 pl-2">
-                        <button onClick={() => router.push('/admin-dashboard')} className="group flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-md hover:shadow-indigo-500/20">
-                            <span className="group-hover:scale-110 transition-transform">⚙️</span> 운영 홈
+                    <div className="w-px h-5 bg-white/15 mx-0.5"></div>
+
+                    {/* 내비게이션 & 내 정보 */}
+                    <div className="flex items-center gap-2">
+                        <button onClick={() => router.push('/admin-dashboard')} className="bg-[#013a8f] hover:bg-blue-800 border border-blue-400/30 px-2.5 py-1 rounded-lg text-[11px] font-bold transition-colors shadow-sm whitespace-nowrap leading-none">
+                            운영 대시보드 ⚙️
                         </button>
-                        <div className="w-px h-8 bg-slate-700 mx-1 hidden sm:block"></div>
-                        <div className="text-right hidden sm:block leading-tight">
-                            <div className="text-xs font-bold text-slate-200">{instructorInfo.name}</div>
-                            <div className="text-[10px] font-medium text-slate-500">{instructorInfo.position}</div>
+                        <div className="text-right hidden sm:block">
+                            <div className="text-[11px] font-bold leading-tight">{instructorInfo.name} <span className="text-[9px] text-blue-300 font-normal">{instructorInfo.position}</span></div>
                         </div>
-                        <button onClick={handleLogout} className="bg-slate-800 hover:bg-rose-500/20 hover:text-rose-400 text-slate-400 border border-slate-700 hover:border-rose-500/50 px-3 py-2 rounded-lg text-xs font-bold transition-colors">
+                        <button onClick={handleLogout} className="bg-rose-500/20 hover:bg-rose-500/40 text-rose-200 border border-rose-500/30 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-colors whitespace-nowrap leading-none">
                             로그아웃
                         </button>
                     </div>

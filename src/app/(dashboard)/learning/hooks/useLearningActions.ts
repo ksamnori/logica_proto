@@ -1,11 +1,11 @@
 // src/app/(dashboard)/learning/hooks/useLearningActions.ts
 import { supabase } from "@/lib/supabase";
 import { StudentInfo, ViewState, TabType } from "../types";
-import { toast } from "react-toastify"; // 🌟 토스트 임포트
+import { toast } from "react-toastify"; 
 
 interface ActionProps {
   currentView: ViewState;
-  activeTab: TabType;
+  activeTab: TabType | string; // 🌟 타입 에러 방지를 위해 string 허용
   allStudentsList: StudentInfo[];
   selectedBlocks: string[];
   setSelectedBlocks: React.Dispatch<React.SetStateAction<string[]>>;
@@ -15,7 +15,7 @@ interface ActionProps {
   setIsGeneratingPrint: (val: boolean) => void;
   setDateFilter: (val: 'ALL' | '1W' | '1M') => void;
   fetchStudentTimeline: (sId: string, cId: string, all: StudentInfo[]) => void;
-  fetchGlobalListForTab: (tab: TabType, all: StudentInfo[]) => void;
+  fetchGlobalListForTab: (tab: TabType | string, all: StudentInfo[]) => void; // 🌟 타입 에러 방지
   fetchStatsForTab: (all: StudentInfo[]) => void;
 }
 
@@ -51,7 +51,6 @@ export function useLearningActions({
   fetchStudentTimeline, fetchGlobalListForTab, fetchStatsForTab
 }: ActionProps) {
 
-  // 🌟 [원상 복구] 기존 작동하던 라우팅 방식(/homework/step2, /exam/step2) 유지
   const handleExtractCommonHomework = async () => {
     const listToUse = currentView.type === 'STUDENT' ? selectedBlocks : globalSelectedBlocks;
     const isStudentView = currentView.type === 'STUDENT';
@@ -134,8 +133,7 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of globalSelectedBlocks) {
-        // 🌟 4분류 (similar_ 추가)
-        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
           if (error) throw error;
@@ -177,7 +175,7 @@ export function useLearningActions({
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           await supabase.from('student_answer').delete().eq('exam_assignment_id', aId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', aId);
-        } else if (block.startsWith('print_') || block.startsWith('similar_')) {
+        } else if (block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
           const assignId = block.split('_')[1];
           const {data} = await supabase.from('exam_assignment').select('exam_id').eq('assignment_id', assignId).single();
           if(data) {
@@ -212,7 +210,7 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', assignId);
           if (error) throw error;
@@ -253,7 +251,7 @@ export function useLearningActions({
           const assignId = block.split('_').pop();
           await supabase.from('student_answer').delete().eq('exam_assignment_id', assignId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', assignId);
-        } else if (block.startsWith('print_') || block.startsWith('similar_')) {
+        } else if (block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
           const assignId = block.split('_')[1];
           const {data} = await supabase.from('exam_assignment').select('exam_id').eq('assignment_id', assignId).single();
           if(data) {
@@ -286,7 +284,7 @@ export function useLearningActions({
     if (!confirm("이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
     
     try {
-      if (type === 'exam' || type === 'print' || type === 'similar' || type === 'hw_exam') {
+      if (type === 'exam' || type === 'print' || type === 'similar' || type === 'overdue' || type === 'hw_exam') {
         const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
         if (error) throw error;
       } else if (type === 'hw') {
@@ -363,12 +361,11 @@ export function useLearningActions({
       toast.success("🗑️ 프린트가 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else {
-        if (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') fetchGlobalListForTab(activeTab, allStudentsList);
+        if (activeTab === 'INCORRECT' || activeTab === 'SIMILAR' || activeTab === 'OVERDUE') fetchGlobalListForTab(activeTab, allStudentsList);
       }
     } catch (e) { toast.error("삭제 실패"); }
   };
 
-  // 🌟 [원상 복구] 정상 작동하던 오리지널 페이지 렌더링 호출
   const handlePrintItem = async (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => {
     e.stopPropagation();
     
@@ -414,7 +411,6 @@ export function useLearningActions({
     }
   };
 
-  // 🌟 [원상 복구] 교재 과제 편집 시 /homework/step2 로 정상 이동
   const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => {
     e.stopPropagation();
     if (!targetQuestions || targetQuestions.length === 0) { toast.warning('수정할 문항이 없습니다.'); return; }
@@ -455,7 +451,6 @@ export function useLearningActions({
     } finally { setIsLoading(false); }
   };
 
-  // 🌟 [원상 복구] 시험지 편집 시 /exam/step2 로 정상 이동
   const handleEditExamToStep2 = async (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => {
     e.stopPropagation();
     if (!masterId || !assignId) return toast.error('시험지 정보를 찾을 수 없습니다.');

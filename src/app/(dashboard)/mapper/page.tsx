@@ -25,11 +25,20 @@ const getTaxParts = (taxId: string | null | undefined) => {
   return taxId.split('-');
 };
 
+// 🌟 업데이트됨: 괄호 제거 및 다중 서브 문항 완벽 병합 처리
 const formatQNum = (qNum: string | number, subNum?: string | number) => {
-  let numStr = String(qNum || "");
+  // 1. 본 문항 번호 공백 및 기존 -0 꼬리표 1차 제거
+  let numStr = String(qNum || "").trim().replace(/-0$/, '');
+  
   if (subNum !== undefined && subNum !== null && String(subNum).trim() !== "") {
-    numStr = `${numStr}-${subNum}`;
+    // 2. 괄호 기호만 제거하여 순수 번호 추출 (예: "(1)" -> "1")
+    const cleanSubNum = String(subNum).replace(/[()]/g, '').trim();
+    if (cleanSubNum !== "") {
+      numStr = `${numStr}-${cleanSubNum}`;
+    }
   }
+  
+  // 3. 서브 번호가 0이어서 최종 결합이 -0으로 끝나면 다시 제거 (예: 2-2-0 -> 2-2)
   return numStr.replace(/-0$/, '');
 };
 
@@ -484,7 +493,6 @@ export default function VisualMapperPage() {
     }
   };
 
-  // 🌟 [핵심 변경] Promise.all 대신 안전한 순차 처리(Sequential Loop)를 적용하여 DB 락/충돌 원천 차단
   const handleMultiTwinLink = async () => {
     if (selectedMainIds.length === 0 || selectedWbIds.length === 0) return;
 

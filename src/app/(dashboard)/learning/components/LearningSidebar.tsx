@@ -8,7 +8,7 @@ import { LEVEL_ORDER } from "../hooks/useLearningFetch";
 interface LearningSidebarProps {
   currentView: ViewState;
   groupedClasses: Record<string, ClassInfo[]>;
-  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; }>;
+  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; overdueQ: number; }>;
   isLoading: boolean;
   handleViewChange: (view: ViewState) => void;
   handleStudentClick: (studentId: string, studentName: string, classId: string, className: string) => void;
@@ -115,11 +115,12 @@ export default function LearningSidebar({
                               {!c.students || c.students.length === 0 ? <div className="py-3 text-center text-[10px] text-slate-400 font-bold bg-slate-50/50">학생 없음</div> : (
                                 c.students.map(s => {
                                   if (!s) return null;
-                                  const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0 };
+                                  const allStats = studentStatsMap[`${s.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
                                   const displayExamQ = allStats.examQ;
                                   const displayHwQ = allStats.hwQ;
                                   const displayPrintQ = allStats.printQ;
                                   const displaySimilarQ = allStats.similarQ;
+                                  const displayOverdueQ = allStats.overdueQ; // 🌟 
                                   const isStudentActive = currentView.studentId === s.id && currentView.classId === c.class_id;
 
                                   return (
@@ -132,6 +133,9 @@ export default function LearningSidebar({
                                         </div>
                                         <div className="w-[18px] flex justify-center">
                                           {displayHwQ > 0 && <span className="bg-amber-100 text-amber-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="과제 미해결 문항">{displayHwQ}</span>}
+                                        </div>
+                                        <div className="w-[18px] flex justify-center">
+                                          {displayOverdueQ > 0 && <span className="bg-rose-100 text-rose-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="미완료 과제 문항">{displayOverdueQ}</span>}
                                         </div>
                                         <div className="w-[18px] flex justify-center">
                                           {displayPrintQ > 0 && <span className="bg-emerald-100 text-emerald-700 w-full py-0.5 text-center rounded-full shadow-sm text-[9px] font-black" title="오답 미해결 문항">{displayPrintQ}</span>}

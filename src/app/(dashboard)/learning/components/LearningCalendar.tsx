@@ -11,7 +11,7 @@ interface LearningCalendarProps {
   classCalendarEvents: any[];
   selectedDate: string | null;
   setSelectedDate: (date: string | null) => void;
-  handleCalendarSummaryClick: (tab: 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR') => void;
+  handleCalendarSummaryClick: (tab: 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR' | 'OVERDUE') => void;
   handleViewAllStudents: () => void; 
 }
 
@@ -28,7 +28,7 @@ export default function LearningCalendar({
     if (currentView.type === 'GLOBAL_LIST') {
       return globalList.map(g => ({
         date: g.sort_date || g.created_at,
-        type: g.is_exam_hw ? 'hw_exam' : (activeTab === 'EXAM' ? 'exam' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'hw'),
+        type: g.is_exam_hw ? 'hw_exam' : (activeTab === 'EXAM' ? 'exam' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'hw'),
         isCompleted: ['채점완료', '제출완료', '완료'].includes(g.status || '미제출')
       }));
     }
@@ -37,18 +37,19 @@ export default function LearningCalendar({
   }, [currentView, timelineData, globalList, classCalendarEvents, activeTab]);
 
   const dotsMap = useMemo(() => {
-    const map: Record<string, { exam: number, hw: number, print: number, similar: number }> = {};
+    const map: Record<string, { exam: number, hw: number, print: number, similar: number, overdue: number }> = {};
     eventsToUse.forEach(ev => {
       if (!ev.date) return;
       const d = new Date(ev.date);
       const ymd = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
       if (!ev.isCompleted) {
-        if (!map[ymd]) map[ymd] = { exam: 0, hw: 0, print: 0, similar: 0 };
+        if (!map[ymd]) map[ymd] = { exam: 0, hw: 0, print: 0, similar: 0, overdue: 0 };
         if (ev.type === 'exam') map[ymd].exam++;
+        else if (ev.type === 'overdue') map[ymd].overdue++; // 🌟 미완료점 추가
         else if (ev.type?.includes('hw')) map[ymd].hw++;
         else if (ev.type === 'print') map[ymd].print++;
-        else if (ev.type === 'similar') map[ymd].similar++; // 🌟 유사점 추가
+        else if (ev.type === 'similar') map[ymd].similar++; 
       }
     });
     return map;
@@ -99,10 +100,11 @@ export default function LearningCalendar({
               >
                 <span className={`text-[11px] font-bold ${isToday && !isSelected ? 'text-rose-500' : ''}`}>{day}</span>
                 
-                {/* 🌟 캘린더에 오답유사 보라색 마커 추가 */}
+                {/* 🌟 캘린더에 미완료 빨간색 마커 추가 */}
                 <div className="flex flex-wrap justify-center gap-0.5 mt-0.5 px-1">
                   {dots?.exam > 0 && <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shadow-sm" title={`시험 미해결 ${dots.exam}건`}></span>}
                   {dots?.hw > 0 && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shadow-sm" title={`과제 미해결 ${dots.hw}건`}></span>}
+                  {dots?.overdue > 0 && <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shadow-sm" title={`미완료과제 ${dots.overdue}건`}></span>}
                   {dots?.print > 0 && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-sm" title={`오답 미해결 ${dots.print}건`}></span>}
                   {dots?.similar > 0 && <span className="w-1.5 h-1.5 rounded-full bg-violet-500 shadow-sm" title={`오답유사 미해결 ${dots.similar}건`}></span>}
                 </div>
@@ -117,7 +119,7 @@ export default function LearningCalendar({
               <span>📅</span> {selectedDate} 미해결 요약
             </h4>
             
-            {/* 🌟 4분류 요약 박스로 개편 */}
+            {/* 🌟 5분류 요약 박스로 개편 */}
             <div className="grid grid-cols-2 gap-1.5 bg-white p-1.5 rounded-lg border border-rose-100 shadow-sm">
               <div onClick={() => handleCalendarSummaryClick('EXAM')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-blue-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-blue-100">
                 <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black">📝 시험</span>
@@ -126,6 +128,10 @@ export default function LearningCalendar({
               <div onClick={() => handleCalendarSummaryClick('HOMEWORK')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-amber-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-amber-100">
                 <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">📚 과제</span>
                 <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.hw || 0}건</span>
+              </div>
+              <div onClick={() => handleCalendarSummaryClick('OVERDUE')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-rose-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-rose-100 col-span-2">
+                <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-black">⏰ 미완료</span>
+                <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.overdue || 0}건</span>
               </div>
               <div onClick={() => handleCalendarSummaryClick('INCORRECT')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-emerald-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-emerald-100">
                 <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-black">❌ 오답</span>

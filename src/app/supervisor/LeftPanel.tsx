@@ -67,27 +67,44 @@ export default function LeftPanel({ data }: { data: any }) {
                         <div className="text-center text-xs text-slate-400 py-8">접속한 조교가 없습니다.</div>
                     ) : (
                         <>
-                            {Object.values(activeTAs).sort((a: any, b: any) => a.joined_at - b.joined_at).map((ta: any) => (
-                                <div key={ta.clientId} className="bg-white border border-slate-200 rounded-xl p-3 mb-2 shadow-sm hover:shadow-md hover:border-slate-300 transition-all">
-                                    <div className="flex justify-between items-start">
-                                        <span className="font-bold text-slate-800 text-[12px]">{ta.name}</span>
-                                        <span className="text-[10px] text-slate-400 font-semibold tracking-tight">근무 <span className="tabular-nums">{formatDuration(now - ta.joined_at)}</span></span>
-                                    </div>
-                                    {ta.handling ? (
-                                        <div className="text-[11px] font-bold text-rose-600 mt-1.5 flex items-center gap-1">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500 dot-live shrink-0"></span>
-                                            [{ta.handling.split('::')[0]}] {activeStudents[ta.handling.split('::')[0]]?.name || '학생'} · {ta.handling.split('::')[1]}번 상담 중
+                            {Object.values(activeTAs).sort((a: any, b: any) => a.joined_at - b.joined_at).map((ta: any) => {
+                                const handlingInfo = ta.handling ? ta.handling.split('::') : null;
+                                const handlingSeat = handlingInfo ? handlingInfo[0] : null;
+                                const handlingTarget = handlingInfo ? handlingInfo[1] : null; // qNum 또는 uid
+                                
+                                const studentObj = handlingSeat ? activeStudents[handlingSeat] : null;
+                                
+                                // 🌟 [핵심 방어 로직] 
+                                // 조교가 '상담 중'이라고 주장해도, 실제 학생의 호출(calls)이나 재확인(rechecks) 큐에
+                                // 해당 항목이 실제로 살아있는지 팩트체크(Cross-check) 합니다. 우측에서 지우면 즉시 대기 중으로 바뀝니다.
+                                let isReallyHandling = false;
+                                if (studentObj && handlingTarget) {
+                                    if (studentObj.calls && studentObj.calls[handlingTarget] !== undefined) isReallyHandling = true;
+                                    if (studentObj.rechecks && studentObj.rechecks[handlingTarget] !== undefined) isReallyHandling = true;
+                                }
+
+                                return (
+                                    <div key={ta.clientId} className="bg-white border border-slate-200 rounded-xl p-3 mb-2 shadow-sm hover:shadow-md hover:border-slate-300 transition-all">
+                                        <div className="flex justify-between items-start">
+                                            <span className="font-bold text-slate-800 text-[12px]">{ta.name}</span>
+                                            <span className="text-[10px] text-slate-400 font-semibold tracking-tight">근무 <span className="tabular-nums">{formatDuration(now - ta.joined_at)}</span></span>
                                         </div>
-                                    ) : (
-                                        <div className="text-[11px] font-bold text-emerald-600 mt-1.5 flex items-center gap-1">
-                                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>대기 중
+                                        {isReallyHandling ? (
+                                            <div className="text-[11px] font-bold text-rose-600 mt-1.5 flex items-center gap-1">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-rose-500 dot-live shrink-0"></span>
+                                                [{handlingSeat}] {studentObj?.name || '학생'} · {handlingTarget === 'general' ? '호출' : handlingTarget}번 상담 중
+                                            </div>
+                                        ) : (
+                                            <div className="text-[11px] font-bold text-emerald-600 mt-1.5 flex items-center gap-1">
+                                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>대기 중
+                                            </div>
+                                        )}
+                                        <div className="text-[10px] text-slate-400 font-semibold mt-2 pt-2 border-t border-slate-100">
+                                            누적 처리 <span className="text-slate-600 font-bold">{taStats[ta.clientId]?.total || 0}건</span> · 힌트 {taStats[ta.clientId]?.hint || 0} · 넘어가기 {taStats[ta.clientId]?.skip || 0}
                                         </div>
-                                    )}
-                                    <div className="text-[10px] text-slate-400 font-semibold mt-2 pt-2 border-t border-slate-100">
-                                        누적 처리 <span className="text-slate-600 font-bold">{taStats[ta.clientId]?.total || 0}건</span> · 힌트 {taStats[ta.clientId]?.hint || 0} · 넘어가기 {taStats[ta.clientId]?.skip || 0}
                                     </div>
-                                </div>
-                            ))}
+                                );
+                            })}
                         </>
                     )}
                 </div>

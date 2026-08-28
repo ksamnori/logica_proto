@@ -251,7 +251,6 @@ export default function StudentPortal() {
         }));
         setClassWeekTypes(newClassWeekTypes);
 
-        // 🌟 수정 1: 실제로 풀이 흔적(O, X, 세모 등)이 남은 문항을 DB에서 먼저 모두 가져옴
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
                 .select('homework_id, tq_id')
@@ -322,7 +321,6 @@ export default function StudentPortal() {
                 const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 const isPending = !['제출완료', '채점완료', '완료'].includes(ex.status);
 
-                // 🌟 수정 2: 전체 문항에서 "아예 손도 안 댄(미입력) 문제" 수만 추출
                 const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - attempted);
 
@@ -374,7 +372,6 @@ export default function StudentPortal() {
                 let tqLen = 0;
                 try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
 
-                // 🌟 수정 3: 과제에서도 동일하게 시도한 문제(O, X 등)를 뺀 순수 미입력 문제 계산
                 const attempted = hwAttemptedMap.get(hw.homework_id)?.size || 0;
                 const remain = Math.max(0, tqLen - attempted);
                 
@@ -879,11 +876,23 @@ export default function StudentPortal() {
                     <section className="mb-4">
                         <div className="flex items-center gap-4 mb-6">
                             <h2 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
-                            {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => (
-                                <button key={cls} onClick={() => setSelectedClass(cls)} className={`text-sm md:text-base font-black px-5 py-2 rounded-full shadow-sm transition-colors inline-flex items-center gap-1.5 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-                                    <span>🏫</span>{cls}
-                                </button>
-                            ))}
+                            {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => {
+                                // 🌟 탭 우측에 띄울 미결제 총 문제 수 계산 로직
+                                const prog = hwProgress[cls] || {};
+                                const totalPending = (prog.examQCount || 0) + (prog.hwQCount || 0) + (prog.printQCount || 0) + (prog.overdueQCount || 0);
+
+                                return (
+                                    <button key={cls} onClick={() => setSelectedClass(cls)} className={`relative text-sm md:text-base font-black px-5 py-2 rounded-full shadow-sm transition-colors inline-flex items-center gap-1.5 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                        <span>🏫</span>{cls}
+                                        {/* 🌟 할 일이 남아있으면 빨간색 숫자 배지 렌더링 */}
+                                        {totalPending > 0 && (
+                                            <span className="absolute -top-1.5 -right-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-black text-white shadow-sm ring-2 ring-white">
+                                                {totalPending > 99 ? '99+' : totalPending}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
                         </div>
                         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6">
                             {renderCard('exam', 1, selectedClass)}

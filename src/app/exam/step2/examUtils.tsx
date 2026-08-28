@@ -27,6 +27,7 @@ export const getTypeName = (q: any) => {
   return '객관식';
 };
 
+// 💡 배지 렌더링을 위한 사고력 문제 판별 로직은 그대로 유지합니다.
 export const isThinking = (q: any) => !!(q.thk_taxonomy_id && String(q.thk_taxonomy_id).trim() !== '');
 
 export const smartSplitTaxonomy = (pathStr: string) => {
@@ -44,11 +45,8 @@ export const smartSplitTaxonomy = (pathStr: string) => {
   return merged.filter(p => p !== '');
 };
 
+// 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다.
 export const getDepth5Name = (q: any, depth5Map: Record<string, string>) => {
-  if (isThinking(q) && q.thk_taxonomy_name) {
-    const parts = smartSplitTaxonomy(q.thk_taxonomy_name);
-    return parts.length >= 5 ? parts[4] : parts[parts.length - 1];
-  }
   const iId = q.item_id ? String(q.item_id).trim().toUpperCase() : null;
   if (iId && depth5Map[iId]) return depth5Map[iId];
   if (q.taxonomy_name) {
@@ -58,11 +56,8 @@ export const getDepth5Name = (q: any, depth5Map: Record<string, string>) => {
   return '분류 없음';
 };
 
+// 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다.
 export const getDepth6Name = (q: any, depth6Map: Record<string, string>) => {
-  if (isThinking(q) && q.thk_taxonomy_name) {
-    const parts = smartSplitTaxonomy(q.thk_taxonomy_name);
-    return parts.length >= 6 ? parts[5] : parts[parts.length - 1];
-  }
   const iId = q.item_id ? String(q.item_id).trim().toUpperCase() : null;
   if (iId && depth6Map[iId]) return depth6Map[iId];
   if (q.taxonomy_name) {
@@ -136,7 +131,6 @@ export const getParentSourceText = (parentQ: any, typeLabel: string) => {
   return '';
 };
 
-// 🌟 [누락 복구] 터졌던 원인인 이 함수를 완벽히 살렸습니다!
 export const renderParentRelations = (q: any, parentSourceMap: Record<string, any>) => {
   const ext = extractParentIds(q.parent_relations, q.parent_question_id);
   let lines: string[] = [];
@@ -167,7 +161,6 @@ export const renderParentRelations = (q: any, parentSourceMap: Record<string, an
   );
 };
 
-// 🌟 서브 문항에서 찌꺼기를 날리지 않고 원본 그대로의 (1), (2) 번호를 살리는 로직
 export const processGroupText = (items: any[]) => {
   if (!items || items.length === 0) return { common: "", remainders: [] };
   if (items.length === 1) return { common: "", remainders: [items[0].question || items[0].text_question || ""] };

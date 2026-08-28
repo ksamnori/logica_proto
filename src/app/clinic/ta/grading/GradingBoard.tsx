@@ -38,15 +38,6 @@ const parseWrongLog = (raw: any) => {
   return Array.isArray(log) ? log : [];
 };
 
-const getResultStyle = (code: string | null) => {
-  if (!code) return 'bg-white text-slate-400';
-  if (['O', 'TO', 'RO'].includes(code)) return 'bg-emerald-50 text-emerald-600';
-  if (['X', 'TX'].includes(code)) return 'bg-rose-50 text-rose-600';
-  if (code === '☆') return 'bg-amber-50 text-amber-500';
-  if (code === 'B') return 'bg-slate-100 text-slate-500';
-  return 'bg-blue-50 text-blue-600';
-};
-
 interface GradeButtonProps {
   code: string;
   currentCode: string;
@@ -55,13 +46,16 @@ interface GradeButtonProps {
 
 const GradeButton = memo(({ code, currentCode, onClick }: GradeButtonProps) => {
   let bgClass = "bg-white text-slate-500 hover:bg-slate-100";
-  let checkedClass = "text-white";
+  let checkedClass = "text-white shadow-inner";
 
-  if (['O', 'TO', 'RO'].includes(code)) checkedClass += " bg-[#10b981]";
-  else if (['X', 'TX'].includes(code)) checkedClass += " bg-[#ef4444]";
-  else if (code === '☆') checkedClass += " bg-[#f59e0b]";
-  else if (code === 'B') checkedClass += " bg-[#64748b]";
-  else checkedClass += " bg-[#0ea5e9]";
+  // 🌟 O, X, TO, RO, TX, 별, B 컬러 매핑
+  if (code === 'O') checkedClass += " bg-emerald-500";
+  else if (code === 'TO') checkedClass += " bg-teal-500"; 
+  else if (code === 'RO') checkedClass += " bg-blue-500"; 
+  else if (code === 'X') checkedClass += " bg-rose-500";
+  else if (code === 'TX' || code === '☆') checkedClass += " bg-orange-500"; 
+  else if (code === 'B') checkedClass += " bg-slate-400"; 
+  else checkedClass += " bg-blue-400";
 
   const isChecked = currentCode === code;
 
@@ -231,8 +225,13 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       setHeaderInfo({ title: `📚 ${baseHw.homework_title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
 
-      const { data: allHws } = await supabase.from('homework_assignment').select('*').eq('class_id', baseHw.class_id).eq('homework_title', baseHw.homework_title);
-      const hwIdsToFetchStatus = allHws?.map(h => h.homework_id) || [];
+      // 🌟 class_id Null 체크 추가 적용
+      let hwQ = supabase.from('homework_assignment').select('*').eq('homework_title', baseHw.homework_title);
+      if (baseHw.class_id) hwQ = hwQ.eq('class_id', baseHw.class_id);
+      else hwQ = hwQ.is('class_id', null);
+      
+      const { data: allHws } = await hwQ;
+      const hwIdsToFetchStatus = allHws?.map((h: any) => h.homework_id) || [];
       const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
 
       const baseResult = hwResults?.find(r => String(r.homework_id) === String(baseHw.homework_id));
@@ -241,24 +240,29 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       let validStudentIds: string[] = [];
 
       if (gradeAll) {
-        const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseHw.class_id);
-        const classStudentIds = enrolls?.filter((e: any) => {
-          const s = Array.isArray(e.student) ? e.student[0] : e.student;
-          return s?.status === '재원';
-        }).map(e => e.student_id) || [];
+        if (baseHw.class_id) {
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseHw.class_id);
+          const classStudentIds = enrolls?.filter((e: any) => {
+            const s = Array.isArray(e.student) ? e.student[0] : e.student;
+            return s?.status === '재원';
+          }).map(e => e.student_id) || [];
 
-        classStudentIds.forEach(sId => {
-          let studentHws = allHws?.filter(h => String(h.target_student_id) === String(sId)) || [];
-          const globalHw = allHws?.find(h => !h.target_student_id);
-          let targetHw = studentHws.length > 0 ? studentHws[0] : globalHw;
-          if (String(sId) === String(baseHw.target_student_id)) targetHw = baseHw;
+          classStudentIds.forEach(sId => {
+            let studentHws = allHws?.filter((h: any) => String(h.target_student_id) === String(sId)) || [];
+            const globalHw = allHws?.find((h: any) => !h.target_student_id);
+            let targetHw = studentHws.length > 0 ? studentHws[0] : globalHw;
+            if (String(sId) === String(baseHw.target_student_id)) targetHw = baseHw;
 
-          if (targetHw) {
-            const res = hwResults?.find(r => String(r.homework_id) === String(targetHw.homework_id) && String(r.student_id) === String(sId));
-            const isComp = ['채점완료', '제출완료', '완료'].includes(res?.status || '');
-            if (isComp === isBaseCompleted) validStudentIds.push(sId);
-          }
-        });
+            if (targetHw) {
+              const res = hwResults?.find(r => String(r.homework_id) === String(targetHw.homework_id) && String(r.student_id) === String(sId));
+              const isComp = ['채점완료', '제출완료', '완료'].includes(res?.status || '');
+              if (isComp === isBaseCompleted) validStudentIds.push(sId);
+            }
+          });
+        } else {
+          // 반 정보가 없으면 대상 학생만 넣음
+          if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
+        }
       } else {
         if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
         else if (studentIdParam) validStudentIds.push(studentIdParam);
@@ -277,16 +281,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       if (cols.length === 0) { alert("🎉 해당 과제의 채점이 모두 완료되었습니다!"); onBack(); return; }
 
       const studentHwMap = new Map();
-      const globalHw = allHws?.find(h => !h.target_student_id);
+      const globalHw = allHws?.find((h: any) => !h.target_student_id);
       
       cols.forEach(s => {
-        let studentHws = allHws?.filter(h => String(h.target_student_id) === String(s.id)) || [];
+        let studentHws = allHws?.filter((h: any) => String(h.target_student_id) === String(s.id)) || [];
         if (studentHws.length === 0 && globalHw) { studentHwMap.set(s.id, globalHw); return; }
         studentHws.sort((a, b) => b.homework_id - a.homework_id); 
         let selectedHw = studentHws[0];
         if (String(s.id) === String(baseHw.target_student_id)) { selectedHw = baseHw; } 
         else {
-          const matched = studentHws.find(h => {
+          const matched = studentHws.find((h: any) => {
             const r = hwResults?.find(res => String(res.homework_id) === String(h.homework_id));
             const isComp = ['채점완료', '제출완료', '완료'].includes(r?.status || '');
             return isComp === isBaseCompleted;
@@ -352,7 +356,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         const completedIds = new Set(safeParseIds(res?.completed_tq_ids));
         const hwTargetSet = new Set(safeParseIds(hw.target_questions));
 
-        // 🌟 학생별 문제 번호 1부터 초기화
         let studentQNum = 1;
 
         rows.forEach(r => {
@@ -366,7 +369,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           
           cellMap.set(key, {
             isBlocked: false,
-            studentQNum: studentQNum++, // 🌟 배정된 문제에 한해 순차적으로 번호 부여
+            studentQNum: studentQNum++, 
             answerId: existingAns?.hw_answer_id || null,
             homeworkId: hw.homework_id,
             studentId: s.id,
@@ -404,7 +407,15 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       setHeaderInfo({ title: `📝 ${exTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: exType });
 
-      const { data: allAssigns } = await supabase.from('exam_assignment').select('*, student(name)').eq('exam_id', m.exam_id).eq('class_id', baseEx.class_id);
+      // 🌟 [핵심 변경] 시스템 파생 시험지(오답, 미완료 등)는 class_id가 null일 수 있으므로 이를 예외 처리합니다.
+      let assignQuery = supabase.from('exam_assignment').select('*, student(name)').eq('exam_id', m.exam_id);
+      if (baseEx.class_id) {
+        assignQuery = assignQuery.eq('class_id', baseEx.class_id);
+      } else {
+        assignQuery = assignQuery.is('class_id', null);
+      }
+      const { data: allAssigns } = await assignQuery;
+      
       const isBaseCompleted = ['채점완료', '완료'].includes(baseEx.status);
 
       let cols = (allAssigns || [])
@@ -423,7 +434,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         }).sort((a: any, b: any) => a.name.localeCompare(b.name));
 
       if (!gradeAll && studentIdParam) cols = cols.filter(c => String(c.id) === String(studentIdParam));
-      if (cols.length === 0) { alert("대상 학생이 없습니다."); onBack(); return; }
+      if (cols.length === 0) { alert("채점할 대상 학생 데이터가 없습니다. 이미 완료되었을 수 있습니다."); onBack(); return; }
 
       if (exType === '입학테스트') {
         const assignIds = cols.map(c => c.assignmentId);
@@ -485,7 +496,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       const cellMap = new Map();
       cols.forEach(s => {
-        // 🌟 학생별 문제 번호 1부터 초기화
         let studentQNum = 1;
 
         rows.forEach(r => {
@@ -494,7 +504,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           
           cellMap.set(key, {
             isBlocked: false,
-            studentQNum: studentQNum++, // 🌟 배정된 문제에 한해 순차적으로 번호 부여
+            studentQNum: studentQNum++, 
             answerId: existingAns?.answer_id || null,
             assignmentId: s.assignmentId,
             studentId: s.id,
@@ -624,65 +634,75 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     fireInstantSave([payload]); 
   };
 
-  const markCol = (sId: string, code: string) => {
+  const markCol = (studentId: string, code: string) => {
     const payloads: any[] = [];
-    setMatrixData(prev => {
-      const newMap = new Map(prev.cellMap);
-      matrixData.rows.forEach(r => {
-        const key = `${sId}_${r.id}`;
-        const cell = newMap.get(key);
-        if (!cell || cell.isBlocked) return;
-        
-        const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
-        newMap.set(key, { ...cell, currentCode: code });
-        
-        payloads.push({
-          type: isHomeworkMode ? 'hw' : 'exam',
-          answer_id: cell.answerId, homework_id: cell.homeworkId, assignment_id: cell.assignmentId,
-          student_id: sId, q_id: cell.qId, tq_id: cell.tqId,
-          grading_code: code, is_correct: isCorrectEq, earned_score: newEarned
-        });
+    const newMap = new Map(matrixData.cellMap);
+    
+    matrixData.rows.forEach(r => {
+      const key = `${studentId}_${r.id}`;
+      const cell = newMap.get(key);
+      if (!cell || cell.isBlocked) return;
+      
+      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
+      newMap.set(key, { ...cell, currentCode: code });
+      
+      payloads.push({
+        type: isHomeworkMode ? 'hw' : 'exam',
+        answer_id: cell.answerId, homework_id: cell.homeworkId, assignment_id: cell.assignmentId,
+        student_id: studentId, q_id: cell.qId, tq_id: cell.tqId,
+        grading_code: code, is_correct: isCorrectEq, earned_score: newEarned
       });
-      return { ...prev, cellMap: newMap };
     });
 
-    const newPending = { ...pendingUpdates };
-    payloads.forEach(p => { newPending[`${p.student_id}_${isHomeworkMode ? p.tq_id : p.q_id}`] = p; });
-    setPendingUpdates(newPending);
+    if (payloads.length === 0) return;
+
+    setMatrixData(prev => ({ ...prev, cellMap: newMap }));
+    
+    setPendingUpdates(prev => {
+      const next = { ...prev };
+      payloads.forEach(p => { next[`${p.student_id}_${isHomeworkMode ? p.tq_id : p.q_id}`] = p; });
+      return next;
+    });
+
     fireInstantSave(payloads); 
   };
 
-  const markRow = (rowId: string, code: string) => {
+  const markRow = (questionId: string, code: string) => {
     const payloads: any[] = [];
-    setMatrixData(prev => {
-      const newMap = new Map(prev.cellMap);
-      matrixData.cols.forEach(c => {
-        const key = `${c.id}_${rowId}`;
-        const cell = newMap.get(key);
-        if (!cell || cell.isBlocked) return;
-        
-        const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
-        newMap.set(key, { ...cell, currentCode: code });
+    const newMap = new Map(matrixData.cellMap);
 
-        payloads.push({
-          type: isHomeworkMode ? 'hw' : 'exam',
-          answer_id: cell.answerId, homework_id: cell.homeworkId, assignment_id: cell.assignmentId,
-          student_id: c.id, q_id: cell.qId, tq_id: cell.tqId,
-          grading_code: code, is_correct: isCorrectEq, earned_score: newEarned
-        });
+    matrixData.cols.forEach(c => {
+      const key = `${c.id}_${questionId}`;
+      const cell = newMap.get(key);
+      if (!cell || cell.isBlocked) return;
+      
+      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
+      newMap.set(key, { ...cell, currentCode: code });
+
+      payloads.push({
+        type: isHomeworkMode ? 'hw' : 'exam',
+        answer_id: cell.answerId, homework_id: cell.homeworkId, assignment_id: cell.assignmentId,
+        student_id: c.id, q_id: cell.qId, tq_id: cell.tqId,
+        grading_code: code, is_correct: isCorrectEq, earned_score: newEarned
       });
-      return { ...prev, cellMap: newMap };
     });
 
-    const newPending = { ...pendingUpdates };
-    payloads.forEach(p => { newPending[`${p.student_id}_${isHomeworkMode ? p.tq_id : p.q_id}`] = p; });
-    setPendingUpdates(newPending);
+    if (payloads.length === 0) return;
+
+    setMatrixData(prev => ({ ...prev, cellMap: newMap }));
+
+    setPendingUpdates(prev => {
+      const next = { ...prev };
+      payloads.forEach(p => { next[`${p.student_id}_${isHomeworkMode ? p.tq_id : p.q_id}`] = p; });
+      return next;
+    });
+
     fireInstantSave(payloads);
   };
 
   const saveMatrixGrades = async () => {
     if (Object.keys(pendingUpdates).length > 0) return alert("현재 백그라운드 저장 중인 항목이 있습니다. 잠시 후 다시 시도해주세요.");
-    if (!confirm("현재 DB에 실시간 저장되어 있습니다.\n\n최종 마감을 위해 오답노트를 발급하고 제출 상태를 갱신하시겠습니까?")) return;
+    if (!confirm("현재 DB에 실시간 저장되어 있습니다.\n\n최종 마감을 위해 오답노트를 발급하고 패널을 닫으시겠습니까?")) return;
 
     setIsSaving(true);
     try {
@@ -714,9 +734,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           
           const allTqIds = Array.from(resolvedCodeByTqId.keys());
           const completedTqIds = allTqIds.filter(id => ['O', 'TO', 'RO'].includes(resolvedCodeByTqId.get(id) || ''));
-          const allDone = allTqIds.length > 0 && completedTqIds.length === allTqIds.length;
-          
-          await supabase.from('student_homework_result').update({ completed_tq_ids: completedTqIds, status: allDone ? '채점완료' : '미제출' }).eq('homework_id', hwId).eq('student_id', stId);
+          await supabase.from('student_homework_result').update({ completed_tq_ids: completedTqIds, status: '채점완료' }).eq('homework_id', hwId).eq('student_id', stId);
         }
       } else {
         for (const statusKey of Array.from(studentStatuses)) {
@@ -757,7 +775,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       }
 
       alert("🎉 완료 상태 갱신 및 오답노트 발급이 처리되었습니다!");
-      if (isHomeworkMode) loadMatrixHomework(); else loadMatrixExam();
+      onBack();
 
     } catch (err: any) {
       console.error("상태 갱신 오류:", err);
@@ -982,7 +1000,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                       <td key={key} className="p-2 border-r border-b transition-colors align-middle relative">
                         <div className="flex items-center justify-between mb-1 px-1 h-[16px]">
                            <div className="flex items-center gap-1 min-w-0 shrink-0">
-                             {/* 🌟 학생 패드 기준 문항 번호 뱃지 추가 */}
                              <span className="shrink-0 flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] font-black" title="학생 화면에서의 문제 번호">
                                {cell.studentQNum}
                              </span>
@@ -1011,9 +1028,8 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                               onClick={() => handleMatrixGrade(c.id, r.id, code)}
                             />
                           ))}
-                          <div className={`flex items-center justify-center text-[11px] font-black h-[28px] ${getResultStyle(currentCode)}`}>
-                            {currentCode || ''}
-                          </div>
+                          {/* 🌟 8번째 빈칸 영역 처리 */}
+                          <div className="flex items-center justify-center h-[28px] bg-slate-200 shadow-inner" />
                         </div>
                       </td>
                     );

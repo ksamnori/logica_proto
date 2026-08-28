@@ -3,7 +3,7 @@
 
 import { useEffect, useState, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { ViewState, TabType } from "./types";
+import { ViewState } from "./types";
 import { useLearningFetch, LEVEL_ORDER } from "./hooks/useLearningFetch";
 import { useLearningActions } from "./hooks/useLearningActions";
 
@@ -14,7 +14,7 @@ import StudentTimeline from "./components/StudentTimeline";
 import LearningCalendar from "./components/LearningCalendar";
 
 export default function LearningPage() {
-  const [activeTab, setActiveTab] = useState<TabType>('DASHBOARD');
+  const [activeTab, setActiveTab] = useState<any>('DASHBOARD');
   const [currentView, setCurrentView] = useState<ViewState>({ type: 'ALL', classId: '', className: '', studentId: '', studentName: '' });
 
   const [selectedBlocks, setSelectedBlocks] = useState<string[]>([]);
@@ -26,10 +26,8 @@ export default function LearningPage() {
   const [isGeneratingPrint, setIsGeneratingPrint] = useState(false);
   const [isFilterActive, setIsFilterActive] = useState(false);
 
-  // 🌟 반 전체 일괄 프린트 생성기 상태
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   
-  // 🌟 오답 추출 기간 설정 (기본값: 최근 1주일)
   const [bulkStartDate, setBulkStartDate] = useState(() => {
     const d = new Date(Date.now() + 9 * 60 * 60 * 1000); 
     d.setDate(d.getDate() - 7); 
@@ -40,7 +38,6 @@ export default function LearningPage() {
     return d.toISOString().split('T')[0];
   });
 
-  // 🌟 클리닉 수행 목표 날짜 설정 (기본값: 오늘)
   const [bulkTargetDate, setBulkTargetDate] = useState(() => {
     const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
     return d.toISOString().split('T')[0];
@@ -78,7 +75,7 @@ export default function LearningPage() {
 
   useEffect(() => {
     if (allStudentsList.length > 0) {
-      const savedTab = (sessionStorage.getItem('logica_learning_tab') as TabType) || 'DASHBOARD';
+      const savedTab = sessionStorage.getItem('logica_learning_tab') || 'DASHBOARD';
       const savedViewStr = sessionStorage.getItem('logica_learning_view');
       let view: ViewState = { type: 'ALL', classId: '', className: '', studentId: '', studentName: '' };
 
@@ -106,7 +103,7 @@ export default function LearningPage() {
     }
   }, [allStudentsList]);
 
-  const handleMainTabClick = (tab: TabType) => {
+  const handleMainTabClick = (tab: any) => {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
     setSelectedBlocks([]); setGlobalSelectedBlocks([]); setIsFilterActive(false); setSelectedDate(null); 
@@ -114,7 +111,7 @@ export default function LearningPage() {
     else fetchGlobalListForTab(tab, allStudentsList);
   };
 
-  const handleCalendarSummaryClick = (tab: TabType) => {
+  const handleCalendarSummaryClick = (tab: any) => {
     setActiveTab(tab);
     sessionStorage.setItem('logica_learning_tab', tab);
     setSelectedBlocks([]); setGlobalSelectedBlocks([]); setGlobalList([]); setTimelineData([]);
@@ -163,6 +160,7 @@ export default function LearningPage() {
       if (activeTab === 'HOMEWORK' && !item.type.includes('hw')) return false;
       if (activeTab === 'INCORRECT' && item.type !== 'print') return false;
       if (activeTab === 'SIMILAR' && item.type !== 'similar') return false; 
+      if (activeTab === 'OVERDUE' && item.type !== 'overdue') return false; 
       if (!showCompleted && item.isCompleted) return false; 
       return true;
     });
@@ -182,6 +180,7 @@ export default function LearningPage() {
          if (activeTab === 'HOMEWORK') return res.is_exam_hw ? `hw_exam_${safeId}_${res.student_id}` : `hw_${safeId}_${res.student_id}`;
          if (activeTab === 'INCORRECT') return `print_${safeId}_${res.student_id}`;
          if (activeTab === 'SIMILAR') return `similar_${safeId}_${res.student_id}`; 
+         if (activeTab === 'OVERDUE') return `overdue_${safeId}_${res.student_id}`; 
          return '';
       }));
     }
@@ -194,13 +193,13 @@ export default function LearningPage() {
   };
 
   const studentStatsMap = useMemo(() => {
-    const map: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; }> = {};
+    const map: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; overdueQ: number }> = {};
     currentStats.forEach(e => {
       let statClassId = e.class_id || 'UNKNOWN';
       const key = `${e.student_id}_${statClassId}`;
       const globalKey = `${e.student_id}_ALL`;
-      if (!map[key]) map[key] = { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0 };
-      if (!map[globalKey]) map[globalKey] = { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0 };
+      if (!map[key]) map[key] = { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
+      if (!map[globalKey]) map[globalKey] = { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
       
       const statusStr = e.status || '미제출';
       const isPending = ['미제출', '진행중', '미응시', '응시전', '응시중'].includes(statusStr);
@@ -210,6 +209,7 @@ export default function LearningPage() {
         else if (e.type === 'HW') { map[key].hwQ += qCount; map[globalKey].hwQ += qCount; }
         else if (e.type === 'PRINT') { map[key].printQ += qCount; map[globalKey].printQ += qCount; }
         else if (e.type === 'SIMILAR') { map[key].similarQ += qCount; map[globalKey].similarQ += qCount; }
+        else if (e.type === 'OVERDUE') { map[key].overdueQ += qCount; map[globalKey].overdueQ += qCount; } 
       }
     });
     return map;
@@ -330,8 +330,13 @@ export default function LearningPage() {
         <div className="flex items-center gap-2 p-1.5 bg-slate-200/60 rounded-xl shadow-inner overflow-x-auto">
           <button onClick={() => handleMainTabClick('DASHBOARD')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'DASHBOARD' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📈 학생 대시보드</button>
           <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
+          
           <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 시험</button>
           <button onClick={() => handleMainTabClick('HOMEWORK')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'HOMEWORK' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📝 과제</button>
+          
+          {/* 🌟 OVERDUE 탭 디자인 통일 */}
+          <button onClick={() => handleMainTabClick('OVERDUE')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'OVERDUE' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>⏰ 미완료과제</button>
+          
           <button onClick={() => handleMainTabClick('INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'INCORRECT' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>❌ 오답</button>
           <button onClick={() => handleMainTabClick('SIMILAR')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'SIMILAR' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔄 오답유사</button>
           
@@ -450,7 +455,6 @@ export default function LearningPage() {
                   <div className="flex flex-col gap-2">
                     <label className="text-sm font-extrabold text-slate-800">1. 오답 추출 기간 설정</label>
                     <div className="flex items-center gap-3">
-                      {/* 🌟 transition-colors 제거 및 colorScheme: 'light' 추가로 깜빡임 해결 */}
                       <input type="date" style={{ colorScheme: 'light' }} value={bulkStartDate} onChange={e => setBulkStartDate(e.target.value)} className="flex-1 px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 outline-none focus:border-violet-500" />
                       <span className="text-slate-400 font-bold">~</span>
                       <input type="date" style={{ colorScheme: 'light' }} value={bulkEndDate} onChange={e => setBulkEndDate(e.target.value)} className="flex-1 px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 outline-none focus:border-violet-500" />
@@ -509,7 +513,6 @@ export default function LearningPage() {
                   <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 mt-2">
                     <label className="text-sm font-extrabold text-slate-800">3. 클리닉 수행 목표일 지정 <span className="text-xs text-slate-400 font-medium">(선택)</span></label>
                     <div className="flex items-center gap-3">
-                      {/* 🌟 transition-colors 제거 및 colorScheme: 'light' 추가로 깜빡임 해결 */}
                       <input 
                         type="date" 
                         style={{ colorScheme: 'light' }}

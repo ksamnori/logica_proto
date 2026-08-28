@@ -19,24 +19,72 @@ const generateUUID = () => {
   });
 };
 
-const sortQuestionsList = (data: any[]) => {
-  return [...data].sort((a, b) => {
-    const pA = parseInt(String(a.final_printed_page)) || a.detected_page_num || 9999;
-    const pB = parseInt(String(b.final_printed_page)) || b.detected_page_num || 9999;
-    if (pA !== pB) return pA - pB;
-    const nA = parseInt(String(a.question_number).replace(/[^0-9]/g, '')) || 9999;
-    const nB = parseInt(String(b.question_number).replace(/[^0-9]/g, '')) || 9999;
-    if (nA !== nB) return nA - nB;
-    return (a.sub_num || 0) - (b.sub_num || 0);
-  });
+// 🌟 크로스 매퍼와 동일한 괄호 제거 및 다중 서브 문항 완벽 병합 처리
+const formatQNum = (qNum: string | number, subNum?: string | number) => {
+  let numStr = String(qNum || "").trim().replace(/-0$/, '');
+  
+  if (subNum !== undefined && subNum !== null && String(subNum).trim() !== "") {
+    const cleanSubNum = String(subNum).replace(/[()]/g, '').trim();
+    if (cleanSubNum !== "") {
+      numStr = `${numStr}-${cleanSubNum}`;
+    }
+  }
+  
+  return numStr.replace(/-0$/, '');
 };
 
-const formatQNum = (qNum: any, subNum: any) => {
-  let numStr = String(qNum || "-");
-  if (subNum !== undefined && subNum !== null && String(subNum).trim() !== "" && String(subNum).trim() !== "0") {
-    numStr = `${numStr}-${subNum}`;
+// 🌟 자연 정렬(Natural Sort) 알고리즘
+const parseNatural = (str: string) => {
+  return String(str || "")
+    .match(/(\d+)|(\D+)/g)
+    ?.map(part => {
+      const num = parseInt(part, 10);
+      return isNaN(num) ? part : num;
+    }) || [];
+};
+
+const compareNatural = (strA: string, strB: string) => {
+  const partsA = parseNatural(strA);
+  const partsB = parseNatural(strB);
+  
+  const len = Math.max(partsA.length, partsB.length);
+  for (let i = 0; i < len; i++) {
+    const partA = partsA[i];
+    const partB = partsB[i];
+    
+    if (partA === undefined) return -1;
+    if (partB === undefined) return 1;
+    
+    if (typeof partA === 'number' && typeof partB === 'number') {
+      if (partA !== partB) return partA - partB; 
+    } else if (typeof partA === 'string' && typeof partB === 'string') {
+      const cmp = String(partA).localeCompare(String(partB));
+      if (cmp !== 0) return cmp; 
+    } else {
+      return typeof partA === 'number' ? -1 : 1;
+    }
   }
-  return numStr;
+  return 0;
+};
+
+// 🌟 크로스 매퍼와 동일하게 화면 출력 번호를 기준으로 정렬하도록 수정
+const sortQuestionsList = (data: any[]) => {
+  return [...data].sort((a, b) => {
+    const parsePage = (p1: any, p2: any) => {
+      const v1 = parseInt(String(p1));
+      if (!isNaN(v1) && v1 > 0) return v1;
+      const v2 = parseInt(String(p2));
+      if (!isNaN(v2) && v2 > 0) return v2;
+      return 99999;
+    };
+    const pageA = parsePage(a.final_printed_page, a.detected_page_num);
+    const pageB = parsePage(b.final_printed_page, b.detected_page_num);
+    if (pageA !== pageB) return pageA - pageB;
+
+    const dispA = formatQNum(a.question_number, a.sub_num);
+    const dispB = formatQNum(b.question_number, b.sub_num);
+    return compareNatural(dispA, dispB);
+  });
 };
 
 const fetchAllRows = async (tableName: string, selectQuery: string = '*', filterCol?: string, filterVal?: string) => {
@@ -442,12 +490,10 @@ export default function TaxonomyEditorPage() {
     } catch (e: any) { alert("삭제 실패: " + e.message); } finally { setIsLoading(false); }
   };
 
-  // 🌟 [최종 완성] 엑박을 원천 차단하는 가장 완벽하고 튼튼한 URL 필터
   const getCleanUrl = (url: string) => {
     if (!url || url === 'null' || url === 'undefined') return '';
     let validUrl = String(url).trim();
     
-    // 1. 배열 형태 찌꺼기 방어 (예: ["img.png"])
     if (validUrl.startsWith('[')) {
       try {
         const parsed = JSON.parse(validUrl);
@@ -457,16 +503,13 @@ export default function TaxonomyEditorPage() {
       } catch(e) {}
     }
     
-    // 2. 쌍따옴표 찌꺼기 완벽 제거
     validUrl = validUrl.replace(/^["']|["']$/g, '').trim();
     
     const lowerUrl = validUrl.toLowerCase();
     
-    // 3. 순수 파일명(절대 경로가 아님)인 경우에만 question_images 경로 강제 주입
     if (validUrl && validUrl !== 'null' && !lowerUrl.startsWith('http') && !lowerUrl.startsWith('data:image') && !lowerUrl.startsWith('blob:')) {
       if (validUrl.startsWith('/')) validUrl = validUrl.substring(1);
       
-      // NEXT_PUBLIC_SUPABASE_URL 증발 방어막 적용 (직접 찾아낸 도메인 하드코딩)
       const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbwornivkrvoeqdh.supabase.co";
       validUrl = `${baseUrl}/storage/v1/object/public/question_images/${validUrl}`;
     }
@@ -1075,7 +1118,7 @@ export default function TaxonomyEditorPage() {
                   
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
-                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-4 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 mr-2 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
+                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-4 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 mr-2 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 정 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
                         <span>👯</span> <span>쌍둥이/유사 생성</span>
                       </button>
                       

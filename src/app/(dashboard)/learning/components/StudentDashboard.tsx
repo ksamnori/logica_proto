@@ -11,7 +11,7 @@ interface StudentDashboardProps {
   handleViewChange: (view: any) => void;
   handleStudentClick: (studentId: string, studentName: string, classId: string, className: string) => void;
   groupedClasses: Record<string, any[]>;
-  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; }>;
+  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; overdueQ: number; }>;
   LEVEL_ORDER: string[];
 }
 
@@ -25,6 +25,7 @@ export default function StudentDashboard({
     let totalHw = 0;
     let totalPrint = 0;
     let totalSimilar = 0;
+    let totalOverdue = 0;
     
     const processedStudentIds = new Set<string>();
 
@@ -36,8 +37,9 @@ export default function StudentDashboard({
         cls.students.forEach((stu: any) => {
           if (processedStudentIds.has(stu.id)) return;
 
-          const stats = studentStatsMap[`${stu.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0 };
-          const totalPending = stats.examQ + stats.hwQ + stats.printQ + stats.similarQ;
+          // 🌟 5단 분류 스탯 매핑 적용
+          const stats = studentStatsMap[`${stu.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
+          const totalPending = stats.examQ + stats.hwQ + stats.printQ + stats.similarQ + stats.overdueQ;
           
           if (totalPending > 0) {
             processedStudentIds.add(stu.id); 
@@ -53,22 +55,23 @@ export default function StudentDashboard({
             totalHw += stats.hwQ;
             totalPrint += stats.printQ;
             totalSimilar += stats.similarQ;
+            totalOverdue += stats.overdueQ;
           }
         });
       });
     });
 
     list.sort((a, b) => {
-      const aTotal = a.stats.examQ + a.stats.hwQ + a.stats.printQ + a.stats.similarQ;
-      const bTotal = b.stats.examQ + b.stats.hwQ + b.stats.printQ + b.stats.similarQ;
+      const aTotal = a.stats.examQ + a.stats.hwQ + a.stats.printQ + a.stats.similarQ + a.stats.overdueQ;
+      const bTotal = b.stats.examQ + b.stats.hwQ + b.stats.printQ + b.stats.similarQ + b.stats.overdueQ;
       if (bTotal !== aTotal) return bTotal - aTotal;
       return a.name.localeCompare(b.name);
     });
 
-    return { list, totalExam, totalHw, totalPrint, totalSimilar };
+    return { list, totalExam, totalHw, totalPrint, totalSimilar, totalOverdue };
   }, [groupedClasses, studentStatsMap, LEVEL_ORDER, currentView]);
 
-  const { list, totalExam, totalHw, totalPrint, totalSimilar } = actionList;
+  const { list, totalExam, totalHw, totalPrint, totalSimilar, totalOverdue } = actionList;
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50">
@@ -88,21 +91,25 @@ export default function StudentDashboard({
           </p>
         </div>
         
-        {/* 🌟 4분류 요약 박스 */}
-        <div className="flex gap-4 overflow-x-auto pb-1">
-          <div className="bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+        {/* 🌟 5분류 요약 박스 (미완료 추가 및 레이아웃 최적화) */}
+        <div className="flex gap-3 overflow-x-auto pb-1">
+          <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 시험</span>
             <span className="text-2xl font-black text-blue-700">{totalExam}<span className="text-sm ml-0.5">건</span></span>
           </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+          <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-amber-600 mb-1">📝 과제</span>
             <span className="text-2xl font-black text-amber-700">{totalHw}<span className="text-sm ml-0.5">건</span></span>
           </div>
-          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+          <div className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
+            <span className="text-[11px] font-extrabold text-rose-600 mb-1">⏰ 미완료</span>
+            <span className="text-2xl font-black text-rose-700">{totalOverdue}<span className="text-sm ml-0.5">건</span></span>
+          </div>
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-emerald-600 mb-1">❌ 오답</span>
             <span className="text-2xl font-black text-emerald-700">{totalPrint}<span className="text-sm ml-0.5">건</span></span>
           </div>
-          <div className="bg-violet-50 border border-violet-200 rounded-xl px-4 py-3 flex flex-col items-center min-w-[90px] shadow-sm shrink-0">
+          <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-violet-600 mb-1">🔄 유사</span>
             <span className="text-2xl font-black text-violet-700">{totalSimilar}<span className="text-sm ml-0.5">건</span></span>
           </div>
@@ -126,6 +133,7 @@ export default function StudentDashboard({
                   <th className="py-3.5 px-6 w-32">학생명</th>
                   <th className="py-3.5 px-3 text-center text-blue-700">시험</th>
                   <th className="py-3.5 px-3 text-center text-amber-700">과제</th>
+                  <th className="py-3.5 px-3 text-center text-rose-700">미완료</th>
                   <th className="py-3.5 px-3 text-center text-emerald-700">오답</th>
                   <th className="py-3.5 px-3 text-center text-violet-700">유사</th>
                   <th className="py-3.5 px-6 w-32 text-center">관리 액션</th>
@@ -145,6 +153,8 @@ export default function StudentDashboard({
                     <td className="py-3.5 px-6 font-black text-slate-800 text-[14px]">
                       {stu.name}
                     </td>
+                    
+                    {/* 🌟 5단 분류 스탯 배지 렌더링 */}
                     <td className="py-3.5 px-3 text-center">
                       {stu.stats.examQ > 0 ? (
                         <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-blue-200">{stu.stats.examQ}</span>
@@ -156,16 +166,21 @@ export default function StudentDashboard({
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     <td className="py-3.5 px-3 text-center">
+                      {stu.stats.overdueQ > 0 ? (
+                        <span className="inline-flex items-center justify-center bg-rose-100 text-rose-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-rose-200">{stu.stats.overdueQ}</span>
+                      ) : <span className="text-slate-300 font-medium text-xs">-</span>}
+                    </td>
+                    <td className="py-3.5 px-3 text-center">
                       {stu.stats.printQ > 0 ? (
                         <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-emerald-200">{stu.stats.printQ}</span>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
-                    {/* 🌟 4분류: 유사 문제 셀 추가 */}
                     <td className="py-3.5 px-3 text-center">
                       {stu.stats.similarQ > 0 ? (
                         <span className="inline-flex items-center justify-center bg-violet-100 text-violet-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-violet-200">{stu.stats.similarQ}</span>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
+                    
                     <td className="py-3.5 px-6 text-center">
                       <button 
                         onClick={() => handleStudentClick(stu.id, stu.name, stu.classId, stu.className)}

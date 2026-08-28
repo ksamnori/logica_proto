@@ -336,8 +336,8 @@ export default function StudentTimeline({
       } else if (modalTab === 'SELECTED') {
           let tempQIds: string[] = [];
           for (const block of selectedBlocks) {
-            // 시험 및 오답, 유사프린트 계열
-            if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_') || block.startsWith('similar_')) {
+            // 시험 및 오답, 유사프린트 계열 (미완료 포함)
+            if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
               const assignId = block.split('_').reverse()[1]; 
               const { data: ans } = await supabaseClient.from('student_answer')
                 .select('question_id')
@@ -411,8 +411,6 @@ export default function StudentTimeline({
     sessionStorage.setItem('clinicTargetStudentId', currentView?.studentId);
     sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
     sessionStorage.setItem('isClinicMode', 'true');
-    
-    // 🌟 4분류: 마법사로 넘기는 프린트 속성을 '오답유사'로 지정
     sessionStorage.setItem('examType', '오답유사');
 
     window.location.href = '/exam/step2?source=clinic_incorrect';
@@ -437,7 +435,6 @@ export default function StudentTimeline({
       else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답 복습';
       else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답 복습';
 
-      // 🌟 4분류: 즉시 생성할 때 exam_type을 '오답유사'로
       const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
         title: examTitle,
         sub_title: subTitle,
@@ -784,7 +781,7 @@ export default function StudentTimeline({
               const isSelected = selectedBlocks.includes(item.id);
               const isCompleted = item.isCompleted;
 
-              // 🌟 4분류 컬러링 적용
+              // 🌟 5분류 컬러링 적용 (미완료과제 포함)
               let badgeColor = "bg-slate-100 text-slate-500";
               let typeLabel = "";
 
@@ -792,6 +789,7 @@ export default function StudentTimeline({
               else if (item.type.includes('hw')) { badgeColor = "bg-amber-100 text-amber-700 border-amber-200"; typeLabel = "📚 과제"; }
               else if (item.type === 'print') { badgeColor = "bg-emerald-100 text-emerald-700 border-emerald-200"; typeLabel = "❌ 오답"; }
               else if (item.type === 'similar') { badgeColor = "bg-violet-100 text-violet-700 border-violet-200"; typeLabel = "🔄 오답유사"; }
+              else if (item.type === 'overdue') { badgeColor = "bg-rose-100 text-rose-700 border-rose-200"; typeLabel = "⏰ 미완료과제"; }
 
               const rowBgClass = isSelected
                 ? 'border-rose-400 bg-rose-50/30 shadow-rose-100'
@@ -842,16 +840,16 @@ export default function StudentTimeline({
                     </div>
 
                     <div className="flex items-center gap-2.5 shrink-0 border-l border-slate-300 pl-4 w-[160px] justify-end">
-                      {item.type === 'exam' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' ? (
+                      {item.type === 'exam' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue' ? (
                         <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
                       ) : (
                         <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
+                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
                       <button 
-                        onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : 'similar'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
+                        onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
                         className="text-[15px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" 
                         title="프린트 출력"
                       >
@@ -861,7 +859,7 @@ export default function StudentTimeline({
                       <button onClick={(e) => { 
                           e.stopPropagation(); 
                           let detailHref = '';
-                          if (item.type === 'hw_exam' || item.type === 'print' || item.type === 'similar') {
+                          if (item.type === 'hw_exam' || item.type === 'print' || item.type === 'similar' || item.type === 'overdue') {
                             detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
                           } else if (item.type === 'hw') {
                             detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;

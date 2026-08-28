@@ -225,7 +225,7 @@ export default function Sidebar() {
         <MenuSection title="수업 관리" icon="👨‍🏫">
           <MenuItem path="/lesson" label="교재 관리" />
           <MenuItem path="/progress" label="진도 관리" />
-          <MenuItem path="/learning" label="학습 관리" desc="(시험·과제·오답·유사)" full />
+          <MenuItem path="/learning" label="학습 관리" desc="(시험·과제·미완료·오답·유사)" full />
           <MenuItem path="/class-report" label="학습 결과" />
           <MenuItem path="/makeup" label="보강 관리" />
         </MenuSection>
