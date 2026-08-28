@@ -11,7 +11,6 @@ export default function LaunchSpecialClassPage() {
     levelCode: "SS", course: "", daysCode: "", period: "", ym: "",
     name: "", targetGrade: "", instructorId: "", status: "예정",
     capacity: 15,
-    // 🌟 특강/메이크업용 추가 필드: 시작일, 종료일, 총 회차
     startDate: "", endDate: "", totalSessions: ""
   });
   
@@ -90,10 +89,11 @@ export default function LaunchSpecialClassPage() {
       }
       
       const finalCode = `${basePrefix}${nextAlphabet}${ym}`;
-      const levelName = { SS: "특강", WS: "특강", MU: "메이크업", LE: "메이크업" }[levelCode] || "특강";
       
-      // 🌟 레벨 코드에 따른 자동 class_type 지정 로직
-      let determinedClassType = "SPECIAL"; // 기본값 특강
+      // 🌟 레벨 코드별 이름 매핑 (PU 풀업 추가)
+      const levelName = { SS: "특강", WS: "특강", PU: "풀업", MU: "메이크업", LE: "메이크업" }[levelCode] || "특강";
+      
+      let determinedClassType = "SPECIAL"; 
       if (levelCode === "MU" || levelCode === "LE") {
         determinedClassType = "MAKEUP";
       }
@@ -108,7 +108,6 @@ export default function LaunchSpecialClassPage() {
         status: status,
         capacity: capacity,
         tenant_id: myTenantId,
-        // 🌟 신규 컬럼 데이터 삽입
         class_type: determinedClassType,
         start_date: startDate || null,
         end_date: endDate || null,
@@ -156,8 +155,12 @@ export default function LaunchSpecialClassPage() {
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">분류 (2자리)</label>
                 <select value={form.levelCode} onChange={e => setForm({...form, levelCode: e.target.value})} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:ring-2 focus:ring-indigo-600">
-                  <option value="SS">여름특강 (SS)</option><option value="WS">겨울특강 (WS)</option>
-                  <option value="MU">메이크업 보강 (MU)</option><option value="LE">학습부진 보강 (LE)</option>
+                  <option value="SS">여름특강 (SS)</option>
+                  <option value="WS">겨울특강 (WS)</option>
+                  {/* 🌟 풀업특강 드롭다운 옵션 추가 */}
+                  <option value="PU">풀업특강 (PU)</option>
+                  <option value="MU">메이크업 보강 (MU)</option>
+                  <option value="LE">학습부진 보강 (LE)</option>
                 </select>
               </div>
               <div>
@@ -198,7 +201,6 @@ export default function LaunchSpecialClassPage() {
                 </select>
               </div>
               
-              {/* 🌟 추가된 특강 기간 및 회차 설정 섹션 */}
               <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-4 grid grid-cols-3 gap-4">
                 <div>
                    <label className="block text-sm font-bold text-slate-700 mb-1">시작 일자</label>

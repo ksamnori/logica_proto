@@ -28,10 +28,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const [searchGrade, setSearchGrade] = useState("");
   const [searchKeyword, setSearchKeyword] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  // 💡 요일을 수정해 저장할 때마다 값을 바꿔서, 방금 DB에 반영된 정규 요일을
-  // ClassWeekCalendar가 즉시 다시 읽어오게 만드는 트리거.
+  
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
-
   const [daechiInstructors, setDaechiInstructors] = useState<any[]>([]);
 
   useEffect(() => {
@@ -143,23 +141,19 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     onSuccess(); 
   };
 
-  // 🌟 [수정] 개별 학생 제외 시에도 연관 출결 기록(attendance)을 먼저 지워줍니다.
   const removeStudent = async (studentId: string) => {
     if (!confirm("정말 수강생 목록에서 제외하시겠습니까?\n(이 반에서 발생한 해당 학생의 출결 기록도 함께 삭제됩니다.)")) return;
     
-    // 1. 제외하려는 enrollment_id 찾기
     const { data: targetEnroll } = await supabase
       .from("enrollment")
       .select("enrollment_id")
       .match({ student_id: studentId, class_id: modalData.class_id })
       .single();
 
-    // 2. 해당 enrollment_id에 묶인 출결 삭제
     if (targetEnroll) {
       await supabase.from("attendance").delete().eq("enrollment_id", targetEnroll.enrollment_id);
     }
 
-    // 3. 최종 명단(enrollment) 삭제
     const { error } = await supabase.from("enrollment").delete().match({ student_id: studentId, class_id: modalData.class_id });
     if (error) {
       return alert("제외 실패: " + error.message);
@@ -213,7 +207,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     }
   };
 
-  // 🌟 [완전삭제 해결 핵심] enrollment_id를 먼저 확보하여 출결 기록부터 완벽하게 삭제합니다.
   const deleteClass = async () => {
     if (!confirm(`⚠️ 경고: [${modalData.name}] 반을 정말 삭제하시겠습니까?\n이 반과 연결된 명단, 시간표, 배정된 교재, 출결 기록, 과제/시험 등이 모두 함께 삭제되며 절대 복구할 수 없습니다.`)) return;
     
@@ -221,7 +214,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     try {
       const cId = modalData.class_id;
 
-      // 1-1. 시험 기록 삭제
       const { data: exData } = await supabase.from("exam_assignment").select("assignment_id").eq("class_id", cId);
       if (exData && exData.length > 0) {
         const exIds = exData.map(e => e.assignment_id);
@@ -229,7 +221,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         await supabase.from("exam_assignment").delete().eq("class_id", cId);
       }
 
-      // 1-2. 과제 기록 삭제
       const { data: hwData } = await supabase.from("homework_assignment").select("homework_id").eq("class_id", cId);
       if (hwData && hwData.length > 0) {
         const hwIds = hwData.map(h => h.homework_id);
@@ -238,18 +229,14 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         await supabase.from("homework_assignment").delete().eq("class_id", cId);
       }
 
-      // 🌟 1-3. 출결(attendance) 기록 완벽 삭제 (enrollment_id 기반)
       const { data: enrollData } = await supabase.from("enrollment").select("enrollment_id").eq("class_id", cId);
       if (enrollData && enrollData.length > 0) {
         const enrollIds = enrollData.map(e => e.enrollment_id);
-        const { error: attErr } = await supabase.from("attendance").delete().in("enrollment_id", enrollIds);
-        if (attErr) throw new Error(`[출결 기록] 삭제 실패: ${attErr.message}`);
+        await supabase.from("attendance").delete().in("enrollment_id", enrollIds);
       }
       
-      // 혹시 몰라 class_id로도 삭제 시도 (보험용)
       await supabase.from("attendance").delete().eq("class_id", cId);
 
-      // 1-4. 나머지 브릿지 데이터 완전 청소 (attendance는 이미 지웠으므로 배열에서 뺌)
       const cleanupTables = [
         { name: 'class_textbook', label: '교재 배정 내역' },
         { name: 'class_schedule', label: '시간표' },
@@ -259,21 +246,13 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       ];
 
       for (const table of cleanupTables) {
-        const { error } = await supabase.from(table.name).delete().eq("class_id", cId);
-        if (error) {
-          throw new Error(`[${table.label}] 삭제 실패: ${error.message}`);
-        }
+         await supabase.from(table.name).delete().eq("class_id", cId);
       }
 
-      // 1-5. 학생 테이블에 남아있을 수 있는 class_id 연결 끊기
       await supabase.from("student").update({ class_id: null }).eq("class_id", cId);
 
-      // 🌟 2. 하위 데이터 청소가 무사히 끝났다면 최종 반 삭제 진행
       const { error: finalError } = await supabase.from("class").delete().eq("class_id", cId);
-      
-      if (finalError) {
-        throw new Error(`최종 반 삭제 실패: ${finalError.message}`);
-      }
+      if (finalError) throw new Error(`최종 반 삭제 실패: ${finalError.message}`);
       
       alert("✅ 반 정보가 연관 데이터와 함께 완벽하게 삭제되었습니다.");
       onSuccess();
@@ -290,69 +269,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
 
   const canEdit = currentUser.isAdmin || String(modalData.instructor_id) === String(currentUser.instId);
   const isSpecialOrMakeup = modalData.class_type === 'SPECIAL' || modalData.class_type === 'MAKEUP';
-
-  // 🌟 특강/메이크업용 상세 일정 산출 로직
-  const renderSpecialClassDates = () => {
-    if (!modalData.start_date || !modalData.end_date) return null;
-    
-    const daysMap: any = { "일": 0, "월": 1, "화": 2, "수": 3, "목": 4, "금": 5, "토": 6 };
-    const checkedSchedules = modalSchedules.filter(s => s.checked);
-    if (checkedSchedules.length === 0) return null;
-
-    const parseDateLocal = (ymd: string) => {
-      const [y, m, d] = ymd.split('-').map(Number);
-      return new Date(y, m - 1, d);
-    };
-
-    const start = parseDateLocal(modalData.start_date);
-    const end = parseDateLocal(modalData.end_date);
-    const dates = [];
-
-    const diffTime = Math.abs(end.getTime() - start.getTime());
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)); 
-    if (start > end || diffDays > 365) return <p className="text-sm text-rose-500 font-bold p-2 mt-2 border border-rose-200 bg-rose-50 rounded-lg text-center">기간 설정이 올바르지 않거나 너무 깁니다.</p>;
-
-    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-      const dayNum = d.getDay();
-      const schedule = checkedSchedules.find(s => daysMap[s.day] === dayNum);
-      if (schedule) {
-        dates.push({
-          dateStr: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
-          day: schedule.day,
-          start_time: schedule.start_time,
-          end_time: schedule.end_time
-        });
-      }
-    }
-
-    return (
-      <div className="mt-3 max-h-48 overflow-y-auto custom-scroll border border-indigo-100 rounded-lg shadow-inner">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-indigo-100/50 sticky top-0">
-            <tr>
-              <th className="py-2 px-3 font-bold text-indigo-800 border-b border-indigo-100">회차</th>
-              <th className="py-2 px-3 font-bold text-indigo-800 border-b border-indigo-100">날짜</th>
-              <th className="py-2 px-3 font-bold text-indigo-800 border-b border-indigo-100">시간</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-indigo-50 bg-white">
-            {dates.map((item, idx) => (
-              <tr key={item.dateStr} className="hover:bg-indigo-50/30 transition-colors">
-                <td className="py-2 px-3 text-indigo-400 font-bold">{idx + 1}회차</td>
-                <td className="py-2 px-3 text-indigo-700 font-bold">{item.dateStr} ({item.day})</td>
-                <td className="py-2 px-3 text-slate-600 font-bold">{item.start_time || '-'} ~ {item.end_time || '-'}</td>
-              </tr>
-            ))}
-            {dates.length === 0 && (
-              <tr>
-                <td colSpan={3} className="py-4 text-center text-indigo-400 font-bold">해당 기간 내에 수업일이 없습니다.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    );
-  };
 
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
@@ -427,30 +343,31 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               </div>
             </div>
 
-            {/* 🌟 조건부 렌더링: 정규반(REGULAR)일 때만 클리닉 달력을 표시하고, 특강/보강은 요약 정보만 표시 */}
-            {modalData.class_id && !isSpecialOrMakeup ? (
-              <ClassWeekCalendar
-                classId={modalData.class_id}
-                className={modalData.name}
-                canEdit={canEdit}
-                scheduleRefreshKey={scheduleRefreshKey}
-              />
-            ) : modalData.class_id && isSpecialOrMakeup ? (
-              <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-4">
-                <label className="block text-xs font-bold text-indigo-700 mb-2">클래스 일정 안내 (특강/보강)</label>
-                <div className="text-sm font-bold text-slate-700">
-                  {modalData.start_date && modalData.end_date ? (
-                    <p>📅 기간: {modalData.start_date} ~ {modalData.end_date} (총 {modalData.total_sessions || '-'}회)</p>
-                  ) : (
-                    <p className="text-slate-500">📅 시작/종료 일자가 설정되지 않았습니다.</p>
-                  )}
-                  {renderSpecialClassDates()}
-                  <div className="mt-3 text-[11px] font-bold text-indigo-400">
-                    * 특강 및 메이크업 클래스는 클리닉 배정 달력이 지원되지 않습니다.
+            {/* 🌟 조건부 숨김 제거 - 이제 항상 달력을 렌더링하고, 내부에서 특강 모드로 작동시킵니다 */}
+            {modalData.class_id && (
+              <div className="col-span-2">
+                {isSpecialOrMakeup && (
+                  <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-3">
+                    <div className="text-sm font-bold text-slate-700">
+                      {modalData.start_date && modalData.end_date ? (
+                        <p>📅 특강 기간: {modalData.start_date} ~ {modalData.end_date} (총 {modalData.total_sessions || '-'}회)</p>
+                      ) : (
+                        <p className="text-slate-500">📅 특강 시작/종료 일자가 설정되지 않았습니다.</p>
+                      )}
+                    </div>
                   </div>
-                </div>
+                )}
+                <ClassWeekCalendar
+                  classId={modalData.class_id}
+                  className={modalData.name}
+                  canEdit={canEdit}
+                  scheduleRefreshKey={scheduleRefreshKey}
+                  isSpecialOrMakeup={isSpecialOrMakeup}
+                  specialStartDate={modalData.start_date}
+                  specialEndDate={modalData.end_date}
+                />
               </div>
-            ) : null}
+            )}
 
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>
