@@ -6,6 +6,27 @@ import ChatWidget from "@/components/parent/ChatWidget";
 import StudentCard from "@/components/parent/StudentCard";
 import { verifyParentPhone, loginParentAction, setupParentAction } from "@/app/actions/parentAuth";
 
+// 🌟 데이터 파싱을 위한 유틸리티 함수 추가
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
+const safeParseIds = (raw: any): number[] => {
+  if (!raw) return [];
+  try {
+    let val = raw;
+    if (typeof val === 'string') {
+      if (val === "null" || val.trim() === "") return [];
+      val = JSON.parse(val);
+    }
+    if (Array.isArray(val)) return val.map(Number);
+  } catch (err) {
+    console.warn("데이터 파싱 경고:", err);
+  }
+  return [];
+};
+
 export default function ParentPortalPage() {
   const [isExitModalOpen, setIsExitModalOpen] = useState(false);
   const [authState, setAuthState] = useState<"check_phone" | "login" | "setup" | "dashboard">("check_phone");
@@ -20,10 +41,8 @@ export default function ParentPortalPage() {
   const [infoName, setInfoName] = useState("");
   const [studentsData, setStudentsData] = useState<any[]>([]);
   
-  // 현재 선택된 자녀의 ID를 관리하는 상태
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
-  // 히스토리 라우팅 (뒤로가기 방어)
   const isExitModalOpenRef = useRef(isExitModalOpen);
   isExitModalOpenRef.current = isExitModalOpen;
   const authStateRef = useRef(authState);
@@ -47,7 +66,6 @@ export default function ParentPortalPage() {
     return () => { window.removeEventListener("popstate", handlePopState); };
   }, []);
 
-  // 초기 인증 확인 및 카카오 세션 처리
   useEffect(() => {
     const hash = window.location.hash;
     
@@ -60,7 +78,6 @@ export default function ParentPortalPage() {
     if (hash.includes("access_token")) setIsKakaoLoading(true); 
 
     const handleKakaoSession = async (session: any) => {
-      console.log("🔥 [1단계] Supabase 세션 확인:", session);
       let kakaoPhone = "";
 
       if (session.provider_token) {
@@ -72,7 +89,6 @@ export default function ParentPortalPage() {
             },
           });
           const kakaoData = await res.json();
-          console.log("🚀 [2단계] 카카오 다이렉트 통신 성공! 데이터:", kakaoData);
           kakaoPhone = kakaoData?.kakao_account?.phone_number || "";
         } catch (e) {
           console.error("카카오 다이렉트 호출 실패", e);
@@ -84,7 +100,6 @@ export default function ParentPortalPage() {
         kakaoPhone = meta.phone_number || meta.phone || session.user?.identities?.[0]?.identity_data?.phone_number || "";
       }
 
-      // 🌟 [수정] 임시 테스트 모드 프롬프트를 완전히 제거하고 즉시 알림창 띄우기
       if (!kakaoPhone) {
         alert("카카오에서 연락처 정보를 가져올 수 없습니다.\n카카오 계정 설정을 확인하거나 일반 로그인(전화번호)을 이용해주세요.");
         await supabase.auth.signOut();
@@ -98,8 +113,6 @@ export default function ParentPortalPage() {
       
       const rawPhone = kakaoPhone.replace(/[^0-9]/g, ""); 
       const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
-
-      console.log("📞 [3단계] 폰 번호 검색 준비 완료:", { rawPhone, formattedPhone });
 
       try {
         const { data } = await supabase
@@ -210,11 +223,188 @@ export default function ParentPortalPage() {
 
       const { data: sData, error } = await supabase
         .from("student")
-        .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
+        .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
         .in("parent_id", pids);
 
       if (!error && sData && sData.length > 0) {
         const sorted = sData.sort((a, b) => (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0));
+        
+        // 🌟 [추가] 각 자녀별 교재 진도율 실시간 매핑 로직 이식
+        for (let stu of sorted) {
+          const activeEnrollment = stu.enrollment?.find((e: any) => (!e.end_date || new Date(e.end_date) >= new Date()) && unwrap(e.class)?.class_id);
+          const classId = activeEnrollment ? unwrap(activeEnrollment.class)?.class_id : null;
+          
+          if (classId) {
+            const { data: ctData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId);
+            if (ctData && ctData.length > 0) {
+              const bIds = ctData.map(cb => cb.book_id);
+              
+              let qData: any[] = [];
+              for (const bId of bIds) {
+                 let from = 0;
+                 while (true) {
+                   const { data: qChunk } = await supabase.from("textbook_question").select("tq_id, book_id, page_number, question_id").eq("book_id", bId).range(from, from + 999);
+                   if (!qChunk || qChunk.length === 0) break;
+                   qData.push(...qChunk);
+                   if (qChunk.length < 1000) break;
+                   from += 1000;
+                 }
+              }
+              
+              const globalStatusMap: Record<number, 'done' | 'homework'> = {};
+              const qIdToTqId = new Map<number, number>();
+              const bookPagesMap: Record<string, Set<number>> = {};
+              const bookPageTqsMap: Record<string, Record<number, number[]>> = {};
+
+              bIds.forEach(b => { bookPagesMap[b] = new Set(); bookPageTqsMap[b] = {}; });
+              
+              qData.forEach(q => {
+                if (q.question_id) qIdToTqId.set(q.question_id, q.tq_id);
+                const pNum = Number(q.page_number) || 0;
+                bookPagesMap[q.book_id].add(pNum);
+                if (!bookPageTqsMap[q.book_id][pNum]) bookPageTqsMap[q.book_id][pNum] = [];
+                bookPageTqsMap[q.book_id][pNum].push(q.tq_id);
+              });
+
+              // 과제 매핑
+              const { data: hwAssignments } = await supabase.from("homework_assignment")
+                .select("book_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)")
+                .eq("class_id", classId)
+                .in("book_id", bIds);
+                
+              hwAssignments?.forEach(hw => {
+                 const targetQs = safeParseIds(hw.target_questions);
+                 const isClassWide = !hw.target_student_id;
+                 if (isClassWide || hw.target_student_id === stu.student_id) {
+                   targetQs.forEach(tq => globalStatusMap[tq] = 'homework');
+                 }
+                 
+                 hw.student_homework_result?.forEach((res: any) => {
+                   if (res.student_id === stu.student_id) {
+                      const parsedCompleted = safeParseIds(res.completed_tq_ids);
+                      const isFullyCompleted = ['채점완료', '제출완료', '완료'].includes(res.status);
+                      let completedQs = parsedCompleted;
+                      if (isFullyCompleted && targetQs.length > 0) completedQs = Array.from(new Set([...targetQs, ...parsedCompleted]));
+                      completedQs.forEach(tqId => globalStatusMap[tqId] = 'done');
+                   }
+                 });
+              });
+
+              // 시험지 기록 융합
+              let exAssigns: any[] = [];
+              let fromEA = 0;
+              while(true) {
+                  const { data: chunk } = await supabase.from('exam_assignment')
+                      .select('assignment_id, status, exam_id')
+                      .eq('student_id', stu.student_id)
+                      .range(fromEA, fromEA + 999);
+                  if (!chunk || chunk.length === 0) break;
+                  exAssigns.push(...chunk);
+                  if (chunk.length < 1000) break;
+                  fromEA += 1000;
+              }
+              const eIds = [...new Set(exAssigns.map(a => a.exam_id).filter(Boolean))];
+              if (eIds.length > 0) {
+                  let eItems: any[] = [];
+                  for (let i = 0; i < eIds.length; i += 100) {
+                      const chunkIds = eIds.slice(i, i + 100);
+                      let fromEI = 0;
+                      while(true) {
+                          const { data: chunk } = await supabase.from('exam_item')
+                             .select('exam_id, question_id')
+                             .in('exam_id', chunkIds)
+                             .range(fromEI, fromEI + 999);
+                          if (!chunk || chunk.length === 0) break;
+                          eItems.push(...chunk);
+                          if (chunk.length < 1000) break;
+                          fromEI += 1000;
+                      }
+                  }
+                  const examQMap = new Map<string, number[]>();
+                  eItems.forEach(item => {
+                      if (!examQMap.has(item.exam_id)) examQMap.set(item.exam_id, []);
+                      examQMap.get(item.exam_id)!.push(item.question_id);
+                  });
+                  exAssigns.forEach(assign => {
+                      const qIdsInExam = examQMap.get(assign.exam_id) || [];
+                      const isCompleted = ['채점완료', '제출완료', '완료'].includes(assign.status);
+                      qIdsInExam.forEach(qId => {
+                          const tqId = qIdToTqId.get(qId);
+                          if (tqId) {
+                              const curStatus = globalStatusMap[tqId];
+                              if (isCompleted) {
+                                  globalStatusMap[tqId] = 'done';
+                              } else if (curStatus !== 'done') {
+                                  globalStatusMap[tqId] = 'homework';
+                              }
+                          }
+                      });
+                  });
+              }
+
+              // 오답노트/정답 기록 수집
+              let hwAns: any[] = [];
+              let fromHw = 0;
+              while(true) {
+                 const { data: chunk } = await supabase.from('student_homework_answer').select('tq_id, is_correct, grading_code').eq('student_id', stu.student_id).range(fromHw, fromHw + 999);
+                 if (!chunk || chunk.length === 0) break;
+                 hwAns.push(...chunk);
+                 if (chunk.length < 1000) break;
+                 fromHw += 1000;
+              }
+              hwAns.forEach(ans => {
+                 if (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct) globalStatusMap[ans.tq_id] = 'done';
+              });
+
+              let exAns: any[] = [];
+              let fromEx = 0;
+              while(true) {
+                 const { data: chunk } = await supabase.from('student_answer').select('question_id, is_correct, grading_code').eq('student_id', stu.student_id).range(fromEx, fromEx + 999);
+                 if (!chunk || chunk.length === 0) break;
+                 exAns.push(...chunk);
+                 if (chunk.length < 1000) break;
+                 fromEx += 1000;
+              }
+              exAns.forEach(ans => {
+                 const tqId = qIdToTqId.get(ans.question_id);
+                 if (tqId && (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct)) globalStatusMap[tqId] = 'done';
+              });
+
+              // 최종 데이터 컴파일
+              stu.progressBooks = ctData.map(cb => {
+                 const bId = cb.book_id;
+                 const totalPages = Array.from(bookPagesMap[bId] || []).sort((a,b)=>a-b);
+                 let donePagesCount = 0;
+                 const pageStatuses: Record<number, 'done'|'homework'|'none'> = {};
+
+                 totalPages.forEach(p => {
+                   const tqs = bookPageTqsMap[bId][p] || [];
+                   let doneCount = 0;
+                   let hwCount = 0;
+                   tqs.forEach(tq => {
+                     if (globalStatusMap[tq] === 'done') doneCount++;
+                     else if (globalStatusMap[tq] === 'homework') hwCount++;
+                   });
+                   if (tqs.length > 0 && doneCount === tqs.length) {
+                     pageStatuses[p] = 'done';
+                     donePagesCount++;
+                   } else if (doneCount > 0 || hwCount > 0) {
+                     pageStatuses[p] = 'homework';
+                   } else {
+                     pageStatuses[p] = 'none';
+                   }
+                 });
+
+                 const percent = totalPages.length > 0 ? Math.min(100, Math.round((donePagesCount / totalPages.length) * 100)) : 0;
+                 return {
+                   ...cb,
+                   stats: { percent, donePagesCount, maxPageCount: totalPages.length, pageStatuses, bookPages: totalPages }
+                 };
+              });
+            }
+          }
+        }
+        
         setStudentsData(sorted);
         setSelectedStudentId(sorted[0].student_id);
       }
@@ -253,7 +443,6 @@ export default function ParentPortalPage() {
             </div>
           )}
 
-          {/* 캡처를 위해 로그인 폼 하단에 추가해 주실 코드 */}
           <div className="mt-6 text-center">
             <a 
               href="/privacy" 
@@ -293,8 +482,8 @@ export default function ParentPortalPage() {
             </a>
             
             <div className="text-[10px] text-slate-400 leading-relaxed">
-              <p className="font-bold text-slate-500 mb-1">(주)이배움 로지카대치본원학원</p>
-              <p>대표자: 천종현 | 사업자등록번호: 732-85-02927</p>
+              <p className="font-bold text-slate-500 mb-1">LOGICA학원 대치 본원</p>
+              <p>대표자: 이웅행 | 사업자등록번호: 732-85-02927</p>
               <p>주소: 서울특별시 강남구 역삼로 448, 3층(대치동)</p>
               <p>대표번호: 02-555-8875</p>
             </div>
@@ -303,8 +492,6 @@ export default function ParentPortalPage() {
       </div>
     );
   };
-
-  
 
   const selectedStudent = studentsData.find(s => s.student_id === selectedStudentId);
 
