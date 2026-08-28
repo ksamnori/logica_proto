@@ -9,8 +9,11 @@ import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from "@/hooks/useToggleCooldown
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { awardClinicMinutePoints, spendPoints } from "@/app/actions/shopPoints";
 import { resolvePendingHomeworkQuestions, BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
-import { getISOWeekKST } from "@/lib/classRound";
 import PointBadge from "@/components/clinic/PointBadge";
+
+import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
+import { useClinicTimer } from "./hooks/useClinicTimer";
+import { ClinicCanvas } from "./components/ClinicCanvas";
 
 import {
   SUPABASE_URL, SUPABASE_ANON_KEY, CLINIC_ROOM, ROUND1_TIME_LIMIT_SECONDS,
@@ -19,7 +22,6 @@ import {
   isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion, combineDbHints
 } from "./utils";
 import { QuestionDisplay } from "./components/QuestionDisplay";
-import { HintRevealBox } from "./components/HintRevealBox";
 import { ViewerModals } from "./components/ViewerModals";
 
 const getSupabaseClient = () => {
@@ -39,11 +41,7 @@ export default function ClinicViewer() {
   const [globalExamTitle, setGlobalExamTitle] = useState('과제');
 
   const [points, setPoints] = useState<number | null>(null);
-  const [clinicRemainingStr, setClinicRemainingStr] = useState("60:00");
-  const [isClinicUrgent, setIsClinicUrgent] = useState(false);
-  const [roundRemainingSec, setRoundRemainingSec] = useState(ROUND1_TIME_LIMIT_SECONDS);
   const [timeIsUp, setTimeIsUp] = useState(false);
-
   const [questions, setQuestions] = useState<any[]>([]);
   const [currentQIndex, setCurrentQIndex] = useState(0);
   const [pendingQCount, setPendingQCount] = useState<string>("로딩 중...");
@@ -76,6 +74,8 @@ export default function ClinicViewer() {
   const [currentPenWidth, setCurrentPenWidth] = useState(3);
   const [currentPenColor, setCurrentPenColor] = useState(PEN_COLORS[0]);
   const [isEraserMode, setIsEraserMode] = useState(false);
+  const [canvasClearTrigger, setCanvasClearTrigger] = useState(0); 
+
   const [keypadCollapsed, setKeypadCollapsed] = useState(false);
   const [hintPanelExpanded, setHintPanelExpanded] = useState(true);
   const [myAwayActive, setMyAwayActive] = useState(false);
@@ -100,15 +100,12 @@ export default function ClinicViewer() {
   const [sessionInfo, setSessionInfo] = useState<any>(null);
 
   const optionsRef = useRef<HTMLDivElement>(null);
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const questionNavScrollRef = useRef<HTMLDivElement>(null);
-  const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
-  const isDrawing = useRef(false);
   const clinicChannelRef = useRef<any>(null);
   const mySeatRef = useRef<string | null>(null);
   const seatKeysRef = useRef<string[]>([]);
+  const handleTaActionRef = useRef<any>(null); 
   const [editorLocked, setEditorLocked] = useState(false);
-  const handleTaActionRef = useRef<any>(null);
 
   useEffect(() => {
     const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
@@ -124,6 +121,10 @@ export default function ClinicViewer() {
   const correctSolvedCountRef = useRef(0);
   const totalQuestionsInRoundRef = useRef(0);
   const examAssignmentTotalsRef = useRef<Record<string, number>>({});
+
+  const { clinicRemainingStr, isClinicUrgent, roundRemainingSec } = useClinicTimer({
+    isStarted, isTimedRound, timeIsUp, clinicSessionStateRef, supabaseClient, handleTimeUp: (f, s) => handleTimeUp(f, s)
+  });
 
   useEffect(() => {
     const sId = localStorage.getItem('logica_student_id');
@@ -171,22 +172,17 @@ export default function ClinicViewer() {
     const idx = draft.qIndex;
     if (idx < 0 || idx >= questions.length) return;
 
-    const q = questions[idx];
+    const qItem = questions[idx];
     if (draft.mode === 'pen') {
       studentDrawings.current[idx] = draft.answer;
       studentAnswers.current[idx] = draft.answer;
-    } else if (isObjectiveQuestion(q)) {
+    } else if (isObjectiveQuestion(qItem)) {
       studentAnswers.current[idx] = draft.answer;
     } else {
       keypadAnswers.current[idx] = draft.answer;
     }
     setCurrentQIndex(idx);
     forceUpdate();
-    if (draft.mode === 'pen') setTimeout(() => initCanvas(idx), 50);
-
-    clinicSessionStateRef.current.draft_progress = null;
-    const sid = clinicSessionStateRef.current?.id;
-    if (sid) supabaseClient.from('clinic_session_state').update({ draft_progress: null }).eq('id', sid).then();
   }, [questions, params]);
 
   const initMathJax = () => {
@@ -199,7 +195,8 @@ export default function ClinicViewer() {
     }
   };
 
-  const loadExistingAnswers = async (sId: string, qs: any[]) => {
+  // 🌟 남은 문제 수를 정확히 카운트하여 렌더링하는 향상된 로직
+  const loadExistingAnswers = async (sId: string, qs: any[], baseTitle: string) => {
     if (qs.length === 0) return;
     const examAssignIds = [...new Set(qs.map(q => q.examAssignmentId).filter(Boolean))];
     const hwIds = [...new Set(qs.map(q => q.homework_id).filter(Boolean))];
@@ -212,13 +209,14 @@ export default function ClinicViewer() {
     const examAns = examAnsRes.data || [];
     const hwAns = hwAnsRes.data || [];
     let correctCount = 0;
+    let attemptedCount = 0; // 한 번이라도 시도한 문제 카운트
 
-    qs.forEach((q, i) => {
+    qs.forEach((qItem, i) => {
       let existing = null;
-      if (q.examAssignmentId && q.question_id) {
-        existing = examAns.find((a: any) => String(a.exam_assignment_id) === String(q.examAssignmentId) && String(a.question_id) === String(q.question_id));
-      } else if (q.homework_id && q.tq_id) {
-        existing = hwAns.find((a: any) => String(a.homework_id) === String(q.homework_id) && String(a.tq_id) === String(q.tq_id));
+      if (qItem.examAssignmentId && qItem.question_id) {
+        existing = examAns.find((a: any) => String(a.exam_assignment_id) === String(qItem.examAssignmentId) && String(a.question_id) === String(qItem.question_id));
+      } else if (qItem.homework_id && qItem.tq_id) {
+        existing = hwAns.find((a: any) => String(a.homework_id) === String(qItem.homework_id) && String(a.tq_id) === String(qItem.tq_id));
       }
 
       if (existing) {
@@ -236,6 +234,11 @@ export default function ClinicViewer() {
 
         const code = existing.grading_code;
         if (code) {
+          // O, X, 세모 등 채점 이력이 있으면 시도한 문제로 간주
+          if (['O', 'X', 'TO', 'RO', 'TX', 'T', '☆'].includes(code)) {
+              attemptedCount++;
+          }
+          
           if (code === 'O') {
             qBoxStatus.current[i] = 'correct_blue';
             correctCount++;
@@ -248,7 +251,12 @@ export default function ClinicViewer() {
         }
       }
     });
+
     correctSolvedCountRef.current = correctCount;
+    const remainCount = Math.max(0, qs.length - attemptedCount);
+    
+    // 남은 문제 수 표기 적용
+    setPendingQCount(`${baseTitle} : 총 ${qs.length}문항 (남은 문제: ${remainCount}문항)`);
     forceUpdate();
   };
 
@@ -259,10 +267,10 @@ export default function ClinicViewer() {
       const newData = payload.new;
       if (!newData || String(newData.student_id) !== String(studentInfo.id) || !newData.grading_code) return;
 
-      const idx = questions.findIndex(q =>
+      const idx = questions.findIndex(qItem =>
         type === 'exam'
-          ? (String(q.examAssignmentId) === String(newData.exam_assignment_id) && String(q.question_id) === String(newData.question_id))
-          : (String(q.homework_id) === String(newData.homework_id) && String(q.tq_id) === String(newData.tq_id))
+          ? (String(qItem.examAssignmentId) === String(newData.exam_assignment_id) && String(qItem.question_id) === String(newData.question_id))
+          : (String(qItem.homework_id) === String(newData.homework_id) && String(qItem.tq_id) === String(newData.tq_id))
       );
 
       if (idx === -1) return;
@@ -293,7 +301,7 @@ export default function ClinicViewer() {
            studentAnswers.current[idx] = null; 
            delete studentDrawings.current[idx];
            delete keypadAnswers.current[idx];
-           setTimeout(() => initCanvas(idx), 50);
+           setCanvasClearTrigger(p => p + 1);
         }
       }
       forceUpdate();
@@ -351,21 +359,21 @@ export default function ClinicViewer() {
       const allQIds = [...new Set([...qIds, ...tqQIds])];
       const { data: allQDbRows } = allQIds.length > 0 ? await supabaseClient.from('question_db').select('*').in('question_id', allQIds) : { data: [] };
 
-      const qDbMap = new Map<any, any>((allQDbRows || []).map((q:any) => [q.question_id, q]));
+      const qDbMap = new Map<any, any>((allQDbRows || []).map((qItem:any) => [qItem.question_id, qItem]));
       const tqMap = new Map<any, any>((tqRows || []).map((tq:any) => [tq.tq_id, tq]));
 
       const mapped: any[] = [];
       records.forEach((r:any) => {
         if (r.question_id && qDbMap.has(r.question_id)) {
-          const q = qDbMap.get(r.question_id);
-          const dbHint = combineDbHints(q.step_1_concept, q.step_2_approach);
+          const qItem = qDbMap.get(r.question_id);
+          const dbHint = combineDbHints(qItem.step_1_concept, qItem.step_2_approach);
           mapped.push({
-            index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: q.question_id,
-            source: '과제오답유사', questionText: formatMathTextForWeb(q.question),
-            imageUrl: getCleanUrl(q.image_url), options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
-            answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '',
+            index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
+            source: '과제오답유사', questionText: formatMathTextForWeb(qItem.question),
+            imageUrl: getCleanUrl(qItem.image_url), options: typeof qItem.options === 'string' ? JSON.parse(qItem.options) : qItem.options,
+            answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '',
             hintText: dbHint,
-            aiGradable: q.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
+            aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
           });
         } else if (r.tq_id && tqMap.has(r.tq_id)) {
           const tq = tqMap.get(r.tq_id);
@@ -391,13 +399,11 @@ export default function ClinicViewer() {
       if (mapped.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
       
       setIsTimedRound(false);
-      
       setGlobalExamTitle('이번 주 과제오답유사');
-      setPendingQCount(`이번 주 과제오답유사: ${mapped.length}문제`);
       totalQuestionsInRoundRef.current = mapped.length;
       hintState.current = hydrateHintState(sId, mapped);
       
-      await loadExistingAnswers(sId, mapped);
+      await loadExistingAnswers(sId, mapped, '이번 주 과제오답유사');
       setQuestions(mapped);
     } catch(e) {}
   };
@@ -459,7 +465,6 @@ export default function ClinicViewer() {
 
       if (validItems.length === 0) { setPendingQCount(`이번 주 ${displayLabel}: 문제 없음`); setQuestions([]); return; }
 
-      setPendingQCount(`이번 주 ${displayLabel}: ${validItems.length}문제 (20분 제한)`);
       const mapped = validItems.map((it:any, i:number) => {
         const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
         return {
@@ -475,7 +480,8 @@ export default function ClinicViewer() {
       totalQuestionsInRoundRef.current = mapped.length;
       hintState.current = hydrateHintState(sId, mapped);
 
-      await loadExistingAnswers(sId, mapped);
+      const titleBase = matchedTitle || `이번 주 ${displayLabel}`;
+      await loadExistingAnswers(sId, mapped, isTimedRound ? `${titleBase} (20분 제한)` : titleBase);
       setQuestions(mapped);
     } catch(e) {}
   };
@@ -530,40 +536,40 @@ export default function ClinicViewer() {
 
       if (qs.length === 0 && examRows.length === 0) { setPendingQCount(`모든 과제를 완료했습니다!`); setQuestions([]); return; }
 
-      setGlobalExamTitle(assignIdsArray.length > 0 ? '미완료 과제' : (examTitle || '정규 과제'));
-      setPendingQCount(`대기 중인 병합 과제: ${qs.length + examRows.length}문제`);
+      const baseTitle = assignIdsArray.length > 0 ? '미완료 과제' : (examTitle || '정규 과제');
+      setGlobalExamTitle(baseTitle);
 
-      const hwQIds = qs.map((q: any) => q.question_id).filter(Boolean);
+      const hwQIds = qs.map((qItem: any) => qItem.question_id).filter(Boolean);
       const { data: freshQDb } = hwQIds.length > 0 
         ? await supabaseClient.from('question_db').select('question_id, step_1_concept, step_2_approach').in('question_id', hwQIds)
         : { data: [] };
-      const freshQDbMap = new Map((freshQDb || []).map((q: any) => [q.question_id, q]));
+      const freshQDbMap = new Map((freshQDb || []).map((qItem: any) => [qItem.question_id, qItem]));
 
-      const mappedHw = qs.map((q:any, i:number) => {
-        const raw = q.raw_metadata || {};
-        const freshQ: any = freshQDbMap.get(q.question_id) || {};
+      const mappedHw = qs.map((qItem:any, i:number) => {
+        const raw = qItem.raw_metadata || {};
+        const freshQ: any = freshQDbMap.get(qItem.question_id) || {};
         const dbHint = combineDbHints(freshQ.step_1_concept || raw.step_1_concept, freshQ.step_2_approach || raw.step_2_approach);
-        const tbFields = textbookHintFields(q.bookType);
+        const tbFields = textbookHintFields(qItem.bookType);
 
         return {
-          index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: q.homeworkId, tq_id: q.tq_id, question_id: q.question_id,
-          source: q.homeworkTitle || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
-          imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || q.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
-          answer: String(q.answer || '').trim(), explanation: raw.explanation || raw.solution || '', 
+          index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: qItem.homeworkId, tq_id: qItem.tq_id, question_id: qItem.question_id,
+          source: qItem.homeworkTitle || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
+          imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || qItem.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
+          answer: String(qItem.answer || '').trim(), explanation: raw.explanation || raw.solution || '', 
           hintText: dbHint || tbFields.hintText,
           hasHint: !!dbHint || tbFields.hasHint,
           needsAiHint: !dbHint && tbFields.needsAiHint,
-          bookId: q.book_id, bookType: q.bookType, bookTitle: q.bookTitle,
-          aiGradable: q.ai_gradable !== false
+          bookId: qItem.book_id, bookType: qItem.bookType, bookTitle: qItem.bookTitle,
+          aiGradable: qItem.ai_gradable !== false
         };
       });
-      const mappedExam = examRows.map((q: any, i: number) => ({ ...q, index: mappedHw.length + i, uid: 'rq' + (mappedHw.length + i) + '_' + Date.now() }));
+      const mappedExam = examRows.map((qItem: any, i: number) => ({ ...qItem, index: mappedHw.length + i, uid: 'rq' + (mappedHw.length + i) + '_' + Date.now() }));
       const mapped = [...mappedHw, ...mappedExam];
 
       totalQuestionsInRoundRef.current = mapped.length;
       hintState.current = hydrateHintState(sId, mapped);
       
-      await loadExistingAnswers(sId, mapped);
+      await loadExistingAnswers(sId, mapped, baseTitle);
       setQuestions(mapped);
     } catch(e){}
   };
@@ -572,23 +578,23 @@ export default function ClinicViewer() {
     try {
       const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, question_id, source_type, question_db(*)').eq('student_id', sId).is('resolved_at', null).in('status', ['X', 'TX', 'T', '☆', 'B', 'TO', 'RO']);
       if (!records || records.length === 0) { setPendingQCount(`대기 중인 오답: 0문제`); setQuestions([]); return; }
-      setPendingQCount(`대기 중인 오답: ${records.length}문제`);
+      
       const mapped = records.filter((r:any) => r.question_db).map((r:any, i:number) => {
-        const q = r.question_db;
-        const dbHint = combineDbHints(q.step_1_concept, q.step_2_approach);
+        const qItem = r.question_db;
+        const dbHint = combineDbHints(qItem.step_1_concept, qItem.step_2_approach);
         return {
-          index: i, uid: 'rq' + i + '_' + Date.now(), record_id: r.record_id, question_id: q.question_id,
-          source: r.source_type || '오답노트', questionText: formatMathTextForWeb(q.question),
-          imageUrl: getCleanUrl(q.image_url), options: typeof q.options === 'string' ? JSON.parse(q.options) : q.options,
-          answer: String(q.answer || '').trim(), explanation: q.explanation || q.solution || '', 
+          index: i, uid: 'rq' + i + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
+          source: r.source_type || '오답노트', questionText: formatMathTextForWeb(qItem.question),
+          imageUrl: getCleanUrl(qItem.image_url), options: typeof qItem.options === 'string' ? JSON.parse(qItem.options) : qItem.options,
+          answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '', 
           hintText: dbHint,
-          aiGradable: q.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
+          aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint
         };
       });
       totalQuestionsInRoundRef.current = mapped.length;
       hintState.current = hydrateHintState(sId, mapped);
       
-      await loadExistingAnswers(sId, mapped);
+      await loadExistingAnswers(sId, mapped, '대기 중인 오답');
       setQuestions(mapped);
     } catch(e){}
   };
@@ -677,669 +683,11 @@ export default function ClinicViewer() {
     }
   };
 
-  // =====================================================================
-  // 🌟 누락 함수 복원 (getAnswerMode 등 5종 추가 완료)
-  // =====================================================================
-
-  const getAnswerMode = (idx: number, q: any): 'pen' | 'keypad' => {
-    const explicit = answerModes.current[idx];
-    if (explicit) return explicit;
-    if (studentDrawings.current[idx]) return 'pen';
-    if (q && !isKeypadEnterable(q.answer)) return 'pen';
-    return 'keypad';
-  };
-
-  const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string): Promise<any> => {
-    const res = await fetch('/api/clinic-grade', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ imageDataUrl: dataUrl, correct, questionText: qText }),
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'API 오류');
-    return data;
-  };
-
-  const generateAiHint = async (qText: string): Promise<string> => {
-    try {
-      const res = await fetch('/api/clinic-hint', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ questionText: qText }),
-      });
-      if (!res.ok) throw new Error('API 오류');
-      const data = await res.json();
-      return (data.hint || '').trim() || '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
-    } catch (e) {
-      return '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
-    }
-  };
-
-  const persistExamAnswersToDB = async (): Promise<number> => {
-    if (!isTimedRound || !params.assignmentId) return 0;
-    await supabaseClient.from('student_answer').delete().eq('exam_assignment_id', params.assignmentId).eq('student_id', studentInfo.id);
-
-    const inserts: any[] = []; const incUpserts: any[] = []; let totalScore = 0;
-    for (let idx = 0; idx < questions.length; idx++) {
-      const q = questions[idx];
-      const ans = studentAnswers.current[idx] ? String(studentAnswers.current[idx]).trim() : '미입력';
-      const isCorrect = await isQuestionCorrect(idx);
-      const score = isCorrect ? (100 / totalQuestionsInRoundRef.current) : 0;
-      totalScore += score;
-
-      inserts.push({ exam_assignment_id: params.assignmentId, student_id: studentInfo.id, question_id: q.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
-      if (!isCorrect && q.question_id) {
-        incUpserts.push({ student_id: studentInfo.id, question_id: q.question_id, source_type: '시험지', status: ans === '미입력' ? 'B' : 'X', resolved_at: null });
-      }
-    }
-
-    if (inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
-    if (incUpserts.length > 0) await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
-    return totalScore;
-  };
-
-  const saveExamResultsToDB = async () => {
-    if (!isTimedRound || !params.assignmentId) return;
-    const totalScore = await persistExamAnswersToDB();
-    await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', params.assignmentId);
-  };
-
-  const ensurePenGraded = useCallback((idx: number): Promise<void> => {
-    if (penGradeCache.current[idx] !== undefined) return Promise.resolve();
-    if (penGradeInFlight.current[idx]) return penGradeInFlight.current[idx];
-    const q = questions[idx];
-    const isSubj = q && !isObjectiveQuestion(q);
-    const mode = getAnswerMode(idx, q);
-    const drawing = studentDrawings.current[idx];
-    if (!q || !isSubj || mode !== 'pen' || !drawing) return Promise.resolve();
-    const p = gradeHandwrittenAnswerWithGemini(drawing, q.answer, q.questionText)
-      .then((meta: any) => { penGradeCache.current[idx] = !!meta.is_correct; penGradeMetaCache.current[idx] = meta; })
-      .catch(() => {})
-      .finally(() => { delete penGradeInFlight.current[idx]; });
-    penGradeInFlight.current[idx] = p;
-    return p;
-  }, [questions]);
-
-  const isQuestionCorrect = useCallback(async (idx: number): Promise<boolean> => {
-    const q = questions[idx];
-    if (!q) return false;
-    const isSubj = !isObjectiveQuestion(q);
-    const mode = getAnswerMode(idx, q);
-    if (isSubj && mode === 'pen') {
-      await ensurePenGraded(idx);
-      return !!penGradeCache.current[idx];
-    }
-    if (isSubj) return keypadAnswersMatch(studentAnswers.current[idx], q.answer);
-    return mcAnswersMatch(studentAnswers.current[idx], q.answer);
-  }, [questions, ensurePenGraded]);
-
-  useEffect(() => {
-    if (!isTimedRound || !isStarted) return;
-    const leavingIdx = currentQIndex;
-    return () => { ensurePenGraded(leavingIdx); };
-  }, [currentQIndex, isTimedRound, isStarted, ensurePenGraded]);
-
-  const processSessionEnd = async () => {
-    try {
-        const incorrectQIds: number[] = [];
-        const unansweredQIds: number[] = [];
-        const statusMap: Record<number, string> = {};
-        let corrects = 0;
-
-        questions.forEach((q, i) => {
-            const status = qBoxStatus.current[i];
-            const isResolved = status === 'correct_blue' || status === 'correct_yellow' || status === 'retry_yellow';
-
-            if (isResolved) {
-                corrects++;
-            } else if (q.question_id) {
-                const isSubj = !isObjectiveQuestion(q);
-                const mode = getAnswerMode(i, q);
-                const ans = isSubj && mode === 'pen' ? studentDrawings.current[i] : studentAnswers.current[i];
-                const isBlank = !ans || String(ans).trim() === '' || String(ans).trim() === '미입력';
-
-                if (isBlank) {
-                    if (params.round === 2) {
-                        unansweredQIds.push(q.question_id); 
-                    } else {
-                        incorrectQIds.push(q.question_id); 
-                        statusMap[q.question_id] = 'B';
-                    }
-                } else {
-                    incorrectQIds.push(q.question_id);
-                    statusMap[q.question_id] = 'X';
-                }
-            }
-        });
-
-        correctSolvedCountRef.current = corrects;
-
-        if (incorrectQIds.length > 0 && !(params.round === 2 && params.overdue)) {
-            await generateIncorrectPrint(incorrectQIds, globalExamTitle, isTimedRound, statusMap);
-        }
-
-        if (unansweredQIds.length > 0 && params.round === 2) {
-            await generateOverduePrint(unansweredQIds, globalExamTitle);
-        }
-
-        if (params.round === 2) {
-            const hwIdsProcessed = new Set<number>();
-            const examAssignIdsProcessed = new Set<string>();
-            questions.forEach(q => {
-                if (q.homework_id) hwIdsProcessed.add(q.homework_id);
-                if (q.examAssignmentId) examAssignIdsProcessed.add(q.examAssignmentId);
-            });
-
-            if (hwIdsProcessed.size > 0) {
-                await supabaseClient.from('student_homework_result')
-                    .update({ status: '제출완료' })
-                    .eq('student_id', studentInfo.id)
-                    .in('homework_id', Array.from(hwIdsProcessed));
-            }
-            if (examAssignIdsProcessed.size > 0) {
-                await supabaseClient.from('exam_assignment')
-                    .update({ status: '제출완료' })
-                    .eq('student_id', studentInfo.id)
-                    .in('assignment_id', Array.from(examAssignIdsProcessed));
-            }
-        }
-    } catch (err) {
-        console.error('Error during processSessionEnd:', err);
-    }
-  };
-
-  const generateOverduePrint = async (uIds: number[], sourceTitle: string) => {
-    if (uIds.length === 0) return;
-    try {
-      const cleanSourceTitle = sourceTitle.replace(new RegExp(`^\\[${studentInfo.name}\\]\\s*`), '').trim();
-      const title = `[${studentInfo.name}] ${cleanSourceTitle} 미완료 프린트`;
-      const { data: exMasters } = await supabaseClient.from('exam_master')
-        .select('exam_id, created_at')
-        .eq('title', title)
-        .eq('exam_type', '미완료과제')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      let existingExamId = null;
-      let merged = false;
-
-      if (exMasters && exMasters.length > 0) {
-          const todayStr = getKSTDateString();
-          const validMasters = exMasters.filter((m: any) => {
-              const createdAtKST = new Date(new Date(m.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-              return createdAtKST === todayStr;
-          });
-
-          if (validMasters.length > 0) {
-              const examIds = validMasters.map((m: any) => m.exam_id);
-              const { data: assignments } = await supabaseClient.from('exam_assignment')
-                  .select('assignment_id, exam_id')
-                  .eq('student_id', studentInfo.id)
-                  .in('exam_id', examIds)
-                  .eq('status', '미응시')
-                  .limit(1);
-
-              if (assignments && assignments.length > 0) {
-                  existingExamId = assignments[0].exam_id;
-              }
-          }
-      }
-
-      if (existingExamId) {
-          const { data: existingItems } = await supabaseClient.from('exam_item').select('question_id').eq('exam_id', existingExamId);
-          const existingQIds = new Set((existingItems || []).map((item: any) => item.question_id));
-          const newQIds = uIds.filter(id => !existingQIds.has(id));
-
-          if (newQIds.length > 0) {
-              const maxSortOrder = existingItems?.length || 0;
-              const itemsToInsert = newQIds.map((qid, i) => ({
-                  exam_id: existingExamId, question_id: qid, sort_order: maxSortOrder + i + 1, assigned_score: 0
-              }));
-              await supabaseClient.from('exam_item').insert(itemsToInsert);
-
-              const newTotal = maxSortOrder + newQIds.length;
-              await supabaseClient.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
-              const newScore = Math.round(100 / newTotal);
-              await supabaseClient.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
-          }
-          merged = true;
-      }
-
-      if (!merged) {
-          const { data: cls } = await supabaseClient.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
-          let instId = cls?.class?.instructor_id;
-          if (!instId) { const { data: fb } = await supabaseClient.from('instructor').select('instructor_id').limit(1).maybeSingle(); instId = fb?.instructor_id; }
-          if (!instId) return;
-
-          const { data: ex } = await supabaseClient.from('exam_master').insert({ title, exam_type: '미완료과제', instructor_id: instId, total_questions: uIds.length }).select().single();
-          const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round(100 / uIds.length) }));
-          await supabaseClient.from('exam_item').insert(items);
-          await supabaseClient.from('exam_assignment').insert({ exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시' });
-      }
-    } catch(e) {}
-  };
-
-  const generateIncorrectPrint = async (incQIds: number[], sourceTitle: string, syncIncorrectRecord: boolean = true, statusMap?: Record<number, string>) => {
-    const uIds = [...new Set(incQIds)];
-    if (uIds.length === 0) return;
-
-    if (syncIncorrectRecord) {
-      const incUpserts = uIds.map(qid => ({ student_id: studentInfo.id, question_id: qid, source_type: '시험지', status: statusMap?.[qid] || 'X', resolved_at: null }));
-      await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
-    }
-
-    try {
-      const cleanSourceTitle = sourceTitle.replace(new RegExp(`^\\[${studentInfo.name}\\]\\s*`), '').trim();
-      const title = `[${studentInfo.name}] ${cleanSourceTitle} 오답 프린트`;
-
-      const { data: exMasters } = await supabaseClient.from('exam_master')
-        .select('exam_id, created_at')
-        .eq('title', title)
-        .eq('exam_type', '오답프린트')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      let existingExamId = null;
-      let merged = false;
-
-      if (exMasters && exMasters.length > 0) {
-          const todayStr = getKSTDateString();
-          const validMasters = exMasters.filter((m: any) => {
-              const createdAtKST = new Date(new Date(m.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-              return createdAtKST === todayStr;
-          });
-
-          if (validMasters.length > 0) {
-              const examIds = validMasters.map((m: any) => m.exam_id);
-              const { data: assignments } = await supabaseClient.from('exam_assignment')
-                  .select('assignment_id, exam_id')
-                  .eq('student_id', studentInfo.id)
-                  .in('exam_id', examIds)
-                  .eq('status', '미응시')
-                  .limit(1);
-
-              if (assignments && assignments.length > 0) {
-                  existingExamId = assignments[0].exam_id;
-              }
-          }
-      }
-
-      if (existingExamId) {
-          const { data: existingItems } = await supabaseClient.from('exam_item').select('question_id').eq('exam_id', existingExamId);
-          const existingQIds = new Set((existingItems || []).map((item: any) => item.question_id));
-          const newQIds = uIds.filter(id => !existingQIds.has(id));
-
-          if (newQIds.length > 0) {
-              const maxSortOrder = existingItems?.length || 0;
-              const itemsToInsert = newQIds.map((qid, i) => ({
-                  exam_id: existingExamId,
-                  question_id: qid,
-                  sort_order: maxSortOrder + i + 1,
-                  assigned_score: 0
-              }));
-              await supabaseClient.from('exam_item').insert(itemsToInsert);
-
-              const newTotal = maxSortOrder + newQIds.length;
-              await supabaseClient.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
-              const newScore = Math.round(100 / newTotal);
-              await supabaseClient.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
-          }
-          merged = true;
-      }
-
-      if (!merged) {
-          const { data: cls } = await supabaseClient.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
-          let instId = cls?.class?.instructor_id;
-          if (!instId) { const { data: fb } = await supabaseClient.from('instructor').select('instructor_id').limit(1).maybeSingle(); instId = fb?.instructor_id; }
-          if (!instId) return;
-
-          const { data: ex } = await supabaseClient.from('exam_master').insert({ title, exam_type: '오답프린트', instructor_id: instId, total_questions: uIds.length }).select().single();
-
-          const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round(100 / uIds.length) }));
-          await supabaseClient.from('exam_item').insert(items);
-          await supabaseClient.from('exam_assignment').insert({ exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시' });
-      }
-    } catch(e) {
-        console.error(e);
-    }
-  };
-
-  const handleTimeUp = async (forceAction?: string, sessionExpired = false) => {
-    setTimeIsUp(true);
-
-    await processSessionEnd(); 
-
-    const wholeSessionEnd = sessionExpired || forceAction === 'force_checkout' || forceAction === 'force_checkout_by_ta';
-    setLogoutTarget(wholeSessionEnd ? 'login' : 'portal');
-
-    const reviewList: any[] = [];
-    if (isTimedRound && !forceAction) {
-      questions.forEach((q, i) => {
-        const status = qBoxStatus.current[i];
-        if (status === 'correct_blue' || status === 'correct_yellow' || status === 'retry_yellow') return;
-        
-        const isSubj = !isObjectiveQuestion(q);
-        if (!isSubj || getAnswerMode(i, q) !== 'pen') return;
-        const meta = penGradeMetaCache.current[i];
-        const recordId = q.record_id || null; 
-        reviewList.push({
-          idx: i, uid: q.uid, qNum: i + 1, questionText: q.questionText, correctAnswer: q.answer,
-          imageDataUrl: studentDrawings.current[i] || null,
-          recognizedText: meta?.recognized_text || '', aiExplanation: meta?.explanation || '', aiConfidence: meta?.confidence ?? null,
-          recordId, tqId: q.tq_id ?? null, questionId: q.question_id ?? null,
-          examAssignmentId: q.question_id && params.assignmentId ? params.assignmentId : null,
-          requested: false, resolved: false,
-        });
-      });
-    }
-    setPendingRecheckReview(reviewList);
-
-    if (isTimedRound) await saveExamResultsToDB();
-
-    if (forceAction) {
-      setSessionTimeUpModal(true);
-    } else if (isTimedRound) {
-      setSubmitResultModal(true);
-    } else {
-      setSessionTimeUpModal(true);
-    }
-
-    if (reviewList.length === 0) {
-      let sec = 10; setAutoLeaveSec(sec);
-      const itv = setInterval(() => { sec--; setAutoLeaveSec(sec); if (sec <= 0) { clearInterval(itv); (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); } }, 1000);
-    }
-  };
-
-  const submitSingleAnswer = async () => {
-    const currentStatus = qBoxStatus.current[currentQIndex];
-    const isAlreadyCorrect = currentStatus === 'correct_blue' || currentStatus === 'correct_yellow' || currentStatus === 'retry_yellow';
-    
-    if (isSubmitting || timeIsUp || callState.current[currentQIndex] || recheckState.current[currentQIndex] === 'pending' || isAlreadyCorrect) return;
-    
-    const q = questions[currentQIndex];
-    const isSubjective = !isObjectiveQuestion(q);
-    const useAI = isSubjective && getAnswerMode(currentQIndex, q) === 'pen';
-    const myAns = studentAnswers.current[currentQIndex];
-
-    if (!myAns) { alert(useAI ? "답을 먼저 그려주세요!" : "정답을 먼저 입력해주세요!"); return; }
-
-    if (useAI && q.aiGradable === false) {
-      requestManualGradingDirect(currentQIndex, q, myAns);
-      return;
-    }
-
-    setIsSubmitting(true);
-    let isCorrect = false; let gradingMeta: any = null;
-
-    if (useAI) {
-      try {
-        gradingMeta = await gradeHandwrittenAnswerWithGemini(myAns, q.answer, q.questionText);
-        isCorrect = !!gradingMeta.is_correct;
-      } catch (err: any) {
-        setIsSubmitting(false);
-        alert('채점 중 문제 발생:\n' + err.message);
-        return;
-      }
-    } else if (isSubjective) {
-      isCorrect = keypadAnswersMatch(myAns, q.answer);
-    } else {
-      isCorrect = mcAnswersMatch(myAns, q.answer);
-    }
-
-    lastGradingContextRef.current = useAI ? { idx: currentQIndex, uid: q.uid, q, imageDataUrl: myAns, gradingMeta } : null;
-    const gotTaHint = !!taHintState.current[currentQIndex];
-
-    if (isCorrect) {
-      await processCorrectAnswer(q, currentQIndex, false);
-      setResultModal({ isCorrect: true, note: gotTaHint ? '조교 힌트를 받아 해결했어요.' : null, canRecheck: false });
-    } else if (useAI) {
-      if (gotTaHint && q.record_id) await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', q.record_id);
-      recheckState.current[currentQIndex] = 'pending';
-      const payload = {
-        uid: q.uid, qNum: currentQIndex + 1, questionText: q.questionText, correctAnswer: q.answer,
-        imageDataUrl: myAns, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '',
-        aiConfidence: gradingMeta?.confidence || null, initial: true,
-      };
-      sendAction('recheck_request', payload);
-      const sid = clinicSessionStateRef.current?.id;
-      if (sid) setActiveRecheck(supabaseClient, sid, q.uid, payload);
-      setRecheckToast('✏️ 조교 선생님이 확인하고 있어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
-      forceUpdate();
-    } else {
-      qBoxStatus.current[currentQIndex] = 'wrong_red';
-      if (q.record_id) await bumpIncorrectRecord(q.record_id, gotTaHint ? 'TX' : 'X', false);
-      if (!isTimedRound) await finalizeQuestionProgress(q, false, gotTaHint);
-      setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
-    }
-    setIsSubmitting(false);
-  };
-
-  const requestManualGradingDirect = (idx: number, q: any, imageDataUrl: string) => {
-    recheckState.current[idx] = 'pending';
-    const payload = {
-      uid: q.uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer,
-      imageDataUrl, recognizedText: '', aiExplanation: '', aiConfidence: null, initial: true,
-    };
-    sendAction('recheck_request', payload);
-    const sid = clinicSessionStateRef.current?.id;
-    if (sid) setActiveRecheck(supabaseClient, sid, q.uid, payload);
-    setRecheckToast('✏️ 이 문제는 선생님이 직접 확인해요. 잠시만 기다려주세요.');
-    setTimeout(() => setRecheckToast(""), 4000);
-    forceUpdate();
-  };
-
-  const enterAwaitingReview = () => {
-    awaitingReviewSinceRef.current = new Date().toISOString();
-    setAwaitingReview(true);
-    setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '선생님이 결과를 확인하고 있어요. 잠시만 기다려주세요.', awaited: true });
-    sendAction('submit', { score: correctSolvedCountRef.current });
-  };
-
-  const findNextUnresolvedIndex = (fromIdx: number) => {
-    const isResolved = (i: number) => qBoxStatus.current[i] === 'correct_blue' || qBoxStatus.current[i] === 'correct_yellow' || qBoxStatus.current[i] === 'retry_yellow';
-    const n = questions.length;
-    for (let step = 1; step <= n; step++) {
-      const i = (fromIdx + step) % n;
-      if (!isResolved(i)) return i;
-    }
-    return null;
-  };
-
-  const processCorrectAnswer = async (q: any, idx: number, fromRecheck: boolean) => {
-    const currentStatus = qBoxStatus.current[idx];
-    const isAlreadyCorrect = currentStatus === 'correct_blue' || currentStatus === 'correct_yellow' || currentStatus === 'retry_yellow';
-    if (isAlreadyCorrect) return; 
-
-    const usedHint = hintState.current[idx] && hintState.current[idx].revealed;
-    const helped = taHintState.current[idx] || usedHint;
-    const wasWrongBefore = currentStatus === 'wrong_red';
-
-    const newStatus = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
-    const resolved = true; 
-
-    correctSolvedCountRef.current++;
-    qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
-    forceUpdate();
-
-    if (q.record_id) {
-      await bumpIncorrectRecord(q.record_id, newStatus, resolved);
-    } else {
-      const filterCol = q.tq_id ? 'tq_id' : 'question_id';
-      const filterVal = q.tq_id ?? q.question_id;
-      if (filterVal) {
-        const { data: matches } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null);
-        for (const m of (matches || [])) await bumpIncorrectRecord(m.record_id, newStatus, resolved);
-      }
-    }
-
-    if (!isTimedRound) await finalizeQuestionProgress(q, true, helped, wasWrongBefore);
-
-    const nextIdx = findNextUnresolvedIndex(idx);
-    if (nextIdx === null) {
-      enterAwaitingReview();
-      saveRoundScoreToLocalStorage();
-      await processSessionEnd(); 
-    } else {
-      setCurrentQIndex(nextIdx);
-      setTimeout(() => initCanvas(nextIdx), 100);
-    }
-    forceUpdate();
-  };
-
-  const saveRoundScoreToLocalStorage = () => {
-    const key = `logica_clinic_${studentInfo.id}_${params.className}_round${params.round}_score`;
-    try { localStorage.setItem(key, JSON.stringify({ correct: correctSolvedCountRef.current, total: totalQuestionsInRoundRef.current, savedAt: new Date().toISOString() })); } catch(e){}
-  };
-
-  const requestRecheck = () => {
-    if (!lastGradingContextRef.current) return;
-    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
-    setResultModal(null);
-    recheckState.current[idx] = 'pending';
-    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
-    sendAction('recheck_request', recheckPayload);
-    const sid = clinicSessionStateRef.current?.id;
-    if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
-    lastGradingContextRef.current = null;
-    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.');
-    setTimeout(() => setRecheckToast(""), 4000);
-    forceUpdate();
-  };
-
-  const requestRecheckForReviewItem = (item: any) => {
-    recheckState.current[item.idx] = 'pending';
-    const recheckPayload = {
-      uid: item.uid, qNum: item.qNum, questionText: item.questionText, correctAnswer: item.correctAnswer,
-      imageDataUrl: item.imageDataUrl, recognizedText: item.recognizedText, aiExplanation: item.aiExplanation, aiConfidence: item.aiConfidence,
-      recordId: item.recordId, tqId: item.tqId, questionId: item.questionId, examAssignmentId: item.examAssignmentId,
-      deferredWrite: true,
-    };
-    sendAction('recheck_request', recheckPayload);
-    const sid = clinicSessionStateRef.current?.id;
-    if (sid) setActiveRecheck(supabaseClient, sid, item.uid, recheckPayload);
-    setPendingRecheckReview(prev => prev.map(r => r.uid === item.uid ? { ...r, requested: true } : r));
-  };
-
-  const finalizeHomeworkProgress = async (q: any, isCorrect: boolean, helped: boolean = false, retried: boolean = false) => {
-    if (!q.homework_id) return;
-    const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id, wrong_attempts_log').eq('homework_id', q.homework_id).eq('student_id', studentInfo.id).eq('tq_id', q.tq_id).maybeSingle();
-    let wrongLog = existing?.wrong_attempts_log || [];
-    if (typeof wrongLog === 'string') try { wrongLog = JSON.parse(wrongLog); } catch(e){ wrongLog=[]; }
-    if (!Array.isArray(wrongLog)) wrongLog = [];
-
-    const myAns = studentAnswers.current[currentQIndex] || '미입력';
-    if (!isCorrect && myAns !== '미입력') wrongLog.push({ input: myAns, at: new Date().toISOString() });
-
-    const gradingCode = isCorrect ? (helped ? 'TO' : (retried ? 'RO' : 'O')) : (helped ? 'TX' : 'X');
-    const payload = { homework_id: q.homework_id, student_id: studentInfo.id, tq_id: q.tq_id, student_input: myAns, is_correct: isCorrect, grading_code: gradingCode, earned_score: isCorrect ? 1 : 0, wrong_attempts_log: wrongLog };
-    if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
-    else await supabaseClient.from('student_homework_answer').insert(payload);
-
-    if (isCorrect) {
-      const { data: hwRes } = await supabaseClient.from('student_homework_result').select('hw_result_id, completed_tq_ids, homework_assignment(target_questions)').eq('homework_id', q.homework_id).eq('student_id', studentInfo.id).maybeSingle();
-      if (hwRes) {
-        let comp = typeof hwRes.completed_tq_ids === 'string' ? JSON.parse(hwRes.completed_tq_ids) : hwRes.completed_tq_ids;
-        if (!Array.isArray(comp)) comp = [];
-        const cSet = new Set(comp.map(Number)); cSet.add(Number(q.tq_id));
-        let tq = typeof hwRes.homework_assignment?.target_questions === 'string' ? JSON.parse(hwRes.homework_assignment.target_questions) : hwRes.homework_assignment?.target_questions;
-        if (!Array.isArray(tq)) tq = [];
-        const allDone = tq.every((id:any) => cSet.has(Number(id)));
-        await supabaseClient.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined }).eq('hw_result_id', hwRes.hw_result_id);
-      }
-    }
-    const isFullyClean = isCorrect && !helped && !retried;
-    if (!isFullyClean && !q.record_id && (q.tq_id || q.question_id) && !(params.overdue && isCorrect)) {
-      q.record_id = await upsertIncorrectRecord(q, gradingCode);
-    }
-  };
-
-  const finalizeExamAssignmentProgress = async (q: any, isCorrect: boolean, helped: boolean = false, retried: boolean = false) => {
-    if (!q.examAssignmentId) return;
-
-    const gradingCode = isCorrect ? (helped ? 'TO' : (retried ? 'RO' : 'O')) : (helped ? 'TX' : 'X');
-
-    if (q.question_id) {
-      const myAns = studentAnswers.current[currentQIndex] || '미입력';
-      const studentInput = myAns;
-
-      const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id').eq('exam_assignment_id', q.examAssignmentId).eq('student_id', studentInfo.id).eq('question_id', q.question_id).maybeSingle();
-      const ansPayload = { exam_assignment_id: q.examAssignmentId, student_id: studentInfo.id, question_id: q.question_id, student_input: studentInput, is_correct: isCorrect, grading_code: gradingCode, grading_status: '대기' };
-      if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
-      else await supabaseClient.from('student_answer').insert(ansPayload);
-    }
-
-    const isFullyClean = isCorrect && !helped && !retried;
-    if (!isFullyClean && !q.record_id && q.question_id && !(params.overdue && isCorrect)) {
-      q.record_id = await upsertIncorrectRecord(q, gradingCode);
-    }
-
-    if (!isCorrect) return;
-    const remaining = (examAssignmentTotalsRef.current[q.examAssignmentId] || 1) - 1;
-    examAssignmentTotalsRef.current[q.examAssignmentId] = remaining;
-    if (remaining <= 0) {
-      await supabaseClient.from('exam_assignment').update({ status: '제출완료' }).eq('assignment_id', q.examAssignmentId);
-    }
-  };
-
-  const finalizeQuestionProgress = async (q: any, isCorrect: boolean, helped: boolean = false, retried: boolean = false) => {
-    if (q.examAssignmentId) await finalizeExamAssignmentProgress(q, isCorrect, helped, retried);
-    else await finalizeHomeworkProgress(q, isCorrect, helped, retried);
-  };
-
-  const drawWritableHint = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
-    ctx.save(); ctx.fillStyle = 'rgba(28,37,48,0.08)';
-    for (let x = 16; x < w; x += 32) { for (let y = 16; y < h; y += 32) { ctx.beginPath(); ctx.arc(x, y, 1, 0, Math.PI * 2); ctx.fill(); } }
-    ctx.restore();
-  };
-
-  const initCanvas = (idx: number) => {
-    const canvas = canvasRef.current; if (!canvas) return;
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas.getBoundingClientRect();
-    if (rect.width === 0) { requestAnimationFrame(() => initCanvas(idx)); return; }
-
-    canvas.width = Math.max(1, Math.round(rect.width * dpr));
-    canvas.height = Math.max(1, Math.round(rect.height * dpr));
-    const ctx = canvas.getContext('2d'); if (!ctx) return;
-    ctxRef.current = ctx;
-    ctx.scale(dpr, dpr); ctx.lineCap = 'round'; ctx.lineJoin = 'round'; ctx.strokeStyle = currentPenColor; ctx.lineWidth = currentPenWidth; ctx.globalCompositeOperation = 'source-over';
-    setIsEraserMode(false);
-
-    drawWritableHint(ctx, rect.width, rect.height);
-
-    const saved = studentDrawings.current[idx];
-    if (saved) { const img = new Image(); img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height); img.src = saved; }
-
-    const getPos = (e: any) => { const r = canvas.getBoundingClientRect(); return { x: (e.clientX || e.touches?.[0].clientX) - r.left, y: (e.clientY || e.touches?.[0].clientY) - r.top }; };
-
-    const startDraw = (e: any) => {
-      isDrawing.current = true;
-      try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
-      const p = getPos(e); ctx.beginPath(); ctx.moveTo(p.x, p.y); ctx.lineTo(p.x+0.01, p.y+0.01); ctx.stroke();
-    };
-    const draw = (e: any) => { if (!isDrawing.current) return; const p = getPos(e); ctx.lineTo(p.x, p.y); ctx.stroke(); };
-    const stopDraw = (e: any) => {
-      if (!isDrawing.current) return;
-      isDrawing.current = false;
-      try { if (e?.pointerId != null) canvas.releasePointerCapture(e.pointerId); } catch (err) {}
-      studentDrawings.current[idx] = canvas.toDataURL('image/webp', 0.5); 
-      studentAnswers.current[idx] = studentDrawings.current[idx];
-      forceUpdate();
-    };
-
-    canvas.onpointerdown = startDraw; canvas.onpointermove = draw; canvas.onpointerup = stopDraw; canvas.onpointercancel = stopDraw;
-  };
-
   const handleClearCanvas = () => {
     delete studentDrawings.current[currentQIndex];
     studentAnswers.current[currentQIndex] = null;
+    setCanvasClearTrigger(p => p + 1);
     forceUpdate();
-    if (canvasRef.current && ctxRef.current) {
-      const c = canvasRef.current;
-      const dpr = window.devicePixelRatio || 1;
-      ctxRef.current.clearRect(0, 0, c.width, c.height);
-      drawWritableHint(ctxRef.current, c.width / dpr, c.height / dpr);
-    }
   };
 
   const pressKeypad = (key: string) => {
@@ -1364,6 +712,14 @@ export default function ClinicViewer() {
     forceUpdate();
   };
 
+  const getAnswerMode = (idx: number, qItem: any): 'pen' | 'keypad' => {
+    const explicit = answerModes.current[idx];
+    if (explicit) return explicit;
+    if (studentDrawings.current[idx]) return 'pen';
+    if (qItem && !isKeypadEnterable(qItem.answer)) return 'pen';
+    return 'keypad';
+  };
+
   const toggleAnswerMode = () => {
     const current = getAnswerMode(currentQIndex, questions[currentQIndex]);
     const mode = current === 'pen' ? 'keypad' : 'pen';
@@ -1371,16 +727,10 @@ export default function ClinicViewer() {
     answerModes.current[currentQIndex] = mode;
     studentAnswers.current[currentQIndex] = mode === 'pen' ? (studentDrawings.current[currentQIndex] || null) : (keypadAnswers.current[currentQIndex] || null);
     forceUpdate();
-    if (mode === 'pen') setTimeout(() => initCanvas(currentQIndex), 50);
   };
 
   const toggleEraser = () => {
-    const next = !isEraserMode;
-    setIsEraserMode(next);
-    if (ctxRef.current) {
-      ctxRef.current.globalCompositeOperation = next ? 'destination-out' : 'source-over';
-      ctxRef.current.lineWidth = next ? currentPenWidth * ERASER_WIDTH_MULTIPLIER : currentPenWidth;
-    }
+    setIsEraserMode(!isEraserMode);
   };
 
   const handleCallAction = async () => {
@@ -1400,14 +750,15 @@ export default function ClinicViewer() {
     const willCall = !callState.current[currentQIndex];
     callState.current[currentQIndex] = willCall;
     forceUpdate();
+    const qItem = questions[currentQIndex];
     const callPayload = {
       qNum: currentQIndex + 1,
-      questionText: q.questionText,
-      imageUrl: q.imageUrl,
-      options: q.options,
-      answer: q.answer,
-      explanation: q.explanation,
-      source: q.source
+      questionText: qItem.questionText,
+      imageUrl: qItem.imageUrl,
+      options: qItem.options,
+      answer: qItem.answer,
+      explanation: qItem.explanation,
+      source: qItem.source
     };
     sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 });
     if (sid) {
@@ -1505,17 +856,548 @@ export default function ClinicViewer() {
       }
 
       const qItem = questions[idx];
+      
+      // 🔥 정답/오답 판정 전에 무조건 화면 잠금(대기 상태)부터 해제
+      recheckState.current[idx] = null;
+
       if (payload.verdict === 'correct') {
         processCorrectAnswer(qItem, idx, true);
       } else {
-        recheckState.current[idx] = null;
         qBoxStatus.current[idx] = 'wrong_red';
         delete studentDrawings.current[idx]; delete keypadAnswers.current[idx]; delete keypadCursor.current[idx]; studentAnswers.current[idx] = null;
         setRecheckToast('조교 확인 결과 오답이 맞습니다. 다시 풀어보세요.'); setTimeout(() => setRecheckToast(""), 4000);
+        setCanvasClearTrigger(p => p + 1);
         forceUpdate();
-        setTimeout(() => initCanvas(idx), 50);
+
+        // 🔥 선생님이 오답(X)을 줬을 때, DB에도 무조건 'X'로 쾅 찍어서 날아가지 않게 보존
+        const recordManualWrong = async () => {
+          const gotTaHint = !!taHintState.current[idx];
+          const gradingCode = gotTaHint ? 'TX' : 'X';
+
+          if (qItem.record_id) {
+              await supabaseClient.from('student_incorrect_record').update({ status: gradingCode }).eq('record_id', qItem.record_id);
+          } else if ((qItem.tq_id || qItem.question_id) && !params.overdue) {
+              qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+          }
+          
+          if (!isTimedRound) {
+              if (qItem.examAssignmentId) {
+                  const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id').eq('exam_assignment_id', qItem.examAssignmentId).eq('student_id', studentInfo.id).eq('question_id', qItem.question_id).maybeSingle();
+                  const ansPayload = { exam_assignment_id: qItem.examAssignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: '수동채점 오답', is_correct: false, grading_code: gradingCode, grading_status: '대기' };
+                  if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
+                  else await supabaseClient.from('student_answer').insert(ansPayload);
+              } else if (qItem.homework_id) {
+                  const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id, wrong_attempts_log').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).eq('tq_id', qItem.tq_id).maybeSingle();
+                  let wrongLog = existing?.wrong_attempts_log || [];
+                  if (typeof wrongLog === 'string') try { wrongLog = JSON.parse(wrongLog); } catch(e){ wrongLog=[]; }
+                  if (!Array.isArray(wrongLog)) wrongLog = [];
+                  wrongLog.push({ input: '수동채점 오답', at: new Date().toISOString() });
+                  
+                  const payload = { homework_id: qItem.homework_id, student_id: studentInfo.id, tq_id: qItem.tq_id, student_input: '수동채점 오답', is_correct: false, grading_code: gradingCode, earned_score: 0, wrong_attempts_log: wrongLog };
+                  if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
+                  else await supabaseClient.from('student_homework_answer').insert(payload);
+              }
+          }
+        };
+        recordManualWrong();
       }
     }
+  };
+  handleTaActionRef.current = handleTaAction;
+
+  useEffect(() => {
+    if (!studentInfo.id) return;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const res = await awardClinicMinutePoints(studentInfo.id);
+        if (!cancelled) setPoints(res.balance);
+      } catch (err) {
+        console.error('포인트 적립 확인 중 오류:', err);
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 65000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [studentInfo.id]);
+
+  useEffect(() => {
+    if (!studentInfo.id) return;
+    let cancelled = false;
+    const beat = async () => {
+      const sid = clinicSessionStateRef.current?.id;
+      if (!sid || cancelled) return;
+
+      const { data } = await supabaseClient.from('clinic_session_state').select('duration_ms').eq('id', sid).maybeSingle();
+      if (data && clinicSessionStateRef.current) {
+        clinicSessionStateRef.current.duration_ms = data.duration_ms;
+      }
+      await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
+    };
+    beat();
+    const iv = setInterval(beat, 15000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [studentInfo.id]);
+
+  const hasActiveCallForGuard = Object.values(callState.current).some(v => v);
+  const hasPendingRecheckForGuard = Object.values(recheckState.current).some(v => v === 'pending');
+  const isNavigationBlocked = myAwayActive || hasActiveCallForGuard || hasPendingRecheckForGuard || awaitingReview;
+
+  useEffect(() => {
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+      if (!isNavigationBlocked) return;
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [isNavigationBlocked]);
+
+  useEffect(() => {
+    if (!isNavigationBlocked) return;
+    const blockBack = () => {
+      window.history.pushState(null, '', window.location.href);
+      alert('자리비움/호출/재확인 처리 중에는 화면을 이동할 수 없습니다. 상태 해제 후 다시 시도해주세요.');
+    };
+    window.history.pushState(null, '', window.location.href);
+    window.addEventListener('popstate', blockBack);
+    return () => window.removeEventListener('popstate', blockBack);
+  }, [isNavigationBlocked]);
+
+  useEffect(() => {
+    if (!awaitingReview || !studentInfo.id) return;
+    let cancelled = false;
+    const since = awaitingReviewSinceRef.current;
+    const check = async () => {
+      const { data } = await supabaseClient.from('exam_assignment')
+        .select('assignment_id, created_at, exam_master!inner(exam_type)')
+        .eq('student_id', studentInfo.id).eq('exam_master.exam_type', '오답프린트')
+        .gt('created_at', since || new Date(0).toISOString()).limit(1);
+      if (!cancelled && data && data.length > 0) setAwaitingReview(false);
+    };
+    check();
+    const itv = setInterval(check, 5000);
+
+    const rebroadcast = () => sendAction('submit', { score: correctSolvedCountRef.current });
+    rebroadcast();
+    const rebroadcastItv = setInterval(rebroadcast, 8000);
+
+    return () => { cancelled = true; clearInterval(itv); clearInterval(rebroadcastItv); };
+  }, [awaitingReview, studentInfo.id]);
+
+  const startClinic = () => {
+    if (questions.length === 0) return;
+    setIsStarted(true);
+    if (!isTimedRound && questions.length === 0) {
+      setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 없습니다. 홈으로 돌아가세요.' });
+    }
+    setTimeout(() => { if ((window as any).MathJax) (window as any).MathJax.typesetPromise(); }, 100);
+  };
+
+  const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string): Promise<any> => {
+    const res = await fetch('/api/clinic-grade', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ imageDataUrl: dataUrl, correct, questionText: qText }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'API 오류');
+    return data;
+  };
+
+  const generateAiHint = async (qText: string): Promise<string> => {
+    try {
+      const res = await fetch('/api/clinic-hint', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionText: qText }),
+      });
+      if (!res.ok) throw new Error('API 오류');
+      const data = await res.json();
+      return (data.hint || '').trim() || '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
+    } catch (e) {
+      return '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
+    }
+  };
+
+  const ensurePenGraded = useCallback((idx: number): Promise<void> => {
+    if (penGradeCache.current[idx] !== undefined) return Promise.resolve();
+    if (penGradeInFlight.current[idx]) return penGradeInFlight.current[idx];
+    const qItem = questions[idx];
+    const isSubj = qItem && !isObjectiveQuestion(qItem);
+    const mode = getAnswerMode(idx, qItem);
+    const drawing = studentDrawings.current[idx];
+    if (!qItem || !isSubj || mode !== 'pen' || !drawing) return Promise.resolve();
+    const p = gradeHandwrittenAnswerWithGemini(drawing, qItem.answer, qItem.questionText)
+      .then((meta: any) => { penGradeCache.current[idx] = !!meta.is_correct; penGradeMetaCache.current[idx] = meta; })
+      .catch(() => {})
+      .finally(() => { delete penGradeInFlight.current[idx]; });
+    penGradeInFlight.current[idx] = p;
+    return p;
+  }, [questions]);
+
+  const isQuestionCorrect = useCallback(async (idx: number): Promise<boolean> => {
+    const qItem = questions[idx];
+    if (!qItem) return false;
+    const isSubj = !isObjectiveQuestion(qItem);
+    const mode = getAnswerMode(idx, qItem);
+    if (isSubj && mode === 'pen') {
+      await ensurePenGraded(idx);
+      return !!penGradeCache.current[idx];
+    }
+    if (isSubj) return keypadAnswersMatch(studentAnswers.current[idx], qItem.answer);
+    return mcAnswersMatch(studentAnswers.current[idx], qItem.answer);
+  }, [questions, ensurePenGraded]);
+
+  useEffect(() => {
+    if (!isTimedRound || !isStarted) return;
+    const leavingIdx = currentQIndex;
+    return () => { ensurePenGraded(leavingIdx); };
+  }, [currentQIndex, isTimedRound, isStarted, ensurePenGraded]);
+
+  const persistExamAnswersToDB = async (): Promise<number> => {
+    if (!isTimedRound || !params.assignmentId) return 0;
+    await supabaseClient.from('student_answer').delete().eq('exam_assignment_id', params.assignmentId).eq('student_id', studentInfo.id);
+
+    const inserts: any[] = []; const incUpserts: any[] = []; let totalScore = 0;
+    for (let idx = 0; idx < questions.length; idx++) {
+      const qItem = questions[idx];
+      const ans = studentAnswers.current[idx] ? String(studentAnswers.current[idx]).trim() : '미입력';
+      const isCorrect = await isQuestionCorrect(idx);
+      const score = isCorrect ? (100 / totalQuestionsInRoundRef.current) : 0;
+      totalScore += score;
+
+      inserts.push({ exam_assignment_id: params.assignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
+      if (!isCorrect && qItem.question_id) {
+        incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: '시험지', status: ans === '미입력' ? 'B' : 'X', resolved_at: null });
+      }
+    }
+
+    if (inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
+    if (incUpserts.length > 0) await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
+    return totalScore;
+  };
+
+  const saveExamResultsToDB = async () => {
+    if (!isTimedRound || !params.assignmentId) return;
+    const totalScore = await persistExamAnswersToDB();
+    await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', params.assignmentId);
+  };
+
+  const processSessionEnd = async () => {
+    try {
+        const incorrectQIds: number[] = [];
+        const unansweredQIds: number[] = [];
+        const statusMap: Record<number, string> = {};
+        let corrects = 0;
+
+        questions.forEach((qItem, i) => {
+            const status = qBoxStatus.current[i];
+            const isResolved = status === 'correct_blue' || status === 'correct_yellow' || status === 'retry_yellow';
+
+            if (isResolved) {
+                corrects++;
+            } else if (qItem.question_id) {
+                const isSubj = !isObjectiveQuestion(qItem);
+                const mode = getAnswerMode(i, qItem);
+                const ans = isSubj && mode === 'pen' ? studentDrawings.current[i] : studentAnswers.current[i];
+                const isBlank = !ans || String(ans).trim() === '' || String(ans).trim() === '미입력';
+
+                if (isBlank) {
+                    if (params.round === 2) {
+                        unansweredQIds.push(qItem.question_id); 
+                    } else {
+                        incorrectQIds.push(qItem.question_id); 
+                        statusMap[qItem.question_id] = 'B';
+                    }
+                } else {
+                    incorrectQIds.push(qItem.question_id);
+                    statusMap[qItem.question_id] = 'X';
+                }
+            }
+        });
+
+        correctSolvedCountRef.current = corrects;
+
+        await finalizeSessionData(
+            supabaseClient, studentInfo, params, globalExamTitle, isTimedRound,
+            incorrectQIds, unansweredQIds, statusMap, questions
+        );
+    } catch (err) {
+        console.error('Error during processSessionEnd:', err);
+    }
+  };
+
+  const handleTimeUp = async (forceAction?: string, sessionExpired = false) => {
+    setTimeIsUp(true);
+
+    await processSessionEnd(); 
+
+    const wholeSessionEnd = sessionExpired || forceAction === 'force_checkout' || forceAction === 'force_checkout_by_ta';
+    setLogoutTarget(wholeSessionEnd ? 'login' : 'portal');
+
+    const reviewList: any[] = [];
+    if (isTimedRound && !forceAction) {
+      questions.forEach((qItem, i) => {
+        const status = qBoxStatus.current[i];
+        if (status === 'correct_blue' || status === 'correct_yellow' || status === 'retry_yellow') return;
+        
+        const isSubj = !isObjectiveQuestion(qItem);
+        if (!isSubj || getAnswerMode(i, qItem) !== 'pen') return;
+        const meta = penGradeMetaCache.current[i];
+        const recordId = qItem.record_id || null; 
+        reviewList.push({
+          idx: i, uid: qItem.uid, qNum: i + 1, questionText: qItem.questionText, correctAnswer: qItem.answer,
+          imageDataUrl: studentDrawings.current[i] || null,
+          recognizedText: meta?.recognized_text || '', aiExplanation: meta?.explanation || '', aiConfidence: meta?.confidence ?? null,
+          recordId, tqId: qItem.tq_id ?? null, questionId: qItem.question_id ?? null,
+          examAssignmentId: qItem.question_id && params.assignmentId ? params.assignmentId : null,
+          requested: false, resolved: false,
+        });
+      });
+    }
+    setPendingRecheckReview(reviewList);
+
+    if (isTimedRound) await saveExamResultsToDB();
+
+    if (forceAction) {
+      setSessionTimeUpModal(true);
+    } else if (isTimedRound) {
+      setSubmitResultModal(true);
+    } else {
+      setSessionTimeUpModal(true);
+    }
+
+    if (reviewList.length === 0) {
+      let sec = 10; setAutoLeaveSec(sec);
+      const itv = setInterval(() => { sec--; setAutoLeaveSec(sec); if (sec <= 0) { clearInterval(itv); (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); } }, 1000);
+    }
+  };
+
+  const submitSingleAnswer = async () => {
+    const currentStatus = qBoxStatus.current[currentQIndex];
+    const isAlreadyCorrect = currentStatus === 'correct_blue' || currentStatus === 'correct_yellow' || currentStatus === 'retry_yellow';
+    
+    if (isSubmitting || timeIsUp || callState.current[currentQIndex] || recheckState.current[currentQIndex] === 'pending' || isAlreadyCorrect) return;
+    
+    const qItem = questions[currentQIndex];
+    const isSubjective = !isObjectiveQuestion(qItem);
+    const useAI = isSubjective && getAnswerMode(currentQIndex, qItem) === 'pen';
+    const myAns = studentAnswers.current[currentQIndex];
+
+    if (!myAns) { alert(useAI ? "답을 먼저 그려주세요!" : "정답을 먼저 입력해주세요!"); return; }
+
+    if (useAI && qItem.aiGradable === false) {
+      requestManualGradingDirect(currentQIndex, qItem, myAns);
+      return;
+    }
+
+    setIsSubmitting(true);
+    let isCorrect = false; let gradingMeta: any = null;
+
+    if (useAI) {
+      try {
+        gradingMeta = await gradeHandwrittenAnswerWithGemini(myAns, qItem.answer, qItem.questionText);
+        isCorrect = !!gradingMeta.is_correct;
+      } catch (err: any) {
+        setIsSubmitting(false);
+        alert('채점 중 문제 발생:\n' + err.message);
+        return;
+      }
+    } else if (isSubjective) {
+      isCorrect = keypadAnswersMatch(myAns, qItem.answer);
+    } else {
+      isCorrect = mcAnswersMatch(myAns, qItem.answer);
+    }
+
+    lastGradingContextRef.current = useAI ? { idx: currentQIndex, uid: qItem.uid, q: qItem, imageDataUrl: myAns, gradingMeta } : null;
+    const gotTaHint = !!taHintState.current[currentQIndex];
+
+    if (isCorrect) {
+      await processCorrectAnswer(qItem, currentQIndex, false);
+      setResultModal({ isCorrect: true, note: gotTaHint ? '조교 힌트를 받아 해결했어요.' : null, canRecheck: false });
+    } else if (useAI) {
+      if (gotTaHint && qItem.record_id) await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', qItem.record_id);
+      recheckState.current[currentQIndex] = 'pending';
+      const payload = {
+        uid: qItem.uid, qNum: currentQIndex + 1, questionText: qItem.questionText, correctAnswer: qItem.answer,
+        imageDataUrl: myAns, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '',
+        aiConfidence: gradingMeta?.confidence || null, initial: true,
+      };
+      sendAction('recheck_request', payload);
+      const sid = clinicSessionStateRef.current?.id;
+      if (sid) setActiveRecheck(supabaseClient, sid, qItem.uid, payload);
+      setRecheckToast('✏️ 조교 선생님이 확인하고 있어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
+      forceUpdate();
+    } else {
+      qBoxStatus.current[currentQIndex] = 'wrong_red';
+      if (qItem.record_id) await bumpIncorrectRecord(qItem.record_id, gotTaHint ? 'TX' : 'X', false);
+      if (!isTimedRound) {
+        if (qItem.examAssignmentId) {
+            const gradingCode = gotTaHint ? 'TX' : 'X';
+            const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id').eq('exam_assignment_id', qItem.examAssignmentId).eq('student_id', studentInfo.id).eq('question_id', qItem.question_id).maybeSingle();
+            const ansPayload = { exam_assignment_id: qItem.examAssignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: myAns, is_correct: false, grading_code: gradingCode, grading_status: '대기' };
+            if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
+            else await supabaseClient.from('student_answer').insert(ansPayload);
+            if (!qItem.record_id && qItem.question_id && !(params.overdue && isCorrect)) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+        } else if (qItem.homework_id) {
+            const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id, wrong_attempts_log').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).eq('tq_id', qItem.tq_id).maybeSingle();
+            let wrongLog = existing?.wrong_attempts_log || [];
+            if (typeof wrongLog === 'string') try { wrongLog = JSON.parse(wrongLog); } catch(e){ wrongLog=[]; }
+            if (!Array.isArray(wrongLog)) wrongLog = [];
+            wrongLog.push({ input: myAns, at: new Date().toISOString() });
+            const gradingCode = gotTaHint ? 'TX' : 'X';
+            const payload = { homework_id: qItem.homework_id, student_id: studentInfo.id, tq_id: qItem.tq_id, student_input: myAns, is_correct: false, grading_code: gradingCode, earned_score: 0, wrong_attempts_log: wrongLog };
+            if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
+            else await supabaseClient.from('student_homework_answer').insert(payload);
+            if (!qItem.record_id && (qItem.tq_id || qItem.question_id) && !(params.overdue && isCorrect)) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+        }
+      }
+      setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
+    }
+    setIsSubmitting(false);
+  };
+
+  const requestManualGradingDirect = (idx: number, qItem: any, imageDataUrl: string) => {
+    recheckState.current[idx] = 'pending';
+    const payload = {
+      uid: qItem.uid, qNum: idx + 1, questionText: qItem.questionText, correctAnswer: qItem.answer,
+      imageDataUrl, recognizedText: '', aiExplanation: '', aiConfidence: null, initial: true,
+    };
+    sendAction('recheck_request', payload);
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) setActiveRecheck(supabaseClient, sid, qItem.uid, payload);
+    setRecheckToast('✏️ 이 문제는 선생님이 직접 확인해요. 잠시만 기다려주세요.');
+    setTimeout(() => setRecheckToast(""), 4000);
+    forceUpdate();
+  };
+
+  const enterAwaitingReview = () => {
+    awaitingReviewSinceRef.current = new Date().toISOString();
+    setAwaitingReview(true);
+    setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '선생님이 결과를 확인하고 있어요. 잠시만 기다려주세요.', awaited: true });
+    sendAction('submit', { score: correctSolvedCountRef.current });
+  };
+
+  const findNextUnresolvedIndex = (fromIdx: number) => {
+    const isResolved = (i: number) => qBoxStatus.current[i] === 'correct_blue' || qBoxStatus.current[i] === 'correct_yellow' || qBoxStatus.current[i] === 'retry_yellow';
+    const n = questions.length;
+    for (let step = 1; step <= n; step++) {
+      const i = (fromIdx + step) % n;
+      if (!isResolved(i)) return i;
+    }
+    return null;
+  };
+
+  const processCorrectAnswer = async (qItem: any, idx: number, fromRecheck: boolean) => {
+    const currentStatus = qBoxStatus.current[idx];
+    const isAlreadyCorrect = currentStatus === 'correct_blue' || currentStatus === 'correct_yellow' || currentStatus === 'retry_yellow';
+    if (isAlreadyCorrect) return; 
+
+    const usedHint = hintState.current[idx] && hintState.current[idx].revealed;
+    const helped = taHintState.current[idx] || usedHint;
+    const wasWrongBefore = currentStatus === 'wrong_red';
+
+    const newStatus = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
+    const resolved = true; 
+
+    correctSolvedCountRef.current++;
+    qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
+    forceUpdate();
+
+    if (qItem.record_id) {
+      await bumpIncorrectRecord(qItem.record_id, newStatus, resolved);
+    } else {
+      const filterCol = qItem.tq_id ? 'tq_id' : 'question_id';
+      const filterVal = qItem.tq_id ?? qItem.question_id;
+      if (filterVal) {
+        const { data: matches } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null);
+        for (const m of (matches || [])) await bumpIncorrectRecord(m.record_id, newStatus, resolved);
+      }
+    }
+
+    if (!isTimedRound) {
+        if (qItem.examAssignmentId) {
+            const gradingCode = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
+            const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id').eq('exam_assignment_id', qItem.examAssignmentId).eq('student_id', studentInfo.id).eq('question_id', qItem.question_id).maybeSingle();
+            const ansPayload = { exam_assignment_id: qItem.examAssignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: studentAnswers.current[idx], is_correct: true, grading_code: gradingCode, grading_status: '대기' };
+            if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
+            else await supabaseClient.from('student_answer').insert(ansPayload);
+            
+            const remaining = (examAssignmentTotalsRef.current[qItem.examAssignmentId] || 1) - 1;
+            examAssignmentTotalsRef.current[qItem.examAssignmentId] = remaining;
+            if (remaining <= 0) await supabaseClient.from('exam_assignment').update({ status: '제출완료' }).eq('assignment_id', qItem.examAssignmentId);
+        } else if (qItem.homework_id) {
+            const gradingCode = helped ? 'TO' : (wasWrongBefore ? 'RO' : 'O');
+            const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).eq('tq_id', qItem.tq_id).maybeSingle();
+            const payload = { homework_id: qItem.homework_id, student_id: studentInfo.id, tq_id: qItem.tq_id, student_input: studentAnswers.current[idx], is_correct: true, grading_code: gradingCode, earned_score: 1 };
+            if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
+            else await supabaseClient.from('student_homework_answer').insert(payload);
+
+            const { data: hwRes } = await supabaseClient.from('student_homework_result').select('hw_result_id, completed_tq_ids, homework_assignment(target_questions)').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).maybeSingle();
+            if (hwRes) {
+                let comp = typeof hwRes.completed_tq_ids === 'string' ? JSON.parse(hwRes.completed_tq_ids) : hwRes.completed_tq_ids;
+                if (!Array.isArray(comp)) comp = [];
+                const cSet = new Set(comp.map(Number)); cSet.add(Number(qItem.tq_id));
+                let tq = typeof hwRes.homework_assignment?.target_questions === 'string' ? JSON.parse(hwRes.homework_assignment.target_questions) : hwRes.homework_assignment?.target_questions;
+                if (!Array.isArray(tq)) tq = [];
+                const allDone = tq.every((id:any) => cSet.has(Number(id)));
+                await supabaseClient.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined }).eq('hw_result_id', hwRes.hw_result_id);
+            }
+        }
+    }
+
+    const nextIdx = findNextUnresolvedIndex(idx);
+    if (nextIdx === null) {
+      enterAwaitingReview();
+      try { localStorage.setItem(`logica_clinic_${studentInfo.id}_${params.className}_round${params.round}_score`, JSON.stringify({ correct: correctSolvedCountRef.current, total: totalQuestionsInRoundRef.current, savedAt: new Date().toISOString() })); } catch(e){}
+      
+      const incorrectQIds: number[] = [];
+      const statusMap: Record<number, string> = {};
+      questions.forEach((qi, i) => {
+        const st = qBoxStatus.current[i];
+        if (st === 'wrong_red' && qi.question_id) {
+          incorrectQIds.push(qi.question_id);
+          statusMap[qi.question_id] = 'X';
+        }
+      });
+      if (incorrectQIds.length > 0 && !(params.round === 2 && params.overdue)) {
+          await generateIncorrectPrint(supabaseClient, studentInfo, incorrectQIds, globalExamTitle, isTimedRound, statusMap);
+      }
+    } else {
+      setCurrentQIndex(nextIdx);
+      setTimeout(() => setCanvasClearTrigger(p=>p+1), 100);
+    }
+    forceUpdate();
+  };
+
+  const requestRecheck = () => {
+    if (!lastGradingContextRef.current) return;
+    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
+    setResultModal(null);
+    recheckState.current[idx] = 'pending';
+    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
+    sendAction('recheck_request', recheckPayload);
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
+    lastGradingContextRef.current = null;
+    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.');
+    setTimeout(() => setRecheckToast(""), 4000);
+    forceUpdate();
+  };
+
+  const requestRecheckForReviewItem = (item: any) => {
+    recheckState.current[item.idx] = 'pending';
+    const recheckPayload = {
+      uid: item.uid, qNum: item.qNum, questionText: item.questionText, correctAnswer: item.correctAnswer,
+      imageDataUrl: item.imageDataUrl, recognizedText: item.recognizedText, aiExplanation: item.aiExplanation, aiConfidence: item.aiConfidence,
+      recordId: item.recordId, tqId: item.tqId, questionId: item.questionId, examAssignmentId: item.examAssignmentId,
+      deferredWrite: true,
+    };
+    sendAction('recheck_request', recheckPayload);
+    const sid = clinicSessionStateRef.current?.id;
+    if (sid) setActiveRecheck(supabaseClient, sid, item.uid, recheckPayload);
+    setPendingRecheckReview(prev => prev.map(r => r.uid === item.uid ? { ...r, requested: true } : r));
   };
 
   const bumpIncorrectRecord = async (recordId: number, status: string, resolved: boolean) => {
@@ -1558,12 +1440,37 @@ export default function ClinicViewer() {
       alert('자리비움/호출/재확인 처리 중에는 포탈로 나갈 수 없습니다. 상태 해제 후 다시 시도해주세요.');
       return;
     }
-    if (window.confirm('아직 모든 문제를 푸신 게 아닙니다. 정말 나가시겠습니까?')) leaveAndGoHome();
+    if (window.confirm('아직 모든 문제를 푸신 게 아닙니다. 임시저장하고 나가시겠습니까?')) leaveAndGoHome();
   };
 
   const finalizeAndGoToLogin = async () => {
     setIsLoggingOut(true);
-    await processSessionEnd();
+    
+    const incorrectQIds: number[] = [];
+    const unansweredQIds: number[] = [];
+    const statusMap: Record<number, string> = {};
+    
+    questions.forEach((qItem, i) => {
+        const status = qBoxStatus.current[i];
+        const isResolved = status === 'correct_blue' || status === 'correct_yellow' || status === 'retry_yellow';
+
+        if (!isResolved && qItem.question_id) {
+            const isSubj = !isObjectiveQuestion(qItem);
+            const mode = getAnswerMode(i, qItem);
+            const ans = isSubj && mode === 'pen' ? studentDrawings.current[i] : studentAnswers.current[i];
+            const isBlank = !ans || String(ans).trim() === '' || String(ans).trim() === '미입력';
+
+            if (isBlank) {
+                if (params.round === 2) unansweredQIds.push(qItem.question_id); 
+                else { incorrectQIds.push(qItem.question_id); statusMap[qItem.question_id] = 'B'; }
+            } else {
+                incorrectQIds.push(qItem.question_id); statusMap[qItem.question_id] = 'X';
+            }
+        }
+    });
+
+    await finalizeSessionData(supabaseClient, studentInfo, params, globalExamTitle, isTimedRound, incorrectQIds, unansweredQIds, statusMap, questions);
+
     sendAction('depart');
     await untrackPresence();
     localStorage.removeItem('logica_student_id');
@@ -1577,15 +1484,6 @@ export default function ClinicViewer() {
     if (target === 'login') finalizeAndGoToLogin();
     else leaveAndGoHome();
   };
-
-  const startClinic = () => {
-    if (questions.length === 0) return;
-    setIsStarted(true);
-    if (!isTimedRound && questions.length === 0) {
-      setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 없습니다. 홈으로 돌아가세요.' });
-    }
-    setTimeout(() => { if ((window as any).MathJax) (window as any).MathJax.typesetPromise(); initCanvas(0); }, 100);
-  };  
 
   const renderKeypadButton = (k: string) => {
     let btnClass = 'bg-slate-50 text-slate-700 text-2xl hover:bg-slate-100';
@@ -1618,7 +1516,7 @@ export default function ClinicViewer() {
     setBookFilter(bookType);
     if (bookType !== 'all') {
       const idx = questions.findIndex(qq => qq.bookType === bookType);
-      if (idx !== -1) { setCurrentQIndex(idx); setTimeout(() => initCanvas(idx), 50); }
+      if (idx !== -1) { setCurrentQIndex(idx); setCanvasClearTrigger(p=>p+1); }
     }
   };
 
@@ -1747,7 +1645,16 @@ export default function ClinicViewer() {
                       <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} />
                     </div>
                     {isSubjective && curAnsMode === 'pen' && (
-                      <canvas ref={canvasRef} className="absolute inset-0 w-full h-full cursor-crosshair touch-none"></canvas>
+                      <ClinicCanvas
+                        qIndex={currentQIndex}
+                        currentPenWidth={currentPenWidth}
+                        currentPenColor={currentPenColor}
+                        isEraserMode={isEraserMode}
+                        studentDrawings={studentDrawings}
+                        studentAnswers={studentAnswers}
+                        forceUpdate={forceUpdate}
+                        clearTrigger={canvasClearTrigger}
+                      />
                     )}
                   </div>
                 </div>
@@ -1778,9 +1685,19 @@ export default function ClinicViewer() {
                     )}
                     <button onClick={handleAwayToggle} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-base font-bold py-3 px-6 rounded-xl shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 자리비움'}</button>
                   </div>
+                  {/* 🌟 힌트 텍스트 렌더링 부분을 dangerouslySetInnerHTML로 교체하여 HTML 태그 렌더링 지원 */}
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
                     <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'}`}>
-                      <HintRevealBox revealedText={hintState.current[currentQIndex].hintText} />
+                      <div 
+                        className="bg-white rounded-xl p-5 border border-blue-200 text-slate-700 text-sm md:text-base leading-relaxed whitespace-pre-wrap font-medium shadow-inner mt-2"
+                        dangerouslySetInnerHTML={{ 
+                          __html: formatMathTextForWeb(
+                            hintState.current[currentQIndex].hintText
+                              .replace(/<\s*b\s*>/gi, '<b>')
+                              .replace(/<\s*\/\s*b\s*>/gi, '</b>')
+                          ) 
+                        }} 
+                      />
                     </div>
                   )}
                 </div>
@@ -1838,7 +1755,7 @@ export default function ClinicViewer() {
                       }
 
                       return (
-                        <button key={i} onClick={() => { setCurrentQIndex(i); setTimeout(() => initCanvas(i), 50); forceUpdate(); }} className={`relative w-16 h-16 shrink-0 border-[3px] rounded-xl font-black text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
+                        <button key={i} onClick={() => { setCurrentQIndex(i); setCanvasClearTrigger(p=>p+1); }} className={`relative w-16 h-16 shrink-0 border-[3px] rounded-xl font-black text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
                           {!isCalled && symbol ? symbol : i + 1}
                           {!isCalled && !status && hasAnswer && (
                             <span className="absolute top-1.5 right-1.5 w-3 h-3 rounded-full bg-emerald-500 shadow-sm border-2 border-white"></span>
@@ -1893,13 +1810,13 @@ export default function ClinicViewer() {
                       <p className="text-sm md:text-base font-bold text-slate-400 text-center">✍️ 왼쪽 문제 위에 풀이 과정과 정답을 바로 그려주세요</p>
                       <div className="w-full flex flex-col gap-3">
                         <div className="flex items-center justify-center gap-3">
-                          <button onClick={() => { const w = Math.max(1, currentPenWidth - 1); setCurrentPenWidth(w); if(ctxRef.current) ctxRef.current.lineWidth = isEraserMode ? w * ERASER_WIDTH_MULTIPLIER : w; }} className="w-12 h-12 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl">−</button>
+                          <button onClick={() => { const w = Math.max(1, currentPenWidth - 1); setCurrentPenWidth(w); }} className="w-12 h-12 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl">−</button>
                           <span className="text-lg font-bold text-slate-500 w-8 text-center">{currentPenWidth}</span>
-                          <button onClick={() => { const w = Math.min(10, currentPenWidth + 1); setCurrentPenWidth(w); if(ctxRef.current) ctxRef.current.lineWidth = isEraserMode ? w * ERASER_WIDTH_MULTIPLIER : w; }} className="w-12 h-12 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl">+</button>
+                          <button onClick={() => { const w = Math.min(10, currentPenWidth + 1); setCurrentPenWidth(w); }} className="w-12 h-12 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl">+</button>
                         </div>
                         <div className={`flex items-center justify-center gap-3 transition-opacity ${isEraserMode ? 'opacity-30 pointer-events-none' : ''}`}>
                           {PEN_COLORS.map(color => (
-                            <button key={color} onClick={() => { setCurrentPenColor(color); if(ctxRef.current) ctxRef.current.strokeStyle = color; }} className={`w-10 h-10 rounded-full border-4 transition-transform ${currentPenColor === color ? 'border-[#002864] scale-110' : 'border-white'} shadow-sm`} style={{ backgroundColor: color }}></button>
+                            <button key={color} onClick={() => { setCurrentPenColor(color); }} className={`w-10 h-10 rounded-full border-4 transition-transform ${currentPenColor === color ? 'border-[#002864] scale-110' : 'border-white'} shadow-sm`} style={{ backgroundColor: color }}></button>
                           ))}
                         </div>
                         <div className="flex items-center gap-3 mt-2">
@@ -2011,8 +1928,8 @@ export default function ClinicViewer() {
           delete studentDrawings.current[currentQIndex];
           delete keypadAnswers.current[currentQIndex];
           delete keypadCursor.current[currentQIndex];
+          setCanvasClearTrigger(p=>p+1);
           forceUpdate();
-          setTimeout(() => initCanvas(currentQIndex), 50);
         }}
         onRequestRecheck={requestRecheck}
         sessionTimeUpModal={sessionTimeUpModal}

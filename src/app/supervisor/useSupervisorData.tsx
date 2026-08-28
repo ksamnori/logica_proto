@@ -825,6 +825,28 @@ export function useSupervisorData() {
         }
     };
 
+    const resolveRecheck = async (seat: string, uid: string, verdict: 'correct' | 'incorrect') => {
+        const st = studentsRef.current[seat];
+        if (!st) return;
+
+        // 1. 브로드캐스트로 학생 화면 잠금 즉시 해제
+        sendToStudent(seat, 'resolve_recheck', { uid, verdict });
+
+        // 2. DB에서 재확인 상태 완전히 삭제 (핵심 패치)
+        if (st.sessionId) {
+            await clearActiveRecheck(supabaseClient, st.sessionId, uid);
+        }
+
+        // 3. 관리자 화면 상태 정리
+        const currentStudents = { ...studentsRef.current };
+        if (currentStudents[seat] && currentStudents[seat].rechecks) {
+            delete currentStudents[seat].rechecks[uid];
+        }
+        removeLogsByTypeAndSeat('recheck', seat, null, uid);
+        updateStudents(currentStudents);
+        setRecheckModal({ isOpen: false, seat: null, uid: null });
+    };
+
     const taAction = (seat: string, type: string, qNum: any = null) => {
         const currentStudents = { ...studentsRef.current };
         if (type === 'cancel_call') {
@@ -862,6 +884,7 @@ export function useSupervisorData() {
         endRequestModal, setEndRequestModal, resolveEndRequest,
         reservationModal, setReservationModal, confirmReservation, cancelReservation,
         handlePointerDown, handleListPointerDown, adjustClinicTime, confirmForceCheckout, taAction, sendToStudent, removeLogsByTypeAndSeat, appendLog,
+        resolveRecheck,
         ghostRect,
         seats, seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked
     };

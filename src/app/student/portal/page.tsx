@@ -225,7 +225,7 @@ export default function StudentPortal() {
             newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA', overdue: 'NO_DATA' };
             newHwProgress[c] = { 
                 activeExamMode: 'DONE',
-                examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], 
+                examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], overdueExamIds: [],
                 examTitle: '', hwTitle: '', printTitle: '', overdueTitle: '',
                 examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0
             };
@@ -251,9 +251,32 @@ export default function StudentPortal() {
         }));
         setClassWeekTypes(newClassWeekTypes);
 
-        const { data: examsData } = await supabaseClient.from('exam_assignment')
-            .select('assignment_id, status, class_id, exam_master!inner(exam_type, title, total_questions)')
-            .eq('student_id', sid);
+        // 🌟 수정 1: 실제로 풀이 흔적(O, X, 세모 등)이 남은 문항을 DB에서 먼저 모두 가져옴
+        const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
+            supabaseClient.from('student_homework_answer')
+                .select('homework_id, tq_id')
+                .eq('student_id', sid)
+                .in('grading_code', ['O', 'X', 'TO', 'RO', 'TX', 'T', '☆']),
+            supabaseClient.from('student_answer')
+                .select('exam_assignment_id, question_id')
+                .eq('student_id', sid)
+                .in('grading_code', ['O', 'X', 'TO', 'RO', 'TX', 'T', '☆']),
+            supabaseClient.from('exam_assignment')
+                .select('assignment_id, status, class_id, exam_master!inner(exam_type, title, total_questions)')
+                .eq('student_id', sid)
+        ]);
+
+        const hwAttemptedMap = new Map<number, Set<number>>();
+        hwAnsData?.forEach((a: any) => {
+            if (!hwAttemptedMap.has(a.homework_id)) hwAttemptedMap.set(a.homework_id, new Set());
+            hwAttemptedMap.get(a.homework_id)!.add(a.tq_id);
+        });
+
+        const examAttemptedMap = new Map<number, Set<number>>();
+        examAnsData?.forEach((a: any) => {
+            if (!examAttemptedMap.has(a.exam_assignment_id)) examAttemptedMap.set(a.exam_assignment_id, new Set());
+            examAttemptedMap.get(a.exam_assignment_id)!.add(a.question_id);
+        });
 
         const classIds = Object.values(nameToId).filter(Boolean);
         let hwsData: any[] = [];
@@ -271,36 +294,12 @@ export default function StudentPortal() {
         const hwResMap = new Map();
         hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r));
 
-        let incorrectQCount = 0;
-        const { data: incorrectRecords } = await supabaseClient.from('student_incorrect_record')
-            .select('record_id, tq_id, question_id')
-            .eq('student_id', sid).eq('source_type', '과제오답').is('resolved_at', null);
-
-        if (incorrectRecords && incorrectRecords.length > 0) {
-            const qIds = [...new Set(incorrectRecords.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
-            const tqIds = [...new Set(incorrectRecords.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))];
-
-            const [{ data: qDbRows }, { data: tqRows }] = await Promise.all([
-                qIds.length > 0 ? supabaseClient.from('question_db').select('question_id').in('question_id', qIds) : Promise.resolve({ data: [] }),
-                tqIds.length > 0 ? supabaseClient.from('textbook_question').select('tq_id').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
-            ]);
-
-            const validQIds = new Set((qDbRows || []).map((q:any) => q.question_id));
-            const validTqIds = new Set((tqRows || []).map((tq:any) => tq.tq_id));
-
-            incorrectQCount = incorrectRecords.filter((r:any) => {
-                if (r.question_id && validQIds.has(r.question_id)) return true;
-                if (r.tq_id && validTqIds.has(r.tq_id)) return true;
-                return false;
-            }).length;
-        }
-
         classes.forEach(c => {
             const cid = nameToId[c];
             if (!cid) return;
 
             let hwPending = 0, printPending = 0, overduePending = 0;
-            let hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [];
+            let hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [], overdueExamIds: number[] = [];
             let hTitles: string[] = [], pTitles: string[] = [], oTitles: string[] = [];
             let hCount = 0, pCount = 0, oCount = 0;
 
@@ -323,26 +322,20 @@ export default function StudentPortal() {
                 const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 const isPending = !['제출완료', '채점완료', '완료'].includes(ex.status);
 
+                // 🌟 수정 2: 전체 문항에서 "아예 손도 안 댄(미입력) 문제" 수만 추출
+                const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
+                const remain = Math.max(0, (tq || 0) - attempted);
+
                 if (type === '오답프린트') {
-                    if (isPending) { 
-                        printPending++; printIds.push(ex.assignment_id); 
-                        pTitles.push(title); pCount += (tq || 0); 
-                    }
+                    if (isPending) { printPending++; printIds.push(ex.assignment_id); pTitles.push(title); pCount += remain; }
                 } else if (type === '과제' || type === '과제프린트') {
-                    if (isPending) { 
-                        hwPending++; hwExamIds.push(ex.assignment_id); 
-                        hTitles.push(title); hCount += (tq || 0); 
-                    }
+                    if (isPending) { hwPending++; hwExamIds.push(ex.assignment_id); hTitles.push(title); hCount += remain; }
                 } else if (type === '오답유사' || type === '과제오답유사') {
-                    if (isPending) { 
-                        similarExamPending++; similarExamIds.push(ex.assignment_id); 
-                        similarETitles.push(title); similarECount += (tq || 0); 
-                    }
+                    if (isPending) { similarExamPending++; similarExamIds.push(ex.assignment_id); similarETitles.push(title); similarECount += remain; }
+                } else if (type === '미완료과제') {
+                    if (isPending) { overduePending++; overdueExamIds.push(ex.assignment_id); oTitles.push(title); oCount += remain; }
                 } else { 
-                    if (isPending) { 
-                        regularExamPending++; regularExamIds.push(ex.assignment_id); 
-                        regularETitles.push(title); regularECount += (tq || 0); 
-                    }
+                    if (isPending) { regularExamPending++; regularExamIds.push(ex.assignment_id); regularETitles.push(title); regularECount += remain; }
                 }
             });
 
@@ -357,31 +350,15 @@ export default function StudentPortal() {
 
             if (isEvenWeek) {
                 if (hasSimilar) {
-                    activeExamMode = 'SIMILAR';
-                    finalExamPending = similarExamPending;
-                    finalExamIds = similarExamIds; 
-                    finalETitles = similarETitles;
-                    finalECount = similarECount;
+                    activeExamMode = 'SIMILAR'; finalExamPending = similarExamPending; finalExamIds = similarExamIds; finalETitles = similarETitles; finalECount = similarECount;
                 } else if (hasRegular) {
-                    activeExamMode = 'TEST';
-                    finalExamPending = regularExamPending; 
-                    finalExamIds = regularExamIds; 
-                    finalETitles = regularETitles; 
-                    finalECount = regularECount;
+                    activeExamMode = 'TEST'; finalExamPending = regularExamPending; finalExamIds = regularExamIds; finalETitles = regularETitles; finalECount = regularECount;
                 }
             } else {
                 if (hasRegular) {
-                    activeExamMode = 'TEST';
-                    finalExamPending = regularExamPending; 
-                    finalExamIds = regularExamIds; 
-                    finalETitles = regularETitles; 
-                    finalECount = regularECount;
+                    activeExamMode = 'TEST'; finalExamPending = regularExamPending; finalExamIds = regularExamIds; finalETitles = regularETitles; finalECount = regularECount;
                 } else if (hasSimilar) {
-                    activeExamMode = 'SIMILAR';
-                    finalExamPending = similarExamPending;
-                    finalExamIds = similarExamIds;
-                    finalETitles = similarETitles;
-                    finalECount = similarECount;
+                    activeExamMode = 'SIMILAR'; finalExamPending = similarExamPending; finalExamIds = similarExamIds; finalETitles = similarETitles; finalECount = similarECount;
                 }
             }
 
@@ -397,19 +374,16 @@ export default function StudentPortal() {
                 let tqLen = 0;
                 try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
 
-                let compLen = 0;
-                if (resObj && resObj.completed_tq_ids) {
-                    try { compLen = typeof resObj.completed_tq_ids === 'string' ? JSON.parse(resObj.completed_tq_ids).length : (resObj.completed_tq_ids.length || 0); } catch(e){}
-                }
-                const remain = Math.max(0, tqLen - compLen);
+                // 🌟 수정 3: 과제에서도 동일하게 시도한 문제(O, X 등)를 뺀 순수 미입력 문제 계산
+                const attempted = hwAttemptedMap.get(hw.homework_id)?.size || 0;
+                const remain = Math.max(0, tqLen - attempted);
+                
                 if (remain === 0) return;
 
                 if (hw.due_date && hw.due_date <= today) { 
-                    overduePending++; overdueHwIds.push(hw.homework_id); 
-                    oTitles.push(hw.homework_title); oCount += remain; 
+                    overduePending++; overdueHwIds.push(hw.homework_id); oTitles.push(hw.homework_title); oCount += remain; 
                 } else { 
-                    hwPending++; hwIds.push(hw.homework_id); 
-                    hTitles.push(hw.homework_title); hCount += remain; 
+                    hwPending++; hwIds.push(hw.homework_id); hTitles.push(hw.homework_title); hCount += remain; 
                 }
             });
 
@@ -431,7 +405,7 @@ export default function StudentPortal() {
 
             newHwProgress[c] = { 
                 activeExamMode,
-                examIds: finalExamIds, hwExamIds, printIds, hwIds, overdueHwIds,
+                examIds: finalExamIds, hwExamIds, printIds, hwIds, overdueHwIds, overdueExamIds,
                 examTitle: getShortTitle(finalETitles), hwTitle: getShortTitle(hTitles), printTitle: getShortTitle(pTitles), overdueTitle: getShortTitle(oTitles),
                 examQCount: finalECount, hwQCount: hCount, printQCount: pCount, overdueQCount: oCount
             };
@@ -568,7 +542,6 @@ export default function StudentPortal() {
             await channelRef.current.untrack();
         }
 
-        // 🌟 전역 처리: 클리닉이 최종 종료될 때 열어보지 않은 과제까지 모조리 '미완료(Overdue)'로 강제 이관
         const allPendingHwIds: number[] = [];
         Object.values(hwProgress).forEach((prog: any) => {
             if (prog.hwIds && prog.hwIds.length > 0) {
@@ -663,6 +636,7 @@ export default function StudentPortal() {
         } else if (typeKey === 'overdue') {
             testName = '미완료 과제';
             if (prog.overdueHwIds && prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
+            if (prog.overdueExamIds && prog.overdueExamIds.length > 0) params.append('assignment_id', prog.overdueExamIds[0]);
         } else if (typeKey === 'print') {
             testName = '오답프린트';
             if (prog.printIds && prog.printIds.length > 0) params.append('assignment_id', prog.printIds[0]);
