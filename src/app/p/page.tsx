@@ -290,7 +290,6 @@ export default function ParentPortalPage() {
               rel="noopener noreferrer" 
               className="text-[11px] font-bold text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2 mb-4 inline-block"
             >
-              개인정보 처리방침
             </a>
             
             <div className="text-[10px] text-slate-400 leading-relaxed">
