@@ -19,7 +19,6 @@ const generateUUID = () => {
   });
 };
 
-// 🌟 크로스 매퍼와 동일한 괄호 제거 및 다중 서브 문항 완벽 병합 처리
 const formatQNum = (qNum: string | number, subNum?: string | number) => {
   let numStr = String(qNum || "").trim().replace(/-0$/, '');
   
@@ -33,7 +32,6 @@ const formatQNum = (qNum: string | number, subNum?: string | number) => {
   return numStr.replace(/-0$/, '');
 };
 
-// 🌟 자연 정렬(Natural Sort) 알고리즘
 const parseNatural = (str: string) => {
   return String(str || "")
     .match(/(\d+)|(\D+)/g)
@@ -67,7 +65,6 @@ const compareNatural = (strA: string, strB: string) => {
   return 0;
 };
 
-// 🌟 크로스 매퍼와 동일하게 화면 출력 번호를 기준으로 정렬하도록 수정
 const sortQuestionsList = (data: any[]) => {
   return [...data].sort((a, b) => {
     const parsePage = (p1: any, p2: any) => {
@@ -462,18 +459,33 @@ export default function TaxonomyEditorPage() {
     setIsLoading(true);
     try {
       const newQuestionId = generateUUID();
-      const newDbData = { question_id: newQuestionId, source_book_name: selectedBook, question_number: 'NEW', question: '새로운 문항입니다. 우측 상단의 수정 버튼을 눌러 내용을 입력해주세요.', taxonomy_id: '미분류', difficulty: '미지정' };
+      // 🌟 '미지정' 대신 DB가 허용하는 null 전송
+      const newDbData = { 
+        question_id: newQuestionId, 
+        source_book_name: selectedBook, 
+        question_number: 'NEW', 
+        question: '새로운 문항입니다. 우측 상단의 수정 버튼을 눌러 내용을 입력해주세요.', 
+        taxonomy_id: '미분류', 
+        difficulty: null 
+      };
+      
       const { data: newQ, error: dbErr } = await supabase.from('question_db').insert(newDbData).select().single();
       if (dbErr) throw dbErr;
+      
       const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', selectedBook).maybeSingle();
       if (tb) {
         await supabase.from('textbook_question').insert({ book_id: tb.book_id, question_id: newQ.question_id, page_number: 999, question_number: 'NEW', question: newQ.question, question_category: '일반', taxonomy_id: '미분류' });
       }
+      
       setQuestions(prev => sortQuestionsList([...prev, newQ])); setSelectedQuestion(newQ);
       setEditForm({ page_number: '999', question_number: 'NEW', sub_num: '0', difficulty: '미지정', solving_probability: '', question: newQ.question, answer: '', image_url: '', image_2_url: '', answer_image_url: '', answer_image_2_url: '', step_1_concept: '', step_2_approach: '', step_3_process: '', step_4_conclusion: '' });
       setIsEditingContent(true);
       setTimeout(() => { const el = document.getElementById(`q-list-${newQ.question_id}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
-    } catch (e: any) { alert("추가 실패: " + e.message); } finally { setIsLoading(false); }
+    } catch (e: any) { 
+      alert("추가 실패: " + e.message); 
+    } finally { 
+      setIsLoading(false); 
+    }
   };
 
   const deleteQuestion = async () => {
@@ -1195,7 +1207,7 @@ export default function TaxonomyEditorPage() {
                       </div>
                       <div className="flex flex-col gap-1.5 flex-1 min-w-[100px]">
                         <label className="text-xs font-bold text-slate-500">난이도</label>
-                        <select value={editForm.difficulty} onChange={e => setEditForm({...editForm, difficulty: e.target.value})} className="px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-[#002864] outline-none shadow-sm bg-white">
+                        <select value={editForm.difficulty || '미지정'} onChange={e => setEditForm({...editForm, difficulty: e.target.value})} className="px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-[#002864] outline-none shadow-sm bg-white">
                           <option value="최상">최상</option>
                           <option value="상">상</option>
                           <option value="중">중</option>
