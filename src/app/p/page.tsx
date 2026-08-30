@@ -1,3 +1,4 @@
+// 학부모 포탈 페이지 파일 전체 복사 & 붙여넣기
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -68,7 +69,17 @@ export default function ParentPortalPage() {
 
   useEffect(() => {
     const hash = window.location.hash;
+    const search = window.location.search;
     
+    // 🌟 [핵심 방어 1] 카카오 로그인 시간이 초과되거나 에러로 튕겨 돌아왔을 때 무한 로딩 방지 및 초기화
+    if (hash.includes("error=") || search.includes("error=")) {
+      alert("카카오 로그인 인증 시간이 초과되었거나 취소되었습니다. 다시 시도해주세요.");
+      window.history.replaceState(null, "", window.location.pathname);
+      sessionStorage.removeItem("logica_oauth_source");
+      setIsKakaoLoading(false);
+      return;
+    }
+
     if (localStorage.getItem("logica_parent_id")) {
       localStorage.removeItem("logica_parent_id");
     }
@@ -183,6 +194,9 @@ export default function ParentPortalPage() {
   };
 
   const loginWithKakao = async () => {
+    // 🌟 [핵심 방어 2] 카카오 로그인 출발지가 '학부모 페이지'임을 브라우저에 단기 기록
+    sessionStorage.setItem("logica_oauth_source", "parent");
+
     const { error } = await supabase.auth.signInWithOAuth({ 
       provider: "kakao", 
       options: { 
@@ -229,7 +243,6 @@ export default function ParentPortalPage() {
       if (!error && sData && sData.length > 0) {
         const sorted = sData.sort((a, b) => (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0));
         
-        // 🌟 [추가] 각 자녀별 교재 진도율 실시간 매핑 로직 이식
         for (let stu of sorted) {
           const activeEnrollment = stu.enrollment?.find((e: any) => (!e.end_date || new Date(e.end_date) >= new Date()) && unwrap(e.class)?.class_id);
           const classId = activeEnrollment ? unwrap(activeEnrollment.class)?.class_id : null;
@@ -266,7 +279,6 @@ export default function ParentPortalPage() {
                 bookPageTqsMap[q.book_id][pNum].push(q.tq_id);
               });
 
-              // 과제 매핑
               const { data: hwAssignments } = await supabase.from("homework_assignment")
                 .select("book_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)")
                 .eq("class_id", classId)
@@ -290,7 +302,6 @@ export default function ParentPortalPage() {
                  });
               });
 
-              // 시험지 기록 융합
               let exAssigns: any[] = [];
               let fromEA = 0;
               while(true) {
@@ -342,7 +353,6 @@ export default function ParentPortalPage() {
                   });
               }
 
-              // 오답노트/정답 기록 수집
               let hwAns: any[] = [];
               let fromHw = 0;
               while(true) {
@@ -370,7 +380,6 @@ export default function ParentPortalPage() {
                  if (tqId && (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct)) globalStatusMap[tqId] = 'done';
               });
 
-              // 최종 데이터 컴파일
               stu.progressBooks = ctData.map(cb => {
                  const bId = cb.book_id;
                  const totalPages = Array.from(bookPagesMap[bId] || []).sort((a,b)=>a-b);

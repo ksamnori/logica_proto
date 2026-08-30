@@ -162,10 +162,6 @@ export default function TaxonomyEditorPage() {
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
 
-  // 🌟 추가됨: 복제 모달 및 폼 상태
-  const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
-  const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '' });
-
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -213,7 +209,7 @@ export default function TaxonomyEditorPage() {
     };
     const timer = setTimeout(renderMath, 150);
     return () => clearTimeout(timer);
-  }, [questions, selectedQuestion, isEditingContent, generatedTwins, isTwinModalOpen, isCloneModalOpen]);
+  }, [questions, selectedQuestion, isEditingContent, generatedTwins, isTwinModalOpen]);
 
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -463,6 +459,7 @@ export default function TaxonomyEditorPage() {
     setIsLoading(true);
     try {
       const newQuestionId = generateUUID();
+      // 🌟 '미지정' 대신 DB가 허용하는 null 전송
       const newDbData = { 
         question_id: newQuestionId, 
         source_book_name: selectedBook, 
@@ -503,60 +500,6 @@ export default function TaxonomyEditorPage() {
       setSelectedQuestion(null); setIsEditingContent(false);
       alert("✅ 문항이 삭제되었습니다.");
     } catch (e: any) { alert("삭제 실패: " + e.message); } finally { setIsLoading(false); }
-  };
-
-  // 🌟 추가됨: 교재 복제 실행 로직
-  const executeClone = async () => {
-    if (!selectedQuestion) return;
-    if (!cloneForm.targetBookName.trim()) return alert("대상 교재 이름을 입력하세요.");
-
-    setIsLoading(true);
-    try {
-      const newUuid = generateUUID();
-      
-      const qDbInsert = {
-        ...selectedQuestion,
-        question_id: newUuid,
-        source_book_name: cloneForm.targetBookName.trim(),
-        book_name: cloneForm.targetBookName.trim(), 
-        final_printed_page: cloneForm.pageNumber ? parseInt(cloneForm.pageNumber) : null,
-        question_number: cloneForm.questionNumber || 'NEW',
-        parent_question_id: null, // 기존 상속 관계 단절
-        derivation_type: '복제',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString()
-      };
-
-      const { error: dbErr } = await supabase.from('question_db').insert(qDbInsert);
-      if (dbErr) throw dbErr;
-
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', cloneForm.targetBookName.trim()).maybeSingle();
-      if (tb) {
-        await supabase.from('textbook_question').insert({
-          book_id: tb.book_id,
-          question_id: newUuid,
-          page_number: cloneForm.pageNumber ? parseInt(cloneForm.pageNumber) : 999,
-          question_number: cloneForm.questionNumber || 'NEW',
-          question: qDbInsert.question,
-          answer: qDbInsert.answer,
-          taxonomy_id: qDbInsert.taxonomy_id || '미분류',
-          question_category: '일반'
-        });
-      }
-
-      alert(`✅ [${cloneForm.targetBookName.trim()}] 교재로 문항이 복제되었습니다!`);
-      setIsCloneModalOpen(false);
-      
-      if (cloneForm.targetBookName.trim() === selectedBook) {
-        fetchQuestions(); 
-      } else {
-        loadWorkbooks(); 
-      }
-    } catch (e: any) {
-      alert("복제 실패: " + e.message);
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const getCleanUrl = (url: string) => {
@@ -855,74 +798,6 @@ export default function TaxonomyEditorPage() {
     <div className="flex flex-col h-full bg-slate-50 font-pretendard p-6 overflow-hidden relative">
       
       <input id="globalFileInput" type="file" accept="image/*" onChange={(e) => { if(e.target.files?.[0] && cropTargetField) handleImageInput(e.target.files[0], cropTargetField); e.target.value = ''; }} className="hidden" />
-
-      {/* 🌟 문항 복제 모달 */}
-      {isCloneModalOpen && (
-        <div className="fixed inset-0 z-[100] bg-slate-900/60 flex flex-col items-center justify-center p-6 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
-            <div className="p-5 bg-gradient-to-r from-emerald-600 to-teal-600 flex justify-between items-center shrink-0">
-              <div>
-                <h2 className="text-xl font-black text-white flex items-center gap-2">
-                  <span>📋</span> 문항 복제 (다른 교재로)
-                </h2>
-              </div>
-              <button onClick={() => setIsCloneModalOpen(false)} className="text-white hover:text-emerald-200 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
-                닫기 ✕
-              </button>
-            </div>
-            
-            <div className="p-6 flex flex-col gap-5 bg-slate-50">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-bold text-slate-500">타겟 교재 이름 (기존 선택 또는 새 이름 입력)</label>
-                <input 
-                  type="text" 
-                  list="workbook-options"
-                  value={cloneForm.targetBookName} 
-                  onChange={(e) => setCloneForm(prev => ({...prev, targetBookName: e.target.value}))} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
-                  placeholder="새로운 교재 이름 입력..."
-                />
-                <datalist id="workbook-options">
-                  {workbooks.map(b => <option key={b} value={b} />)}
-                </datalist>
-              </div>
-              
-              <div className="flex gap-4">
-                <div className="flex flex-col gap-1.5 flex-1">
-                  <label className="text-xs font-bold text-slate-500">새 페이지 번호</label>
-                  <input 
-                    type="number" 
-                    value={cloneForm.pageNumber} 
-                    onChange={(e) => setCloneForm(prev => ({...prev, pageNumber: e.target.value}))} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
-                    placeholder="ex) 12"
-                  />
-                </div>
-                <div className="flex flex-col gap-1.5 flex-1">
-                  <label className="text-xs font-bold text-slate-500">새 문항 번호</label>
-                  <input 
-                    type="text" 
-                    value={cloneForm.questionNumber} 
-                    onChange={(e) => setCloneForm(prev => ({...prev, questionNumber: e.target.value}))} 
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
-                    placeholder="ex) 15-1"
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="p-5 bg-white border-t border-slate-200 flex justify-end shrink-0">
-              <button 
-                onClick={executeClone} 
-                disabled={isLoading || !cloneForm.targetBookName}
-                className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white font-black rounded-xl shadow-md transition-colors flex items-center gap-2"
-              >
-                {isLoading ? "복제 중..." : "🚀 복제 실행"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 크롭퍼 모달 */}
       {cropImageSrc && (
@@ -1255,28 +1130,15 @@ export default function TaxonomyEditorPage() {
                   
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
-                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
-                        <span>👯</span> <span>AI 유사생성</span>
-                      </button>
-
-                      {/* 🌟 추가됨: 교재 간 복제 버튼 */}
-                      <button 
-                        onClick={() => {
-                          setCloneForm({ targetBookName: selectedBook, pageNumber: selectedQuestion.final_printed_page || '', questionNumber: selectedQuestion.question_number || '' });
-                          setIsCloneModalOpen(true);
-                        }} 
-                        disabled={!perms.add} 
-                        className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 mr-2 ${perms.add ? 'bg-slate-100 hover:bg-slate-200 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} 
-                        title={!perms.add ? "새 문항 추가 권한이 없습니다." : "현재 문제를 다른 교재로 복제합니다."}
-                      >
-                        <span>📋</span> 타 교재로 복제
+                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-4 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 mr-2 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 정 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
+                        <span>👯</span> <span>쌍둥이/유사 생성</span>
                       </button>
                       
-                      <button onClick={() => setIsEditingContent(true)} disabled={!perms.edit} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.edit ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.edit ? "수정 권한이 없습니다." : ""}>
-                        <span>✏️</span> 문항 수정
+                      <button onClick={() => setIsEditingContent(true)} disabled={!perms.edit} className={`px-4 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.edit ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.edit ? "수정 권한이 없습니다." : ""}>
+                        <span>✏️</span> 문항 & 해설 & 이미지 수정
                       </button>
                       <button onClick={deleteQuestion} disabled={!perms.delete} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.delete ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.delete ? "삭제 권한이 없습니다." : ""}>
-                        <span>🗑️</span> 삭제
+                        <span>🗑️</span> 완전 삭제
                       </button>
                     </div>
                   ) : (

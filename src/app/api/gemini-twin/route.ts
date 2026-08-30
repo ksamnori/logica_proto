@@ -8,12 +8,13 @@ export async function POST(req: Request) {
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." }, { status: 500 });
+      // 프론트엔드가 실제 원인을 볼 수 있도록 status 우회
+      return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
     
-    // 쌍둥이 및 유사 문항 생성 스키마
+    // 사용자가 명시한 최신 모델 유지 (3.5 사용 시 gemini-3.5-flash로 변경)
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
       generationConfig: {
@@ -62,12 +63,25 @@ export async function POST(req: Request) {
     `;
 
     const result = await model.generateContent(prompt);
-    const responseText = result.response.text();
+    let responseText = result.response.text();
     
-    return NextResponse.json({ success: true, data: JSON.parse(responseText) });
+    // 🛡️ 1차 방어: 마크다운 코드 블록(```json) 찌꺼기 완벽 제거
+    responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
+
+    let parsedData;
+    try {
+      parsedData = JSON.parse(responseText);
+    } catch (parseError) {
+      // 🛡️ 2차 방어: 수식(\frac 등)의 백슬래시가 JSON 파싱을 터뜨리는 경우 이스케이프 강제 처리
+      const escapedText = responseText.replace(/\\/g, '\\\\');
+      parsedData = JSON.parse(escapedText);
+    }
+
+    return NextResponse.json({ success: true, data: parsedData });
 
   } catch (error: any) {
     console.error("Twin Generator Error:", error);
-    return NextResponse.json({ success: false, error: error.message }, { status: 500 });
+    // 💡 핵심: 프론트엔드의 !res.ok 블록을 우회하여 화면에 '진짜 에러 내용'을 팝업으로 띄움
+    return NextResponse.json({ success: false, error: `AI 생성 실패: ${error.message}` });
   }
 }
