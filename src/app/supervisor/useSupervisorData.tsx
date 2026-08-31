@@ -397,15 +397,16 @@ export function useSupervisorData() {
                 }
             }
 
+            // 🌟 하트비트 타임아웃 발생 시 세션을 종료하지 않고 '연결끊김' 로그만 남김!
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
                 const sinceLastSeen = Date.now() - new Date(dbRecord.last_seen_at).getTime();
                 if (sinceLastSeen < HEARTBEAT_TIMEOUT_MS) continue;
 
                 const st = current[seat];
-                endTodaySession(supabaseClient, dbRecord.student_id, todayStr);
                 
-                appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '세션마감', `[${seat}] ${st.name} 퇴실`, `기기 연결이 해제되어 세션이 마감되었습니다.`);
+                // 화면이 잠시 꺼져도 세션 종료를 막습니다 (endTodaySession 삭제됨)
+                appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '오프라인', `[${seat}] ${st.name} 화면 꺼짐`, `학생 패드의 화면이 꺼졌거나 앱이 백그라운드로 내려갔습니다.`);
                 
                 removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
                 delete current[seat];
@@ -829,11 +830,9 @@ export function useSupervisorData() {
         const st = studentsRef.current[seat];
         if (!st) return;
 
-        // 🌟 수정: 수퍼바이저/강사가 '정답' 처리 시 오답 DB 삭제 로직을 백엔드로 바로 실행
         if (verdict === 'correct') {
            const targetRecheck = st.rechecks?.[uid];
            if (targetRecheck) {
-               // recordId가 있으면 직접 지우고, 없으면 studentId + (tqId or questionId)로 지움
                if (targetRecheck.recordId) {
                    await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
                } else if (targetRecheck.tqId || targetRecheck.questionId) {
@@ -846,7 +845,6 @@ export function useSupervisorData() {
            }
         }
 
-        // 패드 화면(학생 뷰) 갱신 신호 발송
         sendToStudent(seat, 'resolve_recheck', { uid, verdict });
 
         if (st.sessionId) {
@@ -884,6 +882,10 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('submit', seat); delete currentStudents[seat];
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
+        // 🌟 새로고침 강제 호출 이벤트 추가 (학생 화면 새로고침)
+        } else if (type === 'force_refresh') {
+            sendToStudent(seat, 'force_refresh');
+            appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
         }
         updateStudents(currentStudents);
     };

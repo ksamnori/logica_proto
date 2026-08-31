@@ -876,7 +876,6 @@ export default function ClinicViewer() {
         clinicSessionStateRef.current.duration_ms = Math.max(0, clinicSessionStateRef.current.duration_ms + dMs);
         trackPresence(mySeatRef.current!, sId, clinicSessionStateRef.current);
       }
-    // 🌟 핵심 해결 2: 조교(수동채점) 판정 로직 안정화 (pending 유실 대비)
     } else if (payload.action === 'resolve_recheck') {
       const idx = questions.findIndex(item => item.uid === payload.uid);
       
@@ -1607,7 +1606,7 @@ export default function ClinicViewer() {
     });
 
     return (
-      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard pt-12">
+      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard">
         <div className="bg-white rounded-[2rem] shadow-2xl p-10 w-full max-w-2xl text-center animate-[fadeIn_0.3s_ease-out]">
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mx-auto mb-6 object-contain" />
           <h2 className="text-3xl font-black text-[#002864] tracking-tighter mb-4">학습 클리닉</h2>
@@ -1638,7 +1637,7 @@ export default function ClinicViewer() {
   }
 
   return (
-    <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none pt-12">
+    <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none">
       {(isSubmitting || isBatchGrading) && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[9999] flex items-center justify-center px-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 flex flex-col items-center max-w-sm w-full text-center">
