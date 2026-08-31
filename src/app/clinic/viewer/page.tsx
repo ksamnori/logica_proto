@@ -876,21 +876,22 @@ export default function ClinicViewer() {
         clinicSessionStateRef.current.duration_ms = Math.max(0, clinicSessionStateRef.current.duration_ms + dMs);
         trackPresence(mySeatRef.current!, sId, clinicSessionStateRef.current);
       }
+    // 🌟 핵심 해결 2: 조교(수동채점) 판정 로직 안정화 (pending 유실 대비)
     } else if (payload.action === 'resolve_recheck') {
       const idx = questions.findIndex(item => item.uid === payload.uid);
-      if (idx === -1 || recheckState.current[idx] !== 'pending') return;
-
+      
       const isReviewItem = pendingRecheckReview.some(r => r.uid === payload.uid);
       if (isReviewItem) {
-        recheckState.current[idx] = null;
+        if (idx !== -1) recheckState.current[idx] = null;
         setPendingRecheckReview(prev => prev.map(r => r.uid === payload.uid ? { ...r, resolved: true, verdict: payload.verdict } : r));
         setRecheckToast(payload.verdict === 'correct' ? '🎉 조교가 정답으로 확인했어요!' : '조교 확인 결과 오답이 맞습니다.');
         setTimeout(() => setRecheckToast(""), 4000);
         return;
       }
 
+      if (idx === -1) return;
+
       const qItem = questions[idx];
-      
       recheckState.current[idx] = null;
 
       if (payload.verdict === 'correct') {
@@ -1211,7 +1212,6 @@ export default function ClinicViewer() {
     }
   };
 
-  // 🌟 오답을 기존 오답프린트에 실시간으로 추가(병합)하는 핵심 함수
   const appendToExistingIncorrectPrint = async (qItem: any) => {
     if (!qItem.question_id) return;
     try {
@@ -1638,7 +1638,6 @@ export default function ClinicViewer() {
   }
 
   return (
-    // 🌟 상단 시스템 바 충돌 방지를 위해 컨테이너의 맨 위에 패딩(pt-12) 추가
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none pt-12">
       {(isSubmitting || isBatchGrading) && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[9999] flex items-center justify-center px-4 animate-[fadeIn_0.2s_ease-out]">

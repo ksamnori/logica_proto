@@ -21,7 +21,7 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   
   const isDrawing = useRef(false);
-  const activePointerId = useRef<number | null>(null); // 🌟 멀티 터치 방지용 고유 ID 추적기
+  const activePointerId = useRef<number | null>(null);
 
   const lastPos = useRef<{x: number, y: number} | null>(null);
   const lastMid = useRef<{x: number, y: number} | null>(null);
@@ -95,11 +95,10 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const startDraw = (e: any) => {
-    // 🌟 핵심 방어: 이미 다른 손가락/펜으로 그리고 있다면 추가 터치는 철저히 무시
     if (isDrawing.current) return;
     
     isDrawing.current = true;
-    activePointerId.current = e.pointerId; // 🌟 첫 터치의 고유 ID 기억
+    activePointerId.current = e.pointerId; 
     
     const canvas = canvasRef.current;
     if (!canvas || !ctxRef.current) return;
@@ -119,11 +118,14 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const draw = (e: any) => {
-    // 🌟 최초 터치된 손가락/펜(activePointerId)이 아니면 무시 (직선 그어짐 완벽 방지)
     if (!isDrawing.current || e.pointerId !== activePointerId.current || !canvasRef.current || !ctxRef.current || !lastPos.current || !lastMid.current) return;
     
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     
+    // 🌟 핵심 방어: 붓질을 한 번만 시작하고 루프를 돕니다.
+    ctxRef.current.beginPath();
+    ctxRef.current.moveTo(lastMid.current.x, lastMid.current.y);
+
     for (const ev of events) {
       const currentPos = getPos(ev, canvasRef.current);
       
@@ -132,18 +134,17 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
         y: (lastPos.current.y + currentPos.y) / 2
       };
 
-      ctxRef.current.beginPath();
-      ctxRef.current.moveTo(lastMid.current.x, lastMid.current.y);
       ctxRef.current.quadraticCurveTo(lastPos.current.x, lastPos.current.y, midPos.x, midPos.y);
-      ctxRef.current.stroke();
 
       lastPos.current = currentPos;
       lastMid.current = midPos;
     }
+    
+    // 🌟 모든 좌표 이동이 끝난 후 물감을 캔버스에 한 번에 칠합니다. (렉 완벽 제거)
+    ctxRef.current.stroke();
   };
 
   const stopDraw = (e: any) => {
-    // 🌟 최초 터치된 손가락/펜이 손을 뗄 때만 종료 로직 실행
     if (!isDrawing.current || e.pointerId !== activePointerId.current || !canvasRef.current || !ctxRef.current) return;
     
     if (lastPos.current && lastMid.current) {
@@ -154,7 +155,7 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     }
 
     isDrawing.current = false;
-    activePointerId.current = null; // 🌟 ID 초기화
+    activePointerId.current = null; 
     lastPos.current = null;
     lastMid.current = null;
 
