@@ -54,6 +54,10 @@ export function useTaxonomy() {
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
   const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '', subNumber: '' });
 
+  // 🌟 쌍둥이 및 유사 문항 각각의 저장 대상을 관리하는 상태
+  const [twinTargetBook, setTwinTargetBook] = useState<string>('');
+  const [similarTargetBook, setSimilarTargetBook] = useState<string>('');
+
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -499,6 +503,11 @@ export function useTaxonomy() {
 
     setIsGeneratingTwins(true);
     setGeneratedTwins([]);
+    
+    // 🌟 모달이 열릴 때 각각 다른 기본값을 부여합니다.
+    setTwinTargetBook(`${selectedBook} 쌍둥이`);
+    setSimilarTargetBook(`${selectedBook} 유사`);
+    
     setIsTwinModalOpen(true);
 
     try {
@@ -533,25 +542,78 @@ export function useTaxonomy() {
   const saveTwinsToDB = async () => {
     const selectedTwinsToSave = generatedTwins.filter(t => t.isSelected !== false);
     if (selectedTwinsToSave.length === 0) return alert("저장할 문항을 하나 이상 체크박스에서 선택해주세요.");
-    if (!confirm(`선택된 ${selectedTwinsToSave.length}개의 쌍둥이/유사 문항을 마스터 DB에 저장하시겠습니까?\n(원본 문항에 꼬리로 연결됩니다.)`)) return;
+    
+    const twinCount = selectedTwinsToSave.filter(t => t.question_type !== '유사').length;
+    const similarCount = selectedTwinsToSave.filter(t => t.question_type === '유사').length;
+
+    let confirmMsg = `선택된 ${selectedTwinsToSave.length}개의 문항을 저장하시겠습니까?`;
+    if (twinCount > 0 && similarCount > 0) {
+      confirmMsg = `쌍둥이 ${twinCount}개 ➔ [${twinTargetBook}]\n유사 ${similarCount}개 ➔ [${similarTargetBook}]\n위 설정대로 마스터 DB에 저장하시겠습니까?`;
+    } else if (twinCount > 0) {
+      confirmMsg = `쌍둥이 ${twinCount}개 ➔ [${twinTargetBook}] 교재로 저장하시겠습니까?`;
+    } else if (similarCount > 0) {
+      confirmMsg = `유사 ${similarCount}개 ➔ [${similarTargetBook}] 교재로 저장하시겠습니까?`;
+    }
+
+    if (!confirm(confirmMsg)) return;
 
     setIsLoading(true);
     try {
-      const twinInserts = selectedTwinsToSave.map((twin, idx) => ({
-        question_id: generateUUID(), parent_question_id: selectedQuestion.question_id,
-        source_book_name: selectedBook, detected_page_num: selectedQuestion.detected_page_num || 0,
-        final_printed_page: selectedQuestion.final_printed_page, question_number: `${selectedQuestion.question_number}-T${idx + 1}`, 
-        question: twin.question, answer: twin.answer, step_1_concept: twin.step_1_concept, step_2_approach: twin.step_2_approach, step_3_process: twin.step_3_process, step_4_conclusion: twin.step_4_conclusion,
-        taxonomy_id: selectedQuestion.taxonomy_id, difficulty: selectedQuestion.difficulty || '중', is_human_verified: true,
-        derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN' 
-      }));
+      const twinInserts = selectedTwinsToSave.map((twin, idx) => {
+        // 🌟 문항 타입에 따라 타겟 북을 동적으로 분리할당
+        const targetBook = twin.question_type === '유사' ? similarTargetBook : twinTargetBook;
+        
+        return {
+          question_id: generateUUID(), 
+          parent_question_id: selectedQuestion.question_id,
+          source_book_name: targetBook, 
+          book_name: targetBook,        
+          detected_page_num: selectedQuestion.detected_page_num || 0,
+          final_printed_page: selectedQuestion.final_printed_page, 
+          question_number: `${selectedQuestion.question_number}-T${idx + 1}`, 
+          question: twin.question, 
+          answer: twin.answer, 
+          step_1_concept: twin.step_1_concept, 
+          step_2_approach: twin.step_2_approach, 
+          step_3_process: twin.step_3_process, 
+          step_4_conclusion: twin.step_4_conclusion,
+          taxonomy_id: selectedQuestion.taxonomy_id, 
+          difficulty: selectedQuestion.difficulty || '중', 
+          is_human_verified: true,
+          derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        };
+      });
 
       const { error } = await supabase.from('question_db').insert(twinInserts);
       if (error) throw error;
 
+      // 🌟 사용된 타겟 북들이 여러 개일 수 있으므로 각각 매핑하여 저장
+      const uniqueBooks = Array.from(new Set(twinInserts.map(q => q.source_book_name)));
+      for (const book of uniqueBooks) {
+        const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', book).maybeSingle();
+        if (tb) {
+          const tqInserts = twinInserts.filter(q => q.source_book_name === book).map(q => ({
+            book_id: tb.book_id,
+            question_id: q.question_id,
+            page_number: q.final_printed_page || 999,
+            question_number: q.question_number,
+            question: q.question,
+            answer: q.answer,
+            taxonomy_id: q.taxonomy_id,
+            question_category: '일반'
+          }));
+          await supabase.from('textbook_question').insert(tqInserts);
+        }
+      }
+
       alert(`✅ 선택된 ${selectedTwinsToSave.length}개의 문항이 성공적으로 저장되었습니다!`);
       setIsTwinModalOpen(false);
-      fetchQuestions(); 
+      
+      if (uniqueBooks.includes(selectedBook)) fetchQuestions(); 
+      else loadWorkbooks(); 
+
     } catch (e: any) { alert("쌍둥이 저장 실패: " + e.message); } finally { setIsLoading(false); }
   };
 
@@ -600,10 +662,11 @@ export function useTaxonomy() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,
+    twinTargetBook, similarTargetBook, 
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
     normalRoots, trueOrphans, getDescendants,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
-    setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm,
+    setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
     saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange

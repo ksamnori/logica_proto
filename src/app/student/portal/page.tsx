@@ -526,7 +526,7 @@ export default function StudentPortal() {
                     setRecheckToast(payload.verdict === 'correct' ? '🎉 조교가 정답으로 확인했어요! (자세한 내용은 클리닉에서 확인해주세요)' : '조교 확인 결과 오답이 맞습니다.');
                     setTimeout(() => setRecheckToast(""), 4000);
                 }
-                // 🌟 새로고침 수신 로직
+                // 🌟 수퍼바이저 보드에서 '강제 새로고침' 신호가 왔을 때 실행
                 else if (payload.action === 'force_refresh') {
                     window.location.reload();
                 }
@@ -799,7 +799,8 @@ export default function StudentPortal() {
     }, [remainingMs, isSameDay, isMounted]);
 
     return (
-        <div className="min-h-screen flex flex-col bg-slate-100 font-['Pretendard']">
+        // 🌟 상단 시스템 바 충돌 방지를 위해 컨테이너의 맨 위에 패딩(pt-12) 추가
+        <div className="min-h-screen flex flex-col bg-slate-100 font-['Pretendard'] pt-12">
             {editorLocked && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
                     <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-sm">

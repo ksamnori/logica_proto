@@ -1,8 +1,4 @@
 // src/app/supervisor/SeatCardBody.tsx
-// 좌석 카드 안쪽 내용(배지/이름/반/상태 등)을 그리는 공용 부분. SeatGrid의 실제 카드와, 드래그 중
-// 커서를 따라다니는 고스트 미리보기가 반드시 똑같은 정보를 보여줘야 하므로 하나로 공유한다.
-// 호출/자리비움 등 상태의 "정확한 정보"(대기 시간, 자리비움 시간, 최근 힌트 등)는 카드에 텍스트로
-// 늘어놓지 않고 상태 배지 색깔로만 표시한다 — 자세한 내용은 우측 현장 라이브 로그에서 확인한다.
 import React from 'react';
 import { formatDuration } from './supervisorUtils';
 
@@ -11,16 +7,17 @@ interface SeatCardBodyProps {
     student: any;
     now: number;
     isMounted: boolean;
-    interactive?: boolean; // false면 버튼이 눌리지 않는 미리보기 전용(드래그 고스트)
+    interactive?: boolean; 
     onClearAway?: () => void;
     onConfirmCheckout?: () => void;
     onOpenEndRequest?: () => void;
     onAdjustTime?: (deltaMin: number) => void;
+    onForceRefresh?: () => void; // 🌟 강제 새로고침 프롭 추가
 }
 
 export default function SeatCardBody({
     seat, student, now, isMounted, interactive = true,
-    onClearAway, onConfirmCheckout, onOpenEndRequest, onAdjustTime,
+    onClearAway, onConfirmCheckout, onOpenEndRequest, onAdjustTime, onForceRefresh
 }: SeatCardBodyProps) {
     const isCall = student.status === 'call';
     const isAway = student.status === 'away';
@@ -41,7 +38,15 @@ export default function SeatCardBody({
                     <span className="shrink-0 bg-[#002864] text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">{seat}</span>
                     <span className="font-bold text-slate-900 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
                 </div>
-                <span className={`shrink-0 text-[8px] font-bold px-1 py-px rounded leading-none ${badgeBg}`}>{badgeText}</span>
+                <div className="flex items-center gap-1 shrink-0">
+                    {/* 🌟 오프라인 의심(오래된 업데이트) 시 강제 새로고침 버튼 노출 */}
+                    {interactive && (now - student.lastUpdatedAt > 10000) && (
+                        <button onClick={(e) => { e.stopPropagation(); onForceRefresh?.(); }} title="기기 새로고침 신호 전송" className={`text-[8px] bg-slate-200 text-slate-500 hover:bg-blue-500 hover:text-white px-1 py-px rounded leading-none ${pe}`}>
+                            ↻
+                        </button>
+                    )}
+                    <span className={`text-[8px] font-bold px-1 py-px rounded leading-none ${badgeBg}`}>{badgeText}</span>
+                </div>
             </div>
             <div className="flex items-center gap-1.5 min-w-0">
                 {student.classes?.length > 0 ? (

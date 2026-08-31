@@ -10,11 +10,11 @@ export default function TaxonomyEditorPage() {
     isAuthorized, perms, isTaxonomyLoading, workbooks, selectedBook, questions, selectedQuestion, isLoading,
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
-    isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,
+    isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm, twinTargetBook, similarTargetBook,
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
     normalRoots, trueOrphans, getDescendants,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
-    setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen,
+    setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
     saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange
@@ -263,13 +263,45 @@ export default function TaxonomyEditorPage() {
               )}
             </div>
 
-            <div className="p-5 bg-white border-t border-slate-200 flex justify-end shrink-0">
+            {/* 🌟 2개로 분리된 드롭다운 영역 */}
+            <div className="p-5 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
+              <div className="flex items-center gap-6">
+                
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-slate-500">👯 쌍둥이 문항 저장 대상:</label>
+                  <select
+                    value={twinTargetBook}
+                    onChange={(e) => setTwinTargetBook(e.target.value)}
+                    className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-indigo-700 bg-indigo-50 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer text-sm"
+                  >
+                    <option value={`${selectedBook} 쌍둥이`}>{selectedBook} 쌍둥이</option>
+                    <option value="주간테스트">주간테스트</option>
+                    <option value="중간테스트">중간테스트</option>
+                    <option value="분기테스트">분기테스트</option>
+                  </select>
+                </div>
+
+                <div className="flex flex-col gap-1">
+                  <label className="text-[11px] font-bold text-slate-500">💡 유사 문항 저장 대상:</label>
+                  <select
+                    value={similarTargetBook}
+                    onChange={(e) => setSimilarTargetBook(e.target.value)}
+                    className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-amber-700 bg-amber-50 outline-none focus:ring-2 focus:ring-amber-500 shadow-sm cursor-pointer text-sm"
+                  >
+                    <option value={`${selectedBook} 유사`}>{selectedBook} 유사</option>
+                    <option value="주간테스트">주간테스트</option>
+                    <option value="중간테스트">중간테스트</option>
+                    <option value="분기테스트">분기테스트</option>
+                  </select>
+                </div>
+
+              </div>
               <button 
                 onClick={saveTwinsToDB} 
                 disabled={isGeneratingTwins || generatedTwins.length === 0 || isLoading}
                 className="px-8 py-3 bg-[#002864] hover:bg-blue-900 disabled:bg-slate-300 text-white font-black rounded-xl shadow-lg transition-colors flex items-center gap-2"
               >
-                {isLoading ? "저장 중..." : `💾 선택된 ${generatedTwins.filter(t => t.isSelected !== false).length}개 쌍둥이/유사 문항을 마스터 DB에 저장`}
+                {isLoading ? "저장 중..." : `💾 선택된 ${generatedTwins.filter(t => t.isSelected !== false).length}개 문항 저장`}
               </button>
             </div>
           </div>

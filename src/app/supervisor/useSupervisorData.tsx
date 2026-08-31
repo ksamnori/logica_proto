@@ -193,7 +193,8 @@ export function useSupervisorData() {
                         firstSeenAt: new Date(sess.started_at).getTime() || Date.now(),
                         clinicDurationMs: sess.duration_ms || DEFAULT_CLINIC_DURATION_MS,
                         sessionNo: sess.session_no || 1,
-                        totalCalls: 0, totalHints: 0, calls: {}
+                        totalCalls: 0, totalHints: 0, calls: {},
+                        lastUpdatedAt: Date.now() // 초기화 시점 기록
                     };
                 }
             }
@@ -307,7 +308,8 @@ export function useSupervisorData() {
                         clinicDurationMs: dbRecord.duration_ms || DEFAULT_CLINIC_DURATION_MS,
                         sessionNo: dbRecord.session_no || 1,
                         endRequestPending: dbRecord.end_request_status === 'pending',
-                        totalCalls: 0, totalHints: 0, calls: {}, activity: '포털/수동 배정 연동'
+                        totalCalls: 0, totalHints: 0, calls: {}, activity: '포털/수동 배정 연동',
+                        lastUpdatedAt: Date.now() // 초기화
                     };
                     isModified = true;
                     const justStarted = Date.now() - (new Date(dbRecord.started_at).getTime() || 0) < 10000;
@@ -353,7 +355,7 @@ export function useSupervisorData() {
                         if (st.calls[qNumKey]) return;
                         const qNum = qNumKey === 'general' ? 'general' : Number(qNumKey);
                         st.calls[qNumKey] = dbCalls[qNumKey]?.requestedAt || Date.now();
-                        st.status = 'call';
+                        if (st.status !== 'offline') st.status = 'call';
                         isModified = true;
                         const isGeneral = qNumKey === 'general';
                         appendLog('border-rose-500', 'bg-rose-100 text-rose-600', isGeneral ? '조교호출' : '질문호출',
@@ -388,31 +390,37 @@ export function useSupervisorData() {
 
                     const dbAwaySince = dbRecord.away_since ? new Date(dbRecord.away_since).getTime() : null;
                     if (dbAwaySince && !st.awaySince) {
-                        st.awaySince = dbAwaySince; st.status = 'away'; isModified = true;
+                        st.awaySince = dbAwaySince; 
+                        if (st.status !== 'offline') st.status = 'away'; 
+                        isModified = true;
                         appendLog('border-amber-500', 'bg-amber-100 text-amber-700', '자리비움', `[${targetSeat}] ${st.name} 자리비움`, `학생이 자리를 비웠습니다.`, 'away', { seat: targetSeat });
                     } else if (!dbAwaySince && st.awaySince) {
-                        st.awaySince = null; if (st.status === 'away') st.status = 'idle'; isModified = true;
+                        st.awaySince = null; 
+                        if (st.status === 'away') st.status = 'idle'; 
+                        isModified = true;
                         removeLogsByTypeAndSeat('away', targetSeat);
                     }
                 }
             }
 
-            // 🌟 하트비트 타임아웃 발생 시 세션을 종료하지 않고 '연결끊김' 로그만 남김!
+            // 🌟 핵심 방어: 타임아웃 발생 시 완전히 퇴실 처리(삭제)하지 않고 '오프라인' 상태로 전환
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
+                
                 const sinceLastSeen = Date.now() - new Date(dbRecord.last_seen_at).getTime();
-                if (sinceLastSeen < HEARTBEAT_TIMEOUT_MS) continue;
-
-                const st = current[seat];
                 
-                // 화면이 잠시 꺼져도 세션 종료를 막습니다 (endTodaySession 삭제됨)
-                appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '오프라인', `[${seat}] ${st.name} 화면 꺼짐`, `학생 패드의 화면이 꺼졌거나 앱이 백그라운드로 내려갔습니다.`);
-                
-                removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
-                delete current[seat];
-                dbSeats.delete(seat);
-                pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
-                isModified = true;
+                if (sinceLastSeen > HEARTBEAT_TIMEOUT_MS) {
+                    if (current[seat].status !== 'offline') {
+                        current[seat].status = 'offline';
+                        isModified = true;
+                        appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '오프라인', `[${seat}] ${current[seat].name} 화면 꺼짐`, `학생 패드의 화면이 꺼졌거나 앱이 백그라운드로 내려갔습니다.`);
+                    }
+                } else if (sinceLastSeen <= HEARTBEAT_TIMEOUT_MS && current[seat].status === 'offline') {
+                    // 패드 화면이 다시 켜져서 하트비트가 수신되면 오프라인 상태 해제
+                    current[seat].status = 'idle';
+                    isModified = true;
+                    appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '복귀', `[${seat}] ${current[seat].name} 연결 복구`, `기기 연결이 정상적으로 복구되었습니다.`);
+                }
             }
 
             Object.keys(current).forEach(uiSeat => {
@@ -444,12 +452,15 @@ export function useSupervisorData() {
 
         if (action === 'force_cancel_call') {
             if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
-            if (Object.keys(currentStudents[seat]?.calls || {}).length === 0) currentStudents[seat].status = 'idle';
+            if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
             removeLogsByTypeAndSeat('call', seat, qNum);
             appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출해제', `[${seat}] ${qNum}번 문항 지도 종료`, `${taName || '총책임자'} · ${mark === 'hint' ? '힌트 제공 후 종료' : mark === 'skip' ? '설명 없이 넘어감' : '지도 종료'}`);
             recordTaStat(taClientId || taName || '총책임자', mark);
         } else if (action === 'force_return_to_seat') {
-            if (currentStudents[seat]) { currentStudents[seat].status = 'idle'; currentStudents[seat].awaySince = null; }
+            if (currentStudents[seat]) { 
+                if (currentStudents[seat].status !== 'offline') currentStudents[seat].status = 'idle'; 
+                currentStudents[seat].awaySince = null; 
+            }
             removeLogsByTypeAndSeat('away', seat);
             appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '복귀처리', `[${seat}] 자리비움 해제`, `다른 화면에서 해제했습니다.`);
         } else if (action === 'force_checkout' || action === 'force_checkout_by_ta') {
@@ -490,6 +501,11 @@ export function useSupervisorData() {
                         appendLog('border-indigo-400', 'bg-indigo-50 text-indigo-600', '화면전환', `[${activeSeat}] ${st[activeSeat].name} 이동`, `포탈로 이동했거나 대기 중입니다.`);
                     }
                 } else if (st[activeSeat]) {
+                    // 활동 신호가 들어왔다는 건 앱이 켜져있다는 뜻이므로 상태 복구 (최종 안전장치)
+                    if (st[activeSeat].status === 'offline') {
+                        st[activeSeat].status = 'idle';
+                    }
+
                     if (action === 'update_activity') { 
                         st[activeSeat].activity = data.activity; 
                         appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });
@@ -509,7 +525,7 @@ export function useSupervisorData() {
                         }
                     } else if (action === 'cancel_call') {
                         delete st[activeSeat].calls[data.qNum];
-                        if (Object.keys(st[activeSeat].calls).length === 0) st[activeSeat].status = 'idle';
+                        if (Object.keys(st[activeSeat].calls).length === 0 && st[activeSeat].status !== 'offline') st[activeSeat].status = 'idle';
                         removeLogsByTypeAndSeat('call', activeSeat, data.qNum);
                     } else if (action === 'away') {
                         st[activeSeat].status = 'away'; st[activeSeat].awaySince = Date.now();
@@ -865,14 +881,17 @@ export function useSupervisorData() {
         if (type === 'cancel_call') {
             if (qNum !== null) {
                 if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
-                if (Object.keys(currentStudents[seat]?.calls || {}).length === 0) currentStudents[seat].status = 'idle';
+                if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
                 sendToStudent(seat, 'force_cancel_call', { qNum });
                 recordTaStat('총책임자', '');
                 if (currentStudents[seat]?.sessionId) clearActiveCall(supabaseClient, currentStudents[seat].sessionId, qNum);
             }
         } else if (type === 'clear_away') {
-            if (currentStudents[seat]) { currentStudents[seat].status = 'idle'; currentStudents[seat].awaySince = null; }
+            if (currentStudents[seat]) { 
+                if (currentStudents[seat].status !== 'offline') currentStudents[seat].status = 'idle'; 
+                currentStudents[seat].awaySince = null; 
+            }
             removeLogsByTypeAndSeat('away', seat); sendToStudent(seat, 'force_return_to_seat');
             if (currentStudents[seat]?.sessionId) clearAway(supabaseClient, currentStudents[seat].sessionId);
         } else if (type === 'confirm_checkout') {
@@ -882,7 +901,6 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('submit', seat); delete currentStudents[seat];
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
-        // 🌟 새로고침 강제 호출 이벤트 추가 (학생 화면 새로고침)
         } else if (type === 'force_refresh') {
             sendToStudent(seat, 'force_refresh');
             appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
