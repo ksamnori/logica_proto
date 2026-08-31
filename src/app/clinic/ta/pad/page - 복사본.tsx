@@ -16,7 +16,7 @@ let mathJaxInitStarted = false;
 const initMathJax = () => {
   if (typeof window === 'undefined' || mathJaxInitStarted || document.getElementById('mathjax-script')) return;
   mathJaxInitStarted = true;
-  (window as any).MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]] }, chtml: { displayAlign: 'left' } };
+  (window as any).MathJax = { tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] }, chtml: { displayAlign: 'left' } };
   const script = document.createElement('script');
   script.id = 'mathjax-script';
   script.src = 'https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js';
@@ -60,10 +60,10 @@ export default function TaHandheldDashboard() {
   const recheckSeatSet = new Set(Object.values(rechecksSnapshot).map(r => r.seat));
 
   // 호출 + 재확인 요청을 하나의 목록으로 합쳐서 시간순으로 보여줌
-  type Req = { key: string; type: 'call' | 'recheck'; seat: string; name: string; classes: string[]; time: number; qNum?: number };
+  type Req = { key: string; type: 'call' | 'recheck'; seat: string; name: string; classes: string[]; time: number; qNum?: number; initial?: boolean };
   const requestList: Req[] = [
     ...Object.values(callsSnapshot).map(c => ({ key: `${c.seat}::${c.qNum}`, type: 'call' as const, seat: c.seat, name: c.name, classes: c.classes, time: c.calledAt, qNum: c.qNum })),
-    ...Object.values(rechecksSnapshot).map(r => ({ key: `${r.seat}::${r.uid}`, type: 'recheck' as const, seat: r.seat, name: r.name, classes: r.classes, time: r.requestedAt })),
+    ...Object.values(rechecksSnapshot).map(r => ({ key: `${r.seat}::${r.uid}`, type: 'recheck' as const, seat: r.seat, name: r.name, classes: r.classes, time: r.requestedAt, initial: r.initial })),
   ].filter(req => selectedCallKey === req.key || assignmentMap[req.seat] === taClientId || assignmentMap[req.seat] === undefined)
    .sort((a, b) => a.time - b.time);
 
@@ -157,7 +157,7 @@ export default function TaHandheldDashboard() {
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0">
                         {!claimedName && <span className={`text-[9px] font-semibold ${isRecheck ? 'text-blue-500' : 'text-red-500'}`}>{formatElapsed(req.time)}</span>}
-                        {claimedName ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">🔒 {claimedName}</span> : isRecheck ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">재확인</span> : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#002864] text-white">{req.qNum}번</span>}
+                        {claimedName ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-500">🔒 {claimedName}</span> : isRecheck ? (req.initial ? <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-500 text-white">1차채점</span> : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">재확인</span>) : <span className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-[#002864] text-white">{req.qNum}번</span>}
                       </div>
                     </div>
                   );
@@ -175,7 +175,7 @@ export default function TaHandheldDashboard() {
               <div className="w-full">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-sm font-bold text-blue-600">{currentRecheck.name} · {formatSeat(currentRecheck.seat)}</span>
-                  <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-blue-600 text-white">{currentRecheck.qNum}번 · 재확인 요청</span>
+                  <span className={`text-xs font-bold px-1.5 py-0.5 rounded text-white ${currentRecheck.initial ? 'bg-amber-500' : 'bg-blue-600'}`}>{currentRecheck.qNum}번 · {currentRecheck.initial ? '조교 채점 대기' : '재확인 요청'}</span>
                 </div>
                 <MathText className="text-[19px] text-slate-800 font-myungjo font-semibold leading-[2.0] break-keep" html={currentRecheck.questionText} />
                 <div className="mt-4 pt-3 border-t border-slate-100 flex items-start gap-2">
@@ -224,7 +224,7 @@ export default function TaHandheldDashboard() {
         {/* 4. 처리 상태 컨트롤 */}
         {currentRecheck ? (
           <div className="bg-white rounded-2xl shadow-sm px-4 py-2.5 flex items-center gap-3 shrink-0">
-            <h2 className="text-xs font-bold text-slate-700 shrink-0">재확인 처리</h2>
+            <h2 className="text-xs font-bold text-slate-700 shrink-0">{currentRecheck.initial ? '조교 채점' : '재확인 처리'}</h2>
             <div className="ml-auto flex items-center gap-2">
               <button onClick={() => handleConfirmRecheck('incorrect')} className="bg-rose-50 hover:bg-rose-100 text-rose-600 border-2 border-rose-300 text-xs font-bold px-4 py-2.5 rounded-xl transition-colors shadow-sm">❌ 오답 처리</button>
               <button onClick={() => handleConfirmRecheck('correct')} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-600 border-2 border-emerald-300 text-xs font-bold px-4 py-2.5 rounded-xl transition-colors shadow-sm">⭕ 정답 처리</button>

@@ -150,7 +150,9 @@ export default function ClinicViewer() {
     }
 
     setParams({ round, className, weekType, assignmentId, homeworkIdsStr, assignmentIdsStr, overdue });
-    setIsTimedRound(round === 1 || round === 4);
+    
+    // 🌟 수정: 1라운드의 경우 홀수 주차(주간테스트)만 타이머 및 일괄제출이 활성화되도록 분리
+    setIsTimedRound((round === 1 && weekType === 'odd') || round === 4);
 
     initMathJax();
     initSessionAndFetch(sId, round, className, weekType, assignmentId, homeworkIdsStr, assignmentIdsStr);
@@ -1339,14 +1341,28 @@ export default function ClinicViewer() {
     qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
     forceUpdate();
 
-    if (qItem.record_id) {
-      await bumpIncorrectRecord(qItem.record_id, newStatus, resolved);
+    // 🌟 수정: 억울한 오답(수동채점 정답 인정)의 경우, 오답 기록에서 아예 영구 삭제
+    if (fromRecheck && wasWrongBefore && !helped) {
+      if (qItem.record_id) {
+        await supabaseClient.from('student_incorrect_record').delete().eq('record_id', qItem.record_id);
+        qItem.record_id = null;
+      } else {
+        const filterCol = qItem.tq_id ? 'tq_id' : 'question_id';
+        const filterVal = qItem.tq_id ?? qItem.question_id;
+        if (filterVal) {
+          await supabaseClient.from('student_incorrect_record').delete().eq('student_id', studentInfo.id).eq(filterCol, filterVal);
+        }
+      }
     } else {
-      const filterCol = qItem.tq_id ? 'tq_id' : 'question_id';
-      const filterVal = qItem.tq_id ?? qItem.question_id;
-      if (filterVal) {
-        const { data: matches } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null);
-        for (const m of (matches || [])) await bumpIncorrectRecord(m.record_id, newStatus, resolved);
+      if (qItem.record_id) {
+        await bumpIncorrectRecord(qItem.record_id, newStatus, resolved);
+      } else {
+        const filterCol = qItem.tq_id ? 'tq_id' : 'question_id';
+        const filterVal = qItem.tq_id ?? qItem.question_id;
+        if (filterVal) {
+          const { data: matches } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).is('resolved_at', null);
+          for (const m of (matches || [])) await bumpIncorrectRecord(m.record_id, newStatus, resolved);
+        }
       }
     }
 
@@ -1573,7 +1589,6 @@ export default function ClinicViewer() {
 
   return (
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none">
-      {/* 🌟 1. 채점 중(AI 분석) 로딩 애니메이션 소형화 & 중앙 배치 */}
       {(isSubmitting || isBatchGrading) && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[9999] flex items-center justify-center px-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 flex flex-col items-center max-w-sm w-full text-center">
@@ -1658,7 +1673,6 @@ export default function ClinicViewer() {
               <div className="flex items-center gap-3 p-6 border-b border-slate-100 bg-slate-50 shrink-0">
                 <div className="flex items-center shrink-0">
                   <span className="text-4xl font-extrabold text-[#002864] leading-none">{String(currentQIndex + 1).padStart(2, '0')}</span>
-                  {/* 🌟 원본 문제 페이지 번호 및 문제 번호 표시 */}
                   {(!isTimedRound && q.pageNum) && (
                     <div className="flex flex-col ml-3 pl-3 border-l-2 border-blue-200 justify-center h-8">
                       <span className="text-[10px] font-bold text-blue-400 leading-tight">p.{q.pageNum}</span>
@@ -1798,7 +1812,9 @@ export default function ClinicViewer() {
                   </div>
                   <button onClick={() => questionNavScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })} className="shrink-0 w-10 h-16 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl flex items-center justify-center hover:bg-slate-200">›</button>
                 </div>
-                {params.round === 1 && (
+
+                {/* 🌟 수정: isTimedRound 조건으로 교체하여, 과제오답유사(홀/짝주차 무관하게 단일제출 모드)일 땐 버튼을 숨깁니다. */}
+                {isTimedRound && (
                   <button onClick={() => setSubmitConfirmModal(true)} disabled={timeIsUp} className="w-full mt-5 bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl shadow-sm transition-colors text-lg disabled:opacity-40 disabled:cursor-not-allowed">
                     📮 전체 제출하기
                   </button>
@@ -1900,6 +1916,7 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
+              {/* 🌟 수정: !isTimedRound 조건으로 처리되어, 과제오답유사일 때 개별 정답 입력 및 호출 버튼이 표시됩니다. */}
               {!isTimedRound && (
                 <div className="flex flex-col gap-3 mt-auto shrink-0">
                   <div className="flex gap-3 w-full">

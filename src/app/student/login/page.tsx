@@ -1,11 +1,9 @@
-// src/app/student/login/page.tsx
-
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import { searchStudentsByDigits, loginStudentAction, loginTransferAction } from "@/app/actions/studentAuth";
+import { searchStudentsByDigits, loginStudentAction, loginTransferAction, setupStudentPinAction } from "@/app/actions/studentAuth";
 import { getSeatForDevice, assignPadDevice, listActiveTenants } from "@/app/actions/clinicPadDevice";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { getKioskDeviceId } from "@/lib/kioskDevice";
@@ -20,7 +18,6 @@ const getSupabaseClient = () => {
 const supabaseClient = getSupabaseClient();
 const CLINIC_ROOM = 'logica-clinic-room';
 
-// 아바타 에셋 유지
 const ANIMALS = ['🐶', '🦒', '🦊', '🐱', '🐰'];
 const AVATAR_COLORS = [
   { bg: 'bg-blue-50',    ring: 'group-hover:border-blue-500',    text: 'group-hover:text-blue-600' },
@@ -57,11 +54,13 @@ const IconDelete = () => <svg width="28" height="28" viewBox="0 0 24 24" fill="n
 
 export default function StudentKioskLogin() {
   const router = useRouter(); 
-  const [step, setStep] = useState<"phone" | "profile" | "password">("phone");
+  const [step, setStep] = useState<"phone" | "profile" | "password" | "setup_pin">("phone");
   const [digits, setDigits] = useState("");
   const [matchedList, setMatchedList] = useState<any[]>([]);
   const [selectedStudent, setSelectedStudent] = useState<any>(null);
   const [passwordInput, setPasswordInput] = useState("");
+  const [newPinInput, setNewPinInput] = useState("");
+  const [pendingLoginData, setPendingLoginData] = useState<any>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [unregisteredDeviceId, setUnregisteredDeviceId] = useState<string | null>(null);
   const [seatInputValue, setSeatInputValue] = useState("");
@@ -70,25 +69,18 @@ export default function StudentKioskLogin() {
   const [selectedTenantId, setSelectedTenantId] = useState("");
   const kioskSeatRef = useRef<string | null>(null);
 
-  // 💡 완전히 처음 켜는 기기는 localStorage/TA 환경변수 어디에도 지점 정보가 없을 수 있다
-  // (강사 로그인도, TA 이름 입력도 이 브라우저에서 한 적 없는 경우). 그래서 지점은 추론하지
-  // 않고, 등록 화면에서 사람이 목록 중 직접 골라 입력하게 한다.
   useEffect(() => {
     if (!unregisteredDeviceId || tenantOptions.length > 0) return;
     listActiveTenants().then(setTenantOptions);
   }, [unregisteredDeviceId, tenantOptions.length]);
 
-  // 💡 미등록 패드에서 관리자 페이지(/clinic-pad-registry)까지 갈 필요 없이, 로그인 화면에서
-  // 지점과 좌석번호를 바로 입력해 이 기기ID를 그 지점의 그 자리에 등록한다.
   const handleRegisterSeat = async () => {
     const seat = seatInputValue.trim();
     if (!unregisteredDeviceId || !seat || !selectedTenantId || isRegisteringSeat) return;
 
     const tenantId = selectedTenantId;
-
     setIsRegisteringSeat(true);
 
-    // 💡 선택한 지점의 실제 좌석 배치도에 입력한 좌석번호가 존재하는지 확인한다(오타 방지).
     const layout = await getActiveSeatLayout(tenantId);
     const seatExists = layout.seats.some((s) => String(s.number) === seat);
     if (!seatExists) {
@@ -114,24 +106,16 @@ export default function StudentKioskLogin() {
     localStorage.setItem("logica_student_id", result.studentId);
     localStorage.setItem("logica_student_phone", result.phone || "");
     localStorage.setItem("logica_student_name", result.name);
-    // 💡 학생 로그인은 loginStudentAction이 tenant_id를 돌려주는데도 지금까지 아무도
-    // localStorage에 저장하지 않았다 — 그래서 클리닉 화면들이 전부 "hq"(존재하지 않는
-    // tenant_id) 폴백으로 떨어져 uuid 컬럼 비교 쿼리(clinic_seat_layout 등)가 깨졌다.
     if (result.tenant_id) localStorage.setItem("logica_tenant_id", result.tenant_id);
     if (kioskSeatRef.current) localStorage.setItem("logica_kiosk_seat", kioskSeatRef.current);
-    // 이미 터치 시점에 전체화면이 적용되어 있으므로 바로 넘겨도 튕기지 않습니다!
     router.push("/student/portal");
   };
 
-// 💡 이 패드가 키오스크로 특정 좌석에 고정 등록돼 있으면, 로그인 전에 미리 좌석번호를
-  // 알아둬야 한다 — (1) 수퍼바이저가 다른 패드에 있던 학생을 이 자리로 이동시켰을 때
-  // 그 신호(relocated_in)를 받을 수 있고, (2) 로그인 성공 시 곧바로 그 번호로 좌석을 고정할 수 있다.
   useEffect(() => {
     let cancelled = false;
     let channel: any = null;
 
     const setup = async () => {
-      // 1. 기기 ID 가져오기 또는 브라우저 전용 난수 생성 (팝업 띄우기 위함)
       let deviceId = getKioskDeviceId();
       if (!deviceId) {
         deviceId = localStorage.getItem('logica_fallback_device_id');
@@ -145,15 +129,12 @@ export default function StudentKioskLogin() {
       if (cancelled) return;
       
       if (!seat) {
-        // 💡 관리자가 /clinic-pad-registry에서 이 기기ID를 좌석에 등록할 수 있게, 등록 안 된
-        // 상태일 때만 화면에 조용히 표시해둔다(등록된 패드에서는 안 보임).
         setUnregisteredDeviceId(deviceId);
         return;
       }
       
       kioskSeatRef.current = seat;
 
-      // 🚨 실수로 지워졌던 tenantId 변수 선언 부분 복구![cite: 8]
       const tenantId = localStorage.getItem('logica_tenant_id') || process.env.NEXT_PUBLIC_TA_TENANT_ID || '';
       if (!tenantId) return;
 
@@ -172,12 +153,9 @@ export default function StudentKioskLogin() {
     return () => { cancelled = true; if (channel) supabaseClient.removeChannel(channel); };
   }, []);
 
-  // 💡 [핵심] 어떠한 터치든 감지되면 즉시 전체화면으로 밀어넣는 전용 함수
   const ensureFullscreen = () => {
     if (typeof document !== "undefined" && !document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {
-        // 아이폰 등 미지원 기기는 조용히 무시
-      });
+      document.documentElement.requestFullscreen().catch(() => {});
     }
   };
 
@@ -194,16 +172,18 @@ export default function StudentKioskLogin() {
   };
 
   const resetState = () => {
-    ensureFullscreen(); // 초기화 버튼 누를 때도 강제 유지
+    ensureFullscreen(); 
     setStep("phone");
     setDigits("");
     setMatchedList([]);
     setSelectedStudent(null);
     setPasswordInput("");
+    setNewPinInput("");
+    setPendingLoginData(null);
   };
 
   const handleDigit = (num: string) => {
-    ensureFullscreen(); // 💡 키패드 누르는 즉시 전체화면 진입!
+    ensureFullscreen(); 
     if (step === "phone") {
       if (digits.length < 4 && !isProcessing) {
         const newDigits = digits + num;
@@ -221,7 +201,7 @@ export default function StudentKioskLogin() {
   };
 
   const handlePinDigit = (num: string) => {
-    ensureFullscreen(); // 💡 비밀번호 누를 때도 전체화면 강제 락인!
+    ensureFullscreen(); 
     if (passwordInput.length < 4 && !isProcessing) {
       const newPin = passwordInput + num;
       setPasswordInput(newPin);
@@ -234,6 +214,22 @@ export default function StudentKioskLogin() {
   const handlePinDelete = () => {
     ensureFullscreen();
     setPasswordInput(prev => prev.slice(0, -1));
+  };
+
+  const handleNewPinDigit = (num: string) => {
+    ensureFullscreen();
+    if (newPinInput.length < 4 && !isProcessing) {
+      const nextPin = newPinInput + num;
+      setNewPinInput(nextPin);
+      if (nextPin.length === 4) {
+        handleSaveNewPin(nextPin);
+      }
+    }
+  };
+
+  const handleNewPinDelete = () => {
+    ensureFullscreen();
+    setNewPinInput(prev => prev.slice(0, -1));
   };
 
   const searchDBAndProcess = async (code: string) => {
@@ -260,10 +256,29 @@ export default function StudentKioskLogin() {
     setIsProcessing(false);
 
     if (result.success) {
-      finalizeLogin(result as any);
+      if ((result as any).needsPinSetup) {
+        setPendingLoginData(result);
+        setStep("setup_pin");
+        setPasswordInput("");
+      } else {
+        finalizeLogin(result as any);
+      }
     } else {
       alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
       setPasswordInput(""); 
+    }
+  };
+
+  const handleSaveNewPin = async (pin: string) => {
+    setIsProcessing(true);
+    const res = await setupStudentPinAction(selectedStudent.student_id, pin);
+    setIsProcessing(false);
+    
+    if (res.success) {
+      finalizeLogin(pendingLoginData);
+    } else {
+      alert(res.message || "설정 실패. 다시 시도해주세요.");
+      setNewPinInput("");
     }
   };
 
@@ -276,10 +291,6 @@ export default function StudentKioskLogin() {
         </div>
       )}
 
-      {/* 💡 이 패드가 아직 좌석에 등록 안 된 키오스크 기기일 때만 뜬다. /clinic-pad-registry로
-          가지 않아도, 여기서 좌석번호를 바로 입력해 이 기기를 그 자리에 등록할 수 있다.
-          어차피 설정 단계라 실제 학생들에게는 보일 일이 없으므로, 가운데 로그인 카드를
-          가리지 않게 화면 왼쪽 빈 공간에 띄운다. */}
       {unregisteredDeviceId && (
         <div className="fixed left-6 top-1/2 -translate-y-1/2 w-72 bg-white border-2 border-amber-400 rounded-2xl shadow-2xl px-5 py-4 z-40">
           <p className="text-sm font-extrabold text-amber-600 mb-0.5">⚠️ 미등록 패드</p>
@@ -321,7 +332,6 @@ export default function StudentKioskLogin() {
       {step === "phone" && (
         <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
           
-          {/* 투명한 비밀 버튼 (흰색 상자의 오른쪽 맨 위 구석) */}
           <button 
             onClick={toggleFullScreen} 
             className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
@@ -456,6 +466,52 @@ export default function StudentKioskLogin() {
             <button onClick={() => { ensureFullscreen(); setStep("profile"); setPasswordInput(""); }} className="mt-8 text-sm text-slate-400 hover:text-slate-600 underline font-medium underline-offset-4">
               다른 프로필 선택하기
             </button>
+          </div>
+        );
+      })()}
+
+      {/* 4단계: 초기 비밀번호 설정 */}
+      {step === "setup_pin" && pendingLoginData && (() => {
+        const avatar = getAvatarFor(selectedStudent.student_id);
+        return (
+          <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
+            
+            <button onClick={toggleFullScreen} className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50" title="전체화면 토글" />
+
+            <div className={`w-20 h-20 rounded-full ${avatar.color.bg} flex items-center justify-center mb-4 shadow-sm ring-4 ring-emerald-100`}>
+              <span className="text-4xl">{avatar.animal}</span>
+            </div>
+            <h2 className="text-xl font-extrabold text-emerald-600 mb-1">
+              환영합니다, {selectedStudent.name} 학생!
+            </h2>
+            <p className="text-xs text-slate-500 font-bold mb-8 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100 text-center">
+              앞으로 사용할 <span className="text-emerald-600">새 비밀번호 4자리</span>를<br/>지금 바로 설정해주세요.
+            </p>
+
+            <div className="flex gap-4 mb-6">
+              {[0, 1, 2, 3].map((idx) => (
+                <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-black transition-all border-2 ${newPinInput.length > idx ? 'border-emerald-500 text-emerald-500 bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
+                  {newPinInput[idx] ? '●' : ''}
+                </div>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 w-full mt-2">
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button key={num} onClick={() => handleNewPinDigit(num.toString())} className="bg-slate-50 hover:bg-emerald-50 active:bg-emerald-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+                  {num}
+                </button>
+              ))}
+              <button onClick={() => { ensureFullscreen(); setNewPinInput(""); }} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
+                초기화
+              </button>
+              <button onClick={() => handleNewPinDigit('0')} className="bg-slate-50 hover:bg-emerald-50 active:bg-emerald-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+                0
+              </button>
+              <button onClick={handleNewPinDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-colors border border-slate-100 shadow-sm">
+                <IconDelete />
+              </button>
+            </div>
           </div>
         );
       })()}

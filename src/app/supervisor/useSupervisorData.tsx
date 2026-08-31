@@ -397,7 +397,6 @@ export function useSupervisorData() {
                 }
             }
 
-            // 🌟 하트비트 시간 초과 시 정상 세션 종료(퇴실)로 부드럽게 처리
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
                 const sinceLastSeen = Date.now() - new Date(dbRecord.last_seen_at).getTime();
@@ -406,7 +405,6 @@ export function useSupervisorData() {
                 const st = current[seat];
                 endTodaySession(supabaseClient, dbRecord.student_id, todayStr);
                 
-                // 🌟 [수정] 비정상종료 대신 안전한 퇴실완료 로그로 남깁니다
                 appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '세션마감', `[${seat}] ${st.name} 퇴실`, `기기 연결이 해제되어 세션이 마감되었습니다.`);
                 
                 removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
@@ -486,12 +484,9 @@ export function useSupervisorData() {
                 const st = { ...studentsRef.current };
                 const activeSeat = Object.keys(st).find(s => st[s].studentId === data.studentId) || seat;
 
-                // 🌟 [수정] depart 신호가 왔을 때 화면에서 깜빡거리며 사라지지 않도록 방어
                 if (action === 'depart') {
                     if (st[activeSeat]) {
                         appendLog('border-indigo-400', 'bg-indigo-50 text-indigo-600', '화면전환', `[${activeSeat}] ${st[activeSeat].name} 이동`, `포탈로 이동했거나 대기 중입니다.`);
-                        // 세션 종료(endTodaySession)나 UI(delete st) 삭제는 하지 않습니다.
-                        // (진짜 로그아웃일 경우 하트비트 타임아웃이 알아서 부드럽게 세션마감 처리합니다)
                     }
                 } else if (st[activeSeat]) {
                     if (action === 'update_activity') { 
@@ -834,6 +829,24 @@ export function useSupervisorData() {
         const st = studentsRef.current[seat];
         if (!st) return;
 
+        // 🌟 수정: 수퍼바이저/강사가 '정답' 처리 시 오답 DB 삭제 로직을 백엔드로 바로 실행
+        if (verdict === 'correct') {
+           const targetRecheck = st.rechecks?.[uid];
+           if (targetRecheck) {
+               // recordId가 있으면 직접 지우고, 없으면 studentId + (tqId or questionId)로 지움
+               if (targetRecheck.recordId) {
+                   await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
+               } else if (targetRecheck.tqId || targetRecheck.questionId) {
+                   const filterCol = targetRecheck.tqId ? 'tq_id' : 'question_id';
+                   const filterVal = targetRecheck.tqId ?? targetRecheck.questionId;
+                   await supabaseClient.from('student_incorrect_record').delete()
+                       .eq('student_id', st.studentId)
+                       .eq(filterCol, filterVal);
+               }
+           }
+        }
+
+        // 패드 화면(학생 뷰) 갱신 신호 발송
         sendToStudent(seat, 'resolve_recheck', { uid, verdict });
 
         if (st.sessionId) {

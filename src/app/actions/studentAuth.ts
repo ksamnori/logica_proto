@@ -1,4 +1,3 @@
-// src/app/actions/studentAuth.ts
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
@@ -79,17 +78,26 @@ export async function loginStudentAction(studentId: string, passwordInput: strin
   try {
     const { data, error } = await supabaseAdmin
       .from("student")
-      // 🌟 [핵심] 학생 로그인 시 DB에서 내 소속 지점(tenant_id)도 챙겨옵니다!
       .select("student_id, name, phone, password_hash, tenant_id")
       .eq("student_id", studentId)
       .maybeSingle();
 
     if (error || !data) return { success: false, message: "학생 정보를 찾을 수 없습니다." };
     
-    if (data.password_hash !== passwordInput) return { success: false, message: "비밀번호가 다릅니다." };
+    const isPasswordEmpty = !data.password_hash || data.password_hash.trim() === "";
+    let isAuthorized = false;
+    let needsPinSetup = false;
 
-    // 🌟 [보안] 포인트 조회/차감 등 학생 본인 확인이 필요한 액션에서 클라이언트가 보낸
-    // studentId를 그대로 믿지 않고 이 서명된 쿠키와 대조할 수 있게 발급한다.
+    if (isPasswordEmpty && passwordInput === "0000") {
+      isAuthorized = true;
+      needsPinSetup = true;
+    } else if (data.password_hash === passwordInput) {
+      isAuthorized = true;
+      if (passwordInput === "0000") needsPinSetup = true; 
+    }
+
+    if (!isAuthorized) return { success: false, message: "비밀번호가 다릅니다." };
+
     const token = await new SignJWT({ student_id: data.student_id })
       .setProtectedHeader({ alg: "HS256" })
       .setExpirationTime("1d")
@@ -108,17 +116,28 @@ export async function loginStudentAction(studentId: string, passwordInput: strin
       studentId: data.student_id,
       name: data.name,
       phone: data.phone,
-      tenant_id: data.tenant_id // 🌟 학생 꼬리표 반환!
+      tenant_id: data.tenant_id,
+      needsPinSetup 
     };
   } catch (err) {
     return { success: false, message: "서버 통신 오류" };
   }
 }
 
-// 수퍼바이저가 학생을 다른 키오스크 패드로 이동시켰을 때, 그 패드에서 PIN 없이 자동으로
-// 세션을 이어받기 위한 로그인이다. 누구나 studentId만 알면 로그인되는 걸 막기 위해,
-// 수퍼바이저가 이동시키는 순간 그 학생의 세션 행에 발급해둔 1회용 단기 토큰과 대조한다 —
-// 토큰이 일치하고 아직 만료 전이어야만 통과한다(clinic_session_state.transfer_token 컬럼 필요).
+export async function setupStudentPinAction(studentId: string, newPin: string) {
+  if (!newPin || newPin.length !== 4) return { success: false, message: "4자리 숫자를 입력해주세요." };
+  try {
+    const { error } = await supabaseAdmin
+      .from("student")
+      .update({ password_hash: newPin })
+      .eq("student_id", studentId);
+    if (error) throw error;
+    return { success: true };
+  } catch (err) {
+    return { success: false, message: "비밀번호 설정 중 오류가 발생했습니다." };
+  }
+}
+
 export async function loginTransferAction(studentId: string, token: string, seatNumber: string) {
   try {
     if (!studentId || !token || !seatNumber) return { success: false, message: "잘못된 요청입니다." };
@@ -143,7 +162,6 @@ export async function loginTransferAction(studentId: string, token: string, seat
       .maybeSingle();
     if (error || !data) return { success: false, message: "학생 정보를 찾을 수 없습니다." };
 
-    // 토큰은 1회용이라 성공 시점에 바로 지우고, 실제 좌석도 이 패드 번호로 확정한다.
     await supabaseAdmin.from("clinic_session_state")
       .update({ transfer_token: null, transfer_token_expires_at: null, seat: seatNumber, manual_seat: seatNumber })
       .eq("id", session.id);

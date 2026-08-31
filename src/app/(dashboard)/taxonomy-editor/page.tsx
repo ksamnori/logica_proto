@@ -162,9 +162,9 @@ export default function TaxonomyEditorPage() {
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
 
-  // 🌟 추가됨: 복제 모달 및 폼 상태
+  // 🌟 수정됨: 복제 모달 폼에 subNumber 상태 추가
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
-  const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '' });
+  const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '', subNumber: '' });
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -505,7 +505,7 @@ export default function TaxonomyEditorPage() {
     } catch (e: any) { alert("삭제 실패: " + e.message); } finally { setIsLoading(false); }
   };
 
-  // 🌟 추가됨: 교재 복제 실행 로직
+  // 🌟 수정됨: 복제 실행 로직에 sub_num 저장 로직 추가
   const executeClone = async () => {
     if (!selectedQuestion) return;
     if (!cloneForm.targetBookName.trim()) return alert("대상 교재 이름을 입력하세요.");
@@ -513,6 +513,7 @@ export default function TaxonomyEditorPage() {
     setIsLoading(true);
     try {
       const newUuid = generateUUID();
+      const parsedSubNum = cloneForm.subNumber ? parseInt(cloneForm.subNumber) : 0;
       
       const qDbInsert = {
         ...selectedQuestion,
@@ -521,6 +522,7 @@ export default function TaxonomyEditorPage() {
         book_name: cloneForm.targetBookName.trim(), 
         final_printed_page: cloneForm.pageNumber ? parseInt(cloneForm.pageNumber) : null,
         question_number: cloneForm.questionNumber || 'NEW',
+        sub_num: parsedSubNum,
         parent_question_id: null, // 기존 상속 관계 단절
         derivation_type: '복제',
         created_at: new Date().toISOString(),
@@ -887,6 +889,7 @@ export default function TaxonomyEditorPage() {
                 </datalist>
               </div>
               
+              {/* 🌟 수정됨: 새 문항 번호 옆에 서브 번호 입력 필드 추가 */}
               <div className="flex gap-4">
                 <div className="flex flex-col gap-1.5 flex-1">
                   <label className="text-xs font-bold text-slate-500">새 페이지 번호</label>
@@ -905,7 +908,17 @@ export default function TaxonomyEditorPage() {
                     value={cloneForm.questionNumber} 
                     onChange={(e) => setCloneForm(prev => ({...prev, questionNumber: e.target.value}))} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
-                    placeholder="ex) 15-1"
+                    placeholder="ex) 15"
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5 flex-1">
+                  <label className="text-xs font-bold text-slate-500">새 서브 번호</label>
+                  <input 
+                    type="number" 
+                    value={cloneForm.subNumber} 
+                    onChange={(e) => setCloneForm(prev => ({...prev, subNumber: e.target.value}))} 
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
+                    placeholder="ex) 0"
                   />
                 </div>
               </div>
@@ -1259,10 +1272,15 @@ export default function TaxonomyEditorPage() {
                         <span>👯</span> <span>AI 유사생성</span>
                       </button>
 
-                      {/* 🌟 추가됨: 교재 간 복제 버튼 */}
+                      {/* 🌟 수정됨: 교재 간 복제 버튼 누를 때 subNumber 초기화 추가 */}
                       <button 
                         onClick={() => {
-                          setCloneForm({ targetBookName: selectedBook, pageNumber: selectedQuestion.final_printed_page || '', questionNumber: selectedQuestion.question_number || '' });
+                          setCloneForm({ 
+                            targetBookName: selectedBook, 
+                            pageNumber: selectedQuestion.final_printed_page || '', 
+                            questionNumber: selectedQuestion.question_number || '',
+                            subNumber: selectedQuestion.sub_num || ''
+                          });
                           setIsCloneModalOpen(true);
                         }} 
                         disabled={!perms.add} 
