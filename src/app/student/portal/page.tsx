@@ -459,13 +459,14 @@ export default function StudentPortal() {
                         name: studentInfo.name, 
                         studentId: studentInfo.id, 
                         classes: studentInfo.classes,
+                        activity: '포털 대기 중 📋', // 🌟 명시적 activity 부착
                         startedAt: isReal ? new Date(clinicSessionRef.current?.started_at || Date.now()).getTime() : Date.now(),
                         durationMs: clinicSessionRef.current?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS,
                         updatedAt: Date.now()
                     }).then(() => {
                         channel.send({
                             type: 'broadcast', event: 'student_action',
-                            payload: { seat: targetSeat, action: 'update_activity', data: { studentId: studentInfo.id, activity: '포털에서 문제 선택 중 📋' } }
+                            payload: { seat: targetSeat, action: 'update_activity', data: { studentId: studentInfo.id, activity: '포털 대기 중 📋' } }
                         });
                     });
                 }
@@ -483,6 +484,7 @@ export default function StudentPortal() {
                     trackedSeatRef.current = payload.newSeat;
                     channel.track({ 
                         seat: payload.newSeat, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
+                        activity: '포털 대기 중 📋', // 🌟
                         startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: clinicSessionRef.current.duration_ms, updatedAt: Date.now() 
                     });
                 } 
@@ -503,6 +505,7 @@ export default function StudentPortal() {
                     if (trackedSeatRef.current) {
                         channel.track({
                             seat: trackedSeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
+                            activity: '포털 대기 중 📋',
                             startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: nextDuration, updatedAt: Date.now()
                         });
                     }
@@ -526,7 +529,6 @@ export default function StudentPortal() {
                     setRecheckToast(payload.verdict === 'correct' ? '🎉 조교가 정답으로 확인했어요! (자세한 내용은 클리닉에서 확인해주세요)' : '조교 확인 결과 오답이 맞습니다.');
                     setTimeout(() => setRecheckToast(""), 4000);
                 }
-                // 🌟 수퍼바이저 보드에서 '강제 새로고침' 신호가 왔을 때 실행
                 else if (payload.action === 'force_refresh') {
                     window.location.reload();
                 }
@@ -636,6 +638,7 @@ export default function StudentPortal() {
             if (prog.hwExamIds && prog.hwExamIds.length > 0) params.append('assignment_id', prog.hwExamIds[0]);
         } else if (typeKey === 'overdue') {
             testName = '미완료 과제';
+            params.append('overdue', '1'); // 🌟 Overdue 파라미터 추가
             if (prog.overdueHwIds && prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
             if (prog.overdueExamIds && prog.overdueExamIds.length > 0) params.append('assignment_id', prog.overdueExamIds[0]);
         } else if (typeKey === 'print') {
@@ -799,8 +802,7 @@ export default function StudentPortal() {
     }, [remainingMs, isSameDay, isMounted]);
 
     return (
-        // 🌟 상단 시스템 바 충돌 방지를 위해 컨테이너의 맨 위에 패딩(pt-12) 추가
-        <div className="min-h-screen flex flex-col bg-slate-100 font-['Pretendard'] pt-12">
+        <div className="min-h-screen flex flex-col bg-slate-100 font-['Pretendard']">
             {editorLocked && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
                     <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-sm">

@@ -936,7 +936,7 @@ export default function ClinicViewer() {
         recordManualWrong();
       }
     }
-    // 🌟 수퍼바이저에서 보낸 '강제 새로고침' 신호 처리
+    // 🌟 수퍼바이저 보드에서 '강제 새로고침' 신호가 왔을 때 실행
     else if (payload.action === 'force_refresh') {
       window.location.reload();
     }

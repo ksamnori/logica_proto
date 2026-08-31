@@ -22,9 +22,10 @@ export default function SeatCardBody({
     const isCall = student.status === 'call';
     const isAway = student.status === 'away';
     const isSubmitted = student.status === 'submitted';
+    const isOffline = student.status === 'offline';
 
-    const badgeBg = isCall ? 'bg-rose-600 text-white' : student.status === 'hint' ? 'bg-yellow-400 text-yellow-900' : isAway ? 'bg-amber-500 text-white' : isSubmitted ? 'bg-blue-600 text-white' : 'bg-emerald-100 text-emerald-700';
-    const badgeText = isCall ? `🚨 ${Object.keys(student.calls || {}).length}` : student.status === 'hint' ? '💡 힌트' : isAway ? '🚶 자리비움' : isSubmitted ? '✅ 완료' : '🟢 온라인';
+    const badgeBg = isOffline ? 'bg-slate-500 text-white' : isCall ? 'bg-rose-600 text-white' : student.status === 'hint' ? 'bg-yellow-400 text-yellow-900' : isAway ? 'bg-amber-500 text-white' : isSubmitted ? 'bg-blue-600 text-white' : 'bg-emerald-100 text-emerald-700';
+    const badgeText = isOffline ? '⚫ 오프라인' : isCall ? `🚨 ${Object.keys(student.calls || {}).length}` : student.status === 'hint' ? '💡 힌트' : isAway ? '🚶 자리비움' : isSubmitted ? '✅ 완료' : '🟢 온라인';
 
     const remainingMs = (student.firstSeenAt + student.clinicDurationMs) - now;
     const isUrgent = remainingMs <= 5 * 60 * 1000;
@@ -39,8 +40,8 @@ export default function SeatCardBody({
                     <span className="font-bold text-slate-900 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                    {/* 🌟 오프라인 의심(오래된 업데이트) 시 강제 새로고침 버튼 노출 */}
-                    {interactive && (now - student.lastUpdatedAt > 10000) && (
+                    {/* 🌟 오프라인 시 강제 새로고침 버튼 노출 */}
+                    {interactive && isOffline && (
                         <button onClick={(e) => { e.stopPropagation(); onForceRefresh?.(); }} title="기기 새로고침 신호 전송" className={`text-[8px] bg-slate-200 text-slate-500 hover:bg-blue-500 hover:text-white px-1 py-px rounded leading-none ${pe}`}>
                             ↻
                         </button>
@@ -72,6 +73,10 @@ export default function SeatCardBody({
                         <div className="bg-white border border-blue-200 rounded text-center py-px text-[9px] font-bold text-blue-800 leading-tight">{student.score}/5점</div>
                         <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="bg-slate-800 text-white text-[9px] font-bold py-1 rounded leading-none">퇴실처리</button>
                     </div>
+                )}
+                {/* 🌟 오프라인 시 강제 퇴실 버튼 추가 노출 */}
+                {isOffline && (
+                    <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="w-full bg-slate-800 text-white text-[9px] font-bold py-1 rounded border border-slate-700 leading-none mt-1 animate-pulse">⚠️ 강제 퇴실 처리</button>
                 )}
             </div>
             {student.firstSeenAt && student.clinicDurationMs != null && (
