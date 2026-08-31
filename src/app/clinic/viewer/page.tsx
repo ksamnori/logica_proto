@@ -908,8 +908,10 @@ export default function ClinicViewer() {
 
           if (qItem.record_id) {
               await supabaseClient.from('student_incorrect_record').update({ status: gradingCode }).eq('record_id', qItem.record_id);
+              await appendToExistingIncorrectPrint(qItem);
           } else if (qItem.tq_id || qItem.question_id) {
               qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+              await appendToExistingIncorrectPrint(qItem);
           }
           
           if (!isTimedRound) {
@@ -1209,6 +1211,41 @@ export default function ClinicViewer() {
     }
   };
 
+  // 🌟 오답을 기존 오답프린트에 실시간으로 추가(병합)하는 핵심 함수
+  const appendToExistingIncorrectPrint = async (qItem: any) => {
+    if (!qItem.question_id) return;
+    try {
+      const { data: assignments } = await supabaseClient.from('exam_assignment')
+        .select('assignment_id, exam_id, status, exam_master!inner(exam_type, total_questions)')
+        .eq('student_id', studentInfo.id)
+        .eq('exam_master.exam_type', '오답프린트')
+        .not('status', 'in', '("제출완료", "채점완료", "완료")')
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      if (assignments && assignments.length > 0) {
+        const assign = assignments[0];
+        const examId = assign.exam_id;
+        const master = Array.isArray(assign.exam_master) ? assign.exam_master[0] : assign.exam_master;
+        
+        const { data: existingItem } = await supabaseClient.from('exam_item')
+          .select('item_id')
+          .eq('exam_id', examId)
+          .eq('question_id', qItem.question_id)
+          .maybeSingle();
+
+        if (!existingItem) {
+          const { count } = await supabaseClient.from('exam_item').select('*', { count: 'exact', head: true }).eq('exam_id', examId);
+          const nextSortOrder = (count || 0) + 1;
+          await supabaseClient.from('exam_item').insert({ exam_id: examId, question_id: qItem.question_id, sort_order: nextSortOrder });
+          await supabaseClient.from('exam_master').update({ total_questions: nextSortOrder }).eq('exam_id', examId);
+        }
+      }
+    } catch (err) {
+      console.error('오답 프린트 추가 실패:', err);
+    }
+  };
+
   const submitSingleAnswer = async () => {
     const currentStatus = qBoxStatus.current[currentQIndex];
     const isAlreadyCorrect = currentStatus === 'correct_blue' || currentStatus === 'correct_yellow' || currentStatus === 'retry_yellow';
@@ -1252,7 +1289,10 @@ export default function ClinicViewer() {
       await processCorrectAnswer(qItem, currentQIndex, false);
       setResultModal({ isCorrect: true, note: gotTaHint ? '조교 힌트를 받아 해결했어요.' : null, canRecheck: false });
     } else if (useAI) {
-      if (gotTaHint && qItem.record_id) await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', qItem.record_id);
+      if (gotTaHint && qItem.record_id) {
+          await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', qItem.record_id);
+          await appendToExistingIncorrectPrint(qItem);
+      }
       recheckState.current[currentQIndex] = 'pending';
       const payload = {
         uid: qItem.uid, qNum: currentQIndex + 1, questionText: qItem.questionText, correctAnswer: qItem.answer,
@@ -1266,7 +1306,10 @@ export default function ClinicViewer() {
       forceUpdate();
     } else {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
-      if (qItem.record_id) await bumpIncorrectRecord(qItem.record_id, gotTaHint ? 'TX' : 'X', false);
+      if (qItem.record_id) {
+          await bumpIncorrectRecord(qItem.record_id, gotTaHint ? 'TX' : 'X', false);
+          await appendToExistingIncorrectPrint(qItem);
+      }
       if (!isTimedRound) {
         if (qItem.examAssignmentId) {
             const gradingCode = gotTaHint ? 'TX' : 'X';
@@ -1275,7 +1318,10 @@ export default function ClinicViewer() {
             if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
             else await supabaseClient.from('student_answer').insert(ansPayload);
             
-            if (!qItem.record_id && qItem.question_id) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+            if (!qItem.record_id && qItem.question_id) {
+                qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+                await appendToExistingIncorrectPrint(qItem);
+            }
         } else if (qItem.homework_id) {
             const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id, wrong_attempts_log').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).eq('tq_id', qItem.tq_id).maybeSingle();
             let wrongLog = existing?.wrong_attempts_log || [];
@@ -1287,7 +1333,10 @@ export default function ClinicViewer() {
             if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
             else await supabaseClient.from('student_homework_answer').insert(payload);
             
-            if (!qItem.record_id && (qItem.tq_id || qItem.question_id)) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+            if (!qItem.record_id && (qItem.tq_id || qItem.question_id)) {
+                qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+                await appendToExistingIncorrectPrint(qItem);
+            }
         }
       }
       setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
@@ -1558,7 +1607,7 @@ export default function ClinicViewer() {
     });
 
     return (
-      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard">
+      <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard pt-12">
         <div className="bg-white rounded-[2rem] shadow-2xl p-10 w-full max-w-2xl text-center animate-[fadeIn_0.3s_ease-out]">
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mx-auto mb-6 object-contain" />
           <h2 className="text-3xl font-black text-[#002864] tracking-tighter mb-4">학습 클리닉</h2>
@@ -1589,7 +1638,7 @@ export default function ClinicViewer() {
   }
 
   return (
-    // 🌟 상단 시스템 바 터치 충돌 방지를 위해 컨테이너의 맨 위에 패딩(pt-12) 추가
+    // 🌟 상단 시스템 바 충돌 방지를 위해 컨테이너의 맨 위에 패딩(pt-12) 추가
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none pt-12">
       {(isSubmitting || isBatchGrading) && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[9999] flex items-center justify-center px-4 animate-[fadeIn_0.2s_ease-out]">

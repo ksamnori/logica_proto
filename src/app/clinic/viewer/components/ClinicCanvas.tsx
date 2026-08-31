@@ -19,7 +19,9 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
+  
   const isDrawing = useRef(false);
+  const activePointerId = useRef<number | null>(null); // 🌟 멀티 터치 방지용 고유 ID 추적기
 
   const lastPos = useRef<{x: number, y: number} | null>(null);
   const lastMid = useRef<{x: number, y: number} | null>(null);
@@ -48,7 +50,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
     
-    // 🌟 핵심 해결: 브라우저 렌더링 큐를 무시하고 즉각적으로 화면에 잉크를 쏘는 저지연 모드 활성화
     const ctx = canvas.getContext('2d', { desynchronized: true });
     if (!ctx) return;
     
@@ -94,7 +95,12 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const startDraw = (e: any) => {
+    // 🌟 핵심 방어: 이미 다른 손가락/펜으로 그리고 있다면 추가 터치는 철저히 무시
+    if (isDrawing.current) return;
+    
     isDrawing.current = true;
+    activePointerId.current = e.pointerId; // 🌟 첫 터치의 고유 ID 기억
+    
     const canvas = canvasRef.current;
     if (!canvas || !ctxRef.current) return;
     try { canvas.setPointerCapture(e.pointerId); } catch (err) {}
@@ -113,7 +119,8 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const draw = (e: any) => {
-    if (!isDrawing.current || !canvasRef.current || !ctxRef.current || !lastPos.current || !lastMid.current) return;
+    // 🌟 최초 터치된 손가락/펜(activePointerId)이 아니면 무시 (직선 그어짐 완벽 방지)
+    if (!isDrawing.current || e.pointerId !== activePointerId.current || !canvasRef.current || !ctxRef.current || !lastPos.current || !lastMid.current) return;
     
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     
@@ -136,7 +143,8 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const stopDraw = (e: any) => {
-    if (!isDrawing.current || !canvasRef.current || !ctxRef.current) return;
+    // 🌟 최초 터치된 손가락/펜이 손을 뗄 때만 종료 로직 실행
+    if (!isDrawing.current || e.pointerId !== activePointerId.current || !canvasRef.current || !ctxRef.current) return;
     
     if (lastPos.current && lastMid.current) {
         ctxRef.current.beginPath();
@@ -146,6 +154,7 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     }
 
     isDrawing.current = false;
+    activePointerId.current = null; // 🌟 ID 초기화
     lastPos.current = null;
     lastMid.current = null;
 
