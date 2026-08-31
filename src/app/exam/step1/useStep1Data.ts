@@ -15,6 +15,9 @@ export const TEST_DATA = {
   }
 };
 
+// 🌟 테스트 전용 탭 목록 정의
+export const TEST_GROUPS = ["주간테스트", "중간테스트", "분기테스트", "단원테스트", "입학테스트"];
+
 export function useStep1Data() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(true);
@@ -22,6 +25,7 @@ export function useStep1Data() {
   const [thinkingData, setThinkingData] = useState<any>({});
   
   const [currentMode, setCurrentMode] = useState("regular");
+  const [currentTestGroup, setCurrentTestGroup] = useState("주간테스트"); // 🌟 테스트 전용 하위 탭 관리
   const [currentD1, setCurrentD1] = useState("");
   const [currentD2, setCurrentD2] = useState("");
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -120,29 +124,41 @@ export function useStep1Data() {
     setCurrentMode(mode);
     setSearchKeyword(""); 
     if (mode === "regular") {
+      setIsSettingsDisabled(false);
       const d1Keys = Object.keys(mData).sort();
       if (d1Keys.length > 0) {
         const d1 = d1Keys.includes("중학교") ? "중학교" : d1Keys[0];
-        updateD1(d1, mode);
+        setCurrentD1(d1);
         const d2Keys = Object.keys(mData[d1] || {}).sort();
         if (d2Keys.length > 0) setCurrentD2(d2Keys.includes("1학년 1학기") ? "1학년 1학기" : d2Keys[0]);
       }
     } else if (mode === "thinking") {
+      setIsSettingsDisabled(false);
       const d1Keys = Object.keys(tData).sort();
-      if (d1Keys.length > 0) updateD1(d1Keys[0], mode);
+      if (d1Keys.length > 0) setCurrentD1(d1Keys[0]);
     } else if (mode === "test") {
-      const d1Keys = Object.keys(TEST_DATA).sort();
-      if (d1Keys.length > 0) updateD1(d1Keys[0], mode);
+      updateTestGroup(currentTestGroup, mData);
     }
   };
 
-  const updateD1 = (d1: string, mode: string = currentMode) => {
-    setCurrentD1(d1);
-    if (mode === "test" && d1 === "입학테스트") {
+  // 🌟 테스트 전용 탭 내부에서의 이동을 처리합니다.
+  const updateTestGroup = (group: string, mData = masterData) => {
+    setCurrentTestGroup(group);
+    if (group === "입학테스트") {
       setIsSettingsDisabled(true);
       setQCount(30); 
     } else {
       setIsSettingsDisabled(false);
+      // 🌟 주간/중간/분기 테스트일 경우 정규 교과의 카테고리를 활용하도록 세팅
+      if (['주간테스트', '중간테스트', '분기테스트'].includes(group)) {
+        const d1Keys = Object.keys(mData).sort();
+        if (d1Keys.length > 0) {
+          const d1 = d1Keys.includes("중학교") ? "중학교" : d1Keys[0];
+          setCurrentD1(d1);
+          const d2Keys = Object.keys(mData[d1] || {}).sort();
+          if (d2Keys.length > 0) setCurrentD2(d2Keys.includes("1학년 1학기") ? "1학년 1학기" : d2Keys[0]);
+        }
+      }
     }
   };
 
@@ -184,7 +200,20 @@ export function useStep1Data() {
     
     sessionStorage.removeItem("editExamId");
     sessionStorage.setItem("examMode", currentMode);
-    sessionStorage.setItem("testCategory", currentD1);
+    
+    // 🌟 핵심: Step 2에서 source_book_name으로 교차 필터링을 할 수 있도록 조건 주입
+    if (currentMode === 'test') {
+      sessionStorage.setItem("testCategory", currentTestGroup);
+      if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
+        sessionStorage.setItem("testSourceFilter", currentTestGroup);
+      } else {
+        sessionStorage.removeItem("testSourceFilter");
+      }
+    } else {
+      sessionStorage.setItem("testCategory", currentD1);
+      sessionStorage.removeItem("testSourceFilter");
+    }
+
     sessionStorage.setItem("selectedItemIds", JSON.stringify(Array.from(selectedItemIds)));
     sessionStorage.setItem("qCount", String(qCount));
     sessionStorage.setItem("distributions", JSON.stringify(finalDistributions));
@@ -196,12 +225,13 @@ export function useStep1Data() {
 
   return {
     isLoading, masterData, thinkingData,
-    currentMode, currentD1, currentD2, setCurrentD2,
+    currentMode, currentD1, setCurrentD1, currentD2, setCurrentD2,
+    currentTestGroup, updateTestGroup, // 🌟 반환 객체에 추가
     selectedItemIds, setSelectedItemIds,
     searchKeyword, setSearchKeyword, searchResults,
     qCount, setQCount, diffBounds, setDiffBounds,
     rateMax, setRateMax, rateMin, setRateMin,
     types, setTypes, isSettingsDisabled,
-    switchMainTab, updateD1, toggleItem, toggleFolder, generateExam
+    switchMainTab, toggleItem, toggleFolder, generateExam
   };
 }

@@ -1,6 +1,6 @@
 // src/app/exam/step1/LeftPanel.tsx
 import React, { useState, useMemo } from "react";
-import { TEST_DATA } from "./useStep1Data";
+import { TEST_DATA, TEST_GROUPS } from "./useStep1Data";
 
 export const getAllIds = (node: any) => {
   const ids: string[] = [];
@@ -19,9 +19,7 @@ export const getAllIds = (node: any) => {
   return ids;
 };
 
-// 💡 [핵심 알고리즘 1] ID 문자열을 E, 5, 1, 3, 01, 02 등 각각의 독립적인 숫자로 완벽히 분해합니다.
 const parseId = (id: string) => {
-  // 예: "E512-01-02..." -> match[1]='E', match[2]='5', match[3]='1', match[4]='2', match[5]='-01-02...'
   const match = String(id).trim().match(/^[\[\s]*([EMH])(\d)(\d)(\d+)(.*)/);
   if (!match) return null;
   
@@ -30,14 +28,12 @@ const parseId = (id: string) => {
   const semester = parseInt(match[3], 10);
   const unit = parseInt(match[4], 10);
   
-  // 대시(-) 뒤의 숫자들도 모두 분리하여 배열로 담습니다.
   const restStr = match[5];
   const restNums = restStr ? restStr.split('-').filter(Boolean).map(x => parseInt(x, 10) || 0) : [];
   
   return [school, grade, semester, unit, ...restNums];
 };
 
-// 💡 [핵심 알고리즘 2] 노드 안에 숨겨져 있는 실제 DB의 itemId를 찾아옵니다.
 const getRepresentativeId = (n: any): string => {
   if (!n) return "";
   if (n.itemId) return n.itemId;
@@ -58,7 +54,6 @@ const getRepresentativeId = (n: any): string => {
   return "";
 };
 
-// 💡 [핵심 알고리즘 3] 분해한 ID 배열을 바탕으로 첫번째 뎁스부터 차례대로 크기를 비교합니다.
 const compareNodes = (aKey: string, aNode: any, bKey: string, bNode: any) => {
   const idA = getRepresentativeId(aNode) || aKey;
   const idB = getRepresentativeId(bNode) || bKey;
@@ -66,7 +61,6 @@ const compareNodes = (aKey: string, aNode: any, bKey: string, bNode: any) => {
   const pA = parseId(idA);
   const pB = parseId(idB);
 
-  // 구조에 맞는 ID라면 앞에서부터 숫자로 완벽 비교
   if (pA && pB) {
     const len = Math.max(pA.length, pB.length);
     for (let i = 0; i < len; i++) {
@@ -76,12 +70,9 @@ const compareNodes = (aKey: string, aNode: any, bKey: string, bNode: any) => {
     }
     return 0;
   }
-  
-  // 만약 규칙 외의 문자열(테스트용 등)이라면 자연스러운 한글/숫자 비교로 대체
   return String(aKey).localeCompare(String(bKey), 'ko', { numeric: true });
 };
 
-// 초/중/고 및 학년/학기용 정렬 헬퍼
 const sortNumeric = (a: string, b: string) => String(a).localeCompare(String(b), 'ko', { numeric: true });
 const sortD1 = (a: string, b: string) => {
   const weight: Record<string, number> = { '초등학교': 1, '중학교': 2, '고등학교': 3 };
@@ -89,7 +80,6 @@ const sortD1 = (a: string, b: string) => {
 };
 
 const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem, toggleFolder }: any) => {
-  // 💡 요청사항 반영: 아코디언이 열리는 기본 한계를 뎁스 4(대단원)까지만 설정
   const [isOpen, setIsOpen] = useState(depth <= 4);
 
   if (node.children) {
@@ -110,7 +100,6 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
         </summary>
         {isOpen && (
           <div className="ml-4 mt-1 space-y-1 border-l border-slate-100 pl-2">
-            {/* 자식 노드들도 완벽한 ID 기준 정렬 적용 */}
             {Object.keys(node.children).sort((a, b) => compareNodes(a, node.children[a], b, node.children[b])).map(k => (
               <TreeNode key={k} nodeKey={k} node={node.children[k]} depth={depth + 1} selectedItemIds={selectedItemIds} toggleItem={toggleItem} toggleFolder={toggleFolder} />
             ))}
@@ -130,30 +119,39 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
 
 export default function LeftPanel({ step1Data }: { step1Data: any }) {
   const {
-    isLoading, masterData, thinkingData, currentMode, currentD1, currentD2, setCurrentD2,
+    isLoading, masterData, thinkingData, currentMode, currentD1, setCurrentD1, currentD2, setCurrentD2,
+    currentTestGroup, updateTestGroup, // 🌟 받아온 테스트 그룹 관리자
     selectedItemIds, setSelectedItemIds, searchKeyword, setSearchKeyword, searchResults,
-    switchMainTab, updateD1, toggleItem, toggleFolder
+    switchMainTab, toggleItem, toggleFolder
   } = step1Data;
 
   const memoizedTree = useMemo(() => {
     if (isLoading) return <div className="flex-1 flex items-center justify-center font-bold text-slate-400">단원 트리를 불러오는 중...</div>;
     
     let targetData: any = {};
-    if (currentMode === "regular") targetData = masterData[currentD1]?.[currentD2];
-    else if (currentMode === "thinking") targetData = thinkingData[currentD1];
-    else if (currentMode === "test") targetData = (TEST_DATA as any)[currentD1];
+    if (currentMode === "regular") {
+      targetData = masterData[currentD1]?.[currentD2];
+    } else if (currentMode === "thinking") {
+      targetData = thinkingData[currentD1];
+    } else if (currentMode === "test") {
+      // 🌟 주간/중간/분기 테스트는 정규 교과(masterData)의 트리를 그대로 차용합니다!
+      if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
+         targetData = masterData[currentD1]?.[currentD2];
+      } else {
+         targetData = (TEST_DATA as any)[currentTestGroup];
+      }
+    }
 
     if (!targetData) return <div className="p-6 text-slate-400 font-bold text-center">선택된 단원이 없습니다.</div>;
 
     return (
       <div className="flex-1 overflow-y-auto p-6 custom-scrollbar">
-        {/* 아코디언의 최상단 레벨(대단원)이 Depth 4에 해당하므로 depth={4} 부여 */}
         {Object.keys(targetData).sort((a, b) => compareNodes(a, targetData[a], b, targetData[b])).map(k => (
           <TreeNode key={k} nodeKey={k} node={targetData[k]} depth={4} selectedItemIds={selectedItemIds} toggleItem={toggleItem} toggleFolder={toggleFolder} />
         ))}
       </div>
     );
-  }, [isLoading, masterData, thinkingData, currentMode, currentD1, currentD2, selectedItemIds]);
+  }, [isLoading, masterData, thinkingData, currentMode, currentD1, currentD2, currentTestGroup, selectedItemIds]);
 
   return (
     <section className="w-[50%] bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 min-h-0">
@@ -217,22 +215,42 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
       ) : (
         <>
           <div className="shrink-0 border-b border-slate-200 bg-white">
+            
+            {/* 메인 그룹 선택 (Depth 1) */}
             <div className="flex px-4 pt-4 space-x-5 border-b border-slate-100 overflow-x-auto whitespace-nowrap no-scrollbar">
               {currentMode === 'regular' && Object.keys(masterData).sort(sortD1).map(d1 => (
-                <button key={d1} onClick={() => updateD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
+                <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
               ))}
               {currentMode === 'thinking' && Object.keys(thinkingData).sort(sortD1).map(d1 => (
-                <button key={d1} onClick={() => updateD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
+                <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
               ))}
-              {currentMode === 'test' && Object.keys(TEST_DATA).sort(sortD1).map(d1 => (
-                <button key={d1} onClick={() => updateD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
+              {currentMode === 'test' && TEST_GROUPS.map(grp => (
+                <button key={grp} onClick={() => updateTestGroup(grp)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentTestGroup === grp ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{grp}</button>
               ))}
             </div>
+
+            {/* 정규 교과의 학년/학기 (Depth 2) */}
             {currentMode === 'regular' && (
               <div className="flex px-4 py-3 gap-2 flex-wrap">
                 {Object.keys(masterData[currentD1] || {}).sort(sortNumeric).map(d2 => (
                   <button key={d2} onClick={() => setCurrentD2(d2)} className={`w-[110px] flex justify-center items-center py-2 rounded-full text-[14px] font-bold transition-colors shrink-0 ${currentD2 === d2 ? 'bg-slate-800 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{d2}</button>
                 ))}
+              </div>
+            )}
+
+            {/* 🌟 테스트 전용 모드일 때 추가되는 2중 네비게이션 바 */}
+            {currentMode === 'test' && ['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup) && (
+              <div className="flex flex-col bg-slate-50 border-b border-slate-100">
+                 <div className="flex px-4 py-2.5 gap-3 overflow-x-auto no-scrollbar border-b border-slate-100">
+                   {Object.keys(masterData).sort(sortD1).map(d1 => (
+                     <button key={d1} onClick={() => setCurrentD1(d1)} className={`px-4 py-1.5 text-[13px] font-extrabold rounded-full transition-colors ${currentD1 === d1 ? 'bg-rose-500 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}>{d1}</button>
+                   ))}
+                 </div>
+                 <div className="flex px-4 py-2.5 gap-2 flex-wrap">
+                   {Object.keys(masterData[currentD1] || {}).sort(sortNumeric).map(d2 => (
+                     <button key={d2} onClick={() => setCurrentD2(d2)} className={`w-[100px] flex justify-center items-center py-1.5 rounded-full text-[12px] font-bold transition-colors shrink-0 ${currentD2 === d2 ? 'bg-slate-800 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}>{d2}</button>
+                   ))}
+                 </div>
               </div>
             )}
           </div>

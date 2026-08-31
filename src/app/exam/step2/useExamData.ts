@@ -317,7 +317,17 @@ export function useExamData() {
           orQueryStr = `${orQueryStr},${pdfQueries}`;
         }
 
-        const { data, error } = await supabase.from("question_db").select("*").or(orQueryStr).limit(2000);
+        // 🌟 [추가된 로직] Step 1에서 넘겨받은 소스 북 네임 교차 필터링
+        let finalQuery = supabase.from("question_db").select("*").or(orQueryStr);
+        const testSourceFilter = sessionStorage.getItem("testSourceFilter");
+        
+        if (testSourceFilter) {
+            // '주간테스트', '중간테스트', '분기테스트' 조건이 있을 경우, 
+            // taxonomy에 해당하면서 source_book_name까지 일치하는 문제만 가져옵니다.
+            finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
+        }
+
+        const { data, error } = await finalQuery.limit(2000);
         if (error) throw error;
         if (data) allData = allData.concat(data);
       }
@@ -325,16 +335,7 @@ export function useExamData() {
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
-        
-        // 🌟 [핵심 필터링 추가] 정규교과/사고력 모드일 때 '테스트' 관련 문항 배제
         if (examMode !== "test") {
-          const isTestQuestion = 
-            String(q.pdf_source || '').includes('테스트') || 
-            String(q.source_book_name || '').includes('테스트') || 
-            String(q.book_name || '').includes('테스트');
-            
-          if (isTestQuestion) return false;
-
           const pt = String(q.problem_type || '').toUpperCase();
           let isObj = false, isSubj = false, isEssay = false;
           if (pt === 'SUBJECTIVE' || pt === 'SHORT_ANSWER') isSubj = true;
@@ -342,7 +343,6 @@ export function useExamData() {
           else isObj = true; 
           if ((isObj && !pTypes.obj) || (isSubj && !pTypes.subj) || (isEssay && !pTypes.essay)) return false;
         }
-        
         if (isRateFilterActive) {
           if (q.solving_probability === null || q.solving_probability === undefined) return true;
           if (q.solving_probability > rateMax || q.solving_probability < rateMin) return false;

@@ -52,7 +52,6 @@ export function useSupervisorData() {
     const checkReservationExpiryRef = useRef<any>(null);
     const checkClinicTimeExpiryRef = useRef<any>(null);
     
-    // 🌟 1. 오프라인 로그 중복 발송 방지용 추적기
     const offlineLogSentRef = useRef<Set<string>>(new Set());
 
     const [seats, setSeats] = useState<string[]>([]);
@@ -196,7 +195,8 @@ export function useSupervisorData() {
                         firstSeenAt: new Date(sess.started_at).getTime() || Date.now(),
                         clinicDurationMs: sess.duration_ms || DEFAULT_CLINIC_DURATION_MS,
                         sessionNo: sess.session_no || 1,
-                        totalCalls: 0, totalHints: 0, calls: {}
+                        totalCalls: 0, totalHints: 0, calls: {},
+                        lastUpdatedAt: Date.now()
                     };
                 }
             }
@@ -284,7 +284,13 @@ export function useSupervisorData() {
                     effectiveSeat = s.seat;
                     supabaseClient.from('clinic_session_state').update({ manual_seat: effectiveSeat }).eq('id', s.id).then();
                 }
-                if (effectiveSeat) dbSeats.set(effectiveSeat, s);
+                if (effectiveSeat) {
+                    // 🌟 1. 같은 자리에 세션이 겹칠 경우 가장 최근에 시작된 최신 세션을 우선
+                    const existing = dbSeats.get(effectiveSeat);
+                    if (!existing || new Date(s.started_at).getTime() > new Date(existing.started_at).getTime()) {
+                        dbSeats.set(effectiveSeat, s);
+                    }
+                }
             }
 
             const current = { ...studentsRef.current };
@@ -295,6 +301,23 @@ export function useSupervisorData() {
                 if (staleReservedSeat) {
                     delete current[staleReservedSeat]; isModified = true;
                     supabaseClient.from('clinic_reservation').delete().eq('student_id', dbRecord.student_id).eq('session_date', todayStr).then();
+                }
+
+                // 🌟 2. [핵심 방어] 자리에 이미 다른 학생이 로그인해 들어온 경우 기존 오프라인/다른 학생을 밀어냄
+                if (current[targetSeat] && current[targetSeat].type !== 'reserved' && current[targetSeat].studentId !== dbRecord.student_id) {
+                    appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '로그아웃', `[${targetSeat}] ${current[targetSeat].name} 밀어내기`, `새로운 학생이 로그인하여 기존 세션을 정리합니다.`);
+                    removeLogsByTypeAndSeat('call', targetSeat); 
+                    removeLogsByTypeAndSeat('submit', targetSeat); 
+                    removeLogsByTypeAndSeat('away', targetSeat); 
+                    removeLogsByTypeAndSeat('recheck', targetSeat); 
+                    removeLogsByTypeAndSeat('end_request', targetSeat);
+                    
+                    // 기존 학생의 찌꺼기 세션도 안전하게 닫아줌
+                    endTodaySession(supabaseClient, current[targetSeat].studentId, todayStr);
+                    
+                    delete current[targetSeat];
+                    offlineLogSentRef.current.delete(targetSeat);
+                    isModified = true;
                 }
 
                 const oldSeat = Object.keys(current).find(s => current[s].studentId === dbRecord.student_id && current[s].type !== 'reserved');
@@ -310,7 +333,8 @@ export function useSupervisorData() {
                         clinicDurationMs: dbRecord.duration_ms || DEFAULT_CLINIC_DURATION_MS,
                         sessionNo: dbRecord.session_no || 1,
                         endRequestPending: dbRecord.end_request_status === 'pending',
-                        totalCalls: 0, totalHints: 0, calls: {}, activity: '포털/수동 배정 연동'
+                        totalCalls: 0, totalHints: 0, calls: {}, activity: '포털/수동 배정 연동',
+                        lastUpdatedAt: Date.now() // 갱신 타임스탬프 초기화
                     };
                     isModified = true;
                     const justStarted = Date.now() - (new Date(dbRecord.started_at).getTime() || 0) < 10000;
@@ -356,9 +380,7 @@ export function useSupervisorData() {
                         if (st.calls[qNumKey]) return;
                         const qNum = qNumKey === 'general' ? 'general' : Number(qNumKey);
                         st.calls[qNumKey] = dbCalls[qNumKey]?.requestedAt || Date.now();
-                        
                         if (st.status !== 'offline') st.status = 'call';
-                        
                         isModified = true;
                         const isGeneral = qNumKey === 'general';
                         appendLog('border-rose-500', 'bg-rose-100 text-rose-600', isGeneral ? '조교호출' : '질문호출',
@@ -406,7 +428,6 @@ export function useSupervisorData() {
                 }
             }
 
-            // 🌟 하트비트 체크: 오프라인/복구 로그 도배 억제 로직
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
                 
@@ -438,7 +459,7 @@ export function useSupervisorData() {
                 const isPendingMove = pendingMovesRef.current[uiSeat] && Date.now() < pendingMovesRef.current[uiSeat].expiresAt;
                 if (!dbSeats.has(uiSeat) && !isPendingDelete && !isPendingMove && !current[uiSeat].dummy && current[uiSeat].type !== 'reserved') {
                     delete current[uiSeat]; 
-                    offlineLogSentRef.current.delete(uiSeat); // 삭제 시 로그 추적기에서도 비움
+                    offlineLogSentRef.current.delete(uiSeat); 
                     isModified = true;
                 }
             });
@@ -632,7 +653,6 @@ export function useSupervisorData() {
             appendLog('border-slate-800', 'bg-slate-900 text-white', '시간종료', `[${seat}] ${st.name} 이용시간 종료`, `배정된 클리닉 시간이 모두 소진되어 자동 퇴실 처리되었습니다.`);
             removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
             delete current[seat];
-            offlineLogSentRef.current.delete(seat);
             pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             isModified = true;
         });
