@@ -54,7 +54,6 @@ export function useTaxonomy() {
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
   const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '', subNumber: '' });
 
-  // 🌟 쌍둥이 및 유사 문항 각각의 저장 대상을 관리하는 상태
   const [twinTargetBook, setTwinTargetBook] = useState<string>('');
   const [similarTargetBook, setSimilarTargetBook] = useState<string>('');
 
@@ -504,7 +503,6 @@ export function useTaxonomy() {
     setIsGeneratingTwins(true);
     setGeneratedTwins([]);
     
-    // 🌟 모달이 열릴 때 각각 다른 기본값을 부여합니다.
     setTwinTargetBook(`${selectedBook} 쌍둥이`);
     setSimilarTargetBook(`${selectedBook} 유사`);
     
@@ -514,7 +512,15 @@ export function useTaxonomy() {
       const res = await fetch('/api/gemini-twin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ originalQuestion: selectedQuestion.question, originalAnswer: selectedQuestion.answer, taxonomyStr: taxStr })
+        body: JSON.stringify({ 
+          originalQuestion: selectedQuestion.question, 
+          originalAnswer: selectedQuestion.answer, 
+          taxonomyStr: taxStr,
+          step1Concept: selectedQuestion.step_1_concept || '',
+          step2Approach: selectedQuestion.step_2_approach || '',
+          step3Process: selectedQuestion.step_3_process || '',
+          step4Conclusion: selectedQuestion.step_4_conclusion || ''
+        })
       });
 
       const contentType = res.headers.get("content-type");
@@ -559,9 +565,12 @@ export function useTaxonomy() {
 
     setIsLoading(true);
     try {
-      const twinInserts = selectedTwinsToSave.map((twin, idx) => {
-        // 🌟 문항 타입에 따라 타겟 북을 동적으로 분리할당
+      let tCount = 1;
+      let sCount = 1;
+
+      const twinInserts = selectedTwinsToSave.map((twin) => {
         const targetBook = twin.question_type === '유사' ? similarTargetBook : twinTargetBook;
+        const suffix = twin.question_type === '유사' ? `S${sCount++}` : `T${tCount++}`;
         
         return {
           question_id: generateUUID(), 
@@ -570,7 +579,7 @@ export function useTaxonomy() {
           book_name: targetBook,        
           detected_page_num: selectedQuestion.detected_page_num || 0,
           final_printed_page: selectedQuestion.final_printed_page, 
-          question_number: `${selectedQuestion.question_number}-T${idx + 1}`, 
+          question_number: `${selectedQuestion.question_number}-${suffix}`, 
           question: twin.question, 
           answer: twin.answer, 
           step_1_concept: twin.step_1_concept, 
@@ -589,7 +598,6 @@ export function useTaxonomy() {
       const { error } = await supabase.from('question_db').insert(twinInserts);
       if (error) throw error;
 
-      // 🌟 사용된 타겟 북들이 여러 개일 수 있으므로 각각 매핑하여 저장
       const uniqueBooks = Array.from(new Set(twinInserts.map(q => q.source_book_name)));
       for (const book of uniqueBooks) {
         const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', book).maybeSingle();
