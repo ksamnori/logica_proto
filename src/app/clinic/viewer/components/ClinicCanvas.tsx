@@ -21,7 +21,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const ctxRef = useRef<CanvasRenderingContext2D | null>(null);
   const isDrawing = useRef(false);
 
-  // 🌟 부드러운 곡선을 그리기 위한 이전 좌표 추적용 Ref
   const lastPos = useRef<{x: number, y: number} | null>(null);
   const lastMid = useRef<{x: number, y: number} | null>(null);
 
@@ -48,7 +47,9 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
 
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
-    const ctx = canvas.getContext('2d');
+    
+    // 🌟 핵심 해결: 브라우저 렌더링 큐를 무시하고 즉각적으로 화면에 잉크를 쏘는 저지연 모드 활성화
+    const ctx = canvas.getContext('2d', { desynchronized: true });
     if (!ctx) return;
     
     ctxRef.current = ctx;
@@ -102,7 +103,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     lastPos.current = p;
     lastMid.current = p;
 
-    // 점 하나만 찍었을 때도 자연스럽게 둥근 점이 남도록 처리
     ctxRef.current.beginPath();
     ctxRef.current.fillStyle = isEraserMode ? 'rgba(0,0,0,1)' : currentPenColor;
     ctxRef.current.arc(p.x, p.y, (isEraserMode ? currentPenWidth * ERASER_WIDTH_MULTIPLIER : currentPenWidth) / 2, 0, Math.PI * 2);
@@ -115,13 +115,11 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const draw = (e: any) => {
     if (!isDrawing.current || !canvasRef.current || !ctxRef.current || !lastPos.current || !lastMid.current) return;
     
-    // 🌟 애플펜슬, 갤탭 등 고주사율 기기의 미세한 중간 좌표까지 모두 가져와서 스무딩 처리 (브라우저 지원 시)
     const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
     
     for (const ev of events) {
       const currentPos = getPos(ev, canvasRef.current);
       
-      // 이전 좌표와 현재 좌표의 중간 지점을 계산
       const midPos = {
         x: (lastPos.current.x + currentPos.x) / 2,
         y: (lastPos.current.y + currentPos.y) / 2
@@ -129,7 +127,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
 
       ctxRef.current.beginPath();
       ctxRef.current.moveTo(lastMid.current.x, lastMid.current.y);
-      // 직선(lineTo) 대신 2차 베지어 곡선(quadraticCurveTo)을 사용하여 곡선으로 렌더링
       ctxRef.current.quadraticCurveTo(lastPos.current.x, lastPos.current.y, midPos.x, midPos.y);
       ctxRef.current.stroke();
 
@@ -141,7 +138,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const stopDraw = (e: any) => {
     if (!isDrawing.current || !canvasRef.current || !ctxRef.current) return;
     
-    // 마지막 꼬리 부분을 자연스럽게 닫아줌
     if (lastPos.current && lastMid.current) {
         ctxRef.current.beginPath();
         ctxRef.current.moveTo(lastMid.current.x, lastMid.current.y);
