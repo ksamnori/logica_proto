@@ -151,7 +151,6 @@ export default function ClinicViewer() {
 
     setParams({ round, className, weekType, assignmentId, homeworkIdsStr, assignmentIdsStr, overdue });
     
-    // 🌟 수정: 1라운드의 경우 홀수 주차(주간테스트)만 타이머 및 일괄제출이 활성화되도록 분리
     setIsTimedRound((round === 1 && weekType === 'odd') || round === 4);
 
     initMathJax();
@@ -907,9 +906,10 @@ export default function ClinicViewer() {
           const gotTaHint = !!taHintState.current[idx];
           const gradingCode = gotTaHint ? 'TX' : 'X';
 
+          // 🌟 수정: 수동채점 오답(오답 유지)의 경우, 미완료 과제 여부와 상관없이 무조건 오답 DB 갱신/저장
           if (qItem.record_id) {
               await supabaseClient.from('student_incorrect_record').update({ status: gradingCode }).eq('record_id', qItem.record_id);
-          } else if ((qItem.tq_id || qItem.question_id) && !params.overdue) {
+          } else if (qItem.tq_id || qItem.question_id) {
               qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
           }
           
@@ -1275,7 +1275,9 @@ export default function ClinicViewer() {
             const ansPayload = { exam_assignment_id: qItem.examAssignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: myAns, is_correct: false, grading_code: gradingCode, grading_status: '대기' };
             if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
             else await supabaseClient.from('student_answer').insert(ansPayload);
-            if (!qItem.record_id && qItem.question_id && !(params.overdue && isCorrect)) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+            
+            // 🌟 수정: 오답일 경우 항상 DB에 기록되도록 제한 조건 해제
+            if (!qItem.record_id && qItem.question_id) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
         } else if (qItem.homework_id) {
             const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id, wrong_attempts_log').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).eq('tq_id', qItem.tq_id).maybeSingle();
             let wrongLog = existing?.wrong_attempts_log || [];
@@ -1286,7 +1288,9 @@ export default function ClinicViewer() {
             const payload = { homework_id: qItem.homework_id, student_id: studentInfo.id, tq_id: qItem.tq_id, student_input: myAns, is_correct: false, grading_code: gradingCode, earned_score: 0, wrong_attempts_log: wrongLog };
             if (existing) await supabaseClient.from('student_homework_answer').update(payload).eq('hw_answer_id', existing.hw_answer_id);
             else await supabaseClient.from('student_homework_answer').insert(payload);
-            if (!qItem.record_id && (qItem.tq_id || qItem.question_id) && !(params.overdue && isCorrect)) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
+            
+            // 🌟 수정: 오답일 경우 항상 DB에 기록되도록 제한 조건 해제
+            if (!qItem.record_id && (qItem.tq_id || qItem.question_id)) qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode);
         }
       }
       setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
@@ -1341,7 +1345,6 @@ export default function ClinicViewer() {
     qBoxStatus.current[idx] = wasWrongBefore ? 'retry_yellow' : (helped ? 'correct_yellow' : 'correct_blue');
     forceUpdate();
 
-    // 🌟 수정: 억울한 오답(수동채점 정답 인정)의 경우, 오답 기록에서 아예 영구 삭제
     if (fromRecheck && wasWrongBefore && !helped) {
       if (qItem.record_id) {
         await supabaseClient.from('student_incorrect_record').delete().eq('record_id', qItem.record_id);
@@ -1411,7 +1414,9 @@ export default function ClinicViewer() {
           statusMap[qi.question_id] = 'X';
         }
       });
-      if (incorrectQIds.length > 0 && !(params.round === 2 && params.overdue)) {
+      
+      // 🌟 수정: 미완료 과제(overdue)라도 마지막엔 정상적으로 오답 프린트를 생성하도록 제한 해제
+      if (incorrectQIds.length > 0) {
           await generateIncorrectPrint(supabaseClient, studentInfo, incorrectQIds, globalExamTitle, isTimedRound, statusMap);
       }
     } else {
@@ -1812,8 +1817,6 @@ export default function ClinicViewer() {
                   </div>
                   <button onClick={() => questionNavScrollRef.current?.scrollBy({ left: 200, behavior: 'smooth' })} className="shrink-0 w-10 h-16 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl flex items-center justify-center hover:bg-slate-200">›</button>
                 </div>
-
-                {/* 🌟 수정: isTimedRound 조건으로 교체하여, 과제오답유사(홀/짝주차 무관하게 단일제출 모드)일 땐 버튼을 숨깁니다. */}
                 {isTimedRound && (
                   <button onClick={() => setSubmitConfirmModal(true)} disabled={timeIsUp} className="w-full mt-5 bg-slate-800 hover:bg-slate-900 text-white font-bold py-4 rounded-xl shadow-sm transition-colors text-lg disabled:opacity-40 disabled:cursor-not-allowed">
                     📮 전체 제출하기
@@ -1916,7 +1919,6 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
-              {/* 🌟 수정: !isTimedRound 조건으로 처리되어, 과제오답유사일 때 개별 정답 입력 및 호출 버튼이 표시됩니다. */}
               {!isTimedRound && (
                 <div className="flex flex-col gap-3 mt-auto shrink-0">
                   <div className="flex gap-3 w-full">
