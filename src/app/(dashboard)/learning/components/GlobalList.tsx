@@ -25,14 +25,47 @@ interface GlobalListProps {
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
+  handleBulkPrintAction: (items: any[]) => void; // 🌟 추가됨
 }
 
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleExtractCommonHomework, handleViewChange, toggleGlobalSelection,
-  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2
+  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
+  handleBulkPrintAction // 🌟 추가됨
 }: GlobalListProps) {
   
+  // 🌟 단일 뷰어로 병합 전송하는 일괄 출력 로직
+  const handleBulkPrint = () => {
+    const selectedItems = globalList.filter((res, idx) => {
+      const safeId = res.assignment_id || res.homework_id || `temp_${idx}`;
+      const itemId = activeTab === 'EXAM' ? `exam_${safeId}_${res.student_id}` 
+                   : activeTab === 'INCORRECT' ? `print_${safeId}_${res.student_id}`
+                   : activeTab === 'SIMILAR' ? `similar_${safeId}_${res.student_id}`
+                   : activeTab === 'OVERDUE' ? `overdue_${safeId}_${res.student_id}`
+                   : res.is_exam_hw ? `hw_exam_${safeId}_${res.student_id}` : `hw_${safeId}_${res.student_id}`;
+      return globalSelectedBlocks.includes(itemId);
+    });
+
+    if (selectedItems.length === 0) return;
+
+    const printItems = selectedItems.map((res) => {
+      const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
+      const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
+      const rawTitle = activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음';
+      
+      return {
+        printType: res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'),
+        masterId: res.masterId || m?.exam_id,
+        targetQuestions: res.target_questions || hw.target_questions,
+        title: rawTitle.replace(/^\[시스템\]\s*/, ''),
+        subTitle: res.subTitle || ''
+      };
+    });
+
+    handleBulkPrintAction(printItems);
+  };
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2">
@@ -65,6 +98,11 @@ export default function GlobalList({
             </button>
             <button onClick={handleBulkDeleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap">
               🗑️ 선택 삭제 ({globalSelectedBlocks.length})
+            </button>
+            
+            {/* 🌟 선택 병합 출력 버튼 */}
+            <button onClick={handleBulkPrint} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap shadow-sm">
+              🖨️ 선택 한 장에 모아 출력 ({globalSelectedBlocks.length})
             </button>
           </div>
         </div>
@@ -99,7 +137,6 @@ export default function GlobalList({
               else if(isCompleted) statusBadge = "bg-slate-300 text-slate-700 border border-slate-400";
               else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
 
-              // 🌟 5분류 컬러링 적용
               let typeBadge = activeTab === 'EXAM' ? "📝 시험" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
@@ -161,7 +198,7 @@ export default function GlobalList({
                       
                       <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
-                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 출력">🖨️</button>
+                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 단일 출력">🖨️</button>
 
                       <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>

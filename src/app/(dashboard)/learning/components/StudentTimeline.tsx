@@ -31,6 +31,7 @@ interface StudentTimelineProps {
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
+  handleBulkPrintAction: (items: any[]) => void; // 🌟 추가됨
 }
 
 const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => {
@@ -116,7 +117,8 @@ export default function StudentTimeline({
   filteredTimeline = [], selectedBlocks = [], setSelectedBlocks, handleSelectAllStudent,
   handleBulkCompleteStudent, handleBulkDeleteStudent,
   handleGenerateIncorrectPrint, handleExtractCommonHomework, isGeneratingPrint,
-  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2
+  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
+  handleBulkPrintAction // 🌟 추가됨
 }: StudentTimelineProps) {
 
   const [modalTab, setModalTab] = useState<'TAXONOMY' | 'PERIOD' | 'SELECTED' | null>(null);
@@ -336,7 +338,6 @@ export default function StudentTimeline({
       } else if (modalTab === 'SELECTED') {
           let tempQIds: string[] = [];
           for (const block of selectedBlocks) {
-            // 시험 및 오답, 유사프린트 계열 (미완료 포함)
             if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
               const assignId = block.split('_').reverse()[1]; 
               const { data: ans } = await supabaseClient.from('student_answer')
@@ -345,7 +346,6 @@ export default function StudentTimeline({
                 .in('grading_code', ['X', 'TX', '☆', 'B']);
               ans?.forEach(a => { if (a.question_id) tempQIds.push(a.question_id); });
             } 
-            // 일반 교재 과제 계열
             else if (block.startsWith('hw_')) {
               const hwId = block.split('_')[1];
               const { data: hwAns } = await supabaseClient.from('student_homework_answer')
@@ -497,6 +497,22 @@ export default function StudentTimeline({
     }
   };
 
+  // 🌟 단일 뷰어로 병합 전송하는 일괄 출력 로직
+  const handleBulkPrint = () => {
+    const selectedItems = filteredTimeline.filter(item => selectedBlocks.includes(item.id));
+    if (selectedItems.length === 0) return;
+
+    const printItems = selectedItems.map(item => ({
+      printType: item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'),
+      masterId: item.masterId,
+      targetQuestions: item.target_questions,
+      title: (item.title || '제목 없음').replace(/^\[시스템\]\s*/, ''),
+      subTitle: item.subTitle || ''
+    }));
+
+    handleBulkPrintAction(printItems);
+  };
+
   const renderHeader = () => {
     const isAllSelected = filteredTimeline?.length > 0 && selectedBlocks.length === filteredTimeline.length;
     return (
@@ -529,6 +545,9 @@ export default function StudentTimeline({
             )}
             <button onClick={handleBulkCompleteStudent} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[12px] disabled:opacity-40">✅ 선택 완료 ({selectedBlocks.length})</button>
             <button onClick={handleBulkDeleteStudent} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[12px] disabled:opacity-40">🗑️ 선택 삭제 ({selectedBlocks.length})</button>
+            
+            {/* 🌟 선택 병합 출력 버튼 */}
+            <button onClick={handleBulkPrint} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[12px] disabled:opacity-40 shadow-sm whitespace-nowrap">🖨️ 선택 한 장에 모아 출력 ({selectedBlocks.length})</button>
           </div>
 
           <div className="flex items-center gap-2 pr-1">
@@ -781,7 +800,6 @@ export default function StudentTimeline({
               const isSelected = selectedBlocks.includes(item.id);
               const isCompleted = item.isCompleted;
 
-              // 🌟 5분류 컬러링 적용 (미완료과제 포함)
               let badgeColor = "bg-slate-100 text-slate-500";
               let typeLabel = "";
 
@@ -851,7 +869,7 @@ export default function StudentTimeline({
                       <button 
                         onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
                         className="text-[15px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" 
-                        title="프린트 출력"
+                        title="프린트 단일 출력"
                       >
                         🖨️
                       </button>

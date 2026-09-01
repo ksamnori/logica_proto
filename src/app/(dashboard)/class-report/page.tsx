@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
-type ReportTabType = 'ALL' | 'EXAM' | 'HW' | 'OVERDUE' | 'PRINT' | 'SIMILAR';
+type ReportTabType = 'LOG' | 'ALL' | 'EXAM' | 'HW' | 'OVERDUE' | 'PRINT' | 'SIMILAR';
 
 interface ClassInfo {
   class_id: string;
@@ -64,6 +64,9 @@ export default function ClassReportPage() {
   
   const [assignments, setAssignments] = useState<AnalyzedItem[]>([]);
   const [selectedItem, setSelectedItem] = useState<AnalyzedItem | null>(null);
+
+  const [lessonLogs, setLessonLogs] = useState<any[]>([]);
+  const [selectedLog, setSelectedLog] = useState<any | null>(null);
   
   const [matrixCols, setMatrixCols] = useState<MatrixCol[]>([]);
   const [matrixRows, setMatrixRows] = useState<MatrixRow[]>([]);
@@ -75,7 +78,6 @@ export default function ClassReportPage() {
   const [modalQuestion, setModalQuestion] = useState<MatrixCol | null>(null);
   const mathJaxRef = useRef(false);
 
-  // 반 목록 마우스 드래그 스크롤 (화면 밖 이탈 방지 적용)
   const classListRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragged, setDragged] = useState(false);
@@ -172,7 +174,7 @@ export default function ClassReportPage() {
   useEffect(() => {
     const searchParams = new URLSearchParams(window.location.search);
     const urlTab = searchParams.get('tab');
-    if (urlTab && ['ALL', 'EXAM', 'HW', 'OVERDUE', 'PRINT', 'SIMILAR'].includes(urlTab)) {
+    if (urlTab && ['LOG', 'ALL', 'EXAM', 'HW', 'OVERDUE', 'PRINT', 'SIMILAR'].includes(urlTab)) {
       setActiveTab(urlTab as ReportTabType);
     }
 
@@ -219,9 +221,19 @@ export default function ClassReportPage() {
   useEffect(() => {
     if (!selectedClassId) return;
 
-    const fetchAssignments = async () => {
+    const fetchAssignmentsAndLogs = async () => {
       setIsLoading(true);
       try {
+        // 🌟 [수정] 복잡한 과제 연동 제거하고 기본 알림장 내용(homework_desc)만 가져오도록 쿼리 단순화
+        const { data: logData } = await supabase
+          .from('daily_lesson_log')
+          .select('lesson_log_id, actual_date, actual_session_no, instructor_note, homework_desc')
+          .eq('class_id', selectedClassId)
+          .order('actual_date', { ascending: false });
+        
+        setLessonLogs(logData || []);
+        setSelectedLog(null);
+
         let list: AnalyzedItem[] = [];
 
         const { data: examData } = await supabase
@@ -275,12 +287,10 @@ export default function ClassReportPage() {
         if (hwData) {
           hwData.forEach((hw: any) => {
             const tqs = safeParseIds(hw.target_questions);
-            
             let isAllDone = false;
             if (hw.student_homework_result && hw.student_homework_result.length > 0) {
                isAllDone = hw.student_homework_result.every((r: any) => ['제출완료', '채점완료', '완료'].includes(r.status));
             }
-
             list.push({
               id: String(hw.homework_id),
               type: 'HW',
@@ -305,11 +315,11 @@ export default function ClassReportPage() {
       }
     };
 
-    fetchAssignments();
+    fetchAssignmentsAndLogs();
   }, [selectedClassId]);
 
   useEffect(() => {
-    if (!selectedItem || !selectedClassId) return;
+    if (!selectedItem || !selectedClassId || activeTab === 'LOG') return;
 
     const fetchMatrix = async () => {
       setIsMatrixLoading(true);
@@ -458,10 +468,10 @@ export default function ClassReportPage() {
     };
 
     fetchMatrix();
-  }, [selectedItem, selectedClassId]);
+  }, [selectedItem, selectedClassId, activeTab]);
 
   const filteredAssignments = useMemo(() => {
-    if (activeTab === 'ALL') return assignments;
+    if (activeTab === 'ALL' || activeTab === 'LOG') return assignments;
     return assignments.filter(a => a.type === activeTab);
   }, [assignments, activeTab]);
 
@@ -494,6 +504,199 @@ export default function ClassReportPage() {
     }
   };
 
+  // 🌟 [수정] 메인 과제 구조와 완벽히 분리된 알림장 전용 뷰어
+  const renderLogView = () => {
+    if (!selectedLog) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+          <span className="text-5xl mb-4 text-indigo-200">📝</span>
+          <p className="font-extrabold text-lg text-slate-500">좌측에서 조회할 수업 일지를 선택해주세요.</p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50/50 relative">
+        <div className="max-w-4xl mx-auto space-y-6">
+          <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between md:items-center gap-4">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <span className="text-sm font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-lg shadow-sm border border-indigo-200">
+                  {formatDateLabel(selectedLog.actual_date)}
+                </span>
+              </div>
+              <h2 className="text-2xl font-black text-slate-800">
+                {selectedLog.actual_session_no ? `${selectedLog.actual_session_no}회차 수업 기록` : '수업 일지 기록'}
+              </h2>
+            </div>
+          </div>
+
+          <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
+            <h3 className="text-base font-black text-slate-800 border-b border-slate-100 pb-3 mb-5 flex items-center gap-2">
+              <span className="text-xl">📚</span> 학부모 안내장 (과제 및 진도 요약)
+            </h3>
+            {selectedLog.homework_desc ? (
+              <p className="text-[15px] font-bold text-indigo-800 whitespace-pre-wrap leading-loose bg-indigo-50/50 p-5 rounded-xl border border-indigo-100">
+                {selectedLog.homework_desc}
+              </p>
+            ) : (
+              <div className="text-center py-8 opacity-60">
+                <span className="text-sm font-bold text-slate-400">작성된 학부모 안내장이 없습니다.</span>
+              </div>
+            )}
+          </div>
+
+          <div className="bg-yellow-50 p-6 md:p-8 rounded-2xl shadow-sm border border-yellow-200">
+            <h3 className="text-base font-black text-yellow-800 border-b border-yellow-200/60 pb-3 mb-5 flex items-center gap-2">
+              <span className="text-xl">🔒</span> 강사 특이사항 메모 <span className="text-xs font-bold text-yellow-600/70 ml-2 bg-yellow-100 px-2 py-1 rounded">(학부모 미노출)</span>
+            </h3>
+            {selectedLog.instructor_note ? (
+              <p className="text-[15px] font-medium text-slate-700 whitespace-pre-wrap leading-loose">
+                {selectedLog.instructor_note}
+              </p>
+            ) : (
+              <div className="text-center py-8 opacity-60">
+                <span className="text-sm font-bold text-yellow-700">작성된 특이사항 메모가 없습니다.</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const renderMatrixView = () => {
+    if (!selectedItem) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+          <span className="text-5xl mb-4">👈</span>
+          <p className="font-extrabold text-lg">좌측에서 분석할 시험지나 과제를 선택해주세요.</p>
+        </div>
+      );
+    }
+    
+    if (isMatrixLoading) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin mb-4"></div>
+          <p className="font-bold text-sm">학생별 정오답 데이터를 분석 중입니다...</p>
+        </div>
+      );
+    }
+
+    if (matrixCols.length === 0) {
+      return (
+        <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
+          <p className="font-bold text-sm">해당 문제지에 문항 데이터가 없습니다.</p>
+        </div>
+      );
+    }
+
+    return (
+      <>
+        <div className="p-5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between shrink-0 gap-4">
+          <div>
+            <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+              {getTypeBadge(selectedItem.type)} {selectedItem.title.replace(/^\[시스템\]\s*/, '')}
+            </h3>
+            <div className="text-xs font-bold text-slate-500 mt-1 flex gap-3">
+              <span>📅 출제일: {formatDateLabel(selectedItem.date)}</span>
+              <span>📝 총 {matrixCols.length}문항</span>
+              <span>👥 수강생 {matrixRows.length}명</span>
+            </div>
+          </div>
+          
+          <div className="flex flex-wrap gap-2.5 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
+            <div className="flex items-center gap-1"><span className="text-[11px] font-black text-emerald-500">O</span><span className="text-[10px] font-bold text-slate-600">정답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-teal-500">TO</span><span className="text-[10px] font-bold text-slate-600">힌트정답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-blue-500">RO</span><span className="text-[10px] font-bold text-slate-600">재시도정답</span></div>
+            <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-[11px] font-black text-rose-500">X</span><span className="text-[10px] font-bold text-slate-600">오답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-orange-500">TX</span><span className="text-[10px] font-bold text-slate-600">힌트오답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-orange-500">☆</span><span className="text-[10px] font-bold text-slate-600">질문</span></div>
+            <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-[11px] font-black text-slate-400">B</span><span className="text-[10px] font-bold text-slate-600">빈칸</span></div>
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-auto custom-scroll relative bg-slate-50/30">
+          <table className="w-max border-collapse">
+            <thead className="sticky top-0 z-20 shadow-sm">
+              <tr>
+                <th className="sticky left-0 z-30 bg-slate-100 p-3 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                  <span className="text-xs font-extrabold text-slate-700">학생명</span>
+                </th>
+                <th className="bg-slate-50 p-3 min-w-[80px] w-[80px] max-w-[80px] border-r border-b border-slate-200 text-center align-middle shadow-sm">
+                  <span className="text-xs font-extrabold text-slate-700">정답 수</span>
+                </th>
+                
+                {matrixCols.map(col => (
+                  <th key={col.qId} className="bg-blue-50 p-2 min-w-[70px] w-[70px] border-r border-b border-slate-200 text-center align-middle">
+                    <div className="flex flex-col items-center justify-center gap-0.5">
+                      <div className="flex items-center gap-1">
+                        <span className="text-[13px] font-black text-[#002864]">{col.displayNum}</span>
+                        <button onClick={() => setModalQuestion(col)} className="text-[11px] text-blue-400 hover:text-blue-700 transition-colors leading-none" title="문제 상세 보기">🔍</button>
+                      </div>
+                      {(col.page || col.number) && (
+                        <span className="text-[9px] font-bold text-blue-500 whitespace-nowrap tracking-tighter">
+                          {col.page ? `p.${col.page}` : ''}{col.page && col.number ? '-' : ''}{col.number ? `${col.number}번` : ''}
+                        </span>
+                      )}
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {matrixRows.map((row, idx) => {
+                const isCompleted = ['완료', '채점완료', '제출완료'].includes(row.status);
+                return (
+                  <tr key={row.studentId} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
+                    <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50">
+                      <div className="flex flex-col items-center justify-center gap-1 w-full">
+                        <span className="truncate w-full text-center">{row.studentName}</span>
+                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${isCompleted ? 'text-slate-400 bg-slate-100' : 'text-rose-500 bg-rose-50 border border-rose-100'}`}>
+                          {row.status || '미제출'}
+                        </span>
+                      </div>
+                    </td>
+                    <td className="p-3 border-r border-b border-slate-200 text-center align-middle min-w-[80px] w-[80px] max-w-[80px]">
+                      <span className="text-xs font-black text-[#002864] bg-blue-50 px-2 py-1 rounded border border-blue-100 whitespace-nowrap">
+                        {row.totalCorrect} / {matrixCols.length}
+                      </span>
+                    </td>
+                    {matrixCols.map(col => (
+                      <td key={col.qId} className="p-2 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[70px] w-[70px]">
+                        {getCellUI(row.cells[col.qId])}
+                      </td>
+                    ))}
+                  </tr>
+                );
+              })}
+            </tbody>
+            <tfoot className="sticky bottom-0 z-20 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
+              <tr>
+                <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 p-3 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                  <span className="text-xs font-black text-slate-700">문항별 정답률</span>
+                </th>
+                {matrixCols.map(col => {
+                  const rate = questionRates[col.qId] || 0;
+                  let rateColor = "text-slate-700";
+                  if (rate < 50) rateColor = "text-rose-500"; 
+                  else if (rate >= 80) rateColor = "text-emerald-600"; 
+
+                  return (
+                    <th key={col.qId} className="bg-slate-50 p-2 border-r border-t border-slate-200 text-center align-middle min-w-[70px] w-[70px]">
+                      <span className={`text-[12px] font-black ${rateColor}`}>{rate}%</span>
+                    </th>
+                  );
+                })}
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </>
+    );
+  };
+
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative font-pretendard">
       
@@ -504,7 +707,7 @@ export default function ClassReportPage() {
             <span>📊</span> 반별 문항 분석 및 학습 결과
           </h2>
           <p className="text-sm font-bold text-slate-500 mt-1.5">
-            반 전체 학생의 정오답(O, X, ☆ 등) 결과를 문항별로 한눈에 비교하고 취약점을 분석합니다.
+            반 전체 학생의 정오답 분석 결과와 수업 일지(진도/과제 이력)를 확인합니다.
           </p>
         </div>
 
@@ -549,10 +752,12 @@ export default function ClassReportPage() {
       {/* 메인 레이아웃 */}
       <div className="flex flex-1 gap-4 overflow-hidden">
         
-        {/* 🌟 좌측 패널 (탭 레이아웃 flex-nowrap으로 고정) */}
+        {/* 좌측 패널 */}
         <div className="w-[390px] 2xl:w-[430px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm shrink-0 overflow-hidden">
           <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-nowrap items-center gap-1 shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
-            <button onClick={() => setActiveTab('ALL')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'ALL' ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>전체</button>
+            <button onClick={() => setActiveTab('LOG')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'LOG' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>📝 수업일지</button>
+            <div className="w-px bg-slate-200 h-4 mx-1"></div>
+            <button onClick={() => setActiveTab('ALL')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'ALL' ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>전체 분석</button>
             <button onClick={() => setActiveTab('EXAM')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'EXAM' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>💯 시험</button>
             <button onClick={() => setActiveTab('HW')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'HW' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>📝 과제</button>
             <button onClick={() => setActiveTab('OVERDUE')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'OVERDUE' ? 'bg-rose-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>⏰ 미완료</button>
@@ -563,6 +768,28 @@ export default function ClassReportPage() {
           <div className="flex-1 overflow-y-auto custom-scroll p-2 space-y-1.5 bg-slate-50/50">
             {isLoading ? (
               <div className="py-10 text-center text-sm font-bold text-slate-400">목록을 불러오는 중...</div>
+            ) : activeTab === 'LOG' ? (
+              lessonLogs.length === 0 ? (
+                <div className="py-10 text-center text-sm font-bold text-slate-400">작성된 수업 일지가 없습니다.</div>
+              ) : (
+                lessonLogs.map((log) => (
+                  <div 
+                    key={log.lesson_log_id} 
+                    onClick={() => setSelectedLog(log)}
+                    className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'bg-indigo-50 border-indigo-300 shadow-md transform scale-[1.02] ml-1' : 'bg-white border-slate-200 hover:border-slate-400 hover:bg-slate-50 shadow-sm'}`}
+                  >
+                    <div className="flex items-center gap-2 mb-1.5 justify-between">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-indigo-200">일지</span>
+                        <span className={`text-[10px] font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>{formatDateLabel(log.actual_date)}</span>
+                      </div>
+                    </div>
+                    <div className={`font-extrabold text-[13px] leading-snug line-clamp-2 ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-900' : 'text-slate-800'}`}>
+                      {log.actual_session_no ? `${log.actual_session_no}회차 진행` : '수업 일지'}
+                    </div>
+                  </div>
+                ))
+              )
             ) : filteredAssignments.length === 0 ? (
               <div className="py-10 text-center text-sm font-bold text-slate-400">출제된 항목이 없습니다.</div>
             ) : (
@@ -577,7 +804,6 @@ export default function ClassReportPage() {
                       {getTypeBadge(item.type)}
                       <span className={`text-[10px] font-bold truncate ${selectedItem?.id === item.id ? 'text-blue-200' : 'text-slate-400'}`}>{formatDateLabel(item.date)}</span>
                     </div>
-                    {/* 항목 상태 배지 */}
                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${item.status === '완료' ? 'bg-slate-100 text-slate-400' : 'bg-rose-500 text-white shadow-sm'}`}>
                       {item.status}
                     </span>
@@ -594,127 +820,9 @@ export default function ClassReportPage() {
           </div>
         </div>
 
-        {/* 우측 패널: 분석표 */}
+        {/* 우측 패널: 함수 렌더링 도입으로 문법 오류 원천 차단 */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
-          {!selectedItem ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-              <span className="text-5xl mb-4">👈</span>
-              <p className="font-extrabold text-lg">좌측에서 분석할 시험지나 과제를 선택해주세요.</p>
-            </div>
-          ) : isMatrixLoading ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-              <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin mb-4"></div>
-              <p className="font-bold text-sm">학생별 정오답 데이터를 분석 중입니다...</p>
-            </div>
-          ) : matrixCols.length === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
-              <p className="font-bold text-sm">해당 문제지에 문항 데이터가 없습니다.</p>
-            </div>
-          ) : (
-            <>
-              <div className="p-5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between shrink-0 gap-4">
-                <div>
-                  <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
-                    {getTypeBadge(selectedItem.type)} {selectedItem.title.replace(/^\[시스템\]\s*/, '')}
-                  </h3>
-                  <div className="text-xs font-bold text-slate-500 mt-1 flex gap-3">
-                    <span>📅 출제일: {formatDateLabel(selectedItem.date)}</span>
-                    <span>📝 총 {matrixCols.length}문항</span>
-                    <span>👥 수강생 {matrixRows.length}명</span>
-                  </div>
-                </div>
-                
-                {/* 🌟 범례 영역 수정 */}
-                <div className="flex flex-wrap gap-2.5 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-                  <div className="flex items-center gap-1"><span className="text-[11px] font-black text-emerald-500">O</span><span className="text-[10px] font-bold text-slate-600">정답</span></div>
-                  <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-teal-500">TO</span><span className="text-[10px] font-bold text-slate-600">힌트정답</span></div>
-                  <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-blue-500">RO</span><span className="text-[10px] font-bold text-slate-600">재시도정답</span></div>
-                  <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-[11px] font-black text-rose-500">X</span><span className="text-[10px] font-bold text-slate-600">오답</span></div>
-                  <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-orange-500">TX</span><span className="text-[10px] font-bold text-slate-600">힌트오답</span></div>
-                  <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-orange-500">☆</span><span className="text-[10px] font-bold text-slate-600">질문</span></div>
-                  <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-[11px] font-black text-slate-400">B</span><span className="text-[10px] font-bold text-slate-600">빈칸</span></div>
-                </div>
-              </div>
-
-              {/* 🌟 표 상단 및 하단 배경색 밝게 수정 */}
-              <div className="flex-1 overflow-auto custom-scroll relative">
-                <table className="w-max border-collapse">
-                  <thead className="sticky top-0 z-20 shadow-sm">
-                    <tr>
-                      <th className="sticky left-0 z-30 bg-slate-100 p-3 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                        <span className="text-xs font-extrabold text-slate-700">학생명</span>
-                      </th>
-                      <th className="bg-slate-50 p-3 min-w-[80px] w-[80px] max-w-[80px] border-r border-b border-slate-200 text-center align-middle shadow-sm">
-                        <span className="text-xs font-extrabold text-slate-700">정답 수</span>
-                      </th>
-                      
-                      {matrixCols.map(col => (
-                        <th key={col.qId} className="bg-blue-50 p-2 min-w-[70px] w-[70px] border-r border-b border-slate-200 text-center align-middle">
-                          <div className="flex flex-col items-center justify-center gap-0.5">
-                            <div className="flex items-center gap-1">
-                              <span className="text-[13px] font-black text-[#002864]">{col.displayNum}</span>
-                              <button onClick={() => setModalQuestion(col)} className="text-[11px] text-blue-400 hover:text-blue-700 transition-colors leading-none" title="문제 상세 보기">🔍</button>
-                            </div>
-                            {(col.page || col.number) && (
-                              <span className="text-[9px] font-bold text-blue-500 whitespace-nowrap tracking-tighter">
-                                {col.page ? `p.${col.page}` : ''}{col.page && col.number ? '-' : ''}{col.number ? `${col.number}번` : ''}
-                              </span>
-                            )}
-                          </div>
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {matrixRows.map((row, idx) => {
-                      const isCompleted = ['완료', '채점완료', '제출완료'].includes(row.status);
-                      return (
-                        <tr key={row.studentId} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
-                          <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50">
-                            <div className="flex flex-col items-center justify-center gap-1 w-full">
-                              <span className="truncate w-full text-center">{row.studentName}</span>
-                              <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${isCompleted ? 'text-slate-400 bg-slate-100' : 'text-rose-500 bg-rose-50 border border-rose-100'}`}>
-                                {row.status || '미제출'}
-                              </span>
-                            </div>
-                          </td>
-                          <td className="p-3 border-r border-b border-slate-200 text-center align-middle min-w-[80px] w-[80px] max-w-[80px]">
-                            <span className="text-xs font-black text-[#002864] bg-blue-50 px-2 py-1 rounded border border-blue-100 whitespace-nowrap">
-                              {row.totalCorrect} / {matrixCols.length}
-                            </span>
-                          </td>
-                          {matrixCols.map(col => (
-                            <td key={col.qId} className="p-2 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[70px] w-[70px]">
-                              {getCellUI(row.cells[col.qId])}
-                            </td>
-                          ))}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                  <tfoot className="sticky bottom-0 z-20 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
-                    <tr>
-                      <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 p-3 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                        <span className="text-xs font-black text-slate-700">문항별 정답률</span>
-                      </th>
-                      {matrixCols.map(col => {
-                        const rate = questionRates[col.qId] || 0;
-                        let rateColor = "text-slate-700";
-                        if (rate < 50) rateColor = "text-rose-500"; 
-                        else if (rate >= 80) rateColor = "text-emerald-600"; 
-
-                        return (
-                          <th key={col.qId} className="bg-slate-50 p-2 border-r border-t border-slate-200 text-center align-middle min-w-[70px] w-[70px]">
-                            <span className={`text-[12px] font-black ${rateColor}`}>{rate}%</span>
-                          </th>
-                        );
-                      })}
-                    </tr>
-                  </tfoot>
-                </table>
-              </div>
-            </>
-          )}
+          {activeTab === 'LOG' ? renderLogView() : renderMatrixView()}
         </div>
       </div>
 

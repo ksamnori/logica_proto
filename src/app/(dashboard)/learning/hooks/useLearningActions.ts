@@ -5,7 +5,7 @@ import { toast } from "react-toastify";
 
 interface ActionProps {
   currentView: ViewState;
-  activeTab: TabType | string; // 🌟 타입 에러 방지를 위해 string 허용
+  activeTab: TabType | string; 
   allStudentsList: StudentInfo[];
   selectedBlocks: string[];
   setSelectedBlocks: React.Dispatch<React.SetStateAction<string[]>>;
@@ -15,7 +15,7 @@ interface ActionProps {
   setIsGeneratingPrint: (val: boolean) => void;
   setDateFilter: (val: 'ALL' | '1W' | '1M') => void;
   fetchStudentTimeline: (sId: string, cId: string, all: StudentInfo[]) => void;
-  fetchGlobalListForTab: (tab: TabType | string, all: StudentInfo[]) => void; // 🌟 타입 에러 방지
+  fetchGlobalListForTab: (tab: TabType | string, all: StudentInfo[]) => void; 
   fetchStatsForTab: (all: StudentInfo[]) => void;
 }
 
@@ -39,7 +39,8 @@ const purgeOldSession = () => {
     'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
     'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
     'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
-    'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds'
+    'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
+    'bulkPrintData' // 🌟 연속 출력용 데이터 키 추가
   ];
   keysToRemove.forEach(k => sessionStorage.removeItem(k));
 };
@@ -52,26 +53,40 @@ export function useLearningActions({
 }: ActionProps) {
 
   const handleExtractCommonHomework = async () => {
-    const listToUse = currentView.type === 'STUDENT' ? selectedBlocks : globalSelectedBlocks;
-    const isStudentView = currentView.type === 'STUDENT';
-    
-    if (listToUse.length < 2) {
-      toast.warning("공통 문항을 추출할 2개 이상의 과제를 선택해주세요.");
-      return;
-    }
-    
-    const hwIds = listToUse.map(b => b.startsWith('hw_exam_') ? b.split('_')[2] : b.split('_')[1]);
-    
-    setIsLoading(true);
     try {
+      const listToUse = currentView.type === 'STUDENT' ? selectedBlocks : globalSelectedBlocks;
+      const isStudentView = currentView.type === 'STUDENT';
+      
+      if (listToUse.length < 2) {
+        toast.warning("공통 문항을 추출할 2개 이상의 과제를 선택해주세요.");
+        return;
+      }
+      
+      const hwIds = listToUse.map(b => b.startsWith('hw_exam_') ? b.split('_')[2] : b.split('_')[1]);
+      
+      if (!hwIds || hwIds.length === 0) {
+        toast.warning("분리할 과제 정보를 찾을 수 없습니다. 올바른 항목을 선택해주세요.");
+        return;
+      }
+
+      setIsLoading(true);
+
       const { data: assignments, error } = await supabase.from('homework_assignment')
         .select('homework_id, target_questions, is_exam_hw')
         .in('homework_id', hwIds);
         
-      if (error || !assignments) throw new Error("과제 정보를 불러올 수 없습니다.");
+      if (error || !assignments || assignments.length === 0) {
+        toast.error("과제 정보를 정상적으로 불러올 수 없습니다.");
+        setIsLoading(false);
+        return;
+      }
 
       const isMixed = assignments.some(a => a.is_exam_hw) && assignments.some(a => !a.is_exam_hw);
-      if (isMixed) throw new Error("교재 기반 과제와 문제지 기반 과제는 함께 병합할 수 없습니다. 같은 종류끼리만 선택해주세요.");
+      if (isMixed) {
+        toast.error("교재 기반 과제와 문제지 기반 과제는 함께 병합할 수 없습니다. 같은 종류끼리만 선택해주세요.");
+        setIsLoading(false);
+        return;
+      }
 
       let allQuestions: any[] = [];
       
@@ -411,6 +426,72 @@ export function useLearningActions({
     }
   };
 
+  // 🌟 한 창에서 여러 시험지를 연속 렌더링하도록 배열 데이터를 전송하는 신규 병합 출력 함수
+  const handleBulkPrintAction = async (printItems: { printType: string, masterId: any, targetQuestions: any, title: string, subTitle: string }[]) => {
+    if (printItems.length === 0) return;
+    
+    setIsLoading(true);
+    try {
+      const bulkData = [];
+      
+      for (const item of printItems) {
+        let qIds: any[] = [];
+        if (item.targetQuestions) {
+            if (typeof item.targetQuestions === 'string') {
+                try { qIds = JSON.parse(item.targetQuestions); } catch(err){}
+            } else if (Array.isArray(item.targetQuestions)) {
+                qIds = item.targetQuestions;
+            }
+        }
+        
+        if (item.printType === 'hw') {
+          if (qIds.length === 0) continue;
+          const tqIds = qIds.map((id: any) => Number(id)).filter((id: any) => !isNaN(id));
+          const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', tqIds);
+          if (error) throw error;
+          
+          const tqMap = new Map();
+          tqData?.forEach(i => { if (i.question_id) tqMap.set(i.tq_id, i.question_id); });
+          const finalQIds = tqIds.map((id: any) => tqMap.get(id)).filter(Boolean);
+          
+          if (finalQIds.length > 0) {
+            bulkData.push({
+              type: 'hw',
+              examQuestions: finalQIds,
+              examTitle: item.title || '교재 과제',
+              examSubTitle: item.subTitle || '과제 프린트',
+              examType: '과제프린트'
+            });
+          }
+        } else {
+          if (!item.masterId) continue;
+          bulkData.push({
+            type: 'exam',
+            exam_id: item.masterId,
+            examTitle: item.title,
+            examSubTitle: item.subTitle || ''
+          });
+        }
+      }
+      
+      if (bulkData.length === 0) {
+        toast.warning("출력할 수 있는 유효한 문항이 없습니다.");
+        return;
+      }
+      
+      purgeOldSession();
+      // 🌟 배열 데이터를 JSON으로 저장. 뷰어에서 이 배열을 순회하여 여러 장을 그립니다.
+      sessionStorage.setItem('bulkPrintData', JSON.stringify(bulkData));
+      window.open('/exam/viewer?source=bulk', '_blank');
+      
+    } catch (err: any) {
+      console.error(err);
+      toast.error('출력 데이터를 구성하는 중 오류가 발생했습니다.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => {
     e.stopPropagation();
     if (!targetQuestions || targetQuestions.length === 0) { toast.warning('수정할 문항이 없습니다.'); return; }
@@ -504,6 +585,6 @@ export function useLearningActions({
     handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2,
     handleEditExamToStep2, handleExtractCommonHomework,
     handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleBulkCompleteStudent,
-    handleBulkDeleteStudent, handleGenerateIncorrectPrint
+    handleBulkDeleteStudent, handleGenerateIncorrectPrint, handleBulkPrintAction
   };
 }

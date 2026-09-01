@@ -94,6 +94,8 @@ export default function ExamViewerPage() {
   const [unsavedModalOpen, setUnsavedModalOpen] = useState(false);
   const [pendingLeaveAction, setPendingLeaveAction] = useState<(() => void) | null>(null);
 
+  const [isBulkPrintMode, setIsBulkPrintMode] = useState(false);
+
   useEffect(() => {
     sessionStorage.setItem("restoreExamQuestions", "1");
 
@@ -106,15 +108,21 @@ export default function ExamViewerPage() {
     initExamData();
 
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (hasUnsavedChangesRef.current) { e.preventDefault(); e.returnValue = ''; }
+      if (hasUnsavedChangesRef.current && !isBulkPrintMode) { e.preventDefault(); e.returnValue = ''; }
     };
     window.addEventListener('beforeunload', handleBeforeUnload);
+
+    window.onafterprint = () => {
+      if (isBulkPrintMode) window.close();
+    };
+
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.onafterprint = null;
       if (zoomDelayTimerRef.current) clearTimeout(zoomDelayTimerRef.current);
       if (zoomRafRef.current) cancelAnimationFrame(zoomRafRef.current);
     };
-  }, []);
+  }, [isBulkPrintMode]);
 
   useEffect(() => {
     if (!movingToTargetRef.current && !buttonPageTimerRef.current) setPageInputValue(String(currentPage));
@@ -197,8 +205,213 @@ export default function ExamViewerPage() {
 
   const nextFrame = () => new Promise(res => requestAnimationFrame(() => requestAnimationFrame(res)));
 
+  const buildBulkExamData = async (bulkItems: any[]) => {
+    try {
+      let finalBulkHtml = '';
+      let totalPageCount = 0;
+      const allQids = new Set<string>();
+
+      for (const item of bulkItems) {
+        if (item.type === 'hw') {
+          item.examQuestions.forEach((id: string) => allQids.add(String(id)));
+        } else if (item.exam_id) {
+          const { data: examItems } = await supabase.from('exam_item').select('question_id').eq('exam_id', item.exam_id);
+          examItems?.forEach((i: any) => allQids.add(String(i.question_id)));
+        }
+      }
+
+      const flatQIds = Array.from(allQids);
+      const { data: questions } = await supabase.from('question_db').select('*').in('question_id', flatQIds);
+      const qMap = new Map();
+      questions?.forEach(q => qMap.set(String(q.question_id), q));
+
+      for (let index = 0; index < bulkItems.length; index++) {
+        const item = bulkItems[index];
+        let orderedQuestions: any[] = [];
+        let title = "시험지", badge = "", lType = "과제프린트";
+        let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
+        let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
+        let userMergedTextQuestions: any[][] = [];
+
+        if (item.type === 'hw') {
+          title = item.examTitle || '과제 프린트';
+          badge = item.examSubTitle || '';
+          lType = item.examType || '과제프린트';
+          
+          item.examQuestions.forEach((qid: string, idx: number) => {
+             const q = qMap.get(String(qid));
+             if (q) orderedQuestions.push({ ...q, sort_order: idx + 1 });
+          });
+        } else {
+          const { data: examData } = await supabase.from('exam_master').select('*').eq('exam_id', item.exam_id).single();
+          if (!examData) continue;
+          
+          badge = [examData.target_grade || examData.grade, examData.course || examData.course_name].filter(Boolean).join(' ');
+          if (!badge) badge = examData.sub_title || '';
+          title = examData.title || '시험지';
+          lType = examData.exam_type || '선택없음';
+
+          const dbLayoutSettings = examData.layout_settings || null;
+          if (dbLayoutSettings) {
+            const s = typeof dbLayoutSettings === 'string' ? JSON.parse(dbLayoutSettings) : dbLayoutSettings;
+            if (s.column) initialCol = parseInt(s.column);
+            if (s.split) initialSplit = parseInt(s.split);
+            if (s.titleMode) initialTitleMode = s.titleMode;
+            if (s.template) initialTmpl = s.template;
+            if (s.numberColor) cNum = s.numberColor;
+            if (s.titleColor) cTit = s.titleColor;
+            if (s.lineColor) cLin = s.lineColor;
+            if (s.examDate) eDate = s.examDate;
+            if (s.userMergedTextQuestions) userMergedTextQuestions = s.userMergedTextQuestions;
+          }
+
+          const { data: examItems } = await supabase.from('exam_item').select('*').eq('exam_id', item.exam_id).order('sort_order');
+          examItems?.forEach((i: any) => {
+            const q = qMap.get(String(i.question_id));
+            if (q) orderedQuestions.push({ ...q, sort_order: i.sort_order });
+          });
+        }
+
+        const customGroupMap = new Map<string, string>();
+        userMergedTextQuestions.forEach((arr: any[], idx: number) => {
+            const gId = `custom_group_${idx}`;
+            arr.forEach(qid => customGroupMap.set(String(qid), gId));
+        });
+
+        const groupMap = new Map<string, any>();
+        orderedQuestions.forEach((q: any) => {
+           let gId = customGroupMap.get(String(q.question_id));
+           if (!gId) gId = `single_${q.question_id}_${Math.random()}`;
+           if (!groupMap.has(gId)) {
+              groupMap.set(gId, { id: gId, questions: [], repQ: q, is_merged_text: !!customGroupMap.get(String(q.question_id)) });
+           }
+           groupMap.get(gId).questions.push(q);
+        });
+
+        const groups = Array.from(groupMap.values());
+        groups.forEach((g: any, idx: number) => { g.sort_order = idx + 1; g.displayNum = idx + 1; });
+
+        await Promise.all([
+          document.fonts.load("400 17px 'NanumSquare'"),
+          document.fonts.load("700 17px 'NanumSquare'"),
+          document.fonts.load("normal 42px 'CJU_Medium'")
+        ]).catch(() => {});
+
+        const probeHeaderFirst = buildHeaderHtml(badge, title, true, initialTmpl, eDate);
+        const probeHeaderOther = buildHeaderHtml(badge, title, false, initialTmpl, eDate);
+        const probeFooter = buildFooterHtml(badge, 0, 1, title, initialTmpl, eDate);
+
+        const probe = document.createElement('div');
+        probe.className = 'a3-page';
+        probe.style.cssText = 'position:absolute; left:-9999px; top:0; visibility:hidden;';
+        probe.innerHTML = probeHeaderFirst + `<div class="exam-grid-admission pt-6 pb-6"></div>` + probeFooter;
+        document.body.appendChild(probe);
+        await nextFrame();
+        const grid = probe.querySelector('.exam-grid-admission') as HTMLElement;
+        const availableHeightFirst = grid.clientHeight;
+        const columnWidth = grid.clientWidth / 2;
+        document.body.removeChild(probe);
+
+        const probe2 = document.createElement('div');
+        probe2.className = 'a3-page';
+        probe2.style.cssText = 'position:absolute; left:-9999px; top:0; visibility:hidden;';
+        probe2.innerHTML = probeHeaderOther + `<div class="exam-grid-admission pt-6 pb-6"></div>` + probeFooter;
+        document.body.appendChild(probe2);
+        await nextFrame();
+        const grid2 = probe2.querySelector('.exam-grid-admission') as HTMLElement;
+        const availableHeightOther = grid2.clientHeight;
+        document.body.removeChild(probe2);
+
+        await measureGroupHeights(groups, columnWidth);
+
+        const maxPerColumn = initialSplit / 2;
+        let targetCols = [];
+        if (initialTitleMode === 'first') {
+          const pass1 = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn);
+          const firstCols = pass1.slice(0, initialCol);
+          const consumed = firstCols.reduce((sum, c) => sum + c.length, 0);
+          const rem = groups.slice(consumed);
+          const pass2 = rem.length > 0 ? chunkColumnsByHeight(rem, availableHeightOther - SAFETY_MARGIN_PX, maxPerColumn) : [];
+          targetCols = firstCols.concat(pass2);
+        } else {
+          targetCols = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn);
+        }
+
+        const pages = [];
+        if (initialCol === 1) {
+          targetCols.forEach(c => pages.push({ left: c, right: null }));
+        } else {
+          for (let j = 0; j < targetCols.length; j += 2) pages.push({ left: targetCols[j], right: targetCols[j+1] || [] });
+        }
+
+        pages.forEach((pageCols, pIdx) => {
+          const showTitle = !(initialTitleMode === 'first' && pIdx > 0);
+          const hHtml = buildHeaderHtml(badge, title, showTitle, initialTmpl, eDate);
+          const fHtml = buildFooterHtml(badge, pIdx, pages.length, title, initialTmpl, eDate);
+          
+          let rHtml = '';
+          if (pageCols.right === null) {
+            const h = showTitle ? availableHeightFirst : availableHeightOther;
+            const lines = Array.from({ length: Math.ceil((h || 1587)/28) + 1 }).map(() => `<div style="height: 28px; border-bottom: 1px solid #e2e8f0; box-sizing: border-box;"></div>`).join('');
+            rHtml = `<div class="w-full h-full min-w-0 flex flex-col pl-6" style="border-left: 1px dashed #cbd5e1; overflow: hidden;"><div class="text-[13px] font-bold text-slate-400 mb-2 tracking-widest">풀 이</div><div class="flex-1" style="overflow: hidden;">${lines}</div></div>`;
+          } else {
+            rHtml = generateLocalColHtml(pageCols.right, cNum);
+          }
+          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="exam-grid-admission pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum)}${rHtml}</div>${fHtml}</div>`;
+        });
+
+        // 🌟 [수정됨] 강제로 빈 페이지를 토해내게 만들던 인라인 style 제거 완료!
+        if (pages.length % 2 !== 0) {
+          finalBulkHtml += `
+            <div class="a3-page flex flex-col items-center justify-center bg-slate-50/20">
+              <div class="text-slate-300 font-extrabold text-4xl tracking-[1em] opacity-40">여백</div>
+              <div class="text-slate-300 font-bold text-sm mt-4 opacity-50">양면 인쇄 구분을 위한 빈 페이지입니다.</div>
+            </div>`;
+          totalPageCount += (pages.length + 1);
+        } else {
+          totalPageCount += pages.length;
+        }
+      }
+
+      if (examContainerRef.current) {
+        examContainerRef.current.innerHTML = finalBulkHtml;
+        if ((window as any).MathJax?.typesetPromise) {
+          (window as any).MathJax.typesetClear();
+          try { await (window as any).MathJax.typesetPromise([examContainerRef.current]); } catch(e){}
+        }
+        shrinkOverflowingMath(examContainerRef.current);
+        
+        setIsSidebarFolded(true); 
+        setTotalPages(totalPageCount);
+        updatePreviewViewport();
+        (window as any).__examRenderReady = true;
+
+        setTimeout(() => {
+          window.print();
+        }, 500);
+      }
+
+    } catch (e: any) {
+      if (examContainerRef.current) examContainerRef.current.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">에러: ${e.message}</div>`;
+    }
+  };
+
   const initExamData = async () => {
     const params = new URLSearchParams(window.location.search);
+    const sourceParam = params.get('source');
+    
+    if (sourceParam === 'bulk') {
+      setIsBulkPrintMode(true);
+      const bulkDataStr = sessionStorage.getItem('bulkPrintData');
+      if (bulkDataStr) {
+        const bulkItems = JSON.parse(bulkDataStr);
+        await buildBulkExamData(bulkItems);
+      } else {
+        if (examContainerRef.current) examContainerRef.current.innerHTML = `<div class="text-center py-20 text-red-500 font-bold">출력할 데이터가 없습니다.</div>`;
+      }
+      return;
+    }
+
     const urlExamId = params.get('exam_id') || params.get('id');
 
     let isNew = false;
@@ -298,8 +511,6 @@ export default function ExamViewerPage() {
         setColumns(initialCol); setSplits(initialSplit); setTitleMode(initialTitleMode); setTemplate(initialTmpl);
         setColorNum(cNum); setColorTitle(cTit); setColorLine(cLin); setExamDate(eDate);
 
-        // 🌟 수정: 뷰어에 바로 진입했을 때, 이전에 분배되었더라도 강제 수정 안내창 띄우지 않음. 
-        // 그냥 hasUnsavedChanges는 무조건 false로 잡음
         hasUnsavedChangesRef.current = false; 
 
         examStateRef.current = { groups, examTitle: title, displayBadge: badge };
@@ -476,7 +687,6 @@ export default function ExamViewerPage() {
             const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
             
-            // 🌟 서브 문항 간격을 mt-16 으로 확대
             subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
         });
 
@@ -533,7 +743,7 @@ export default function ExamViewerPage() {
     return columns;
   };
 
-  const generateLocalColHtml = (cGroups: any[]) => {
+  const generateLocalColHtml = (cGroups: any[], numColorStr: string = 'var(--color-num)') => {
     if (!cGroups || cGroups.length === 0) return `<div class="flex flex-col flex-1 w-full min-w-0"></div>`;
     let cHtml = '<div class="flex flex-col flex-1 w-full min-w-0 gap-[15mm]">';
     
@@ -557,7 +767,6 @@ export default function ExamViewerPage() {
             const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
             
-            // 🌟 서브 문항 간격을 mt-16 으로 확대
             subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
         });
         const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
@@ -566,7 +775,7 @@ export default function ExamViewerPage() {
             <div class="flex-1 flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
                 <div class="flex items-start w-full min-w-0">
                     <div class="flex flex-col items-center mr-3 shrink-0 min-w-[36px]">
-                        <span style="font-family: 'CJU_Medium', sans-serif !important; color: var(--color-num);" class="text-[42px] leading-[0.85] tracking-tighter">${g.displayNum}</span>
+                        <span style="font-family: 'CJU_Medium', sans-serif !important; color: ${numColorStr};" class="text-[42px] leading-[0.85] tracking-tighter">${g.displayNum}</span>
                         ${scoreTagHtml}
                     </div>
                     <div class="flex flex-col w-full min-w-0 pt-[2px]">${subHtml}</div>
@@ -756,7 +965,6 @@ export default function ExamViewerPage() {
                     const prefix = ''; 
                     const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
                     
-                    // 🌟 서브 문항 간격을 mt-16 으로 확대
                     subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
                 });
                 
@@ -1160,15 +1368,19 @@ export default function ExamViewerPage() {
   };
 
   const handlePrint = async () => {
-    await saveExam(true);
+    if (!isBulkPrintMode) {
+      await saveExam(true);
+    }
     window.print();
   };
 
   const downloadPdfViaServer = async () => {
     setIsGeneratingPdf(true);
     try {
-      const saved = await saveExam(true); 
-      if (!saved) return; 
+      if (!isBulkPrintMode) {
+        const saved = await saveExam(true); 
+        if (!saved) return; 
+      }
 
       const examId = currentExamIdRef.current;
       if (!examId) throw new Error('저장된 시험지 ID를 찾을 수 없습니다.');
@@ -1188,7 +1400,7 @@ export default function ExamViewerPage() {
   };
 
   const attemptLeave = (fn: () => void) => {
-    if (hasUnsavedChangesRef.current) { setPendingLeaveAction(() => fn); setUnsavedModalOpen(true); }
+    if (hasUnsavedChangesRef.current && !isBulkPrintMode) { setPendingLeaveAction(() => fn); setUnsavedModalOpen(true); }
     else fn();
   };
 
@@ -1208,12 +1420,12 @@ export default function ExamViewerPage() {
         @page { size: A4 portrait; margin: 0; }
         @media print {
             html, body { width: 210mm; margin: 0 !important; padding: 0 !important; background: white; }
-            .a3-page { width: 297mm; height: 420mm; zoom: 70.7071%; margin: 0 !important; padding: 15mm 20mm !important; box-shadow: none !important; border: none !important; page-break-after: always; page-break-inside: avoid; display: flex !important; transform: none !important; }
+            .a3-page { width: 297mm; height: 420mm; zoom: 70.7071%; margin: 0 !important; padding: 15mm 20mm !important; box-shadow: none !important; border: none !important; page-break-after: auto !important; page-break-inside: avoid; display: flex !important; transform: none !important; }
             .no-print { display: none !important; }
             #exam-container { transform: none !important; }
             #preview-box { width: auto !important; height: auto !important; overflow: visible !important; box-shadow: none !important; margin: 0 !important; }
             body, .content-row, #preview-viewport, #preview-wrapper, #viewer-root { display: block !important; height: auto !important; overflow: visible !important; }
-            .a3-page:last-child { page-break-after: auto; }
+            .a3-page:last-child { page-break-after: auto !important; }
         }
       `}} />
       
@@ -1224,46 +1436,50 @@ export default function ExamViewerPage() {
         `}} />
       )}
 
-      <ViewerHeader 
-        isExamDistributed={isExamDistributed} 
-        isNewExam={isNewExamRef.current} 
-        currentExamId={currentExamIdRef.current} 
-        onAttemptLeave={attemptLeave} 
-      />
+      {!isBulkPrintMode && (
+        <ViewerHeader 
+          isExamDistributed={isExamDistributed} 
+          isNewExam={isNewExamRef.current} 
+          currentExamId={currentExamIdRef.current} 
+          onAttemptLeave={attemptLeave} 
+        />
+      )}
 
       <div className="content-row flex flex-1 min-h-0 relative">
-        <ViewerSidebar 
-          isSidebarFolded={isSidebarFolded}
-          setIsSidebarFolded={setIsSidebarFolded}
-          isAdmissionLock={isAdmissionLock}
-          titleMode={titleMode}
-          template={template}
-          colorNum={colorNum}
-          colorTitle={colorTitle}
-          colorLine={colorLine}
-          palette={palette}
-          columns={columns}
-          splits={splits}
-          examTitle={examTitle}
-          displayBadge={displayBadge}
-          examDate={examDate}
-          layoutType={layoutType}
-          testDate={testDate}
-          isWeekPopupOpen={isWeekPopupOpen}
-          setIsWeekPopupOpen={setIsWeekPopupOpen}
-          savedExamId={savedExamId}
-          weeklyTargetGrade={weeklyTargetGrade}
-          isSaving={isSaving}
-          isGeneratingPdf={isGeneratingPdf}
-          handleSettingChange={handleSettingChange}
-          savePalette={savePalette}
-          handleWeekDateSelect={handleWeekDateSelect}
-          handleWeeklyMetaChange={handleWeeklyMetaChange}
-          setIsExamDistributed={setIsExamDistributed}
-          saveExam={saveExam}
-          handlePrint={handlePrint}
-          downloadPdfViaServer={downloadPdfViaServer}
-        />
+        {!isBulkPrintMode && (
+          <ViewerSidebar 
+            isSidebarFolded={isSidebarFolded}
+            setIsSidebarFolded={setIsSidebarFolded}
+            isAdmissionLock={isAdmissionLock}
+            titleMode={titleMode}
+            template={template}
+            colorNum={colorNum}
+            colorTitle={colorTitle}
+            colorLine={colorLine}
+            palette={palette}
+            columns={columns}
+            splits={splits}
+            examTitle={examTitle}
+            displayBadge={displayBadge}
+            examDate={examDate}
+            layoutType={layoutType}
+            testDate={testDate}
+            isWeekPopupOpen={isWeekPopupOpen}
+            setIsWeekPopupOpen={setIsWeekPopupOpen}
+            savedExamId={savedExamId}
+            weeklyTargetGrade={weeklyTargetGrade}
+            isSaving={isSaving}
+            isGeneratingPdf={isGeneratingPdf}
+            handleSettingChange={handleSettingChange}
+            savePalette={savePalette}
+            handleWeekDateSelect={handleWeekDateSelect}
+            handleWeeklyMetaChange={handleWeeklyMetaChange}
+            setIsExamDistributed={setIsExamDistributed}
+            saveExam={saveExam}
+            handlePrint={handlePrint}
+            downloadPdfViaServer={downloadPdfViaServer}
+          />
+        )}
 
         <main 
           id="preview-viewport" 
@@ -1275,7 +1491,7 @@ export default function ExamViewerPage() {
             '--q-font-size': `${fontSize}px` 
           } as React.CSSProperties}
         >
-          {isSidebarFolded && (
+          {isSidebarFolded && !isBulkPrintMode && (
              <button onClick={() => setIsSidebarFolded(false)} className="absolute left-0 top-6 z-50 bg-white border border-slate-300 border-l-0 rounded-r-xl px-2.5 py-4 shadow-md hover:bg-slate-50 flex flex-col items-center gap-1.5 text-slate-500 hover:text-[#002864] transition-colors">
                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                  <span className="text-[11px] font-black tracking-widest" style={{ writingMode: 'vertical-rl' }}>설정 펼치기</span>

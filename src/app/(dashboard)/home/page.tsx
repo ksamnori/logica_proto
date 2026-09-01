@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 
-// 🌟 진도율 계산을 위한 안전한 JSON 파싱 함수
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -33,10 +32,9 @@ export default function TeacherDashboardPage() {
   const [selectedClassId, setSelectedClassId] = useState<string>("all");
 
   const [students, setStudents] = useState<any[]>([]);
-  const [classStats, setClassStats] = useState({ avgScore: 0, hwRate: 0, bookName: "-", bookProgress: 0 });
+  const [classStats, setClassStats] = useState({ avgScore: 0, hwRate: 0, bookName: "-", bookProgress: 0, bookId: null as string | null });
   
   const [upcomingSchedule, setUpcomingSchedule] = useState<{ type: string; title: string; time: string } | null>(null);
-  // 🌟 입학테스트 대신 보강/클리닉 일정 상태로 교체
   const [upcomingMakeup, setUpcomingMakeup] = useState<{ title: string; time: string } | null>(null);
 
   const [csRequests, setCsRequests] = useState<any[]>([]);
@@ -50,6 +48,14 @@ export default function TeacherDashboardPage() {
 
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
   const [memoData, setMemoData] = useState({ type: "일반공지", content: "" });
+
+  // 🌟 [수정] 복잡한 과제 연동을 제거하고, 순수 알림장(메모) 용도의 폼으로 간소화
+  const [isLessonLogModalOpen, setIsLessonLogModalOpen] = useState(false);
+  const [lessonForm, setLessonForm] = useState({
+    actual_session_no: "",
+    homework_desc: "", // 학부모 노출용 (진도/과제 요약)
+    instructor_note: "" // 강사만 보는 비밀 메모
+  });
 
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
 
@@ -180,7 +186,6 @@ export default function TeacherDashboardPage() {
     const todayStr = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
 
     try {
-      // 🌟 입학테스트를 덜어내고, 보강/클리닉(Makeup) 일정으로 대체
       const { data: makeups } = await supabase
         .from("agenda")
         .select("title, meeting_date")
@@ -240,7 +245,7 @@ export default function TeacherDashboardPage() {
 
     if (allTargetIds.length === 0) {
       setStudents([]);
-      setClassStats({ avgScore: 0, hwRate: 0, bookName: "주교재 미배정", bookProgress: 0 });
+      setClassStats({ avgScore: 0, hwRate: 0, bookName: "주교재 미배정", bookProgress: 0, bookId: null });
       return;
     }
 
@@ -297,10 +302,10 @@ export default function TeacherDashboardPage() {
 
     const { data: cbData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId).eq("textbook.book_type", "주교재");
     const bookName = cbData && cbData.length > 0 ? cbData[0].textbook?.title : "주교재 미배정";
+    const bookId = cbData && cbData.length > 0 ? cbData[0].book_id : null;
     
     let bookProgress = 0;
-    if (cbData && cbData.length > 0 && cbData[0].book_id) {
-      const bookId = cbData[0].book_id;
+    if (bookId) {
       const { data: qData } = await supabase.from("textbook_question").select("tq_id, page_number").eq("book_id", bookId);
       
       if (qData && qData.length > 0) {
@@ -342,7 +347,7 @@ export default function TeacherDashboardPage() {
       }
     }
 
-    setClassStats({ avgScore, hwRate, bookName, bookProgress });
+    setClassStats({ avgScore, hwRate, bookName, bookProgress, bookId });
   };
 
   const fetchAttendance = async (classId: string) => {
@@ -551,6 +556,43 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
+  // 🌟 [수정] 모달 오픈 시 빈칸으로 초기화 (자동 로딩 제거, 순수 메모용)
+  const openLessonLogModal = () => {
+    setIsLessonLogModalOpen(true);
+    setLessonForm({
+      actual_session_no: "",
+      homework_desc: "",
+      instructor_note: ""
+    });
+  };
+
+  // 🌟 [수정] 메인 과제 테이블을 건드리지 않고, 오직 daily_lesson_log 에만 저장
+  const handleLessonLogSubmit = async () => {
+    if (!lessonForm.homework_desc.trim()) {
+      alert("학부모 안내용 알림장 내용(과제/진도)을 입력해주세요.");
+      return;
+    }
+
+    try {
+      const { error: logErr } = await supabase.from("daily_lesson_log").insert({
+         class_id: selectedClassId,
+         actual_date: new Date(new Date().getTime() + 9 * 3600000).toISOString().split('T')[0],
+         actual_session_no: lessonForm.actual_session_no ? parseInt(lessonForm.actual_session_no) : null,
+         homework_desc: lessonForm.homework_desc, // 학부모 노출 텍스트
+         instructor_note: lessonForm.instructor_note // 강사 비밀 메모
+      });
+
+      if (logErr) throw logErr;
+
+      alert("✅ 수업 일지가 성공적으로 등록되었습니다!");
+      setIsLessonLogModalOpen(false);
+      fetchClassDetails(selectedClassId); 
+    } catch (e: any) {
+      console.error(e);
+      alert("등록 중 오류가 발생했습니다: " + e.message);
+    }
+  };
+
   if (isAuthorized === null) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
@@ -621,7 +663,6 @@ export default function TeacherDashboardPage() {
           <div className="flex flex-col gap-3 h-[220px]">
             <div className="flex gap-3 flex-1">
               
-              {/* 🌟 1. 시험 성취도 박스 클릭 시 -> 학습 결과의 EXAM 탭으로 이동 */}
               <div onClick={() => router.push(`/class-report?class_id=${selectedClassId}&tab=EXAM`)} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-blue-300 transition-colors cursor-pointer group">
                 <div className="flex flex-col">
                   <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-blue-100">최근 2주</span>
@@ -633,7 +674,6 @@ export default function TeacherDashboardPage() {
                 </div>
               </div>
               
-              {/* 🌟 2. 과제 제출률 박스 클릭 시 -> 학습 결과의 HW 탭으로 이동 */}
               <div onClick={() => router.push(`/class-report?class_id=${selectedClassId}&tab=HW`)} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-amber-300 transition-colors cursor-pointer group">
                 <div className="flex flex-col">
                   <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-amber-100">최근 1달</span>
@@ -676,7 +716,6 @@ export default function TeacherDashboardPage() {
                 )}
               </div>
               
-              {/* 🌟 3. 입학테스트 대신 '임박한 보강/클리닉' 일정으로 교체 적용 완료 */}
               <div onClick={() => hasAccess('/makeup') ? router.push('/makeup') : alert("접근 권한이 없습니다.")} className={`flex flex-col justify-center bg-emerald-50 p-3 rounded-xl border border-emerald-100 transition-colors h-[68px] ${hasAccess('/makeup') ? 'cursor-pointer hover:bg-emerald-100' : 'cursor-not-allowed opacity-70'}`}>
                 <span className="text-[10px] font-bold text-emerald-500 mb-1">🏥 임박한 보강/클리닉</span>
                 {upcomingMakeup ? (
@@ -742,8 +781,17 @@ export default function TeacherDashboardPage() {
           <div className="lg:col-span-3 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-full">
             <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
               <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2">👨‍🎓 반 학생 상세 현황</h2>
-              <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-2 py-1 rounded-md">총 {students.length}명</span>
+              <div className="flex items-center gap-3">
+                <button 
+                  onClick={openLessonLogModal} 
+                  className="px-3 py-1.5 bg-[#002864] text-white text-xs font-black rounded-lg hover:bg-blue-900 transition-colors shadow-sm flex items-center gap-1"
+                >
+                  📝 오늘 수업일지 작성
+                </button>
+                <span className="text-xs font-bold text-slate-500 bg-white border border-slate-200 px-2 py-1 rounded-md">총 {students.length}명</span>
+              </div>
             </div>
+            
             <div className="overflow-x-auto overflow-y-auto custom-scroll flex-1">
               <table className="w-full text-left border-collapse min-w-[700px]">
                 <thead className="bg-white sticky top-0 shadow-sm z-10">
@@ -926,7 +974,6 @@ export default function TeacherDashboardPage() {
 
       <AgendaSidebar currentUser={currentUser} tenantId={tenantId} hasAccess={hasAccess} />
 
-      {/* 수동 설정 모달 */}
       {manualModalData && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">
@@ -1003,6 +1050,67 @@ export default function TeacherDashboardPage() {
                   setIsMemoModalOpen(false); setMemoData({ type: "일반공지", content: "" }); fetchMemos();
                 } catch (err) { alert("등록 실패"); }
               }} className="px-4 py-2 bg-[#002864] text-white text-xs font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm">공지 등록</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 수업 일지 (알림장 메모) 작성 모달 */}
+      {isLessonLogModalOpen && (
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
+          <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
+              <h3 className="text-base font-black flex items-center gap-2">📝 오늘 수업 일지 작성</h3>
+              <button onClick={() => setIsLessonLogModalOpen(false)} className="text-white hover:text-rose-400 text-2xl font-bold leading-none transition-colors">&times;</button>
+            </div>
+            
+            <div className="p-6 space-y-6 overflow-y-auto max-h-[70vh] bg-slate-50/50">
+              
+              <div>
+                <label className="block text-xs font-extrabold text-slate-500 mb-1.5">진행 회차</label>
+                <input 
+                  type="number" 
+                  value={lessonForm.actual_session_no} 
+                  onChange={e => setLessonForm({...lessonForm, actual_session_no: e.target.value})} 
+                  className="border border-slate-300 p-2.5 w-1/3 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] bg-white shadow-sm"
+                  placeholder="예: 1" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-indigo-600 mb-1.5 flex items-center gap-1">
+                  <span>📱 학부모 안내장 (과제 및 진도 요약)</span> <span className="text-rose-500">*</span>
+                </label>
+                <textarea 
+                  value={lessonForm.homework_desc} 
+                  onChange={e => setLessonForm({...lessonForm, homework_desc: e.target.value})} 
+                  rows={5}
+                  className="border border-indigo-200 p-4 w-full rounded-xl text-sm font-bold text-indigo-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm resize-none placeholder-indigo-300"
+                  placeholder="학부모 앱에 그대로 노출될 내용입니다.&#10;&#10;예) &#10;[진도] 2단원 이차방정식 개념 학습 (p.10~15)&#10;[과제] 복습 프린트 2장 풀기 (기한: 9/5)" 
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-extrabold text-slate-500 mb-1.5 flex items-center gap-1">
+                  <span>🔒 강사 특이사항 메모</span>
+                  <span className="text-[10px] text-slate-400 font-medium">(선택 - 학부모 미노출)</span>
+                </label>
+                <textarea 
+                  value={lessonForm.instructor_note} 
+                  onChange={e => setLessonForm({...lessonForm, instructor_note: e.target.value})} 
+                  rows={3}
+                  className="border border-slate-300 p-4 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] bg-white shadow-sm resize-none"
+                  placeholder="선생님들끼리 공유할 특이사항을 적어주세요. 학부모에게는 보이지 않습니다." 
+                />
+              </div>
+
+            </div>
+            
+            <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
+              <button onClick={() => setIsLessonLogModalOpen(false)} className="px-5 py-3 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-xl text-sm transition-colors shadow-sm">취소</button>
+              <button onClick={handleLessonLogSubmit} className="px-5 py-3 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-xl text-sm shadow-md transition-colors flex items-center gap-2">
+                ✅ 등록 완료
+              </button>
             </div>
           </div>
         </div>
