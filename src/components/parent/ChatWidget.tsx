@@ -11,6 +11,15 @@ const getProfileImageUrl = (path: string | null | undefined) => {
   return data.publicUrl;
 };
 
+// 🌟 원장, 부원장, 실장을 제외한 직책을 '선생님'으로 표기
+const formatPosition = (pos: string | null | undefined) => {
+  if (!pos) return "선생님";
+  if (pos.includes("부원장")) return "부원장";
+  if (pos.includes("원장")) return "원장";
+  if (pos.includes("실장")) return "실장";
+  return "선생님";
+};
+
 export default function ChatWidget({ parentId }: { parentId: string }) {
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [activeChatView, setActiveChatView] = useState<"list" | "room">("list");
@@ -23,6 +32,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const [chatInput, setChatInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
+  
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [isUploading, setIsUploading] = useState(false);
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -35,7 +47,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // --- 드래그 로직 ---
   const iconRef = useRef<HTMLButtonElement>(null);
   const iconPos = useRef({ x: 0, y: 0 });
   const iconDrag = useRef({ isDragging: false, startX: 0, startY: 0, clickX: 0, clickY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
@@ -132,11 +143,10 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   const loadAvailableStaff = async () => {
     try {
-      // 🌟 [핵심 변경] 학생을 조회할 때 'tenant_id(소속 지점)'도 함께 가져옵니다.
       const { data: sData } = await supabase.from("student").select("tenant_id, enrollment(class(instructor_id))").eq("parent_id", parentId);
       
       let instructorIds = new Set<string>();
-      let tenantIds = new Set<string>(); // 자녀가 다니는 학원 지점들
+      let tenantIds = new Set<string>(); 
 
       sData?.forEach((s: any) => { 
         if (s.tenant_id) tenantIds.add(s.tenant_id);
@@ -145,21 +155,28 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         }); 
       });
 
-      // 소속된 학원이 아예 없으면 빈 리스트 반환
       if (tenantIds.size === 0) return setStaffList([]);
 
-      let orQuery = "position.ilike.%실장%,role.eq.MANAGER,role.eq.ADMIN";
+      let orQuery = "position.ilike.%실장%";
       if (instructorIds.size > 0) orQuery += `,instructor_id.in.(${Array.from(instructorIds).join(",")})`;
       
-      // 🌟 [핵심 변경] "내 아이가 다니는 지점(tenantIds)"에 소속된 선생님/관리자만 불러오도록 필터 추가!
       const { data } = await supabase
         .from("instructor")
         .select("*")
         .eq("status", "재직")
-        .in("tenant_id", Array.from(tenantIds)) // 👈 서초/부산 가맹점 원장님 노출 차단 방어막
+        .in("tenant_id", Array.from(tenantIds))
         .or(orQuery);
         
-      setStaffList(data || []);
+      let filteredList = data || [];
+      
+      filteredList.sort((a, b) => {
+        const aIsManager = (a.position || "").includes("실장") ? -1 : 1;
+        const bIsManager = (b.position || "").includes("실장") ? -1 : 1;
+        if (aIsManager !== bIsManager) return aIsManager - bIsManager;
+        return a.name.localeCompare(b.name);
+      });
+      
+      setStaffList(filteredList);
     } catch (e) { console.error(e); }
   };
 
@@ -182,7 +199,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       const { data: existing } = await supabase.from("chat_room").select("room_id").eq("instructor_id", instructorId).eq("parent_id", parentId).maybeSingle();
       let roomId = existing?.room_id;
       if (!roomId) {
-        // 💡 채팅방(chat_room)이나 채팅메시지(chat_message)는 부모님과 지점 선생님을 1:1로 이어주는 테이블이므로, 선생님의 tenant_id에 자연스럽게 귀속되어 꼬리표를 붙일 필요가 없습니다.
         const { data: newRoom } = await supabase.from("chat_room").insert({ instructor_id: instructorId, parent_id: parentId }).select().single();
         roomId = newRoom?.room_id;
       }
@@ -219,6 +235,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     } catch (e) { console.error(e); }
   };
 
+  const deleteChatRoom = async (e: React.MouseEvent, roomId: string) => {
+    e.stopPropagation();
+    if (!confirm("해당 상담 대화방과 대화 내역을 모두 삭제하시겠습니까?\n삭제된 내용은 복구할 수 없습니다.")) return;
+    try {
+      await supabase.from("chat_room").delete().eq("room_id", roomId);
+      loadChatRooms();
+    } catch (e) {
+      alert("대화방 삭제 중 오류가 발생했습니다.");
+    }
+  };
+
   const sendParentMsg = async () => {
     const text = chatInput.trim();
     if (!text || !activeRoomId) return;
@@ -242,6 +269,47 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       if (newMsg) setChatMessages(prev => [...prev, newMsg]);
       if (isDND) { setTimeout(async () => { await supabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "instructor", content: `[자동응답] ${autoReplyMsg}`, is_read: false }); }, 500); }
     } catch (e) { alert("메시지 전송 실패"); }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeRoomId) return;
+
+    setIsUploading(true);
+    try {
+      const fileExt = file.name.split('.').pop()?.toLowerCase();
+      const isImage = ['png', 'jpg', 'jpeg', 'gif'].includes(fileExt || '');
+      const fileName = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `chat_images/${parentId}/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('system_images')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data } = supabase.storage.from('system_images').getPublicUrl(filePath);
+      const publicUrl = data.publicUrl;
+
+      // 🌟 이미지 외 문서 파일이면 [FILE] 태그로 전송
+      const contentString = isImage ? `[IMAGE]${publicUrl}` : `[FILE]${publicUrl}`;
+
+      const { data: newMsg } = await supabase.from("chat_message").insert({ 
+        room_id: activeRoomId, 
+        sender_type: "parent", 
+        content: contentString, 
+        is_read: false 
+      }).select().single();
+      
+      if (newMsg) setChatMessages(prev => [...prev, newMsg]);
+
+    } catch (error) {
+      console.error("파일 업로드 실패:", error);
+      alert("파일 전송에 실패했습니다.");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const initRealtimeSystem = () => {
@@ -293,12 +361,14 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   staffList.map(staff => {
                     const avatarUrl = getProfileImageUrl(staff.profile_image_url);
                     return (
-                      <div key={staff.instructor_id} onClick={() => createOrOpenRoom(staff.instructor_id, `${staff.name} ${staff.position || '선생님'}`, avatarUrl)} className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 w-14">
+                      <div key={staff.instructor_id} onClick={() => createOrOpenRoom(staff.instructor_id, `${staff.name} ${formatPosition(staff.position)}`, avatarUrl)} className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 w-14">
                         <div className="relative w-11 h-11 rounded-full bg-[#002864]/5 border border-[#002864]/10 flex items-center justify-center text-[#002864] text-lg font-black group-hover:bg-[#002864] group-hover:text-white transition-colors shadow-sm overflow-hidden">
                           <span className="absolute z-0">{staff.name.substring(1) || staff.name}</span>
                           {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                         </div>
-                        <span className="text-[10px] font-bold text-slate-700 truncate w-full text-center group-hover:text-[#002864] mt-0.5">{staff.name}</span>
+                        <span className="text-[10px] font-bold text-slate-700 truncate w-full text-center group-hover:text-[#002864] mt-0.5">
+                          {staff.name} {formatPosition(staff.position)}
+                        </span>
                       </div>
                     );
                   })
@@ -310,11 +380,16 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
               <div className="space-y-2">
                 {chatRooms.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">진행 중인 대화가 없습니다.<br/>선생님을 선택해 대화를 시작하세요.</div> :
                   chatRooms.map(r => {
-                    const staffName = r.instructor ? `${r.instructor.name} ${r.instructor.position || '선생님'}` : '알 수 없음';
+                    const staffName = r.instructor ? `${r.instructor.name} ${formatPosition(r.instructor.position)}` : '알 수 없음';
                     const avatarUrl = getProfileImageUrl(r.instructor?.profile_image_url);
                     const sorted = (r.chat_message || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
                     let preview = sorted.length > 0 ? sorted[0].content : '내역 없음';
-                    if (preview.length > 18) preview = preview.substring(0, 18) + '...';
+                    
+                    // 🌟 파일/이미지 프리뷰 포맷팅 업데이트
+                    if (preview.startsWith("[IMAGE]")) preview = "📷 사진을 보냈습니다.";
+                    else if (preview.startsWith("[FILE]")) preview = "📎 첨부파일을 보냈습니다.";
+                    else if (preview.length > 18) preview = preview.substring(0, 18) + '...';
+                    
                     const isUnread = sorted.filter((m: any) => m.sender_type === "instructor" && !m.is_read).length;
                     return (
                       <div key={r.room_id} onClick={() => openChatRoom(r.room_id, staffName, avatarUrl)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-[#002864] transition-all flex items-center justify-between cursor-pointer group">
@@ -328,6 +403,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                             <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${isUnread > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate flex-1 pr-2`}>{preview}</span>{isUnread > 0 && <div className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">{isUnread > 99 ? '99+' : isUnread}</div>}</div>
                           </div>
                         </div>
+                        <button onClick={(e) => deleteChatRoom(e, r.room_id)} className="p-2 ml-1 text-slate-300 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition-colors" title="대화방 삭제">
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                        </button>
                       </div>
                     );
                   })
@@ -358,7 +436,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                       )}
 
                       <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type === "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
-                        {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
+                        {/* 🌟 메시지 타입별 렌더링 분기: 파일, 이미지, 일반 텍스트 */}
+                        {msg.content?.startsWith("[IMAGE]") ? (
+                          <img src={msg.content.replace("[IMAGE]", "")} alt="uploaded" className="max-w-[180px] sm:max-w-[220px] rounded-lg border border-slate-200/50 cursor-pointer object-cover my-1" onClick={() => window.open(msg.content.replace("[IMAGE]", ""), "_blank")} />
+                        ) : msg.content?.startsWith("[FILE]") ? (
+                          <a href={msg.content.replace("[FILE]", "")} target="_blank" rel="noreferrer" className="flex items-center gap-2 px-3 py-2 bg-slate-100/80 rounded-xl border border-slate-200 hover:bg-slate-200 transition-colors my-1 text-slate-700 w-fit">
+                            <span className="text-xl">📎</span>
+                            <span className="underline font-bold text-blue-600 text-[12px]">첨부파일 열기</span>
+                          </a>
+                        ) : (
+                          String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)
+                        )}
                       </div>
                       <div className="flex flex-col items-end shrink-0 text-[9px] text-slate-500">
                         {msg.sender_type === 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
@@ -385,7 +473,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
               <div ref={messagesEndRef} />
             </div>
+            
+            {/* 🌟 파일 전송 허용 (accept 속성 제거) */}
             <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2">
+              <input type="file" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
+              <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-[#002864] transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
+                {isUploading ? (
+                  <div className="w-5 h-5 border-2 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+                ) : (
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
+                )}
+              </button>
               <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
               <button onClick={sendParentMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
             </div>

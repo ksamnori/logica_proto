@@ -16,16 +16,22 @@ export default function StudentCard({ student }: { student: any }) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [selectedDate, setSelectedDate] = useState(new Date());
 
-  // 🌟 과제(수업 일지) 데이터 로딩 상태
+  // 과제(수업 일지) 데이터 로딩 상태
   const [lessonLogs, setLessonLogs] = useState<any[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
+
+  // 🌟 토스트 팝업 상태 관리
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const showToast = (msg: string) => {
+    setToastMessage(msg);
+    setTimeout(() => setToastMessage(null), 2500);
+  };
 
   const activeEnrollment = student.enrollment?.find((e: any) => (!e.end_date || new Date(e.end_date) >= new Date()) && unwrap(e.class)?.name);
   const currentClass = activeEnrollment ? unwrap(activeEnrollment.class) : null;
   const className = currentClass?.name || "소속 반 없음";
   const classId = currentClass?.class_id;
 
-  // --- 과제(수업 일지) 데이터 불러오기 ---
   useEffect(() => {
     if (activeTab === "homework" && classId) {
       const fetchLogs = async () => {
@@ -33,9 +39,9 @@ export default function StudentCard({ student }: { student: any }) {
         try {
           const { data } = await supabase
             .from("daily_lesson_log")
-            .select("lesson_log_id, actual_date, actual_session_no, homework_desc") // 🌟 고유 ID 추가
+            .select("lesson_log_id, actual_date, actual_session_no, homework_desc")
             .eq("class_id", classId)
-            .not("homework_desc", "is", null) // 과제 내용이 있는 것만
+            .not("homework_desc", "is", null)
             .order("actual_date", { ascending: false });
           
           setLessonLogs(data || []);
@@ -49,8 +55,6 @@ export default function StudentCard({ student }: { student: any }) {
     }
   }, [activeTab, classId]);
 
-
-  // --- 출결 캘린더 로직 ---
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
   const daysInMonth = new Date(year, month + 1, 0).getDate();
@@ -71,21 +75,18 @@ export default function StudentCard({ student }: { student: any }) {
   const selectedDateStr = `${selectedDate.getFullYear()}-${String(selectedDate.getMonth() + 1).padStart(2, '0')}-${String(selectedDate.getDate()).padStart(2, '0')}`;
   const selectedAtt = attendanceMap.get(selectedDateStr);
 
-  // 날짜/시간 포맷 유틸리티
   const formatTime = (isoString: string) => {
     if (!isoString) return "";
     const date = new Date(isoString);
     return date.toLocaleTimeString("ko-KR", { hour12: false, hour: "2-digit", minute: "2-digit" });
   };
 
-  // 🌟 [수정] 오타 교정 (formatDateTitle -> formatDateLabel)
   const formatDateLabel = (dateStr: string) => {
     if (!dateStr) return "";
     const d = new Date(dateStr);
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  // --- 진도 블록 렌더링 로직 ---
   const renderPageBlocks = (bookPages: number[], pageStatuses: Record<number, 'done' | 'homework' | 'none'>) => {
     if (!bookPages || bookPages.length === 0) {
       return <span className="text-xs font-bold text-slate-400">교재 데이터가 없습니다.</span>;
@@ -107,11 +108,10 @@ export default function StudentCard({ student }: { student: any }) {
           }
 
           return (
-            // 🌟 높이를 줄이고 클릭 시 상세 팝업 추가
+            // 🌟 토스트 팝업 함수 연결
             <button 
               key={p} 
-              title={title} 
-              onClick={() => alert(`교재 진행 현황\n\n페이지: ${title}`)}
+              onClick={() => showToast(title)}
               className={`w-2 h-2.5 rounded-[1px] ${bgColor} shadow-sm transition-colors hover:scale-150 active:scale-150 transform`} 
             />
           );
@@ -121,8 +121,7 @@ export default function StudentCard({ student }: { student: any }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden font-pretendard">
-      {/* 학생 기본 정보 */}
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden font-pretendard relative">
       <div className="p-6 border-b border-slate-100 flex flex-col gap-3">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
@@ -153,7 +152,6 @@ export default function StudentCard({ student }: { student: any }) {
         </div>
       </div>
 
-      {/* 탭 네비게이션 */}
       <div className="flex px-6 pt-4 border-b border-slate-100 gap-2 overflow-x-auto no-scrollbar">
         {[
           { id: "attendance", label: "출결" },
@@ -177,10 +175,8 @@ export default function StudentCard({ student }: { student: any }) {
         ))}
       </div>
 
-      {/* 탭 콘텐츠 영역 */}
       <div className="p-6 bg-slate-50/50 min-h-[400px]">
         
-        {/* 🌟 1. 출결 캘린더 탭 */}
         {activeTab === "attendance" && (
           <div className="animate-[fadeIn_0.2s_ease-out]">
             <div className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
@@ -230,7 +226,6 @@ export default function StudentCard({ student }: { student: any }) {
               </div>
             </div>
 
-            {/* 🌟 선택된 날짜 상세 내역 (등/하원 분리) */}
             <div className="mt-4 bg-slate-50 rounded-xl p-4 border border-slate-200 shadow-sm">
                <div className="flex items-center gap-1.5 mb-3">
                  <span className="text-base">🗓️</span>
@@ -272,7 +267,6 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
-        {/* 🌟 2. 진도 탭 */}
         {activeTab === "progress" && (
           <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
             <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-lg border border-slate-200 w-fit mb-4 shadow-sm">
@@ -321,7 +315,6 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
-        {/* 🌟 3. 과제 (알림장) 탭 */}
         {activeTab === "homework" && (
           <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
             {isLogsLoading ? (
@@ -356,7 +349,6 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
-        {/* 미구현 탭들 */}
         {["makeup", "exam", "consultation"].includes(activeTab) && (
           <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm animate-[fadeIn_0.2s_ease-out]">
             <span className="text-3xl block mb-3 opacity-50">🛠️</span>
@@ -364,6 +356,13 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
       </div>
+
+      {/* 🌟 토스트 팝업 UI */}
+      {toastMessage && (
+        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-800/90 text-white px-5 py-2.5 rounded-full text-[13px] font-bold shadow-lg z-[9999] pointer-events-none transition-all animate-[fadeIn_0.2s_ease-out]">
+          📖 {toastMessage}
+        </div>
+      )}
     </div>
   );
 }
