@@ -491,8 +491,8 @@ export default function ParentPortalPage() {
             </a>
             
             <div className="text-[10px] text-slate-400 leading-relaxed">
-              <p className="font-bold text-slate-500 mb-1">LOGICA학원 대치 본원</p>
-              <p>대표자: 이웅행 | 사업자등록번호: 732-85-02927</p>
+              <p className="font-bold text-slate-500 mb-1">(주)이배움 로지카대치본원학원</p>
+              <p>대표자: 천종현 | 사업자등록번호: 732-85-02927</p>
               <p>주소: 서울특별시 강남구 역삼로 448, 3층(대치동)</p>
               <p>대표번호: 02-555-8875</p>
             </div>
