@@ -233,23 +233,44 @@ export default function StudentEditModal({
 
     setIsSaving(true);
     try {
+      // 1. 수강 배정에 묶인 출석 기록 삭제
       const { data: enrs } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", studentId);
       if (enrs && enrs.length > 0) {
         const enrIds = enrs.map(e => e.enrollment_id);
         await supabase.from("attendance").delete().in("enrollment_id", enrIds);
       }
+      
+      // 2. 수강 배정 기록 삭제
       await supabase.from("enrollment").delete().eq("student_id", studentId);
 
+      // 3. 학생과 연관된 모든 하위 테이블 동시 삭제 (시험 배정 등 잔여 에러 방지를 위해 대규모 확장)
       await Promise.all([
         supabase.from("student_answer").delete().eq("student_id", studentId),
         supabase.from("student_exam_result").delete().eq("student_id", studentId),
         supabase.from("student_progress").delete().eq("student_id", studentId),
         supabase.from("student_incorrect_record").delete().eq("student_id", studentId), 
         supabase.from("admission_application").delete().eq("student_id", studentId),
+        supabase.from("admission_test_report").delete().eq("student_id", studentId),
         supabase.from("individual_makeup").delete().eq("student_id", studentId),
-        supabase.from("parent_request_log").delete().eq("student_id", studentId)
+        supabase.from("parent_request_log").delete().eq("student_id", studentId),
+        supabase.from("clinic_session_state").delete().eq("student_id", studentId),
+        supabase.from("clinic_round_result").delete().eq("student_id", studentId),  
+        supabase.from("student_points").delete().eq("student_id", studentId),
+        supabase.from("consultation_log").delete().eq("student_id", studentId),
+        supabase.from("point_log").delete().eq("student_id", studentId),
+        supabase.from("student_category_analysis").delete().eq("student_id", studentId),
+        supabase.from("clinic_task").delete().eq("student_id", studentId),
+        supabase.from("clinic_log").delete().eq("student_id", studentId),
+        supabase.from("student_homework_result").delete().eq("student_id", studentId),
+        supabase.from("student_homework_answer").delete().eq("student_id", studentId),
+        supabase.from("student_school_exam").delete().eq("student_id", studentId),
+        supabase.from("clinic_reservation").delete().eq("student_id", studentId),
+        supabase.from("exam_assignment").delete().eq("student_id", studentId), // 🌟 추가됨 (현재 에러 원인)
+        supabase.from("academy_billing").delete().eq("student_id", studentId), // 🌟 혹시 모를 잠재적 에러 방지
+        supabase.from("shop_purchase").delete().eq("student_id", studentId)    // 🌟 혹시 모를 잠재적 에러 방지
       ]);
 
+      // 4. 최종적으로 학생 테이블 본체 삭제
       const { error: delErr } = await supabase.from("student").delete().eq("student_id", studentId);
       if (delErr) throw delErr;
 
@@ -263,7 +284,7 @@ export default function StudentEditModal({
     }
   };
 
-  // 🌟 [핵심 변경] SS, WS(특강) / MU, LE(보강) 학원 명명 규칙 반영 필터 로직
+  // 🌟 SS, WS(특강) / MU, LE(보강) 학원 명명 규칙 반영 필터 로직
   const filteredClasses = allClasses.filter(c => {
     if (levelFilter === "전체") return true;
     
@@ -276,12 +297,10 @@ export default function StudentEditModal({
     if (levelFilter === "Titan") return targetStr.includes("TITAN") || targetStr.includes("T반") || c.level_name?.toUpperCase() === "T" || upperName.endsWith(" T");
     if (levelFilter === "Horizon") return targetStr.includes("HORIZON") || targetStr.includes("H반") || c.level_name?.toUpperCase() === "H" || upperName.endsWith(" H");
     
-    // 특강: 반 이름이 SS나 WS로 시작하거나 레벨명/이름에 '특강'이 들어간 경우
     if (levelFilter === "특강") {
       return upperName.startsWith("SS") || upperName.startsWith("WS") || targetStr.includes("특강");
     }
     
-    // 메이크업/보강: 반 이름이 MU나 LE로 시작하거나 레벨명/이름에 '메이크업', '보강'이 들어간 경우
     if (levelFilter === "메이크업/보강") {
       return upperName.startsWith("MU") || upperName.startsWith("LE") || targetStr.includes("메이크업") || targetStr.includes("보강");
     }

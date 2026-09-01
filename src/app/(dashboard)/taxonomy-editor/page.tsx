@@ -11,13 +11,14 @@ export default function TaxonomyEditorPage() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm, twinTargetBook, similarTargetBook,
+    isFixingLatex, // 🌟 추가됨
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
     normalRoots, trueOrphans, getDescendants,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
     setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
-    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange
+    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex // 🌟 추가됨
   } = useTaxonomy();
 
   const renderImageBox = (label: string, fieldKey: string, colorTheme: 'indigo' | 'emerald') => {
@@ -263,7 +264,7 @@ export default function TaxonomyEditorPage() {
               )}
             </div>
 
-            {/* 🌟 2개로 분리된 드롭다운 영역 */}
+            {/* 2개로 분리된 드롭다운 영역 */}
             <div className="p-5 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
               <div className="flex items-center gap-6">
                 
@@ -500,10 +501,12 @@ export default function TaxonomyEditorPage() {
                   
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
+                      {/* 🌟 1. AI 유사생성 */}
                       <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
                         <span>👯</span> <span>AI 유사생성</span>
                       </button>
 
+                      {/* 🌟 2. 타 교재로 복제 */}
                       <button 
                         onClick={() => {
                           setCloneForm({ 
@@ -515,15 +518,28 @@ export default function TaxonomyEditorPage() {
                           setIsCloneModalOpen(true);
                         }} 
                         disabled={!perms.add} 
-                        className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 mr-2 ${perms.add ? 'bg-slate-100 hover:bg-slate-200 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} 
+                        className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.add ? 'bg-slate-100 hover:bg-slate-200 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} 
                         title={!perms.add ? "새 문항 추가 권한이 없습니다." : "현재 문제를 다른 교재로 복제합니다."}
                       >
                         <span>📋</span> 타 교재로 복제
                       </button>
+
+                      {/* 🌟 3. AI 수식 자동 복구 (신규 추가) */}
+                      <button 
+                        onClick={handleFixLatex} 
+                        disabled={!perms.edit || isFixingLatex} 
+                        className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.edit && !isFixingLatex ? 'bg-blue-50 hover:bg-blue-100 text-blue-700 border-blue-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} 
+                        title="AI를 사용하여 깨진 텍스트 수식을 정교한 LaTeX로 일괄 복구합니다."
+                      >
+                        {isFixingLatex ? <><span>🪄</span> 복구 중...</> : <><span>🪄</span> AI 수식 자동 복구</>}
+                      </button>
                       
+                      {/* 🌟 4. 문항 수정 */}
                       <button onClick={() => setIsEditingContent(true)} disabled={!perms.edit} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.edit ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.edit ? "수정 권한이 없습니다." : ""}>
                         <span>✏️</span> 문항 수정
                       </button>
+
+                      {/* 🌟 5. 삭제 */}
                       <button onClick={deleteQuestion} disabled={!perms.delete} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.delete ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.delete ? "삭제 권한이 없습니다." : ""}>
                         <span>🗑️</span> 삭제
                       </button>

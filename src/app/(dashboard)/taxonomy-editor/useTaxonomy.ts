@@ -57,6 +57,9 @@ export function useTaxonomy() {
   const [twinTargetBook, setTwinTargetBook] = useState<string>('');
   const [similarTargetBook, setSimilarTargetBook] = useState<string>('');
 
+  // 🌟 추가됨: AI 복구 상태
+  const [isFixingLatex, setIsFixingLatex] = useState(false);
+
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -545,6 +548,74 @@ export function useTaxonomy() {
     } catch (e: any) { alert("쌍둥이 생성 중 오류 발생: " + e.message); setIsTwinModalOpen(false); } finally { setIsGeneratingTwins(false); }
   };
 
+  // 🌟 추가됨: AI 수식 자동 복구 실행 로직
+  const handleFixLatex = async () => {
+    if (!selectedQuestion) return alert("원본 문항을 먼저 선택해주세요.");
+    if (!confirm("AI를 사용하여 깨진 수식을 완벽한 LaTeX 형태로 자동 교정하시겠습니까?\n\n수정된 내용은 즉시 저장됩니다.")) return;
+
+    setIsFixingLatex(true);
+    try {
+      const payload = {
+        question: selectedQuestion.question || "",
+        answer: selectedQuestion.answer || "",
+        step_1_concept: selectedQuestion.step_1_concept || "",
+        step_2_approach: selectedQuestion.step_2_approach || "",
+        step_3_process: selectedQuestion.step_3_process || "",
+        step_4_conclusion: selectedQuestion.step_4_conclusion || ""
+      };
+
+      const res = await fetch('/api/gemini-fix-latex', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) throw new Error(`서버 연결 오류 (${res.status})`);
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      // 교정된 데이터로 상태 및 폼 업데이트
+      const updatedQuestion = { ...selectedQuestion, ...data.data };
+      
+      setEditForm(prev => ({
+        ...prev,
+        question: data.data.question || prev.question,
+        answer: data.data.answer || prev.answer,
+        step_1_concept: data.data.step_1_concept || prev.step_1_concept,
+        step_2_approach: data.data.step_2_approach || prev.step_2_approach,
+        step_3_process: data.data.step_3_process || prev.step_3_process,
+        step_4_conclusion: data.data.step_4_conclusion || prev.step_4_conclusion,
+      }));
+      
+      setSelectedQuestion(updatedQuestion);
+      setQuestions(prev => prev.map(q => q.question_id === updatedQuestion.question_id ? updatedQuestion : q));
+
+      // DB에 직접 변경사항 저장
+      const { error: dbError } = await supabase.from('question_db').update({
+        question: data.data.question,
+        answer: data.data.answer,
+        step_1_concept: data.data.step_1_concept,
+        step_2_approach: data.data.step_2_approach,
+        step_3_process: data.data.step_3_process,
+        step_4_conclusion: data.data.step_4_conclusion
+      }).eq('question_id', selectedQuestion.question_id);
+
+      if (dbError) throw dbError;
+      
+      await supabase.from('textbook_question').update({ 
+        question: data.data.question, 
+        answer: data.data.answer 
+      }).eq('question_id', selectedQuestion.question_id);
+
+      alert("✅ AI 수식 교정이 완벽하게 적용되어 저장되었습니다!");
+
+    } catch (e: any) {
+      alert("수식 교정 중 오류 발생: " + e.message);
+    } finally {
+      setIsFixingLatex(false);
+    }
+  };
+
   const saveTwinsToDB = async () => {
     const selectedTwinsToSave = generatedTwins.filter(t => t.isSelected !== false);
     if (selectedTwinsToSave.length === 0) return alert("저장할 문항을 하나 이상 체크박스에서 선택해주세요.");
@@ -670,13 +741,13 @@ export function useTaxonomy() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,
-    twinTargetBook, similarTargetBook, 
+    twinTargetBook, similarTargetBook, isFixingLatex, // 🌟 추가됨
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
     normalRoots, trueOrphans, getDescendants,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
     setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
-    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange
+    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex // 🌟 추가됨
   };
 }
