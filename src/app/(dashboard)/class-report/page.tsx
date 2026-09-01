@@ -218,103 +218,131 @@ export default function ClassReportPage() {
     fetchClasses();
   }, []);
 
-  useEffect(() => {
-    if (!selectedClassId) return;
+  // 🌟 [추가] 수업 일지 삭제 함수
+  const handleDeleteLog = async (e: React.MouseEvent, logId: number) => {
+    e.stopPropagation(); // 클릭 이벤트 전파 방지 (리스트가 선택되는 것 방지)
+    
+    if (!confirm("정말 이 수업 일지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) {
+      return;
+    }
 
-    const fetchAssignmentsAndLogs = async () => {
-      setIsLoading(true);
-      try {
-        // 🌟 [수정] 복잡한 과제 연동 제거하고 기본 알림장 내용(homework_desc)만 가져오도록 쿼리 단순화
-        const { data: logData } = await supabase
-          .from('daily_lesson_log')
-          .select('lesson_log_id, actual_date, actual_session_no, instructor_note, homework_desc')
-          .eq('class_id', selectedClassId)
-          .order('actual_date', { ascending: false });
-        
-        setLessonLogs(logData || []);
-        setSelectedLog(null);
+    try {
+      const { error } = await supabase
+        .from('daily_lesson_log')
+        .delete()
+        .eq('lesson_log_id', logId);
 
-        let list: AnalyzedItem[] = [];
-
-        const { data: examData } = await supabase
-          .from('exam_assignment')
-          .select('exam_id, status, created_at, exam_master!inner(title, exam_type, total_questions)')
-          .eq('class_id', selectedClassId);
-
-        if (examData) {
-          const uniqueExams = new Map<string, any>();
-          examData.forEach((a: any) => {
-            if (!uniqueExams.has(a.exam_id)) {
-              uniqueExams.set(a.exam_id, {
-                id: a.exam_id,
-                date: a.created_at,
-                master: Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master,
-                statuses: [a.status]
-              });
-            } else {
-              uniqueExams.get(a.exam_id).statuses.push(a.status);
-            }
-          });
-
-          uniqueExams.forEach((val) => {
-            let type: ReportTabType = 'EXAM';
-            const eType = val.master?.exam_type;
-            if (['과제', '과제프린트'].includes(eType)) type = 'HW';
-            else if (['오답프린트', '오답'].includes(eType)) type = 'PRINT';
-            else if (['오답유사', '과제오답유사'].includes(eType)) type = 'SIMILAR';
-            else if (eType === '미완료과제') type = 'OVERDUE'; 
-
-            const isAllDone = val.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
-
-            list.push({
-              id: val.id,
-              type: type,
-              sourceType: 'EXAM',
-              title: val.master?.title || '제목 없음',
-              date: val.date,
-              totalQ: val.master?.total_questions || 0,
-              status: isAllDone ? '완료' : '진행중'
-            });
-          });
-        }
-
-        const { data: hwData } = await supabase
-          .from('homework_assignment')
-          .select('homework_id, homework_title, created_at, target_questions, student_homework_result(status)')
-          .eq('class_id', selectedClassId)
-          .neq('homework_title', '[시스템] 수업 진도 완료 기록');
-
-        if (hwData) {
-          hwData.forEach((hw: any) => {
-            const tqs = safeParseIds(hw.target_questions);
-            let isAllDone = false;
-            if (hw.student_homework_result && hw.student_homework_result.length > 0) {
-               isAllDone = hw.student_homework_result.every((r: any) => ['제출완료', '채점완료', '완료'].includes(r.status));
-            }
-            list.push({
-              id: String(hw.homework_id),
-              type: 'HW',
-              sourceType: 'TEXTBOOK',
-              title: hw.homework_title || '교재 과제',
-              date: hw.created_at,
-              totalQ: tqs.length || 0,
-              status: isAllDone ? '완료' : '진행중'
-            });
-          });
-        }
-
-        list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-        setAssignments(list);
-        setSelectedItem(null);
-        setMatrixCols([]);
-        setMatrixRows([]);
-      } catch (err) {
-        console.error("리스트 로딩 실패:", err);
-      } finally {
-        setIsLoading(false);
+      if (error) throw error;
+      
+      alert("✅ 성공적으로 삭제되었습니다.");
+      
+      // 삭제 후 목록 다시 불러오기
+      if (selectedLog && selectedLog.lesson_log_id === logId) {
+        setSelectedLog(null); // 우측 뷰어 초기화
       }
-    };
+      fetchAssignmentsAndLogs(); 
+      
+    } catch (err: any) {
+      console.error("삭제 에러:", err);
+      alert("삭제 중 오류가 발생했습니다: " + err.message);
+    }
+  };
 
+  // 기존 fetch 로직을 함수로 분리하여 삭제 후 재사용 가능하도록 조치
+  const fetchAssignmentsAndLogs = async () => {
+    if (!selectedClassId) return;
+    setIsLoading(true);
+    try {
+      const { data: logData } = await supabase
+        .from('daily_lesson_log')
+        .select('lesson_log_id, actual_date, actual_session_no, instructor_note, homework_desc')
+        .eq('class_id', selectedClassId)
+        .order('actual_date', { ascending: false });
+      
+      setLessonLogs(logData || []);
+
+      let list: AnalyzedItem[] = [];
+
+      const { data: examData } = await supabase
+        .from('exam_assignment')
+        .select('exam_id, status, created_at, exam_master!inner(title, exam_type, total_questions)')
+        .eq('class_id', selectedClassId);
+
+      if (examData) {
+        const uniqueExams = new Map<string, any>();
+        examData.forEach((a: any) => {
+          if (!uniqueExams.has(a.exam_id)) {
+            uniqueExams.set(a.exam_id, {
+              id: a.exam_id,
+              date: a.created_at,
+              master: Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master,
+              statuses: [a.status]
+            });
+          } else {
+            uniqueExams.get(a.exam_id).statuses.push(a.status);
+          }
+        });
+
+        uniqueExams.forEach((val) => {
+          let type: ReportTabType = 'EXAM';
+          const eType = val.master?.exam_type;
+          if (['과제', '과제프린트'].includes(eType)) type = 'HW';
+          else if (['오답프린트', '오답'].includes(eType)) type = 'PRINT';
+          else if (['오답유사', '과제오답유사'].includes(eType)) type = 'SIMILAR';
+          else if (eType === '미완료과제') type = 'OVERDUE'; 
+
+          const isAllDone = val.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
+
+          list.push({
+            id: val.id,
+            type: type,
+            sourceType: 'EXAM',
+            title: val.master?.title || '제목 없음',
+            date: val.date,
+            totalQ: val.master?.total_questions || 0,
+            status: isAllDone ? '완료' : '진행중'
+          });
+        });
+      }
+
+      const { data: hwData } = await supabase
+        .from('homework_assignment')
+        .select('homework_id, homework_title, created_at, target_questions, student_homework_result(status)')
+        .eq('class_id', selectedClassId)
+        .neq('homework_title', '[시스템] 수업 진도 완료 기록');
+
+      if (hwData) {
+        hwData.forEach((hw: any) => {
+          const tqs = safeParseIds(hw.target_questions);
+          let isAllDone = false;
+          if (hw.student_homework_result && hw.student_homework_result.length > 0) {
+             isAllDone = hw.student_homework_result.every((r: any) => ['제출완료', '채점완료', '완료'].includes(r.status));
+          }
+          list.push({
+            id: String(hw.homework_id),
+            type: 'HW',
+            sourceType: 'TEXTBOOK',
+            title: hw.homework_title || '교재 과제',
+            date: hw.created_at,
+            totalQ: tqs.length || 0,
+            status: isAllDone ? '완료' : '진행중'
+          });
+        });
+      }
+
+      list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      setAssignments(list);
+      setSelectedItem(null);
+      setMatrixCols([]);
+      setMatrixRows([]);
+    } catch (err) {
+      console.error("리스트 로딩 실패:", err);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  useEffect(() => {
     fetchAssignmentsAndLogs();
   }, [selectedClassId]);
 
@@ -504,7 +532,6 @@ export default function ClassReportPage() {
     }
   };
 
-  // 🌟 [수정] 메인 과제 구조와 완벽히 분리된 알림장 전용 뷰어
   const renderLogView = () => {
     if (!selectedLog) {
       return (
@@ -783,6 +810,15 @@ export default function ClassReportPage() {
                         <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-indigo-200">일지</span>
                         <span className={`text-[10px] font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>{formatDateLabel(log.actual_date)}</span>
                       </div>
+                      
+                      {/* 🌟 [추가] 일지 삭제 버튼 (휴지통 아이콘) */}
+                      <button 
+                        onClick={(e) => handleDeleteLog(e, log.lesson_log_id)}
+                        className="text-slate-300 hover:text-rose-500 transition-colors p-1 rounded-md hover:bg-rose-50"
+                        title="이 일지 삭제하기"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      </button>
                     </div>
                     <div className={`font-extrabold text-[13px] leading-snug line-clamp-2 ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-900' : 'text-slate-800'}`}>
                       {log.actual_session_no ? `${log.actual_session_no}회차 진행` : '수업 일지'}
