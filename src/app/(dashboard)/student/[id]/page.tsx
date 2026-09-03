@@ -43,6 +43,9 @@ export default function StudentDetailPage() {
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
 
   const [activeTab, setActiveTab] = useState<string>("info");
+  
+  // 💡 [핵심 교정] 404 강제 튕김을 막고, 화면 내에서 부드럽게 에러를 보여주기 위한 상태값 추가
+  const [isNotFound, setIsNotFound] = useState(false);
 
   const [student, setStudent] = useState<any>(null);
   const [enrollments, setEnrollments] = useState<any[]>([]);
@@ -153,13 +156,13 @@ export default function StudentDetailPage() {
 
   const loadInitialData = async () => {
     try {
-      // 💡 [핵심 교정] .single() 대신 .maybeSingle()을 사용하여 406 에러(먹통 방지) 원천 차단
       const { data: stuData, error } = await supabase.from("student").select("*, parent(*)").eq("student_id", studentId).maybeSingle();
       
-      // 💡 데이터가 없거나 에러가 났을 때(학생이 삭제되었을 때) 바로 목록으로 튕겨냄
-      if (error || !stuData) {
-        alert("존재하지 않거나 이미 삭제된 학생입니다.");
-        router.replace("/student");
+      if (error) console.error("데이터 로딩 오류:", error);
+
+      // 💡 [핵심 교정] 에러나 빈 데이터 발생 시 강제로 URL을 이동시키지 않고 화면에 안내 팝업 상태만 켭니다.
+      if (!stuData) {
+        setIsNotFound(true);
         return;
       }
 
@@ -437,7 +440,7 @@ export default function StudentDetailPage() {
       ]);
       await supabase.from('student').delete().eq('student_id', studentId);
       alert("✅ 학생 데이터가 완전히 삭제되었습니다.");
-      // 💡 삭제 후 이전 페이지로 돌아갑니다. (필터 유지 등)
+      // 💡 삭제 후 이전 페이지(학생 목록의 필터/검색결과)로 자연스럽게 돌아갑니다.
       router.back(); 
     } catch (error: any) { alert("삭제 실패: " + error.message); }
   };
@@ -603,6 +606,22 @@ export default function StudentDetailPage() {
       </div>
     );
   };
+
+  // 💡 [핵심 교정] 404 강제 튕김을 멈추고 대신 화면 중앙에 안내와 뒤로가기 버튼을 표시합니다.
+  if (isNotFound) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center min-h-[80vh] bg-slate-50 p-10 font-pretendard">
+        <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center max-w-md w-full animate-[fadeIn_0.3s_ease-out]">
+          <div className="text-5xl mb-4">👻</div>
+          <h2 className="text-xl font-black text-slate-800 mb-2">학생을 찾을 수 없습니다.</h2>
+          <p className="text-sm font-bold text-slate-500 mb-6">이미 삭제되었거나 잘못된 접근입니다.</p>
+          <button onClick={() => router.back()} className="px-6 py-3 bg-[#002864] text-white font-bold rounded-lg shadow-sm hover:bg-blue-900 transition-colors w-full">
+            이전 화면으로 돌아가기
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (!student) return <div className="p-10 text-center font-bold text-slate-500">데이터를 불러오는 중입니다...</div>;
 
@@ -1276,7 +1295,7 @@ export default function StudentDetailPage() {
             
             <form onSubmit={handleReEnroll} className="p-5 bg-slate-50 flex flex-col gap-3">
               <div className="text-[11px] font-bold text-slate-600 mb-1 leading-relaxed">
-                <span className="text-emerald-600">[{student.name}]</span> 학생을 다시 재원생으로 전환하고 새로운 반에 배정합니다.
+                <span className="text-emerald-600">[{student?.name}]</span> 학생을 다시 재원생으로 전환하고 새로운 반에 배정합니다.
               </div>
 
               <div>
