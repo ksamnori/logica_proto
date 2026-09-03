@@ -247,7 +247,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
   const [myTenantName, setMyTenantName] = useState<string>(""); 
   const [myDeptName, setMyDeptName] = useState<string>("");
   
-  // 🌟 [추가] RLS 에러 방지를 위해 실제 DB의 UUID tenant_id 보관
   const [myDbTenantId, setMyDbTenantId] = useState<string | null>(null);
 
   const [isChatOpen, setIsChatOpen] = useState(false);
@@ -508,7 +507,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
       
       if (me) {
         setMyDeptName(me.department || ""); 
-        setMyDbTenantId(me.tenant_id || null); // 🌟 실제 DB의 UUID를 저장
+        setMyDbTenantId(me.tenant_id || null); 
 
         if (me.tenant_id) {
           const { data: tenantData } = await supabase.from('academy_tenant').select('tenant_type, name').eq('tenant_id', me.tenant_id).maybeSingle();
@@ -694,7 +693,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
   const loadStaffRooms = async () => {
     try {
-      // 🌟 [수정] SQL의 NULL 비교문제를 해결하기 위해 or 조건문으로 안전하게 필터링
       const { data } = await supabase.from('internal_chat_member')
         .select('room_id, custom_title, internal_chat_room(title, room_type, created_at), last_read_at')
         .eq('instructor_id', instId)
@@ -938,12 +936,8 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     setSelectedInstIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
-  // 🌟 [수정] 방 생성 시 로컬스토리지에서 tenant_id를 강제로 꺼내어 삽입해 RLS 에러 차단
   const handleCreateOrOpenStaffRoom = async (targetInstId: string, targetName: string, targetPos?: string) => {
     try {
-      const activeTenantId = localStorage.getItem("logica_tenant_id"); // 무조건 로컬에서 꺼냄
-      const validTenantId = activeTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : activeTenantId;
-
       if (targetInstId === instId) {
         const { data: myRoomsData } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
         const myRooms = (myRoomsData as unknown as { room_id: string }[]) || [];
@@ -963,11 +957,19 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
         }
         
         const titleWithPos = `${targetName} (나)`;
-        const roomPayload: any = { room_type: 'DIRECT', title: titleWithPos, created_by: instId };
-        if (validTenantId) roomPayload.tenant_id = validTenantId; // 안전한 tenant_id 주입
+        const roomPayload: any = { room_type: 'DIRECT', title: titleWithPos };
+        if (myDbTenantId) roomPayload.tenant_id = myDbTenantId;
 
-        const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload).select().single();
+        let { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload).select().single();
+        
+        if (roomError && roomError.message.includes('security')) {
+           const fallbackRes = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos }).select().single();
+           newRoomData = fallbackRes.data;
+           roomError = fallbackRes.error;
+        }
+
         if (roomError) throw roomError;
+        
         const newRoom = newRoomData as unknown as { room_id: string };
         if (newRoom) {
           await supabase.from('internal_chat_member').insert([{ room_id: newRoom.room_id, instructor_id: instId }]);
@@ -990,11 +992,19 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
       if (!roomId) {
         const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
-        const roomPayload2: any = { room_type: 'DIRECT', title: titleWithPos, created_by: instId };
-        if (validTenantId) roomPayload2.tenant_id = validTenantId; // 안전한 tenant_id 주입
+        const roomPayload2: any = { room_type: 'DIRECT', title: titleWithPos };
+        if (myDbTenantId) roomPayload2.tenant_id = myDbTenantId;
 
-        const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload2).select().single();
+        let { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload2).select().single();
+        
+        if (roomError && roomError.message.includes('security')) {
+           const fallbackRes = await supabase.from('internal_chat_room').insert({ room_type: 'DIRECT', title: titleWithPos }).select().single();
+           newRoomData = fallbackRes.data;
+           roomError = fallbackRes.error;
+        }
+
         if (roomError) throw roomError;
+        
         const newRoom = newRoomData as unknown as { room_id: string };
         if (newRoom) {
           roomId = newRoom.room_id;
@@ -1005,7 +1015,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     } catch (e: any) { alert("방 생성 에러: " + e.message); }
   };
 
-  // 🌟 [수정] 그룹 방 생성 시 로컬스토리지에서 tenant_id를 강제로 꺼내어 삽입해 RLS 에러 차단
   const handleStartGroupChat = async () => {
     if (selectedInstIds.length === 0) return;
     
@@ -1018,13 +1027,17 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     if (!roomName) return;
 
     try {
-      const activeTenantId = localStorage.getItem("logica_tenant_id"); // 무조건 로컬에서 꺼냄
-      const validTenantId = activeTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : activeTenantId;
+      const roomPayload: any = { room_type: 'GROUP', title: roomName };
+      if (myDbTenantId) roomPayload.tenant_id = myDbTenantId;
 
-      const roomPayload: any = { room_type: 'GROUP', title: roomName, created_by: instId };
-      if (validTenantId) roomPayload.tenant_id = validTenantId; // 안전한 tenant_id 주입
+      let { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload).select().single();
+      
+      if (roomError && roomError.message.includes('security')) {
+           const fallbackRes = await supabase.from('internal_chat_room').insert({ room_type: 'GROUP', title: roomName }).select().single();
+           newRoomData = fallbackRes.data;
+           roomError = fallbackRes.error;
+      }
 
-      const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload).select().single();
       if (roomError) throw roomError;
 
       const newRoom = newRoomData as unknown as { room_id: string };
@@ -1098,7 +1111,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     }
   };
 
-  // 🌟 [수정] 방 목록 나가기/삭제 기능. (is_active null 필터링 해결)
   const deleteStaffChatRoom = async (roomId: string, e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     if (!confirm("⚠️ 이 대화방을 목록에서 삭제(나가기) 하시겠습니까?")) return;
@@ -1121,7 +1133,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     }
   };
 
-  // 🌟 [수정] 원래 규격대로 복구 (tenant_id 제거)
   const handleStaffImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !activeStaffRoomId) return;
@@ -1144,7 +1155,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
       const contentString = isImage ? `[IMAGE]${publicUrl}` : `[FILE]${publicUrl}`;
 
-      // 원래 스키마 구조에 맞게 room_id, sender_id, content 만 전송
       const { data: newMsg, error } = await supabase.from("internal_chat_message").insert({ 
         room_id: activeStaffRoomId, 
         sender_id: instId, 
@@ -1167,13 +1177,11 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     }
   };
 
-  // 🌟 [수정] 원래 규격대로 복구 (tenant_id 제거)
   const sendStaffMsg = async () => {
     const text = staffChatInput.trim();
     if (!text || !activeStaffRoomId) return;
     setStaffChatInput("");
     try {
-      // 원래 스키마 구조에 맞게 room_id, sender_id, content 만 전송
       const { data: newMsg, error } = await supabase.from("internal_chat_message").insert({ 
         room_id: activeStaffRoomId, 
         sender_id: instId, 
@@ -1732,7 +1740,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                             
                             <div className={`flex items-end gap-1.5 ${msg.sender_id === instId ? 'flex-row-reverse' : 'flex-row'}`}>
                               <div className={`px-3.5 py-2 rounded-2xl shadow-sm text-[13px] ${msg.sender_id === instId ? 'bg-slate-700 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
-                                {/* 🌟 사내 메신저 사진 및 파일 렌더링 */}
                                 {msg.content?.startsWith("[IMAGE]") ? (
                                   <img src={msg.content.replace("[IMAGE]", "")} alt="uploaded" className="max-w-[180px] sm:max-w-[220px] rounded-lg border border-slate-200/50 cursor-pointer object-cover my-1" onClick={() => window.open(msg.content.replace("[IMAGE]", ""), "_blank")} />
                                 ) : msg.content?.startsWith("[FILE]") ? (
