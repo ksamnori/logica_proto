@@ -226,14 +226,13 @@ export default function StudentEditModal({
 
     setIsSaving(true);
     try {
-      const { data: enrs } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", studentId);
-      if (enrs && enrs.length > 0) {
-        const enrIds = enrs.map(e => e.enrollment_id);
-        await supabase.from("attendance").delete().in("enrollment_id", enrIds);
-      }
-      
+      // 🌟 [핵심 수정] 출결(attendance) 기록을 student_id를 기준으로 가장 먼저 완벽하게 날려버립니다.
+      await supabase.from("attendance").delete().eq("student_id", studentId);
+
+      // 그 다음 수강 배정(enrollment) 기록을 안전하게 삭제합니다.
       await supabase.from("enrollment").delete().eq("student_id", studentId);
 
+      // 나머지 종속 데이터 병렬 삭제 (attendance 제외)
       await Promise.all([
         supabase.from("student_answer").delete().eq("student_id", studentId),
         supabase.from("student_exam_result").delete().eq("student_id", studentId),
@@ -260,6 +259,7 @@ export default function StudentEditModal({
         supabase.from("shop_purchase").delete().eq("student_id", studentId)
       ]);
 
+      // 모든 방해물이 제거된 후 학생 본체 삭제
       const { error: delErr } = await supabase.from("student").delete().eq("student_id", studentId);
       if (delErr) throw delErr;
 
@@ -383,7 +383,6 @@ export default function StudentEditModal({
                   <select value={editForm.newClassId} onChange={e => setEditForm({...editForm, newClassId: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864]">
                     <option value="">{filteredClasses.length === 0 ? "해당 레벨의 반이 없습니다" : "반 선택"}</option>
                     {filteredClasses.map(c => {
-                      // 🌟 핵심 수정: name이 아닌 code(풀코드)를 참조하여 마지막 4자리 숫자만 자름
                       const fullCode = c.code || c.name || '';
                       const displayName = fullCode.replace(/\d{4}$/, '').trim();
                       const instName = c.instructor?.name || '미정';
