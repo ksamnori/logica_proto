@@ -55,6 +55,9 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
   // 2. 필터링된 결과 연산
   const filteredSearchData = useMemo(() => {
     return allStudentsData.filter(s => {
+      // 💡 [핵심 추가] 이름에 '테스트'가 들어간 원생은 리스트 노출에서 완전 제외합니다.
+      if ((s.name || '').includes('테스트')) return false;
+
       if (searchStatusFilter !== 'all' && s.status !== searchStatusFilter) return false;
       if (searchGradeFilter !== 'all' && s.grade !== searchGradeFilter) return false;
       

@@ -13,7 +13,6 @@ import ClassDetailModal from "@/components/admin/ClassDetailModal";
 import ClassVacancyChart from "@/components/admin/ClassVacancyChart";
 import InstructorPerformance from "@/components/admin/InstructorPerformance";
 
-// 🌟 알림톡 및 일반문자 액션 임포트
 import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "@/app/actions/alimtalk";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
@@ -55,16 +54,15 @@ export default function AdminDashboardPage() {
   const [classStudents, setClassStudents] = useState<any[]>([]);
   const [classSchedules, setClassSchedules] = useState<any[]>([]);
 
-  // 🌟 발송 대기열 상태 (로컬스토리지 연동)
   const [queuedMessages, setQueuedMessages] = useState<any[]>([]);
-  const [isQueueLoaded, setIsQueueLoaded] = useState(false); // 로딩 확인용
+  const [isQueueLoaded, setIsQueueLoaded] = useState(false);
   const [isSendingAlimtalk, setIsSendingAlimtalk] = useState(false);
   
   const [bulkType, setBulkType] = useState('schedule');
   const [bulkTarget, setBulkTarget] = useState('all');
   const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
 
-  // 🌟 [추가] 1. 페이지 접속 시 로컬 스토리지에서 대기열 복구
+  // 💡 [핵심] 페이지 접속 시 로컬 스토리지에서 대기열 복구
   useEffect(() => {
     const savedQueue = localStorage.getItem("logica_queued_messages");
     if (savedQueue) {
@@ -77,7 +75,7 @@ export default function AdminDashboardPage() {
     setIsQueueLoaded(true);
   }, []);
 
-  // 🌟 [추가] 2. 대기열에 변동이 생길 때마다 로컬 스토리지에 자동 저장
+  // 💡 [핵심] 대기열 상태가 변경될 때마다 로컬 스토리지 동기화
   useEffect(() => {
     if (isQueueLoaded) {
       localStorage.setItem("logica_queued_messages", JSON.stringify(queuedMessages));
@@ -439,7 +437,6 @@ export default function AdminDashboardPage() {
 
     if (targets.length === 0) return alert('발송 대상(재원생)이 없습니다.');
 
-    // 🌟 [수정] 타입스크립트가 안심할 수 있도록 any[] 명시
     const newMessages: any[] = targets.map(student => {
       const parentInfo = unwrap(student.parent);
       const parentPhone = parentInfo?.phone;
@@ -479,7 +476,6 @@ export default function AdminDashboardPage() {
     }).filter(Boolean);
 
     setQueuedMessages(prev => {
-      // 🌟 [수정] newMsg 파라미터에도 any를 명시하여 null 에러 방어
       const uniqueNew = newMessages.filter((newMsg: any) => !prev.some(m => m.id === newMsg.id));
       return [...prev, ...uniqueNew];
     });
@@ -662,12 +658,8 @@ export default function AdminDashboardPage() {
             </div>
           </div>
 
-          {/* ==========================================
-              🌟 3. 알림톡 센터 (3-Column Layout)
-              ========================================== */}
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             
-            {/* COLUMN 1: 메시지 작성 폼 */}
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">📝 단체 알림톡 / 문자 작성</h3>
@@ -706,7 +698,6 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* COLUMN 2: 알림톡 대기열 */}
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
@@ -756,7 +747,6 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            {/* COLUMN 3: 실시간 피드 (1줄 렌더링) */}
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
