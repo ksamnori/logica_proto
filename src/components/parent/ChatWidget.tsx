@@ -11,7 +11,7 @@ const getProfileImageUrl = (path: string | null | undefined) => {
   return data.publicUrl;
 };
 
-// 🌟 원장, 부원장, 실장을 제외한 직책을 '선생님'으로 표기
+// 원장, 부원장, 실장을 제외한 직책을 '선생님'으로 표기
 const formatPosition = (pos: string | null | undefined) => {
   if (!pos) return "선생님";
   if (pos.includes("부원장")) return "부원장";
@@ -36,6 +36,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
+  // 🌟 동적 높이 조절 상태 (키보드 대응)
+  const [dynamicMaxHeight, setDynamicMaxHeight] = useState('80dvh');
+
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -54,6 +57,40 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const panelPos = useRef({ x: 0, y: 0 });
   const panelDrag = useRef({ isDragging: false, startX: 0, startY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
+
+  // 🌟 키보드가 올라올 때 채팅창 높이 자동 계산 로직
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.visualViewport) {
+        const isMobile = window.innerWidth < 640;
+        const bottomMargin = isMobile ? 100 : 120; // 떠있는 버튼의 위치(bottom-90) 고려
+        const availableHeight = window.visualViewport.height - bottomMargin;
+        setDynamicMaxHeight(`${availableHeight}px`);
+      }
+    };
+    
+    if (typeof window !== 'undefined' && window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
+      window.visualViewport.addEventListener('scroll', handleResize); // iOS 대응
+      handleResize();
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined' && window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+        window.visualViewport.removeEventListener('scroll', handleResize);
+      }
+    };
+  }, []);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  // 메시지 변동 시 자동으로 맨 아래로 이동
+  useEffect(() => { 
+    scrollToBottom(); 
+  }, [chatMessages, isTyping]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -138,8 +175,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       if (activeChannelRef.current) { supabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
     };
   }, [parentId]);
-
-  useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages, isTyping]);
 
   const loadAvailableStaff = async () => {
     try {
@@ -291,7 +326,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       const { data } = supabase.storage.from('system_images').getPublicUrl(filePath);
       const publicUrl = data.publicUrl;
 
-      // 🌟 이미지 외 문서 파일이면 [FILE] 태그로 전송
       const contentString = isImage ? `[IMAGE]${publicUrl}` : `[FILE]${publicUrl}`;
 
       const { data: newMsg } = await supabase.from("chat_message").insert({ 
@@ -344,7 +378,16 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      <div ref={panelRef} className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[550px] max-h-[80vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} style={{ transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px) scale(${isChatOpenRef.current ? 1 : 0.95})`, transformOrigin: 'bottom right' }}>
+      {/* 🌟 패널 클래스에서 max-h-[80vh] 제거 및 style 속성에 동적 maxHeight 추가 */}
+      <div 
+        ref={panelRef} 
+        className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[550px] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} 
+        style={{ 
+          transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px) scale(${isChatOpenRef.current ? 1 : 0.95})`, 
+          transformOrigin: 'bottom right',
+          maxHeight: dynamicMaxHeight
+        }}
+      >
         <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 cursor-move touch-none">
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
@@ -385,7 +428,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                     const sorted = (r.chat_message || []).sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
                     let preview = sorted.length > 0 ? sorted[0].content : '내역 없음';
                     
-                    // 🌟 파일/이미지 프리뷰 포맷팅 업데이트
                     if (preview.startsWith("[IMAGE]")) preview = "📷 사진을 보냈습니다.";
                     else if (preview.startsWith("[FILE]")) preview = "📎 첨부파일을 보냈습니다.";
                     else if (preview.length > 18) preview = preview.substring(0, 18) + '...';
@@ -436,7 +478,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                       )}
 
                       <div className={`px-3.5 py-2 rounded-2xl shadow-sm font-medium text-[13px] leading-snug break-words ${msg.sender_type === "parent" ? "bg-[#fef01b] text-slate-800 rounded-tr-sm" : "bg-white text-slate-800 rounded-tl-sm border border-slate-100"}`}>
-                        {/* 🌟 메시지 타입별 렌더링 분기: 파일, 이미지, 일반 텍스트 */}
                         {msg.content?.startsWith("[IMAGE]") ? (
                           <img src={msg.content.replace("[IMAGE]", "")} alt="uploaded" className="max-w-[180px] sm:max-w-[220px] rounded-lg border border-slate-200/50 cursor-pointer object-cover my-1" onClick={() => window.open(msg.content.replace("[IMAGE]", ""), "_blank")} />
                         ) : msg.content?.startsWith("[FILE]") ? (
@@ -474,7 +515,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
               <div ref={messagesEndRef} />
             </div>
             
-            {/* 🌟 파일 전송 허용 (accept 속성 제거) */}
             <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2">
               <input type="file" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
               <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-[#002864] transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
@@ -484,7 +524,16 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
+              {/* 🌟 텍스트 박스에 onFocus 핸들러 추가: 입력 시 부드럽게 하단으로 스크롤 */}
+              <textarea 
+                rows={1} 
+                value={chatInput} 
+                onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
+                onFocus={() => setTimeout(scrollToBottom, 300)}
+                onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
+                className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
+                placeholder="메시지를 입력하세요..." 
+              />
               <button onClick={sendParentMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
             </div>
           </div>
