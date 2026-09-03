@@ -118,11 +118,11 @@ export default function StudentDetailPage() {
   }, [studentId]);
 
   useEffect(() => {
-    if (studentId) {
+    if (studentId && student) {
       loadConsultLogs();
       loadAttendance();
     }
-  }, [studentId, calYear, calMonth]);
+  }, [studentId, student, calYear, calMonth]);
 
   useEffect(() => {
     if (activeTab === "billing") loadBillings();
@@ -153,7 +153,16 @@ export default function StudentDetailPage() {
 
   const loadInitialData = async () => {
     try {
-      const { data: stuData } = await supabase.from("student").select("*, parent(*)").eq("student_id", studentId).single();
+      // 💡 [핵심 교정] .single() 대신 .maybeSingle()을 사용하여 406 에러(먹통 방지) 원천 차단
+      const { data: stuData, error } = await supabase.from("student").select("*, parent(*)").eq("student_id", studentId).maybeSingle();
+      
+      // 💡 데이터가 없거나 에러가 났을 때(학생이 삭제되었을 때) 바로 목록으로 튕겨냄
+      if (error || !stuData) {
+        alert("존재하지 않거나 이미 삭제된 학생입니다.");
+        router.replace("/student");
+        return;
+      }
+
       setStudent(stuData);
 
       const { data: enrollData } = await supabase.from("enrollment")
@@ -170,7 +179,6 @@ export default function StudentDetailPage() {
   const loadClasses = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     
-    // 🌟 풀코드(code)와 강사이름(instructor)을 데이터베이스에서 명시적으로 가져오도록 쿼리 수정
     let query = supabase.from("class")
       .select("class_id, code, name, level_name, instructor(name)")
       .neq("status", "종료")
@@ -429,7 +437,8 @@ export default function StudentDetailPage() {
       ]);
       await supabase.from('student').delete().eq('student_id', studentId);
       alert("✅ 학생 데이터가 완전히 삭제되었습니다.");
-      router.push("/student");
+      // 💡 삭제 후 이전 페이지로 돌아갑니다. (필터 유지 등)
+      router.back(); 
     } catch (error: any) { alert("삭제 실패: " + error.message); }
   };
 
@@ -664,7 +673,7 @@ export default function StudentDetailPage() {
               <div className="flex flex-col lg:flex-row gap-6 animate-[fadeIn_0.2s_ease-out] h-full">
                 <div className="flex-1 min-w-0 flex flex-col gap-4">
                   
-                  {/* 🌟 [글씨 크기 약간 향상] 학생/학부모/수강이력 패널 */}
+                  {/* 🌟 학생/학부모/수강이력 패널 */}
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
                     <h3 className="text-[12px] font-black text-slate-600 mb-3 flex items-center gap-1.5"><span className="w-1 h-3.5 bg-[#0ea5e9] rounded-full"></span>학생 정보</h3>
                     <div className="grid grid-cols-3 gap-3">
@@ -778,7 +787,6 @@ export default function StudentDetailPage() {
               <div className="flex flex-col lg:flex-row gap-6 animate-[fadeIn_0.3s_ease-out] h-full">
                 <div className="flex-1 min-w-0 flex flex-col h-full gap-4">
                   
-                  {/* 이전달/이번달 듀얼 통계 패널 */}
                   <div className="bg-slate-50 rounded-xl p-5 border border-slate-100 shadow-sm shrink-0">
                     <div className="flex flex-col xl:flex-row gap-4">
                       <div className="flex-1 opacity-70">

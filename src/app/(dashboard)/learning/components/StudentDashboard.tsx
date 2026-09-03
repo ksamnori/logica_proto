@@ -11,7 +11,7 @@ interface StudentDashboardProps {
   handleViewChange: (view: any) => void;
   handleStudentClick: (studentId: string, studentName: string, classId: string, className: string) => void;
   groupedClasses: Record<string, any[]>;
-  studentStatsMap: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; overdueQ: number; }>;
+  studentStatsMap: Record<string, { examC: number; examQ: number; hwC: number; hwQ: number; printC: number; printQ: number; similarC: number; similarQ: number; overdueC: number; overdueQ: number; }>;
   LEVEL_ORDER: string[];
 }
 
@@ -21,11 +21,11 @@ export default function StudentDashboard({
 
   const actionList = useMemo(() => {
     const list: any[] = [];
-    let totalExam = 0;
-    let totalHw = 0;
-    let totalPrint = 0;
-    let totalSimilar = 0;
-    let totalOverdue = 0;
+    let totalExamC = 0, totalExamQ = 0;
+    let totalHwC = 0, totalHwQ = 0;
+    let totalPrintC = 0, totalPrintQ = 0;
+    let totalSimilarC = 0, totalSimilarQ = 0;
+    let totalOverdueC = 0, totalOverdueQ = 0;
     
     const processedStudentIds = new Set<string>();
 
@@ -37,11 +37,10 @@ export default function StudentDashboard({
         cls.students.forEach((stu: any) => {
           if (processedStudentIds.has(stu.id)) return;
 
-          // 🌟 5단 분류 스탯 매핑 적용
-          const stats = studentStatsMap[`${stu.id}_ALL`] || { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
-          const totalPending = stats.examQ + stats.hwQ + stats.printQ + stats.similarQ + stats.overdueQ;
+          const stats = studentStatsMap[`${stu.id}_ALL`] || { examC: 0, examQ: 0, hwC: 0, hwQ: 0, printC: 0, printQ: 0, similarC: 0, similarQ: 0, overdueC: 0, overdueQ: 0 };
+          const totalPendingCount = stats.examC + stats.hwC + stats.printC + stats.similarC + stats.overdueC;
           
-          if (totalPending > 0) {
+          if (totalPendingCount > 0) {
             processedStudentIds.add(stu.id); 
             list.push({
               id: stu.id,
@@ -51,27 +50,27 @@ export default function StudentDashboard({
               level: lvl,
               stats
             });
-            totalExam += stats.examQ;
-            totalHw += stats.hwQ;
-            totalPrint += stats.printQ;
-            totalSimilar += stats.similarQ;
-            totalOverdue += stats.overdueQ;
+            totalExamC += stats.examC; totalExamQ += stats.examQ;
+            totalHwC += stats.hwC; totalHwQ += stats.hwQ;
+            totalPrintC += stats.printC; totalPrintQ += stats.printQ;
+            totalSimilarC += stats.similarC; totalSimilarQ += stats.similarQ;
+            totalOverdueC += stats.overdueC; totalOverdueQ += stats.overdueQ;
           }
         });
       });
     });
 
     list.sort((a, b) => {
-      const aTotal = a.stats.examQ + a.stats.hwQ + a.stats.printQ + a.stats.similarQ + a.stats.overdueQ;
-      const bTotal = b.stats.examQ + b.stats.hwQ + b.stats.printQ + b.stats.similarQ + b.stats.overdueQ;
+      const aTotal = a.stats.examC + a.stats.hwC + a.stats.printC + a.stats.similarC + a.stats.overdueC;
+      const bTotal = b.stats.examC + b.stats.hwC + b.stats.printC + b.stats.similarC + b.stats.overdueC;
       if (bTotal !== aTotal) return bTotal - aTotal;
       return a.name.localeCompare(b.name);
     });
 
-    return { list, totalExam, totalHw, totalPrint, totalSimilar, totalOverdue };
+    return { list, totalExamC, totalExamQ, totalHwC, totalHwQ, totalPrintC, totalPrintQ, totalSimilarC, totalSimilarQ, totalOverdueC, totalOverdueQ };
   }, [groupedClasses, studentStatsMap, LEVEL_ORDER, currentView]);
 
-  const { list, totalExam, totalHw, totalPrint, totalSimilar, totalOverdue } = actionList;
+  const { list, totalExamC, totalExamQ, totalHwC, totalHwQ, totalPrintC, totalPrintQ, totalSimilarC, totalSimilarQ, totalOverdueC, totalOverdueQ } = actionList;
 
   return (
     <div className="flex flex-col h-full bg-slate-50/50">
@@ -91,27 +90,32 @@ export default function StudentDashboard({
           </p>
         </div>
         
-        {/* 🌟 5분류 요약 박스 (미완료 추가 및 레이아웃 최적화) */}
+        {/* 🌟 건수 중심 + 하단 문항수 표시 UI */}
         <div className="flex gap-3 overflow-x-auto pb-1">
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 시험</span>
-            <span className="text-2xl font-black text-blue-700">{totalExam}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-2xl font-black text-blue-700">{totalExamC}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-[10px] font-bold text-slate-400 mt-0.5">총 {totalExamQ}문항</span>
           </div>
           <div className="bg-amber-50 border border-amber-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-amber-600 mb-1">📝 과제</span>
-            <span className="text-2xl font-black text-amber-700">{totalHw}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-2xl font-black text-amber-700">{totalHwC}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-[10px] font-bold text-slate-400 mt-0.5">총 {totalHwQ}문항</span>
           </div>
           <div className="bg-rose-50 border border-rose-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-rose-600 mb-1">⏰ 미완료</span>
-            <span className="text-2xl font-black text-rose-700">{totalOverdue}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-2xl font-black text-rose-700">{totalOverdueC}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-[10px] font-bold text-slate-400 mt-0.5">총 {totalOverdueQ}문항</span>
           </div>
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-emerald-600 mb-1">❌ 오답</span>
-            <span className="text-2xl font-black text-emerald-700">{totalPrint}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-2xl font-black text-emerald-700">{totalPrintC}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-[10px] font-bold text-slate-400 mt-0.5">총 {totalPrintQ}문항</span>
           </div>
           <div className="bg-violet-50 border border-violet-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
             <span className="text-[11px] font-extrabold text-violet-600 mb-1">🔄 유사</span>
-            <span className="text-2xl font-black text-violet-700">{totalSimilar}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-2xl font-black text-violet-700">{totalSimilarC}<span className="text-sm ml-0.5">건</span></span>
+            <span className="text-[10px] font-bold text-slate-400 mt-0.5">총 {totalSimilarQ}문항</span>
           </div>
         </div>
       </div>
@@ -154,30 +158,45 @@ export default function StudentDashboard({
                       {stu.name}
                     </td>
                     
-                    {/* 🌟 5단 분류 스탯 배지 렌더링 */}
+                    {/* 🌟 테이블 배지 UI 변경 (건수 뱃지 + 하단 회색 문항수) */}
                     <td className="py-3.5 px-3 text-center">
-                      {stu.stats.examQ > 0 ? (
-                        <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-blue-200">{stu.stats.examQ}</span>
+                      {stu.stats.examC > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-7 h-7 rounded-full font-black text-xs shadow-sm border border-blue-200">{stu.stats.examC}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{stu.stats.examQ}문항</span>
+                        </div>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     <td className="py-3.5 px-3 text-center">
-                      {stu.stats.hwQ > 0 ? (
-                        <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-amber-200">{stu.stats.hwQ}</span>
+                      {stu.stats.hwC > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-7 h-7 rounded-full font-black text-xs shadow-sm border border-amber-200">{stu.stats.hwC}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{stu.stats.hwQ}문항</span>
+                        </div>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     <td className="py-3.5 px-3 text-center">
-                      {stu.stats.overdueQ > 0 ? (
-                        <span className="inline-flex items-center justify-center bg-rose-100 text-rose-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-rose-200">{stu.stats.overdueQ}</span>
+                      {stu.stats.overdueC > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center justify-center bg-rose-100 text-rose-700 w-7 h-7 rounded-full font-black text-xs shadow-sm border border-rose-200">{stu.stats.overdueC}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{stu.stats.overdueQ}문항</span>
+                        </div>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     <td className="py-3.5 px-3 text-center">
-                      {stu.stats.printQ > 0 ? (
-                        <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-emerald-200">{stu.stats.printQ}</span>
+                      {stu.stats.printC > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-7 h-7 rounded-full font-black text-xs shadow-sm border border-emerald-200">{stu.stats.printC}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{stu.stats.printQ}문항</span>
+                        </div>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     <td className="py-3.5 px-3 text-center">
-                      {stu.stats.similarQ > 0 ? (
-                        <span className="inline-flex items-center justify-center bg-violet-100 text-violet-700 w-8 h-8 rounded-full font-black text-sm shadow-sm border border-violet-200">{stu.stats.similarQ}</span>
+                      {stu.stats.similarC > 0 ? (
+                        <div className="flex flex-col items-center gap-1">
+                          <span className="inline-flex items-center justify-center bg-violet-100 text-violet-700 w-7 h-7 rounded-full font-black text-xs shadow-sm border border-violet-200">{stu.stats.similarC}</span>
+                          <span className="text-[10px] text-slate-400 font-bold">{stu.stats.similarQ}문항</span>
+                        </div>
                       ) : <span className="text-slate-300 font-medium text-xs">-</span>}
                     </td>
                     

@@ -20,7 +20,7 @@ export default function StudentCard({ student }: { student: any }) {
   const [lessonLogs, setLessonLogs] = useState<any[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
 
-  // 🌟 토스트 팝업 상태 관리
+  // 토스트 팝업 상태 관리
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -108,7 +108,6 @@ export default function StudentCard({ student }: { student: any }) {
           }
 
           return (
-            // 🌟 토스트 팝업 함수 연결
             <button 
               key={p} 
               onClick={() => showToast(title)}
@@ -121,8 +120,8 @@ export default function StudentCard({ student }: { student: any }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden font-pretendard relative">
-      <div className="p-6 border-b border-slate-100 flex flex-col gap-3">
+    <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden font-pretendard relative max-w-full">
+      <div className="p-5 sm:p-6 border-b border-slate-100 flex flex-col gap-3">
         <div className="flex justify-between items-center">
           <div className="flex items-center gap-2">
             <span className="text-xl font-black text-slate-800">{student.name}</span>
@@ -141,18 +140,22 @@ export default function StudentCard({ student }: { student: any }) {
           {currentClass?.class_schedule && currentClass.class_schedule.length > 0 && (
             <div className="flex justify-between text-xs font-bold">
               <span className="text-slate-500">시간표</span>
-              <span className="text-slate-700">
+              <span className="text-slate-700 tabular-nums text-right break-words max-w-[65%] leading-relaxed">
                 {currentClass.class_schedule.map((sc: any) => {
+                   // 🌟 [수정] 시작 시간과 종료 시간을 모두 포맷팅해서 출력
                    const sTime = sc.start_time?.substring(0, 5) || "";
-                   return `${sc.day_of_week} ${sTime}`;
-                }).join(", ")}
+                   const eTime = sc.end_time?.substring(0, 5) || "";
+                   const timeString = eTime ? `${sTime} ~ ${eTime}` : sTime;
+                   return `${sc.day_of_week} ${timeString}`;
+                }).join(" / ")}
               </span>
             </div>
           )}
         </div>
       </div>
 
-      <div className="flex px-6 pt-4 border-b border-slate-100 gap-2 overflow-x-auto no-scrollbar">
+      {/* 🌟 [수정] 탭 너비와 패딩을 줄여 한 화면에 다 들어가도록 조절 (px-3로 감소, gap-1.5, text-[11px]) */}
+      <div className="flex px-4 sm:px-6 pt-4 border-b border-slate-100 gap-1.5 overflow-x-auto no-scrollbar justify-start">
         {[
           { id: "attendance", label: "출결" },
           { id: "progress", label: "진도" },
@@ -164,7 +167,7 @@ export default function StudentCard({ student }: { student: any }) {
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as any)}
-            className={`px-4 py-2 text-xs font-extrabold rounded-full transition-all shrink-0 border ${
+            className={`px-3 py-1.5 text-[11px] font-extrabold rounded-full transition-all shrink-0 border ${
               activeTab === tab.id
                 ? "bg-[#002864] text-white border-[#002864] shadow-sm"
                 : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
@@ -175,7 +178,7 @@ export default function StudentCard({ student }: { student: any }) {
         ))}
       </div>
 
-      <div className="p-6 bg-slate-50/50 min-h-[400px]">
+      <div className="p-5 sm:p-6 bg-slate-50/50 min-h-[400px]">
         
         {activeTab === "attendance" && (
           <div className="animate-[fadeIn_0.2s_ease-out]">
@@ -359,7 +362,7 @@ export default function StudentCard({ student }: { student: any }) {
 
       {/* 🌟 토스트 팝업 UI */}
       {toastMessage && (
-        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 bg-slate-800/90 text-white px-5 py-2.5 rounded-full text-[13px] font-bold shadow-lg z-[9999] pointer-events-none transition-all animate-[fadeIn_0.2s_ease-out]">
+        <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 w-max max-w-[90%] bg-slate-800/90 text-white px-5 py-2.5 rounded-full text-[13px] font-bold shadow-lg z-[9999] pointer-events-none transition-all animate-[fadeIn_0.2s_ease-out]">
           📖 {toastMessage}
         </div>
       )}

@@ -193,23 +193,26 @@ export default function LearningPage() {
   };
 
   const studentStatsMap = useMemo(() => {
-    const map: Record<string, { examQ: number; hwQ: number; printQ: number; similarQ: number; overdueQ: number }> = {};
+    // 🌟 [수정] 건수(cCount)와 문항수(qCount)를 분리해서 누적하도록 변경
+    const map: Record<string, { examC: number; examQ: number; hwC: number; hwQ: number; printC: number; printQ: number; similarC: number; similarQ: number; overdueC: number; overdueQ: number }> = {};
     currentStats.forEach(e => {
       let statClassId = e.class_id || 'UNKNOWN';
       const key = `${e.student_id}_${statClassId}`;
       const globalKey = `${e.student_id}_ALL`;
-      if (!map[key]) map[key] = { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
-      if (!map[globalKey]) map[globalKey] = { examQ: 0, hwQ: 0, printQ: 0, similarQ: 0, overdueQ: 0 };
+      
+      if (!map[key]) map[key] = { examC: 0, examQ: 0, hwC: 0, hwQ: 0, printC: 0, printQ: 0, similarC: 0, similarQ: 0, overdueC: 0, overdueQ: 0 };
+      if (!map[globalKey]) map[globalKey] = { examC: 0, examQ: 0, hwC: 0, hwQ: 0, printC: 0, printQ: 0, similarC: 0, similarQ: 0, overdueC: 0, overdueQ: 0 };
       
       const statusStr = e.status || '미제출';
       const isPending = ['미제출', '진행중', '미응시', '응시전', '응시중'].includes(statusStr);
+      
       if (isPending) { 
         const qCount = e.qCount || 0;
-        if (e.type === 'EXAM') { map[key].examQ += qCount; map[globalKey].examQ += qCount; }
-        else if (e.type === 'HW') { map[key].hwQ += qCount; map[globalKey].hwQ += qCount; }
-        else if (e.type === 'PRINT') { map[key].printQ += qCount; map[globalKey].printQ += qCount; }
-        else if (e.type === 'SIMILAR') { map[key].similarQ += qCount; map[globalKey].similarQ += qCount; }
-        else if (e.type === 'OVERDUE') { map[key].overdueQ += qCount; map[globalKey].overdueQ += qCount; } 
+        if (e.type === 'EXAM') { map[key].examC += 1; map[key].examQ += qCount; map[globalKey].examC += 1; map[globalKey].examQ += qCount; }
+        else if (e.type === 'HW') { map[key].hwC += 1; map[key].hwQ += qCount; map[globalKey].hwC += 1; map[globalKey].hwQ += qCount; }
+        else if (e.type === 'PRINT') { map[key].printC += 1; map[key].printQ += qCount; map[globalKey].printC += 1; map[globalKey].printQ += qCount; }
+        else if (e.type === 'SIMILAR') { map[key].similarC += 1; map[key].similarQ += qCount; map[globalKey].similarC += 1; map[globalKey].similarQ += qCount; }
+        else if (e.type === 'OVERDUE') { map[key].overdueC += 1; map[key].overdueQ += qCount; map[globalKey].overdueC += 1; map[globalKey].overdueQ += qCount; } 
       }
     });
     return map;

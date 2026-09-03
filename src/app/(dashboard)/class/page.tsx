@@ -8,6 +8,15 @@ import ClassEditModal from "@/components/class/ClassEditModal";
 
 const DAYS = ['월', '화', '수', '목', '금', '토'];
 
+const WD_START_HOUR = 14; 
+const END_HOUR = 22; 
+const ROW_COUNT = END_HOUR - WD_START_HOUR; 
+
+const SAT_START_HOUR = 9; 
+
+const WD_HOURS = Array.from({length: ROW_COUNT}, (_, i) => WD_START_HOUR + i);
+const SAT_HOURS = Array.from({length: ROW_COUNT}, (_, i) => SAT_START_HOUR + i);
+
 const parseTime = (t: string) => {
   if (!t) return 0;
   const [h, m] = t.split(':').map(Number);
@@ -48,7 +57,10 @@ export default function ClassPage() {
 
   const [viewMode, setViewMode] = useState<'timetable' | 'list'>('timetable');
   const [ttFilter, setTtFilter] = useState<'ALL' | 'REGULAR' | 'SPECIAL'>('ALL');
+  
   const [showPlanned, setShowPlanned] = useState(false);
+  // 💡 종료/폐강된 유령 반들을 볼 수 있도록 새로운 상태 추가[cite: 3]
+  const [showEnded, setShowEnded] = useState(false);
 
   const [filterLevel, setFilterLevel] = useState("all");
   const [filterGrade, setFilterGrade] = useState("all");
@@ -69,7 +81,7 @@ export default function ClassPage() {
       setTimeout(scrollToBottom, 50);
       setTimeout(scrollToBottom, 300);
     }
-  }, [viewMode, classes, ttFilter, showPlanned]);
+  }, [viewMode, classes, ttFilter, showPlanned, showEnded]);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -138,8 +150,12 @@ export default function ClassPage() {
       if (name.includes('(테스트)')) return;
 
       const status = c.status || '';
-      if (status.includes('종료')) return;
-      if (!showPlanned && status !== '진행중') return;
+      const isEnded = status.includes('종료') || status.includes('폐강');
+      const isOngoing = status === '진행중';
+
+      // 💡 종료/폐강 반 노출 로직 적용[cite: 3]
+      if (isEnded && !showEnded) return;
+      if (!isEnded && !isOngoing && !showPlanned) return;
 
       const isRegular = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon'].includes(c.level_name);
       
@@ -165,14 +181,13 @@ export default function ClassPage() {
       });
     });
     return blocks;
-  }, [classes, ttFilter, showPlanned]);
+  }, [classes, ttFilter, showPlanned, showEnded]);
 
-  // 🌟 평일과 토요일을 각각 계산하여 빈 공간(여백)을 날림
   const { wdStartHour, wdRowCount, wdHours, satStartHour, satRowCount, satHours } = useMemo(() => {
     let wdMin = 14;
     let wdMax = 22;
     let satMin = 9;
-    let satMax = 18; // 토요일 기본 종료 시간 18시
+    let satMax = 18; 
 
     timetableBlocks.forEach(b => {
       const sHour = Math.floor(parseTime(b.start));
@@ -211,8 +226,12 @@ export default function ClassPage() {
   const filteredClasses = useMemo(() => {
     let result = classes.filter((c) => {
       const status = c.status || '';
-      if (status.includes('종료')) return false;
-      if (!showPlanned && status !== '진행중') return false;
+      const isEnded = status.includes('종료') || status.includes('폐강');
+      const isOngoing = status === '진행중';
+
+      // 💡 종료/폐강 반 노출 로직 적용[cite: 3]
+      if (isEnded && !showEnded) return false;
+      if (!isEnded && !isOngoing && !showPlanned) return false;
 
       let matchLevel = false;
       const cName = (c.name || "").trim().toUpperCase();
@@ -232,10 +251,10 @@ export default function ClassPage() {
     });
 
     return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [classes, filterLevel, filterGrade, filterInstructor, showPlanned]);
+  }, [classes, filterLevel, filterGrade, filterInstructor, showPlanned, showEnded]);
 
   const resetFilters = () => { 
-    setFilterLevel("all"); setFilterGrade("all"); setFilterInstructor("all"); setShowPlanned(false); 
+    setFilterLevel("all"); setFilterGrade("all"); setFilterInstructor("all"); setShowPlanned(false); setShowEnded(false); 
   };
 
   const openEditModal = (classItem: any) => { setSelectedClass(classItem); setIsEditModalOpen(true); };
@@ -316,11 +335,11 @@ export default function ClassPage() {
           
           .print-time-col { 
             min-width: 46px !important; width: 46px !important; flex: 0 0 46px !important; 
-            border-right: 1px solid #cbd5e1 !important; 
+            border-right: 1px solid #94a3b8 !important; 
           }
           .print-day-col { 
-            min-width: 0 !important; flex: 1 1 0% !important; 
-            border-right: 1px dashed #cbd5e1 !important; 
+            min-width: 0 !important; 
+            border-right: 1px solid #94a3b8 !important; 
           }
           
           .custom-scroll::-webkit-scrollbar { display: none; }
@@ -359,31 +378,39 @@ export default function ClassPage() {
       </div>
 
       {viewMode === 'list' && (
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 shrink-0 flex-wrap mb-4 no-print">
-          <span className="font-bold text-slate-600 text-sm mr-2">🔍 반 정렬/필터</span>
-          <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
-            <option value="all">모든 레벨</option><option value="Ultimate">Ultimate</option><option value="Master">Master</option>
-            <option value="Apex">Apex</option><option value="Titan">Titan</option><option value="Horizon">Horizon</option>
-            <option value="특강">특강 (SS, WS)</option><option value="메이크업">메이크업 (MU, LE)</option>
-          </select>
-          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
-            <option value="all">모든 학년</option><option value="초1">초1</option><option value="초2">초2</option><option value="초3">초3</option>
-            <option value="초4">초4</option><option value="초5">초5</option><option value="초6">초6</option><option value="중1">중1</option>
-            <option value="중2">중2</option><option value="중3">중3</option><option value="특강, 보강">특강, 보강</option>
-          </select>
-          <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
-            <option value="all">모든 담당 강사</option>
-            {instructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name}</option>)}
-          </select>
-          
-          <label className="flex items-center gap-2 cursor-pointer ml-2 border-l border-slate-300 pl-4">
-            <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
-            <span className="text-sm font-bold text-slate-600">예정된 반 포함</span>
-          </label>
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 mb-4 no-print">
+          <div className="flex items-center gap-3 flex-wrap flex-1">
+            <span className="font-bold text-slate-600 text-sm mr-2">🔍 반 정렬/필터</span>
+            <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+              <option value="all">모든 레벨</option><option value="Ultimate">Ultimate</option><option value="Master">Master</option>
+              <option value="Apex">Apex</option><option value="Titan">Titan</option><option value="Horizon">Horizon</option>
+              <option value="특강">특강 (SS, WS)</option><option value="메이크업">메이크업 (MU, LE)</option>
+            </select>
+            <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+              <option value="all">모든 학년</option><option value="초1">초1</option><option value="초2">초2</option><option value="초3">초3</option>
+              <option value="초4">초4</option><option value="초5">초5</option><option value="초6">초6</option><option value="중1">중1</option>
+              <option value="중2">중2</option><option value="중3">중3</option><option value="특강, 보강">특강, 보강</option>
+            </select>
+            <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+              <option value="all">모든 담당 강사</option>
+              {instructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name}</option>)}
+            </select>
+            
+            <div className="flex items-center gap-4 ml-2 border-l border-slate-300 pl-4 h-8">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">예정 포함</span>
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
+              </label>
+            </div>
 
-          <button onClick={resetFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-lg transition-colors border border-slate-300 flex items-center gap-1 ml-2">🔄 초기화</button>
+            <button onClick={resetFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-lg transition-colors border border-slate-300 flex items-center gap-1 ml-2">🔄 초기화</button>
+          </div>
           
-          <div className="ml-auto flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0 ml-4">
             <div className="flex gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
               <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📅 시간표</button>
               <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all bg-white text-[#002864] shadow-sm">📋 리스트</button>
@@ -401,19 +428,25 @@ export default function ClassPage() {
       )}
 
       {viewMode === 'timetable' && (
-        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 shrink-0 flex-wrap mb-4 justify-between no-print">
-          <div className="flex gap-2 items-center">
+        <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 mb-4 no-print">
+          <div className="flex gap-2 items-center flex-wrap flex-1">
             <button onClick={() => setTtFilter('ALL')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${ttFilter === 'ALL' ? 'bg-[#002864] text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>전체 시간표</button>
             <button onClick={() => setTtFilter('REGULAR')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors flex items-center gap-1.5 ${ttFilter === 'REGULAR' ? 'bg-[#002864] text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}><span className="w-2 h-2 rounded-full bg-blue-500"></span>정규반</button>
             <button onClick={() => setTtFilter('SPECIAL')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors flex items-center gap-1.5 ${ttFilter === 'SPECIAL' ? 'bg-[#002864] text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}><span className="w-2 h-2 rounded-full bg-amber-500"></span>특강/메이크업반</button>
             
-            <label className="flex items-center gap-2 cursor-pointer ml-3 border-l border-slate-300 pl-4 h-8">
-              <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
-              <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">예정된 반 포함</span>
-            </label>
+            <div className="flex items-center gap-4 ml-3 border-l border-slate-300 pl-4 h-8">
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">예정 포함</span>
+              </label>
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
+              </label>
+            </div>
           </div>
           
-          <div className="flex items-center gap-3 shrink-0">
+          <div className="flex items-center gap-3 shrink-0 ml-4">
             <div className="flex gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
               <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all bg-white text-[#002864] shadow-sm">📅 시간표</button>
               <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📋 리스트</button>
@@ -454,7 +487,10 @@ export default function ClassPage() {
                 ) : (
                   filteredClasses.map(c => {
                     const studentCount = new Set((c.enrollment || []).map((e: any) => e.student_id)).size;
-                    let statusHtml = c.status === '진행중' ? <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">진행중</span> : <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold">{c.status || '-'}</span>;
+                    
+                    let statusHtml = <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold">{c.status || '-'}</span>;
+                    if (c.status === '진행중') statusHtml = <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded text-xs font-bold">진행중</span>;
+                    else if (c.status === '종료' || c.status === '폐강') statusHtml = <span className="bg-rose-100 text-rose-600 px-2 py-1 rounded text-xs font-bold">{c.status}</span>;
                     
                     return (
                       <tr key={c.class_id} className="hover:bg-blue-50/50 transition-colors">
@@ -513,7 +549,7 @@ export default function ClassPage() {
           >
             <div className="flex w-full min-w-max min-h-full">
               
-              <div className="w-14 shrink-0 border-r border-slate-200 bg-slate-50 z-30 sticky left-0 pointer-events-none print-time-col">
+              <div className="w-14 shrink-0 border-r border-slate-300 bg-slate-50 z-30 sticky left-0 pointer-events-none print-time-col">
                 <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-40 flex items-center justify-center font-extrabold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
                   평일시간
                 </div>
@@ -658,8 +694,8 @@ export default function ClassPage() {
                           </div>
                         </div>
                       )}
-
-                      <div className="print-day-col flex-1 border-r border-slate-200 relative shrink-0" style={{ minWidth: `${minWidthFinal}px` }}>
+                      
+                      <div className="print-day-col border-r border-slate-300 relative shrink-0" style={{ flex: `${totalCols} 1 0%`, maxWidth: `${totalCols * 140}px`, minWidth: `${minWidthFinal}px` }}>
                         <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-black text-[13px] bg-white sticky top-0 z-20 shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
                           {day}요일
                         </div>

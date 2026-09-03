@@ -938,9 +938,12 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     setSelectedInstIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
   };
 
-  // 🌟 [수정] 방 생성 시 myDbTenantId 적용
+  // 🌟 [수정] 방 생성 시 로컬스토리지에서 tenant_id를 강제로 꺼내어 삽입해 RLS 에러 차단
   const handleCreateOrOpenStaffRoom = async (targetInstId: string, targetName: string, targetPos?: string) => {
     try {
+      const activeTenantId = localStorage.getItem("logica_tenant_id"); // 무조건 로컬에서 꺼냄
+      const validTenantId = activeTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : activeTenantId;
+
       if (targetInstId === instId) {
         const { data: myRoomsData } = await supabase.from('internal_chat_member').select('room_id').eq('instructor_id', instId);
         const myRooms = (myRoomsData as unknown as { room_id: string }[]) || [];
@@ -961,7 +964,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
         
         const titleWithPos = `${targetName} (나)`;
         const roomPayload: any = { room_type: 'DIRECT', title: titleWithPos, created_by: instId };
-        if (myDbTenantId) roomPayload.tenant_id = myDbTenantId;
+        if (validTenantId) roomPayload.tenant_id = validTenantId; // 안전한 tenant_id 주입
 
         const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload).select().single();
         if (roomError) throw roomError;
@@ -988,7 +991,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
       if (!roomId) {
         const titleWithPos = `${targetName} ${targetPos || '선생님'}`;
         const roomPayload2: any = { room_type: 'DIRECT', title: titleWithPos, created_by: instId };
-        if (myDbTenantId) roomPayload2.tenant_id = myDbTenantId;
+        if (validTenantId) roomPayload2.tenant_id = validTenantId; // 안전한 tenant_id 주입
 
         const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload2).select().single();
         if (roomError) throw roomError;
@@ -1002,7 +1005,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     } catch (e: any) { alert("방 생성 에러: " + e.message); }
   };
 
-  // 🌟 [수정] 방 생성 시 myDbTenantId 적용
+  // 🌟 [수정] 그룹 방 생성 시 로컬스토리지에서 tenant_id를 강제로 꺼내어 삽입해 RLS 에러 차단
   const handleStartGroupChat = async () => {
     if (selectedInstIds.length === 0) return;
     
@@ -1015,8 +1018,11 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     if (!roomName) return;
 
     try {
+      const activeTenantId = localStorage.getItem("logica_tenant_id"); // 무조건 로컬에서 꺼냄
+      const validTenantId = activeTenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : activeTenantId;
+
       const roomPayload: any = { room_type: 'GROUP', title: roomName, created_by: instId };
-      if (myDbTenantId) roomPayload.tenant_id = myDbTenantId;
+      if (validTenantId) roomPayload.tenant_id = validTenantId; // 안전한 tenant_id 주입
 
       const { data: newRoomData, error: roomError } = await supabase.from('internal_chat_room').insert(roomPayload).select().single();
       if (roomError) throw roomError;

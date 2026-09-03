@@ -1,4 +1,4 @@
-// 학부모 포탈 페이지 파일 전체 복사 & 붙여넣기
+// 학부모 포탈 페이지 파일
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -42,9 +42,7 @@ export default function ParentPortalPage() {
   
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
-  // 🌟 [수정] 무의미한 종료 모달 로직을 완전히 걷어내고, 뒤로가기를 자연스럽게 브라우저에 맡깁니다.
   useEffect(() => {
-    // 혹시 기존에 남아있던 history trap 찌꺼기가 있다면 초기화
     if (window.history.state?.app_state === "trap") {
        window.history.replaceState(null, "", window.location.href);
     }
@@ -188,19 +186,14 @@ export default function ParentPortalPage() {
     if (error) alert("카카오 로그인 중 오류가 발생했습니다.");
   };
 
-  // 🌟 [수정] 강력한 로그아웃 처리
   const logout = async () => {
     if (confirm("로그아웃 하시겠습니까?")) {
-      // 1. Supabase 세션 완전히 끊기
       await supabase.auth.signOut({ scope: 'local' });
-      // 2. 브라우저 스토리지 싹 비우기
       localStorage.clear();
       sessionStorage.clear();
-      // 3. 상태 초기화
       setAuthState("check_phone");
       setParentId(null);
       setStudentsData([]);
-      // 4. URL 클린업 및 강제 새로고침
       window.history.replaceState(null, "", window.location.pathname);
       window.location.reload();
     }
@@ -225,9 +218,10 @@ export default function ParentPortalPage() {
 
       const pids = allParents?.map(p => p.parent_id) || [pid];
 
+      // 🌟 [핵심 변경] class_schedule(day_of_week, start_time, end_time) 으로 종료 시간까지 호출하도록 수정됨
       const { data: sData, error } = await supabase
         .from("student")
-        .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
+        .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time, end_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
         .in("parent_id", pids);
 
       if (!error && sData && sData.length > 0) {

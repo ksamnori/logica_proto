@@ -128,7 +128,7 @@ export default function Sidebar() {
       );
     }
 
-    // 기본 테마 (교재 관리 등 특정 색상이 지정되지 않은 메뉴들에 적용)
+    // 기본 테마
     let customBg = active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
     let customLabel = active ? 'font-black' : 'font-bold';
     let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
@@ -138,12 +138,10 @@ export default function Sidebar() {
       customLabel = 'font-black';
       customDesc = active ? 'text-blue-200 font-medium' : 'text-blue-400 font-medium';
     } else if (path === '/learning') { 
-      // 학습 관리 (에메랄드)
       customBg = active ? 'bg-emerald-500 border-emerald-600 text-white shadow-md' : 'bg-emerald-50/50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-emerald-100 font-medium' : 'text-emerald-500 font-medium';
     } else if (path === '/class-report') {
-      // 🌟 학습 결과 분리 및 신규 색상 (청록색 / Teal) 적용
       customBg = active ? 'bg-teal-500 border-teal-600 text-white shadow-md' : 'bg-teal-50/50 border-teal-100 text-teal-700 hover:bg-teal-100 hover:border-teal-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-teal-100 font-medium' : 'text-teal-500 font-medium';
@@ -221,7 +219,7 @@ export default function Sidebar() {
           <MenuItem path="/class" label="반 관리" />
         </MenuSection>
 
-        {/* 🌟 2. 수업 관리 (요청하신 순서 및 짝맞춤 반영) */}
+        {/* 🌟 2. 수업 관리 */}
         <MenuSection title="수업 관리" icon="👨‍🏫">
           <MenuItem path="/lesson" label="교재 관리" />
           <MenuItem path="/progress" label="진도 관리" />
@@ -230,6 +228,7 @@ export default function Sidebar() {
           <MenuItem path="/makeup" label="보강 관리" />
         </MenuSection>
 
+        {/* 🌟 3. 소통 및 업무 관리 */}
         <MenuSection title="소통 및 업무 관리" icon="💬">
           <MenuItem path="/minutes" label="AI 회의록" />
           <MenuItem path="/task" label="업무 공유" />
@@ -237,11 +236,29 @@ export default function Sidebar() {
           <MenuItem path="/cs" label="학부모 요청/CS" />
         </MenuSection>
 
+        {/* 🌟 4. 출제 및 배포 */}
         <MenuSection title="출제 및 배포" icon="🖨️">
           <MenuItem path="/exam-list" label="문제지 관리" />
           <MenuItem path="/admission" label="진단평가 관리" />
         </MenuSection>
 
+        {/* 🌟 5. 데스크 전용 (팩토리 위로 이동) */}
+        <div className="mb-6">
+          <div className="px-4 flex items-center gap-1.5 mb-3">
+            <span className="text-[13px]">🏢</span>
+            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">데스크 전용</p>
+            <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-md font-black border border-rose-200 ml-1">원장·실장</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2 px-3">
+            <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
+            <MenuItem path="/billing" label="수납/청구" />
+            <MenuItem path="/unpaid" label="미납 관리" />
+            <MenuItem path="/shop-admin" label="상점 관리" />
+            <MenuItem path="/print-center" label="서류 출력" />
+          </div>
+        </div>
+
+        {/* 🌟 6. 조교(TA) 전용 */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🧑‍🏫</span>
@@ -253,7 +270,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* LOGICA Factory 라이트 인더스트리얼 테마 영역 */}
+        {/* 🌟 7. LOGICA Factory (데스크 아래로 이동) */}
         <div className="mx-3 mb-6 bg-slate-50/80 rounded-xl pt-4 pb-3 border border-slate-200 shadow-sm relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-full h-1.5 bg-[repeating-linear-gradient(45deg,#fcd34d,#fcd34d_8px,#475569_8px,#475569_16px)] opacity-50"></div>
 
@@ -273,21 +290,7 @@ export default function Sidebar() {
           </div>
         </div>
 
-        <div className="mb-6">
-          <div className="px-4 flex items-center gap-1.5 mb-3">
-            <span className="text-[13px]">🏢</span>
-            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">데스크 전용</p>
-            <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-md font-black border border-rose-200 ml-1">원장·실장</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 px-3">
-            <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
-            <MenuItem path="/billing" label="수납/청구" />
-            <MenuItem path="/unpaid" label="미납 관리" />
-            <MenuItem path="/shop-admin" label="상점 관리" />
-            <MenuItem path="/print-center" label="서류 출력" />
-          </div>
-        </div>
-
+        {/* 🌟 8. 원장·최고관리자 전용 */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">👑</span>
