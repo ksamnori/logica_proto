@@ -151,6 +151,31 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const moveSelectedToBottom = () => { if(checkedIds.size > 0) setQuestions([...questions.filter((q: any) => !checkedIds.has(q.id)), ...questions.filter((q: any) => checkedIds.has(q.id))]); };
   const deleteSelected = () => { if(checkedIds.size > 0 && confirm("선택한 문항을 삭제하시겠습니까?")) { setQuestions(questions.filter((q: any) => !checkedIds.has(q.id))); setCheckedIds(new Set()); } };
 
+  const sortBySource = () => {
+    setQuestions((prevQs: any[]) => {
+      const getBook = (q: any) => q.source_book_name || q.book_name || q.pdf_source || '';
+      const getPage = (q: any) => parseInt(String(q.page_number || q.final_printed_page || q.detected_page_num || '0').replace(/[^0-9]/g, ''), 10) || 0;
+      const getNum = (q: any) => parseInt(String(q.question_number || '0').replace(/[^0-9]/g, ''), 10) || 0;
+
+      const sortedQs = [...prevQs].sort((a, b) => {
+        const qA = a.items[0];
+        const qB = b.items[0];
+        
+        const bookA = getBook(qA);
+        const bookB = getBook(qB);
+        if (bookA !== bookB) return bookA.localeCompare(bookB);
+        
+        const pageA = getPage(qA);
+        const pageB = getPage(qB);
+        if (pageA !== pageB) return pageA - pageB;
+        
+        return getNum(qA) - getNum(qB);
+      });
+      
+      return sortedQs;
+    });
+  };
+
   const mergeSelected = () => {
     if (checkedIds.size === 0) return alert("병합할 문항을 선택하세요.");
     setQuestions((prevQs: any[]) => {
@@ -177,25 +202,45 @@ export default function LeftPanel({ examData }: { examData: any }) {
   };
 
   const autoMergeSubQuestions = () => {
-    if (!confirm("공통 지문이 있는 연속된 서브 문항들을 자동으로 찾아 병합하시겠습니까?")) return;
+    // 🌟 메시지 수정: 번호 연속 조건 제거
+    if (!confirm("페이지 순으로 정렬한 뒤, 공통 지문(8글자 이상)을 가진 서브 문항들을 자동으로 병합하시겠습니까?")) return;
     
     setQuestions((prevQs: any[]) => {
+      const getBook = (q: any) => q.source_book_name || q.book_name || q.pdf_source || '';
+      const getPage = (q: any) => parseInt(String(q.page_number || q.final_printed_page || q.detected_page_num || '0').replace(/[^0-9]/g, ''), 10) || 0;
+      const getNum = (q: any) => parseInt(String(q.question_number || '0').replace(/[^0-9]/g, ''), 10) || 0;
+
+      let sortedQs = [...prevQs].sort((a, b) => {
+        const qA = a.items[0];
+        const qB = b.items[0];
+        
+        const bookA = getBook(qA);
+        const bookB = getBook(qB);
+        if (bookA !== bookB) return bookA.localeCompare(bookB);
+        
+        const pageA = getPage(qA);
+        const pageB = getPage(qB);
+        if (pageA !== pageB) return pageA - pageB;
+        
+        return getNum(qA) - getNum(qB);
+      });
+
       const result: any[] = [];
       let i = 0;
       
       const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
       let mergedCount = 0;
 
-      while (i < prevQs.length) {
-        let currentGroup = { ...prevQs[i], items: [...prevQs[i].items] }; 
+      while (i < sortedQs.length) {
+        let currentGroup = { ...sortedQs[i], items: [...sortedQs[i].items] }; 
         let j = i + 1;
         
-        while (j < prevQs.length) {
-          const item1 = currentGroup.items[0];
-          const item2 = prevQs[j].items[0];
+        while (j < sortedQs.length) {
+          const lastItem = currentGroup.items[currentGroup.items.length - 1];
+          const nextItem = sortedQs[j].items[0];
           
-          const text1 = item1.question || item1.text_question || "";
-          const text2 = item2.question || item2.text_question || "";
+          const text1 = lastItem.question || lastItem.text_question || "";
+          const text2 = nextItem.question || nextItem.text_question || "";
           
           const clean1 = text1.replace(removeNumberingRegex, "$1");
           const clean2 = text2.replace(removeNumberingRegex, "$1");
@@ -206,14 +251,14 @@ export default function LeftPanel({ examData }: { examData: any }) {
           const commonPrefix = clean1.substring(0, k);
           const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, '').trim();
           
-          const hasSameParent = item1.parent_question_id && item1.parent_question_id !== 'null' && item1.parent_question_id === item2.parent_question_id;
+          const hasSameParent = lastItem.parent_question_id && lastItem.parent_question_id !== 'null' && lastItem.parent_question_id === nextItem.parent_question_id;
           
-          // Taxonomy 검사 완화, 지문 5글자 이상 일치하면 병합
-          if (hasSameParent || textOnlyCommon.length >= 5) {
+          // 🌟 문제 번호 연속성 조건 삭제. 8글자 이상 일치하면 병합 수행.
+          if (hasSameParent || textOnlyCommon.length >= 8) {
             if (!currentGroup.id.startsWith('merged_')) {
-                currentGroup.id = `merged_${Date.now()}_${item1.question_id}`;
+                currentGroup.id = `merged_${Date.now()}_${currentGroup.items[0].question_id}`;
             }
-            currentGroup.items.push(...prevQs[j].items);
+            currentGroup.items.push(...sortedQs[j].items);
             currentGroup.is_group = true;
             currentGroup.is_merged_text = true;
             mergedCount++;
@@ -232,9 +277,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
       }
 
       if (mergedCount === 0) {
-          alert("병합할 만한 조건(연속됨 + 5글자 이상 지문 일치 등)을 만족하는 문항이 없습니다.");
+          alert("병합할 만한 조건(8글자 이상 지문 일치 등)을 만족하는 문항이 없습니다.");
       } else {
-          alert(`✨ 시험지 내의 연속된 서브 문항들이 성공적으로 자동 병합되었습니다!`);
+          alert(`✨ 시험지 문항들이 교재/페이지 순으로 정렬되었으며, 공통 지문을 가진 서브 문항들이 성공적으로 자동 병합되었습니다!`);
       }
       
       return result;
@@ -342,7 +387,10 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   <div className="flex space-x-1.5 shrink-0 ml-auto">
                     <button onClick={moveSelectedToTop} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↑ 맨 위로</button>
                     <button onClick={moveSelectedToBottom} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↓ 맨 아래로</button>
-                    <button onClick={autoMergeSubQuestions} className="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 병합</button>
+                    
+                    <button onClick={sortBySource} className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold rounded border border-blue-200 transition-colors shadow-sm whitespace-nowrap" title="교재 및 페이지/번호 순으로 전체 정렬">🔄 순서 정렬</button>
+                    
+                    <button onClick={autoMergeSubQuestions} className="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 정렬/병합</button>
                     <button onClick={mergeSelected} className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[11px] font-bold rounded border border-indigo-200 transition-colors shadow-sm whitespace-nowrap">🔗 선택 병합</button>
                     <button onClick={deleteSelected} className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold rounded border border-rose-200 transition-colors whitespace-nowrap">🗑️ 삭제</button>
                   </div>
@@ -360,7 +408,6 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   else if(diff === '상') diffColor = "border-indigo-500 text-indigo-600";
                   else if(diff === '최상') diffColor = "border-rose-500 text-rose-600";
 
-                  // 🌟 주석을 return 위로 올림으로써 구문 오류를 완벽하게 해결했습니다!
                   return (
                     <li key={g.id} 
                         draggable 

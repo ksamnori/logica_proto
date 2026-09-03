@@ -14,14 +14,13 @@ export default function RightPreview({ examData }: { examData: any }) {
 
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
   
-  // 🌟 [Hydration 에러 해결] 세션 스토리지 값은 클라이언트 마운트 후에 안전하게 가져옵니다!
   const [previewTitle, setPreviewTitle] = useState<string | null>(null);
   const [previewBadge, setPreviewBadge] = useState<string | null>(null);
 
   useEffect(() => {
     setPreviewTitle(sessionStorage.getItem('examTitle'));
     setPreviewBadge(sessionStorage.getItem('examSubTitle'));
-  }, [questions]); // questions가 업데이트 될 때 동기화
+  }, [questions]); 
 
   useEffect(() => {
     if (typeof window !== "undefined" && (window as any).MathJax?.typesetPromise) {
@@ -84,7 +83,6 @@ export default function RightPreview({ examData }: { examData: any }) {
       <div className="bg-white px-6 py-4 border-b border-slate-200 shrink-0 flex justify-between items-center shadow-sm z-10">
         <div>
           <h2 className="font-extrabold text-xl text-slate-800 flex items-center"><span className="mr-2">📝</span> 시험지 미리보기</h2>
-          {/* 🌟 클라이언트 측 렌더링이 완료된 후에만 뱃지를 띄워 에러 방지 */}
           {(previewTitle || previewBadge) && (
              <div className="flex items-center gap-2 mt-1.5 animate-[fadeIn_0.3s_ease-out]">
                {previewBadge && <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm">{previewBadge}</span>}
@@ -116,10 +114,11 @@ export default function RightPreview({ examData }: { examData: any }) {
            const isDragged = draggedIdx === idx;
            const isDragOverTarget = dragOverIdx === idx && draggedIdx !== idx;
 
-           let cardClass = "rounded-xl shadow-sm overflow-hidden flex flex-row group transition-all duration-200 ";
-           if (isDragged) cardClass += "opacity-40 border-2 border-dashed border-[#002864] bg-slate-50 scale-[0.98] ";
-           else if (isDragOverTarget) cardClass += "border-2 border-emerald-400 bg-emerald-50/50 scale-[1.01] z-20 shadow-md ";
-           else cardClass += "bg-white border border-slate-200 hover:border-blue-400 ";
+           // 🌟 레이아웃 시프트 방지용 일관된 border-2 클래스 적용
+           let cardClass = "rounded-xl shadow-sm overflow-hidden flex flex-row group transition-colors duration-200 border-2 ";
+           if (isDragged) cardClass += "opacity-40 border-dashed border-[#002864] bg-slate-50 ";
+           else if (isDragOverTarget) cardClass += "border-emerald-400 bg-emerald-50/50 z-20 shadow-md ";
+           else cardClass += "bg-white border-slate-200 hover:border-blue-400 ";
 
            if (!isEditingMode) cardClass += "cursor-grab active:cursor-grabbing ";
 
@@ -168,8 +167,18 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                    return (
                      <div key={q.question_id} className={`relative ${subIdx < g.items.length - 1 ? 'mb-8 pb-8 border-b-2 border-dashed border-slate-200' : ''}`}>
-                       <div className="flex justify-between items-start mb-1">
-                         <div className="flex-1 flex flex-col gap-0.5 pointer-events-none">
+                       <div className="flex justify-between items-start mb-2">
+                         <div className="flex-1 flex flex-col gap-1.5 pointer-events-none">
+                           
+                           <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
+                             <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200">출처</span>
+                             <span>
+                               {q.source_book_name || q.book_name || q.pdf_source || '출처 정보 없음'}
+                               {q.final_printed_page || q.detected_page_num ? ` p.${String(q.final_printed_page || q.detected_page_num).replace(/p/gi, '').trim()}` : ''}
+                               {q.question_number ? ` ${String(q.question_number).replace(/번/g, '').trim()}번` : ''}
+                             </span>
+                           </div>
+
                            {renderParentRelations(q, parentSourceMap)}
                          </div>
                          

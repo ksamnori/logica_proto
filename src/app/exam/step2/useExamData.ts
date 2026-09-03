@@ -317,13 +317,10 @@ export function useExamData() {
           orQueryStr = `${orQueryStr},${pdfQueries}`;
         }
 
-        // 🌟 [추가된 로직] Step 1에서 넘겨받은 소스 북 네임 교차 필터링
         let finalQuery = supabase.from("question_db").select("*").or(orQueryStr);
         const testSourceFilter = sessionStorage.getItem("testSourceFilter");
         
         if (testSourceFilter) {
-            // '주간테스트', '중간테스트', '분기테스트' 조건이 있을 경우, 
-            // taxonomy에 해당하면서 source_book_name까지 일치하는 문제만 가져옵니다.
             finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
         }
 
@@ -461,7 +458,14 @@ export function useExamData() {
     } catch (e) {}
   };
 
-  const handleDragStart = (e: React.DragEvent, idx: number) => { setDraggedIdx(idx); e.dataTransfer.effectAllowed = "move"; };
+  const handleDragStart = (e: React.DragEvent, idx: number) => { 
+    // 🌟 고스트 이미지 위치 버그 방지를 위해 비동기 처리
+    e.dataTransfer.effectAllowed = "move"; 
+    setTimeout(() => {
+      setDraggedIdx(idx);
+    }, 0);
+  };
+  
   const handleDragOver = (e: React.DragEvent) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; };
   const handleDrop = (e: React.DragEvent, targetIdx: number) => {
     e.preventDefault();
