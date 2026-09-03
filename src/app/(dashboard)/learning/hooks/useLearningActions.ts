@@ -122,8 +122,10 @@ export function useLearningActions({
         }
         window.location.href = '/exam/step2';
       } else {
-        sessionStorage.setItem('hwQuestions', JSON.stringify(commonQuestions));
-        sessionStorage.setItem('hwTitle', '[병합] 복습 및 오답 교재 과제');
+        // 🌟 /exam/step2 뷰어가 읽을 수 있도록 세션 스토리지 호환 패치
+        sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions));
+        sessionStorage.setItem('examTitle', '[병합] 복습 및 오답 교재 과제');
+        sessionStorage.setItem('examType', '과제프린트');
         
         if (isStudentView) {
           sessionStorage.setItem('clinicTargetStudentId', currentView.studentId);
@@ -132,7 +134,8 @@ export function useLearningActions({
         } else {
           sessionStorage.setItem('isClinicMode', 'false');
         }
-        window.location.href = '/homework/step2';
+        // 🌟 올바른 통합 편집 마법사 라우팅 주소로 교체
+        window.location.href = '/exam/step2';
       }
       
     } catch (err: any) {
@@ -426,7 +429,6 @@ export function useLearningActions({
     }
   };
 
-  // 🌟 한 창에서 여러 시험지를 연속 렌더링하도록 배열 데이터를 전송하는 신규 병합 출력 함수
   const handleBulkPrintAction = async (printItems: { printType: string, masterId: any, targetQuestions: any, title: string, subTitle: string }[]) => {
     if (printItems.length === 0) return;
     
@@ -480,7 +482,6 @@ export function useLearningActions({
       }
       
       purgeOldSession();
-      // 🌟 배열 데이터를 JSON으로 저장. 뷰어에서 이 배열을 순회하여 여러 장을 그립니다.
       sessionStorage.setItem('bulkPrintData', JSON.stringify(bulkData));
       window.open('/exam/viewer?source=bulk', '_blank');
       
@@ -524,7 +525,8 @@ export function useLearningActions({
       sessionStorage.setItem('editStudentId', String(studentId));
       sessionStorage.setItem('editClassId', String(classId));
 
-      window.location.href = '/homework/step2';
+      // 🌟 올바른 통합 편집 마법사 라우팅 주소로 교체
+      window.location.href = '/exam/step2';
 
     } catch (err: any) {
       console.error(err);

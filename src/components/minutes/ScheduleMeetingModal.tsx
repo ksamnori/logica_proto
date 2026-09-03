@@ -108,7 +108,6 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
     if (!meetingTitle.trim()) return alert("회의록/일정 제목을 입력해주세요.");
     if (!meetingDateStr || !meetingTimeStr) return alert("날짜와 시간을 지정해주세요.");
 
-    // 🌟 [추가됨] 새 회의 일정 등록 전 소속 지점 꼬리표 챙기기
     const myTenantId = localStorage.getItem("logica_tenant_id");
     if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
 
@@ -136,7 +135,7 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
         meeting_date: currentMeetingDate.toISOString(), 
         attendees: participantNames,
         is_secret: isSecret,
-        tenant_id: myTenantId // 🌟 [추가됨] 모든 회의록/일정에 꼬리표 부착!
+        tenant_id: myTenantId
       });
     }
 
@@ -162,6 +161,16 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+      {/* 🌟 크롬 내장 캘린더 렌더링 깨짐을 강제로 방지하는 스타일 블록 주입 */}
+      <style dangerouslySetInnerHTML={{
+        __html: `
+          .chrome-datepicker-fix {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif !important;
+            letter-spacing: normal !important;
+            font-size: 14px !important;
+          }
+        `
+      }} />
       <div className="bg-white w-full max-w-6xl h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         <div className="bg-[#002864] p-3 text-white flex justify-between items-center shrink-0">
           <h2 className="font-black text-[13px] flex items-center gap-2">📅 새 회의 / 일정 예약하기</h2>
@@ -240,13 +249,23 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
                   <option value="상담/면담">📁 상담/면담</option>
                 </select>
               </div>
-              <div className="w-[20%]">
+              <div className="w-[20%] min-w-[130px]">
                 <label className="block text-[11px] font-bold text-slate-500 mb-1">날짜 예약</label>
-                <input type="date" value={meetingDateStr} onChange={e => setMeetingDateStr(e.target.value)} className="w-full text-[12px] font-bold text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" />
+                <input 
+                  type="date" 
+                  value={meetingDateStr} 
+                  onChange={e => setMeetingDateStr(e.target.value)} 
+                  className="chrome-datepicker-fix w-full font-medium text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" 
+                />
               </div>
-              <div className="w-[20%]">
+              <div className="w-[20%] min-w-[120px]">
                 <label className="block text-[11px] font-bold text-slate-500 mb-1">시간 예약</label>
-                <input type="time" value={meetingTimeStr} onChange={e => setMeetingTimeStr(e.target.value)} className="w-full text-[12px] font-bold text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" />
+                <input 
+                  type="time" 
+                  value={meetingTimeStr} 
+                  onChange={e => setMeetingTimeStr(e.target.value)} 
+                  className="chrome-datepicker-fix w-full font-medium text-[#002864] border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864] bg-white" 
+                />
               </div>
               
               <div className="flex-1 border-l border-slate-200 pl-3 flex justify-end items-center gap-3">

@@ -275,9 +275,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
          await supabase.from(table.name).delete().eq("class_id", cId);
       }
 
-      // 6. 학생 테이블의 참조 초기화
-      await supabase.from("student").update({ class_id: null }).eq("class_id", cId);
-
       // 7. 최종 반 삭제
       const { error: finalError } = await supabase.from("class").delete().eq("class_id", cId);
       if (finalError) throw new Error(`최종 반 삭제 실패: ${finalError.message}`);
