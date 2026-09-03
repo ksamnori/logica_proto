@@ -7,7 +7,6 @@ import ChatWidget from "@/components/parent/ChatWidget";
 import StudentCard from "@/components/parent/StudentCard";
 import { verifyParentPhone, loginParentAction, setupParentAction } from "@/app/actions/parentAuth";
 
-// 🌟 데이터 파싱을 위한 유틸리티 함수 추가
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
@@ -29,7 +28,6 @@ const safeParseIds = (raw: any): number[] => {
 };
 
 export default function ParentPortalPage() {
-  const [isExitModalOpen, setIsExitModalOpen] = useState(false);
   const [authState, setAuthState] = useState<"check_phone" | "login" | "setup" | "dashboard">("check_phone");
   const [isKakaoLoading, setIsKakaoLoading] = useState(false);
   
@@ -44,34 +42,18 @@ export default function ParentPortalPage() {
   
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
-  const isExitModalOpenRef = useRef(isExitModalOpen);
-  isExitModalOpenRef.current = isExitModalOpen;
-  const authStateRef = useRef(authState);
-  authStateRef.current = authState;
-
+  // 🌟 [수정] 무의미한 종료 모달 로직을 완전히 걷어내고, 뒤로가기를 자연스럽게 브라우저에 맡깁니다.
   useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
-      if (isExitModalOpenRef.current) {
-        setIsExitModalOpen(false);
-        window.history.pushState({ app_state: "trap" }, "", window.location.href);
-      } else if (authStateRef.current === "dashboard") {
-        setIsExitModalOpen(true);
-        window.history.pushState({ app_state: "modal" }, "", window.location.href);
-      } else {
-        window.history.pushState({ app_state: "trap" }, "", window.location.href);
-      }
-    };
-    window.history.replaceState({ app_state: "main" }, "", window.location.href);
-    window.history.pushState({ app_state: "trap" }, "", window.location.href);
-    window.addEventListener("popstate", handlePopState);
-    return () => { window.removeEventListener("popstate", handlePopState); };
+    // 혹시 기존에 남아있던 history trap 찌꺼기가 있다면 초기화
+    if (window.history.state?.app_state === "trap") {
+       window.history.replaceState(null, "", window.location.href);
+    }
   }, []);
 
   useEffect(() => {
     const hash = window.location.hash;
     const search = window.location.search;
     
-    // 🌟 [핵심 방어 1] 카카오 로그인 시간이 초과되거나 에러로 튕겨 돌아왔을 때 무한 로딩 방지 및 초기화
     if (hash.includes("error=") || search.includes("error=")) {
       alert("카카오 로그인 인증 시간이 초과되었거나 취소되었습니다. 다시 시도해주세요.");
       window.history.replaceState(null, "", window.location.pathname);
@@ -135,7 +117,7 @@ export default function ParentPortalPage() {
         
         if (data) {
           sessionStorage.setItem("logica_parent_id", data.parent_id);
-          window.history.replaceState({ app_state: "trap" }, "", window.location.pathname);
+          window.history.replaceState(null, "", window.location.pathname);
           setIsKakaoLoading(false);
           loadDashboard(data.parent_id);
         } else {
@@ -194,7 +176,6 @@ export default function ParentPortalPage() {
   };
 
   const loginWithKakao = async () => {
-    // 🌟 [핵심 방어 2] 카카오 로그인 출발지가 '학부모 페이지'임을 브라우저에 단기 기록
     sessionStorage.setItem("logica_oauth_source", "parent");
 
     const { error } = await supabase.auth.signInWithOAuth({ 
@@ -207,11 +188,20 @@ export default function ParentPortalPage() {
     if (error) alert("카카오 로그인 중 오류가 발생했습니다.");
   };
 
+  // 🌟 [수정] 강력한 로그아웃 처리
   const logout = async () => {
     if (confirm("로그아웃 하시겠습니까?")) {
-      await supabase.auth.signOut();
+      // 1. Supabase 세션 완전히 끊기
+      await supabase.auth.signOut({ scope: 'local' });
+      // 2. 브라우저 스토리지 싹 비우기
       localStorage.clear();
       sessionStorage.clear();
+      // 3. 상태 초기화
+      setAuthState("check_phone");
+      setParentId(null);
+      setStudentsData([]);
+      // 4. URL 클린업 및 강제 새로고침
+      window.history.replaceState(null, "", window.location.pathname);
       window.location.reload();
     }
   };
@@ -482,14 +472,6 @@ export default function ParentPortalPage() {
           )}
 
           <div className="mt-8 pt-6 border-t border-slate-100 text-center">
-            <a 
-              href="/privacy" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="text-[11px] font-bold text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2 mb-4 inline-block"
-            >
-            </a>
-            
             <div className="text-[10px] text-slate-400 leading-relaxed">
               <p className="font-bold text-slate-500 mb-1">LOGICA학원 대치 본원</p>
               <p>대표자: 이웅행 | 사업자등록번호: 732-85-02927</p>
@@ -507,20 +489,8 @@ export default function ParentPortalPage() {
   return (
     <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
       
-      {isExitModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[200] flex items-center justify-center p-4">
-          <div className="bg-white w-full max-w-[280px] rounded-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="p-6 text-center space-y-2"><div className="text-4xl mb-3">👋</div><h2 className="font-bold text-lg text-slate-800">앱을 종료하시겠습니까?</h2></div>
-            <div className="flex border-t border-slate-200">
-              <button onClick={() => { setIsExitModalOpen(false); window.history.replaceState({ app_state: "trap" }, "", window.location.href); }} className="flex-1 py-3.5 text-slate-500 font-bold border-r border-slate-200">취소</button>
-              <button onClick={() => window.history.go(-2)} className="flex-1 py-3.5 text-rose-500 font-bold">종료하기</button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {authState === "dashboard" ? (
-        <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative animate-[fadeIn_0.3s_ease-out]">
           
           <header className="bg-white px-6 py-4 flex justify-between items-center shadow-sm shrink-0 z-20">
             <div className="flex items-center">
@@ -554,7 +524,7 @@ export default function ParentPortalPage() {
           <main className="flex-1 overflow-y-auto custom-scroll w-full mx-auto p-4 sm:p-6 pb-32 overscroll-contain">
             <div className="w-full max-w-4xl mx-auto">
               {!selectedStudent ? (
-                <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-2xl border border-slate-200">등록된 자녀 정보가 없습니다.</div>
+                <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-2xl border border-slate-200 shadow-sm">등록된 자녀 정보가 없습니다.</div>
               ) : (
                 <StudentCard student={selectedStudent} />
               )}

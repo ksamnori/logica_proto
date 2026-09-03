@@ -26,6 +26,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const [classStudents, setClassStudents] = useState<any[]>([]);
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [searchGrade, setSearchGrade] = useState("");
+  const [searchStatus, setSearchStatus] = useState("재원"); // 🌟 기본값을 재원으로 설정
   const [searchKeyword, setSearchKeyword] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   
@@ -62,7 +63,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       setSearchKeyword("");
 
       fetchClassStudents(classItem.class_id);
-      searchAllStudents("");
+      searchAllStudents("", "재원"); // 🌟 모달 열릴 때 상태 초기화
     }
   }, [isOpen, classItem]);
 
@@ -74,9 +75,14 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     setClassStudents(data || []);
   };
 
-  const searchAllStudents = async (grade: string) => {
+  // 🌟 학년 및 상태 필터 연동 로직
+  const searchAllStudents = async (grade: string, status: string) => {
     setSearchGrade(grade);
-    let query = supabase.from("student").select("student_id, name, phone, grade, school_name, school").order("name").limit(300); 
+    setSearchStatus(status);
+    
+    // limit를 1000으로 늘려 데이터 누락 방지 및 상태(status) 정보 추가 호출
+    let query = supabase.from("student").select("student_id, name, phone, grade, school_name, school, status").order("name").limit(1000); 
+    
     if (grade) {
       const gradeMap: any = {
         '1': ['1', '초1', '초등 1학년'], '2': ['2', '초2', '초등 2학년'], '3': ['3', '초3', '초등 3학년'],
@@ -86,6 +92,11 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       };
       query = query.in("grade", gradeMap[grade] || [grade]);
     }
+
+    if (status) {
+      query = query.eq("status", status);
+    }
+
     const { data } = await query;
     setAllStudents(data || []);
   };
@@ -123,7 +134,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         const match = s.phone.match(/(\d{4})(?:-\d+)?$/);
         if (match) contactEnd = match[1];
       }
-      const visibleText = `${s.name} (${s.school_name || s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
+      // 🌟 표시 텍스트와 정확히 매칭되도록 상태값 포함
+      const visibleText = `[${s.status || '상태미상'}] ${s.name} (${s.school_name || s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
       return visibleText === searchKeyword;
     });
 
@@ -208,12 +220,13 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   };
 
   const deleteClass = async () => {
-    if (!confirm(`⚠️ 경고: [${modalData.name}] 반을 정말 삭제하시겠습니까?\n이 반과 연결된 명단, 시간표, 배정된 교재, 출결 기록, 과제/시험 등이 모두 함께 삭제되며 절대 복구할 수 없습니다.`)) return;
+    if (!confirm(`⚠️ 경고: [${modalData.name}] 반을 정말 삭제하시겠습니까?\n이 반과 연결된 명단, 시간표, 배정된 교재, 출결 기록, 과제/시험, 수업 일지 등이 모두 함께 삭제되며 절대 복구할 수 없습니다.`)) return;
     
     setIsSaving(true);
     try {
       const cId = modalData.class_id;
 
+      // 1. 시험 및 답안 삭제
       const { data: exData } = await supabase.from("exam_assignment").select("assignment_id").eq("class_id", cId);
       if (exData && exData.length > 0) {
         const exIds = exData.map(e => e.assignment_id);
@@ -221,6 +234,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         await supabase.from("exam_assignment").delete().eq("class_id", cId);
       }
 
+      // 2. 과제 및 결과 삭제
       const { data: hwData } = await supabase.from("homework_assignment").select("homework_id").eq("class_id", cId);
       if (hwData && hwData.length > 0) {
         const hwIds = hwData.map(h => h.homework_id);
@@ -229,19 +243,31 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         await supabase.from("homework_assignment").delete().eq("class_id", cId);
       }
 
+      // 3. 수업 일지 및 진도 기록 삭제
+      const { data: lessonLogs } = await supabase.from("daily_lesson_log").select("lesson_log_id").eq("class_id", cId);
+      if (lessonLogs && lessonLogs.length > 0) {
+        const logIds = lessonLogs.map(l => l.lesson_log_id);
+        await supabase.from("lesson_progress").delete().in("log_id", logIds);
+        await supabase.from("daily_lesson_log").delete().in("lesson_log_id", logIds);
+      }
+
+      // 4. 출결 기록 삭제
       const { data: enrollData } = await supabase.from("enrollment").select("enrollment_id").eq("class_id", cId);
       if (enrollData && enrollData.length > 0) {
         const enrollIds = enrollData.map(e => e.enrollment_id);
         await supabase.from("attendance").delete().in("enrollment_id", enrollIds);
       }
-      
       await supabase.from("attendance").delete().eq("class_id", cId);
 
+      // 5. 기타 연관 테이블 일괄 삭제
       const cleanupTables = [
         { name: 'class_textbook', label: '교재 배정 내역' },
         { name: 'class_schedule', label: '시간표' },
         { name: 'class_holiday', label: '휴강일' },
         { name: 'class_extra_session', label: '보강 일정' },
+        { name: 'class_syllabus', label: '진도 계획표' },
+        { name: 'class_instructor_history', label: '강사 배정 이력' },
+        { name: 'class_performance', label: '반 성적 통계' },
         { name: 'enrollment', label: '수강 명단' }
       ];
 
@@ -249,8 +275,10 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
          await supabase.from(table.name).delete().eq("class_id", cId);
       }
 
+      // 6. 학생 테이블의 참조 초기화
       await supabase.from("student").update({ class_id: null }).eq("class_id", cId);
 
+      // 7. 최종 반 삭제
       const { error: finalError } = await supabase.from("class").delete().eq("class_id", cId);
       if (finalError) throw new Error(`최종 반 삭제 실패: ${finalError.message}`);
       
@@ -343,7 +371,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               </div>
             </div>
 
-            {/* 🌟 조건부 숨김 제거 - 이제 항상 달력을 렌더링하고, 내부에서 특강 모드로 작동시킵니다 */}
             {modalData.class_id && (
               <div className="col-span-2">
                 {isSpecialOrMakeup && (
@@ -384,17 +411,24 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
             </div>
           </div>
 
-          {/* 학생 리스트 및 배정 */}
+          {/* 🌟 상태 필터가 추가된 수강 학생 배정 영역 */}
           <div className="flex justify-between items-end mb-3 border-b border-slate-200 pb-2">
             <h3 className="font-bold text-slate-800">👨‍🎓 수강 학생 리스트</h3>
             {isEditMode && canEdit && (
               <div className="flex items-center gap-2">
-                <select value={searchGrade} onChange={e => searchAllStudents(e.target.value)} className="px-3 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
+                <select value={searchGrade} onChange={e => searchAllStudents(e.target.value, searchStatus)} className="px-3 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
                   <option value="">전체 학년</option>
                   <option value="1">초1</option><option value="2">초2</option><option value="3">초3</option>
                   <option value="4">초4</option><option value="5">초5</option><option value="6">초6</option>
                   <option value="7">중1</option><option value="8">중2</option><option value="9">중3</option>
                   <option value="10">고1</option><option value="11">고2</option><option value="12">고3</option>
+                </select>
+                <select value={searchStatus} onChange={e => searchAllStudents(searchGrade, e.target.value)} className="px-3 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
+                  <option value="">전체 상태</option>
+                  <option value="재원">재원</option>
+                  <option value="퇴원">퇴원</option>
+                  <option value="휴원">휴원</option>
+                  <option value="입학테스트">입학테스트(대기)</option>
                 </select>
                 <input 
                   list="all_students_list" 
@@ -406,7 +440,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                 <datalist id="all_students_list">
                   {allStudents.map(s => {
                     let contactEnd = s.phone?.match(/(\d{4})(?:-\d+)?$/)?.[1] || "번호없음";
-                    const text = `${s.name} (${s.school_name || s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
+                    // 🌟 데이터 리스트에 상태값 노출
+                    const text = `[${s.status || '상태미상'}] ${s.name} (${s.school_name || s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
                     return <option key={s.student_id} value={text} />;
                   })}
                 </datalist>

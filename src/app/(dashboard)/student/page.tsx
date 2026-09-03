@@ -52,9 +52,8 @@ export default function StudentPage() {
     setIsLoading(true);
     try {
       const myId = localStorage.getItem("logica_instructor_id");
-      const tenantId = localStorage.getItem("logica_tenant_id"); // 🌟 소속 지점 아이디 획득
+      const tenantId = localStorage.getItem("logica_tenant_id");
 
-      // 🌟 [수정] 강사 필터 목록을 가져올 때 내 지점(tenant_id) 강사만 가져옵니다.
       let instQuery = supabase.from("instructor").select("instructor_id, name").eq("status", "재직");
       if (tenantId) {
         instQuery = instQuery.eq("tenant_id", tenantId);
@@ -62,14 +61,12 @@ export default function StudentPage() {
       const { data: instData } = await instQuery;
       if (instData) setInstructors(instData);
 
-      // 🌟 [수정] 학생 목록과 소속 반 정보를 가져옵니다. (반의 status도 함께 가져옴)
       let stuQuery = supabase
         .from("student")
         .select("*, parent(phone), enrollment(class(name, level_name, instructor_id, status, instructor(name)))")
         .order("created_at", { ascending: false })
         .limit(1000);
       
-      // 🌟 [수정] 학생도 내 지점 학생들만 가져오도록 필터링
       if (tenantId) {
         stuQuery = stuQuery.eq("tenant_id", tenantId);
       }
@@ -80,7 +77,6 @@ export default function StudentPage() {
         if (isSuper) {
           setStudents(allStuData);
         } else {
-          // 일반 강사는 본인이 담당하는 반에 속한 학생만
           const myStudents = allStuData.filter((student: any) => 
             student.enrollment?.some((e: any) => e.class?.instructor_id === myId)
           );
@@ -97,7 +93,6 @@ export default function StudentPage() {
 
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
-      // 🌟 [수정] 필터링할 때도 '예정'인 반은 무시하고 계산합니다.
       const activeEnrollments = s.enrollment ? s.enrollment.filter((e: any) => e.class && e.class.status !== '예정') : [];
       const classes = activeEnrollments.map((e: any) => e.class);
       
@@ -215,7 +210,6 @@ export default function StudentPage() {
                   if (s.status === "휴원") statusClass = "bg-amber-100 text-amber-700";
                   if (s.status === "입학테스트") statusClass = "bg-indigo-100 text-indigo-700";
 
-                  // 🌟 [수정] 렌더링 시 '예정' 상태인 반은 수강반 목록과 담당 강사에서 제외합니다.
                   const activeEnrollments = s.enrollment ? s.enrollment.filter((e: any) => e.class && e.class.status !== '예정') : [];
                   const classNames: string[] = activeEnrollments.map((e: any) => e.class.name);
                   const instNames: string[] = Array.from(new Set(activeEnrollments.map((e: any) => e.class.instructor?.name).filter(Boolean)));
@@ -268,24 +262,27 @@ export default function StudentPage() {
           </table>
         </div>
 
-        <div className="bg-slate-50 border-t border-slate-200 p-4 flex justify-between items-center shrink-0">
-          <button 
-            onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} 
-            disabled={currentPage === 1}
-            className="px-4 py-2 border border-slate-300 rounded text-sm font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-          >
-            이전
-          </button>
-          <span className="text-sm font-bold text-slate-600">
-            페이지 {currentPage} / {totalPages}
-          </span>
-          <button 
-            onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} 
-            disabled={currentPage === totalPages}
-            className="px-4 py-2 border border-slate-300 rounded text-sm font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50"
-          >
-            다음
-          </button>
+        {/* 수정된 페이지네이션 영역 */}
+        <div className="bg-slate-50 border-t border-slate-200 p-4 flex justify-center items-center shrink-0">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} 
+              disabled={currentPage === 1}
+              className="px-4 py-2 border border-slate-300 rounded text-sm font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            >
+              이전
+            </button>
+            <span className="text-sm font-bold text-slate-600">
+              페이지 {currentPage} / {totalPages}
+            </span>
+            <button 
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))} 
+              disabled={currentPage === totalPages}
+              className="px-4 py-2 border border-slate-300 rounded text-sm font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50"
+            >
+              다음
+            </button>
+          </div>
         </div>
       </div>
     </div>

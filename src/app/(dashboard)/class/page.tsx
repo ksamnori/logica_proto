@@ -8,15 +8,6 @@ import ClassEditModal from "@/components/class/ClassEditModal";
 
 const DAYS = ['월', '화', '수', '목', '금', '토'];
 
-const WD_START_HOUR = 14; 
-const END_HOUR = 22; 
-const ROW_COUNT = END_HOUR - WD_START_HOUR; 
-
-const SAT_START_HOUR = 9; 
-
-const WD_HOURS = Array.from({length: ROW_COUNT}, (_, i) => WD_START_HOUR + i);
-const SAT_HOURS = Array.from({length: ROW_COUNT}, (_, i) => SAT_START_HOUR + i);
-
 const parseTime = (t: string) => {
   if (!t) return 0;
   const [h, m] = t.split(':').map(Number);
@@ -36,7 +27,6 @@ const INSTRUCTOR_COLORS = [
   'bg-indigo-100 border-indigo-300 text-indigo-900',
 ];
 
-// 💡 [새로운 알고리즘] 강사 직책별 우선순위 부여 (1순위: 원장, 2순위: 부원장, 3순위: 전임, 4순위: 파트, 그 외)
 const getPositionPriority = (pos: string) => {
   if (!pos) return 99;
   if (pos.includes('원장') && !pos.includes('부원장')) return 1;
@@ -123,7 +113,6 @@ export default function ClassPage() {
   const fetchInstructors = async () => {
     const tenantId = localStorage.getItem("logica_tenant_id");
     if (!tenantId) { setInstructors([]); return; }
-    // 💡 직책(position) 데이터도 함께 가져옵니다.
     const { data } = await supabase.from("instructor").select("instructor_id, name, position").eq("status", "재직").eq("tenant_id", tenantId).order('name');
     setInstructors(data || []);
   };
@@ -133,7 +122,6 @@ export default function ClassPage() {
     const tenantId = localStorage.getItem("logica_tenant_id");
     if (!tenantId) { setClasses([]); setIsLoading(false); return; }
     
-    // 💡 반 정보를 가져올 때 강사의 직책(position) 정보도 포함하여 가져옵니다.
     const { data, error } = await supabase
       .from("class")
       .select("*, instructor(name, position), enrollment(student_id, student(name)), class_schedule(*)")
@@ -159,18 +147,57 @@ export default function ClassPage() {
       if (ttFilter === 'SPECIAL' && isRegular) return;
 
       c.class_schedule?.forEach((sch: any) => {
-        if (!sch.day_of_week || !sch.start_time || !sch.end_time || sch.day_of_week === '일') return;
+        if (!sch.day_of_week || !sch.start_time || sch.day_of_week === '일') return;
+
+        let finalEndTime = sch.end_time;
+        if (!finalEndTime) {
+          const [h, m] = sch.start_time.split(':').map(Number);
+          finalEndTime = `${String((h + 2) % 24).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+        }
+
         blocks.push({
           classObj: c,
           day: sch.day_of_week,
           start: sch.start_time,
-          end: sch.end_time,
+          end: finalEndTime,
           isRegular
         });
       });
     });
     return blocks;
   }, [classes, ttFilter, showPlanned]);
+
+  // 🌟 평일과 토요일을 각각 계산하여 빈 공간(여백)을 날림
+  const { wdStartHour, wdRowCount, wdHours, satStartHour, satRowCount, satHours } = useMemo(() => {
+    let wdMin = 14;
+    let wdMax = 22;
+    let satMin = 9;
+    let satMax = 18; // 토요일 기본 종료 시간 18시
+
+    timetableBlocks.forEach(b => {
+      const sHour = Math.floor(parseTime(b.start));
+      const eHour = Math.ceil(parseTime(b.end));
+
+      if (b.day === '토') {
+        if (sHour < satMin) satMin = sHour;
+        if (eHour > satMax) satMax = eHour;
+      } else if (b.day !== '일') {
+        if (sHour < wdMin) wdMin = sHour;
+        if (eHour > wdMax) wdMax = eHour;
+      }
+    });
+
+    const wRowCount = Math.max(1, wdMax - wdMin);
+    const wHours = Array.from({ length: wRowCount }, (_, i) => wdMin + i);
+
+    const sRowCount = Math.max(1, satMax - satMin);
+    const sHours = Array.from({ length: sRowCount }, (_, i) => satMin + i);
+
+    return {
+      wdStartHour: wdMin, wdRowCount: wRowCount, wdHours: wHours,
+      satStartHour: satMin, satRowCount: sRowCount, satHours: sHours
+    };
+  }, [timetableBlocks]);
 
   const activeInstructors = useMemo(() => {
     const names = new Set<string>();
@@ -490,9 +517,9 @@ export default function ClassPage() {
                 <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-40 flex items-center justify-center font-extrabold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
                   평일시간
                 </div>
-                <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${ROW_COUNT})` }}>
-                  {WD_HOURS.map(h => (
-                    <div key={h} className="absolute w-full text-[11px] font-black text-slate-400 text-center" style={{ top: `calc(var(--hour-height) * ${h - WD_START_HOUR})`, transform: 'translateY(-50%)' }}>
+                <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${wdRowCount})` }}>
+                  {wdHours.map(h => (
+                    <div key={h} className="absolute w-full text-[11px] font-black text-slate-400 text-center" style={{ top: `calc(var(--hour-height) * ${h - wdStartHour})`, transform: 'translateY(-50%)' }}>
                       {h}:00
                     </div>
                   ))}
@@ -502,8 +529,9 @@ export default function ClassPage() {
               <div className="flex-1 flex w-full">
                 {DAYS.map((day, dayIndex) => {
                   const isSaturday = day === '토';
-                  const startHour = isSaturday ? SAT_START_HOUR : WD_START_HOUR;
-                  const currentHours = isSaturday ? SAT_HOURS : WD_HOURS;
+                  const startHour = isSaturday ? satStartHour : wdStartHour;
+                  const currentHours = isSaturday ? satHours : wdHours;
+                  const currentRowCount = isSaturday ? satRowCount : wdRowCount;
 
                   const dayBlocks = timetableBlocks.filter(b => b.day === day).sort((a,b) => {
                     const timeDiff = parseTime(a.start) - parseTime(b.start);
@@ -511,11 +539,9 @@ export default function ClassPage() {
                     return (a.classObj.name || '').localeCompare(b.classObj.name || '');
                   });
                   
-                  // 💡 [최종 진화형 알고리즘] 강사의 "직책" 기준으로 우선순위를 매겨 같은 기둥에 일렬 배치
                   const blocksByInst = new Map<string, any[]>();
                   const tbdBlocks: any[] = [];
 
-                  // 1. 강사별로 수업 분류 (미정 별도 분리)
                   dayBlocks.forEach(b => {
                       const instName = (b.classObj.instructor?.name || '미정').trim();
                       if (instName === '미정') {
@@ -526,7 +552,6 @@ export default function ClassPage() {
                       }
                   });
 
-                  // 2. 강사들을 직책(Position) 기준으로 정렬: 원장 > 부원장 > 전임 > 파트
                   const instList = Array.from(blocksByInst.keys()).sort((a, b) => {
                       const instA = instructors.find(i => i.name === a);
                       const instB = instructors.find(i => i.name === b);
@@ -536,12 +561,11 @@ export default function ClassPage() {
                       
                       const diff = getPositionPriority(posA) - getPositionPriority(posB);
                       if (diff !== 0) return diff;
-                      return a.localeCompare(b); // 직책이 같으면 이름순
+                      return a.localeCompare(b);
                   });
 
                   const columns: any[][] = []; 
 
-                  // 3. 우선순위가 높은 강사부터 막대기를 통째로 열(Column)에 배정 (위아래 매칭 완벽 보장)
                   instList.forEach(instName => {
                       const instBlocks = blocksByInst.get(instName)!.sort((a, b) => parseTime(a.start) - parseTime(b.start));
                       
@@ -560,7 +584,6 @@ export default function ClassPage() {
                           if (!placed) instCols.push([b]);
                       });
 
-                      // 만들어진 강사의 기둥을 전체 시간표의 빈칸에 꽂아 넣음
                       instCols.forEach(iCol => {
                           let placedGlobal = false;
                           for (let c = 0; c < columns.length; c++) {
@@ -570,7 +593,7 @@ export default function ClassPage() {
                                   return !columns[c].some(existingBlock => {
                                       const es = parseTime(existingBlock.start);
                                       const ee = parseTime(existingBlock.end);
-                                      return Math.max(ns, es) < Math.min(ne, ee); // 겹침 검사
+                                      return Math.max(ns, es) < Math.min(ne, ee);
                                   });
                               });
 
@@ -582,12 +605,11 @@ export default function ClassPage() {
                               }
                           }
                           if (!placedGlobal) {
-                              columns.push([...iCol]); // 빈칸 없으면 우측에 새 기둥 추가
+                              columns.push([...iCol]);
                           }
                       });
                   });
 
-                  // 4. 강사가 미정인(TBD) 수업들을 남는 빈자리에 쏙쏙 끼워 넣기
                   tbdBlocks.sort((a,b) => parseTime(a.start) - parseTime(b.start));
                   tbdBlocks.forEach(b => {
                       let placed = false;
@@ -610,7 +632,6 @@ export default function ClassPage() {
                       if (!placed) columns.push([b]);
                   });
 
-                  // 최종 소속 기둥 번호(Index) 부여
                   columns.forEach((colBlocks, cIdx) => {
                       colBlocks.forEach(b => {
                           b.colIdx = cIdx;
@@ -628,9 +649,9 @@ export default function ClassPage() {
                           <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-20 flex items-center justify-center font-extrabold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
                             토요시간
                           </div>
-                          <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${ROW_COUNT})` }}>
-                            {SAT_HOURS.map(h => (
-                              <div key={`sat-h-${h}`} className="absolute w-full text-[11px] font-black text-blue-500 text-center" style={{ top: `calc(var(--hour-height) * ${h - SAT_START_HOUR})`, transform: 'translateY(-50%)' }}>
+                          <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${satRowCount})` }}>
+                            {satHours.map(h => (
+                              <div key={`sat-h-${h}`} className="absolute w-full text-[11px] font-black text-blue-500 text-center" style={{ top: `calc(var(--hour-height) * ${h - satStartHour})`, transform: 'translateY(-50%)' }}>
                                 {h}:00
                               </div>
                             ))}
@@ -643,12 +664,11 @@ export default function ClassPage() {
                           {day}요일
                         </div>
                         
-                        <div className="relative w-full border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${ROW_COUNT})` }}>
+                        <div className="relative w-full border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${currentRowCount})` }}>
                           {currentHours.map(h => (
                             <div key={`grid-${h}`} className="absolute w-full border-t border-slate-200/60 pointer-events-none" style={{ top: `calc(var(--hour-height) * ${h - startHour})` }}></div>
                           ))}
                           
-                          {/* 💡 병합된 최종 컬럼 구조를 기준으로 화면에 렌더링 */}
                           {columns.flat().map((b, i) => {
                             const s = parseTime(b.start);
                             const e = parseTime(b.end);

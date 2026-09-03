@@ -170,9 +170,9 @@ export default function StudentDetailPage() {
   const loadClasses = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     
-    // 🌟 [수정됨] 상태가 "예정"인 반만 부르던 것을 "종료", "폐강"이 아닌 모든 반을 부르도록 변경
+    // 🌟 풀코드(code)와 강사이름(instructor)을 데이터베이스에서 명시적으로 가져오도록 쿼리 수정
     let query = supabase.from("class")
-      .select("class_id, name, level_name")
+      .select("class_id, code, name, level_name, instructor(name)")
       .neq("status", "종료")
       .neq("status", "폐강");
       
@@ -281,7 +281,6 @@ export default function StudentDetailPage() {
   };
 
   const loadHwList = async () => {
-    // 🌟 [수정] 배부일(created_at)과 마감일(due_date)을 가져오도록 쿼리 수정
     const { data } = await supabase.from("student_homework_result")
       .select("status, completed_tq_ids, checked_at, homework_assignment(homework_title, target_questions, created_at, due_date, textbook(title, book_type))")
       .eq("student_id", studentId)
@@ -1258,6 +1257,7 @@ export default function StudentDetailPage() {
         </div>
       )}
 
+      {/* 🌟 재등록 드롭다운 로직 완벽 적용 */}
       {isReEnrollModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -1275,7 +1275,14 @@ export default function StudentDetailPage() {
                 <label className="block text-[10px] font-bold text-slate-500 mb-1">배정할 수강 반 <span className="text-rose-500">*</span></label>
                 <select required value={reEnrollForm.classId} onChange={(e) => setReEnrollForm({...reEnrollForm, classId: e.target.value})} className="w-full px-2.5 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 bg-white text-sm">
                   <option value="" disabled>반을 선택해주세요</option>
-                  {allClasses.map(c => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
+                  {allClasses.map(c => {
+                    const fullCode = c.code || c.name || '';
+                    const displayName = fullCode.replace(/\d{4}$/, '').trim();
+                    const instName = c.instructor?.name || '미정';
+                    return (
+                      <option key={c.class_id} value={c.class_id}>{displayName} ({instName})</option>
+                    );
+                  })}
                 </select>
               </div>
 
