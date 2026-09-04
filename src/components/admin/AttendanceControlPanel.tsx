@@ -63,10 +63,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     
     if (tId && tId !== 'hq') stQuery = stQuery.eq("tenant_id", tId);
 
-    // 🌟 [핵심 수정] 패드와의 통신 생존 여부를 판단하기 위해 last_seen_at(마지막 통신 시간)을 가져옵니다.
+    // 🌟 [핵심 수정] session_date를 같이 불러와서 오늘/어제 세션을 정확히 구분합니다.
     const clinicQuery = supabase
       .from("clinic_session_state")
-      .select("student_id, ended_at, started_at, last_seen_at")
+      .select("student_id, ended_at, started_at, last_seen_at, session_date")
       .in("session_date", [today, yesterday]);
 
     const [stRes, clinicRes] = await Promise.all([stQuery, clinicQuery]);
@@ -98,27 +98,22 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
       let currentStatus = todayAtt?.status || "NONE";
 
-      // 🌟 [핵심 수정] 패드가 "진짜 켜져 있는지" 하트비트(심장박동)로 철저히 검사합니다.
       const studentClinics = todayClinics.filter(c => String(c.student_id) === String(st.student_id));
       
+      // 살아있는 세션은 오늘/어제 상관없이 잡아냅니다.
       const isActiveInClinic = studentClinics.some(c => {
-          if (c.ended_at) return false; // 이미 종료된 세션 무시
-          
+          if (c.ended_at) return false; 
           const targetTime = c.last_seen_at || c.started_at;
           if (!targetTime) return false;
-          
-          // 마지막 통신 후 3분(180,000ms) 이상 지났으면 브라우저를 끄고 도망갔거나 에러난 좀비 세션이므로 무시
-          const isAlive = (Date.now() - new Date(targetTime).getTime()) < 3 * 60 * 1000;
-          return isAlive;
+          return (Date.now() - new Date(targetTime).getTime()) < 3 * 60 * 1000;
       });
 
-      const hasFinishedClinic = studentClinics.some(c => c.ended_at !== null && c.ended_at !== undefined);
+      // 🌟 [핵심 수정] 어제 끝난 세션은 철저히 무시하고, 오직 "오늘" 끝난 세션만 인정합니다.
+      const hasTodayFinishedClinic = studentClinics.some(c => c.session_date === today && c.ended_at !== null && c.ended_at !== undefined && c.ended_at !== "");
 
       if (isActiveInClinic) {
-          // 패드 화면이 켜져있고 실시간 통신 중인 '진짜' 학생만 클리닉중으로 강제 고정!
           currentStatus = "클리닉중";
-      } else if (hasFinishedClinic && (currentStatus === "NONE" || currentStatus === "클리닉중")) {
-          // 클리닉을 마쳤거나 화면을 꺼서 오프라인된 경우 안전하게 대기중으로 전환
+      } else if (hasTodayFinishedClinic && (currentStatus === "NONE" || currentStatus === "클리닉중")) {
           currentStatus = "대기중";
       }
       
@@ -270,8 +265,16 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const existingId = existingRecords && existingRecords.length > 0 ? existingRecords[0].attendance_id : student.att_id;
 
     if (action === "DELETE") {
-      if (!confirm(`[${student.name}] 학생의 오늘 출결 기록을 초기화(삭제)하시겠습니까?`)) return;
-      if (existingId) await supabase.from("attendance").delete().eq("attendance_id", existingId);
+      // 🌟 [핵심 수정] 완전한 초기화를 위해 클리닉 테이블 찌꺼기까지 동시에 날려버립니다.
+      if (!confirm(`[${student.name}] 학생의 오늘 출결 기록을 완벽히 초기화(삭제)하시겠습니까?\n\n※ 주의: 테스트/실수로 생성된 조교(클리닉) 기록도 함께 파기되어 '미등원' 상태로 강제 리셋됩니다.`)) return;
+      
+      if (existingId) {
+        await supabase.from("attendance").delete().eq("attendance_id", existingId);
+      }
+      
+      // 클리닉 기록 오버라이드 방지를 위해 함께 삭제
+      await supabase.from("clinic_session_state").delete().eq("student_id", student.id).in("session_date", [today, getKSTDateStr(-1)]);
+      
       requestFetch(selectedAttClassId);
       return;
     }
@@ -689,7 +692,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
               )}
             </div>
 
-            <div className="flex justify-end gap-2 mt-8">
+            <div className="flex flex-end gap-2 mt-8">
               <button onClick={() => setManualModalData(null)} className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-sm transition-colors">취소</button>
               <button onClick={handleManualSave} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl text-sm shadow-md transition-colors">저장하기</button>
             </div>
