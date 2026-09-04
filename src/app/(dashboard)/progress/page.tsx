@@ -268,13 +268,11 @@ export default function ProgressPage() {
 
   const loadStatusMapDB = async (classId: string, studentIds: string[]) => {
     try {
-      // 1. 기존 교재 과제(Homework) 불러오기
       const { data: assignments, error } = await supabase
         .from('homework_assignment')
         .select('homework_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)')
         .eq('class_id', classId);
         
-      // 2. 과제프린트로 변환된 데이터(Exam)도 함께 불러오기!
       const { data: examAssignments } = await supabase
         .from('exam_assignment')
         .select(`
@@ -332,7 +330,6 @@ export default function ProgressPage() {
         });
       });
 
-      // 🌟 [핵심 버그 수정] allQuestions 배열 상태에 의존하지 않고, 직접 DB에서 맵핑하여 뱃지가 절대 안 날아가게 방어!
       const examQuestionIds = new Set<number>();
       examAssignments?.forEach((ea: any) => {
          const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
@@ -623,6 +620,9 @@ export default function ProgressPage() {
     } else if (actionType === 'MAIN_HW_AND_WB_HW') {
       mainIds.forEach(id => updateMap(id, 'homework'));
       wbIds.forEach(id => updateMap(id, 'homework'));
+    } else if (actionType === 'DONE_ONLY') {
+      mainIds.forEach(id => updateMap(id, 'done'));
+      wbIds.forEach(id => updateMap(id, 'done'));
     } else if (actionType === 'CANCEL') {
       mainIds.forEach(id => updateMap(id, null));
       wbIds.forEach(id => updateMap(id, null));
@@ -639,6 +639,9 @@ export default function ProgressPage() {
       } else if (actionType === 'MAIN_HW_AND_WB_HW') {
         if (mainIds.length > 0 && selectedBookId) await saveHomeworkToDB(selectedBookId, mainIds, false);
         if (wbIds.length > 0 && selectedWbId) await saveHomeworkToDB(selectedWbId, wbIds, true);
+      } else if (actionType === 'DONE_ONLY') {
+        if (mainIds.length > 0 && selectedBookId) await markProgressAsCompleteInDB(mainIds, targets, selectedBookId);
+        if (wbIds.length > 0 && selectedWbId) await markProgressAsCompleteInDB(wbIds, targets, selectedWbId);
       }
     }).catch(err => {
       console.error("큐(Queue) DB 처리 중 오류 발생:", err);
@@ -668,6 +671,37 @@ export default function ProgressPage() {
     if (actionType === 'DONE_AND_WB_HW') tMsg = `본교재 진도완료 및 워크북 과제가 배부되었습니다!`;
     if (actionType === 'MAIN_HW_AND_WB_HW') tMsg = `과제 배부가 완료되었습니다!`;
     if (actionType !== 'CANCEL') showToast(tMsg);
+  };
+
+  // 🌟 워크북 페이지 단위 일괄 뱃지 순환 처리 (대기 -> 완료 -> 과제 -> 취소)
+  const handleWbPageBadgeCycle = async (pNum: number, currentStatus: string) => {
+    let wbIds: number[] = [];
+    (groupedWbQs[pNum] || []).forEach((wq: any) => wbIds.push(wq.tq_id));
+    
+    if (currentStatus === "대기" || currentStatus === "partial" || !currentStatus) {
+      await applyActionToIds('DONE_ONLY', [], wbIds);
+      showToast(`${pNum}P 워크북 진도완료 처리!`);
+    } else if (currentStatus === "done") {
+      await applyActionToIds('MAIN_HW_AND_WB_HW', [], wbIds);
+      showToast(`${pNum}P 워크북 과제 배부 완료!`);
+    } else {
+      await applyActionToIds('CANCEL', [], wbIds);
+      showToast(`${pNum}P 처리가 취소되었습니다.`);
+    }
+  };
+
+  // 🌟 워크북 단일 문항 뱃지 순환 처리 (대기 -> 완료 -> 과제 -> 취소)
+  const handleWbBadgeCycle = async (tqId: number, currentStatus: string) => {
+    if (currentStatus === "대기" || currentStatus === "partial" || !currentStatus) {
+      await applyActionToIds('DONE_ONLY', [], [tqId]);
+      showToast(`워크북 진도완료 처리!`);
+    } else if (currentStatus === "done") {
+      await applyActionToIds('MAIN_HW_AND_WB_HW', [], [tqId]);
+      showToast(`워크북 과제 배부 완료!`);
+    } else {
+      await applyActionToIds('CANCEL', [], [tqId]);
+      showToast(`처리가 취소되었습니다.`);
+    }
   };
 
   const markSingleQuestionCompleted = async (tqId: number, type: 'main'|'wb') => {
@@ -778,15 +812,49 @@ export default function ProgressPage() {
   const renderBadge = (tqId: number, type: 'main'|'wb') => {
     const st = statusMap[getStatusKey(tqId, selectedStudentId)];
     
-    if (st === "done") {
+    // 🌟 워크북 우측 문항 뱃지 렌더링 (대기->완료->과제->취소 사이클 적용)
+    if (type === 'wb') {
+      if (st === "done") {
+        return (
+          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-[#fef3c7] hover:text-[#b45309] hover:border-[#fcd34d]">
+            <span className="group-hover/qbadge:hidden">완료</span>
+            <span className="hidden group-hover/qbadge:inline tracking-tighter">과제</span>
+          </span>
+        );
+      }
+      if (st === "homework") {
+        return (
+          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
+            <span className="group-hover/qbadge:hidden">과제배부</span>
+            <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
+          </span>
+        );
+      }
+      if (st === "partial") {
+        return (
+          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 shrink-0 ml-4 transition-colors">
+            <span className="group-hover/qbadge:hidden">진행중</span>
+            <span className="hidden group-hover/qbadge:inline tracking-tighter">완료</span>
+          </span>
+        );
+      }
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className={`group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors ${type==='wb' ? 'bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300' : 'bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300'}`}>
-          <span className="group-hover/qbadge:hidden">{type === 'wb' ? '완료' : '진도완료'}</span>
-          <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
+        <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, "대기"); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors hover:bg-emerald-600 hover:text-white hover:border-emerald-600">
+          <span className="group-hover/qbadge:hidden">대기</span>
+          <span className="hidden group-hover/qbadge:inline tracking-tighter">완료</span>
         </span>
       );
     }
     
+    // 본교재 좌측 문항 뱃지 렌더링 (대기->진도완료->취소)
+    if (st === "done") {
+      return (
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300">
+          <span className="group-hover/qbadge:hidden">진도완료</span>
+          <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
+        </span>
+      );
+    }
     if (st === "homework") {
       return (
         <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
@@ -795,7 +863,6 @@ export default function ProgressPage() {
         </span>
       );
     }
-    
     if (st === "partial") {
       return (
         <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
@@ -804,11 +871,10 @@ export default function ProgressPage() {
         </span>
       );
     }
-    
     return (
-      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className={`group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors ${type==='wb' ? 'hover:bg-emerald-600 hover:text-white hover:border-emerald-600' : 'hover:bg-[#002864] hover:text-white hover:border-[#002864]'}`}>
+      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors hover:bg-[#002864] hover:text-white hover:border-[#002864]">
         <span className="group-hover/qbadge:hidden">대기</span>
-        <span className="hidden group-hover/qbadge:inline tracking-tighter">{type === 'main' ? '진도처리' : '과제배부'}</span>
+        <span className="hidden group-hover/qbadge:inline tracking-tighter">진도처리</span>
       </span>
     );
   };
@@ -1003,11 +1069,12 @@ export default function ProgressPage() {
                         <span className={`text-[12px] font-black w-6 text-center ${isActive ? "text-[#059669]" : "text-emerald-700 group-hover:text-[#059669]"}`}>{p}p</span>
                       </div>
                       
+                      {/* 🌟 워크북 좌측 페이지 뱃지 렌더링 (대기->완료->과제->취소 사이클 적용) */}
                       <div className="flex items-center shrink-0">
-                        {status === "done" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'wb'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "homework" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'wb'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "partial" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'wb'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); markSinglePageCompleted(p, 'wb'); }} className="group/pbadge w-10 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-[#059669] hover:text-white transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">과제</span></span>}
+                        {status === "done" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'done'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-pointer hover:bg-[#fef3c7] hover:text-[#b45309] hover:border-[#fcd34d] transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">과제</span></span>}
+                        {status === "homework" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'homework'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
+                        {status === "partial" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'partial'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">완료</span></span>}
+                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, '대기'); }} className="group/pbadge w-10 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">완료</span></span>}
                       </div>
                     </div>
                   );

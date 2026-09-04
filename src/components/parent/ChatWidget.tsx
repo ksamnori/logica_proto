@@ -35,8 +35,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const [isMobile, setIsMobile] = useState(false);
-
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -48,40 +46,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 🔥 [궁극의 해결책] 리액트를 거치지 않는 초고속 CSS 변수 동기화
-  // 크롬의 튕김, 카톡의 먹통을 모두 해결하는 순수 Visual Viewport 밀착 로직입니다.
+  // 💡 [순정 복구] 자바스크립트 꼼수 전면 삭제. 모바일 환경에서 채팅창을 열면 뒷배경 스크롤만 깔끔하게 막습니다.
   useEffect(() => {
-    const syncViewport = () => {
-      const mobileCheck = window.innerWidth < 640;
-      setIsMobile(mobileCheck);
-      
-      if (mobileCheck && window.visualViewport) {
-        // 리액트 State 변경으로 인한 딜레이(요동침)를 막기 위해 CSS 변수에 직접 즉시 할당합니다.
-        document.documentElement.style.setProperty('--chat-vv-height', `${window.visualViewport.height}px`);
-        document.documentElement.style.setProperty('--chat-vv-top', `${window.visualViewport.offsetTop}px`);
-      }
-    };
-
-    if (typeof window !== 'undefined') {
-      syncViewport();
-      window.addEventListener('resize', syncViewport);
-      
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', syncViewport);
-        window.visualViewport.addEventListener('scroll', syncViewport); // iOS 카톡의 핵심
-      }
+    if (isChatOpen && window.innerWidth < 640) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
     }
-
     return () => {
-      if (typeof window !== 'undefined') {
-        window.removeEventListener('resize', syncViewport);
-        if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', syncViewport);
-          window.visualViewport.removeEventListener('scroll', syncViewport);
-        }
-      }
+      document.body.style.overflow = '';
     };
-  }, []);
+  }, [isChatOpen]);
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -319,31 +294,21 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
           if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
           setIsChatOpen(!isChatOpen);
         }} 
-        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen && isMobile ? 'hidden' : ''}`}
+        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen ? 'max-sm:hidden' : ''}`}
       >
         <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 🔥 [모바일 전용 인라인 스타일] 트랜지션(애니메이션)을 없애고 CSS 변수를 통해 화면 좌표와 1:1로 자석처럼 붙습니다. */}
+      {/* 💡 [표준 CSS 복구] Tailwind 반응형 클래스와 h-[100dvh]를 사용하여 브라우저 본연의 키보드 애니메이션에 100% 맡깁니다. */}
       <div 
-        className={`fixed bg-white flex flex-col overflow-hidden z-[9998] 
-          ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
-          ${isMobile 
-            ? 'left-0 right-0 rounded-none' // 모바일: 절대 앵커링
-            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-2xl border border-slate-200 origin-bottom-right transition-all duration-300' 
-          }
+        className={`fixed bg-white flex flex-col overflow-hidden z-[9998] transition-all duration-300 origin-bottom-right shadow-2xl border border-slate-200
+          ${isChatOpen ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'}
+          top-0 left-0 w-full h-[100dvh] rounded-none
+          sm:top-auto sm:left-auto sm:right-10 sm:bottom-[90px] sm:w-[360px] sm:h-[550px] sm:rounded-2xl
         `} 
-        style={isMobile ? { 
-          // 크롬과 카톡 모두 브라우저가 알려주는 진짜 보이는 화면 위치에 정확히 꽂아 넣습니다.
-          height: 'var(--chat-vv-height, 100dvh)',
-          top: 'var(--chat-vv-top, 0px)',
-          transition: 'opacity 0.2s ease', // 높이/탑 애니메이션 절대 금지 (요동침 방지)
-        } : {
-          transform: `scale(${isChatOpenRef.current ? 1 : 0.95})`
-        }}
       >
-        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 touch-none">
+        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -479,15 +444,11 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              
-              {/* 🔥 입력창 포커스 시 불필요한 스크롤 강제 명령(scrollIntoView, scrollTo) 전면 삭제 */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
-                onFocus={() => {
-                  setTimeout(scrollToBottom, 150);
-                }}
+                onFocus={() => { setTimeout(scrollToBottom, 150); }}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
                 className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
                 placeholder="메시지를 입력하세요..." 
