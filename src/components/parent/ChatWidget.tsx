@@ -37,8 +37,12 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const [isUploading, setIsUploading] = useState(false);
 
   // 🌟 동적 높이 및 하단 여백 관리를 위한 상태
-  const [dynamicHeight, setDynamicHeight] = useState('550px');
   const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
+  const [panelStyle, setPanelStyle] = useState({
+      height: '550px',
+      top: 'auto',
+      bottom: '90px'
+  });
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -51,42 +55,43 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  const iconRef = useRef<HTMLButtonElement>(null);
-  const iconPos = useRef({ x: 0, y: 0 });
-  const iconDrag = useRef({ isDragging: false, startX: 0, startY: 0, clickX: 0, clickY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
-
-  const panelRef = useRef<HTMLDivElement>(null);
-  const panelPos = useRef({ x: 0, y: 0 });
-  const panelDrag = useRef({ isDragging: false, startX: 0, startY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
-
   // 💡 [핵심 교정] iOS/Android 모바일 브라우저의 악명 높은 키보드 레이아웃 대응 로직
   useEffect(() => {
-    // 키보드가 올라올 때 window.visualViewport.height가 줄어드는 것을 감지
     const handleResize = () => {
-      if (window.visualViewport) {
-        const isMobile = window.innerWidth < 640;
-        const viewportHeight = window.visualViewport.height;
-        const screenHeight = window.innerHeight;
-        
-        // visualViewport가 화면의 85% 미만으로 쪼그라들면 "키보드가 올라왔다"고 판단
-        const keyboardActive = viewportHeight < screenHeight * 0.85;
-        setIsKeyboardOpen(keyboardActive);
-        
-        if (isMobile) {
+      if (!window.visualViewport) return;
+      
+      const isMobile = window.innerWidth < 640;
+      const vv = window.visualViewport;
+      
+      if (isMobile) {
+          const keyboardActive = vv.height < window.innerHeight * 0.85;
+          setIsKeyboardOpen(keyboardActive);
+          
           if (keyboardActive) {
-            // 키보드가 올라왔을 때는 패널을 화면 최하단(0px)에 붙이고 높이를 viewport에 딱 맞춤
-            setDynamicHeight(`${viewportHeight}px`);
-            // 위로 떠있는 마진을 강제로 없앰
-            if (panelRef.current) panelRef.current.style.bottom = '0px';
+              // 🌟 키보드가 올라왔을 때: 화면 상단(offsetTop)부터 키보드 바로 위(height)까지 패널을 완벽하게 맞춤
+              setPanelStyle({
+                  height: `${vv.height}px`,
+                  top: `${vv.offsetTop}px`,
+                  bottom: 'auto'
+              });
           } else {
-            // 키보드가 내려가면 원래 크기와 떠있는 마진 복구
-            setDynamicHeight('550px');
-            if (panelRef.current) panelRef.current.style.bottom = '90px';
+              // 🌟 키보드가 내려갔을 때: 원래의 둥둥 떠있는 디자인 복구
+              setPanelStyle({
+                  height: '550px',
+                  top: 'auto',
+                  bottom: '0px' // 모바일 기본 바닥 고정
+              });
           }
-        }
+      } else {
+          // PC 환경
+          setPanelStyle({
+              height: '550px',
+              top: 'auto',
+              bottom: '90px'
+          });
       }
     };
-    
+
     if (typeof window !== 'undefined' && window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
       window.visualViewport.addEventListener('scroll', handleResize);
@@ -102,73 +107,12 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   }, []);
 
   const scrollToBottom = () => {
-    // 타이머를 걸어 키보드가 완전히 올라온 뒤에 스크롤을 내리도록 보장
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
     }, 100);
   };
 
   useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, isKeyboardOpen]);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
-    e.currentTarget.setPointerCapture(e.pointerId);
-    const rect = e.currentTarget.getBoundingClientRect();
-    const baseLeft = rect.left - iconPos.current.x;
-    const baseTop = rect.top - iconPos.current.y;
-    iconDrag.current = {
-      isDragging: true, startX: e.clientX - iconPos.current.x, startY: e.clientY - iconPos.current.y,
-      clickX: e.clientX, clickY: e.clientY, minX: -baseLeft, maxX: window.innerWidth - rect.width - baseLeft,
-      minY: -baseTop, maxY: window.innerHeight - rect.height - baseTop
-    };
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLButtonElement>) => {
-    if (!iconDrag.current.isDragging || !iconRef.current) return;
-    let nextX = e.clientX - iconDrag.current.startX;
-    let nextY = e.clientY - iconDrag.current.startY;
-    nextX = Math.max(iconDrag.current.minX, Math.min(nextX, iconDrag.current.maxX));
-    nextY = Math.max(iconDrag.current.minY, Math.min(nextY, iconDrag.current.maxY));
-    iconPos.current = { x: nextX, y: nextY };
-    iconRef.current.style.transform = `translate(${nextX}px, ${nextY}px)`;
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLButtonElement>) => {
-    iconDrag.current.isDragging = false;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    if (Math.abs(e.clientX - iconDrag.current.clickX) < 5 && Math.abs(e.clientY - iconDrag.current.clickY) < 5) {
-      if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
-      setIsChatOpen(!isChatOpen);
-    }
-  };
-
-  const handlePanelDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    // 키보드가 열려있을 때는 드래그 비활성화 (스크롤 간섭 방지)
-    if (isKeyboardOpen) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    if (!panelRef.current) return;
-    const rect = panelRef.current.getBoundingClientRect();
-    const baseLeft = rect.left - panelPos.current.x;
-    const baseTop = rect.top - panelPos.current.y;
-    panelDrag.current = {
-      isDragging: true, startX: e.clientX - panelPos.current.x, startY: e.clientY - panelPos.current.y,
-      minX: -baseLeft, maxX: window.innerWidth - rect.width - baseLeft, minY: -baseTop, maxY: window.innerHeight - rect.height - baseTop
-    };
-  };
-
-  const handlePanelMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!panelDrag.current.isDragging || !panelRef.current || isKeyboardOpen) return;
-    let nextX = e.clientX - panelDrag.current.startX;
-    let nextY = e.clientY - panelDrag.current.startY;
-    nextX = Math.max(panelDrag.current.minX, Math.min(nextX, panelDrag.current.maxX));
-    nextY = Math.max(panelDrag.current.minY, Math.min(nextY, panelDrag.current.maxY));
-    panelPos.current = { x: nextX, y: nextY };
-    panelRef.current.style.transform = `translate(${nextX}px, ${nextY}px) scale(${isChatOpenRef.current ? 1 : 0.95})`;
-  };
-
-  const handlePanelUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    panelDrag.current.isDragging = false;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-  };
 
   useEffect(() => {
     const handleFocus = async () => {
@@ -393,25 +337,31 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   return (
     <>
-      <button ref={iconRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ touchAction: "none", zIndex: 9999 }} className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors cursor-grab active:cursor-grabbing ${isKeyboardOpen ? 'hidden' : 'bottom-6 right-6 sm:bottom-10 sm:right-10'}`}>
+      <button 
+        onClick={() => {
+          if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
+          setIsChatOpen(!isChatOpen);
+        }} 
+        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] ${isKeyboardOpen ? 'hidden' : 'bottom-6 right-6 sm:bottom-10 sm:right-10'}`}
+      >
         <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 💡 [패널 디자인 변경] 키보드가 열리면 화면 하단 0에 고정시키고, 모바일에서 최대 폭을 화면 전체로 사용 */}
+      {/* 💡 [패널 디자인 변경] 드래그를 막고 고정시켰으며, 모바일에서는 하단에 꽉 차게 렌더링됩니다. */}
       <div 
-        ref={panelRef} 
-        className={`fixed right-0 sm:right-10 w-full sm:w-[360px] bg-white rounded-t-2xl sm:rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} 
+        className={`fixed right-0 sm:right-10 w-full sm:w-[360px] bg-white sm:rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-all duration-300 origin-bottom-right ${isChatOpen ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'}`} 
         style={{ 
-          transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px) scale(${isChatOpenRef.current ? 1 : 0.95})`, 
-          transformOrigin: 'bottom right',
-          height: dynamicHeight,
-          bottom: '90px' // 기본값 (resize 핸들러가 0px로 조정해줌)
+          height: panelStyle.height,
+          top: panelStyle.top,
+          bottom: panelStyle.bottom,
+          borderBottomLeftRadius: '0px',
+          borderBottomRightRadius: '0px'
         }}
       >
-        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className={`bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 touch-none ${isKeyboardOpen ? '' : 'cursor-move'}`}>
-          <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
-          <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
+        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
+          <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2"><span>💬</span> 학원 및 선생님 상담</h3>
+          <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
@@ -545,14 +495,14 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              {/* 🌟 텍스트 박스에 onFocus 핸들러 추가: 입력 시 부드럽게 하단으로 스크롤 */}
+              {/* 🌟 입력창 포커스 시 즉시 하단으로 스크롤 강제 동기화 */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
                 onFocus={() => {
                   setIsKeyboardOpen(true);
-                  setTimeout(scrollToBottom, 300);
+                  setTimeout(scrollToBottom, 200);
                 }}
                 onBlur={() => setIsKeyboardOpen(false)}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
