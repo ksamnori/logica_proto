@@ -39,14 +39,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const [manualForm, setManualForm] = useState({ status: "NONE", checkIn: "", checkOut: "" });
 
   const fetchTimeoutRef = useRef<any>(null);
-  
-  // 💡 [핵심] 일괄 처리 중일 때 DB 실시간 알림이 화면과 대기열을 어지럽히지 않도록 막는 락(Lock)
   const isBulkProcessing = useRef<boolean>(false);
 
   const requestFetch = (classId: string) => {
     if (isBulkProcessing.current) return; 
     if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
-    // 충돌 방지를 위해 대기 시간을 넉넉하게 800ms로 연장
     fetchTimeoutRef.current = setTimeout(() => {
       fetchAttendance(classId);
     }, 800); 
@@ -65,18 +62,29 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     
     if (tId && tId !== 'hq') stQuery = stQuery.eq("tenant_id", tId);
 
-    const { data: classStudents, error } = await stQuery;
+    // 🌟 [핵심 수정] 오늘 날짜인 세션은 물론이고, 자정을 넘겨 아직 종료되지 않은(ended_at is null) 세션까지 무조건 긁어옵니다.
+    const clinicQuery = supabase
+      .from("clinic_session_state")
+      .select("student_id, ended_at")
+      .or(`session_date.eq.${today},ended_at.is.null`);
+
+    const [stRes, clinicRes] = await Promise.all([stQuery, clinicQuery]);
     
-    if (error || !classStudents) {
-      console.error("데이터 로딩 오류:", error);
+    if (stRes.error || !stRes.data) {
+      console.error("데이터 로딩 오류:", stRes.error);
       setAttStudents([]);
       return;
     }
 
-    let targetStudents = classStudents;
+    if (clinicRes.error) {
+      console.error("클리닉 상태 로딩 오류:", clinicRes.error);
+    }
+
+    const todayClinics = clinicRes.data || [];
+    let targetStudents = stRes.data;
     
     if (classId !== "all") {
-      targetStudents = classStudents.filter(st => 
+      targetStudents = stRes.data.filter(st => 
         st.enrollment && st.enrollment.some((e: any) => e.class_id === classId)
       );
     }
@@ -91,6 +99,20 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       }
 
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
+      let currentStatus = todayAtt?.status || "NONE";
+
+      // 🌟 [핵심 수정] 클리닉 자동 연동 강제 오버라이드 
+      const studentClinics = todayClinics.filter(c => String(c.student_id) === String(st.student_id));
+      const isActiveInClinic = studentClinics.some(c => c.ended_at === null || c.ended_at === undefined || c.ended_at === "");
+      const hasFinishedClinic = studentClinics.length > 0 && studentClinics.every(c => c.ended_at !== null && c.ended_at !== undefined && c.ended_at !== "");
+
+      if (isActiveInClinic) {
+          // 패드에 살아있으면 무조건 클리닉중으로 강제 고정
+          currentStatus = "클리닉중";
+      } else if (hasFinishedClinic && (currentStatus === "NONE" || currentStatus === "클리닉중")) {
+          // 등원 체크 없이 클리닉을 마쳤거나 방금 퇴실한 경우, '미등원'으로 증발하지 않도록 '대기중'으로 안전하게 전환
+          currentStatus = "대기중";
+      }
       
       return { 
         id: st.student_id, 
@@ -101,7 +123,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         parentPhone: parentInfo?.phone || "",
         parentName: parentInfo?.name || "",
         att_id: todayAtt?.attendance_id, 
-        status: todayAtt?.status || "NONE", 
+        status: currentStatus, 
         checkIn: todayAtt?.check_in_time,
         checkOut: todayAtt?.check_out_time
       };
@@ -114,18 +136,29 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   };
 
   useEffect(() => {
-    if (selectedAttClassId) requestFetch(selectedAttClassId);
-    else setAttStudents([]);
+    if (selectedAttClassId) {
+      requestFetch(selectedAttClassId);
+      
+      const syncInterval = setInterval(() => {
+        if (!isBulkProcessing.current) {
+          fetchAttendance(selectedAttClassId);
+        }
+      }, 5000);
+
+      return () => clearInterval(syncInterval);
+    } else {
+      setAttStudents([]);
+    }
   }, [selectedAttClassId]);
 
   useEffect(() => {
-    const realtimeChannel = supabase
+    const attChannel = supabase
       .channel('global_attendance_realtime')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'attendance' },
         async (payload) => {
-          if (isBulkProcessing.current) return; // 💡 일괄 처리 중엔 실시간 큐잉 중단 (중복 방지)
+          if (isBulkProcessing.current) return; 
           if (selectedAttClassId) requestFetch(selectedAttClassId);
 
           const newRecord = payload.new as any;
@@ -170,7 +203,22 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       )
       .subscribe();
 
-    return () => { supabase.removeChannel(realtimeChannel); };
+    const clinicChannel = supabase
+      .channel('global_clinic_realtime_radar')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'clinic_session_state' },
+        () => {
+          if (isBulkProcessing.current) return;
+          if (selectedAttClassId) requestFetch(selectedAttClassId);
+        }
+      )
+      .subscribe();
+
+    return () => { 
+      supabase.removeChannel(attChannel); 
+      supabase.removeChannel(clinicChannel); 
+    };
   }, [selectedAttClassId, todayIso]);
 
   const groupedStudents = useMemo(() => {
@@ -189,7 +237,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       if (st.status === 'NONE') notArrived++;
       else if (st.status === '결석') absent++;
       else if (['출석', '등원', '지각'].includes(st.status)) inClass++;
-      else if (st.status === '수업종료') waiting++;
+      else if (st.status === '대기중' || st.status === '수업종료') waiting++;
       else if (st.status === '클리닉중') inClinic++;
       else if (['하원', '조퇴'].includes(st.status)) goneHome++;
     });
@@ -231,8 +279,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     } else if (action === "EARLY_LEAVE") {
       payload = { status: "조퇴" };
       if (!student.checkOut) payload.check_out_time = nowTimestamp;
-    } else if (action === "ENDED") {
-      payload = { status: "수업종료" };
+    } else if (action === "WAITING" || action === "ENDED") {
+      payload = { status: "대기중" };
       if (!student.checkOut) payload.check_out_time = nowTimestamp; 
     } else if (action === "CLINIC") {
       payload = { status: "클리닉중" };
@@ -240,12 +288,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       payload = { status: "하원", check_out_time: nowTimestamp }; 
     }
 
-    // 💡 개별 클릭 시 즉각 화면 반영 (Optimistic Update)
     setAttStudents(prev => prev.map(s => 
       s.id === student.id ? { ...s, ...payload } : s
     ));
 
-    // 💡 DB 통신 전, 대기열에 바로 밀어넣기 (버퍼링/증발 완전 차단)
     if (['PRESENT', 'LATE', 'ABSENT', 'EARLY_LEAVE', 'GO_HOME'].includes(action)) {
         let statusLabel = action === 'PRESENT' ? '등원' :
                           action === 'LATE' ? '지각' :
@@ -282,7 +328,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     finally { requestFetch(selectedAttClassId); }
   };
 
-  // 🌟 일괄 등원 처리 (Synchronous Array Push + Optimistic Update)
   const bulkAttend = async () => {
     if (!confirm(`현재 미처리된 전체 학생을 일괄 "등원" 처리하시겠습니까?\n(알림톡이 전송될 수 있습니다)`)) return;
     
@@ -297,15 +342,12 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const nowStr = formatTimeAsKST(nowTimestamp);
     const timeString = `${today.replace(/-/g, '.')} ${nowStr}`;
 
-    // 1. 화면 즉시 변경
     setAttStudents(prev => prev.map(s => 
       s.status === "NONE" ? { ...s, status: "등원", checkIn: nowTimestamp } : s
     ));
 
-    // 2. 락 설정
     isBulkProcessing.current = true;
 
-    // 3. 대기열에 한 방에 배열로 밀어넣기
     const newMessages = toUpdate.filter(s => s.parentPhone).map(s => ({
         id: `${s.id}_등원_${Date.now()}`,
         parentPhone: s.parentPhone,
@@ -344,7 +386,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     }
   };
 
-  // 🌟 일괄 하원 처리 (Synchronous Array Push + Optimistic Update)
   const bulkGoHome = async () => {
     if (!confirm(`현재 학원에 있는(수업/대기/클리닉 중) 전체 학생을 일괄 "하원" 처리하시겠습니까?\n(알림톡이 전송될 수 있습니다)`)) return;
     
@@ -359,17 +400,14 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const nowStr = formatTimeAsKST(nowTimestamp);
     const timeString = `${today.replace(/-/g, '.')} ${nowStr}`;
 
-    // 1. 화면 즉시 변경
     setAttStudents(prev => prev.map(s => 
       (s.att_id && !['하원', '조퇴', '결석', 'NONE'].includes(s.status)) 
         ? { ...s, status: "하원", checkOut: nowTimestamp } 
         : s
     ));
 
-    // 2. 락 설정
     isBulkProcessing.current = true;
 
-    // 3. 대기열에 한 방에 배열로 밀어넣기
     const newMessages = toUpdate.filter(s => s.parentPhone).map(s => ({
         id: `${s.id}_하원_${Date.now()}`,
         parentPhone: s.parentPhone,
@@ -422,7 +460,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
     const { status, checkIn, checkOut } = manualForm;
 
-    // 💡 수동 입력도 즉시 큐로 밀어넣기
     if (['등원', '지각', '결석', '조퇴', '하원'].includes(status) && manualModalData.parentPhone) {
         const timeTarget = status === '조퇴' || status === '하원' ? checkOut : checkIn;
         const nowStr = timeTarget || formatTimeAsKST(new Date().toISOString());
@@ -496,7 +533,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                     <span className="text-[11px] font-bold text-slate-500">🏫 수업중 (등원)</span><span className="text-sm font-black text-blue-600">{flowSummary.inClass}명</span>
                   </div>
                   <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
-                    <span className="text-[11px] font-bold text-slate-500">🛋️ 대기중 (종료)</span><span className="text-sm font-black text-amber-600">{flowSummary.waiting}명</span>
+                    <span className="text-[11px] font-bold text-slate-500">🛋️ 대기중</span><span className="text-sm font-black text-amber-600">{flowSummary.waiting}명</span>
                   </div>
                   <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
                     <span className="text-[11px] font-bold text-slate-500">✍️ 클리닉중</span><span className="text-sm font-black text-purple-600">{flowSummary.inClinic}명</span>
@@ -546,7 +583,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
                         let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-200/50 border-slate-300";
                         if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "수업중"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
-                        else if (student.status === '수업종료') { flowIcon = "🛋️"; flowText = "대기중"; flowColor = "text-amber-700 bg-amber-50 border-amber-200 animate-pulse"; }
+                        else if (student.status === '대기중' || student.status === '수업종료') { flowIcon = "🛋️"; flowText = "대기중"; flowColor = "text-amber-700 bg-amber-50 border-amber-200 animate-pulse"; }
                         else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
                         else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
                         else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
@@ -590,12 +627,12 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
                             <div className="grid grid-cols-3 gap-1 mt-auto pt-1.5 border-t border-slate-200/60">
                               <button onClick={() => handleAttAction(student, 'PRESENT')} className="py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-[6px] text-[10px] transition-colors border border-blue-100">등원</button>
-                              <button onClick={() => handleAttAction(student, 'LATE')} className="py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-[6px] text-[10px] transition-colors border border-amber-100">지각</button>
-                              <button onClick={() => handleAttAction(student, 'ABSENT')} className="py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-[6px] text-[10px] transition-colors border border-rose-100">결석</button>
-                              
+                              <button onClick={() => handleAttAction(student, 'WAITING')} className="py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-[6px] text-[10px] transition-colors border border-amber-100">대기</button>
                               <button onClick={() => handleAttAction(student, 'CLINIC')} className="py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-[6px] text-[10px] transition-colors border border-purple-100">클리닉</button>
+                              
                               <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className="py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-[6px] text-[10px] transition-colors border border-indigo-100">조퇴</button>
                               <button onClick={() => handleAttAction(student, 'GO_HOME')} className="py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-[6px] text-[10px] transition-colors border border-emerald-100">하원</button>
+                              <button onClick={() => handleAttAction(student, 'ABSENT')} className="py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-[6px] text-[10px] transition-colors border border-rose-100">결석</button>
                             </div>
                           </div>
                         );
@@ -619,7 +656,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                 <label className="block text-xs font-extrabold text-slate-500 mb-1.5">위치 / 상태</label>
                 <select value={manualForm.status} onChange={e => setManualForm({...manualForm, status: e.target.value})} className="border border-slate-300 p-2.5 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-slate-50">
                   <option value="등원">🏫 수업중 (등원)</option>
-                  <option value="수업종료">🛋️ 대기중 (수업종료)</option>
+                  <option value="대기중">🛋️ 대기중</option>
                   <option value="클리닉중">✍️ 클리닉중</option>
                   <option value="하원">👋 하원 완료</option>
                   <option value="결석">❌ 결석</option>
