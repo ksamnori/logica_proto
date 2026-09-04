@@ -52,13 +52,16 @@ export default function GlobalList({
     const printItems = selectedItems.map((res) => {
       const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
       const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
-      const rawTitle = activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음';
+      
+      // 💡 [수정됨] TypeError(replace) 방지를 위해 괄호와 옵셔널 체이닝으로 안전하게 처리
+      const rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
+      const titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
       
       return {
         printType: res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'),
         masterId: res.masterId || m?.exam_id,
         targetQuestions: res.target_questions || hw.target_questions,
-        title: rawTitle.replace(/^\[시스템\]\s*/, ''),
+        title: titleStr,
         subTitle: res.subTitle || ''
       };
     });
@@ -140,7 +143,8 @@ export default function GlobalList({
               let typeBadge = activeTab === 'EXAM' ? "📝 시험" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
-              let rawTitle = activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_title : m.title || '제목 없음';
+              // 💡 [수정됨] 화면 렌더링 시에도 안전하게 변환
+              let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
               let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
               let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
               let createdDate = activeTab === 'HOMEWORK' ? (res.sort_date || res.created_at) : res.created_at;

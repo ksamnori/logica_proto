@@ -49,15 +49,50 @@ export default function TeacherDashboardPage() {
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
   const [memoData, setMemoData] = useState({ type: "일반공지", content: "" });
 
-  // 🌟 [수정] 복잡한 과제 연동을 제거하고, 순수 알림장(메모) 용도의 폼으로 간소화
   const [isLessonLogModalOpen, setIsLessonLogModalOpen] = useState(false);
   const [lessonForm, setLessonForm] = useState({
     actual_session_no: "",
-    homework_desc: "", // 학부모 노출용 (진도/과제 요약)
-    instructor_note: "" // 강사만 보는 비밀 메모
+    homework_desc: "", 
+    instructor_note: "" 
   });
 
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
+
+  const [queuedMessages, setQueuedMessages] = useState<any[]>([]);
+  const [isQueueLoaded, setIsQueueLoaded] = useState(false);
+
+  useEffect(() => {
+    const savedQueue = localStorage.getItem("logica_queued_messages");
+    if (savedQueue) {
+      try {
+        setQueuedMessages(JSON.parse(savedQueue));
+      } catch (e) {
+        console.error("큐 파싱 에러:", e);
+      }
+    }
+    setIsQueueLoaded(true);
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'logica_queued_messages') {
+         const newQ = localStorage.getItem("logica_queued_messages");
+         if(newQ) {
+            try {
+              const parsed = JSON.parse(newQ);
+              setQueuedMessages(prev => JSON.stringify(prev) !== newQ ? parsed : prev);
+            } catch(e) {}
+         }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
+  useEffect(() => {
+    if (isQueueLoaded) {
+      localStorage.setItem("logica_queued_messages", JSON.stringify(queuedMessages));
+      window.dispatchEvent(new Event('storage'));
+    }
+  }, [queuedMessages, isQueueLoaded]);
 
   useEffect(() => {
     const instId = localStorage.getItem("logica_instructor_id") || "1";
@@ -96,6 +131,26 @@ export default function TeacherDashboardPage() {
       fetchClassDetails(selectedClassId);
       fetchAttendance(selectedClassId);
     }
+  }, [selectedClassId]);
+
+  // 💡 [핵심 연동] Supabase Realtime을 통한 출결 현황 실시간 동기화 (키오스크/데스크 연동)
+  useEffect(() => {
+    if (!selectedClassId || selectedClassId === "all") return;
+
+    const attendanceChannel = supabase.channel('teacher_attendance_realtime')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'attendance' },
+        (payload) => {
+          // 출결 테이블에 변화(키오스크 등원, 관리자 결석 체크 등)가 생기면 즉시 목록 새로고침
+          fetchAttendance(selectedClassId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(attendanceChannel);
+    };
   }, [selectedClassId]);
 
   const loadPermissions = async (role: string, tId: string, isGodMode: boolean) => {
@@ -370,7 +425,7 @@ export default function TeacherDashboardPage() {
     const { data: classStudents } = await supabase
       .from("student")
       .select(`
-        student_id, name, 
+        student_id, name, parent(name, phone),
         attendance(attendance_id, status, check_in_time, check_out_time, attendance_date)
       `)
       .eq("status", "재원")
@@ -378,9 +433,13 @@ export default function TeacherDashboardPage() {
     
     const mappedAtt = (classStudents || []).map((st: any) => {
       const todayAtt = st.attendance?.find((a: any) => a.attendance_date === today);
+      const parentInfo = Array.isArray(st.parent) ? st.parent[0] : st.parent; 
+
       return { 
         id: st.student_id, 
         name: st.name, 
+        parentPhone: parentInfo?.phone || null,
+        parentName: parentInfo?.name || st.name,
         att_id: todayAtt?.attendance_id, 
         status: todayAtt?.status || "NONE", 
         checkIn: todayAtt?.check_in_time,
@@ -402,10 +461,45 @@ export default function TeacherDashboardPage() {
     return { total, present, leave: earlyLeave, absent };
   }, [attStudents]);
 
+  const queueAlimtalk = (student: any, statusLabel: string, timeString: string) => {
+    if (!student.parentPhone) return;
+    
+    const newMsg = {
+      id: `att_${student.id}_${statusLabel}`,
+      templateId: 'KA01TP260826014520504X1Fplf8R0FH',
+      studentName: student.name,
+      parentName: student.parentName,
+      parentPhone: student.parentPhone,
+      statusLabel,
+      timeString,
+      previewTitle: `[출결] ${statusLabel}`,
+      previewDesc: `${student.parentPhone} • ${timeString}`
+    };
+
+    try {
+      const rawLocal = localStorage.getItem("logica_queued_messages");
+      let currentQueue: any[] = [];
+      if (rawLocal) {
+        currentQueue = JSON.parse(rawLocal);
+      }
+
+      const filtered = currentQueue.filter((m: any) => m.id !== newMsg.id);
+      const nextQueue = [...filtered, newMsg];
+
+      localStorage.setItem("logica_queued_messages", JSON.stringify(nextQueue));
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error("대기열 저장 중 오류:", e);
+    }
+  };
+
   const handleAttAction = async (student: any, action: string) => {
     const today = new Date(new Date().getTime() + (9 * 60 * 60 * 1000)).toISOString().split("T")[0];
-    const nowTimestamp = new Date().toISOString();
+    const nowObj = new Date(new Date().getTime() + 9 * 60 * 60 * 1000);
+    const nowTimestamp = nowObj.toISOString();
+    const timeStr = `${String(nowObj.getUTCHours()).padStart(2,'0')}:${String(nowObj.getUTCMinutes()).padStart(2,'0')}`;
     let payload: any = {};
+    let statusLabelForAlimtalk = "";
 
     if (action === "ABSENT" && student.status !== "결석") {
       if (!confirm(`[${student.name}] 학생을 '결석' 처리하시겠습니까?`)) return;
@@ -422,17 +516,22 @@ export default function TeacherDashboardPage() {
 
     if (action === "PRESENT") {
       payload = { status: "출석" };
+      statusLabelForAlimtalk = "출석 (등원)";
       if (!student.checkIn) payload.check_in_time = nowTimestamp;
     } else if (action === "LATE") {
       payload = { status: "지각" };
+      statusLabelForAlimtalk = "지각 (등원)";
       if (!student.checkIn) payload.check_in_time = nowTimestamp;
     } else if (action === "ABSENT") {
       payload = { status: "결석", check_in_time: null, check_out_time: null };
+      statusLabelForAlimtalk = "결석";
     } else if (action === "EARLY_LEAVE") {
       payload = { status: "조퇴" };
+      statusLabelForAlimtalk = "조퇴 (하원)";
       if (!student.checkOut) payload.check_out_time = nowTimestamp;
     } else if (action === "ENDED") {
       payload = { check_out_time: nowTimestamp };
+      statusLabelForAlimtalk = "수업종료 (하원)";
     }
 
     try {
@@ -444,6 +543,9 @@ export default function TeacherDashboardPage() {
           student_id: student.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
         });
       }
+
+      queueAlimtalk(student, statusLabelForAlimtalk, timeStr);
+
     } catch (e) { console.error(e); } finally {
       fetchAttendance(selectedClassId);
     }
@@ -556,7 +658,6 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
-  // 🌟 [수정] 모달 오픈 시 빈칸으로 초기화 (자동 로딩 제거, 순수 메모용)
   const openLessonLogModal = () => {
     setIsLessonLogModalOpen(true);
     setLessonForm({
@@ -566,7 +667,6 @@ export default function TeacherDashboardPage() {
     });
   };
 
-  // 🌟 [수정] 메인 과제 테이블을 건드리지 않고, 오직 daily_lesson_log 에만 저장
   const handleLessonLogSubmit = async () => {
     if (!lessonForm.homework_desc.trim()) {
       alert("학부모 안내용 알림장 내용(과제/진도)을 입력해주세요.");
@@ -578,8 +678,8 @@ export default function TeacherDashboardPage() {
          class_id: selectedClassId,
          actual_date: new Date(new Date().getTime() + 9 * 3600000).toISOString().split('T')[0],
          actual_session_no: lessonForm.actual_session_no ? parseInt(lessonForm.actual_session_no) : null,
-         homework_desc: lessonForm.homework_desc, // 학부모 노출 텍스트
-         instructor_note: lessonForm.instructor_note // 강사 비밀 메모
+         homework_desc: lessonForm.homework_desc, 
+         instructor_note: lessonForm.instructor_note 
       });
 
       if (logErr) throw logErr;

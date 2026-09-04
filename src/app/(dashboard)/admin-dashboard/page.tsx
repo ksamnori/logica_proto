@@ -13,6 +13,7 @@ import ClassDetailModal from "@/components/admin/ClassDetailModal";
 import ClassVacancyChart from "@/components/admin/ClassVacancyChart";
 import InstructorPerformance from "@/components/admin/InstructorPerformance";
 
+// 🌟 알림톡 및 일반문자 액션 임포트
 import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "@/app/actions/alimtalk";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
@@ -62,7 +63,6 @@ export default function AdminDashboardPage() {
   const [bulkTarget, setBulkTarget] = useState('all');
   const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
 
-  // 💡 [핵심] 페이지 접속 시 로컬 스토리지에서 대기열 복구
   useEffect(() => {
     const savedQueue = localStorage.getItem("logica_queued_messages");
     if (savedQueue) {
@@ -73,12 +73,29 @@ export default function AdminDashboardPage() {
       }
     }
     setIsQueueLoaded(true);
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === 'logica_queued_messages') {
+        const newQ = localStorage.getItem("logica_queued_messages");
+        if (newQ) {
+          try {
+            const parsed = JSON.parse(newQ);
+            setQueuedMessages(prev => JSON.stringify(prev) !== newQ ? parsed : prev);
+          } catch (e) {}
+        }
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
   }, []);
 
-  // 💡 [핵심] 대기열 상태가 변경될 때마다 로컬 스토리지 동기화
   useEffect(() => {
     if (isQueueLoaded) {
-      localStorage.setItem("logica_queued_messages", JSON.stringify(queuedMessages));
+      const currentSaved = localStorage.getItem("logica_queued_messages");
+      const newToSave = JSON.stringify(queuedMessages);
+      if (currentSaved !== newToSave) {
+        localStorage.setItem("logica_queued_messages", newToSave);
+      }
     }
   }, [queuedMessages, isQueueLoaded]);
 
@@ -437,6 +454,8 @@ export default function AdminDashboardPage() {
 
     if (targets.length === 0) return alert('발송 대상(재원생)이 없습니다.');
 
+    const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+
     const newMessages: any[] = targets.map(student => {
       const parentInfo = unwrap(student.parent);
       const parentPhone = parentInfo?.phone;
@@ -447,37 +466,40 @@ export default function AdminDashboardPage() {
 
       if (bulkType === 'schedule') {
         return {
-          id: `sched_${student.student_id}_${Date.now()}_${Math.random()}`,
+          id: `sched_${student.student_id}_${bulkForm.scheduleName}`,
           templateId: 'KA01TP260826015150733a1AW4dFE1qM',
           parentPhone, parentName, studentName: student.name,
           scheduleName: bulkForm.scheduleName, applyDate: bulkForm.applyDate, details: bulkForm.details,
           previewTitle: `[일정] ${bulkForm.scheduleName}`,
-          previewDesc: `${student.name} 학부모님`
+          previewDesc: `${student.name} 학부모님`,
+          queuedAt: currentTimeStr
         };
       } else if (bulkType === 'makeup') {
         return {
-          id: `make_${student.student_id}_${Date.now()}_${Math.random()}`,
+          id: `make_${student.student_id}_${bulkForm.newDate}`,
           templateId: 'KA01TP260831032803585c1Me7WbxjUe',
           parentPhone, parentName, studentName: student.name,
           oldDate: bulkForm.oldDate, newDate: bulkForm.newDate, details: bulkForm.details,
           previewTitle: `[보강] ${student.name}`,
-          previewDesc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`
+          previewDesc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`,
+          queuedAt: currentTimeStr
         };
       } else {
         return {
-          id: `gen_${student.student_id}_${Date.now()}_${Math.random()}`,
+          id: `gen_${student.student_id}_${bulkForm.details.substring(0, 10)}`,
           templateId: 'GENERAL_SMS',
           parentPhone, parentName, studentName: student.name,
           details: bulkForm.details,
           previewTitle: `[일반문자]`,
-          previewDesc: `${student.name} 학부모님`
+          previewDesc: `${student.name} 학부모님`,
+          queuedAt: currentTimeStr
         };
       }
     }).filter(Boolean);
 
     setQueuedMessages(prev => {
-      const uniqueNew = newMessages.filter((newMsg: any) => !prev.some(m => m.id === newMsg.id));
-      return [...prev, ...uniqueNew];
+      const prevFiltered = prev.filter(m => !newMessages.some(newMsg => newMsg.id === m.id));
+      return [...prevFiltered, ...newMessages];
     });
     
     alert(`${newMessages.length}건이 발송 대기열에 추가되었습니다.\n(가운데 큐에서 전체 발송을 눌러주세요)`);
@@ -660,6 +682,7 @@ export default function AdminDashboardPage() {
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
             
+            {/* COLUMN 1: 메시지 작성 폼 */}
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">📝 단체 알림톡 / 문자 작성</h3>
@@ -698,6 +721,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
+            {/* COLUMN 2: 알림톡 대기열 */}
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
@@ -726,7 +750,10 @@ export default function AdminDashboardPage() {
                               <span className="text-[10px] text-slate-400 font-medium">{msg.parentPhone}</span>
                             </div>
                           </div>
-                          <button onClick={() => setQueuedMessages(prev => prev.filter(m => m.id !== msg.id))} className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-bold shrink-0 absolute right-3 top-3">×</button>
+                          <div className="flex items-center gap-1.5 pr-6">
+                            <span className="text-[10px] font-bold text-slate-400">{msg.queuedAt || msg.timeString || ''}</span>
+                          </div>
+                          <button onClick={() => setQueuedMessages(prev => prev.filter(m => m.id !== msg.id))} className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-bold shrink-0 absolute right-2 top-2.5">×</button>
                         </div>
                         
                         {msg.templateId !== "KA01TP260826014520504X1Fplf8R0FH" && msg.details && (
@@ -747,6 +774,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
+            {/* COLUMN 3: 실시간 피드 (1줄 렌더링) */}
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
@@ -794,12 +822,20 @@ export default function AdminDashboardPage() {
             classStats={classStats} 
             todayIso={todayIso} 
             onQueueMessage={(msg) => setQueuedMessages(prev => {
-              const isDuplicate = prev.some(m => m.id === msg.id);
-              if (isDuplicate) return prev;
-              return [...prev, {
+              const generatedId = msg.id || `att_${msg.studentName}_${msg.statusLabel}`;
+              const filtered = prev.filter(m => 
+                m.id !== generatedId && 
+                !(m.studentName === msg.studentName && m.previewTitle === `[출결] ${msg.statusLabel}`)
+              );
+              
+              const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+              
+              return [...filtered, {
                 ...msg, 
+                id: generatedId,
                 previewTitle: `[출결] ${msg.statusLabel}`, 
-                previewDesc: `${msg.parentPhone} • ${msg.timeString}`
+                previewDesc: `${msg.parentPhone} • ${msg.timeString}`,
+                queuedAt: msg.queuedAt || currentTimeStr
               }];
             })} 
           />

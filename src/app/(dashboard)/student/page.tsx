@@ -236,7 +236,8 @@ export default function StudentPage() {
                         )}
                       </td>
                       <td className="py-3 px-4 border-b border-slate-100 text-slate-500 font-bold text-[13px] text-center max-w-[120px] truncate">
-                        {s.school_name || s.school || "-"}
+                        {/* 💡 [수정] 혼용되던 school_name을 제거하고 school만 사용하도록 단일화 */}
+                        {s.school || "-"}
                       </td>
                       <td className="py-3 px-4 border-b border-slate-100 font-bold text-center">{s.grade || "-"}</td>
                       <td className="py-3 px-4 border-b border-slate-100 text-slate-500 font-bold text-xs text-center">{s.gender || "-"}</td>
@@ -262,7 +263,6 @@ export default function StudentPage() {
           </table>
         </div>
 
-        {/* 수정된 페이지네이션 영역 */}
         <div className="bg-slate-50 border-t border-slate-200 p-4 flex justify-center items-center shrink-0">
           <div className="flex items-center gap-4">
             <button 

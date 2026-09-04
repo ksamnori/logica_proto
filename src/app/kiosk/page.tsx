@@ -62,17 +62,56 @@ export default function KioskPage() {
     }
   };
 
-  // 💡 [핵심 구현] 꼬리표 절삭 및 학부모 폰번호 연동 다중 검색 로직
+  // 💡 [핵심 연동] 키오스크 처리 내역을 관리자 대시보드의 알림톡 대기열(스토리지)에 담는 로직
+  const queueAlimtalk = (student: any, statusLabel: string, timeString: string) => {
+    const parentObj = Array.isArray(student.parent) ? student.parent[0] : student.parent;
+    const parentPhone = parentObj?.phone;
+    if (!parentPhone) return;
+
+    const isValidParentName = parentObj?.name && parentObj.name.trim() !== "" && parentObj.name !== "미입력";
+    const parentName = isValidParentName ? parentObj.name : student.name;
+
+    const newMsg = {
+      id: `att_${student.student_id}_${statusLabel}`, 
+      templateId: 'KA01TP260826014520504X1Fplf8R0FH',
+      studentName: student.name,
+      parentName: parentName,
+      parentPhone: parentPhone,
+      statusLabel,
+      timeString,
+      previewTitle: `[출결] ${statusLabel}`,
+      previewDesc: `${parentPhone} • ${timeString}`
+    };
+
+    try {
+      const rawLocal = localStorage.getItem("logica_queued_messages");
+      let currentQueue: any[] = [];
+      if (rawLocal) {
+        currentQueue = JSON.parse(rawLocal);
+      }
+
+      // 이미 스토리지에 같은 학생의 출결(id)이 있다면 제거 후 최신으로 덮어쓰기
+      const filtered = currentQueue.filter((m: any) => m.id !== newMsg.id);
+      const nextQueue = [...filtered, newMsg];
+
+      localStorage.setItem("logica_queued_messages", JSON.stringify(nextQueue));
+      // 저장 완료 후 이벤트 발송 (대시보드가 열려있으면 즉시 감지)
+      window.dispatchEvent(new Event('storage'));
+    } catch (e) {
+      console.error("대기열 저장 중 오류:", e);
+    }
+  };
+
   const searchDBAndProcess = async (code: string) => {
     setIsProcessing(true);
     try {
       // 🌟 [보안] tenant_id 필터 추가 (지점별 격리)
       const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || '';
 
-      // 1. 넓은 범위로 포함된 번호를 검색 (단, '재원' 상태인 학생만)
+      // 💡 [수정] 큐 연동을 위해 parent 데이터에서 name까지 함께 가져오도록 select 변경
       let studentQuery = supabase
         .from('student')
-        .select('student_id, name, grade, phone, parent(phone), enrollment(enrollment_id, class(class_id, name))')
+        .select('student_id, name, grade, phone, parent(name, phone), enrollment(enrollment_id, class(class_id, name))')
         .eq('status', '재원')
         .like('phone', `%${code}%`);
       if (kioskTenantId) studentQuery = studentQuery.eq('tenant_id', kioskTenantId);
@@ -80,7 +119,7 @@ export default function KioskPage() {
 
       let parentQuery = supabase
         .from('student')
-        .select('student_id, name, grade, phone, parent!inner(phone), enrollment(enrollment_id, class(class_id, name))')
+        .select('student_id, name, grade, phone, parent!inner(name, phone), enrollment(enrollment_id, class(class_id, name))')
         .eq('status', '재원')
         .like('parent.phone', `%${code}%`);
       if (kioskTenantId) parentQuery = parentQuery.eq('tenant_id', kioskTenantId);
@@ -92,7 +131,7 @@ export default function KioskPage() {
       let merged: any[] = [...(studentMatch || []), ...(parentMatch || [])];
       let uniqueMap = new Map();
 
-      // 2. 검색된 넓은 범위 데이터 중 꼬리표(-1, -2)를 떼고 완벽히 매칭되는지 2차 검증
+      // 넓은 범위 데이터 중 꼬리표(-1, -2)를 떼고 완벽히 매칭되는지 2차 검증
       merged.forEach((item: any) => {
         const extractCleanDigits = (phoneStr: string) => {
           if (!phoneStr) return "";
@@ -148,19 +187,18 @@ export default function KioskPage() {
 
   const completeAttendance = async (student: any) => {
     setIsProcessing(true);
-    setConfirmStudent(null); // 진행 시작 시 확인 팝업은 닫음
+    setConfirmStudent(null); 
 
     try {
-      // 한국 시간 기준 Today 날짜 구하기
       const now = new Date();
       const kstTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
       const today = kstTime.toISOString().split('T')[0];
       const timestamp = new Date().toISOString();
+      const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
 
       let enrollmentId = (student.enrollment && student.enrollment.length > 0) ? student.enrollment[0].enrollment_id : null;
       let classId = getClassId(student);
 
-      // 1. 오늘자 출결 기록 전체 조회
       const { data: todayRecords, error: fetchError } = await supabase
         .from('attendance')
         .select('*')
@@ -168,11 +206,12 @@ export default function KioskPage() {
         .eq('attendance_date', today)
         .order('attendance_id', { ascending: true });
 
-      if (fetchError) throw fetchError; // 조회 에러 발생 시 캐치로 던짐
+      if (fetchError) throw fetchError;
 
       const latest = todayRecords && todayRecords.length > 0 ? todayRecords[todayRecords.length - 1] : null;
 
-      let popupType = "in"; // 기본: 등원
+      let popupType = "in"; 
+      let statusLabelForAlimtalk = "출석 (등원)";
 
       if (!latest) {
         // [등원]
@@ -184,7 +223,7 @@ export default function KioskPage() {
           status: '출석',
           check_in_time: timestamp
         });
-        if (insertError) throw insertError; // 인서트 에러 발생 시 캐치로 던짐
+        if (insertError) throw insertError; 
 
       } else if (!latest.check_out_time) {
         // [쿨타임 확인]
@@ -201,9 +240,10 @@ export default function KioskPage() {
           check_out_time: timestamp,
           status: '출석'
         }).eq('attendance_id', latest.attendance_id);
-        if (updateError) throw updateError; // 업데이트 에러 발생 시 캐치로 던짐
+        if (updateError) throw updateError; 
         
         popupType = "out";
+        statusLabelForAlimtalk = "수업종료 (하원)";
 
       } else {
         // [재등원]
@@ -215,12 +255,15 @@ export default function KioskPage() {
           status: '출석',
           check_in_time: timestamp
         });
-        if (reentryError) throw reentryError; // 재등원 인서트 에러 발생 시 캐치로 던짐
+        if (reentryError) throw reentryError; 
 
         popupType = "reentry";
+        statusLabelForAlimtalk = "출석 (등원)";
       }
 
-      // 모든 통신이 정상적으로 끝났을 때만 팝업 표시
+      // 💡 [핵심] 출결 처리가 정상 완료되면 로컬 스토리지 대기열에 추가합니다.
+      queueAlimtalk(student, statusLabelForAlimtalk, timeStr);
+
       setSuccessPopup({ name: student.name, type: popupType });
       
       setTimeout(() => {
@@ -228,7 +271,6 @@ export default function KioskPage() {
       }, 3000);
 
     } catch (e: any) {
-      // 🚨 강제로 "등원" 띄우던 속임수 로직 제거! 진짜 원인을 화면에 경고창으로 띄워줍니다.
       console.error("출결 처리 DB 에러:", e);
       alert(`출결 처리 중 오류가 발생했습니다.\n(사유: ${e.message || 'DB 연결 오류'})`);
       resetState();
@@ -286,7 +328,7 @@ export default function KioskPage() {
           </div>
         )}
 
-        {/* 💡 새로운 학생 확인(Yes/No) 팝업 오버레이 */}
+        {/* 새로운 학생 확인(Yes/No) 팝업 오버레이 */}
         {confirmStudent && !successPopup && !isProcessing && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-40 animate-[fadeIn_0.2s_ease-out]">
             <div className="bg-white rounded-3xl p-10 flex flex-col items-center shadow-2xl w-[400px]">
@@ -340,7 +382,6 @@ export default function KioskPage() {
                       <IconUser />
                     </div>
                     <div>
-                      {/* 형제/자매 식별을 위해 학년을 더 강조 */}
                       <div className="font-bold text-slate-800 text-lg">
                         {student.name} <span className="text-base font-extrabold text-[#e11d48] ml-1">[{student.grade}]</span>
                       </div>

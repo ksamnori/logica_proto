@@ -44,7 +44,6 @@ export default function StudentDetailPage() {
 
   const [activeTab, setActiveTab] = useState<string>("info");
   
-  // 💡 [핵심 교정] 404 강제 튕김을 막고, 화면 내에서 부드럽게 에러를 보여주기 위한 상태값 추가
   const [isNotFound, setIsNotFound] = useState(false);
 
   const [student, setStudent] = useState<any>(null);
@@ -160,7 +159,6 @@ export default function StudentDetailPage() {
       
       if (error) console.error("데이터 로딩 오류:", error);
 
-      // 💡 [핵심 교정] 에러나 빈 데이터 발생 시 강제로 URL을 이동시키지 않고 화면에 안내 팝업 상태만 켭니다.
       if (!stuData) {
         setIsNotFound(true);
         return;
@@ -440,7 +438,6 @@ export default function StudentDetailPage() {
       ]);
       await supabase.from('student').delete().eq('student_id', studentId);
       alert("✅ 학생 데이터가 완전히 삭제되었습니다.");
-      // 💡 삭제 후 이전 페이지(학생 목록의 필터/검색결과)로 자연스럽게 돌아갑니다.
       router.back(); 
     } catch (error: any) { alert("삭제 실패: " + error.message); }
   };
@@ -607,7 +604,6 @@ export default function StudentDetailPage() {
     );
   };
 
-  // 💡 [핵심 교정] 404 강제 튕김을 멈추고 대신 화면 중앙에 안내와 뒤로가기 버튼을 표시합니다.
   if (isNotFound) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center min-h-[80vh] bg-slate-50 p-10 font-pretendard">
@@ -661,7 +657,10 @@ export default function StudentDetailPage() {
               </p>
             </div>
           </div>
-          <div className="relative z-10 flex gap-2">
+          <div className="relative z-10 flex items-center gap-2">
+            <button onClick={() => router.back()} className="px-3 py-2 bg-white text-slate-600 font-bold rounded-lg shadow-sm border border-slate-200 hover:bg-slate-50 hover:text-slate-800 transition-colors flex items-center gap-1 text-xs mr-2">
+              ← 목록으로
+            </button>
             {(student.status === "휴원" || student.status === "퇴원") && (
               <button onClick={() => setIsReEnrollModalOpen(true)} className="px-4 py-2 bg-emerald-600 text-white font-bold rounded-lg shadow-sm hover:bg-emerald-700 transition-colors flex items-center gap-1.5 text-xs animate-pulse">
                 🔄 복귀/재등록
