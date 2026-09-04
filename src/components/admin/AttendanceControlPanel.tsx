@@ -9,10 +9,10 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-const getKSTDateStr = () => {
+const getKSTDateStr = (offsetDays = 0) => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000));
+  const kst = new Date(utc + (9 * 3600000) + (offsetDays * 86400000));
   return kst.toISOString().split('T')[0];
 };
 
@@ -52,6 +52,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const fetchAttendance = async (classId: string) => {
     if (!classId) return;
     const today = getKSTDateStr();
+    const yesterday = getKSTDateStr(-1);
     const tId = localStorage.getItem("logica_tenant_id");
 
     let stQuery = supabase.from("student").select(`
@@ -62,11 +63,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     
     if (tId && tId !== 'hq') stQuery = stQuery.eq("tenant_id", tId);
 
-    // 🌟 [핵심 수정] 오늘 날짜인 세션은 물론이고, 자정을 넘겨 아직 종료되지 않은(ended_at is null) 세션까지 무조건 긁어옵니다.
+    // 🌟 [핵심 수정] 패드와의 통신 생존 여부를 판단하기 위해 last_seen_at(마지막 통신 시간)을 가져옵니다.
     const clinicQuery = supabase
       .from("clinic_session_state")
-      .select("student_id, ended_at")
-      .or(`session_date.eq.${today},ended_at.is.null`);
+      .select("student_id, ended_at, started_at, last_seen_at")
+      .in("session_date", [today, yesterday]);
 
     const [stRes, clinicRes] = await Promise.all([stQuery, clinicQuery]);
     
@@ -74,10 +75,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       console.error("데이터 로딩 오류:", stRes.error);
       setAttStudents([]);
       return;
-    }
-
-    if (clinicRes.error) {
-      console.error("클리닉 상태 로딩 오류:", clinicRes.error);
     }
 
     const todayClinics = clinicRes.data || [];
@@ -101,16 +98,27 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
       let currentStatus = todayAtt?.status || "NONE";
 
-      // 🌟 [핵심 수정] 클리닉 자동 연동 강제 오버라이드 
+      // 🌟 [핵심 수정] 패드가 "진짜 켜져 있는지" 하트비트(심장박동)로 철저히 검사합니다.
       const studentClinics = todayClinics.filter(c => String(c.student_id) === String(st.student_id));
-      const isActiveInClinic = studentClinics.some(c => c.ended_at === null || c.ended_at === undefined || c.ended_at === "");
-      const hasFinishedClinic = studentClinics.length > 0 && studentClinics.every(c => c.ended_at !== null && c.ended_at !== undefined && c.ended_at !== "");
+      
+      const isActiveInClinic = studentClinics.some(c => {
+          if (c.ended_at) return false; // 이미 종료된 세션 무시
+          
+          const targetTime = c.last_seen_at || c.started_at;
+          if (!targetTime) return false;
+          
+          // 마지막 통신 후 3분(180,000ms) 이상 지났으면 브라우저를 끄고 도망갔거나 에러난 좀비 세션이므로 무시
+          const isAlive = (Date.now() - new Date(targetTime).getTime()) < 3 * 60 * 1000;
+          return isAlive;
+      });
+
+      const hasFinishedClinic = studentClinics.some(c => c.ended_at !== null && c.ended_at !== undefined);
 
       if (isActiveInClinic) {
-          // 패드에 살아있으면 무조건 클리닉중으로 강제 고정
+          // 패드 화면이 켜져있고 실시간 통신 중인 '진짜' 학생만 클리닉중으로 강제 고정!
           currentStatus = "클리닉중";
       } else if (hasFinishedClinic && (currentStatus === "NONE" || currentStatus === "클리닉중")) {
-          // 등원 체크 없이 클리닉을 마쳤거나 방금 퇴실한 경우, '미등원'으로 증발하지 않도록 '대기중'으로 안전하게 전환
+          // 클리닉을 마쳤거나 화면을 꺼서 오프라인된 경우 안전하게 대기중으로 전환
           currentStatus = "대기중";
       }
       
