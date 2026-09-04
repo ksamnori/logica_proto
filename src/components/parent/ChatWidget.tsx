@@ -35,9 +35,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 🌟 [핵심] 가장 순수하고 완벽한 모바일 뷰포트 상태 관리
+  // 🌟 [근본 해결책] 잡다한 브라우저 감지 삭제. 오직 화면 크기만 동기화
   const [isMobile, setIsMobile] = useState(false);
-  const [viewportStyle, setViewportStyle] = useState({ height: '100%', top: '0px' });
+  const [vvHeight, setVvHeight] = useState('100%');
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -50,65 +50,64 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 💡 [궁극의 해결책] 잡다한 꼼수 전면 제거 -> 오직 브라우저의 진짜 보이는 영역(Visual Viewport)에만 동기화
+  // 💡 [핵심 1] 실제로 눈에 보이는 영역(visualViewport)의 높이만 정밀하게 추적합니다.
   useEffect(() => {
-    const handleViewportChange = () => {
-      const mobileCheck = window.innerWidth < 640;
-      setIsMobile(mobileCheck);
-      
-      if (mobileCheck && window.visualViewport) {
-        // 크롬은 height가 줄어들고 offsetTop은 0 유지.
-        // 카톡/사파리는 height가 줄어들고 화면이 밀려 올라간 만큼 offsetTop이 증가함.
-        // 이 두 변수를 그대로 top과 height에 꽂아주면 어떤 브라우저든 완벽 대응됨!
-        setViewportStyle({
-          height: `${window.visualViewport.height}px`,
-          top: `${window.visualViewport.offsetTop}px`
-        });
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+      if (window.visualViewport) {
+        setVvHeight(`${window.visualViewport.height}px`);
+        // 애니메이션이 끝난 후 한 번 더 보정 (카톡/iOS 버그 방어)
+        setTimeout(() => {
+          if (window.visualViewport) setVvHeight(`${window.visualViewport.height}px`);
+        }, 100);
       } else {
-        setViewportStyle({ height: '100%', top: '0px' });
+        setVvHeight(`${window.innerHeight}px`);
       }
     };
 
-    if (typeof window !== 'undefined') {
-      handleViewportChange();
-      
-      if (window.visualViewport) {
-        window.visualViewport.addEventListener('resize', handleViewportChange);
-        window.visualViewport.addEventListener('scroll', handleViewportChange);
-      } else {
-        window.addEventListener('resize', handleViewportChange);
-      }
+    handleResize();
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
     }
+    window.addEventListener('resize', handleResize);
 
     return () => {
-      if (typeof window !== 'undefined') {
-        if (window.visualViewport) {
-          window.visualViewport.removeEventListener('resize', handleViewportChange);
-          window.visualViewport.removeEventListener('scroll', handleViewportChange);
-        } else {
-          window.removeEventListener('resize', handleViewportChange);
-        }
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
       }
+      window.removeEventListener('resize', handleResize);
     };
   }, []);
 
-  // 모바일에서 채팅창이 열리면 뒷배경이 마음대로 스크롤되지 않게 락(Lock)
+  // 💡 [핵심 2] 채팅창 오픈 시 배경(body)을 화면에 꽉 고정하여 크롬의 요동침과 카톡의 튕김을 원천 차단합니다.
   useEffect(() => {
     if (isMobile && isChatOpen) {
+      const originalScrollY = window.scrollY;
+      document.body.style.position = 'fixed';
+      document.body.style.top = `-${originalScrollY}px`;
+      document.body.style.width = '100%';
       document.body.style.overflow = 'hidden';
-    } else {
-      document.body.style.overflow = '';
+      document.documentElement.style.overflow = 'hidden';
+
+      return () => {
+        document.body.style.position = '';
+        document.body.style.top = '';
+        document.body.style.width = '';
+        document.body.style.overflow = '';
+        document.documentElement.style.overflow = '';
+        window.scrollTo(0, originalScrollY);
+      };
     }
-    return () => { document.body.style.overflow = ''; };
   }, [isMobile, isChatOpen]);
 
   const scrollToBottom = () => {
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+    }, 150);
   };
 
-  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, viewportStyle]);
+  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, vvHeight]);
 
   useEffect(() => {
     const handleFocus = async () => {
@@ -344,18 +343,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 💡 [패널 래퍼] 불필요한 transition을 전면 제거하여 크롬의 요동침을 방지하고, 오직 오파시티만 부드럽게 켜집니다. */}
+      {/* 💡 [패널 래퍼] 애니메이션 제거 및 절대 앵커링. 모바일에서는 높이가 뷰포트에 완벽 동기화됨 */}
       <div 
         className={`fixed bg-white flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-200
           ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
           ${isMobile
-            ? 'left-0 right-0 rounded-none' // 모바일: 절대 앵커링 (top/height는 style에서 관리)
+            ? 'top-0 left-0 right-0 rounded-none' // 모바일: 강제 풀스크린 앵커링
             : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] origin-bottom-right' 
           }
         `} 
         style={isMobile ? { 
-          height: viewportStyle.height,
-          top: viewportStyle.top,
+          height: vvHeight // 키보드가 올라오면 이 높이 자체가 줄어듦 (밀어올릴 필요 없음)
         } : {
           transform: `scale(${isChatOpenRef.current ? 1 : 0.95})`,
           transition: 'transform 0.3s ease, opacity 0.3s ease'
@@ -497,12 +495,16 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              {/* 💡 [핵심] 텍스트 박스를 누를 때 스크롤 포커싱을 아주 약간 늦게 주어 키보드가 다 올라온 후 안착하게 만듦 */}
+              
+              {/* 💡 입력창 포커스 시 즉시 스크롤 동기화 */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
-                onFocus={() => { setTimeout(scrollToBottom, 300); }}
+                onFocus={() => {
+                  setTimeout(scrollToBottom, 100);
+                  setTimeout(scrollToBottom, 300);
+                }}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
                 className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
                 placeholder="메시지를 입력하세요..." 
