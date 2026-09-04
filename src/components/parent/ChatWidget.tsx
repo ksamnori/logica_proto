@@ -11,7 +11,6 @@ const getProfileImageUrl = (path: string | null | undefined) => {
   return data.publicUrl;
 };
 
-// 원장, 부원장, 실장을 제외한 직책을 '선생님'으로 표기
 const formatPosition = (pos: string | null | undefined) => {
   if (!pos) return "선생님";
   if (pos.includes("부원장")) return "부원장";
@@ -34,11 +33,13 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const [unreadCount, setUnreadCount] = useState(0);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const inputContainerRef = useRef<HTMLDivElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 🌟 모바일 호환성을 위한 상태
+  // 🌟 모바일 호환성 2중 방어를 위한 핵심 상태
   const [isMobile, setIsMobile] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState('100dvh');
+  const [isKeyboardUp, setIsKeyboardUp] = useState(false); // 브라우저가 정상적으로 키보드를 인식했는가?
+  const [isInputFocused, setIsInputFocused] = useState(false); // 사용자가 입력창을 터치했는가?
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -51,24 +52,53 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 💡 [핵심 교정] 카톡 인앱 브라우저 / 모바일 키보드 대응을 위한 동적 높이(--vh) 계산
+  // 💡 [초강력 방어 로직] 뷰포트 감지 및 카카오톡 버그 우회용 강제 푸시 계산
   useEffect(() => {
-    const setVh = () => {
-      // 뷰포트의 실제 1% 값을 계산하여 CSS 변수로 등록합니다.
-      const vh = window.innerHeight * 0.01;
-      document.documentElement.style.setProperty('--vh', `${vh}px`);
-      setIsMobile(window.innerWidth < 640);
+    const handleResize = () => {
+      const mobileCheck = window.innerWidth < 640;
+      setIsMobile(mobileCheck);
+      
+      if (window.visualViewport) {
+        const vvHeight = window.visualViewport.height;
+        const innerHeight = window.innerHeight;
+        // 크롬/사파리처럼 정상적으로 뷰포트가 15% 이상 줄어들면 키보드가 뜬 것으로 인식
+        const isUp = vvHeight < innerHeight * 0.85;
+        setIsKeyboardUp(isUp);
+        setViewportHeight(`${vvHeight}px`);
+      } else {
+        setViewportHeight('100dvh');
+      }
     };
 
-    setVh();
-    window.addEventListener('resize', setVh);
-    window.addEventListener('orientationchange', setVh);
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', handleResize);
+      window.visualViewport.addEventListener('scroll', handleResize);
+    }
 
     return () => {
-      window.removeEventListener('resize', setVh);
-      window.removeEventListener('orientationchange', setVh);
+      window.removeEventListener('resize', handleResize);
+      if (window.visualViewport) {
+        window.visualViewport.removeEventListener('resize', handleResize);
+        window.visualViewport.removeEventListener('scroll', handleResize);
+      }
     };
   }, []);
+
+  // 💡 [카톡 전용 핵심 변수] 사용자가 입력창을 눌렀는데 브라우저 창 크기가 안 줄어들었다? -> 100% 카톡 버그! 강제로 밀어올림!
+  const needsManualPush = isMobile && isInputFocused && !isKeyboardUp;
+
+  // 뒷배경 스크롤 잠금
+  useEffect(() => {
+    if (isMobile && isChatOpen) {
+      document.body.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+    }
+    return () => { document.body.style.overflow = ''; };
+  }, [isMobile, isChatOpen]);
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -76,7 +106,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     }, 150);
   };
 
-  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping]);
+  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, viewportHeight, needsManualPush]);
 
   useEffect(() => {
     const handleFocus = async () => {
@@ -213,6 +243,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     const text = chatInput.trim();
     if (!text || !activeRoomId) return;
     setChatInput("");
+    setIsInputFocused(false); // 전송 후 포커스 해제 처리
     try {
       const { data: roomData } = await supabase.from("chat_room").select("instructor(chat_allow_start, chat_allow_end, auto_reply_message, auto_reply_active)").eq("room_id", activeRoomId).single();
       let isDND = false; let autoReplyMsg = "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다.";
@@ -303,34 +334,32 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     <>
       <button 
         onClick={() => {
-          if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
+          if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); setIsInputFocused(false); }
           setIsChatOpen(!isChatOpen);
         }} 
         className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen && isMobile ? 'hidden' : ''}`}
       >
-        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+        <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 💡 [패널 래퍼] 모바일에서는 화면을 완전히 덮고, --vh 변수를 사용해 브라우저 툴바/키보드 변화에 유연하게 대응합니다. */}
+      {/* 💡 [패널 래퍼] 불필요한 이동을 막고 단단하게 고정, 카톡 버그 시 paddingBottom으로 강제 리프팅 */}
       <div 
-        className={`fixed bg-white flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300
+        className={`fixed bg-white flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-all duration-300
           ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
           ${isMobile
-            ? 'top-0 left-0 right-0 bottom-0 rounded-none' // 모바일: 풀스크린 덮어버림
-            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] origin-bottom-right' 
+            ? 'top-0 left-0 right-0 rounded-none' // 모바일: 화면에 딱 붙는 풀스크린 모달
+            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-2xl origin-bottom-right' 
           }
         `} 
         style={isMobile ? { 
-          height: 'calc(var(--vh, 1vh) * 100)', 
-          position: 'fixed' 
-        } : {
-          transform: `scale(${isChatOpenRef.current ? 1 : 0.95})`
-        }}
+          height: viewportHeight, 
+          paddingBottom: needsManualPush ? '340px' : '0px', // 💡 카톡 버그 대응: 강제로 키보드 높이만큼 밀어올림!
+        } : {}}
       >
-        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 touch-none">
+        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
-          <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
+          <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); setIsInputFocused(false); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
@@ -398,7 +427,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         ) : (
           <div className="flex-1 flex flex-col min-h-0 overflow-hidden relative bg-[#b2c7d9]">
             <div className="bg-white/90 backdrop-blur px-3 py-2 border-b border-slate-200 flex items-center gap-2 shrink-0 shadow-sm z-10 sticky top-0">
-              <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
+              <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); setIsInputFocused(false); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
               </button>
               <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeStaffName}</span><span className="text-[10px] font-bold text-emerald-600">실시간 연결됨</span></div>
@@ -455,7 +484,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
               <div ref={messagesEndRef} className="h-1" />
             </div>
             
-            <div ref={inputContainerRef} className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2 relative z-20">
+            <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2 relative z-20">
               <input type="file" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
               <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-[#002864] transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
                 {isUploading ? (
@@ -464,17 +493,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              
-              {/* 💡 [핵심 보완] 입력창이 터치되면 브라우저가 화면을 안전하게 올릴 수 있도록 scrollIntoView 강제 실행 */}
+              {/* 🌟 텍스트 박스에 포커스가 갔을 때 상태 업데이트로 방어선 작동 */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
                 onFocus={() => {
-                  setTimeout(() => {
-                    inputContainerRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-                    scrollToBottom();
-                  }, 300);
+                  setIsInputFocused(true);
+                  setTimeout(scrollToBottom, 200);
+                }}
+                onBlur={() => {
+                  setIsInputFocused(false);
                 }}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
                 className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
