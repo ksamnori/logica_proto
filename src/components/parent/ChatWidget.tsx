@@ -20,18 +20,6 @@ const formatPosition = (pos: string | null | undefined) => {
 };
 
 export default function ChatWidget({ parentId }: { parentId: string }) {
-  // 🔥 [궁극의 카카오톡 강제 탈출 로직]
-  // 컴포넌트가 마운트되자마자 카톡 브라우저인지 스캔하고, 맞으면 사파리/크롬으로 강제 납치(?)합니다.
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const userAgent = navigator.userAgent.toLowerCase();
-      if (userAgent.includes("kakaotalk")) {
-        // 카카오톡 인앱 브라우저 탈출 마법의 명령어
-        window.location.href = 'kakaotalk://web/openExternal?url=' + encodeURIComponent(window.location.href);
-      }
-    }
-  }, []);
-
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [activeChatView, setActiveChatView] = useState<"list" | "room">("list");
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -47,12 +35,10 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  const [isMobile, setIsMobile] = useState(false);
-  const [vvHeight, setVvHeight] = useState('100%');
-
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const typingTimerRef = useRef<any>(null);
   
   const activeRoomIdRef = useRef<string | null>(null);
   useEffect(() => { activeRoomIdRef.current = activeRoomId; }, [activeRoomId]);
@@ -60,62 +46,14 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 💡 [순정 뷰포트 동기화] 정상 브라우저(크롬, 사파리) 환경에서만 실행되며 100% 호환됩니다.
-  useEffect(() => {
-    const handleResize = () => {
-      setIsMobile(window.innerWidth < 640);
-      if (window.visualViewport) {
-        setVvHeight(`${window.visualViewport.height}px`);
-        setTimeout(() => {
-          if (window.visualViewport) setVvHeight(`${window.visualViewport.height}px`);
-        }, 100);
-      } else {
-        setVvHeight(`${window.innerHeight}px`);
-      }
-    };
-
-    handleResize();
-
-    if (window.visualViewport) {
-      window.visualViewport.addEventListener('resize', handleResize);
-    }
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      if (window.visualViewport) {
-        window.visualViewport.removeEventListener('resize', handleResize);
-      }
-      window.removeEventListener('resize', handleResize);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (isMobile && isChatOpen) {
-      const originalScrollY = window.scrollY;
-      document.body.style.position = 'fixed';
-      document.body.style.top = `-${originalScrollY}px`;
-      document.body.style.width = '100%';
-      document.body.style.overflow = 'hidden';
-      document.documentElement.style.overflow = 'hidden';
-
-      return () => {
-        document.body.style.position = '';
-        document.body.style.top = '';
-        document.body.style.width = '';
-        document.body.style.overflow = '';
-        document.documentElement.style.overflow = '';
-        window.scrollTo(0, originalScrollY);
-      };
-    }
-  }, [isMobile, isChatOpen]);
-
+  // 💡 억지로 스크롤을 조작하던 모든 꼼수 제거. 메시지가 올 때만 얌전하게 최하단 이동
   const scrollToBottom = () => {
     setTimeout(() => {
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 150);
+      messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+    }, 100);
   };
 
-  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, vvHeight]);
+  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping]);
 
   useEffect(() => {
     const handleFocus = async () => {
@@ -224,8 +162,8 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       .on("broadcast", { event: "typing" }, (payload: any) => {
         if (payload.payload?.sender_type === "instructor") {
           setIsTyping(true); 
-          // 💡 typingTimerRef.current를 내부에서 setTimeout을 재할당하는 방식으로 안전하게 사용
-          setTimeout(() => setIsTyping(false), 3000);
+          clearTimeout(typingTimerRef.current); 
+          typingTimerRef.current = setTimeout(() => setIsTyping(false), 3000);
         }
       }).subscribe();
 
@@ -345,24 +283,25 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
           if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
           setIsChatOpen(!isChatOpen);
         }} 
-        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen && isMobile ? 'hidden' : ''}`}
+        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen ? 'max-sm:hidden' : ''}`}
       >
         <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
+      {/* 🔥 [모든 꼼수 폐기 - 완전 순정 선언]
+          1. JS 크기 조절 삭제. 순수 CSS 클래스 (max-sm:inset-0)만 사용합니다. 
+          2. 크롬/삼성브라우저는 키보드가 올라오면 inset-0의 바닥(bottom)을 알아서 밀어올립니다.
+          3. overscroll-none: 챗 안에서 스크롤 끝까지 가도 뒷배경이 같이 딸려오지 않게 합니다. */}
       <div 
-        className={`fixed bg-white flex flex-col overflow-hidden z-[9998] transition-opacity duration-200
-          ${isChatOpen ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'}
-          ${isMobile 
-            ? 'top-0 left-0 right-0 rounded-none' 
-            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-2xl border border-slate-200 origin-bottom-right transition-all duration-300' 
-          }
+        className={`fixed bg-white flex flex-col z-[9998] transition-opacity duration-200 overscroll-none
+          ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
+          max-sm:inset-0 max-sm:w-full max-sm:h-[100dvh] max-sm:rounded-none
+          sm:right-10 sm:bottom-[90px] sm:w-[360px] sm:h-[550px] sm:border sm:border-slate-200 sm:rounded-2xl sm:shadow-2xl sm:origin-bottom-right
         `} 
-        style={isMobile ? { height: vvHeight } : { transform: `scale(${isChatOpenRef.current ? 1 : 0.95})` }}
       >
-        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 touch-none">
-          <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
+        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
+          <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
@@ -498,11 +437,11 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                 )}
               </button>
               
+              {/* 🔥 JS onFocus 꼼수 전면 삭제. 브라우저 네이티브 포커싱에 온전히 맡깁니다. */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
-                onFocus={() => { setTimeout(scrollToBottom, 150); }}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
                 className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
                 placeholder="메시지를 입력하세요..." 
