@@ -11,7 +11,6 @@ const getProfileImageUrl = (path: string | null | undefined) => {
   return data.publicUrl;
 };
 
-// 원장, 부원장, 실장을 제외한 직책을 '선생님'으로 표기
 const formatPosition = (pos: string | null | undefined) => {
   if (!pos) return "선생님";
   if (pos.includes("부원장")) return "부원장";
@@ -36,13 +35,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 🌟 동적 높이 및 하단 여백 관리를 위한 상태
-  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
-  const [panelStyle, setPanelStyle] = useState({
-      height: '550px',
-      top: 'auto',
-      bottom: '90px'
-  });
+  // 🌟 모바일 호환성 관리를 위한 핵심 상태
+  const [isMobile, setIsMobile] = useState(false);
+  const [viewportHeight, setViewportHeight] = useState('100dvh');
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -55,64 +50,64 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 💡 [핵심 교정] iOS/Android 모바일 브라우저의 악명 높은 키보드 레이아웃 대응 로직
+  // 💡 [핵심] 카톡/iOS 사파리의 악명 높은 키보드 버그 완벽 대응 로직
   useEffect(() => {
     const handleResize = () => {
-      if (!window.visualViewport) return;
+      const mobileCheck = window.innerWidth < 640;
+      setIsMobile(mobileCheck);
       
-      const isMobile = window.innerWidth < 640;
-      const vv = window.visualViewport;
-      
-      if (isMobile) {
-          const keyboardActive = vv.height < window.innerHeight * 0.85;
-          setIsKeyboardOpen(keyboardActive);
-          
-          if (keyboardActive) {
-              // 🌟 키보드가 올라왔을 때: 화면 상단(offsetTop)부터 키보드 바로 위(height)까지 패널을 완벽하게 맞춤
-              setPanelStyle({
-                  height: `${vv.height}px`,
-                  top: `${vv.offsetTop}px`,
-                  bottom: 'auto'
-              });
-          } else {
-              // 🌟 키보드가 내려갔을 때: 원래의 둥둥 떠있는 디자인 복구
-              setPanelStyle({
-                  height: '550px',
-                  top: 'auto',
-                  bottom: '0px' // 모바일 기본 바닥 고정
-              });
-          }
+      if (window.visualViewport) {
+        // 모바일 브라우저의 실제 눈에 보이는 높이(키보드 제외)를 실시간으로 캐치합니다.
+        setViewportHeight(`${window.visualViewport.height}px`);
+        
+        // 입력창에 포커스가 갔을 때 iOS가 화면을 강제로 올리는 현상 방지
+        if (mobileCheck && isChatOpenRef.current && (document.activeElement?.tagName === 'TEXTAREA' || document.activeElement?.tagName === 'INPUT')) {
+          window.scrollTo(0, 0); 
+        }
       } else {
-          // PC 환경
-          setPanelStyle({
-              height: '550px',
-              top: 'auto',
-              bottom: '90px'
-          });
+        setViewportHeight('100dvh');
       }
     };
 
-    if (typeof window !== 'undefined' && window.visualViewport) {
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    
+    if (window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
       window.visualViewport.addEventListener('scroll', handleResize);
-      handleResize(); // 초기화
     }
-    
+
     return () => {
-      if (typeof window !== 'undefined' && window.visualViewport) {
+      window.removeEventListener('resize', handleResize);
+      if (window.visualViewport) {
         window.visualViewport.removeEventListener('resize', handleResize);
         window.visualViewport.removeEventListener('scroll', handleResize);
       }
     };
   }, []);
 
+  // 💡 [핵심] 채팅창이 열리면 배경(body)이 스크롤되지 않도록 자물쇠를 채웁니다. (레이아웃 붕괴 원천 차단)
+  useEffect(() => {
+    if (isMobile && isChatOpen) {
+      document.body.style.overflow = 'hidden';
+      document.documentElement.style.overflow = 'hidden';
+    } else {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    }
+    return () => {
+      document.body.style.overflow = '';
+      document.documentElement.style.overflow = '';
+    };
+  }, [isMobile, isChatOpen]);
+
   const scrollToBottom = () => {
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, 100);
+    }, 150);
   };
 
-  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, isKeyboardOpen]);
+  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, viewportHeight]);
 
   useEffect(() => {
     const handleFocus = async () => {
@@ -342,27 +337,27 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
           if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
           setIsChatOpen(!isChatOpen);
         }} 
-        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] ${isKeyboardOpen ? 'hidden' : 'bottom-6 right-6 sm:bottom-10 sm:right-10'}`}
+        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen && isMobile ? 'hidden' : ''}`}
       >
-        <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
+        <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 💡 [패널 디자인 변경] 드래그를 막고 고정시켰으며, 모바일에서는 하단에 꽉 차게 렌더링됩니다. */}
+      {/* 💡 드래그(이동) 로직을 전면 제거하고 모바일에서는 꽉 찬 고정 모달로 띄웁니다. */}
       <div 
-        className={`fixed right-0 sm:right-10 w-full sm:w-[360px] bg-white sm:rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-all duration-300 origin-bottom-right ${isChatOpen ? 'opacity-100 scale-100 pointer-events-auto' : 'opacity-0 scale-95 pointer-events-none'}`} 
-        style={{ 
-          height: panelStyle.height,
-          top: panelStyle.top,
-          bottom: panelStyle.bottom,
-          borderBottomLeftRadius: '0px',
-          borderBottomRightRadius: '0px'
-        }}
+        className={`fixed bg-white flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-all duration-300
+          ${isChatOpen ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'}
+          ${isMobile
+            ? 'top-0 left-0 right-0 rounded-none' // 모바일: 화면 상단에 딱 붙고 좌우 꽉참
+            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] origin-bottom-right' // PC: 오른쪽 아래 둥둥
+          }
+        `} 
+        style={isMobile ? { height: viewportHeight } : {}} // 모바일일 때만 키보드를 뺀 실제 화면 높이 적용
       >
         <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
-            <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
           </button>
         </div>
 
@@ -495,16 +490,13 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              {/* 🌟 입력창 포커스 시 즉시 하단으로 스크롤 강제 동기화 */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
                 onFocus={() => {
-                  setIsKeyboardOpen(true);
                   setTimeout(scrollToBottom, 200);
                 }}
-                onBlur={() => setIsKeyboardOpen(false)}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
                 className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
                 placeholder="메시지를 입력하세요..." 
