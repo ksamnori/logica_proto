@@ -842,7 +842,7 @@ export default function TeacherDashboardPage() {
                 <tbody className="divide-y divide-slate-100">
                   {students.length === 0 ? <tr><td colSpan={8} className="py-16 text-center text-slate-400 font-bold">이 반에 등록된 학생이 없습니다.</td></tr> : 
                     students.map(s => {
-                      const schoolName = s.school_name || s.school || "-";
+                      const schoolName = s.school || "-";
                       const gradeText = formatGrade(s.grade);
                       const studentContact = s.phone || s.student_contact || "-";
                       const parentContact = s.parent?.phone || s.parent?.parent_contact || "-";
