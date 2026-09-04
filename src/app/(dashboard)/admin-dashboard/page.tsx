@@ -21,6 +21,59 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+// 💡 [핵심 교정] 대기열 텍스트 정제 및 중복 알림 방지 클리너 (자가 치유 로직 탑재)
+const cleanAndDeduplicateQueue = (rawQueue: any[]) => {
+  if (!Array.isArray(rawQueue)) return [];
+  
+  const normalized = rawQueue.map(m => {
+    let title = typeof m.previewTitle === 'string' && m.previewTitle.trim() !== '' 
+        ? m.previewTitle 
+        : (m.templateId === 'KA01TP260826014520504X1Fplf8R0FH' ? `[출결] ${m.statusLabel || '등원'}` : '');
+    
+    let label = m.statusLabel || '';
+    
+    if (m.templateId === 'KA01TP260826014520504X1Fplf8R0FH' || title.includes('출결') || label) {
+        if (!label) {
+            if (title.includes('등원') || title.includes('출석')) label = '등원';
+            else if (title.includes('지각')) label = '지각';
+            else if (title.includes('조퇴')) label = '조퇴';
+            else if (title.includes('하원')) label = '하원';
+            else if (title.includes('결석')) label = '결석';
+            else label = '등원';
+        }
+        
+        if (label === '출석') label = '등원';
+        if (label === '수업종료') label = '하원'; 
+        
+        title = `[출결] ${label}`;
+    }
+    
+    return { ...m, previewTitle: title, statusLabel: label };
+  });
+
+  const seen = new Set();
+  const deduplicated = [];
+  
+  for (let i = normalized.length - 1; i >= 0; i--) {
+    const m = normalized[i];
+    let key = '';
+    
+    if (m.templateId === 'KA01TP260826014520504X1Fplf8R0FH' || m.previewTitle?.includes('[출결]')) {
+        const isOut = m.statusLabel === '조퇴' || m.statusLabel === '하원';
+        const group = isOut ? 'OUT' : 'IN';
+        key = `${m.studentName}_ATT_${group}`;
+    } else {
+        key = m.id || `${m.studentName}_${m.previewTitle}_${i}`;
+    }
+    
+    if (!seen.has(key)) {
+        seen.add(key);
+        deduplicated.unshift(m); 
+    }
+  }
+  return deduplicated;
+};
+
 export default function AdminDashboardPage() {
   const router = useRouter();
 
@@ -67,7 +120,7 @@ export default function AdminDashboardPage() {
     const savedQueue = localStorage.getItem("logica_queued_messages");
     if (savedQueue) {
       try {
-        setQueuedMessages(JSON.parse(savedQueue));
+        setQueuedMessages(cleanAndDeduplicateQueue(JSON.parse(savedQueue)));
       } catch (e) {
         console.error("대기열 복구 에러:", e);
       }
@@ -79,8 +132,8 @@ export default function AdminDashboardPage() {
         const newQ = localStorage.getItem("logica_queued_messages");
         if (newQ) {
           try {
-            const parsed = JSON.parse(newQ);
-            setQueuedMessages(prev => JSON.stringify(prev) !== newQ ? parsed : prev);
+            const cleaned = cleanAndDeduplicateQueue(JSON.parse(newQ));
+            setQueuedMessages(prev => JSON.stringify(prev) !== JSON.stringify(cleaned) ? cleaned : prev);
           } catch (e) {}
         }
       }
@@ -498,8 +551,7 @@ export default function AdminDashboardPage() {
     }).filter(Boolean);
 
     setQueuedMessages(prev => {
-      const prevFiltered = prev.filter(m => !newMessages.some(newMsg => newMsg.id === m.id));
-      return [...prevFiltered, ...newMessages];
+      return cleanAndDeduplicateQueue([...prev, ...newMessages]);
     });
     
     alert(`${newMessages.length}건이 발송 대기열에 추가되었습니다.\n(가운데 큐에서 전체 발송을 눌러주세요)`);
@@ -551,8 +603,8 @@ export default function AdminDashboardPage() {
   };
 
   const getBadgeColor = (title: string) => {
-    if (!title) return 'bg-slate-100 text-slate-600 border-slate-300';
-    if (title.includes('출석')) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+    if (!title) return 'bg-transparent text-transparent border-transparent';
+    if (title.includes('출석') || title.includes('등원')) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
     if (title.includes('지각')) return 'bg-amber-50 text-amber-600 border-amber-100';
     if (title.includes('결석')) return 'bg-rose-50 text-rose-500 border-rose-100';
     if (title.includes('일정')) return 'bg-blue-50 text-blue-600 border-blue-100';
@@ -818,25 +870,15 @@ export default function AdminDashboardPage() {
 
           </div>
 
+          {/* 💡 [수정] 배열을 그대로 받아 단 한 번의 상태 업데이트(Synchronous Queueing)로 처리 */}
           <AttendanceControlPanel 
             classStats={classStats} 
             todayIso={todayIso} 
-            onQueueMessage={(msg) => setQueuedMessages(prev => {
-              const generatedId = msg.id || `att_${msg.studentName}_${msg.statusLabel}`;
-              const filtered = prev.filter(m => 
-                m.id !== generatedId && 
-                !(m.studentName === msg.studentName && m.previewTitle === `[출결] ${msg.statusLabel}`)
-              );
-              
+            onQueueMessage={(msgOrMsgs) => setQueuedMessages(prev => {
               const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
-              
-              return [...filtered, {
-                ...msg, 
-                id: generatedId,
-                previewTitle: `[출결] ${msg.statusLabel}`, 
-                previewDesc: `${msg.parentPhone} • ${msg.timeString}`,
-                queuedAt: msg.queuedAt || currentTimeStr
-              }];
+              const msgs = Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs];
+              const newMsgs = msgs.map(m => ({ ...m, queuedAt: m.queuedAt || currentTimeStr }));
+              return cleanAndDeduplicateQueue([...prev, ...newMsgs]);
             })} 
           />
 

@@ -36,8 +36,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 🌟 동적 높이 조절 상태 (키보드 대응)
-  const [dynamicMaxHeight, setDynamicMaxHeight] = useState('80dvh');
+  // 🌟 동적 높이 및 하단 여백 관리를 위한 상태
+  const [dynamicHeight, setDynamicHeight] = useState('550px');
+  const [isKeyboardOpen, setIsKeyboardOpen] = useState(false);
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -58,21 +59,38 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const panelPos = useRef({ x: 0, y: 0 });
   const panelDrag = useRef({ isDragging: false, startX: 0, startY: 0, minX: -9999, maxX: 9999, minY: -9999, maxY: 9999 });
 
-  // 🌟 키보드가 올라올 때 채팅창 높이 자동 계산 로직
+  // 💡 [핵심 교정] iOS/Android 모바일 브라우저의 악명 높은 키보드 레이아웃 대응 로직
   useEffect(() => {
+    // 키보드가 올라올 때 window.visualViewport.height가 줄어드는 것을 감지
     const handleResize = () => {
       if (window.visualViewport) {
         const isMobile = window.innerWidth < 640;
-        const bottomMargin = isMobile ? 100 : 120; // 떠있는 버튼의 위치(bottom-90) 고려
-        const availableHeight = window.visualViewport.height - bottomMargin;
-        setDynamicMaxHeight(`${availableHeight}px`);
+        const viewportHeight = window.visualViewport.height;
+        const screenHeight = window.innerHeight;
+        
+        // visualViewport가 화면의 85% 미만으로 쪼그라들면 "키보드가 올라왔다"고 판단
+        const keyboardActive = viewportHeight < screenHeight * 0.85;
+        setIsKeyboardOpen(keyboardActive);
+        
+        if (isMobile) {
+          if (keyboardActive) {
+            // 키보드가 올라왔을 때는 패널을 화면 최하단(0px)에 붙이고 높이를 viewport에 딱 맞춤
+            setDynamicHeight(`${viewportHeight}px`);
+            // 위로 떠있는 마진을 강제로 없앰
+            if (panelRef.current) panelRef.current.style.bottom = '0px';
+          } else {
+            // 키보드가 내려가면 원래 크기와 떠있는 마진 복구
+            setDynamicHeight('550px');
+            if (panelRef.current) panelRef.current.style.bottom = '90px';
+          }
+        }
       }
     };
     
     if (typeof window !== 'undefined' && window.visualViewport) {
       window.visualViewport.addEventListener('resize', handleResize);
-      window.visualViewport.addEventListener('scroll', handleResize); // iOS 대응
-      handleResize();
+      window.visualViewport.addEventListener('scroll', handleResize);
+      handleResize(); // 초기화
     }
     
     return () => {
@@ -84,13 +102,13 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   }, []);
 
   const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    // 타이머를 걸어 키보드가 완전히 올라온 뒤에 스크롤을 내리도록 보장
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
   };
 
-  // 메시지 변동 시 자동으로 맨 아래로 이동
-  useEffect(() => { 
-    scrollToBottom(); 
-  }, [chatMessages, isTyping]);
+  useEffect(() => { scrollToBottom(); }, [chatMessages, isTyping, isKeyboardOpen]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -124,6 +142,8 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   };
 
   const handlePanelDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    // 키보드가 열려있을 때는 드래그 비활성화 (스크롤 간섭 방지)
+    if (isKeyboardOpen) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     if (!panelRef.current) return;
     const rect = panelRef.current.getBoundingClientRect();
@@ -136,7 +156,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   };
 
   const handlePanelMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!panelDrag.current.isDragging || !panelRef.current) return;
+    if (!panelDrag.current.isDragging || !panelRef.current || isKeyboardOpen) return;
     let nextX = e.clientX - panelDrag.current.startX;
     let nextY = e.clientY - panelDrag.current.startY;
     nextX = Math.max(panelDrag.current.minX, Math.min(nextX, panelDrag.current.maxX));
@@ -373,22 +393,23 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   return (
     <>
-      <button ref={iconRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ touchAction: "none" }} className="fixed bottom-6 right-6 sm:bottom-10 sm:right-10 w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors z-[9999] cursor-grab active:cursor-grabbing">
+      <button ref={iconRef} onPointerDown={handlePointerDown} onPointerMove={handlePointerMove} onPointerUp={handlePointerUp} onPointerCancel={handlePointerUp} style={{ touchAction: "none", zIndex: 9999 }} className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors cursor-grab active:cursor-grabbing ${isKeyboardOpen ? 'hidden' : 'bottom-6 right-6 sm:bottom-10 sm:right-10'}`}>
         <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 🌟 패널 클래스에서 max-h-[80vh] 제거 및 style 속성에 동적 maxHeight 추가 */}
+      {/* 💡 [패널 디자인 변경] 키보드가 열리면 화면 하단 0에 고정시키고, 모바일에서 최대 폭을 화면 전체로 사용 */}
       <div 
         ref={panelRef} 
-        className={`fixed bottom-[90px] right-6 sm:bottom-[110px] sm:right-10 w-[360px] h-[550px] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} 
+        className={`fixed right-0 sm:right-10 w-full sm:w-[360px] bg-white rounded-t-2xl sm:rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`} 
         style={{ 
           transform: `translate(${panelPos.current.x}px, ${panelPos.current.y}px) scale(${isChatOpenRef.current ? 1 : 0.95})`, 
           transformOrigin: 'bottom right',
-          maxHeight: dynamicMaxHeight
+          height: dynamicHeight,
+          bottom: '90px' // 기본값 (resize 핸들러가 0px로 조정해줌)
         }}
       >
-        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 cursor-move touch-none">
+        <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className={`bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 touch-none ${isKeyboardOpen ? '' : 'cursor-move'}`}>
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -512,10 +533,10 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                 </div>
               )}
 
-              <div ref={messagesEndRef} />
+              <div ref={messagesEndRef} className="h-1" />
             </div>
             
-            <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2">
+            <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2 relative z-20">
               <input type="file" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
               <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-[#002864] transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
                 {isUploading ? (
@@ -529,7 +550,11 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                 rows={1} 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
-                onFocus={() => setTimeout(scrollToBottom, 300)}
+                onFocus={() => {
+                  setIsKeyboardOpen(true);
+                  setTimeout(scrollToBottom, 300);
+                }}
+                onBlur={() => setIsKeyboardOpen(false)}
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
                 className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
                 placeholder="메시지를 입력하세요..." 
