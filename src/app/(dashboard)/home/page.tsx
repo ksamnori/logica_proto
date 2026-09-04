@@ -268,14 +268,13 @@ export default function TeacherDashboardPage() {
   };
 
   const fetchClassDetails = async (classId: string) => {
-    const [ { data: enrollData }, { data: directData } ] = await Promise.all([
-      supabase.from("enrollment").select("student_id").eq("class_id", classId),
-      supabase.from("student").select("student_id").eq("class_id", classId)
-    ]);
+    // 💡 [수정] 400 Bad Request 에러 원인인 student 테이블 조회 쿼리 삭제
+    const { data: enrollData } = await supabase
+      .from("enrollment")
+      .select("student_id")
+      .eq("class_id", classId);
 
-    const enrollIds = enrollData?.map((e: any) => e.student_id) || [];
-    const directIds = directData?.map((s: any) => s.student_id) || [];
-    const allTargetIds = Array.from(new Set([...enrollIds, ...directIds]));
+    const allTargetIds = enrollData?.map((e: any) => e.student_id) || [];
 
     if (allTargetIds.length === 0) {
       setStudents([]);
@@ -387,15 +386,13 @@ export default function TeacherDashboardPage() {
     const today = getKSTDateStr();
     const yesterday = getKSTDateStr(-1);
 
-    const [ { data: enrollData }, { data: directData }, { data: clinicData } ] = await Promise.all([
+    // 💡 [수정] 400 Bad Request 에러 원인 쿼리 삭제
+    const [ { data: enrollData }, { data: clinicData } ] = await Promise.all([
       supabase.from("enrollment").select("student_id").eq("class_id", classId),
-      supabase.from("student").select("student_id").eq("class_id", classId),
       supabase.from("clinic_session_state").select("student_id, ended_at, started_at, last_seen_at, session_date").in("session_date", [today, yesterday])
     ]);
 
-    const enrollIds = enrollData?.map((e: any) => e.student_id) || [];
-    const directIds = directData?.map((s: any) => s.student_id) || [];
-    const allTargetIds = Array.from(new Set([...enrollIds, ...directIds]));
+    const allTargetIds = enrollData?.map((e: any) => e.student_id) || [];
 
     if (allTargetIds.length === 0) {
       setAttStudents([]);
@@ -955,7 +952,7 @@ export default function TeacherDashboardPage() {
                     
                     const cardBgClass = isNotArrived 
                       ? "bg-slate-100 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
-                      : "bg-white border-slate-200 shadow-sm hover:border-indigo-300";
+                      : "bg-white border-slate-200 hover:border-indigo-300";
 
                     return (
                       <div key={student.id} className={`p-2 rounded-xl border flex flex-col text-xs transition-all relative gap-1 ${cardBgClass} ${isMenuOpen ? 'z-50 shadow-lg ring-2 ring-indigo-200' : 'z-10 shadow-sm'}`}>
@@ -976,6 +973,7 @@ export default function TeacherDashboardPage() {
                             <button onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors mt-0.5">
                               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
                             </button>
+                            
                             {isMenuOpen && (
                               <div className="absolute right-0 top-6 w-28 bg-white shadow-2xl rounded-xl border border-slate-200 z-[9999] py-1 text-left">
                                 <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'LATE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-amber-600 hover:bg-slate-50 flex items-center gap-1.5">⏰ 지각 처리</button>

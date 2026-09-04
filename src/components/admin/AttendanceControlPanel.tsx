@@ -80,6 +80,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const yesterday = getKSTDateStr(-1);
     const tId = localStorage.getItem("logica_tenant_id");
 
+    // 💡 400 에러를 방지하는 가장 안전한 형태의 쿼리 (직접 조회 삭제, 로컬 필터링 사용)
     let stQuery = supabase.from("student").select(`
       student_id, name, status, parent(name, phone), 
       attendance(attendance_id, status, check_in_time, check_out_time, attendance_date),
@@ -104,9 +105,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const todayClinics = clinicRes.data || [];
     let targetStudents = stRes.data;
     
+    // 특정 반이 선택되었을 때만 클라이언트(로컬)에서 안전하게 필터링
     if (classId !== "all") {
       targetStudents = stRes.data.filter(st => 
-        st.enrollment && st.enrollment.some((e: any) => e.class_id === classId)
+        st.enrollment && st.enrollment.some((e: any) => String(e.class_id) === String(classId))
       );
     }
 
@@ -116,7 +118,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       
       let mainEnroll = st.enrollment && st.enrollment.length > 0 ? st.enrollment[0] : null;
       if (classId !== "all" && st.enrollment) {
-         mainEnroll = st.enrollment.find((e:any) => e.class_id === classId) || mainEnroll;
+         mainEnroll = st.enrollment.find((e:any) => String(e.class_id) === String(classId)) || mainEnroll;
       }
 
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
@@ -600,7 +602,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
             ) : (
               <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-8">
                 
-                {/* 💡 리스트 뷰: 등원 열 옆에 '하원' 열 추가 */}
+                {/* 💡 리스트 뷰: 등원/하원 시간 표시 및 모든 버튼 가로 나열 */}
                 {viewMode === "list" ? (
                   <div className="overflow-x-auto w-full bg-white rounded-xl border border-slate-200 shadow-sm">
                     <table className="w-full text-left border-collapse min-w-[800px]">
@@ -631,7 +633,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                               else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
                               
                               const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "-";
-                              // 💡 새로 추가된 하원 시간 문자열 생성 로직
                               const timeOutStr = student.checkOut ? formatTimeAsKST(student.checkOut) : "-";
 
                               return (
@@ -674,6 +675,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                     </table>
                   </div>
                 ) : (
+                  // 💡 카드 뷰 모드 렌더링
                   <div className="flex flex-col gap-6">
                     {Object.entries(groupedStudents)
                       .sort(([a], [b]) => {
