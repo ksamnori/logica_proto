@@ -35,11 +35,13 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
 
-  // 🌟 모바일 호환성 2중 방어를 위한 핵심 상태
+  // 🌟 모바일 호환성을 위한 핵심 상태
   const [isMobile, setIsMobile] = useState(false);
+  const [isKakao, setIsKakao] = useState(false); // 💡 브라우저 환경 판단
   const [viewportHeight, setViewportHeight] = useState('100dvh');
-  const [isKeyboardUp, setIsKeyboardUp] = useState(false); // 브라우저가 정상적으로 키보드를 인식했는가?
-  const [isInputFocused, setIsInputFocused] = useState(false); // 사용자가 입력창을 터치했는가?
+  const [isKeyboardUp, setIsKeyboardUp] = useState(false); 
+  const [isInputFocused, setIsInputFocused] = useState(false); 
+  const [keyboardMargin, setKeyboardMargin] = useState('320px');
 
   const activeChannelRef = useRef<any>(null);
   const globalChannelRef = useRef<any>(null);
@@ -52,7 +54,15 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 💡 [초강력 방어 로직] 뷰포트 감지 및 카카오톡 버그 우회용 강제 푸시 계산
+  // 💡 [핵심 교정] 브라우저 환경 스캔 (User-Agent 확인)
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const ua = navigator.userAgent || navigator.vendor || (window as any).opera;
+      // 카카오톡 인앱 브라우저인지 확인
+      setIsKakao(/KAKAOTALK/i.test(ua));
+    }
+  }, []);
+
   useEffect(() => {
     const handleResize = () => {
       const mobileCheck = window.innerWidth < 640;
@@ -61,10 +71,17 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       if (window.visualViewport) {
         const vvHeight = window.visualViewport.height;
         const innerHeight = window.innerHeight;
-        // 크롬/사파리처럼 정상적으로 뷰포트가 15% 이상 줄어들면 키보드가 뜬 것으로 인식
+        const gap = innerHeight - vvHeight;
+        
         const isUp = vvHeight < innerHeight * 0.85;
         setIsKeyboardUp(isUp);
         setViewportHeight(`${vvHeight}px`);
+
+        if (gap > 100) {
+            setKeyboardMargin(`${gap}px`);
+        } else {
+            setKeyboardMargin('320px'); // 아이폰 최신 기종들도 커버하는 넉넉한 마진
+        }
       } else {
         setViewportHeight('100dvh');
       }
@@ -87,10 +104,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     };
   }, []);
 
-  // 💡 [카톡 전용 핵심 변수] 사용자가 입력창을 눌렀는데 브라우저 창 크기가 안 줄어들었다? -> 100% 카톡 버그! 강제로 밀어올림!
-  const needsManualPush = isMobile && isInputFocused && !isKeyboardUp;
+  // 💡 [초강력 방어막] 오직 '카카오톡 브라우저'에서, '뷰포트가 안 줄어들었을 때'만 강제로 밀어올립니다.
+  const needsManualPush = isMobile && isInputFocused && isKakao && !isKeyboardUp;
 
-  // 뒷배경 스크롤 잠금
   useEffect(() => {
     if (isMobile && isChatOpen) {
       document.body.style.overflow = 'hidden';
@@ -243,7 +259,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     const text = chatInput.trim();
     if (!text || !activeRoomId) return;
     setChatInput("");
-    setIsInputFocused(false); // 전송 후 포커스 해제 처리
+    setIsInputFocused(false);
     try {
       const { data: roomData } = await supabase.from("chat_room").select("instructor(chat_allow_start, chat_allow_end, auto_reply_message, auto_reply_active)").eq("room_id", activeRoomId).single();
       let isDND = false; let autoReplyMsg = "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다.";
@@ -343,21 +359,21 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 💡 [패널 래퍼] 불필요한 이동을 막고 단단하게 고정, 카톡 버그 시 paddingBottom으로 강제 리프팅 */}
+      {/* 💡 [패널 래퍼] 카톡일 때만 paddingBottom을 적용하여 튕김 없이 부드럽게 방어 */}
       <div 
         className={`fixed bg-white flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-all duration-300
-          ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
+          ${isChatOpen ? 'opacity-100 pointer-events-auto scale-100' : 'opacity-0 pointer-events-none scale-95'}
           ${isMobile
-            ? 'top-0 left-0 right-0 rounded-none' // 모바일: 화면에 딱 붙는 풀스크린 모달
-            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-2xl origin-bottom-right' 
+            ? 'top-0 left-0 right-0 bottom-0 rounded-none' 
+            : 'right-10 bottom-[90px] w-[360px] h-[550px] rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.15)] origin-bottom-right' 
           }
         `} 
         style={isMobile ? { 
           height: viewportHeight, 
-          paddingBottom: needsManualPush ? '340px' : '0px', // 💡 카톡 버그 대응: 강제로 키보드 높이만큼 밀어올림!
+          paddingBottom: needsManualPush ? keyboardMargin : '0px',
         } : {}}
       >
-        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
+        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0 touch-none">
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); setIsInputFocused(false); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -493,7 +509,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
               </button>
-              {/* 🌟 텍스트 박스에 포커스가 갔을 때 상태 업데이트로 방어선 작동 */}
               <textarea 
                 rows={1} 
                 value={chatInput} 
