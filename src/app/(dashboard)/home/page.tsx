@@ -1,16 +1,15 @@
 // src/app/(dashboard)/home/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 
-// 💡 [핵심 교정] 접속 기기/지역에 상관없이 절대적인 KST(한국 표준시)를 보장하는 시간 함수
-const getKSTDateStr = () => {
+const getKSTDateStr = (offsetDays = 0) => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000));
+  const kst = new Date(utc + (9 * 3600000) + (offsetDays * 86400000));
   return kst.toISOString().split('T')[0];
 };
 
@@ -118,17 +117,18 @@ export default function TeacherDashboardPage() {
     if (!selectedClassId || selectedClassId === "all") return;
 
     const attendanceChannel = supabase.channel('teacher_attendance_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'attendance' },
-        (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
           fetchAttendance(selectedClassId);
-        }
-      )
-      .subscribe();
+      }).subscribe();
+
+    const clinicChannel = supabase.channel('teacher_clinic_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_session_state' }, () => {
+          fetchAttendance(selectedClassId);
+      }).subscribe();
 
     return () => {
       supabase.removeChannel(attendanceChannel);
+      supabase.removeChannel(clinicChannel);
     };
   }, [selectedClassId]);
 
@@ -385,10 +385,12 @@ export default function TeacherDashboardPage() {
 
   const fetchAttendance = async (classId: string) => {
     const today = getKSTDateStr();
+    const yesterday = getKSTDateStr(-1);
 
-    const [ { data: enrollData }, { data: directData } ] = await Promise.all([
+    const [ { data: enrollData }, { data: directData }, { data: clinicData } ] = await Promise.all([
       supabase.from("enrollment").select("student_id").eq("class_id", classId),
-      supabase.from("student").select("student_id").eq("class_id", classId)
+      supabase.from("student").select("student_id").eq("class_id", classId),
+      supabase.from("clinic_session_state").select("student_id, ended_at, started_at, last_seen_at, session_date").in("session_date", [today, yesterday])
     ]);
 
     const enrollIds = enrollData?.map((e: any) => e.student_id) || [];
@@ -409,9 +411,25 @@ export default function TeacherDashboardPage() {
       .eq("status", "재원")
       .in("student_id", allTargetIds);
     
+    const todayClinics = clinicData || [];
+
     const mappedAtt = (classStudents || []).map((st: any) => {
       const todayAtt = st.attendance?.find((a: any) => a.attendance_date === today);
       const parentInfo = Array.isArray(st.parent) ? st.parent[0] : st.parent; 
+
+      let currentStatus = todayAtt?.status || "NONE";
+
+      const studentClinics = todayClinics.filter(c => String(c.student_id) === String(st.student_id));
+      const isActiveInClinic = studentClinics.some(c => {
+          if (c.ended_at) return false; 
+          const targetTime = c.last_seen_at || c.started_at;
+          if (!targetTime) return false;
+          return (Date.now() - new Date(targetTime).getTime()) < 3 * 60 * 1000;
+      });
+
+      if (isActiveInClinic && !['하원', '조퇴'].includes(currentStatus)) {
+          currentStatus = "클리닉중";
+      }
 
       return { 
         id: st.student_id, 
@@ -419,7 +437,7 @@ export default function TeacherDashboardPage() {
         parentPhone: parentInfo?.phone || null,
         parentName: parentInfo?.name || st.name,
         att_id: todayAtt?.attendance_id, 
-        status: todayAtt?.status || "NONE", 
+        status: currentStatus, 
         checkIn: todayAtt?.check_in_time,
         checkOut: todayAtt?.check_out_time
       };
@@ -429,18 +447,17 @@ export default function TeacherDashboardPage() {
   };
 
   const attSummary = useMemo(() => {
-    let total = 0, present = 0, earlyLeave = 0, absent = 0;
+    let total = 0, present = 0, inClinic = 0, goneHome = 0, absent = 0;
     attStudents.forEach(st => {
       total++;
       if (st.status === "결석") absent++;
-      else if (st.status === "조퇴") earlyLeave++;
+      else if (st.status === "클리닉중") inClinic++;
       else if (["출석", "등원", "지각"].includes(st.status)) present++;
+      else if (["하원", "조퇴"].includes(st.status)) goneHome++;
     });
-    return { total, present, leave: earlyLeave, absent };
+    return { total, present, inClinic, goneHome, absent };
   }, [attStudents]);
 
-  // 💡 [핵심 교정] 강사 대시보드에서는 알림톡 큐에 "직접" 밀어넣지 않습니다! 
-  // 오로지 DB만 변경하면, 관리자 대시보드의 AttendanceControlPanel이 실시간으로 DB를 감지해서 완벽히 중복 없이 큐에 담습니다.
   const handleAttAction = async (student: any, action: string) => {
     const today = getKSTDateStr();
     const nowTimestamp = new Date().toISOString(); 
@@ -470,8 +487,10 @@ export default function TeacherDashboardPage() {
     } else if (action === "EARLY_LEAVE") {
       payload = { status: "조퇴" };
       if (!student.checkOut) payload.check_out_time = nowTimestamp;
-    } else if (action === "ENDED") {
-      payload = { status: "수업종료" };
+    } else if (action === "CLINIC") {
+      payload = { status: "클리닉중" };
+    } else if (action === "GO_HOME") {
+      payload = { status: "하원" };
       if (!student.checkOut) payload.check_out_time = nowTimestamp;
     }
 
@@ -484,7 +503,6 @@ export default function TeacherDashboardPage() {
           student_id: student.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
         });
       }
-      // DB 통신 성공! 이 순간 중앙 레이더(AttendanceControlPanel)가 감지하고 알림톡을 쏩니다.
     } catch (e) { console.error(e); } finally {
       fetchAttendance(selectedClassId);
     }
@@ -496,10 +514,10 @@ export default function TeacherDashboardPage() {
     for (const s of toUpdate) await handleAttAction(s, "PRESENT");
   };
 
-  const bulkEnd = async () => {
-    if (!confirm('현재 등원/지각 학생을 모두 "수업 종료" 처리하시겠습니까? (알림톡 발송 안됨)')) return;
-    const toUpdate = attStudents.filter(s => ["출석", "등원", "지각"].includes(s.status) && !s.checkOut);
-    for (const s of toUpdate) await handleAttAction(s, "ENDED");
+  const bulkGoHome = async () => {
+    if (!confirm('현재 등원/클리닉 중인 전체 학생을 "하원" 처리하시겠습니까? (알림톡 발송됨)')) return;
+    const toUpdate = attStudents.filter(s => s.att_id && !['하원', '조퇴', '결석', 'NONE'].includes(s.status));
+    for (const s of toUpdate) await handleAttAction(s, "GO_HOME");
   };
 
   const openManualModal = (student: any) => {
@@ -907,78 +925,79 @@ export default function TeacherDashboardPage() {
               </div>
             </div>
             
-            <div className="grid grid-cols-4 divide-x divide-slate-100 border-b border-slate-100 bg-white shrink-0">
-              <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-slate-800">{attSummary.total}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">전체</span></div>
-              <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-blue-600">{attSummary.present}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">등원/지각</span></div>
-              <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-indigo-500">{attSummary.leave}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">조퇴</span></div>
-              <div className="flex flex-col items-center py-2"><span className="text-xs font-black text-rose-500">{attSummary.absent}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">결석</span></div>
+            <div className="grid grid-cols-5 divide-x divide-slate-100 border-b border-slate-100 bg-white shrink-0">
+              <div className="flex flex-col items-center py-2"><span className="text-[11px] font-black text-slate-800">{attSummary.total}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">전체</span></div>
+              <div className="flex flex-col items-center py-2"><span className="text-[11px] font-black text-blue-600">{attSummary.present}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">등원</span></div>
+              <div className="flex flex-col items-center py-2"><span className="text-[11px] font-black text-purple-600">{attSummary.inClinic}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">클리닉</span></div>
+              <div className="flex flex-col items-center py-2"><span className="text-[11px] font-black text-emerald-500">{attSummary.goneHome}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">하원</span></div>
+              <div className="flex flex-col items-center py-2"><span className="text-[11px] font-black text-rose-500">{attSummary.absent}</span><span className="text-[9px] font-bold text-slate-400 mt-0.5">결석</span></div>
             </div>
 
             <div className="flex gap-2 p-2 border-b border-slate-100 bg-white shrink-0">
               <button onClick={bulkAttend} className="flex-1 text-[10px] font-bold bg-[#002864] text-white py-1.5 rounded hover:bg-blue-900 transition-colors shadow-sm">전체 등원</button>
-              <button onClick={bulkEnd} className="flex-1 text-[10px] font-bold bg-slate-700 text-white py-1.5 rounded hover:bg-slate-900 transition-colors shadow-sm">전체 수업종료</button>
+              <button onClick={bulkGoHome} className="flex-1 text-[10px] font-bold bg-emerald-600 text-white py-1.5 rounded hover:bg-emerald-700 transition-colors shadow-sm">전체 하원</button>
             </div>
 
-            <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2 bg-slate-50 relative pb-10">
+            <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50 relative pb-10">
               {attStudents.length === 0 ? <div className="text-center py-6 text-xs text-slate-400 font-bold">해당 반에 조회된 학생이 없습니다.</div> :
-                attStudents.map(student => {
-                  const isMenuOpen = activeAttMenu === student.id;
-                  const isNotArrived = student.status === 'NONE';
+                <div className="grid grid-cols-1 2xl:grid-cols-2 gap-2">
+                  {attStudents.map(student => {
+                    const isMenuOpen = activeAttMenu === student.id;
+                    const isNotArrived = student.status === 'NONE';
 
-                  let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-200/50 border-slate-300";
-                  if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "수업중"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
-                  else if (student.status === '수업종료') { flowIcon = "🛋️"; flowText = "대기중"; flowColor = "text-amber-700 bg-amber-50 border-amber-200 animate-pulse"; }
-                  else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
-                  else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
-                  else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
+                    let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-200/50 border-slate-300";
+                    if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내(등원)"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
+                    else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
+                    else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
+                    else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
 
-                  const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "";
-                  const timeOutStr = student.checkOut ? formatTimeAsKST(student.checkOut) : "";
-                  
-                  const cardBgClass = isNotArrived 
-                    ? "bg-slate-100 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
-                    : "bg-white border-slate-200 shadow-sm hover:border-indigo-300";
+                    const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "";
+                    
+                    const cardBgClass = isNotArrived 
+                      ? "bg-slate-100 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
+                      : "bg-white border-slate-200 shadow-sm hover:border-indigo-300";
 
-                  return (
-                    <div key={student.id} className={`p-2.5 rounded-xl border flex flex-col text-xs transition-all relative gap-1.5 min-h-[110px] ${cardBgClass}`}>
-                      <div className="flex justify-between items-start w-full">
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-extrabold text-slate-800 text-[12px]">{student.name}</span>
-                            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${flowColor}`}>
-                              {flowIcon} {flowText}
+                    return (
+                      <div key={student.id} className={`p-2 rounded-xl border flex flex-col text-xs transition-all relative gap-1 ${cardBgClass} ${isMenuOpen ? 'z-50 shadow-lg ring-2 ring-indigo-200' : 'z-10 shadow-sm'}`}>
+                        <div className="flex justify-between items-start w-full">
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1.5">
+                              <span className="font-extrabold text-slate-800 text-[12px] truncate max-w-[50px]">{student.name}</span>
+                              <span className={`px-1 py-0.5 rounded text-[9px] font-black border ${flowColor} whitespace-nowrap`}>
+                                {flowIcon} {flowText}
+                              </span>
+                            </div>
+                            <span className="text-[9px] font-bold text-slate-400 pl-0.5 mt-0.5">
+                              {timeInStr ? `${timeInStr} 등원` : '시간 기록없음'}
                             </span>
                           </div>
-                          <span className="text-[9px] font-bold text-slate-400 pl-0.5 mt-0.5">
-                            {timeInStr ? `${timeInStr} 등원` : '시간 기록없음'}
-                          </span>
+
+                          <div className="relative inline-block shrink-0 kebab-container">
+                            <button onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors mt-0.5">
+                              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
+                            </button>
+                            {isMenuOpen && (
+                              <div className="absolute right-0 top-6 w-28 bg-white shadow-2xl rounded-xl border border-slate-200 z-[9999] py-1 text-left">
+                                <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'LATE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-amber-600 hover:bg-slate-50 flex items-center gap-1.5">⏰ 지각 처리</button>
+                                <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'EARLY_LEAVE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-indigo-600 hover:bg-slate-50 flex items-center gap-1.5">🏃 조퇴 처리</button>
+                                <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'ABSENT'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-rose-600 hover:bg-slate-50 flex items-center gap-1.5">❌ 결석 처리</button>
+                                <hr className="border-slate-100 my-0.5" />
+                                <button onClick={() => openManualModal(student)} className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">⚙️ 수동 설정</button>
+                                <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-1.5">🗑️ 기록 삭제</button>
+                              </div>
+                            )}
+                          </div>
                         </div>
 
-                        <div className="relative inline-block shrink-0 kebab-container">
-                          <button onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors mt-0.5">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
-                          </button>
-                          {isMenuOpen && (
-                            <div className="absolute right-0 top-7 w-32 bg-white shadow-xl rounded-xl border border-slate-200 z-50 py-1">
-                              <button onClick={() => openManualModal(student)} className="w-full text-left px-4 py-2.5 text-[11px] font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-2">⚙️ 수동 설정</button>
-                              <hr className="border-slate-100 my-0.5" />
-                              <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-4 py-2.5 text-[11px] font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-2">🗑️ 기록 삭제</button>
-                            </div>
-                          )}
+                        <div className="flex gap-1 mt-1 pt-1.5 border-t border-slate-200/60">
+                          <button onClick={() => handleAttAction(student, 'PRESENT')} className="flex-1 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-[4px] text-[10px] transition-colors border border-blue-100">등원</button>
+                          <button onClick={() => handleAttAction(student, 'CLINIC')} className="flex-1 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-[4px] text-[10px] transition-colors border border-purple-100">클리닉</button>
+                          <button onClick={() => handleAttAction(student, 'GO_HOME')} className="flex-1 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-[4px] text-[10px] transition-colors border border-emerald-100">하원</button>
                         </div>
                       </div>
-
-                      <div className="grid grid-cols-3 gap-1 mt-auto pt-1.5 border-t border-slate-200/60">
-                        <button onClick={() => handleAttAction(student, 'PRESENT')} className="py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-[6px] text-[10px] transition-colors border border-blue-100">등원</button>
-                        <button onClick={() => handleAttAction(student, 'LATE')} className="py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-[6px] text-[10px] transition-colors border border-amber-100">지각</button>
-                        <button onClick={() => handleAttAction(student, 'ABSENT')} className="py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-[6px] text-[10px] transition-colors border border-rose-100">결석</button>
-                        <button onClick={() => handleAttAction(student, 'ENDED')} className="py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold rounded-[6px] text-[10px] transition-colors border border-slate-300">수업종료</button>
-                        <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className="py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-[6px] text-[10px] transition-colors border border-indigo-100">조퇴</button>
-                        <button onClick={() => handleAttAction(student, 'GO_HOME')} className="py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-[6px] text-[10px] transition-colors border border-emerald-100">하원</button>
-                      </div>
-                    </div>
-                  );
-                })
+                    );
+                  })}
+                </div>
               }
             </div>
           </div>
@@ -997,8 +1016,7 @@ export default function TeacherDashboardPage() {
               <div>
                 <label className="block text-xs font-extrabold text-slate-500 mb-1.5">위치 / 상태</label>
                 <select value={manualForm.status} onChange={e => setManualForm({...manualForm, status: e.target.value})} className="border border-slate-300 p-2.5 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-[#002864] bg-slate-50">
-                  <option value="등원">🏫 수업중 (등원)</option>
-                  <option value="수업종료">🛋️ 대기중 (수업종료)</option>
+                  <option value="등원">🏫 원내체류 (등원)</option>
                   <option value="클리닉중">✍️ 클리닉중</option>
                   <option value="하원">👋 하원 완료</option>
                   <option value="결석">❌ 결석</option>
