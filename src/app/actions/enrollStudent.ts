@@ -90,7 +90,7 @@ export async function registerStudentAction(data: {
       {
         name: name.trim(),
         grade: grade,
-        school_name: school.trim(),
+        school: school.trim(),
         phone: finalContact,
         password_hash: password.trim(),
         status: status,

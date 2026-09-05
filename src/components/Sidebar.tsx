@@ -157,6 +157,10 @@ export default function Sidebar() {
       customBg = active ? 'bg-orange-500 border-orange-600 text-white shadow-md' : 'bg-orange-50/50 border-orange-100 text-orange-700 hover:bg-orange-100 hover:border-orange-200 shadow-sm';
       customLabel = 'font-black';
       customDesc = active ? 'text-orange-100 font-medium' : 'text-orange-400 font-medium';
+    } else if (path === '/consultation') {
+      // 💡 상담 관리 전용 테마 적용
+      customBg = active ? 'bg-pink-500 border-pink-600 text-white shadow-md' : 'bg-pink-50/50 border-pink-100 text-pink-700 hover:bg-pink-100 hover:border-pink-200 shadow-sm';
+      customLabel = 'font-black';
     } else if (path === '/academy-info') {
       customBg = active ? 'bg-[#1f2d26] border-[#1f2d26] text-white shadow-md' : 'bg-[#2e4036] border-[#2e4036] text-white hover:bg-[#24332b] hover:border-[#24332b] shadow-sm';
       customLabel = 'font-black';
@@ -251,6 +255,8 @@ export default function Sidebar() {
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
             <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
+            {/* 💡 상담 관리 메뉴를 운영 대시보드 바로 아래 널찍하게 배치 */}
+            <MenuItem path="/consultation" label="정기 상담 관리" full />
             <MenuItem path="/billing" label="수납/청구" />
             <MenuItem path="/unpaid" label="미납 관리" />
             <MenuItem path="/shop-admin" label="상점 관리" />

@@ -39,6 +39,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const [manualForm, setManualForm] = useState({ status: "NONE", checkIn: "", checkOut: "" });
 
   const [viewMode, setViewMode] = useState<"card" | "list">("card");
+  
+  const [hideGoneHome, setHideGoneHome] = useState<boolean>(false);
 
   const fetchTimeoutRef = useRef<any>(null);
   const isBulkProcessing = useRef<boolean>(false);
@@ -59,11 +61,18 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     if (savedMode === "list" || savedMode === "card") {
       setViewMode(savedMode);
     }
+    const savedFilter = localStorage.getItem("logica_att_hide_gone_home");
+    if (savedFilter === "true") setHideGoneHome(true);
   }, []);
 
   const handleViewModeChange = (mode: "card" | "list") => {
     setViewMode(mode);
     localStorage.setItem("logica_att_view_mode", mode);
+  };
+
+  const handleToggleHideGoneHome = (checked: boolean) => {
+    setHideGoneHome(checked);
+    localStorage.setItem("logica_att_hide_gone_home", checked ? "true" : "false");
   };
 
   const requestFetch = (classId: string) => {
@@ -80,7 +89,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const yesterday = getKSTDateStr(-1);
     const tId = localStorage.getItem("logica_tenant_id");
 
-    // 💡 400 에러를 방지하는 가장 안전한 형태의 쿼리 (직접 조회 삭제, 로컬 필터링 사용)
     let stQuery = supabase.from("student").select(`
       student_id, name, status, parent(name, phone), 
       attendance(attendance_id, status, check_in_time, check_out_time, attendance_date),
@@ -105,7 +113,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const todayClinics = clinicRes.data || [];
     let targetStudents = stRes.data;
     
-    // 특정 반이 선택되었을 때만 클라이언트(로컬)에서 안전하게 필터링
     if (classId !== "all") {
       targetStudents = stRes.data.filter(st => 
         st.enrollment && st.enrollment.some((e: any) => String(e.class_id) === String(classId))
@@ -252,6 +259,23 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     });
     return groups;
   }, [attStudents]);
+
+  const filteredDisplayGroups = useMemo(() => {
+    const result = [];
+    const entries = Object.entries(groupedStudents).sort(([a], [b]) => a === '미배정' ? 1 : b === '미배정' ? -1 : a.localeCompare(b));
+    
+    for (const [cName, students] of entries) {
+      // 💡 [핵심 수정] 미등원, 하원, 조퇴, 결석은 전부 빼고, "현재 학원에 있는(등원/지각/클리닉중)" 아이들만 필터링합니다.
+      const filtered = hideGoneHome 
+        ? students.filter(s => ['출석', '등원', '지각', '클리닉중'].includes(s.status)) 
+        : students;
+
+      if (filtered.length > 0) {
+        result.push({ cName, students: filtered, totalCount: students.length });
+      }
+    }
+    return result;
+  }, [groupedStudents, hideGoneHome]);
 
   const flowSummary = useMemo(() => {
     let notArrived = 0, inClass = 0, inClinic = 0, goneHome = 0, absent = 0;
@@ -533,6 +557,17 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           </h3>
           
           <div className="flex items-center gap-3 w-full sm:w-auto">
+            <label className="flex items-center gap-1.5 cursor-pointer bg-slate-50 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0">
+              <input 
+                type="checkbox" 
+                className="w-3.5 h-3.5 accent-indigo-600 rounded cursor-pointer"
+                checked={hideGoneHome}
+                onChange={(e) => handleToggleHideGoneHome(e.target.checked)}
+              />
+              {/* 💡 [수정] 체크박스 레이블을 정확한 의도에 맞게 변경 */}
+              <span className="text-[11px] font-bold text-slate-600 select-none">👀 원내 체류자만 보기</span>
+            </label>
+
             <div className="bg-slate-100 p-1 rounded-lg flex items-center shadow-inner shrink-0">
               <button 
                 onClick={() => handleViewModeChange('card')} 
@@ -597,12 +632,14 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           </div>
 
           <div className="flex-1 overflow-hidden flex flex-col bg-slate-50/50">
-            {attStudents.length === 0 ? (
-              <div className="flex-1 flex items-center justify-center text-slate-400 font-bold text-sm">조회된 학생이 없습니다.</div>
+            {filteredDisplayGroups.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-sm gap-2">
+                <span className="text-3xl">☕</span>
+                {hideGoneHome ? "현재 원내에 체류 중인 학생이 없습니다." : "조회된 학생이 없습니다."}
+              </div>
             ) : (
               <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-8">
                 
-                {/* 💡 리스트 뷰: 등원/하원 시간 표시 및 모든 버튼 가로 나열 */}
                 {viewMode === "list" ? (
                   <div className="overflow-x-auto w-full bg-white rounded-xl border border-slate-200 shadow-sm">
                     <table className="w-full text-left border-collapse min-w-[800px]">
@@ -616,12 +653,15 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                         </tr>
                       </thead>
                       <tbody>
-                        {Object.entries(groupedStudents).sort(([a], [b]) => a === '미배정' ? 1 : b === '미배정' ? -1 : a.localeCompare(b)).map(([cName, students]) => (
+                        {filteredDisplayGroups.map(({ cName, students, totalCount }) => (
                           <React.Fragment key={cName}>
                             <tr className="bg-slate-100/60 border-b border-slate-200">
                               <td colSpan={5} className="py-2 px-3 text-[11px] font-black text-indigo-700">
                                 <span className="w-1.5 h-3 bg-indigo-500 inline-block align-middle mr-1.5 rounded-full"></span>
-                                {cName} <span className="text-slate-400 font-bold ml-1">({students.length}명)</span>
+                                {cName} 
+                                <span className="text-slate-400 font-bold ml-1">
+                                  (총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 체류 {students.length}명</span>})
+                                </span>
                               </td>
                             </tr>
                             {students.map(student => {
@@ -675,19 +715,15 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                     </table>
                   </div>
                 ) : (
-                  // 💡 카드 뷰 모드 렌더링
                   <div className="flex flex-col gap-6">
-                    {Object.entries(groupedStudents)
-                      .sort(([a], [b]) => {
-                        if (a === '미배정') return 1;
-                        if (b === '미배정') return -1;
-                        return a.localeCompare(b);
-                      })
-                      .map(([cName, students]) => (
+                    {filteredDisplayGroups.map(({ cName, students, totalCount }) => (
                       <div key={cName}>
                         <h4 className="text-xs font-extrabold text-slate-700 mb-2.5 flex items-center gap-1.5 pl-1">
                           <span className="w-1.5 h-3.5 bg-indigo-500 rounded-full"></span>
-                          {cName} <span className="text-[10px] font-bold text-slate-400 ml-1">총 {students.length}명</span>
+                          {cName} 
+                          <span className="text-[10px] font-bold text-slate-400 ml-1">
+                            총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 체류 {students.length}명</span>}
+                          </span>
                         </h4>
                         
                         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">

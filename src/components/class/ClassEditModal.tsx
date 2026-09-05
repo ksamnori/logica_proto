@@ -80,8 +80,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     setSearchGrade(grade);
     setSearchStatus(status);
     
-    // limit를 1000으로 늘려 데이터 누락 방지 및 상태(status) 정보 추가 호출
-    let query = supabase.from("student").select("student_id, name, phone, grade, school_name, school, status").order("name").limit(1000); 
+    // limit를 1000으로 늘려 데이터 누락 방지 및 상태(status) 정보 추가 호출 (수정됨: school_name 제거)
+    let query = supabase.from("student").select("student_id, name, phone, grade, school, status").order("name").limit(1000); 
     
     if (grade) {
       const gradeMap: any = {
@@ -134,8 +134,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         const match = s.phone.match(/(\d{4})(?:-\d+)?$/);
         if (match) contactEnd = match[1];
       }
-      // 🌟 표시 텍스트와 정확히 매칭되도록 상태값 포함
-      const visibleText = `[${s.status || '상태미상'}] ${s.name} (${s.school_name || s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
+      // 🌟 표시 텍스트와 정확히 매칭되도록 상태값 포함 (수정됨: s.school_name 제거)
+      const visibleText = `[${s.status || '상태미상'}] ${s.name} (${s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
       return visibleText === searchKeyword;
     });
 
@@ -437,8 +437,8 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                 <datalist id="all_students_list">
                   {allStudents.map(s => {
                     let contactEnd = s.phone?.match(/(\d{4})(?:-\d+)?$/)?.[1] || "번호없음";
-                    // 🌟 데이터 리스트에 상태값 노출
-                    const text = `[${s.status || '상태미상'}] ${s.name} (${s.school_name || s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
+                    // 🌟 데이터 리스트에 상태값 노출 (수정됨: s.school_name 제거)
+                    const text = `[${s.status || '상태미상'}] ${s.name} (${s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
                     return <option key={s.student_id} value={text} />;
                   })}
                 </datalist>

@@ -3,7 +3,8 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-import { supabase } from "@/lib/supabase"; 
+// 🌟 수정됨: 절대 경로(@/lib/supabase)를 상대 경로로 변경했습니다.
+import { supabase } from "../../lib/supabase"; 
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfwlmbwornivkrvoeqdh.supabase.co';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtmd2xtYndvcm5pdmtydm9lcWRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDUzNzQsImV4cCI6MjA5NTMyMTM3NH0.Kh9MPHzUxf9xLRYTH_UqoIhxOm4lybA_OL8Z60H9vqo';
@@ -219,7 +220,7 @@ export default function AdminDashboardPage() {
       }
 
       const { error: studentError } = await supabase.from('student').insert([{
-          name: sName, grade: String(sGrade), school_name: sSchool, phone: finalContact,
+          name: sName, grade: String(sGrade), school: sSchool, phone: finalContact,
           password_hash: sPw, status: sStatus, parent_id: finalParentId, tenant_id: sTenantId 
       }]);
       if (studentError) throw studentError;

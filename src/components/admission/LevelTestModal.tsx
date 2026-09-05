@@ -263,9 +263,10 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         }
       });
 
+      // 🌟 에러 수정 1: 존재하지 않는 school_name을 제외하고 select
       const { data: apps, error: aError } = await supabase
         .from("admission_application")
-        .select("*, student(name, grade, school_name, school, parent(phone))") 
+        .select("*, student(name, grade, school, parent(phone))") 
         .eq("admission_session_id", selectedSessionId);
       
       if (aError) throw aError;
@@ -303,7 +304,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             student_id: a.student_id,
             student_name: st?.name || "이름없음",
             grade: st?.grade || "미입력",
-            school_name: st?.school_name || st?.school || "",
+            school_name: st?.school || "",
             contact: pPhone,
             test_date: "-",
             created_at: a.created_at, 
@@ -328,9 +329,10 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         source: 'temp'
       }));
 
+      // 🌟 에러 수정 2: 존재하지 않는 school_name을 제외하고 select
       const { data: formalStus, error: fError } = await supabase
         .from("student")
-        .select("student_id, name, grade, school, school_name, created_at, parent(phone)")
+        .select("student_id, name, grade, school, created_at, parent(phone)")
         .eq("status", "입학테스트");
 
       if (fError) throw fError;
@@ -344,7 +346,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           student_id: s.student_id,
           student_name: s.name,
           grade: s.grade || "미입력",
-          school_name: s.school || s.school_name || "",
+          school_name: s.school || "",
           contact: Array.isArray(s.parent) ? s.parent[0]?.phone : (s.parent?.phone || "번호없음"),
           test_date: s.created_at,
           created_at: s.created_at, 
@@ -565,7 +567,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           const { data: newStudent, error: sErr } = await supabase.from("student").insert({
             name: temp.student_name,
             grade: temp.grade || "미입력",
-            school_name: temp.school_name,
             school: temp.school_name, 
             parent_id: parentId,
             status: "입학테스트",
