@@ -75,13 +75,20 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     }
   };
 
-  // 🌟 강제 저장 함수 (렌더링 렉 최소화)
+  // 🌟 강제 저장 함수 (비동기 처리로 메인 스레드 블로킹 방지)
   const saveCanvasData = useCallback(() => {
     if (canvasRef.current) {
-      const dataUrl = canvasRef.current.toDataURL('image/webp', 0.5);
-      studentDrawings.current[qIndex] = dataUrl;
-      studentAnswers.current[qIndex] = dataUrl;
-      forceUpdate();
+      canvasRef.current.toBlob((blob) => {
+        if (!blob) return;
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          const dataUrl = reader.result as string;
+          studentDrawings.current[qIndex] = dataUrl;
+          studentAnswers.current[qIndex] = dataUrl;
+          forceUpdate();
+        };
+        reader.readAsDataURL(blob);
+      }, 'image/webp', 0.5);
     }
   }, [qIndex, studentDrawings, studentAnswers, forceUpdate]);
 
@@ -119,6 +126,12 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const startDraw = (e: any) => {
+    // 🌟 추가된 로직: 새 획을 긋기 시작하면 기존 저장 예약 취소
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
+      saveTimeoutRef.current = null;
+    }
+
     if (isDrawing.current) return;
     
     isDrawing.current = true;

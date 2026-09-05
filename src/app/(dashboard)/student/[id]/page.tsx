@@ -1,8 +1,8 @@
 // src/app/(dashboard)/student/[id]/page.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
-import { useParams, useRouter } from "next/navigation";
+import React, { useState, useEffect, useMemo, Suspense } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
 import StudentEditModal from "@/components/student/StudentEditModal";
@@ -35,6 +35,20 @@ const getTodayKST = () => {
   return d.toISOString().split('T')[0];
 };
 
+// 💡 [신규 로직] URL 쿼리스트링을 파싱하여 특정 탭으로 즉시 진입하는 컴포넌트 추가
+function TabInitHandler({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
+  const searchParams = useSearchParams();
+  const tabParam = searchParams.get('tab');
+  
+  useEffect(() => {
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
+  }, [tabParam, setActiveTab]);
+
+  return null;
+}
+
 export default function StudentDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -42,6 +56,7 @@ export default function StudentDetailPage() {
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
 
+  // 💡 기본 탭은 info 이지만, TabInitHandler가 URL을 감지해 곧장 변경합니다.
   const [activeTab, setActiveTab] = useState<string>("info");
   
   const [isNotFound, setIsNotFound] = useState(false);
@@ -637,6 +652,12 @@ export default function StudentDetailPage() {
 
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-slate-50 h-full relative overflow-y-auto custom-scroll p-4 pt-20 sm:p-8 sm:pt-24 font-pretendard">
+      
+      {/* 💡 URL 쿼리를 감지하여 즉시 탭을 변경하는 컴포넌트 */}
+      <Suspense fallback={null}>
+        <TabInitHandler setActiveTab={setActiveTab} />
+      </Suspense>
+
       <div className="max-w-[1300px] w-full mx-auto space-y-5 pb-20">
         
         {/* 학생 헤더 */}

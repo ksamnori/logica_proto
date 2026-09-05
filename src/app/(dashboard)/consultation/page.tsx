@@ -34,6 +34,8 @@ export default function ConsultationManagementPage() {
   const [selectedClass, setSelectedClass] = useState<string>("all");
   const [overdueOnly, setOverdueOnly] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>(""); 
+  // 💡 신규: '테스트' 학생 숨기기 상태 (기본값 true로 설정하여 쾌적한 뷰 제공)
+  const [hideTestStudents, setHideTestStudents] = useState<boolean>(true);
 
   useEffect(() => {
     const instId = localStorage.getItem("logica_instructor_id") || "1";
@@ -64,7 +66,6 @@ export default function ConsultationManagementPage() {
       setTenantName("본사 (HQ)");
     }
 
-    // 💡 1. 반 목록 조회 시 담당 강사 이름 함께 로드
     let classQuery = supabase.from("class").select("class_id, name, instructor(name)").eq("status", "진행중");
     if (tId && tId !== 'hq') classQuery = classQuery.eq("tenant_id", tId);
     const { data: classData } = await classQuery.order("name");
@@ -76,7 +77,6 @@ export default function ConsultationManagementPage() {
     }));
     setClasses(formattedClasses);
 
-    // 💡 2. 재원생 정보 조회 시 반의 강사 이름(instructor.name) 추가 포함
     let stQuery = supabase.from("student").select(`
       student_id, name, parent(name, phone),
       enrollment(class_id, class(name, instructor(name))),
@@ -134,7 +134,6 @@ export default function ConsultationManagementPage() {
     setIsLoading(false);
   };
 
-  // 💡 데이터 그룹핑 (classId 기준으로 완벽 분리)
   const filteredDisplayGroups = useMemo(() => {
     let filtered = students;
     
@@ -144,6 +143,11 @@ export default function ConsultationManagementPage() {
     
     if (overdueOnly) {
       filtered = filtered.filter(s => s.isOverdue);
+    }
+
+    // 💡 신규: '테스트' 학생 제외 필터 로직
+    if (hideTestStudents) {
+      filtered = filtered.filter(s => !s.name.includes("테스트"));
     }
 
     if (searchTerm.trim() !== "") {
@@ -174,9 +178,16 @@ export default function ConsultationManagementPage() {
       .sort((a, b) => a.cName === '미배정' ? 1 : b.cName === '미배정' ? -1 : a.cName.localeCompare(b.cName));
 
     return result;
-  }, [students, selectedClass, overdueOnly, searchTerm]);
+  }, [students, selectedClass, overdueOnly, hideTestStudents, searchTerm]);
 
-  const totalOverdueCount = useMemo(() => students.filter(s => s.isOverdue).length, [students]);
+  // 상단 통계 수치도 필터링된 배열 기준으로 재계산 (테스트 제외)
+  const totalDisplayStudents = useMemo(() => {
+    return students.filter(s => hideTestStudents ? !s.name.includes("테스트") : true).length;
+  }, [students, hideTestStudents]);
+
+  const totalOverdueCount = useMemo(() => {
+    return students.filter(s => s.isOverdue && (hideTestStudents ? !s.name.includes("테스트") : true)).length;
+  }, [students, hideTestStudents]);
 
   if (isLoading) {
     return (
@@ -201,7 +212,7 @@ export default function ConsultationManagementPage() {
                 <span>💬 학부모 정기 상담 관리</span>
                 <span className="bg-blue-500/30 text-blue-100 text-[15px] px-3 py-1 rounded-lg font-bold border border-blue-400/30 shadow-sm flex items-center">🏢 {tenantName}</span>
               </h1>
-              <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">전체 재원생 {students.length}명 중 상담 요망(30일 경과) <span className="text-rose-400 font-black">{totalOverdueCount}</span>명</p>
+              <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">전체 대상자 {totalDisplayStudents}명 중 상담 요망(30일 경과) <span className="text-rose-400 font-black">{totalOverdueCount}</span>명</p>
             </div>
           </div>
         </header>
@@ -217,7 +228,6 @@ export default function ConsultationManagementPage() {
                 className="border border-indigo-300 rounded-lg py-2 px-3 text-sm font-bold text-indigo-900 bg-indigo-50 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm min-w-[180px]"
               >
                 <option value="all">🌐 전체 반 보기</option>
-                {/* 💡 담당자 이름이 추가된 displayName 표시 */}
                 {classes.map(c => <option key={c.class_id} value={c.class_id}>{c.displayName}</option>)}
               </select>
 
@@ -231,6 +241,17 @@ export default function ConsultationManagementPage() {
                   className="border border-slate-300 rounded-lg py-2 pl-9 pr-3 text-sm font-bold text-slate-700 bg-white focus:outline-none focus:border-indigo-500 shadow-sm w-full sm:w-[180px]"
                 />
               </div>
+
+              {/* 💡 신규: '테스트' 학생 제외 토글 버튼 */}
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-50 hover:bg-slate-100 px-3 py-2 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0">
+                <input 
+                  type="checkbox" 
+                  className="w-4 h-4 accent-slate-600 rounded cursor-pointer"
+                  checked={hideTestStudents}
+                  onChange={(e) => setHideTestStudents(e.target.checked)}
+                />
+                <span className="text-xs font-black text-slate-700 select-none flex items-center gap-1">🚫 '테스트' 학생 숨기기</span>
+              </label>
 
               <label className="flex items-center gap-2 cursor-pointer bg-rose-50 hover:bg-rose-100 px-3 py-2 rounded-lg border border-rose-200 transition-colors shadow-inner shrink-0">
                 <input 
@@ -289,7 +310,6 @@ export default function ConsultationManagementPage() {
                               <td colSpan={6} className="py-2.5 px-4 text-xs font-black text-indigo-800">
                                 <span className="w-2 h-3.5 bg-indigo-500 inline-block align-middle mr-2 rounded-full"></span>
                                 {cName} 
-                                {/* 💡 리스트 뷰 헤더에 담당자 추가 */}
                                 {cName !== '미배정' && <span className="text-indigo-500 font-bold ml-1.5 text-[11px]">({cInstructor})</span>}
                                 <span className="text-slate-500 font-bold ml-2 text-[11px]">(총 {total}명)</span>
                                 {overdueCount > 0 && <span className="ml-2 bg-rose-100 text-rose-600 text-[10px] px-2 py-0.5 rounded-full border border-rose-200">상담 필요 {overdueCount}명</span>}
@@ -343,7 +363,6 @@ export default function ConsultationManagementPage() {
                         <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
                           <span className="w-1.5 h-4 bg-indigo-500 rounded-full"></span>
                           {cName}
-                          {/* 💡 카드 뷰 헤더에 담당자 추가 */}
                           {cName !== '미배정' && <span className="text-indigo-500 font-bold text-xs">({cInstructor})</span>}
                         </h4>
                         <div className="flex gap-2">
