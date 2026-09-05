@@ -164,6 +164,15 @@ export function ViewerModals({
           </div>
         </div>
       )}
+
+      {/* 7. 수동 채점 토스트 알림 */}
+      {recheckToast && (
+        <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-[100] animate-[fadeIn_0.2s_ease-out]">
+          <div className="bg-slate-800 text-white px-6 py-3 rounded-full shadow-lg font-bold text-sm">
+            {recheckToast}
+          </div>
+        </div>
+      )}
     </>
   );
 }
