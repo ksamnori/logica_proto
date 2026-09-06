@@ -4,7 +4,7 @@ const nextConfig: NextConfig = {
   // 🌟 1. 허용 IP 설정은 experimental 내부의 serverActions 안으로 이동해야 합니다.
   experimental: {
     serverActions: {
-      allowedOrigins: ["192.168.0.112"],
+      allowedOrigins: ["192.168.0.112", "192.168.1.2"],
     },
   },
 

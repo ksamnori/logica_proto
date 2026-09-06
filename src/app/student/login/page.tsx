@@ -78,28 +78,31 @@ export default function StudentKioskLogin() {
     const seat = seatInputValue.trim();
     if (!unregisteredDeviceId || !seat || !selectedTenantId || isRegisteringSeat) return;
 
-    const tenantId = selectedTenantId;
     setIsRegisteringSeat(true);
+    try {
+      const layout = await getActiveSeatLayout(selectedTenantId);
+      const seatExists = layout.seats.some((s) => String(s.number) === seat);
+      if (!seatExists) {
+        setIsRegisteringSeat(false);
+        alert(`이 지점의 좌석 배치도에 ${seat}번 좌석이 없습니다. 좌석번호를 확인해주세요.`);
+        return;
+      }
 
-    const layout = await getActiveSeatLayout(tenantId);
-    const seatExists = layout.seats.some((s) => String(s.number) === seat);
-    if (!seatExists) {
+      const res = await assignPadDevice(unregisteredDeviceId, seat, selectedTenantId);
       setIsRegisteringSeat(false);
-      alert(`이 지점의 좌석 배치도에 ${seat}번 좌석이 없습니다. 좌석번호를 다시 확인하거나 관리자에게 문의해주세요.`);
-      return;
+
+      if (!res.success) {
+        alert(`좌석 등록 실패: ${res.message || '알 수 없는 오류'}`);
+        return;
+      }
+
+      kioskSeatRef.current = seat;
+      setUnregisteredDeviceId(null);
+      setSeatInputValue("");
+    } catch (e) {
+      setIsRegisteringSeat(false);
+      alert("좌석 등록 중 서버 연결에 실패했습니다.");
     }
-
-    const res = await assignPadDevice(unregisteredDeviceId, seat, tenantId);
-    setIsRegisteringSeat(false);
-
-    if (!res.success) {
-      alert(`좌석 등록 실패: ${res.message || '알 수 없는 오류'}`);
-      return;
-    }
-
-    kioskSeatRef.current = seat;
-    setUnregisteredDeviceId(null);
-    setSeatInputValue("");
   };
 
   const finalizeLogin = (result: { studentId: string; name: string; phone?: string; tenant_id?: string }) => {
@@ -116,63 +119,60 @@ export default function StudentKioskLogin() {
     let channel: any = null;
 
     const setup = async () => {
-      let deviceId = getKioskDeviceId();
-      if (!deviceId) {
-        deviceId = localStorage.getItem('logica_fallback_device_id');
+      try {
+        let deviceId = getKioskDeviceId();
         if (!deviceId) {
-          deviceId = 'pad-' + Math.random().toString(36).substring(2, 9);
-          localStorage.setItem('logica_fallback_device_id', deviceId);
+          deviceId = localStorage.getItem('logica_fallback_device_id');
+          if (!deviceId) {
+            deviceId = 'pad-' + Math.random().toString(36).substring(2, 9);
+            localStorage.setItem('logica_fallback_device_id', deviceId);
+          }
         }
+
+        const seat = await getSeatForDevice(deviceId);
+        if (cancelled) return;
+        
+        if (!seat) {
+          setUnregisteredDeviceId(deviceId);
+          return;
+        }
+        
+        kioskSeatRef.current = seat;
+
+        const tenantId = localStorage.getItem('logica_tenant_id') || process.env.NEXT_PUBLIC_TA_TENANT_ID || '';
+        if (!tenantId) return;
+
+        channel = supabaseClient.channel(`${CLINIC_ROOM}_${tenantId}`);
+        channel.on('broadcast', { event: 'ta_action' }, async ({ payload }: any) => {
+          if (payload?.action !== 'relocated_in' || payload.seat !== seat) return;
+          setIsProcessing(true);
+          const result = await loginTransferAction(payload.studentId, payload.token, seat);
+          setIsProcessing(false);
+          if (result.success) finalizeLogin(result as any);
+          else alert(result.message || '좌석 이동 인계에 실패했습니다.');
+        }).subscribe();
+      } catch (e) {
+        console.error("초기 설정 오류:", e);
       }
-
-      const seat = await getSeatForDevice(deviceId);
-      if (cancelled) return;
-      
-      if (!seat) {
-        setUnregisteredDeviceId(deviceId);
-        return;
-      }
-      
-      kioskSeatRef.current = seat;
-
-      const tenantId = localStorage.getItem('logica_tenant_id') || process.env.NEXT_PUBLIC_TA_TENANT_ID || '';
-      if (!tenantId) return;
-
-      channel = supabaseClient.channel(`${CLINIC_ROOM}_${tenantId}`);
-      channel.on('broadcast', { event: 'ta_action' }, async ({ payload }: any) => {
-        if (payload?.action !== 'relocated_in' || payload.seat !== seat) return;
-        setIsProcessing(true);
-        const result = await loginTransferAction(payload.studentId, payload.token, seat);
-        setIsProcessing(false);
-        if (result.success) finalizeLogin(result as any);
-        else alert(result.message || '좌석 이동 인계에 실패했습니다.');
-      }).subscribe();
     };
 
     setup();
     return () => { cancelled = true; if (channel) supabaseClient.removeChannel(channel); };
   }, []);
 
-  const ensureFullscreen = () => {
-    if (typeof document !== "undefined" && !document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    }
-  };
-
   const toggleFullScreen = () => {
     if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(err => {
-        console.log("전체화면 미지원 기기", err);
-      });
+      const docEl = document.documentElement as any;
+      if (docEl.requestFullscreen) docEl.requestFullscreen().catch(() => {});
+      else if (docEl.webkitRequestFullscreen) docEl.webkitRequestFullscreen();
     } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen();
-      }
+      const doc = document as any;
+      if (doc.exitFullscreen) doc.exitFullscreen();
+      else if (doc.webkitExitFullscreen) doc.webkitExitFullscreen();
     }
   };
 
   const resetState = () => {
-    ensureFullscreen(); 
     setStep("phone");
     setDigits("");
     setMatchedList([]);
@@ -182,69 +182,80 @@ export default function StudentKioskLogin() {
     setPendingLoginData(null);
   };
 
-  const handleDigit = (num: string) => {
-    ensureFullscreen(); 
-    if (step === "phone") {
-      if (digits.length < 4 && !isProcessing) {
-        const newDigits = digits + num;
-        setDigits(newDigits);
-        if (newDigits.length === 4) {
-          searchDBAndProcess(newDigits);
-        }
+  // 💡 매직 키보드(물리 키보드) 이벤트 지원
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (isProcessing) return;
+      if (e.key >= '0' && e.key <= '9') {
+        if (step === 'phone') handleDigit(e.key);
+        else if (step === 'password') handlePinDigit(e.key);
+        else if (step === 'setup_pin') handleNewPinDigit(e.key);
+      } else if (e.key === 'Backspace') {
+        if (step === 'phone') handleDelete();
+        else if (step === 'password') handlePinDelete();
+        else if (step === 'setup_pin') handleNewPinDelete();
       }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [step, digits, passwordInput, newPinInput, isProcessing]);
+
+  const handleDigit = (num: string) => {
+    if (step === "phone" && digits.length < 4 && !isProcessing) {
+      const newDigits = digits + num;
+      setDigits(newDigits);
+      if (newDigits.length === 4) searchDBAndProcess(newDigits);
     }
   };
 
   const handleDelete = () => {
-    ensureFullscreen();
     if (step === "phone") setDigits(digits.slice(0, -1));
   };
 
   const handlePinDigit = (num: string) => {
-    ensureFullscreen(); 
     if (passwordInput.length < 4 && !isProcessing) {
       const newPin = passwordInput + num;
       setPasswordInput(newPin);
-      if (newPin.length === 4) {
-        handlePasswordLogin(newPin);
-      }
+      if (newPin.length === 4) handlePasswordLogin(newPin);
     }
   };
 
   const handlePinDelete = () => {
-    ensureFullscreen();
     setPasswordInput(prev => prev.slice(0, -1));
   };
 
   const handleNewPinDigit = (num: string) => {
-    ensureFullscreen();
     if (newPinInput.length < 4 && !isProcessing) {
       const nextPin = newPinInput + num;
       setNewPinInput(nextPin);
-      if (nextPin.length === 4) {
-        handleSaveNewPin(nextPin);
-      }
+      if (nextPin.length === 4) handleSaveNewPin(nextPin);
     }
   };
 
   const handleNewPinDelete = () => {
-    ensureFullscreen();
     setNewPinInput(prev => prev.slice(0, -1));
   };
 
+  // 💡 통신 오류 시 앱 멈춤 방지 (try-catch 추가)
   const searchDBAndProcess = async (code: string) => {
     setIsProcessing(true);
-    const result = await searchStudentsByDigits(code);
-    setIsProcessing(false);
+    try {
+      const result = await searchStudentsByDigits(code);
+      setIsProcessing(false);
 
-    if (!result.success || result.data.length === 0) {
-      alert("일치하는 번호가 없습니다.");
+      if (!result?.success || !result?.data || result.data.length === 0) {
+        alert("일치하는 번호가 없습니다.");
+        setDigits("");
+        return;
+      }
+
+      setMatchedList(result.data);
+      setStep("profile"); 
+    } catch (e) {
+      setIsProcessing(false);
+      alert(`서버 통신 오류가 발생했습니다.\n로컬 IP 접속 보안 설정(next.config.ts)을 확인하세요.\n${e}`);
       setDigits("");
-      return;
     }
-
-    setMatchedList(result.data);
-    setStep("profile"); 
   };
 
   const handlePasswordLogin = async (pinToUse?: string) => {
@@ -252,32 +263,44 @@ export default function StudentKioskLogin() {
     if (!finalPin || finalPin.length < 4) return alert("비밀번호 4자리를 모두 입력해주세요.");
 
     setIsProcessing(true);
-    const result = await loginStudentAction(selectedStudent.student_id, finalPin);
-    setIsProcessing(false);
+    try {
+      const result = await loginStudentAction(selectedStudent.student_id, finalPin);
+      setIsProcessing(false);
 
-    if (result.success) {
-      if ((result as any).needsPinSetup) {
-        setPendingLoginData(result);
-        setStep("setup_pin");
-        setPasswordInput("");
+      if (result.success) {
+        if ((result as any).needsPinSetup) {
+          setPendingLoginData(result);
+          setStep("setup_pin");
+          setPasswordInput("");
+        } else {
+          finalizeLogin(result as any);
+        }
       } else {
-        finalizeLogin(result as any);
+        alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
+        setPasswordInput(""); 
       }
-    } else {
-      alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
-      setPasswordInput(""); 
+    } catch (e) {
+      setIsProcessing(false);
+      alert("로그인 처리 중 서버 통신 오류가 발생했습니다.");
+      setPasswordInput("");
     }
   };
 
   const handleSaveNewPin = async (pin: string) => {
     setIsProcessing(true);
-    const res = await setupStudentPinAction(selectedStudent.student_id, pin);
-    setIsProcessing(false);
-    
-    if (res.success) {
-      finalizeLogin(pendingLoginData);
-    } else {
-      alert(res.message || "설정 실패. 다시 시도해주세요.");
+    try {
+      const res = await setupStudentPinAction(selectedStudent.student_id, pin);
+      setIsProcessing(false);
+      
+      if (res.success) {
+        finalizeLogin(pendingLoginData);
+      } else {
+        alert(res.message || "설정 실패. 다시 시도해주세요.");
+        setNewPinInput("");
+      }
+    } catch (e) {
+      setIsProcessing(false);
+      alert("비밀번호 설정 중 서버 통신 오류가 발생했습니다.");
       setNewPinInput("");
     }
   };
@@ -334,7 +357,7 @@ export default function StudentKioskLogin() {
           
           <button 
             onClick={toggleFullScreen} 
-            className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
+            className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50 touch-manipulation"
             title="전체화면 토글"
           />
 
@@ -357,17 +380,17 @@ export default function StudentKioskLogin() {
 
           <div className="grid grid-cols-3 gap-3 w-full mt-2">
             {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-              <button key={num} onClick={() => handleDigit(num.toString())} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+              <button key={num} onClick={() => handleDigit(num.toString())} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 {num}
               </button>
             ))}
-            <button onClick={resetState} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
+            <button onClick={resetState} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
               초기화
             </button>
-            <button onClick={() => handleDigit('0')} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+            <button onClick={() => handleDigit('0')} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
               0
             </button>
-            <button onClick={handleDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-colors border border-slate-100 shadow-sm">
+            <button onClick={handleDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
               <IconDelete />
             </button>
           </div>
@@ -381,7 +404,7 @@ export default function StudentKioskLogin() {
           
           <button 
             onClick={toggleFullScreen} 
-            className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
+            className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50 touch-manipulation"
             title="전체화면 토글"
           />
 
@@ -392,8 +415,8 @@ export default function StudentKioskLogin() {
             {matchedList.map(student => {
               const { animal, color } = getAvatarFor(student.student_id);
               return (
-                <div key={student.student_id} onClick={() => { ensureFullscreen(); setSelectedStudent(student); setStep("password"); setPasswordInput(""); }}
-                  className="group cursor-pointer flex flex-col items-center w-40 shrink-0 transition-transform hover:-translate-y-2">
+                <div key={student.student_id} onClick={() => { setSelectedStudent(student); setStep("password"); setPasswordInput(""); }}
+                  className="group cursor-pointer flex flex-col items-center w-40 shrink-0 transition-transform hover:-translate-y-2 touch-manipulation">
                   <div className={`w-32 h-32 rounded-full ${color.bg} flex items-center justify-center mb-5 border-4 border-transparent ${color.ring} transition-colors shadow-md group-hover:shadow-xl`}>
                     <span className="text-6xl">{animal}</span>
                   </div>
@@ -410,7 +433,7 @@ export default function StudentKioskLogin() {
               );
             })}
           </div>
-          <button onClick={resetState} className="text-slate-400 hover:text-slate-600 font-semibold underline underline-offset-4 transition-colors">
+          <button onClick={resetState} className="text-slate-400 hover:text-slate-600 font-semibold underline underline-offset-4 transition-colors touch-manipulation">
             다른 번호로 로그인하기
           </button>
         </div>
@@ -424,7 +447,7 @@ export default function StudentKioskLogin() {
             
             <button 
               onClick={toggleFullScreen} 
-              className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50"
+              className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50 touch-manipulation"
               title="전체화면 토글"
             />
 
@@ -448,22 +471,22 @@ export default function StudentKioskLogin() {
 
             <div className="grid grid-cols-3 gap-3 w-full mt-2">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                <button key={num} onClick={() => handlePinDigit(num.toString())} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+                <button key={num} onClick={() => handlePinDigit(num.toString())} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                   {num}
                 </button>
               ))}
-              <button onClick={() => { ensureFullscreen(); setPasswordInput(""); }} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
+              <button onClick={() => { setPasswordInput(""); }} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 초기화
               </button>
-              <button onClick={() => handlePinDigit('0')} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+              <button onClick={() => handlePinDigit('0')} className="bg-slate-50 hover:bg-blue-50 active:bg-blue-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 0
               </button>
-              <button onClick={handlePinDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-colors border border-slate-100 shadow-sm">
+              <button onClick={handlePinDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 <IconDelete />
               </button>
             </div>
             
-            <button onClick={() => { ensureFullscreen(); setStep("profile"); setPasswordInput(""); }} className="mt-8 text-sm text-slate-400 hover:text-slate-600 underline font-medium underline-offset-4">
+            <button onClick={() => { setStep("profile"); setPasswordInput(""); }} className="mt-8 text-sm text-slate-400 hover:text-slate-600 underline font-medium underline-offset-4 touch-manipulation">
               다른 프로필 선택하기
             </button>
           </div>
@@ -476,7 +499,7 @@ export default function StudentKioskLogin() {
         return (
           <div className="bg-white w-full max-w-[420px] pt-12 pb-10 px-8 rounded-[32px] shadow-2xl border border-slate-200 animate-[fadeIn_0.3s_ease-out] flex flex-col items-center relative z-10 overflow-hidden">
             
-            <button onClick={toggleFullScreen} className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50" title="전체화면 토글" />
+            <button onClick={toggleFullScreen} className="absolute top-0 right-0 w-16 h-16 bg-transparent opacity-0 cursor-pointer z-50 touch-manipulation" title="전체화면 토글" />
 
             <div className={`w-20 h-20 rounded-full ${avatar.color.bg} flex items-center justify-center mb-4 shadow-sm ring-4 ring-emerald-100`}>
               <span className="text-4xl">{avatar.animal}</span>
@@ -498,17 +521,17 @@ export default function StudentKioskLogin() {
 
             <div className="grid grid-cols-3 gap-3 w-full mt-2">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
-                <button key={num} onClick={() => handleNewPinDigit(num.toString())} className="bg-slate-50 hover:bg-emerald-50 active:bg-emerald-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+                <button key={num} onClick={() => handleNewPinDigit(num.toString())} className="bg-slate-50 hover:bg-emerald-50 active:bg-emerald-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                   {num}
                 </button>
               ))}
-              <button onClick={() => { ensureFullscreen(); setNewPinInput(""); }} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-colors border border-slate-100 shadow-sm">
+              <button onClick={() => { setNewPinInput(""); }} className="bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-500 rounded-2xl py-4 text-sm font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 초기화
               </button>
-              <button onClick={() => handleNewPinDigit('0')} className="bg-slate-50 hover:bg-emerald-50 active:bg-emerald-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-colors border border-slate-100 shadow-sm">
+              <button onClick={() => handleNewPinDigit('0')} className="bg-slate-50 hover:bg-emerald-50 active:bg-emerald-100 text-slate-800 rounded-2xl py-4 text-2xl font-bold transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 0
               </button>
-              <button onClick={handleNewPinDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-colors border border-slate-100 shadow-sm">
+              <button onClick={handleNewPinDelete} className="bg-slate-50 hover:bg-rose-50 active:bg-rose-100 text-rose-500 rounded-2xl py-4 flex items-center justify-center transition-all border border-slate-100 shadow-sm touch-manipulation cursor-pointer active:scale-95">
                 <IconDelete />
               </button>
             </div>

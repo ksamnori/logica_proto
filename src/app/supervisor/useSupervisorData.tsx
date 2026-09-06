@@ -285,7 +285,6 @@ export function useSupervisorData() {
                     supabaseClient.from('clinic_session_state').update({ manual_seat: effectiveSeat }).eq('id', s.id).then();
                 }
                 if (effectiveSeat) {
-                    // 🌟 1. 같은 자리에 세션이 겹칠 경우 가장 최근에 시작된 최신 세션을 우선
                     const existing = dbSeats.get(effectiveSeat);
                     if (!existing || new Date(s.started_at).getTime() > new Date(existing.started_at).getTime()) {
                         dbSeats.set(effectiveSeat, s);
@@ -303,7 +302,6 @@ export function useSupervisorData() {
                     supabaseClient.from('clinic_reservation').delete().eq('student_id', dbRecord.student_id).eq('session_date', todayStr).then();
                 }
 
-                // 🌟 2. [핵심 방어] 자리에 이미 다른 학생이 로그인해 들어온 경우 기존 오프라인/다른 학생을 밀어냄
                 if (current[targetSeat] && current[targetSeat].type !== 'reserved' && current[targetSeat].studentId !== dbRecord.student_id) {
                     appendLog('border-slate-500', 'bg-slate-100 text-slate-500', '로그아웃', `[${targetSeat}] ${current[targetSeat].name} 밀어내기`, `새로운 학생이 로그인하여 기존 세션을 정리합니다.`);
                     removeLogsByTypeAndSeat('call', targetSeat); 
@@ -312,7 +310,6 @@ export function useSupervisorData() {
                     removeLogsByTypeAndSeat('recheck', targetSeat); 
                     removeLogsByTypeAndSeat('end_request', targetSeat);
                     
-                    // 기존 학생의 찌꺼기 세션도 안전하게 닫아줌
                     endTodaySession(supabaseClient, current[targetSeat].studentId, todayStr);
                     
                     delete current[targetSeat];
@@ -334,7 +331,7 @@ export function useSupervisorData() {
                         sessionNo: dbRecord.session_no || 1,
                         endRequestPending: dbRecord.end_request_status === 'pending',
                         totalCalls: 0, totalHints: 0, calls: {}, activity: '포털/수동 배정 연동',
-                        lastUpdatedAt: Date.now() // 갱신 타임스탬프 초기화
+                        lastUpdatedAt: Date.now()
                     };
                     isModified = true;
                     const justStarted = Date.now() - (new Date(dbRecord.started_at).getTime() || 0) < 10000;
@@ -941,6 +938,30 @@ export function useSupervisorData() {
         } else if (type === 'force_refresh') {
             sendToStudent(seat, 'force_refresh');
             appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
+        } 
+        // 🌟 신규: 프리징(화면 멈춤) 오류 발생 시 강제 초기화 장치
+        else if (type === 'force_reset') {
+            if (currentStudents[seat]) {
+                const st = currentStudents[seat];
+                
+                // 1. 관제탑 메모리에 남아있는 모든 꼬인 상태 강제 해제
+                if (st.status !== 'offline') st.status = 'idle';
+                st.awaySince = null;
+                st.calls = {};
+                st.rechecks = {};
+                st.endRequestPending = false;
+                
+                // 2. 화면에 떠있는 관련 찌꺼기 로그 모두 제거
+                removeLogsByTypeAndSeat('call', seat);
+                removeLogsByTypeAndSeat('away', seat);
+                removeLogsByTypeAndSeat('recheck', seat);
+                removeLogsByTypeAndSeat('end_request', seat);
+                
+                // 3. 학생 기기로 강제 새로고침(리로드) 신호 전송
+                sendToStudent(seat, 'force_refresh');
+                
+                appendLog('border-fuchsia-500', 'bg-fuchsia-100 text-fuchsia-700', '강제초기화', `[${seat}] ${st.name} 상태 리셋`, `프리징된 모든 상태를 강제로 해제하고 기기를 새로고침했습니다.`);
+            }
         }
         updateStudents(currentStudents);
     };

@@ -12,12 +12,13 @@ interface SeatCardBodyProps {
     onConfirmCheckout?: () => void;
     onOpenEndRequest?: () => void;
     onAdjustTime?: (deltaMin: number) => void;
-    onForceRefresh?: () => void; // 🌟 강제 새로고침 프롭 추가
+    onForceRefresh?: () => void;
+    onForceReset?: () => void; // 🌟 신규: 강제 리셋 프롭 추가
 }
 
 export default function SeatCardBody({
     seat, student, now, isMounted, interactive = true,
-    onClearAway, onConfirmCheckout, onOpenEndRequest, onAdjustTime, onForceRefresh
+    onClearAway, onConfirmCheckout, onOpenEndRequest, onAdjustTime, onForceRefresh, onForceReset
 }: SeatCardBodyProps) {
     const isCall = student.status === 'call';
     const isAway = student.status === 'away';
@@ -40,7 +41,6 @@ export default function SeatCardBody({
                     <span className="font-bold text-slate-900 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                    {/* 🌟 오프라인 시 강제 새로고침 버튼 노출 */}
                     {interactive && isOffline && (
                         <button onClick={(e) => { e.stopPropagation(); onForceRefresh?.(); }} title="기기 새로고침 신호 전송" className={`text-[8px] bg-slate-200 text-slate-500 hover:bg-blue-500 hover:text-white px-1 py-px rounded leading-none ${pe}`}>
                             ↻
@@ -74,9 +74,17 @@ export default function SeatCardBody({
                         <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="bg-slate-800 text-white text-[9px] font-bold py-1 rounded leading-none">퇴실처리</button>
                     </div>
                 )}
-                {/* 🌟 오프라인 시 강제 퇴실 버튼 추가 노출 */}
                 {isOffline && (
                     <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="w-full bg-slate-800 text-white text-[9px] font-bold py-1 rounded border border-slate-700 leading-none mt-1 animate-pulse">⚠️ 강제 퇴실 처리</button>
+                )}
+                {/* 🌟 신규: 프리징 해결용 강제 초기화 버튼 */}
+                {interactive && (
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onForceReset?.(); }} 
+                        className="w-full bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 font-bold py-1.5 mt-1 rounded border border-fuchsia-200 leading-none text-[9px] transition-colors"
+                    >
+                        🔄 상태 강제 초기화 (오류 해결)
+                    </button>
                 )}
             </div>
             {student.firstSeenAt && student.clinicDurationMs != null && (

@@ -5,67 +5,40 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+// 💡 사이드바 카테고리 순서(1~8)에 맞춰 권한 그룹을 재배치하고 누락된 메뉴 추가
 const PERMISSION_GROUPS = [
   {
-    category: "대시보드 (홈 화면)",
-    desc: "홈 화면 접근 및 대시보드 내 관리 기능 권한입니다.",
+    category: "1. 학원 관리",
+    desc: "홈 대시보드 및 학생/반 기본 관리 권한입니다.",
     items: [
       { id: "/home", label: "홈 메뉴 접근 (기본 제공)", isRequired: true },
       { id: "action_edit_home_attend", label: "↳ [권한] 홈 화면 출결 수동 설정 및 기록 삭제", isAction: true },
-    ]
-  },
-  {
-    category: "학생 및 수강 관리",
-    items: [
       { id: "/student", label: "학생 관리 (기본 정보/리포트)" },
       { id: "action_delete_student", label: "↳ [권한] 학생 데이터 영구 삭제", isAction: true },
       { id: "/class", label: "반 관리 (수강생/일정 배정)" },
       { id: "action_view_all_classes", label: "↳ [권한] 전체 수강반 열람 (미체크 시 본인 반만 노출)", isAction: true },
       { id: "action_delete_class", label: "↳ [권한] 반(클래스) 삭제", isAction: true },
+    ]
+  },
+  {
+    category: "2. 수업 관리",
+    desc: "교재, 진도, 학습지, 결과 리포트 및 보강 일정 관리입니다.",
+    items: [
       { id: "/lesson", label: "교재 관리 (마스터 교재/진도 배정)" },
       { id: "action_delete_book", label: "↳ [권한] 마스터 교재 삭제", isAction: true },
-    ]
-  },
-  {
-    category: "학생 상세 정보 (개별 탭)",
-    items: [
-      { id: "action_view_consult", label: "↳ [권한] 학생 상담 기록 열람", isAction: true },
-      { id: "action_view_exam", label: "↳ [권한] 학생 시험 성적 열람", isAction: true },
-      { id: "action_view_clinic", label: "↳ [권한] 학생 클리닉 분석 열람", isAction: true },
-      { id: "action_edit_attend", label: "↳ [권한] 학생 출결 기록 수정", isAction: true },
-    ]
-  },
-  {
-    category: "플로팅 편의 기능",
-    items: [
-      { id: "action_use_chat", label: "↳ [권한] 메신저 (사내/학부모) 이용", isAction: true },
-      { id: "action_use_memo", label: "↳ [권한] 퀵 메모 (포스트잇) 이용", isAction: true },
-    ]
-  },
-  {
-    category: "학습 및 수업 관리",
-    items: [
+      { id: "/progress", label: "진도 관리 (교재 진도 체크)" },
       { id: "/learning", label: "학습 관리 (시험/과제/오답 현황)" },
       { id: "action_delete_learning_exam", label: "↳ [권한] 타임라인 학습지(시험/과제) 강제 삭제", isAction: true },
-      { id: "/progress", label: "진도 관리 (교재 진도 체크)" },
+      // 💡 신규 추가: 학습 결과 접근 제어
+      { id: "/class-report", label: "학습 결과 (학생별 성취도 리포트)" }, 
       { id: "/makeup", label: "보강 관리 (1:1 개별 보강)" },
       { id: "action_edit_makeup", label: "↳ [권한] 개별 보강 일정 수정", isAction: true },
       { id: "action_delete_makeup", label: "↳ [권한] 개별 보강 일정 삭제", isAction: true },
     ]
   },
   {
-    category: "출제 및 진단 평가",
-    items: [
-      { id: "/exam-list", label: "문제지 보관함 (출제 및 채점)" },
-      { id: "action_delete_exam", label: "↳ [권한] 출제된 문제지 삭제", isAction: true },
-      { id: "/admission", label: "진단평가 및 대기생 관리" },
-      { id: "action_create_admission", label: "↳ [권한] 진단평가 새 일정 만들기", isAction: true },
-      { id: "action_bulk_admission", label: "↳ [권한] 진단평가 일괄 관리 (상태/삭제)", isAction: true },
-      { id: "action_manage_admission_report", label: "↳ [권한] 진단 리포트 생성 및 열람", isAction: true },
-    ]
-  },
-  {
-    category: "소통 및 행정 업무",
+    category: "3. 소통 및 업무 관리",
+    desc: "AI 회의록, 업무 공유, 학부모 상담 등 소통 권한입니다.",
     items: [
       { id: "/minutes", label: "AI 회의록 (회의 안건/일정)" },
       { id: "action_create_voice_minutes", label: "↳ [권한] AI 실시간 음성 회의록 작성", isAction: true },
@@ -80,21 +53,35 @@ const PERMISSION_GROUPS = [
       { id: "action_delete_task_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
       { id: "action_submit_task_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
       
+      { id: "/supply", label: "비품 신청" },
+      { id: "action_delete_supply", label: "↳ [권한] 비품 신청서 삭제", isAction: true },
+      { id: "action_delete_supply_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
+      { id: "action_submit_supply_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
+
       { id: "/cs", label: "학부모 요청 및 CS 관리" },
       { id: "action_view_all_cs", label: "↳ [권한] 타인의 CS 요청 내역 전체 열람", isAction: true },
       { id: "action_delete_cs", label: "↳ [권한] 학부모 요청(CS) 기록 삭제", isAction: true },
       { id: "action_delete_cs_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
       { id: "action_submit_cs_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
       
-      { id: "/supply", label: "비품 신청" },
-      { id: "action_delete_supply", label: "↳ [권한] 비품 신청서 삭제", isAction: true },
-      { id: "action_delete_supply_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
-      { id: "action_submit_supply_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
+      // 💡 신규 추가: 정기 상담 관리 접근 제어
+      { id: "/consultation", label: "정기 상담 관리 (대상자 확인 및 일지)" },
     ]
   },
   {
-    category: "데스크 전용 (수납 및 운영)",
-    desc: "민감한 매출 및 학원 전체 운영 지표에 접근합니다.",
+    category: "4. 출제 및 배포",
+    items: [
+      { id: "/exam-list", label: "문제지 보관함 (출제 및 채점)" },
+      { id: "action_delete_exam", label: "↳ [권한] 출제된 문제지 삭제", isAction: true },
+      { id: "/admission", label: "진단평가 및 대기생 관리" },
+      { id: "action_create_admission", label: "↳ [권한] 진단평가 새 일정 만들기", isAction: true },
+      { id: "action_bulk_admission", label: "↳ [권한] 진단평가 일괄 관리 (상태/삭제)", isAction: true },
+      { id: "action_manage_admission_report", label: "↳ [권한] 진단 리포트 생성 및 열람", isAction: true },
+    ]
+  },
+  {
+    category: "5. 데스크 전용 (수납 및 운영)",
+    desc: "매출 통계 및 수납/행정 지표 권한입니다.",
     items: [
       { id: "/admin-dashboard", label: "운영 대시보드 (KPI/통계)" },
       { id: "/billing", label: "수납 및 청구서 발행" },
@@ -104,26 +91,52 @@ const PERMISSION_GROUPS = [
     ]
   },
   {
-    category: "LOGICA Factory (저작 도구)",
+    category: "6. 조교(TA) 전용",
+    items: [
+      { id: "/ta-tools", label: "조교 전용 페이지(클리닉 패드 등) 접근" },
+    ]
+  },
+  {
+    category: "7. LOGICA Factory (저작 도구)",
     desc: "문제은행 파싱, 교정, 매핑 등 팩토리 도구 권한입니다.",
     items: [
+      { id: "/factory-dashboard", label: "DB 통계 대시보드" },
       { id: "/pdf-parser", label: "PDF 문항 추출기 (페이지 전체 접근)" },
-      { id: "/mapper", label: "교재 수동 연결 도구 (페이지 전체 접근)" },
-      { id: "/taxonomy-editor", label: "문제 교정 및 쌍둥이/유사 생성 (페이지 전체 접근)" },
+      { id: "/taxonomy-editor", label: "문제 교정 및 쌍둥이/유사 생성" },
       { id: "action_add_question", label: "↳ [권한] 새 문항 추가", isAction: true },
       { id: "action_delete_question", label: "↳ [권한] 문항 완전 삭제", isAction: true },
       { id: "action_edit_question", label: "↳ [권한] 문항 & 해설 & 이미지 수정", isAction: true },
       { id: "action_generate_twins", label: "↳ [권한] 쌍둥이/유사 문제 AI 자동 생성", isAction: true },
-      { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },
+      { id: "/mapper", label: "교재 수동 연결 도구" },
       { id: "/book-upload", label: "교재 구조 (textbook) 일괄 업로드" },
+      { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },
     ]
   },
   {
-    category: "최고관리자 권한",
-    desc: "SUPER_ADMIN은 기본으로 모든 권한을 가지며, 이 메뉴는 별도 부여용입니다.",
+    category: "8. 원장·최고관리자 전용",
+    desc: "기본적으로 원장급 이상만 쓰지만 예외 권한 부여가 가능합니다.",
     items: [
       { id: "/seat-layout-editor", label: "클리닉 좌석 배치 에디터" },
+      { id: "/clinic-pad-registry", label: "키오스크 패드 등록" },
+      { id: "/permission", label: "지점 권한 관리" },
+      { id: "/instructor", label: "강사 관리" },
       { id: "/academy-info", label: "학원(지점) 기본 정보 설정" },
+    ]
+  },
+  {
+    category: "기타 세부 액션: 학생 상세 정보(탭)",
+    items: [
+      { id: "action_view_consult", label: "↳ [권한] 학생 상담 기록 열람", isAction: true },
+      { id: "action_view_exam", label: "↳ [권한] 학생 시험 성적 열람", isAction: true },
+      { id: "action_view_clinic", label: "↳ [권한] 학생 클리닉 분석 열람", isAction: true },
+      { id: "action_edit_attend", label: "↳ [권한] 학생 출결 기록 수정", isAction: true },
+    ]
+  },
+  {
+    category: "기타 세부 액션: 플로팅 편의 기능",
+    items: [
+      { id: "action_use_chat", label: "↳ [권한] 메신저 (사내/학부모) 이용", isAction: true },
+      { id: "action_use_memo", label: "↳ [권한] 퀵 메모 (포스트잇) 이용", isAction: true },
     ]
   }
 ];
