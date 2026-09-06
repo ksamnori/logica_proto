@@ -124,7 +124,6 @@ export default function SupervisorDashboard() {
                 </div>
             )}
 
-            {/* 🌟 다크 테마가 적용된 세련된 헤더로 전면 개편 */}
             <header className="bg-slate-900 border-b border-slate-800 text-white px-6 py-3 flex justify-between items-center z-20 shrink-0 shadow-lg">
                 <div className="flex items-center gap-4">
                     <div className="w-10 h-10 bg-indigo-500 rounded-xl flex items-center justify-center shadow-inner shadow-indigo-400/50">
@@ -139,7 +138,6 @@ export default function SupervisorDashboard() {
                 </div>
 
                 <div className="flex items-center gap-5">
-                    {/* Status Badges */}
                     <div className="flex items-center gap-2 bg-slate-800/50 p-1.5 rounded-xl border border-slate-700/50">
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-[11px] font-bold text-slate-300 shadow-sm"><span className="w-2 h-2 rounded-full bg-indigo-400 shrink-0"></span>조교 {Object.keys(activeTAs).length}</div>
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-slate-800 text-[11px] font-bold text-slate-300 shadow-sm"><span className="w-2 h-2 rounded-full bg-emerald-400 shrink-0"></span>학생 {studentCount}</div>
@@ -147,7 +145,6 @@ export default function SupervisorDashboard() {
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/20 border border-rose-500/30 text-[11px] font-bold text-rose-300 shadow-sm"><span className="text-rose-400">🚨</span>호출 {callingCount}</div>
                     </div>
 
-                    {/* Uptime */}
                     <div className="flex items-center gap-3 bg-slate-800/50 pl-4 pr-3 py-1.5 rounded-xl border border-slate-700/50 hidden xl:flex">
                         <div className="text-right">
                             <div className="text-xs font-black font-mono text-slate-200">{isMounted ? new Date(now).toLocaleTimeString('ko-KR', { hour12: false }) : '--:--:--'}</div>
@@ -156,7 +153,6 @@ export default function SupervisorDashboard() {
                         <span className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${connectionStatus === 'connected' ? 'bg-emerald-500 dot-live' : connectionStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500'}`}></span>
                     </div>
 
-                    {/* Profile & Actions */}
                     <div className="flex items-center gap-3 pl-2">
                         <button onClick={() => router.push('/admin-dashboard')} className="group flex items-center gap-2 bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-lg text-xs font-bold transition-all shadow-md hover:shadow-indigo-500/20">
                             <span className="group-hover:scale-110 transition-transform">⚙️</span> 운영 홈
@@ -177,7 +173,6 @@ export default function SupervisorDashboard() {
                 <LeftPanel data={supervisorData} />
                 <SeatGrid data={supervisorData} />
 
-                {/* 우측 라이브 로그 영역 */}
                 <aside className="w-[260px] bg-white border-l border-slate-300 flex flex-col h-full shadow-2xl z-10 shrink-0">
                     <div className="bg-slate-800 text-white px-4 py-2 font-bold text-[12px] flex justify-between items-center shrink-0">
                         <span>⚡ 현장 라이브 로그</span>

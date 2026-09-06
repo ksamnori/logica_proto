@@ -280,13 +280,17 @@ export default function StudentPortal() {
 
         const classIds = Object.values(nameToId).filter(Boolean);
         let hwsData: any[] = [];
-        if (classIds.length > 0) {
-            const { data } = await supabaseClient.from('homework_assignment')
-                .select('homework_id, class_id, target_student_id, due_date, homework_title, target_questions')
-                .in('class_id', classIds as string[])
-                .neq('homework_title', '[시스템] 수업 진도 완료 기록');
-            hwsData = data || [];
-        }
+        
+        // 🌟 수정됨: 반 미배정 학생도 개인 할당 과제를 정상적으로 불러오기 위한 OR 쿼리 구조 변경
+        const hwFilters = [];
+        if (classIds.length > 0) hwFilters.push(`class_id.in.(${classIds.join(',')})`);
+        hwFilters.push(`target_student_id.eq.${sid}`);
+        
+        const { data: hwAssignments } = await supabaseClient.from('homework_assignment')
+            .select('homework_id, class_id, target_student_id, due_date, homework_title, target_questions')
+            .or(hwFilters.join(','))
+            .neq('homework_title', '[시스템] 수업 진도 완료 기록');
+        hwsData = hwAssignments || [];
 
         const { data: hwResData } = await supabaseClient.from('student_homework_result')
             .select('homework_id, status, completed_tq_ids')
@@ -296,7 +300,7 @@ export default function StudentPortal() {
 
         classes.forEach(c => {
             const cid = nameToId[c];
-            if (!cid) return;
+            // 🌟 수정됨: if (!cid) return; 삭제. 반 미배정 학생의 블록도 정상 처리되도록 통과
 
             let hwPending = 0, printPending = 0, overduePending = 0;
             let hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [], overdueExamIds: number[] = [];
@@ -325,7 +329,6 @@ export default function StudentPortal() {
                 const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - attempted);
 
-                // 💡 뷰어에 진입할 첫 번째 과제의 문제 수만 반영하도록 수정
                 if (type === '오답프린트') {
                     if (isPending) { printPending++; printIds.push(ex.assignment_id); pTitles.push(title); if (printPending === 1) pCount += remain; }
                 } else if (type === '과제' || type === '과제프린트') {
@@ -363,7 +366,8 @@ export default function StudentPortal() {
             }
 
             hwsData?.forEach((hw: any) => {
-                if (hw.class_id !== cid) return;
+                // 🌟 수정됨: 반이 할당된 과제인데 내 현재 탭과 다르면 스킵 (하지만 반 없는 개인 과제는 통과)
+                if (hw.class_id && hw.class_id !== cid) return; 
                 if (hw.target_student_id && hw.target_student_id !== sid) return;
                 
                 const resObj = hwResMap.get(hw.homework_id);
@@ -379,7 +383,6 @@ export default function StudentPortal() {
                 
                 if (remain === 0) return;
 
-                // 💡 과제는 여러 개가 동시에 열리므로 누적 합산 유지
                 if (hw.due_date && hw.due_date <= today) { 
                     overduePending++; overdueHwIds.push(hw.homework_id); oTitles.push(hw.homework_title); oCount += remain; 
                 } else { 
@@ -710,7 +713,6 @@ export default function StudentPortal() {
                             <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
                                 {isLocked ? '🔒 잠김' : theme.label}
                             </span>
-                            {/* 🌟 신규: 과제가 여러 개 밀려있음을 알려주는 뱃지 */}
                             {pendingStacks > 1 && !isDone && !isLocked && (
                                 <span className="text-[10px] font-bold bg-white/20 text-white px-2 py-1 rounded shadow-sm border border-white/30">
                                     밀린 과제 {pendingStacks}개
@@ -777,7 +779,6 @@ export default function StudentPortal() {
                             <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
                                 {isLocked ? '🔒 잠김' : theme.label}
                             </span>
-                            {/* 🌟 신규: 과제가 여러 개 밀려있음을 알려주는 뱃지 */}
                             {pendingStacks > 1 && !isDone && !isLocked && (
                                 <span className="text-[10px] font-bold bg-white/20 text-white px-2 py-1 rounded shadow-sm border border-white/30">
                                     밀린 과제 {pendingStacks}개
@@ -902,7 +903,7 @@ export default function StudentPortal() {
             </nav>
 
             <main className="max-w-[1280px] w-full mx-auto py-6 px-6 md:py-8 md:px-8 flex-1">
-                {studentInfo.classes.length > 0 && studentInfo.classes[0] !== '반 미배정' && (
+                {studentInfo.classes.length > 0 && (
                     <section className="mb-4">
                         <div className="flex items-center gap-4 mb-6">
                             <h2 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>

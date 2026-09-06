@@ -13,7 +13,7 @@ interface SeatCardBodyProps {
     onOpenEndRequest?: () => void;
     onAdjustTime?: (deltaMin: number) => void;
     onForceRefresh?: () => void;
-    onForceReset?: () => void; // 🌟 신규: 강제 리셋 프롭 추가
+    onForceReset?: () => void;
 }
 
 export default function SeatCardBody({
@@ -34,16 +34,17 @@ export default function SeatCardBody({
     const pe = interactive ? 'pointer-events-auto' : '';
 
     return (
-        <div className="flex flex-col gap-1">
+        <div className="flex flex-col gap-1 h-full relative">
             <div className="flex items-center justify-between gap-1">
                 <div className="flex items-center gap-1 min-w-0">
                     <span className="shrink-0 bg-[#002864] text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">{seat}</span>
                     <span className="font-bold text-slate-900 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                    {interactive && isOffline && (
-                        <button onClick={(e) => { e.stopPropagation(); onForceRefresh?.(); }} title="기기 새로고침 신호 전송" className={`text-[8px] bg-slate-200 text-slate-500 hover:bg-blue-500 hover:text-white px-1 py-px rounded leading-none ${pe}`}>
-                            ↻
+                    {/* 🌟 수정: 강제 초기화(리셋) 버튼을 배지 옆에 작게 배치하여 공간을 밀어내지 않습니다. */}
+                    {interactive && (
+                        <button onClick={(e) => { e.stopPropagation(); onForceReset?.(); }} title="기기 새로고침 및 상태 초기화" className={`text-[8px] font-bold bg-slate-100 text-slate-500 hover:bg-fuchsia-500 hover:text-white px-1.5 py-0.5 rounded leading-none ${pe} transition-colors`}>
+                            ↻ 리셋
                         </button>
                     )}
                     <span className={`text-[8px] font-bold px-1 py-px rounded leading-none ${badgeBg}`}>{badgeText}</span>
@@ -77,18 +78,10 @@ export default function SeatCardBody({
                 {isOffline && (
                     <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="w-full bg-slate-800 text-white text-[9px] font-bold py-1 rounded border border-slate-700 leading-none mt-1 animate-pulse">⚠️ 강제 퇴실 처리</button>
                 )}
-                {/* 🌟 신규: 프리징 해결용 강제 초기화 버튼 */}
-                {interactive && (
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onForceReset?.(); }} 
-                        className="w-full bg-fuchsia-50 text-fuchsia-700 hover:bg-fuchsia-100 font-bold py-1.5 mt-1 rounded border border-fuchsia-200 leading-none text-[9px] transition-colors"
-                    >
-                        🔄 상태 강제 초기화 (오류 해결)
-                    </button>
-                )}
             </div>
+            {/* 🌟 하단 시간 조절 버튼이 정상적으로 노출됩니다 */}
             {student.firstSeenAt && student.clinicDurationMs != null && (
-                <div className={`flex items-center justify-between pt-1 border-t border-slate-100 ${pe} ${isUrgent ? 'text-rose-600' : 'text-slate-400'}`}>
+                <div className={`mt-auto flex items-center justify-between pt-1 border-t border-slate-100 ${pe} ${isUrgent ? 'text-rose-600' : 'text-slate-400'}`}>
                     <span className="text-[8px] font-bold whitespace-nowrap leading-none">⏳ <span className="tabular-nums">{isMounted ? formatDuration(remainingMs) : '00:00'}</span></span>
                     <div className="flex items-center rounded-md border border-slate-200 overflow-hidden shadow-sm shrink-0">
                         <button onClick={(e) => { e.stopPropagation(); onAdjustTime?.(-10); }} className="w-4 h-4 flex items-center justify-center bg-white text-slate-400 leading-none text-[10px]">-</button>

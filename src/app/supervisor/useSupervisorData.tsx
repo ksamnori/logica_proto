@@ -141,9 +141,11 @@ export function useSupervisorData() {
         }));
     }, []);
 
+    // 🌟 핵심 버그 수정: 신호 발송 시 studentId를 반드시 포함시켜 학생 기기가 신호를 버리지 않도록 보장합니다.
     const sendToStudent = (seat: string, action: string, extra = {}) => {
         if (!channelRef.current) return;
-        channelRef.current.send({ type: 'broadcast', event: 'ta_action', payload: { seat, action, ...extra, timestamp: Date.now() } });
+        const studentId = studentsRef.current[seat]?.studentId;
+        channelRef.current.send({ type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } });
     };
 
     useEffect(() => {
@@ -938,28 +940,19 @@ export function useSupervisorData() {
         } else if (type === 'force_refresh') {
             sendToStudent(seat, 'force_refresh');
             appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
-        } 
-        // 🌟 신규: 프리징(화면 멈춤) 오류 발생 시 강제 초기화 장치
-        else if (type === 'force_reset') {
+        } else if (type === 'force_reset') {
             if (currentStudents[seat]) {
                 const st = currentStudents[seat];
-                
-                // 1. 관제탑 메모리에 남아있는 모든 꼬인 상태 강제 해제
                 if (st.status !== 'offline') st.status = 'idle';
                 st.awaySince = null;
                 st.calls = {};
                 st.rechecks = {};
                 st.endRequestPending = false;
-                
-                // 2. 화면에 떠있는 관련 찌꺼기 로그 모두 제거
                 removeLogsByTypeAndSeat('call', seat);
                 removeLogsByTypeAndSeat('away', seat);
                 removeLogsByTypeAndSeat('recheck', seat);
                 removeLogsByTypeAndSeat('end_request', seat);
-                
-                // 3. 학생 기기로 강제 새로고침(리로드) 신호 전송
                 sendToStudent(seat, 'force_refresh');
-                
                 appendLog('border-fuchsia-500', 'bg-fuchsia-100 text-fuchsia-700', '강제초기화', `[${seat}] ${st.name} 상태 리셋`, `프리징된 모든 상태를 강제로 해제하고 기기를 새로고침했습니다.`);
             }
         }

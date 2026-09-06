@@ -182,24 +182,6 @@ export default function StudentKioskLogin() {
     setPendingLoginData(null);
   };
 
-  // 💡 매직 키보드(물리 키보드) 이벤트 지원
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (isProcessing) return;
-      if (e.key >= '0' && e.key <= '9') {
-        if (step === 'phone') handleDigit(e.key);
-        else if (step === 'password') handlePinDigit(e.key);
-        else if (step === 'setup_pin') handleNewPinDigit(e.key);
-      } else if (e.key === 'Backspace') {
-        if (step === 'phone') handleDelete();
-        else if (step === 'password') handlePinDelete();
-        else if (step === 'setup_pin') handleNewPinDelete();
-      }
-    };
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [step, digits, passwordInput, newPinInput, isProcessing]);
-
   const handleDigit = (num: string) => {
     if (step === "phone" && digits.length < 4 && !isProcessing) {
       const newDigits = digits + num;
@@ -236,7 +218,6 @@ export default function StudentKioskLogin() {
     setNewPinInput(prev => prev.slice(0, -1));
   };
 
-  // 💡 통신 오류 시 앱 멈춤 방지 (try-catch 추가)
   const searchDBAndProcess = async (code: string) => {
     setIsProcessing(true);
     try {
