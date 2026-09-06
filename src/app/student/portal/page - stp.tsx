@@ -160,16 +160,14 @@ export default function StudentPortal() {
         if (!clinicSessionRef.current?.id) return;
         const { data, error } = await supabaseClient
             .from('clinic_session_state')
-            // 🔥 수정됨: active_rechecks 도 함께 가져와야 포털에서도 찌꺼기를 치울 수 있습니다.
-            .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, active_rechecks, away_since')
+            .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, away_since')
             .eq('id', clinicSessionRef.current.id)
             .maybeSingle();
 
         if (!error && data) {
             let hasChanges = false;
-            let needsDbUpdate = false;
-            const updatePayload: any = {};
             
+            // 💡 [필살기] DB에 리셋(REFRESH) 도장이 찍혀있으면 무조건 즉시 새로고침
             if (data.active_calls && data.active_calls['REFRESH']) {
                 const newCalls = { ...data.active_calls };
                 delete newCalls['REFRESH'];
@@ -202,47 +200,11 @@ export default function StudentPortal() {
                 setTimeUpModal({ isOpen: true, icon: '🚪', title: '퇴실 처리되었습니다', desc: '조교가 클리닉 이용을 종료했어요.' });
             }
 
-            // 🚨 1. 조교 호출(Call) 결과 알림 및 찌꺼기 청소
-            if (data.active_calls) {
-                let callChanged = false;
-                const newCalls = { ...data.active_calls };
-                Object.keys(newCalls).forEach(qNum => {
-                    if (newCalls[qNum].verdict === 'resolved') {
-                        delete newCalls[qNum];
-                        callChanged = true;
-                    }
-                });
-                if (callChanged) {
-                    updatePayload.active_calls = newCalls;
-                    needsDbUpdate = true;
-                }
-                setIsPortalCalling(!!newCalls['general']);
-            } else {
-                setIsPortalCalling(false);
-            }
-
-            // 🚨 2. 수동 채점(Recheck) 결과 알림 및 찌꺼기 청소
-            if (data.active_rechecks) {
-                let recheckChanged = false;
-                const newRechecks = { ...data.active_rechecks };
-                Object.keys(newRechecks).forEach(uid => {
-                    if (newRechecks[uid].verdict) {
-                        setRecheckToast(newRechecks[uid].verdict === 'correct' ? '🎉 조교님이 정답으로 확인했어요!' : '조교 확인 결과 오답이 맞습니다. (상세 내용은 클리닉에서 확인)');
-                        setTimeout(() => setRecheckToast(""), 4000);
-                        delete newRechecks[uid]; // 확인했으니 DB에서 파기
-                        recheckChanged = true;
-                    }
-                });
-                if (recheckChanged) {
-                    updatePayload.active_rechecks = newRechecks;
-                    needsDbUpdate = true;
-                }
-            }
-
-            // 변경된 내역(ACK) DB 업데이트
-            if (needsDbUpdate) {
-                await supabaseClient.from('clinic_session_state').update(updatePayload).eq('id', clinicSessionRef.current.id);
-            }
+            setIsPortalCalling(prev => {
+                const dbCalls = data.active_calls || {};
+                if (prev && !dbCalls['general']) return false;
+                return prev;
+            });
 
             setIsPortalAway(prev => {
                 if (prev && !data.away_since) return false;

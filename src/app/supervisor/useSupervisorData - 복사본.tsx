@@ -973,13 +973,13 @@ export function useSupervisorData() {
         
         if (type === 'cancel_call') {
             if (qNum !== null) {
-                // 🌟 DB에 결과를 먼저 업데이트 (mark 에러 픽스)
+                // 🌟 DB에 결과를 먼저 업데이트 (학생이 꺼져있어도 나중에 읽을 수 있게)
                 if (currentStudents[seat]?.sessionId) {
                     const sid = currentStudents[seat].sessionId;
                     const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).single();
                     if (data && data.active_calls && data.active_calls[qNum]) {
                         const newCalls = { ...data.active_calls };
-                        newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' }; 
+                        newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: mark || 'skip' };
                         await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
                     }
                 }
@@ -1006,17 +1006,6 @@ export function useSupervisorData() {
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
         } else if (type === 'force_refresh') {
-            // 🌟 강제 새로고침(REFRESH) 명령을 DB에 주입 (소켓이 끊겨도 복구 보장)
-            if (currentStudents[seat]?.sessionId) {
-                supabaseClient.from('clinic_session_state')
-                    .select('active_calls')
-                    .eq('id', currentStudents[seat].sessionId)
-                    .single()
-                    .then(({ data }) => {
-                        const newCalls = { ...(data?.active_calls || {}), REFRESH: Date.now() };
-                        supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', currentStudents[seat].sessionId).then();
-                    });
-            }
             sendToStudent(seat, 'force_refresh');
             appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
         } else if (type === 'force_reset') {

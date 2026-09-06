@@ -55,7 +55,6 @@ export function useClinicRealtime({
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
 
-  // 🌟 핵심 버그 수정: 컴포넌트 리렌더링 시에도 타이머가 찢어지지 않도록 최신 콜백을 항상 유지
   const callbacksRef = useRef({ 
       processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
       setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview 
@@ -70,7 +69,7 @@ export function useClinicRealtime({
 
   const runSelfCorrectionRef = useRef<any>(null);
 
-  // 🌟 1. 무적의 학생 패드 자가 교정 로직 (이제 타이머가 절대 죽지 않고 5초 주기로 확실하게 작동합니다)
+  // 🌟 1. 무적의 자가 교정 로직 (모달창 프리징 완벽 차단 및 ACK 보강)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
     let cancelled = false;
@@ -88,7 +87,16 @@ export function useClinicRealtime({
       if (error || !data || cancelled) return;
 
       let hasChanges = false;
-      const { processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, setCanvasClearTrigger, setMyAwayActive } = callbacksRef.current;
+      const { processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview } = callbacksRef.current;
+
+      // 💡 [비상 탈출] 관리자의 강제 새로고침(REFRESH) 감지 시 즉시 새로고침
+      if (data.active_calls && data.active_calls['REFRESH']) {
+          const newCalls = { ...data.active_calls };
+          delete newCalls['REFRESH'];
+          await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+          window.location.reload();
+          return;
+      }
 
       if (data.ended_at) {
           handleTimeUp('force_checkout_by_ta', true);
@@ -99,28 +107,39 @@ export function useClinicRealtime({
         clinicSessionStateRef.current.duration_ms = data.duration_ms;
       }
 
-      // 💡 조교 호출 강제 동기화 (결과를 읽고 학생이 스스로 지움)
+      // 🚨 1. 호출(Call) 무조건 강제 해제 및 청소 (ACK)
       const dbCalls = data.active_calls || {};
-      Object.keys(callState.current).forEach((qIdxStr) => {
-        const qIdx = Number(qIdxStr);
-        const qNum = qIdx + 1;
-        const callRec = dbCalls[qNum];
-        
-        if (callState.current[qIdx]) {
-          if (!callRec || callRec.verdict === 'resolved') {
-            callState.current[qIdx] = false;
-            hasChanges = true;
-            if (callRec && callRec.mark === 'hint') {
-              taHintState.current[qIdx] = true;
-              if (questions[qIdx]?.record_id) supabaseClient.from('student_incorrect_record').update({ status: 'T' }).eq('record_id', questions[qIdx].record_id).then();
-            }
-            if (callRec) {
-                const newCalls = { ...data.active_calls };
-                delete newCalls[qNum];
-                supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid).then();
-            }
+      const callsToDelete: string[] = [];
+
+      Object.keys(dbCalls).forEach((qNumStr) => {
+        const callRec = dbCalls[qNumStr];
+        // 내 화면 상태와 무관하게 DB에 해결(resolved)이 떠있으면 무조건 지운다!
+        if (callRec && callRec.verdict === 'resolved') {
+          if (qNumStr !== 'general') {
+              const qIdx = Number(qNumStr) - 1;
+              if (qIdx >= 0 && !isNaN(qIdx)) {
+                  callState.current[qIdx] = false; // UI 프리징 강제 해제
+                  hasChanges = true;
+                  if (callRec.mark === 'hint') {
+                      taHintState.current[qIdx] = true;
+                      if (questions[qIdx]?.record_id) supabaseClient.from('student_incorrect_record').update({ status: 'T' }).eq('record_id', questions[qIdx].record_id).then();
+                  }
+              }
           }
+          callsToDelete.push(qNumStr); // 찌꺼기 파기 등록
         }
+      });
+
+      // 내 로컬 상태에 켜져 있는데 DB에 없으면 끈다 (관리자가 바로 지운 경우 방어)
+      Object.keys(callState.current).forEach((qIdxStr) => {
+          const qIdx = Number(qIdxStr);
+          const qNum = qIdx + 1;
+          const callRec = dbCalls[qNum];
+          
+          if (callState.current[qIdx] && (!callRec || callRec.verdict === 'resolved')) {
+              callState.current[qIdx] = false;
+              hasChanges = true;
+          }
       });
 
       setMyAwayActive((prevAway: boolean) => {
@@ -129,40 +148,65 @@ export function useClinicRealtime({
         return prevAway;
       });
 
-      // 💡 수동 채점 동기화 (관리자가 남긴 verdict를 읽어온 뒤 스스로 지움)
+      // 💡 수동 채점 동기화 및 "모달창 완벽 해제"
       const dbRechecks = data.active_rechecks || {};
-      Object.keys(recheckState.current).forEach((qIdxStr) => {
-        const qIdx = Number(qIdxStr);
-        const qItem = questions[qIdx];
-        if (!qItem) return;
-        
-        const rec = dbRechecks[qItem.uid];
-        if (recheckState.current[qIdx] === 'pending') {
-           if (!rec) {
-               recheckState.current[qIdx] = null;
-               hasChanges = true;
-           } else if (rec.verdict) {
-               recheckState.current[qIdx] = null;
-               hasChanges = true;
+      const rechecksToDelete: string[] = [];
+      
+      Object.keys(dbRechecks).forEach((uid) => {
+        const rec = dbRechecks[uid];
+        if (rec && rec.verdict) {
+           const qIdx = rec.qNum ? rec.qNum - 1 : questions.findIndex((q:any) => q.uid === uid);
+           
+           // ⭐ 버그 픽스: 화면의 모달창(pendingRecheckReview)도 무조건 강제 업데이트
+           setPendingRecheckReview((prev: any[]) => {
+               const exists = prev.some(r => r.uid === uid || (rec.qNum && r.qNum === rec.qNum));
+               if (exists) {
+                   return prev.map(r => (r.uid === uid || (rec.qNum && r.qNum === rec.qNum)) ? { ...r, resolved: true, verdict: rec.verdict } : r);
+               }
+               return prev;
+           });
+
+           if (qIdx !== -1 && questions[qIdx]) {
+               recheckState.current[qIdx] = null; // 문제 프리징 강제 해제
+               const currentStatus = qBoxStatus.current[qIdx];
                
-               if (rec.verdict === 'correct') {
+               if (rec.verdict === 'correct' && currentStatus !== 'correct_blue') {
                    setRecheckToast(`🎉 조교님이 ${qIdx + 1}번을 정답 처리했어요!`);
-                   processCorrectAnswer(qItem, qIdx, true);
-               } else {
+                   processCorrectAnswer(questions[qIdx], qIdx, true);
+               } else if (rec.verdict === 'incorrect' && currentStatus !== 'wrong_red') {
                    qBoxStatus.current[qIdx] = 'wrong_red';
                    delete studentDrawings.current[qIdx]; delete keypadAnswers.current[qIdx]; delete keypadCursor.current[qIdx]; studentAnswers.current[qIdx] = null;
                    setRecheckToast('조교 확인 결과 오답이 맞습니다. 다시 풀어보세요.'); 
                    setCanvasClearTrigger(p => p + 1);
                }
                setTimeout(() => setRecheckToast(""), 4000);
-               
-               // 학생이 확인 후 찌꺼기 완벽하게 삭제
-               const newRechecks = { ...data.active_rechecks };
-               delete newRechecks[qItem.uid];
-               supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', sid).then();
+               hasChanges = true;
+           }
+           rechecksToDelete.push(uid); 
+        } else {
+           const qIdx = rec.qNum ? rec.qNum - 1 : questions.findIndex((q:any) => q.uid === uid);
+           if (qIdx !== -1 && recheckState.current[qIdx] !== 'pending') {
+               recheckState.current[qIdx] = 'pending';
+               hasChanges = true;
            }
         }
       });
+
+      // 🚨 학생 패드가 안전하게 화면을 해제한 뒤 최종적으로 한 번에 DB를 싹 정리(ACK)합니다.
+      if (callsToDelete.length > 0 || rechecksToDelete.length > 0) {
+          const updatePayload: any = {};
+          if (callsToDelete.length > 0) {
+              const newCalls = { ...data.active_calls };
+              callsToDelete.forEach(k => delete newCalls[k]);
+              updatePayload.active_calls = newCalls;
+          }
+          if (rechecksToDelete.length > 0) {
+              const newRechecks = { ...data.active_rechecks };
+              rechecksToDelete.forEach(k => delete newRechecks[k]);
+              updatePayload.active_rechecks = newRechecks;
+          }
+          await supabaseClient.from('clinic_session_state').update(updatePayload).eq('id', sid);
+      }
 
       if (hasChanges) forceUpdate();
     };
@@ -184,7 +228,6 @@ export function useClinicRealtime({
     };
   }, [studentInfo.id, questions]); 
 
-  // 🌟 2. DB 직접 감지 기능 (Broadcast 유실에 대한 2중 안전 장치)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
 
@@ -249,7 +292,6 @@ export function useClinicRealtime({
     const channel = supabaseClient.channel(`student_realtime_grading_listen_${studentInfo.id}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
       .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
-      // 🌟 여기에 DB 직접 감지 기능 추가! (관리자가 DB 업데이트하면 즉각 자가 교정 실행)
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
           if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
       })
@@ -258,7 +300,6 @@ export function useClinicRealtime({
     return () => { supabaseClient.removeChannel(channel); };
   }, [studentInfo.id, questions]);
 
-  // 3. 조교(TA) Broadcast 수신 (빠른 반응용 - 0.1초 즉시 실행)
   handleTaActionRef.current = (payload: any, sId: string, sessionState: any) => {
     const currentSeat = mySeatRef.current;
     if (payload.seat !== currentSeat && payload.studentId !== sId) return;
@@ -300,22 +341,23 @@ export function useClinicRealtime({
         trackPresenceRef.current(mySeatRef.current!, sId, clinicSessionStateRef.current);
       }
     } else if (payload.action === 'resolve_recheck') {
-      // 🌟 Broadcast로 신호를 1차로 잡아내어 즉각 반영
       const { setPendingRecheckReview, setRecheckToast, processCorrectAnswer, setCanvasClearTrigger, forceUpdate } = callbacksRef.current;
-      const idx = questions.findIndex(item => item.uid === payload.uid);
+      
+      const qNum = payload.qNum;
+      const idx = qNum ? qNum - 1 : questions.findIndex((item:any) => item.uid === payload.uid);
       
       setPendingRecheckReview(prev => {
-        const isReviewItem = prev.some(r => r.uid === payload.uid);
+        const isReviewItem = prev.some(r => r.uid === payload.uid || (qNum && r.qNum === qNum));
         if (isReviewItem) {
           if (idx !== -1) recheckState.current[idx] = null;
           setRecheckToast(payload.verdict === 'correct' ? '🎉 조교가 정답으로 확인했어요!' : '조교 확인 결과 오답이 맞습니다.');
           setTimeout(() => setRecheckToast(""), 4000);
-          return prev.map(r => r.uid === payload.uid ? { ...r, resolved: true, verdict: payload.verdict } : r);
+          return prev.map(r => (r.uid === payload.uid || (qNum && r.qNum === qNum)) ? { ...r, resolved: true, verdict: payload.verdict } : r);
         }
         return prev;
       });
 
-      if (idx === -1) return;
+      if (idx === -1 || !questions[idx]) return;
       const qItem = questions[idx];
       recheckState.current[idx] = null;
 
@@ -334,14 +376,19 @@ export function useClinicRealtime({
       }
       setTimeout(() => setRecheckToast(""), 4000);
 
-      // 즉시 처리 후 DB 찌꺼기도 안전하게 삭제
       const sid = clinicSessionStateRef.current?.id;
       if (sid) {
          supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).single().then(({ data }) => {
              if (data && data.active_rechecks) {
                  const newRechecks = { ...data.active_rechecks };
-                 delete newRechecks[payload.uid];
-                 supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', sid).then();
+                 let modified = false;
+                 Object.keys(newRechecks).forEach(k => {
+                     if (newRechecks[k].qNum === qNum || k === payload.uid) {
+                         delete newRechecks[k];
+                         modified = true;
+                     }
+                 });
+                 if (modified) supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', sid).then();
              }
          });
       }
@@ -448,10 +495,44 @@ export function useClinicRealtime({
     }
   };
 
-  const sendAction = (action: string, extra = {}) => {
+  // 🌟 3. 학생이 채점/호출 시 무조건 DB에 절대 번호(qNum)를 남깁니다.
+  const sendAction = async (action: string, extra: any = {}) => {
     if (clinicChannelRef.current && mySeatRef.current) {
       clinicChannelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: mySeatRef.current, action, data: { name: studentInfo.name, studentId: studentInfo.id, ...extra } } });
     }
+
+    const sid = clinicSessionStateRef.current?.id;
+    if (!sid) return;
+
+    try {
+        if (action === 'call' || action === 'cancel_call') {
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).single();
+            let calls = data?.active_calls || {};
+            if (action === 'call') {
+                calls[extra.qNum] = { requestedAt: Date.now(), qNum: extra.qNum };
+            } else {
+                delete calls[extra.qNum];
+            }
+            await supabaseClient.from('clinic_session_state').update({ active_calls: calls }).eq('id', sid);
+        }
+        else if (action === 'recheck_request') {
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).single();
+            let rechecks = data?.active_rechecks || {};
+            
+            // ⭐ 안전 장치: 학생이 qNum을 안 넘겼으면, 배열에서 뒤져서 강제로 문제 번호를 찾아 넣음
+            let safeQNum = extra.qNum;
+            if (!safeQNum && extra.uid) {
+                const fIdx = questions.findIndex(q => q.uid === extra.uid);
+                if (fIdx !== -1) safeQNum = fIdx + 1;
+            }
+
+            rechecks[extra.uid] = { ...extra, requestedAt: Date.now(), qNum: safeQNum };
+            await supabaseClient.from('clinic_session_state').update({ active_rechecks: rechecks }).eq('id', sid);
+        }
+        else if (action === 'away' || action === 'cancel_away') {
+            await supabaseClient.from('clinic_session_state').update({ away_since: action === 'away' ? new Date().toISOString() : null }).eq('id', sid);
+        }
+    } catch(e) { console.error(e); }
   };
 
   useEffect(() => {
