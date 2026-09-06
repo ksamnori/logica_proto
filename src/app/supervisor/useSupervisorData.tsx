@@ -62,6 +62,8 @@ export function useSupervisorData() {
     const [seatHeight, setSeatHeight] = useState(DEFAULT_SEAT_CARD_H);
     const [editorLocked, setEditorLocked] = useState(false);
 
+    const [reconnectTrigger, setReconnectTrigger] = useState(0);
+
     const loadSeats = useCallback(() => {
         getActiveSeatLayout().then(layout => {
             const sorted = [...layout.seats].sort((a, b) => a.number - b.number);
@@ -105,6 +107,27 @@ export function useSupervisorData() {
         verifyAdminAccess();
     }, []);
 
+    useEffect(() => {
+        const handleVisibilityChange = () => {
+            if (document.visibilityState === 'visible') {
+                if (channelRef.current && channelRef.current.state !== 'joined') {
+                    setReconnectTrigger(prev => prev + 1);
+                }
+            }
+        };
+        const handleOnline = () => { setReconnectTrigger(prev => prev + 1); };
+
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+        window.addEventListener('focus', handleVisibilityChange);
+        window.addEventListener('online', handleOnline);
+
+        return () => {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+            window.removeEventListener('focus', handleVisibilityChange);
+            window.removeEventListener('online', handleOnline);
+        };
+    }, []);
+
     const updateStudents = useCallback((newStudents: any) => {
         studentsRef.current = newStudents;
         setActiveStudents({ ...newStudents });
@@ -142,9 +165,9 @@ export function useSupervisorData() {
     }, []);
 
     const sendToStudent = (seat: string, action: string, extra = {}) => {
-        if (!channelRef.current) return;
+        if (!channelRef.current || channelRef.current.state !== 'joined') setReconnectTrigger(p => p + 1);
         const studentId = studentsRef.current[seat]?.studentId;
-        channelRef.current.send({ type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } });
+        channelRef.current?.send({ type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } });
     };
 
     useEffect(() => {
@@ -375,6 +398,7 @@ export function useSupervisorData() {
                     const dbRechecks = dbRecord.active_rechecks || {};
 
                     Object.keys(dbCalls).forEach(qNumKey => {
+                        if (dbCalls[qNumKey]?.verdict) return; // 학생 기기가 아직 안 지운 확인 대기 상태
                         if (st.calls[qNumKey]) return;
                         const qNum = qNumKey === 'general' ? 'general' : Number(qNumKey);
                         st.calls[qNumKey] = dbCalls[qNumKey]?.requestedAt || Date.now();
@@ -388,7 +412,7 @@ export function useSupervisorData() {
                         );
                     });
                     Object.keys(st.calls).forEach(qNumKey => {
-                        if (dbCalls[qNumKey]) return;
+                        if (dbCalls[qNumKey] && !dbCalls[qNumKey].verdict) return; 
                         delete st.calls[qNumKey];
                         if (Object.keys(st.calls).length === 0 && st.status === 'call') st.status = 'idle';
                         removeLogsByTypeAndSeat('call', targetSeat, (qNumKey === 'general' ? 'general' : Number(qNumKey)) as any);
@@ -396,6 +420,7 @@ export function useSupervisorData() {
                     });
 
                     Object.keys(dbRechecks).forEach(uid => {
+                        if (dbRechecks[uid]?.verdict) return; 
                         if (st.rechecks[uid]) return;
                         st.rechecks[uid] = { ...dbRechecks[uid], seat: targetSeat };
                         isModified = true;
@@ -405,7 +430,7 @@ export function useSupervisorData() {
                         );
                     });
                     Object.keys(st.rechecks).forEach(uid => {
-                        if (dbRechecks[uid]) return;
+                        if (dbRechecks[uid] && !dbRechecks[uid].verdict) return; 
                         delete st.rechecks[uid];
                         removeLogsByTypeAndSeat('recheck', targetSeat, null, uid);
                         isModified = true;
@@ -477,11 +502,20 @@ export function useSupervisorData() {
         });
     };
 
-    const handleTaActionFromOtherScreen = (payload: any) => {
+    const handleTaActionFromOtherScreen = async (payload: any) => {
         const { seat, action, qNum, taName, taClientId, mark, uid } = payload;
         const currentStudents = { ...studentsRef.current };
 
         if (action === 'force_cancel_call') {
+            if (currentStudents[seat]?.sessionId) {
+                 const sid = currentStudents[seat].sessionId;
+                 const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).single();
+                 if (data && data.active_calls && data.active_calls[qNum]) {
+                     const newCalls = { ...data.active_calls };
+                     newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: mark || 'skip' };
+                     await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+                 }
+            }
             if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
             if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
             removeLogsByTypeAndSeat('call', seat, qNum);
@@ -513,167 +547,7 @@ export function useSupervisorData() {
         updateStudents(currentStudents);
     };
 
-    useEffect(() => {
-        if (!isAuthorized) return;
-        
-        const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
-        const channelName = `${CLINIC_ROOM}_${myTenantId}`;
-        
-        const channel = supabaseClient.channel(channelName);
-        channelRef.current = channel;
-
-        channel
-            .on('presence', { event: 'sync' }, () => { if (syncPresenceRef.current) syncPresenceRef.current(channel.presenceState()); })
-            .on('broadcast', { event: 'student_action' }, ({ payload }: { payload: any }) => {
-                const { seat, data, action } = payload;
-                const st = { ...studentsRef.current };
-                const activeSeat = Object.keys(st).find(s => st[s].studentId === data.studentId) || seat;
-
-                if (action === 'depart') {
-                    if (st[activeSeat]) {
-                        appendLog('border-indigo-400', 'bg-indigo-50 text-indigo-600', '화면전환', `[${activeSeat}] ${st[activeSeat].name} 이동`, `포탈로 이동했거나 대기 중입니다.`);
-                    }
-                } else if (st[activeSeat]) {
-                    if (st[activeSeat].status === 'offline') {
-                        st[activeSeat].status = 'idle';
-                    }
-
-                    if (action === 'update_activity') { 
-                        st[activeSeat].activity = data.activity; 
-                        appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });
-                    }
-                    else if (action === 'typing') {
-                        st[activeSeat].isTyping = true;
-                        if (st[activeSeat].typingTimeout) clearTimeout(st[activeSeat].typingTimeout);
-                        st[activeSeat].typingTimeout = setTimeout(() => {
-                            if (studentsRef.current[activeSeat]) updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], isTyping: false } });
-                        }, 2000);
-                    } else if (action === 'call') {
-                        st[activeSeat].calls[data.qNum] = Date.now(); st[activeSeat].status = 'call';
-                        if (data.qNum === 'general') {
-                            appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '조교호출', `${data.name} 학생이 조교를 호출했습니다.`, `[${activeSeat}] 포탈에서 호출했습니다 · 확인 후 처리하세요.`, 'call', { seat: activeSeat, qNum: data.qNum });
-                        } else {
-                            appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '질문호출', `[${activeSeat}] ${data.name} 질문 요청`, `${data.qNum}번 문항 설명 대기 중`, 'call', { seat: activeSeat, qNum: data.qNum });
-                        }
-                    } else if (action === 'cancel_call') {
-                        delete st[activeSeat].calls[data.qNum];
-                        if (Object.keys(st[activeSeat].calls).length === 0 && st[activeSeat].status !== 'offline') st[activeSeat].status = 'idle';
-                        removeLogsByTypeAndSeat('call', activeSeat, data.qNum);
-                    } else if (action === 'away') {
-                        st[activeSeat].status = 'away'; st[activeSeat].awaySince = Date.now();
-                        appendLog('border-amber-500', 'bg-amber-100 text-amber-700', '자리비움', `[${activeSeat}] ${data.name} 자리비움`, `학생이 자리를 비웠습니다.`, 'away', { seat: activeSeat });
-                    } else if (action === 'cancel_away') {
-                        st[activeSeat].status = 'idle'; st[activeSeat].awaySince = null;
-                        removeLogsByTypeAndSeat('away', activeSeat);
-                    } else if (action === 'hint') {
-                        st[activeSeat].status = 'hint'; st[activeSeat].lastHint = { qNum: data.qNum, level: data.level, at: Date.now() }; st[activeSeat].totalHints = (st[activeSeat].totalHints || 0) + 1;
-                        setTimeout(() => { if (studentsRef.current[activeSeat]?.status === 'hint') updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], status: 'idle' } }); }, 10000);
-                    } else if (action === 'submit') {
-                        st[activeSeat].status = 'submitted'; st[activeSeat].score = data.score;
-                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score} / 5].`);
-                    } else if (action === 'recheck_request') {
-                        if (!st[activeSeat].rechecks) st[activeSeat].rechecks = {};
-                        st[activeSeat].rechecks[data.uid] = { ...data, seat: activeSeat };
-                        appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '재확인요청',
-                            <span className="underline decoration-dotted cursor-pointer hover:text-indigo-600" onClick={() => setRecheckModal({ isOpen: true, seat: activeSeat, uid: data.uid })}>{data.name}</span>,
-                            `${data.qNum}번 문항 · 직접 확인하세요.`, 'recheck', { seat: activeSeat, uid: data.uid }
-                        );
-                    } else if (action === 'end_clinic_request') {
-                        st[activeSeat].endRequestPending = true;
-                        appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '종료요청',
-                            <span className="underline decoration-dotted cursor-pointer hover:text-rose-600" onClick={() => setEndRequestModal({ isOpen: true, seat: activeSeat })}>{data.name}</span>,
-                            `클리닉 종료를 요청했습니다 · 클릭해서 승인/거부하세요.`, 'end_request', { seat: activeSeat }
-                        );
-                    } else if (action === 'end_clinic_cancel_request') {
-                        st[activeSeat].endRequestPending = false;
-                        removeLogsByTypeAndSeat('end_request', activeSeat);
-                    }
-                }
-                updateStudents(st);
-            })
-            .on('broadcast', { event: 'ta_action' }, ({ payload }: { payload: any }) => handleTaActionFromOtherScreen(payload))
-            .on('broadcast', { event: SEAT_LAYOUT_UPDATED_EVENT }, () => loadSeats())
-            .subscribe((status: string) => setConnectionStatus(status === 'SUBSCRIBED' ? 'connected' : status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' ? 'error' : 'connecting'));
-
-        return () => { supabaseClient.removeChannel(channel); };
-    }, [isAuthorized, updateStudents, appendLog, removeLogsByTypeAndSeat, loadSeats]);
-
-    const syncActiveStudentsFromPresence = (presenceState: any) => {
-        const currentStudents = { ...studentsRef.current };
-        const presenceByStudentId: any = {};
-        const newActiveTAs: any = {};
-
-        let hasEditor = false;
-        Object.values(presenceState).forEach((metas: any) => {
-            let latestMeta = metas.reduce((prev: any, curr: any) => (curr.updatedAt || 0) > (prev.updatedAt || 0) ? curr : prev, metas[0]);
-            if (!latestMeta) return;
-
-            if (latestMeta.role === 'editor') {
-                hasEditor = true;
-                return;
-            }
-            if (latestMeta.role === 'ta') {
-                const key = latestMeta.clientId || latestMeta.name;
-                newActiveTAs[key] = { name: latestMeta.name || '이름 미상', joined_at: latestMeta.joined_at || Date.now(), handling: latestMeta.handling || null, clientId: latestMeta.clientId || key };
-            } else if (latestMeta.studentId) {
-                if (!presenceByStudentId[latestMeta.studentId] || latestMeta.updatedAt > presenceByStudentId[latestMeta.studentId].lastUpdatedAt) {
-                    presenceByStudentId[latestMeta.studentId] = { ...latestMeta, lastUpdatedAt: latestMeta.updatedAt };
-                }
-            }
-        });
-
-        let isModified = false;
-        Object.keys(currentStudents).forEach(seat => {
-            const st = currentStudents[seat];
-            if (st.dummy || !st.studentId || st.type === 'reserved') return;
-            const pData = presenceByStudentId[st.studentId];
-            if (pData) {
-                st.lastUpdatedAt = pData.lastUpdatedAt;
-                if (pData.activity && st.activity !== pData.activity) { st.activity = pData.activity; isModified = true; }
-            }
-        });
-        setActiveTAs(newActiveTAs);
-        setEditorLocked(hasEditor);
-        if (isModified) updateStudents(currentStudents);
-    };
-    syncPresenceRef.current = syncActiveStudentsFromPresence;
-
-    const checkClinicTimeExpiry = useCallback(() => {
-        const current = { ...studentsRef.current };
-        let isModified = false;
-        Object.keys(current).forEach(seat => {
-            const st = current[seat];
-            if (st.dummy || st.type === 'reserved' || !st.studentId || !st.firstSeenAt || st.clinicDurationMs == null) return;
-            if (Date.now() < st.firstSeenAt + st.clinicDurationMs) return;
-
-            endTodaySession(supabaseClient, st.studentId, getKSTDateString());
-            sendToStudent(seat, 'force_checkout');
-            appendLog('border-slate-800', 'bg-slate-900 text-white', '시간종료', `[${seat}] ${st.name} 이용시간 종료`, `배정된 클리닉 시간이 모두 소진되어 자동 퇴실 처리되었습니다.`);
-            removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
-            delete current[seat];
-            pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
-            isModified = true;
-        });
-        if (isModified) updateStudents(current);
-    }, [updateStudents, appendLog, removeLogsByTypeAndSeat]);
-    checkClinicTimeExpiryRef.current = checkClinicTimeExpiry;
-
-    const checkReservationExpiry = useCallback(() => {
-        const current = { ...studentsRef.current };
-        let isModified = false;
-        Object.keys(current).forEach(seat => {
-            const st = current[seat];
-            if (st.type === 'reserved' && Date.now() > st.expiresAt) {
-                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '예약만료', `[${seat}] ${st.name}`, `예약 시간이 초과되어 예약이 종료되었습니다.`);
-                if (st.studentId) supabaseClient.from('clinic_reservation').delete().eq('student_id', st.studentId).eq('session_date', getKSTDateString()).then();
-                delete current[seat];
-                isModified = true;
-            }
-        });
-        if (isModified) updateStudents(current);
-    }, [updateStudents, appendLog]);
-    checkReservationExpiryRef.current = checkReservationExpiry;
-
+    // 🌟 복구된 UI 기능들 (Drag & Drop, Reservation, Checkout 등)
     useEffect(() => {
         const handlePointerMove = (e: PointerEvent) => {
             if (!draggedSeat && !draggedListStudent) return;
@@ -895,17 +769,16 @@ export function useSupervisorData() {
            }
         }
 
-        sendToStudent(seat, 'resolve_recheck', { uid, verdict });
-
         if (st.sessionId) {
-            // 🌟 핵심 수정: DB에서 삭제(clear)하지 않고 verdict 결과만 남겨서 학생 기기가 읽을 수 있게 함
             const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).single();
             if (data && data.active_rechecks && data.active_rechecks[uid]) {
                 const newRechecks = { ...data.active_rechecks };
-                newRechecks[uid].verdict = verdict;
+                newRechecks[uid].verdict = verdict; // 💡 학생 기기가 읽어갈 수 있도록 결과를 DB에 유지
                 await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
             }
         }
+
+        sendToStudent(seat, 'resolve_recheck', { uid, verdict });
 
         const currentStudents = { ...studentsRef.current };
         if (currentStudents[seat] && currentStudents[seat].rechecks) {
@@ -916,16 +789,26 @@ export function useSupervisorData() {
         setRecheckModal({ isOpen: false, seat: null, uid: null });
     };
 
-    const taAction = (seat: string, type: string, qNum: any = null) => {
+    const taAction = async (seat: string, type: string, qNum: any = null) => {
         const currentStudents = { ...studentsRef.current };
+        
         if (type === 'cancel_call') {
             if (qNum !== null) {
+                if (currentStudents[seat]?.sessionId) {
+                    const sid = currentStudents[seat].sessionId;
+                    const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).single();
+                    if (data && data.active_calls && data.active_calls[qNum]) {
+                        const newCalls = { ...data.active_calls };
+                        newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' };
+                        await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+                    }
+                }
+                
                 if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
                 if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
                 sendToStudent(seat, 'force_cancel_call', { qNum });
                 recordTaStat('총책임자', '');
-                if (currentStudents[seat]?.sessionId) clearActiveCall(supabaseClient, currentStudents[seat].sessionId, qNum);
             }
         } else if (type === 'clear_away') {
             if (currentStudents[seat]) { 
@@ -957,12 +840,198 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('away', seat);
                 removeLogsByTypeAndSeat('recheck', seat);
                 removeLogsByTypeAndSeat('end_request', seat);
+                
+                if (st.sessionId) {
+                    supabaseClient.from('clinic_session_state').update({
+                        active_calls: {},
+                        active_rechecks: {},
+                        away_since: null,
+                        end_request_status: 'idle'
+                    }).eq('id', st.sessionId).then();
+                }
+
                 sendToStudent(seat, 'force_refresh');
                 appendLog('border-fuchsia-500', 'bg-fuchsia-100 text-fuchsia-700', '강제초기화', `[${seat}] ${st.name} 상태 리셋`, `프리징된 모든 상태를 강제로 해제하고 기기를 새로고침했습니다.`);
             }
         }
         updateStudents(currentStudents);
     };
+
+    useEffect(() => {
+        if (!isAuthorized) return;
+        
+        const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+        const channelName = `${CLINIC_ROOM}_${myTenantId}`;
+        
+        if (channelRef.current) {
+            supabaseClient.removeChannel(channelRef.current).catch(console.error);
+            channelRef.current = null;
+        }
+        
+        const channel = supabaseClient.channel(channelName);
+        channelRef.current = channel;
+
+        channel
+            .on('presence', { event: 'sync' }, () => { if (syncPresenceRef.current) syncPresenceRef.current(channel.presenceState()); })
+            .on('broadcast', { event: 'student_action' }, ({ payload }: { payload: any }) => {
+                const { seat, data, action } = payload;
+                const st = { ...studentsRef.current };
+                const activeSeat = Object.keys(st).find(s => st[s].studentId === data.studentId) || seat;
+
+                if (action === 'depart') {
+                    if (st[activeSeat]) {
+                        appendLog('border-indigo-400', 'bg-indigo-50 text-indigo-600', '화면전환', `[${activeSeat}] ${st[activeSeat].name} 이동`, `포탈로 이동했거나 대기 중입니다.`);
+                    }
+                } else if (st[activeSeat]) {
+                    if (st[activeSeat].status === 'offline') {
+                        st[activeSeat].status = 'idle';
+                    }
+
+                    if (action === 'update_activity') { 
+                        st[activeSeat].activity = data.activity; 
+                        appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });
+                    }
+                    else if (action === 'typing') {
+                        st[activeSeat].isTyping = true;
+                        if (st[activeSeat].typingTimeout) clearTimeout(st[activeSeat].typingTimeout);
+                        st[activeSeat].typingTimeout = setTimeout(() => {
+                            if (studentsRef.current[activeSeat]) updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], isTyping: false } });
+                        }, 2000);
+                    } else if (action === 'call') {
+                        st[activeSeat].calls[data.qNum] = Date.now(); st[activeSeat].status = 'call';
+                        if (data.qNum === 'general') {
+                            appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '조교호출', `${data.name} 학생이 조교를 호출했습니다.`, `[${activeSeat}] 포탈에서 호출했습니다 · 확인 후 처리하세요.`, 'call', { seat: activeSeat, qNum: data.qNum });
+                        } else {
+                            appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '질문호출', `[${activeSeat}] ${data.name} 질문 요청`, `${data.qNum}번 문항 설명 대기 중`, 'call', { seat: activeSeat, qNum: data.qNum });
+                        }
+                    } else if (action === 'cancel_call') {
+                        delete st[activeSeat].calls[data.qNum];
+                        if (Object.keys(st[activeSeat].calls).length === 0 && st[activeSeat].status !== 'offline') st[activeSeat].status = 'idle';
+                        removeLogsByTypeAndSeat('call', activeSeat, data.qNum);
+                    } else if (action === 'away') {
+                        st[activeSeat].status = 'away'; st[activeSeat].awaySince = Date.now();
+                        appendLog('border-amber-500', 'bg-amber-100 text-amber-700', '자리비움', `[${activeSeat}] ${data.name} 자리비움`, `학생이 자리를 비웠습니다.`, 'away', { seat: activeSeat });
+                    } else if (action === 'cancel_away') {
+                        st[activeSeat].status = 'idle'; st[activeSeat].awaySince = null;
+                        removeLogsByTypeAndSeat('away', activeSeat);
+                    } else if (action === 'hint') {
+                        st[activeSeat].status = 'hint'; st[activeSeat].lastHint = { qNum: data.qNum, level: data.level, at: Date.now() }; st[activeSeat].totalHints = (st[activeSeat].totalHints || 0) + 1;
+                        setTimeout(() => { if (studentsRef.current[activeSeat]?.status === 'hint') updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], status: 'idle' } }); }, 10000);
+                    } else if (action === 'submit') {
+                        st[activeSeat].status = 'submitted'; st[activeSeat].score = data.score;
+                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score} / 5].`);
+                    } else if (action === 'recheck_request') {
+                        if (!st[activeSeat].rechecks) st[activeSeat].rechecks = {};
+                        st[activeSeat].rechecks[data.uid] = { ...data, seat: activeSeat };
+                        appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '재확인요청',
+                            <span className="underline decoration-dotted cursor-pointer hover:text-indigo-600" onClick={() => setRecheckModal({ isOpen: true, seat: activeSeat, uid: data.uid })}>{data.name}</span>,
+                            `${data.qNum}번 문항 · 직접 확인하세요.`, 'recheck', { seat: activeSeat, uid: data.uid }
+                        );
+                    } else if (action === 'end_clinic_request') {
+                        st[activeSeat].endRequestPending = true;
+                        appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '종료요청',
+                            <span className="underline decoration-dotted cursor-pointer hover:text-rose-600" onClick={() => setEndRequestModal({ isOpen: true, seat: activeSeat })}>{data.name}</span>,
+                            `클리닉 종료를 요청했습니다 · 클릭해서 승인/거부하세요.`, 'end_request', { seat: activeSeat }
+                        );
+                    } else if (action === 'end_clinic_cancel_request') {
+                        st[activeSeat].endRequestPending = false;
+                        removeLogsByTypeAndSeat('end_request', activeSeat);
+                    }
+                }
+                updateStudents(st);
+            })
+            .on('broadcast', { event: 'ta_action' }, ({ payload }: { payload: any }) => handleTaActionFromOtherScreen(payload))
+            .on('broadcast', { event: SEAT_LAYOUT_UPDATED_EVENT }, () => loadSeats())
+            .subscribe((status: string) => {
+                setConnectionStatus(status === 'SUBSCRIBED' ? 'connected' : status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' ? 'error' : 'connecting');
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                    setTimeout(() => setReconnectTrigger(p => p + 1), 3000);
+                }
+            });
+
+        return () => { 
+            if (channelRef.current) {
+                supabaseClient.removeChannel(channelRef.current).catch(console.error);
+                channelRef.current = null;
+            }
+        };
+    }, [isAuthorized, updateStudents, appendLog, removeLogsByTypeAndSeat, loadSeats, reconnectTrigger]);
+
+    const syncActiveStudentsFromPresence = (presenceState: any) => {
+        const currentStudents = { ...studentsRef.current };
+        const presenceByStudentId: any = {};
+        const newActiveTAs: any = {};
+
+        let hasEditor = false;
+        Object.values(presenceState).forEach((metas: any) => {
+            let latestMeta = metas.reduce((prev: any, curr: any) => (curr.updatedAt || 0) > (prev.updatedAt || 0) ? curr : prev, metas[0]);
+            if (!latestMeta) return;
+
+            if (latestMeta.role === 'editor') {
+                hasEditor = true;
+                return;
+            }
+            if (latestMeta.role === 'ta') {
+                const key = latestMeta.clientId || latestMeta.name;
+                newActiveTAs[key] = { name: latestMeta.name || '이름 미상', joined_at: latestMeta.joined_at || Date.now(), handling: latestMeta.handling || null, clientId: latestMeta.clientId || key };
+            } else if (latestMeta.studentId) {
+                if (!presenceByStudentId[latestMeta.studentId] || latestMeta.updatedAt > presenceByStudentId[latestMeta.studentId].lastUpdatedAt) {
+                    presenceByStudentId[latestMeta.studentId] = { ...latestMeta, lastUpdatedAt: latestMeta.updatedAt };
+                }
+            }
+        });
+
+        let isModified = false;
+        Object.keys(currentStudents).forEach(seat => {
+            const st = currentStudents[seat];
+            if (st.dummy || !st.studentId || st.type === 'reserved') return;
+            const pData = presenceByStudentId[st.studentId];
+            if (pData) {
+                st.lastUpdatedAt = pData.lastUpdatedAt;
+                if (pData.activity && st.activity !== pData.activity) { st.activity = pData.activity; isModified = true; }
+            }
+        });
+        setActiveTAs(newActiveTAs);
+        setEditorLocked(hasEditor);
+        if (isModified) updateStudents(currentStudents);
+    };
+    syncPresenceRef.current = syncActiveStudentsFromPresence;
+
+    const checkClinicTimeExpiry = useCallback(() => {
+        const current = { ...studentsRef.current };
+        let isModified = false;
+        Object.keys(current).forEach(seat => {
+            const st = current[seat];
+            if (st.dummy || st.type === 'reserved' || !st.studentId || !st.firstSeenAt || st.clinicDurationMs == null) return;
+            if (Date.now() < st.firstSeenAt + st.clinicDurationMs) return;
+
+            endTodaySession(supabaseClient, st.studentId, getKSTDateString());
+            sendToStudent(seat, 'force_checkout');
+            appendLog('border-slate-800', 'bg-slate-900 text-white', '시간종료', `[${seat}] ${st.name} 이용시간 종료`, `배정된 클리닉 시간이 모두 소진되어 자동 퇴실 처리되었습니다.`);
+            removeLogsByTypeAndSeat('call', seat); removeLogsByTypeAndSeat('submit', seat); removeLogsByTypeAndSeat('away', seat); removeLogsByTypeAndSeat('recheck', seat); removeLogsByTypeAndSeat('end_request', seat);
+            delete current[seat];
+            pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
+            isModified = true;
+        });
+        if (isModified) updateStudents(current);
+    }, [updateStudents, appendLog, removeLogsByTypeAndSeat]);
+    checkClinicTimeExpiryRef.current = checkClinicTimeExpiry;
+
+    const checkReservationExpiry = useCallback(() => {
+        const current = { ...studentsRef.current };
+        let isModified = false;
+        Object.keys(current).forEach(seat => {
+            const st = current[seat];
+            if (st.type === 'reserved' && Date.now() > st.expiresAt) {
+                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '예약만료', `[${seat}] ${st.name}`, `예약 시간이 초과되어 예약이 종료되었습니다.`);
+                if (st.studentId) supabaseClient.from('clinic_reservation').delete().eq('student_id', st.studentId).eq('session_date', getKSTDateString()).then();
+                delete current[seat];
+                isModified = true;
+            }
+        });
+        if (isModified) updateStudents(current);
+    }, [updateStudents, appendLog]);
+    checkReservationExpiryRef.current = checkReservationExpiry;
 
     return {
         isAuthorized, authMessage,

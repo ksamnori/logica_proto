@@ -1,7 +1,7 @@
 // src/app/student/portal/page.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 import { resolveTodaySession, closeSessionAtLimit, setActiveCall, clearActiveCall, setAway, clearAway, checkAndBumpToggleCooldown } from '@/lib/clinicSession';
@@ -156,73 +156,69 @@ export default function StudentPortal() {
     const endRequestRef = useRef(endRequest);
     useEffect(() => { endRequestRef.current = endRequest; });
 
-    // 🌟 2. 포털 자가 교정 로직 (5초마다 DB 상태 조회하여 프리징 방지)
-    useEffect(() => {
-        if (!studentInfo.id || !isMounted) return;
+    // 🌟 포털 화면 DB 동기화 함수 분리
+    const runDbSync = useCallback(async () => {
+        if (!clinicSessionRef.current?.id) return;
+        const { data, error } = await supabaseClient
+            .from('clinic_session_state')
+            .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, away_since')
+            .eq('id', clinicSessionRef.current.id)
+            .maybeSingle();
 
-        const runDbSync = async () => {
-            if (!clinicSessionRef.current?.id) return;
-            const { data, error } = await supabaseClient
-                .from('clinic_session_state')
-                .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, away_since')
-                .eq('id', clinicSessionRef.current.id)
-                .maybeSingle();
-
-            if (!error && data) {
-                let hasChanges = false;
-
-                if (clinicSessionRef.current?.duration_ms !== data.duration_ms ||
-                    clinicSessionRef.current?.seat !== data.seat ||
-                    clinicSessionRef.current?.manual_seat !== data.manual_seat) {
-
-                    const updatedSession = { ...clinicSessionRef.current, ...data };
-                    clinicSessionRef.current = updatedSession;
-                    setClinicSession(updatedSession);
-                    hasChanges = true;
-
-                    if (data.manual_seat !== manualSeat) {
-                        setManualSeat(data.manual_seat);
-                    }
-                }
-
-                // 강제 퇴실 상태 동기화
-                if (hasChanges && sessionEndedRef.current && !data.ended_at) {
-                    const remaining = (new Date(data.started_at).getTime() + data.duration_ms) - Date.now();
-                    if (remaining > 0) {
-                        sessionEndedRef.current = false;
-                        setTimeUpModal(prev => ({ ...prev, isOpen: false }));
-                    }
-                } else if (data.ended_at && !sessionEndedRef.current) {
-                    sessionEndedRef.current = true;
-                    setTimeUpModal({ isOpen: true, icon: '🚪', title: '퇴실 처리되었습니다', desc: '조교가 클리닉 이용을 종료했어요.' });
-                }
-
-                // 조교 호출 강제 동기화
-                setIsPortalCalling(prev => {
-                    const dbCalls = data.active_calls || {};
-                    if (prev && !dbCalls['general']) return false;
-                    return prev;
-                });
-
-                // 자리비움 강제 동기화
-                setIsPortalAway(prev => {
-                    if (prev && !data.away_since) return false;
-                    return prev;
-                });
-
-                // 클리닉 종료 요청 상태 동기화
-                if (endRequestRef.current?.state === 'pending' && data.end_request_status !== 'pending') {
-                    if (data.ended_at) {
-                        endRequestRef.current.handleResolved({ approved: true });
-                    } else if (data.end_request_status === 'idle') {
-                        endRequestRef.current.handleResolved({ approved: false, cooldownUntil: data.end_request_cooldown_until });
-                    }
+        if (!error && data) {
+            let hasChanges = false;
+            if (clinicSessionRef.current?.duration_ms !== data.duration_ms ||
+                clinicSessionRef.current?.seat !== data.seat ||
+                clinicSessionRef.current?.manual_seat !== data.manual_seat) {
+                const updatedSession = { ...clinicSessionRef.current, ...data };
+                clinicSessionRef.current = updatedSession;
+                setClinicSession(updatedSession);
+                hasChanges = true;
+                if (data.manual_seat !== manualSeat) {
+                    setManualSeat(data.manual_seat);
                 }
             }
-        };
 
+            if (sessionEndedRef.current && !data.ended_at) {
+                const remaining = (new Date(data.started_at).getTime() + data.duration_ms) - Date.now();
+                if (remaining > 0) {
+                    sessionEndedRef.current = false;
+                    setTimeUpModal(prev => ({ ...prev, isOpen: false }));
+                }
+            } else if (data.ended_at && !sessionEndedRef.current) {
+                sessionEndedRef.current = true;
+                setTimeUpModal({ isOpen: true, icon: '🚪', title: '퇴실 처리되었습니다', desc: '조교가 클리닉 이용을 종료했어요.' });
+            }
+
+            setIsPortalCalling(prev => {
+                const dbCalls = data.active_calls || {};
+                if (prev && !dbCalls['general']) return false;
+                return prev;
+            });
+
+            setIsPortalAway(prev => {
+                if (prev && !data.away_since) return false;
+                return prev;
+            });
+
+            if (endRequestRef.current?.state === 'pending' && data.end_request_status !== 'pending') {
+                if (data.ended_at) {
+                    endRequestRef.current.handleResolved({ approved: true });
+                } else if (data.end_request_status === 'idle') {
+                    endRequestRef.current.handleResolved({ approved: false, cooldownUntil: data.end_request_cooldown_until });
+                }
+            }
+        }
+    }, [manualSeat]);
+
+    const runDbSyncRef = useRef<any>(null);
+    useEffect(() => { runDbSyncRef.current = runDbSync; }, [runDbSync]);
+
+    useEffect(() => {
+        if (!studentInfo.id || !isMounted) return;
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
+        
         const scheduleNext = () => {
             if (cancelled) return;
             timer = setTimeout(async () => {
@@ -230,7 +226,7 @@ export default function StudentPortal() {
                 if (isSyncingSessionRef.current) { scheduleNext(); return; }
                 isSyncingSessionRef.current = true;
                 try {
-                    await runDbSync();
+                    await runDbSyncRef.current();
                 } catch (err) {} finally {
                     isSyncingSessionRef.current = false;
                     scheduleNext();
@@ -239,8 +235,14 @@ export default function StudentPortal() {
         };
         scheduleNext();
 
-        return () => { cancelled = true; if (timer) clearTimeout(timer); };
-    }, [studentInfo.id, isMounted, manualSeat]);
+        const handleFocus = () => { if (runDbSyncRef.current) runDbSyncRef.current(); };
+        window.addEventListener('focus', handleFocus);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && runDbSyncRef.current) runDbSyncRef.current();
+        });
+
+        return () => { cancelled = true; if (timer) clearTimeout(timer); window.removeEventListener('focus', handleFocus); };
+    }, [studentInfo.id, isMounted]);
 
     useEffect(() => {
         if (!studentInfo.id) return;
@@ -574,7 +576,12 @@ export default function StudentPortal() {
                 else if (payload.action === 'force_refresh') {
                     window.location.reload();
                 }
-            }).subscribe();
+            })
+            // 🌟 3. 포털에도 DB 직접 감지 기능 추가
+            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
+                if (runDbSyncRef.current) runDbSyncRef.current();
+            })
+            .subscribe();
         };
 
         connectPresence();
