@@ -227,7 +227,8 @@ export default function StudentPortal() {
                 activeExamMode: 'DONE',
                 examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], overdueExamIds: [],
                 examTitle: '', hwTitle: '', printTitle: '', overdueTitle: '',
-                examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0
+                examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0,
+                examPendingCount: 0, hwPendingCount: 0, printPendingCount: 0, overduePendingCount: 0
             };
         });
 
@@ -324,16 +325,17 @@ export default function StudentPortal() {
                 const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - attempted);
 
+                // 💡 뷰어에 진입할 첫 번째 과제의 문제 수만 반영하도록 수정
                 if (type === '오답프린트') {
-                    if (isPending) { printPending++; printIds.push(ex.assignment_id); pTitles.push(title); pCount += remain; }
+                    if (isPending) { printPending++; printIds.push(ex.assignment_id); pTitles.push(title); if (printPending === 1) pCount += remain; }
                 } else if (type === '과제' || type === '과제프린트') {
-                    if (isPending) { hwPending++; hwExamIds.push(ex.assignment_id); hTitles.push(title); hCount += remain; }
+                    if (isPending) { hwPending++; hwExamIds.push(ex.assignment_id); hTitles.push(title); if (hwExamIds.length === 1) hCount += remain; }
                 } else if (type === '오답유사' || type === '과제오답유사') {
-                    if (isPending) { similarExamPending++; similarExamIds.push(ex.assignment_id); similarETitles.push(title); similarECount += remain; }
+                    if (isPending) { similarExamPending++; similarExamIds.push(ex.assignment_id); similarETitles.push(title); if (similarExamPending === 1) similarECount += remain; }
                 } else if (type === '미완료과제') {
-                    if (isPending) { overduePending++; overdueExamIds.push(ex.assignment_id); oTitles.push(title); oCount += remain; }
+                    if (isPending) { overduePending++; overdueExamIds.push(ex.assignment_id); oTitles.push(title); if (overdueExamIds.length === 1) oCount += remain; }
                 } else { 
-                    if (isPending) { regularExamPending++; regularExamIds.push(ex.assignment_id); regularETitles.push(title); regularECount += remain; }
+                    if (isPending) { regularExamPending++; regularExamIds.push(ex.assignment_id); regularETitles.push(title); if (regularExamPending === 1) regularECount += remain; }
                 }
             });
 
@@ -377,6 +379,7 @@ export default function StudentPortal() {
                 
                 if (remain === 0) return;
 
+                // 💡 과제는 여러 개가 동시에 열리므로 누적 합산 유지
                 if (hw.due_date && hw.due_date <= today) { 
                     overduePending++; overdueHwIds.push(hw.homework_id); oTitles.push(hw.homework_title); oCount += remain; 
                 } else { 
@@ -404,7 +407,8 @@ export default function StudentPortal() {
                 activeExamMode,
                 examIds: finalExamIds, hwExamIds, printIds, hwIds, overdueHwIds, overdueExamIds,
                 examTitle: getShortTitle(finalETitles), hwTitle: getShortTitle(hTitles), printTitle: getShortTitle(pTitles), overdueTitle: getShortTitle(oTitles),
-                examQCount: finalECount, hwQCount: hCount, printQCount: pCount, overdueQCount: oCount
+                examQCount: finalECount, hwQCount: hCount, printQCount: pCount, overdueQCount: oCount,
+                examPendingCount: finalExamPending, hwPendingCount: hwPending, printPendingCount: printPending, overduePendingCount: overduePending
             };
         });
 
@@ -459,7 +463,7 @@ export default function StudentPortal() {
                         name: studentInfo.name, 
                         studentId: studentInfo.id, 
                         classes: studentInfo.classes,
-                        activity: '포털 대기 중 📋', // 🌟 명시적 activity 부착
+                        activity: '포털 대기 중 📋',
                         startedAt: isReal ? new Date(clinicSessionRef.current?.started_at || Date.now()).getTime() : Date.now(),
                         durationMs: clinicSessionRef.current?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS,
                         updatedAt: Date.now()
@@ -484,7 +488,7 @@ export default function StudentPortal() {
                     trackedSeatRef.current = payload.newSeat;
                     channel.track({ 
                         seat: payload.newSeat, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
-                        activity: '포털 대기 중 📋', // 🌟
+                        activity: '포털 대기 중 📋',
                         startedAt: new Date(clinicSessionRef.current.started_at).getTime(), durationMs: clinicSessionRef.current.duration_ms, updatedAt: Date.now() 
                     });
                 } 
@@ -638,7 +642,7 @@ export default function StudentPortal() {
             if (prog.hwExamIds && prog.hwExamIds.length > 0) params.append('assignment_id', prog.hwExamIds[0]);
         } else if (typeKey === 'overdue') {
             testName = '미완료 과제';
-            params.append('overdue', '1'); // 🌟 Overdue 파라미터 추가
+            params.append('overdue', '1'); 
             if (prog.overdueHwIds && prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
             if (prog.overdueExamIds && prog.overdueExamIds.length > 0) params.append('assignment_id', prog.overdueExamIds[0]);
         } else if (typeKey === 'print') {
@@ -674,9 +678,11 @@ export default function StudentPortal() {
 
         let qCount = 0;
         let titleName = '';
-        if (typeKey === 'exam') { qCount = prog.examQCount; titleName = prog.examTitle; }
-        else if (typeKey === 'hw') { qCount = prog.hwQCount; titleName = prog.hwTitle; }
-        else if (typeKey === 'print') { qCount = prog.printQCount; titleName = prog.printTitle; }
+        let pendingStacks = 0;
+
+        if (typeKey === 'exam') { qCount = prog.examQCount; titleName = prog.examTitle; pendingStacks = prog.examPendingCount; }
+        else if (typeKey === 'hw') { qCount = prog.hwQCount; titleName = prog.hwTitle; pendingStacks = prog.hwPendingCount; }
+        else if (typeKey === 'print') { qCount = prog.printQCount; titleName = prog.printTitle; pendingStacks = prog.printPendingCount; }
 
         const scoreData = roundResults[`${className}::${round}`];
         const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
@@ -700,9 +706,17 @@ export default function StudentPortal() {
                 
                 <div className="relative z-10">
                     <div className="flex justify-between items-start mb-3">
-                        <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
-                            {isLocked ? '🔒 잠김' : theme.label}
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
+                                {isLocked ? '🔒 잠김' : theme.label}
+                            </span>
+                            {/* 🌟 신규: 과제가 여러 개 밀려있음을 알려주는 뱃지 */}
+                            {pendingStacks > 1 && !isDone && !isLocked && (
+                                <span className="text-[10px] font-bold bg-white/20 text-white px-2 py-1 rounded shadow-sm border border-white/30">
+                                    밀린 과제 {pendingStacks}개
+                                </span>
+                            )}
+                        </div>
                         {!isDone && qCount > 0 && <span className={`text-xs md:text-sm font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-2.5 py-1 rounded-md`}>남은 문제: {qCount}</span>}
                     </div>
                     <h3 className={`text-xl md:text-2xl font-black mb-1 leading-tight ${isLocked ? 'text-white/90' : ''}`}>
@@ -739,6 +753,7 @@ export default function StudentPortal() {
         const prog = hwProgress[className] || {};
         const qCount = prog.overdueQCount || 0;
         const titleName = prog.overdueTitle || '';
+        const pendingStacks = prog.overduePendingCount || 0;
 
         const theme = {
             label: '⏰ 미완료 과제',
@@ -758,9 +773,17 @@ export default function StudentPortal() {
                 
                 <div className="relative z-10">
                     <div className="flex justify-between items-start mb-3">
-                        <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
-                            {isLocked ? '🔒 잠김' : theme.label}
-                        </span>
+                        <div className="flex items-center gap-2">
+                            <span className={`text-xs md:text-sm font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-3 py-1.5 rounded-lg shadow-sm flex items-center`}>
+                                {isLocked ? '🔒 잠김' : theme.label}
+                            </span>
+                            {/* 🌟 신규: 과제가 여러 개 밀려있음을 알려주는 뱃지 */}
+                            {pendingStacks > 1 && !isDone && !isLocked && (
+                                <span className="text-[10px] font-bold bg-white/20 text-white px-2 py-1 rounded shadow-sm border border-white/30">
+                                    밀린 과제 {pendingStacks}개
+                                </span>
+                            )}
+                        </div>
                         {!isDone && qCount > 0 && <span className={`text-xs md:text-sm font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-2.5 py-1 rounded-md`}>남은 문제: {qCount}</span>}
                     </div>
                     <h3 className={`text-xl md:text-2xl font-black mb-1 leading-tight ${isLocked ? 'text-white/90' : ''}`}>미완료 과제 클리닉</h3>
@@ -885,7 +908,7 @@ export default function StudentPortal() {
                             <h2 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => {
                                 const prog = hwProgress[cls] || {};
-                                const totalPending = (prog.examQCount || 0) + (prog.hwQCount || 0) + (prog.printQCount || 0) + (prog.overdueQCount || 0);
+                                const totalPending = (prog.examPendingCount || 0) + (prog.hwPendingCount || 0) + (prog.printPendingCount || 0) + (prog.overduePendingCount || 0);
 
                                 return (
                                     <button key={cls} onClick={() => setSelectedClass(cls)} className={`relative text-sm md:text-base font-black px-5 py-2 rounded-full shadow-sm transition-colors inline-flex items-center gap-1.5 ${selectedClass === cls ? 'bg-[#002864] text-white' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
