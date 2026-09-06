@@ -141,7 +141,6 @@ export function useSupervisorData() {
         }));
     }, []);
 
-    // 🌟 핵심 버그 수정: 신호 발송 시 studentId를 반드시 포함시켜 학생 기기가 신호를 버리지 않도록 보장합니다.
     const sendToStudent = (seat: string, action: string, extra = {}) => {
         if (!channelRef.current) return;
         const studentId = studentsRef.current[seat]?.studentId;
@@ -899,7 +898,13 @@ export function useSupervisorData() {
         sendToStudent(seat, 'resolve_recheck', { uid, verdict });
 
         if (st.sessionId) {
-            await clearActiveRecheck(supabaseClient, st.sessionId, uid);
+            // 🌟 핵심 수정: DB에서 삭제(clear)하지 않고 verdict 결과만 남겨서 학생 기기가 읽을 수 있게 함
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).single();
+            if (data && data.active_rechecks && data.active_rechecks[uid]) {
+                const newRechecks = { ...data.active_rechecks };
+                newRechecks[uid].verdict = verdict;
+                await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
+            }
         }
 
         const currentStudents = { ...studentsRef.current };

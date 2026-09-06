@@ -13,7 +13,6 @@ interface UseClinicRealtimeProps {
   currentQIndex: number;
   isTimedRound: boolean;
   
-  // Refs
   mySeatRef: React.MutableRefObject<string | null>;
   seatKeysRef: React.MutableRefObject<string[]>;
   clinicSessionStateRef: React.MutableRefObject<any>;
@@ -27,7 +26,6 @@ interface UseClinicRealtimeProps {
   keypadCursor: React.MutableRefObject<Record<number, number>>;
   correctSolvedCountRef: React.MutableRefObject<number>;
   
-  // Callbacks
   setEditorLocked: (locked: boolean) => void;
   setRecheckToast: (toast: string) => void;
   setMyAwayActive: (active: boolean | ((prev: boolean) => boolean)) => void;
@@ -57,7 +55,7 @@ export function useClinicRealtime({
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
 
-  // 🌟 1. 학생 패드 자가 교정 로직 (5초마다 DB 상태 조회하여 프리징 방지)
+  // 🌟 1. 학생 패드 자가 교정 로직 (5초마다 DB 상태 조회하여 프리징 완전 차단)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
     let cancelled = false;
@@ -76,18 +74,16 @@ export function useClinicRealtime({
 
       let hasChanges = false;
 
-      // 1) 강제 퇴실 감지
       if (data.ended_at) {
           handleTimeUp('force_checkout_by_ta', true);
           return;
       }
 
-      // 2) 타이머 동기화
       if (clinicSessionStateRef.current && clinicSessionStateRef.current.duration_ms !== data.duration_ms) {
         clinicSessionStateRef.current.duration_ms = data.duration_ms;
       }
 
-      // 3) 조교 호출 강제 동기화 (내 화면은 호출 중인데 DB에는 없다면 조교가 이미 취소/처리한 것)
+      // 호출 강제 동기화 (DB에서 사라졌다면 조교가 처리한 것)
       const dbCalls = data.active_calls || {};
       Object.keys(callState.current).forEach((qIdxStr) => {
         const qIdx = Number(qIdxStr);
@@ -98,14 +94,14 @@ export function useClinicRealtime({
         }
       });
 
-      // 4) 자리비움 동기화
+      // 자리비움 동기화
       setMyAwayActive((prevAway: boolean) => {
         const isDbAway = !!data.away_since;
         if (prevAway && !isDbAway) return false;
         return prevAway;
       });
 
-      // 5) 수동 채점(재확인) 강제 동기화 - 관리자가 남겨둔 verdict를 읽어서 처리
+      // 🌟 핵심: 수동 채점 강제 동기화 (관리자가 남겨둔 verdict를 읽어서 처리)
       const dbRechecks = data.active_rechecks || {};
       Object.keys(recheckState.current).forEach((qIdxStr) => {
         const qIdx = Number(qIdxStr);
@@ -115,7 +111,7 @@ export function useClinicRealtime({
         const rec = dbRechecks[qItem.uid];
         if (recheckState.current[qIdx] === 'pending') {
            if (!rec) {
-               // DB에서 아예 사라졌다면 (관리자가 단순 취소)
+               // DB에서 아예 사라졌다면 (단순 취소 등)
                recheckState.current[qIdx] = null;
                hasChanges = true;
            } else if (rec.verdict) {
@@ -134,8 +130,8 @@ export function useClinicRealtime({
                }
                setTimeout(() => setRecheckToast(""), 4000);
                
-               // 처리 완료 후 DB에서 찌꺼기 삭제
-               const newRechecks = { ...dbRechecks };
+               // 처리 완료 후 학생이 DB에서 찌꺼기 삭제
+               const newRechecks = { ...data.active_rechecks };
                delete newRechecks[qItem.uid];
                supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', sid).then();
            }
@@ -160,7 +156,6 @@ export function useClinicRealtime({
     };
   }, [studentInfo.id, questions, setMyAwayActive, forceUpdate, processCorrectAnswer, setRecheckToast, setCanvasClearTrigger]);
 
-  // 2. 학생 상태 수신 (Postgres 채점 결과)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
 
@@ -230,7 +225,6 @@ export function useClinicRealtime({
     return () => { supabaseClient.removeChannel(channel); };
   }, [studentInfo.id, questions]);
 
-  // 3. 조교(TA) Broadcast 수신
   handleTaActionRef.current = (payload: any, sId: string, sessionState: any) => {
     const currentSeat = mySeatRef.current;
     if (payload.seat !== currentSeat && payload.studentId !== sId) return;
@@ -310,7 +304,7 @@ export function useClinicRealtime({
         forceUpdate();
       }
 
-      // 수신 즉시 DB 찌꺼기 삭제
+      // 화면 켜져 있어서 실시간 신호 정상 수신 시에도 DB에서 찌꺼기 삭제
       const sid = clinicSessionStateRef.current?.id;
       if (sid) {
          supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).single().then(({ data }) => {
@@ -327,7 +321,6 @@ export function useClinicRealtime({
     }
   };
 
-  // 4. 상태 트래킹 (Track Presence)
   trackPresenceRef.current = (seat: string, sId: string, sessionState: any) => {
     if (!clinicChannelRef.current) return;
     const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
@@ -337,7 +330,6 @@ export function useClinicRealtime({
     });
   };
 
-  // 5. 채널 연결 (Connect Channel)
   const connectChannel = async (sId: string, sessionState: any) => {
     if (clinicChannelRef.current) {
       await supabaseClient.removeChannel(clinicChannelRef.current);
@@ -434,7 +426,6 @@ export function useClinicRealtime({
     }
   };
 
-  // 6. 지속적 생명주기 관리 (포인트 적립 및 하트비트)
   useEffect(() => {
     if (!studentInfo.id) return;
     let cancelled = false;
