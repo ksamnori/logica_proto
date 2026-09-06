@@ -172,8 +172,10 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
         if (data && data.exam_id) {
           matchedExamId = data.exam_id;
-          matchedTitle = data.exam_master?.title;
-          displayLabel = data.exam_master?.exam_type || '시험';
+          // 💡 배열 언래핑 추가
+          const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+          matchedTitle = master?.title;
+          displayLabel = master?.exam_type || '시험';
         }
       }
 
@@ -196,8 +198,10 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         if (data) {
           matchedAssignId = String(data.assignment_id);
           matchedExamId = data.exam_id;
-          matchedTitle = data.exam_master?.title;
-          displayLabel = data.exam_master?.exam_type || '시험';
+          // 💡 배열 언래핑 추가
+          const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+          matchedTitle = master?.title;
+          displayLabel = master?.exam_type || '시험';
         }
       }
 
@@ -242,9 +246,12 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
     const { data: items } = await supabaseClient.from('exam_item').select('*, question_db(*)').eq('exam_id', data.exam_id).order('sort_order', { ascending: true });
     const validItems = (items || []).filter((it: any) => it.question_db);
-    const title = data.exam_master?.title || null;
-
-    const bookType = data.exam_master?.exam_type === '오답프린트' ? '오답' : '기타';
+    
+    // 💡 배열 언래핑 추가
+    const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+    const title = master?.title || null;
+    const bookType = master?.exam_type === '오답프린트' ? '오답' : '기타';
+    
     const rows = validItems.map((it: any) => {
       const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
       return {
