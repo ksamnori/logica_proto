@@ -145,6 +145,18 @@ export default function StudentPortal() {
         };
     }, [studentInfo.id, studentInfo.classes]);
 
+    const endRequest = useClinicEndRequest({
+        supabaseClient, 
+        sendAction: (action, extra) => sendClinicAction(action, extra), 
+        sessionId: clinicSession?.id,
+        endRequestStatus: clinicSession?.end_request_status, 
+        endRequestCooldownUntil: clinicSession?.end_request_cooldown_until,
+        onApproved: () => finalizeAndGoToLogin()
+    });
+    const endRequestRef = useRef(endRequest);
+    useEffect(() => { endRequestRef.current = endRequest; });
+
+    // 🌟 2. 포털 자가 교정 로직 (5초마다 DB 상태 조회하여 프리징 방지)
     useEffect(() => {
         if (!studentInfo.id || !isMounted) return;
 
@@ -152,7 +164,7 @@ export default function StudentPortal() {
             if (!clinicSessionRef.current?.id) return;
             const { data, error } = await supabaseClient
                 .from('clinic_session_state')
-                .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until')
+                .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, away_since')
                 .eq('id', clinicSessionRef.current.id)
                 .maybeSingle();
 
@@ -173,11 +185,37 @@ export default function StudentPortal() {
                     }
                 }
 
+                // 강제 퇴실 상태 동기화
                 if (hasChanges && sessionEndedRef.current && !data.ended_at) {
                     const remaining = (new Date(data.started_at).getTime() + data.duration_ms) - Date.now();
                     if (remaining > 0) {
                         sessionEndedRef.current = false;
                         setTimeUpModal(prev => ({ ...prev, isOpen: false }));
+                    }
+                } else if (data.ended_at && !sessionEndedRef.current) {
+                    sessionEndedRef.current = true;
+                    setTimeUpModal({ isOpen: true, icon: '🚪', title: '퇴실 처리되었습니다', desc: '조교가 클리닉 이용을 종료했어요.' });
+                }
+
+                // 조교 호출 강제 동기화
+                setIsPortalCalling(prev => {
+                    const dbCalls = data.active_calls || {};
+                    if (prev && !dbCalls['general']) return false;
+                    return prev;
+                });
+
+                // 자리비움 강제 동기화
+                setIsPortalAway(prev => {
+                    if (prev && !data.away_since) return false;
+                    return prev;
+                });
+
+                // 클리닉 종료 요청 상태 동기화
+                if (endRequestRef.current?.state === 'pending' && data.end_request_status !== 'pending') {
+                    if (data.ended_at) {
+                        endRequestRef.current.handleResolved({ approved: true });
+                    } else if (data.end_request_status === 'idle') {
+                        endRequestRef.current.handleResolved({ approved: false, cooldownUntil: data.end_request_cooldown_until });
                     }
                 }
             }
@@ -281,7 +319,6 @@ export default function StudentPortal() {
         const classIds = Object.values(nameToId).filter(Boolean);
         let hwsData: any[] = [];
         
-        // 🌟 수정됨: 반 미배정 학생도 개인 할당 과제를 정상적으로 불러오기 위한 OR 쿼리 구조 변경
         const hwFilters = [];
         if (classIds.length > 0) hwFilters.push(`class_id.in.(${classIds.join(',')})`);
         hwFilters.push(`target_student_id.eq.${sid}`);
@@ -300,7 +337,6 @@ export default function StudentPortal() {
 
         classes.forEach(c => {
             const cid = nameToId[c];
-            // 🌟 수정됨: if (!cid) return; 삭제. 반 미배정 학생의 블록도 정상 처리되도록 통과
 
             let hwPending = 0, printPending = 0, overduePending = 0;
             let hwExamIds: number[] = [], printIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [], overdueExamIds: number[] = [];
@@ -366,7 +402,6 @@ export default function StudentPortal() {
             }
 
             hwsData?.forEach((hw: any) => {
-                // 🌟 수정됨: 반이 할당된 과제인데 내 현재 탭과 다르면 스킵 (하지만 반 없는 개인 과제는 통과)
                 if (hw.class_id && hw.class_id !== cid) return; 
                 if (hw.target_student_id && hw.target_student_id !== sid) return;
                 
@@ -611,14 +646,6 @@ export default function StudentPortal() {
         sendClinicAction(next ? 'call' : 'cancel_call', { qNum: 'general' });
         if (sid) (next ? setActiveCall(supabaseClient, sid, 'general', { qNum: 'general' }) : clearActiveCall(supabaseClient, sid, 'general'));
     };
-
-    const endRequest = useClinicEndRequest({
-        supabaseClient, sendAction: sendClinicAction, sessionId: clinicSession?.id,
-        endRequestStatus: clinicSession?.end_request_status, endRequestCooldownUntil: clinicSession?.end_request_cooldown_until,
-        onApproved: finalizeAndGoToLogin,
-    });
-    const endRequestRef = useRef(endRequest);
-    useEffect(() => { endRequestRef.current = endRequest; });
 
     const startClinicBlock = async (className: string, round: number, typeKey: string) => {
         if (isPortalAway || isPortalCalling) {
