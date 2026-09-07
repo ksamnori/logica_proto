@@ -115,32 +115,31 @@ export default function StudentKioskLogin() {
     }
   };
 
-  // 🌟 핵심 해결: 패드 로그인 시 입구 키오스크 누락자를 위한 스텔스 자동 등원 체크 로직!
   const checkAndAutoAttend = async (studentId: string, tenantId: string) => {
     try {
       const now = new Date();
-      // KST 기준 절대 날짜 산출 (새벽 6시 리셋 기준)
       const kstTime = new Date(now.getTime() + (9 * 60 * 60 * 1000) - (6 * 60 * 60 * 1000));
       const today = kstTime.toISOString().split('T')[0];
       const timestamp = now.toISOString();
       
       const formatKstTimeOnly = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-      // 알림톡에 오해 방지용 안내 문구 덧붙임
       const timeStr = `${String(formatKstTimeOnly.getUTCHours()).padStart(2,'0')}:${String(formatKstTimeOnly.getUTCMinutes()).padStart(2,'0')} (클리닉실 입실)`;
 
-      // 1. 오늘 등원 기록이 이미 있는지 샅샅이 스캔
+      // 🌟 오늘 가장 최근 기록 조회 (재등원 여부 파악을 위해)
       const { data: attData, error: attError } = await supabaseClient
         .from('attendance')
-        .select('attendance_id')
+        .select('*')
         .eq('student_id', studentId)
         .eq('attendance_date', today)
+        .order('attendance_id', { ascending: false })
         .limit(1);
 
       if (attError) throw attError;
 
-      // 2. 만약 오늘 등원 기록이 없다면? (키오스크 안 찍고 클리닉 직행한 학생)
-      if (!attData || attData.length === 0) {
-        // 알림톡 발송을 위해 학부모 전화번호 및 수강 정보 가져오기
+      const latestAtt = attData && attData.length > 0 ? attData[0] : null;
+
+      // 🌟 핵심 방어: 첫 등원이거나, 이미 '하원(check_out)' 후 다시 패드에 접속한 경우 새 기록 생성!
+      if (!latestAtt || latestAtt.check_out_time) {
         const { data: stuData } = await supabaseClient
           .from('student')
           .select('name, parent(name, phone), enrollment(enrollment_id, class(class_id))')
@@ -155,7 +154,6 @@ export default function StudentKioskLogin() {
         const enrollmentId = stuData.enrollment && stuData.enrollment.length > 0 ? (stuData.enrollment as any)[0].enrollment_id : null;
         const classId = stuData.enrollment && stuData.enrollment.length > 0 && (stuData.enrollment as any)[0].class ? (stuData.enrollment as any)[0].class.class_id : null;
 
-        // DB에 강제 등원 도장 꽝!
         await supabaseClient.from('attendance').insert({
           student_id: studentId,
           tenant_id: tenantId,
@@ -166,9 +164,7 @@ export default function StudentKioskLogin() {
           check_in_time: timestamp
         });
 
-        // 학부모님께 안심 문자 자동 큐잉!
         if (parentPhone) {
-          // 혹시 모를 중복 대기열 방지
           await supabaseClient.from('alimtalk_queue')
             .delete()
             .eq('student_id', studentId)
@@ -196,7 +192,7 @@ export default function StudentKioskLogin() {
   };
 
   const finalizeLogin = async (result: { studentId: string; name: string; phone?: string; tenant_id?: string }) => {
-    setIsProcessing(true); // 배경을 로딩 상태로 묶어둠
+    setIsProcessing(true); 
     try {
       localStorage.setItem("logica_student_id", result.studentId);
       localStorage.setItem("logica_student_phone", result.phone || "");
@@ -206,7 +202,6 @@ export default function StudentKioskLogin() {
       if (result.tenant_id) localStorage.setItem("logica_tenant_id", result.tenant_id);
       if (kioskSeatRef.current) localStorage.setItem("logica_kiosk_seat", kioskSeatRef.current);
 
-      // 🌟 패드에 성공적으로 로그인 한 직후 스텔스 등원 체크 가동
       await checkAndAutoAttend(result.studentId, tId);
       
     } catch (e) {
@@ -354,12 +349,11 @@ export default function StudentKioskLogin() {
       
       if (result.success) {
         if ((result as any).needsPinSetup) {
-          setIsProcessing(false); // 핀 셋업으로 넘어갈 땐 로딩을 품
+          setIsProcessing(false);
           setPendingLoginData(result);
           setStep("setup_pin");
           setPasswordInput("");
         } else {
-          // finalize 내부에서 어차피 isProcessing 관리를 하므로 await
           await finalizeLogin(result as any);
         }
       } else {

@@ -47,7 +47,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const [manualForm, setManualForm] = useState({ status: "NONE", checkIn: "", checkOut: "" });
 
   const [viewMode, setViewMode] = useState<"card" | "list">("card");
-  const [hideGoneHome, setHideGoneHome] = useState<boolean>(false);
+  // 🌟 핵심 추가: 좌측 요약 패널 클릭용 필터 상태
+  const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
   const fetchTimeoutRef = useRef<any>(null);
   const isBulkProcessing = useRef<boolean>(false);
@@ -65,8 +66,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   useEffect(() => {
     const savedMode = localStorage.getItem("logica_att_view_mode");
     if (savedMode === "list" || savedMode === "card") setViewMode(savedMode);
-    const savedFilter = localStorage.getItem("logica_att_hide_gone_home");
-    if (savedFilter === "true") setHideGoneHome(true);
+    
+    // 이전에 설정한 필터 상태 기억하기
+    const savedFilter = localStorage.getItem("logica_att_status_filter");
+    if (savedFilter) setStatusFilter(savedFilter === 'null' ? null : savedFilter);
   }, []);
 
   const handleViewModeChange = (mode: "card" | "list") => {
@@ -74,9 +77,9 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     localStorage.setItem("logica_att_view_mode", mode);
   };
 
-  const handleToggleHideGoneHome = (checked: boolean) => {
-    setHideGoneHome(checked);
-    localStorage.setItem("logica_att_hide_gone_home", checked ? "true" : "false");
+  const handleStatusFilterChange = (filter: string | null) => {
+    setStatusFilter(filter);
+    localStorage.setItem("logica_att_status_filter", filter === null ? 'null' : filter);
   };
 
   const requestFetch = (classId: string) => {
@@ -106,7 +109,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       .in("session_date", [today, yesterday])
       .limit(10000);
 
-    // 🌟 핵심 방어벽: 어제오늘 데이터를 모두 불러와서 "시차 때문에 증발하는 현상" 완전 차단!
     const attQuery = supabase
       .from("attendance")
       .select("attendance_id, student_id, status, check_in_time, check_out_time, attendance_date")
@@ -134,7 +136,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const mappedAtt = targetStudents.map((st: any) => {
       const myAtts = todayAtts.filter((a: any) => {
           if (String(a.student_id) !== String(st.student_id)) return false;
-          // DB의 CURRENT_DATE가 꼬였더라도 KST 실제 등원 시간을 역산하여 오늘 기록을 정확히 발라냅니다.
           const checkInKST = a.check_in_time ? new Date(new Date(a.check_in_time).getTime() + 9 * 3600000 - 6 * 3600000).toISOString().split('T')[0] : a.attendance_date;
           return checkInKST === today || a.attendance_date === today;
       });
@@ -152,7 +153,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
       let currentStatus = latestAtt?.status || "NONE";
 
-      // 🌟 원장님 지시: 출석을 등원으로, 체크아웃 시 무조건 하원으로!
       if (currentStatus === '출석') currentStatus = '등원';
       if (['등원', '지각'].includes(currentStatus) && latestAtt?.check_out_time) {
           currentStatus = '하원';
@@ -166,7 +166,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           return (Date.now() - new Date(targetTime).getTime()) < 3 * 60 * 1000;
       });
 
-      if (isActiveInClinic && !['하원', '조퇴', '결석'].includes(currentStatus)) {
+      if (isActiveInClinic && currentStatus !== '결석') {
           currentStatus = "클리닉중";
       }
       
@@ -203,7 +203,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   }, [selectedAttClassId]);
 
   useEffect(() => {
-    // 🌟 대기열에 두 번 들어가지 못하도록 감시자 권한을 철저히 박탈하고 화면 새로고침만 허용!
     const attChannel = supabase
       .channel('global_attendance_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
@@ -234,21 +233,26 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     return groups;
   }, [attStudents]);
 
+  // 🌟 핵심 적용: 상태 필터링 로직이 추가되었습니다.
   const filteredDisplayGroups = useMemo(() => {
     const result = [];
     const entries = Object.entries(groupedStudents).sort(([a], [b]) => a === '미배정' ? 1 : b === '미배정' ? -1 : a.localeCompare(b));
     
     for (const [cName, students] of entries) {
-      const filtered = hideGoneHome 
-        ? students.filter(s => ['등원', '지각', '클리닉중'].includes(s.status)) 
-        : students;
+      const filtered = students.filter(s => {
+        if (statusFilter === 'inClass') return ['등원', '지각'].includes(s.status);
+        if (statusFilter === 'inClinic') return s.status === '클리닉중';
+        if (statusFilter === 'goneHome') return ['하원', '조퇴'].includes(s.status);
+        if (statusFilter === 'notArrived') return ['NONE', '결석'].includes(s.status);
+        return true; // null일 경우 전체 표시
+      });
 
       if (filtered.length > 0) {
         result.push({ cName, students: filtered, totalCount: students.length });
       }
     }
     return result;
-  }, [groupedStudents, hideGoneHome]);
+  }, [groupedStudents, statusFilter]);
 
   const flowSummary = useMemo(() => {
     let notArrived = 0, inClass = 0, inClinic = 0, goneHome = 0, absent = 0;
@@ -502,16 +506,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           </h3>
           
           <div className="flex items-center gap-3 w-full sm:w-auto">
-            <label className="flex items-center gap-1.5 cursor-pointer bg-slate-50 hover:bg-slate-100 px-2.5 py-1.5 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0">
-              <input 
-                type="checkbox" 
-                className="w-3.5 h-3.5 accent-indigo-600 rounded cursor-pointer"
-                checked={hideGoneHome}
-                onChange={(e) => handleToggleHideGoneHome(e.target.checked)}
-              />
-              <span className="text-[11px] font-bold text-slate-600 select-none">👀 원내 체류자만 보기</span>
-            </label>
-
+            {/* 상단의 불필요했던 '원내 체류자만 보기' 체크박스를 날려버렸습니다! */}
+            
             <div className="bg-slate-100 p-1 rounded-lg flex items-center shadow-inner shrink-0">
               <button 
                 onClick={() => handleViewModeChange('card')} 
@@ -548,20 +544,31 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                 <span className="text-[11px] font-bold text-slate-500 mb-2 block">
                   {selectedAttClassId === 'all' ? '학원 전체 동선 요약' : '반별 동선 요약'}
                 </span>
+                
+                {/* 🌟 다이나믹 필터 버튼 패널로 개조 */}
                 <div className="flex flex-col gap-1.5">
-                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2 shadow-sm">
+                  <button onClick={() => handleStatusFilterChange(null)} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === null ? 'border-slate-800 ring-1 ring-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <span className="text-[11px] font-bold text-slate-700">🌐 전체 보기</span>
+                    <span className="text-sm font-black text-slate-800">{attStudents.length}명</span>
+                  </button>
+                  <button onClick={() => handleStatusFilterChange('inClass')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'inClass' ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`}>
                     <span className="text-[11px] font-bold text-slate-500">🏫 원내 체류</span>
                     <span className="text-sm font-black text-blue-600">{flowSummary.inClass}명</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2 shadow-sm">
+                  </button>
+                  <button onClick={() => handleStatusFilterChange('inClinic')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'inClinic' ? 'border-purple-500 ring-1 ring-purple-500 bg-purple-50' : 'border-slate-200 hover:border-purple-300'}`}>
                     <span className="text-[11px] font-bold text-slate-500">✍️ 클리닉중</span>
                     <span className="text-sm font-black text-purple-600">{flowSummary.inClinic}명</span>
-                  </div>
-                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2 shadow-sm">
+                  </button>
+                  <button onClick={() => handleStatusFilterChange('goneHome')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'goneHome' ? 'border-emerald-500 ring-1 ring-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300'}`}>
                     <span className="text-[11px] font-bold text-slate-500">👋 하원 완료</span>
                     <span className="text-sm font-black text-emerald-600">{flowSummary.goneHome}명</span>
-                  </div>
+                  </button>
+                  <button onClick={() => handleStatusFilterChange('notArrived')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'notArrived' ? 'border-slate-400 ring-1 ring-slate-400 bg-slate-100' : 'border-slate-200 hover:border-slate-300'}`}>
+                    <span className="text-[11px] font-bold text-slate-500">❓ 미등원 (결석)</span>
+                    <span className="text-sm font-black text-slate-500">{flowSummary.notArrived + flowSummary.absent}명</span>
+                  </button>
                 </div>
+
               </div>
               
               <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-200">
@@ -580,7 +587,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
             {filteredDisplayGroups.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-sm gap-2">
                 <span className="text-3xl">☕</span>
-                {hideGoneHome ? "현재 원내에 체류 중인 학생이 없습니다." : "조회된 학생이 없습니다."}
+                {statusFilter ? "해당 상태의 학생이 없습니다." : "조회된 학생이 없습니다."}
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-8">
@@ -606,13 +613,12 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                                 <span className="w-1.5 h-3 bg-indigo-500 inline-block align-middle mr-1.5 rounded-full"></span>
                                 {cName} 
                                 <span className="text-slate-400 font-bold ml-1">
-                                  (총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 {students.length}명</span>})
+                                  (반 전체 {totalCount}명 {statusFilter && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>})
                                 </span>
                               </td>
                             </tr>
                             {students.map(student => {
                               const isNotArrived = student.status === 'NONE';
-                              // 🌟 UI 텍스트 완벽 통일: 클리닉이 아니라면 "원내체류"
                               let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-100 border-slate-200";
                               if (['등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내체류"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
                               else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
@@ -675,7 +681,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                           <span className="w-1.5 h-3 bg-indigo-500 rounded-full"></span>
                           {cName} 
                           <span className="text-[10px] font-bold text-slate-400 ml-1">
-                            총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 {students.length}명</span>}
+                            반 전체 {totalCount}명 {statusFilter && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>}
                           </span>
                         </h4>
                         
@@ -684,7 +690,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                             const isMenuOpen = activeAttMenu === student.id;
                             const isNotArrived = student.status === 'NONE';
 
-                            // 🌟 UI 텍스트 완벽 통일: 클리닉이 아니라면 "원내체류"
                             let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-200/50 border-slate-300";
                             if (['등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내체류"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
                             else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
