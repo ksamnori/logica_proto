@@ -35,7 +35,7 @@ const getTodayKST = () => {
   return d.toISOString().split('T')[0];
 };
 
-// 💡 [신규 로직] URL 쿼리스트링을 파싱하여 특정 탭으로 즉시 진입하는 컴포넌트 추가
+// 💡 URL 쿼리스트링을 파싱하여 특정 탭으로 즉시 진입하는 컴포넌트
 function TabInitHandler({ setActiveTab }: { setActiveTab: (tab: string) => void }) {
   const searchParams = useSearchParams();
   const tabParam = searchParams.get('tab');
@@ -56,7 +56,7 @@ export default function StudentDetailPage() {
 
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isAdmin: false });
 
-  // 💡 기본 탭은 info 이지만, TabInitHandler가 URL을 감지해 곧장 변경합니다.
+  // 기본 탭
   const [activeTab, setActiveTab] = useState<string>("info");
   
   const [isNotFound, setIsNotFound] = useState(false);
@@ -210,7 +210,7 @@ export default function StudentDetailPage() {
     const { data: admissionLogs } = await supabase.from("admission_application").select("application_id, counseling_memo, test_result, created_at, admission_session(title)").eq("student_id", studentId).not("counseling_memo", "is", null);
 
     const formattedAdmissionLogs = (admissionLogs || []).filter((app: any) => app.counseling_memo && app.counseling_memo.trim() !== "").map((app: any) => ({
-      log_id: `admission_${app.application_id}`,
+      consultation_log_id: `admission_${app.application_id}`, // 스키마에 맞춘 식별자
       consultation_type: "입학 상담",
       contact_method: "방문/테스트",
       content: `[결과: ${app.test_result}]\n${app.counseling_memo}`,
@@ -219,7 +219,13 @@ export default function StudentDetailPage() {
       is_admission: true
     }));
 
-    const combinedLogs = [...(regularLogs || []), ...formattedAdmissionLogs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    // 기존 데이터에 log_id를 기대하는 모달이 있을 수 있으므로 하위 호환성을 위해 추가
+    const mappedRegularLogs = (regularLogs || []).map((log: any) => ({
+      ...log,
+      log_id: log.consultation_log_id
+    }));
+
+    const combinedLogs = [...mappedRegularLogs, ...formattedAdmissionLogs].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     setConsultLogs(combinedLogs);
   };
 
@@ -371,10 +377,21 @@ export default function StudentDetailPage() {
     } catch (err) { alert("실패"); }
   };
 
-  const deleteConsultLog = async (logId: string) => {
+  const deleteConsultLog = async (targetId: string | number) => {
     if (!confirm("이 기록을 삭제하시겠습니까?")) return;
-    await supabase.from("consultation_log").delete().eq("log_id", logId);
-    loadConsultLogs();
+    
+    if (typeof targetId === 'string' && targetId.startsWith('admission_')) {
+      alert("입학 상담 기록은 입학 관리 메뉴에서 수정/삭제해야 합니다.");
+      return;
+    }
+    
+    const { error } = await supabase.from("consultation_log").delete().eq("consultation_log_id", targetId);
+    
+    if (error) {
+      alert("삭제 실패: " + error.message);
+    } else {
+      loadConsultLogs();
+    }
   };
 
   const formatTimeForInput = (isoStr: string | null | undefined) => {
@@ -789,7 +806,7 @@ export default function StudentDetailPage() {
                   <div className="flex-1 overflow-y-auto custom-scroll space-y-4 pb-10 pr-2">
                     {consultLogs.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold border border-slate-200 rounded-xl bg-slate-50 text-xs">등록된 상담 기록이 없습니다.</div> : 
                       consultLogs.map((log, idx) => (
-                        <div key={log.log_id || log.id || idx} className={`bg-white p-4 rounded-xl border shadow-sm relative overflow-hidden group ${log.is_admission ? 'border-amber-200' : 'border-slate-200'}`}>
+                        <div key={log.consultation_log_id || idx} className={`bg-white p-4 rounded-xl border shadow-sm relative overflow-hidden group ${log.is_admission ? 'border-amber-200' : 'border-slate-200'}`}>
                           <div className={`absolute top-0 left-0 w-1 h-full ${log.is_admission ? 'bg-amber-400' : 'bg-indigo-400'}`}></div>
                           <div className="flex justify-between items-start mb-2 pl-2">
                             <div className="flex items-center gap-2">
@@ -802,7 +819,7 @@ export default function StudentDetailPage() {
                                 {!log.is_admission && (
                                   <>
                                     <button onClick={() => { setSelectedConsultLog(log); setIsConsultModalOpen(true); }} className="text-[10px] text-slate-400 hover:text-blue-600 font-bold px-1.5 rounded bg-slate-50 hover:bg-blue-50 transition-colors">수정</button>
-                                    <button onClick={() => deleteConsultLog(log.log_id)} className="text-[10px] text-slate-400 hover:text-rose-600 font-bold px-1.5 rounded bg-slate-50 hover:bg-rose-50 transition-colors">삭제</button>
+                                    <button onClick={() => deleteConsultLog(log.consultation_log_id)} className="text-[10px] text-slate-400 hover:text-rose-600 font-bold px-1.5 rounded bg-slate-50 hover:bg-rose-50 transition-colors">삭제</button>
                                   </>
                                 )}
                               </div>

@@ -60,6 +60,7 @@ export default function AdminDashboardPage() {
   const [liveFeeds, setLiveFeeds] = useState<any[]>([]);
 
   const [todayAgendas, setTodayAgendas] = useState<any[]>([]);
+  const [recentConsults, setRecentConsults] = useState<any[]>([]); // 💡 추가: 최근 상담 내역 상태
   const [riskStudents, setRiskStudents] = useState<any[]>([]);
 
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
@@ -77,7 +78,6 @@ export default function AdminDashboardPage() {
   const [bulkTarget, setBulkTarget] = useState('all');
   const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
 
-  // 🌟 핵심 방어벽: DB에서 2줄이 올라와도 화면엔 무조건 최신 1줄만 찍히게 압축합니다.
   const fetchQueue = async () => {
     if (!tenantId) return;
     const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
@@ -91,7 +91,6 @@ export default function AdminDashboardPage() {
     const raw = data || [];
     const uniqueMap = new Map();
     raw.forEach(item => {
-        // 출결 알림인 경우 무조건 학생 1명당 1개만 유지 (최신 우선)
         const key = item.template_id === 'KA01TP260826014520504X1Fplf8R0FH' ? `${item.student_id}_ATT` : item.queue_id;
         if (!uniqueMap.has(key)) uniqueMap.set(key, item);
     });
@@ -102,7 +101,6 @@ export default function AdminDashboardPage() {
     if (!tenantId) return;
     fetchQueue();
 
-    // 🌟 실시간 DB 감지망 복구 (다른 사람이 키오스크 찍으면 즉각 반응)
     const channel = supabase.channel('queue_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'alimtalk_queue' }, () => {
         fetchQueue();
@@ -197,7 +195,7 @@ export default function AdminDashboardPage() {
       fetchKPIStudents(), fetchKPIBilling(), fetchKPIAdmission(),
       fetchCSRequests(), fetchAdmissions(), fetchLiveFeeds(),
       fetchInstructorStats(), fetchClassMonitoring(), fetchMemos(), fetchAllSearchData(),
-      fetchTodayAgendas(), fetchRiskStudents() 
+      fetchTodayAgendas(), fetchRecentConsults(), fetchRiskStudents() 
     ]);
   };
 
@@ -224,6 +222,22 @@ export default function AdminDashboardPage() {
         .limit(10);
         
       setTodayAgendas(data || []);
+    } catch(e) { console.error(e) }
+  };
+
+  // 💡 추가: 최근 상담 내역을 가져오는 함수
+  const fetchRecentConsults = async () => {
+    const tId = localStorage.getItem("logica_tenant_id");
+    try {
+      let query = supabase.from("consultation_log")
+        .select("content, created_at, consultation_type, student(name)")
+        .order("created_at", { ascending: false })
+        .limit(10);
+        
+      if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
+      
+      const { data } = await query;
+      setRecentConsults(data || []);
     } catch(e) { console.error(e) }
   };
 
@@ -965,23 +979,46 @@ export default function AdminDashboardPage() {
               
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
                 <div className="flex justify-between items-center mb-3 shrink-0">
-                  <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">🗣️ 오늘의 일정 및 상담</span>
+                  <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">🗣️ 오늘의 일정 및 최근 상담</span>
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-2">
-                  {todayAgendas.length === 0 ? (
-                    <div className="flex h-full items-center justify-center text-xs font-bold text-slate-400">오늘 예정된 일정이 없습니다.</div>
+                  {todayAgendas.length === 0 && recentConsults.length === 0 ? (
+                    <div className="flex h-full items-center justify-center text-xs font-bold text-slate-400">일정 및 상담 기록이 없습니다.</div>
                   ) : (
-                    todayAgendas.map((ag, i) => {
-                       const isMeeting = ag.source === 'Meeting';
-                       return (
-                          <div key={i} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 transition-colors">
-                            <span className={`text-[10px] font-black px-2 py-1 rounded shrink-0 ${isMeeting ? 'bg-indigo-100 text-indigo-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                              {formatTimeAsKST(ag.meeting_date)}
-                            </span>
-                            <span className="text-xs font-bold text-slate-700 truncate">{ag.title}</span>
-                          </div>
-                       )
-                    })
+                    <>
+                      {/* 오늘의 일정(Agenda) 리스트 */}
+                      {todayAgendas.map((ag, i) => {
+                         const isMeeting = ag.source === 'Meeting';
+                         return (
+                            <div key={`agenda-${i}`} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 transition-colors">
+                              <span className={`text-[10px] font-black px-2 py-1 rounded shrink-0 ${isMeeting ? 'bg-indigo-100 text-indigo-600' : 'bg-emerald-100 text-emerald-600'}`}>
+                                {formatTimeAsKST(ag.meeting_date)}
+                              </span>
+                              <span className="text-xs font-bold text-slate-700 truncate">{ag.title}</span>
+                            </div>
+                         )
+                      })}
+
+                      {/* 최근 상담 내역 리스트 */}
+                      {recentConsults.map((consult, i) => {
+                         const studentName = unwrap(consult.student)?.name || '알수없음';
+                         const timeStr = formatTimeAsKST(consult.created_at);
+                         return (
+                            <div key={`consult-${i}`} className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-blue-50 border border-blue-100 hover:border-blue-200 transition-colors">
+                              <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="text-[9px] font-black bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded border border-blue-200">상담</span>
+                                  <span className="text-[11px] font-bold text-slate-700">{studentName} 학생</span>
+                                </div>
+                                <span className="text-[9px] font-bold text-slate-400">{timeStr}</span>
+                              </div>
+                              <span className="text-[10px] font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
+                                {consult.content}
+                              </span>
+                            </div>
+                         )
+                      })}
+                    </>
                   )}
                 </div>
               </div>
