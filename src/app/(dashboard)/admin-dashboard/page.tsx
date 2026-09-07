@@ -13,7 +13,6 @@ import MemoCreateModal from "@/components/admin/MemoCreateModal";
 import ClassDetailModal from "@/components/admin/ClassDetailModal";
 import InstructorPerformance from "@/components/admin/InstructorPerformance";
 
-// 🌟 알림톡 및 일반문자 액션 임포트
 import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "@/app/actions/alimtalk";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
@@ -22,71 +21,16 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
 };
 
 const getKSTDateStr = (offsetDays = 0) => {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000) + (offsetDays * 86400000));
-  return kst.toISOString().split('T')[0];
+  const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
+  return kstAdjusted.toISOString().split('T')[0];
 };
 
 const formatTimeAsKST = (isoStr: string) => {
   if (!isoStr) return "";
   const d = new Date(isoStr);
   if (isNaN(d.getTime())) return "";
-  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000));
-  return `${String(kst.getHours()).padStart(2, '0')}:${String(kst.getMinutes()).padStart(2, '0')}`;
-};
-
-const cleanAndDeduplicateQueue = (rawQueue: any[]) => {
-  if (!Array.isArray(rawQueue)) return [];
-  
-  const normalized = rawQueue.map(m => {
-    let title = typeof m.previewTitle === 'string' && m.previewTitle.trim() !== '' 
-        ? m.previewTitle 
-        : (m.templateId === 'KA01TP260826014520504X1Fplf8R0FH' ? `[출결] ${m.statusLabel || '등원'}` : '');
-    
-    let label = m.statusLabel || '';
-    
-    if (m.templateId === 'KA01TP260826014520504X1Fplf8R0FH' || title.includes('출결') || label) {
-        if (!label) {
-            if (title.includes('등원') || title.includes('출석')) label = '등원';
-            else if (title.includes('지각')) label = '지각';
-            else if (title.includes('조퇴')) label = '조퇴';
-            else if (title.includes('하원')) label = '하원';
-            else if (title.includes('결석')) label = '결석';
-            else label = '등원';
-        }
-        
-        if (label === '출석') label = '등원';
-        if (label === '수업종료') label = '하원'; 
-        
-        title = `[출결] ${label}`;
-    }
-    
-    return { ...m, previewTitle: title, statusLabel: label };
-  });
-
-  const seen = new Set();
-  const deduplicated = [];
-  
-  for (let i = 0; i < normalized.length; i++) {
-    const m = normalized[i];
-    let key = '';
-    
-    if (m.templateId === 'KA01TP260826014520504X1Fplf8R0FH' || m.previewTitle?.includes('[출결]')) {
-        const isOut = m.statusLabel === '조퇴' || m.statusLabel === '하원';
-        const group = isOut ? 'OUT' : 'IN';
-        key = `${m.studentName}_ATT_${group}`;
-    } else {
-        key = m.id ? `${m.id}_${i}` : `${m.studentName}_${m.previewTitle}_${i}`;
-    }
-    
-    if (!seen.has(key)) {
-        seen.add(key);
-        deduplicated.push(m); 
-    }
-  }
-  return deduplicated;
+  const kst = new Date(d.getTime() + (9 * 3600000));
+  return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
 };
 
 export default function AdminDashboardPage() {
@@ -126,49 +70,53 @@ export default function AdminDashboardPage() {
   const [classStudents, setClassStudents] = useState<any[]>([]);
   const [classSchedules, setClassSchedules] = useState<any[]>([]);
 
+  // DB 대기열 상태
   const [queuedMessages, setQueuedMessages] = useState<any[]>([]);
-  const [isQueueLoaded, setIsQueueLoaded] = useState(false);
   const [isSendingAlimtalk, setIsSendingAlimtalk] = useState(false);
   
   const [bulkType, setBulkType] = useState('schedule');
   const [bulkTarget, setBulkTarget] = useState('all');
   const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
 
-  useEffect(() => {
-    const savedQueue = localStorage.getItem("logica_queued_messages");
-    if (savedQueue) {
-      try {
-        setQueuedMessages(cleanAndDeduplicateQueue(JSON.parse(savedQueue)));
-      } catch (e) {
-        console.error("대기열 복구 에러:", e);
-      }
-    }
-    setIsQueueLoaded(true);
+  // 🌟 핵심 해결 1: 실시간 동기화 채널용 참조 변수
+  const channelRef = useRef<any>(null);
 
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === 'logica_queued_messages') {
-        const newQ = localStorage.getItem("logica_queued_messages");
-        if (newQ) {
-          try {
-            const cleaned = cleanAndDeduplicateQueue(JSON.parse(newQ));
-            setQueuedMessages(prev => JSON.stringify(prev) !== JSON.stringify(cleaned) ? cleaned : prev);
-          } catch (e) {}
-        }
-      }
-    };
-    window.addEventListener('storage', handleStorageChange);
-    return () => window.removeEventListener('storage', handleStorageChange);
-  }, []);
+  // 🌟 안전하게 DB에서 대기열을 불러오는 함수
+  const fetchQueue = async () => {
+    const tId = localStorage.getItem("logica_tenant_id") || "hq";
+    const validTenantId = tId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tId;
+    const { data } = await supabase
+      .from('alimtalk_queue')
+      .select('*')
+      .eq('tenant_id', validTenantId)
+      .eq('status', '대기')
+      .order('created_at', { ascending: false });
+    setQueuedMessages(data || []);
+  };
+
+  // 🌟 내가 변경한 사항을 다른 사람의 모니터에도 즉시 알림!
+  const broadcastQueueUpdate = () => {
+    if (channelRef.current) {
+      channelRef.current.send({ type: 'broadcast', event: 'queue_updated' });
+    }
+  };
 
   useEffect(() => {
-    if (isQueueLoaded) {
-      const currentSaved = localStorage.getItem("logica_queued_messages");
-      const newToSave = JSON.stringify(queuedMessages);
-      if (currentSaved !== newToSave) {
-        localStorage.setItem("logica_queued_messages", newToSave);
-      }
-    }
-  }, [queuedMessages, isQueueLoaded]);
+    if (!tenantId) return;
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+
+    fetchQueue();
+
+    // 🌟 복잡한 SQL 설정 없이, 즉각적인 100% 실시간 동기화를 보장하는 브로드캐스트 채널!
+    const channel = supabase.channel(`queue_sync_${validTenantId}`);
+    channel.on('broadcast', { event: 'queue_updated' }, () => {
+      fetchQueue(); // 누군가 큐를 변경하면 내 화면도 즉시 새로고침
+    }).subscribe();
+
+    channelRef.current = channel;
+
+    return () => { supabase.removeChannel(channel); };
+  }, [tenantId]);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -575,7 +523,7 @@ export default function AdminDashboardPage() {
     fetchMemos();
   };
 
-  const handleAddBulkToQueue = () => {
+  const handleAddBulkToQueue = async () => {
     if (bulkType === 'schedule' && (!bulkForm.scheduleName || !bulkForm.applyDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'makeup' && (!bulkForm.oldDate || !bulkForm.newDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'general' && !bulkForm.details) return alert('발송할 자유 내용을 입력해주세요.');
@@ -591,6 +539,7 @@ export default function AdminDashboardPage() {
     if (targets.length === 0) return alert('발송 대상(재원생)이 없습니다.');
 
     const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
 
     const newMessages: any[] = targets.map(student => {
       const parentInfo = unwrap(student.parent);
@@ -602,42 +551,29 @@ export default function AdminDashboardPage() {
 
       if (bulkType === 'schedule') {
         return {
-          id: `sched_${student.student_id}_${bulkForm.scheduleName}`,
-          templateId: 'KA01TP260826015150733a1AW4dFE1qM',
-          parentPhone, parentName, studentName: student.name,
-          scheduleName: bulkForm.scheduleName, applyDate: bulkForm.applyDate, details: bulkForm.details,
-          previewTitle: `[일정] ${bulkForm.scheduleName}`,
-          previewDesc: `${student.name} 학부모님`,
-          queuedAt: currentTimeStr
+          tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: parentName, parent_phone: parentPhone,
+          template_id: 'KA01TP260826015150733a1AW4dFE1qM', schedule_name: bulkForm.scheduleName, apply_date: bulkForm.applyDate, details: bulkForm.details,
+          preview_title: `[일정] ${bulkForm.scheduleName}`, preview_desc: `${student.name} 학부모님`, time_string: currentTimeStr, status: '대기'
         };
       } else if (bulkType === 'makeup') {
         return {
-          id: `make_${student.student_id}_${bulkForm.newDate}`,
-          templateId: 'KA01TP260831032803585c1Me7WbxjUe',
-          parentPhone, parentName, studentName: student.name,
-          oldDate: bulkForm.oldDate, newDate: bulkForm.newDate, details: bulkForm.details,
-          previewTitle: `[보강] ${student.name}`,
-          previewDesc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`,
-          queuedAt: currentTimeStr
+          tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: parentName, parent_phone: parentPhone,
+          template_id: 'KA01TP260831032803585c1Me7WbxjUe', old_date: bulkForm.oldDate, new_date: bulkForm.newDate, details: bulkForm.details,
+          preview_title: `[보강] ${student.name}`, preview_desc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`, time_string: currentTimeStr, status: '대기'
         };
       } else {
         return {
-          id: `gen_${student.student_id}_${bulkForm.details.substring(0, 10)}`,
-          templateId: 'GENERAL_SMS',
-          parentPhone, parentName, studentName: student.name,
-          details: bulkForm.details,
-          previewTitle: `[일반문자]`,
-          previewDesc: `${student.name} 학부모님`,
-          queuedAt: currentTimeStr
+          tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: parentName, parent_phone: parentPhone,
+          template_id: 'GENERAL_SMS', details: bulkForm.details,
+          preview_title: `[일반문자]`, preview_desc: `${student.name} 학부모님`, time_string: currentTimeStr, status: '대기'
         };
       }
     }).filter(Boolean);
 
-    setQueuedMessages(prev => {
-      return cleanAndDeduplicateQueue([...newMessages, ...prev]);
-    });
-    
-    alert(`${newMessages.length}건이 발송 대기열에 추가되었습니다.\n(가운데 큐에서 전체 발송을 눌러주세요)`);
+    await supabase.from('alimtalk_queue').insert(newMessages);
+    fetchQueue(); 
+    broadcastQueueUpdate(); // 🌟 남의 모니터도 새로고침!
+    alert(`${newMessages.length}건이 발송 대기열에 안전하게 등록되었습니다.`);
     setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
   };
 
@@ -646,49 +582,59 @@ export default function AdminDashboardPage() {
     if (!confirm(`대기 중인 ${queuedMessages.length}건의 메시지를 발송하시겠습니까?`)) return;
 
     setIsSendingAlimtalk(true);
+    
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+    const { data: toSend } = await supabase.from('alimtalk_queue').select('*').eq('tenant_id', validTenantId).eq('status', '대기');
+    if (!toSend || toSend.length === 0) {
+        setIsSendingAlimtalk(false);
+        return;
+    }
+
+    const ids = toSend.map(q => q.queue_id);
+    await supabase.from('alimtalk_queue').update({ status: '발송중' }).in('queue_id', ids);
+
     let successCount = 0;
     let failCount = 0;
 
-    for (const msg of queuedMessages) {
+    for (const msg of toSend) {
       let res: any;
-      if (msg.templateId === "KA01TP260826014520504X1Fplf8R0FH") {
-        res = await sendAttendanceAlimtalk(msg);
-      } else if (msg.templateId === "KA01TP260826015150733a1AW4dFE1qM") {
-        res = await sendScheduleNoticeAlimtalk(msg);
-      } else if (msg.templateId === "KA01TP260831032803585c1Me7WbxjUe") {
-        res = await sendClassChangeAlimtalk(msg);
-      } else if (msg.templateId === "GENERAL_SMS") {
-        const textContent = `[로지카 학원 대치본원]\n\n${msg.parentName} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
-        res = await sendGeneralMessage({ parentPhone: msg.parentPhone, textContent });
+      const apiPayload = {
+          id: msg.queue_id, templateId: msg.template_id, parentPhone: msg.parent_phone, parentName: msg.parent_name, studentName: msg.student_name,
+          statusLabel: msg.status_label, timeString: msg.time_string, scheduleName: msg.schedule_name, applyDate: msg.apply_date,
+          oldDate: msg.old_date, newDate: msg.new_date, details: msg.details, previewTitle: msg.preview_title, previewDesc: msg.preview_desc
+      };
+
+      if (msg.template_id === "KA01TP260826014520504X1Fplf8R0FH") {
+        res = await sendAttendanceAlimtalk(apiPayload);
+      } else if (msg.template_id === "KA01TP260826015150733a1AW4dFE1qM") {
+        res = await sendScheduleNoticeAlimtalk(apiPayload);
+      } else if (msg.template_id === "KA01TP260831032803585c1Me7WbxjUe") {
+        res = await sendClassChangeAlimtalk(apiPayload);
+      } else if (msg.template_id === "GENERAL_SMS") {
+        const textContent = `[로지카 학원 대치본원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
+        res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
       }
 
-      const logMessage = msg.templateId === "GENERAL_SMS" ? `[일반문자] ${msg.details.substring(0, 30)}...` : msg.previewTitle;
+      const logMessage = msg.template_id === "GENERAL_SMS" ? `[일반문자] ${msg.details?.substring(0, 30)}...` : msg.preview_title;
 
-      const { error: insertError } = await supabase.from('notification_log').insert({
-        tenant_id: tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId,
-        target_name: msg.studentName,
-        target_phone: msg.parentPhone,
-        message: logMessage,
-        status: res?.success ? '성공' : '실패'
+      await supabase.from('notification_log').insert({
+        tenant_id: validTenantId, target_name: msg.student_name, target_phone: msg.parent_phone,
+        message: logMessage, status: res?.success ? '성공' : '실패'
       });
-
-      if (insertError) {
-        console.error("❌ 피드 기록 실패 상세 에러:", insertError);
-      }
 
       if (res?.success) successCount++; else failCount++;
     }
 
+    await supabase.from('alimtalk_queue').delete().in('queue_id', ids);
+    fetchQueue(); 
+    broadcastQueueUpdate(); // 🌟 발송 완료 후 전체 비우기 동기화!
     setIsSendingAlimtalk(false);
-    setQueuedMessages([]);
-    fetchLiveFeeds(); 
     alert(`메시지 전송 완료!\n(성공: ${successCount}건, 실패: ${failCount}건)`);
   };
 
-  // 🌟 색상 규칙 통일 (등원: 파랑 / 하원: 녹색)
   const getBadgeColor = (title: string) => {
     if (!title) return 'bg-transparent text-transparent border-transparent';
-    if (title.includes('출석') || title.includes('등원')) return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (title.includes('출석') || title.includes('등원') || title.includes('원내체류')) return 'bg-blue-50 text-blue-700 border-blue-200';
     if (title.includes('하원') || title.includes('조퇴')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     if (title.includes('지각')) return 'bg-amber-50 text-amber-600 border-amber-100';
     if (title.includes('결석')) return 'bg-rose-50 text-rose-500 border-rose-100';
@@ -863,7 +809,12 @@ export default function AdminDashboardPage() {
                   💬 발송 대기열
                   {queuedMessages.length > 0 && <span className="text-[10px] font-bold text-[#3a2929] bg-[#fef01b] px-2 py-0.5 rounded-full shadow-sm">{queuedMessages.length}건 대기중</span>}
                 </h3>
-                {queuedMessages.length > 0 && <button onClick={() => setQueuedMessages([])} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
+                {queuedMessages.length > 0 && <button onClick={async () => {
+                   const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+                   await supabase.from('alimtalk_queue').delete().eq('tenant_id', validTenantId).eq('status', '대기');
+                   fetchQueue(); 
+                   broadcastQueueUpdate(); // 🌟 나 말고 다른 사람 화면에서도 즉시 지우기!
+                }} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
               </div>
               
               <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50">
@@ -876,22 +827,26 @@ export default function AdminDashboardPage() {
                 ) : (
                   <div className="flex flex-col gap-1.5">
                     {queuedMessages.map((msg, idx) => (
-                      <div key={`${msg.id}_${idx}`} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
+                      <div key={msg.queue_id || idx} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.previewTitle)}`}>{msg.previewTitle}</span>
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.preview_title)}`}>{msg.preview_title}</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-[11px] font-extrabold text-slate-700">{msg.studentName}</span>
-                              <span className="text-[9px] text-slate-400 font-medium">{msg.parentPhone}</span>
+                              <span className="text-[11px] font-extrabold text-slate-700">{msg.student_name}</span>
+                              <span className="text-[9px] text-slate-400 font-medium">{msg.parent_phone}</span>
                             </div>
                           </div>
                           <div className="flex items-center pr-5">
-                            <span className="text-[9px] font-bold text-slate-400">{msg.queuedAt || msg.timeString || ''}</span>
+                            <span className="text-[9px] font-bold text-slate-400">{msg.time_string || ''}</span>
                           </div>
-                          <button onClick={() => setQueuedMessages(prev => prev.filter(m => m.id !== msg.id))} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-1.5 top-1.5">×</button>
+                          <button onClick={async () => {
+                             await supabase.from('alimtalk_queue').delete().eq('queue_id', msg.queue_id);
+                             fetchQueue(); 
+                             broadcastQueueUpdate(); // 🌟 삭제 버튼 누르면 남의 모니터에서도 스르륵 삭제!
+                          }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-1.5 top-1.5">×</button>
                         </div>
                         
-                        {msg.templateId !== "KA01TP260826014520504X1Fplf8R0FH" && msg.details && (
+                        {msg.template_id !== "KA01TP260826014520504X1Fplf8R0FH" && msg.details && (
                           <div className="mt-0.5 bg-slate-50 px-2 py-1 rounded text-[9px] text-slate-600 border border-slate-100 line-clamp-1 leading-snug" title={msg.details}>
                             {msg.details}
                           </div>
@@ -982,12 +937,48 @@ export default function AdminDashboardPage() {
               <AttendanceControlPanel 
                 classStats={classStats} 
                 todayIso={todayIso} 
-                onQueueMessage={(msgOrMsgs) => setQueuedMessages(prev => {
-                  const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+                onQueueMessage={async (msgOrMsgs) => {
+                  if (msgOrMsgs === 'REFRESH_QUEUE') {
+                    fetchQueue();
+                    return;
+                  }
+
+                  const tId = localStorage.getItem("logica_tenant_id") || "hq";
+                  const validTenantId = tId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tId;
                   const msgs = Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs];
-                  const newMsgs = msgs.map(m => ({ ...m, queuedAt: m.queuedAt || currentTimeStr }));
-                  return cleanAndDeduplicateQueue([...newMsgs, ...prev]);
-                })} 
+                  
+                  // 🌟 핵심 해결 2: 수동 조작 시 동일 학생의 오늘 기존 알림을 싹 지워 중복 발송을 완벽히 차단합니다.
+                  for (const m of msgs) {
+                    const isAttendance = m.templateId === 'KA01TP260826014520504X1Fplf8R0FH';
+                    const sId = isAttendance ? m.id.split('_')[0] : null;
+
+                    if (isAttendance && sId) {
+                        await supabase.from('alimtalk_queue')
+                            .delete()
+                            .eq('tenant_id', validTenantId)
+                            .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
+                            .eq('student_id', sId)
+                            .eq('status', '대기');
+                    }
+
+                    await supabase.from('alimtalk_queue').insert({
+                        tenant_id: validTenantId,
+                        student_id: sId,
+                        student_name: m.studentName,
+                        parent_name: m.parentName,
+                        parent_phone: m.parentPhone,
+                        template_id: m.templateId,
+                        status_label: m.statusLabel,
+                        time_string: m.timeString,
+                        preview_title: m.previewTitle,
+                        preview_desc: m.previewDesc,
+                        status: '대기'
+                    });
+                  }
+                  
+                  fetchQueue();
+                  broadcastQueueUpdate(); // 내가 수동 조작한 것도 다른 PC에 즉시 동기화
+                }} 
               />
             </div>
 

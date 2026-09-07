@@ -119,37 +119,36 @@ export default function KioskPage() {
     }
   };
 
-  const queueAlimtalk = (student: any, statusLabel: string, timeString: string) => {
+  // 🌟 핵심 해결: DB 대기열 연동
+  const queueAlimtalk = async (student: any, statusLabel: string, timeString: string) => {
     const parentObj = Array.isArray(student.parent) ? student.parent[0] : student.parent;
     const parentPhone = parentObj?.phone;
     if (!parentPhone) return;
 
     const isValidParentName = parentObj?.name && parentObj.name.trim() !== "" && parentObj.name !== "미입력";
     const parentName = isValidParentName ? parentObj.name : student.name;
-
-    const newMsg = {
-      id: `att_${student.student_id}_${statusLabel}`, 
-      templateId: 'KA01TP260826014520504X1Fplf8R0FH',
-      studentName: student.name,
-      parentName: parentName,
-      parentPhone: parentPhone,
-      statusLabel,
-      timeString,
-      previewTitle: `[출결] ${statusLabel}`,
-      previewDesc: `${parentPhone} • ${timeString}`
-    };
+    const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || localStorage.getItem('logica_tenant_id') || '1ff4299c-d72b-4d99-97b0-45fee08e3b73';
 
     try {
-      const rawLocal = localStorage.getItem("logica_queued_messages");
-      let currentQueue: any[] = [];
-      if (rawLocal) {
-        currentQueue = JSON.parse(rawLocal);
-      }
-      const filtered = currentQueue.filter((m: any) => m.id !== newMsg.id);
-      const nextQueue = [...filtered, newMsg];
+      await supabase.from('alimtalk_queue')
+        .delete()
+        .eq('student_id', student.student_id)
+        .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
+        .eq('status', '대기');
 
-      localStorage.setItem("logica_queued_messages", JSON.stringify(nextQueue));
-      window.dispatchEvent(new Event('storage'));
+      await supabase.from('alimtalk_queue').insert({
+        tenant_id: kioskTenantId,
+        student_id: student.student_id,
+        student_name: student.name,
+        parent_name: parentName,
+        parent_phone: parentPhone,
+        template_id: 'KA01TP260826014520504X1Fplf8R0FH',
+        status_label: statusLabel,
+        time_string: timeString,
+        preview_title: `[출결] ${statusLabel}`,
+        preview_desc: `${parentPhone} • ${timeString}`,
+        status: '대기'
+      });
     } catch (e) {
       console.error("대기열 저장 중 오류:", e);
     }
@@ -253,7 +252,6 @@ export default function KioskPage() {
 
       if (fetchError) throw fetchError;
 
-      // 🌟 Kiosk에서도 절대 정렬(attendance_id) 방식으로 가장 최신 출결을 뽑아냅니다.
       const todayRecords = rawRecords || [];
       todayRecords.sort((a, b) => a.attendance_id - b.attendance_id);
 
@@ -263,7 +261,6 @@ export default function KioskPage() {
       let statusLabelForAlimtalk = "등원"; 
 
       if (!latest) {
-        // 🌟 무조건 '등원' 텍스트 사용
         const { error: insertError } = await supabase.from('attendance').insert({
           student_id: student.student_id,
           class_id: classId,
@@ -307,7 +304,7 @@ export default function KioskPage() {
         statusLabelForAlimtalk = "등원"; 
       }
 
-      queueAlimtalk(student, statusLabelForAlimtalk, timeStr);
+      await queueAlimtalk(student, statusLabelForAlimtalk, timeStr);
       playSuccessSound(popupType);
       setSuccessPopup({ name: student.name, type: popupType });
       
