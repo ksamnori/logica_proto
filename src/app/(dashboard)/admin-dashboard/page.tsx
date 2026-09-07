@@ -2,6 +2,7 @@
 "use client";
 
 import { useEffect, useState, useRef, useMemo } from "react";
+import React from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Chart from "chart.js/auto";
@@ -36,7 +37,6 @@ const formatTimeAsKST = (isoStr: string) => {
   return `${String(kst.getHours()).padStart(2, '0')}:${String(kst.getMinutes()).padStart(2, '0')}`;
 };
 
-// 💡 [핵심 교정] 대기열 텍스트 정제 및 중복 알림 방지 클리너
 const cleanAndDeduplicateQueue = (rawQueue: any[]) => {
   if (!Array.isArray(rawQueue)) return [];
   
@@ -69,7 +69,7 @@ const cleanAndDeduplicateQueue = (rawQueue: any[]) => {
   const seen = new Set();
   const deduplicated = [];
   
-  for (let i = normalized.length - 1; i >= 0; i--) {
+  for (let i = 0; i < normalized.length; i++) {
     const m = normalized[i];
     let key = '';
     
@@ -78,12 +78,12 @@ const cleanAndDeduplicateQueue = (rawQueue: any[]) => {
         const group = isOut ? 'OUT' : 'IN';
         key = `${m.studentName}_ATT_${group}`;
     } else {
-        key = m.id || `${m.studentName}_${m.previewTitle}_${i}`;
+        key = m.id ? `${m.id}_${i}` : `${m.studentName}_${m.previewTitle}_${i}`;
     }
     
     if (!seen.has(key)) {
         seen.add(key);
-        deduplicated.unshift(m); 
+        deduplicated.push(m); 
     }
   }
   return deduplicated;
@@ -115,7 +115,6 @@ export default function AdminDashboardPage() {
   const [admissions, setAdmissions] = useState<any[]>([]);
   const [liveFeeds, setLiveFeeds] = useState<any[]>([]);
 
-  // 💡 신규 위젯 상태 추가
   const [todayAgendas, setTodayAgendas] = useState<any[]>([]);
   const [riskStudents, setRiskStudents] = useState<any[]>([]);
 
@@ -256,7 +255,7 @@ export default function AdminDashboardPage() {
       fetchKPIStudents(), fetchKPIBilling(), fetchKPIAdmission(),
       fetchCSRequests(), fetchAdmissions(), fetchLiveFeeds(),
       fetchInstructorStats(), fetchClassMonitoring(), fetchMemos(), fetchAllSearchData(),
-      fetchTodayAgendas(), fetchRiskStudents() // 💡 신규 위젯 2종 데이터 로드
+      fetchTodayAgendas(), fetchRiskStudents() 
     ]);
   };
 
@@ -269,7 +268,6 @@ export default function AdminDashboardPage() {
     setAllStudentsData(data || []);
   };
 
-  // 💡 [위젯 4] 오늘의 주요 일정 및 상담 데이터 가져오기
   const fetchTodayAgendas = async () => {
     const today = getKSTDateStr();
     const nextDay = getKSTDateStr(1);
@@ -287,7 +285,6 @@ export default function AdminDashboardPage() {
     } catch(e) { console.error(e) }
   };
 
-  // 💡 [위젯 3] 장기 결석 및 이탈 위험군 데이터 가져오기 (지능형 분석)
   const fetchRiskStudents = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     let query = supabase.from('student')
@@ -331,7 +328,6 @@ export default function AdminDashboardPage() {
        }
     });
     
-    // 심각도(이유 갯수)가 높은 순서대로 6명만 뽑아서 표시
     risks.sort((a, b) => b.reasons.length - a.reasons.length);
     setRiskStudents(risks.slice(0, 6)); 
   };
@@ -424,7 +420,7 @@ export default function AdminDashboardPage() {
 
   const fetchLiveFeeds = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
-    let query = supabase.from('notification_log').select('*').order('created_at', { ascending: false }).limit(30);
+    let query = supabase.from('notification_log').select('*').order('created_at', { ascending: false }).limit(40);
     if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
 
     const { data } = await query;
@@ -638,7 +634,7 @@ export default function AdminDashboardPage() {
     }).filter(Boolean);
 
     setQueuedMessages(prev => {
-      return cleanAndDeduplicateQueue([...prev, ...newMessages]);
+      return cleanAndDeduplicateQueue([...newMessages, ...prev]);
     });
     
     alert(`${newMessages.length}건이 발송 대기열에 추가되었습니다.\n(가운데 큐에서 전체 발송을 눌러주세요)`);
@@ -689,15 +685,17 @@ export default function AdminDashboardPage() {
     alert(`메시지 전송 완료!\n(성공: ${successCount}건, 실패: ${failCount}건)`);
   };
 
+  // 🌟 색상 규칙 통일 (등원: 파랑 / 하원: 녹색)
   const getBadgeColor = (title: string) => {
     if (!title) return 'bg-transparent text-transparent border-transparent';
-    if (title.includes('출석') || title.includes('등원')) return 'bg-emerald-50 text-emerald-600 border-emerald-100';
+    if (title.includes('출석') || title.includes('등원')) return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (title.includes('하원') || title.includes('조퇴')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
     if (title.includes('지각')) return 'bg-amber-50 text-amber-600 border-amber-100';
     if (title.includes('결석')) return 'bg-rose-50 text-rose-500 border-rose-100';
-    if (title.includes('일정')) return 'bg-blue-50 text-blue-600 border-blue-100';
+    if (title.includes('일정')) return 'bg-indigo-50 text-indigo-600 border-indigo-100';
     if (title.includes('보강')) return 'bg-purple-50 text-purple-600 border-purple-100';
     if (title.includes('일반문자')) return 'bg-slate-100 text-slate-600 border-slate-300';
-    return 'bg-indigo-50 text-indigo-500 border-indigo-100';
+    return 'bg-slate-100 text-slate-600 border-slate-200';
   };
 
   if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
@@ -877,8 +875,8 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1.5">
-                    {queuedMessages.map((msg) => (
-                      <div key={msg.id} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
+                    {queuedMessages.map((msg, idx) => (
+                      <div key={`${msg.id}_${idx}`} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
                             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.previewTitle)}`}>{msg.previewTitle}</span>
@@ -916,13 +914,30 @@ export default function AdminDashboardPage() {
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
               </div>
               
-              <div className="flex-1 overflow-y-auto custom-scroll bg-white">
+              <div className="flex-1 overflow-y-auto custom-scroll bg-white relative">
                 {liveFeeds.length === 0 ? (
                   <div className="text-center py-10 text-slate-400 font-bold text-sm">최근 발송 내역이 없습니다.</div>
                 ) : (
                   <div className="flex flex-col">
                     {liveFeeds.map((feed, idx) => {
-                      const timeStr = new Date(feed.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                      const dateObj = new Date(feed.created_at);
+                      const days = ['일', '월', '화', '수', '목', '금', '토'];
+                      const currentDateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
+                      const displayDateStr = `${dateObj.getMonth() + 1}월 ${dateObj.getDate()}일 (${days[dateObj.getDay()]})`;
+                      const timeStr = dateObj.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+                      const rightSideDateTime = `${String(dateObj.getMonth() + 1).padStart(2, '0')}/${String(dateObj.getDate()).padStart(2, '0')}(${days[dateObj.getDay()]}) ${timeStr}`;
+
+                      let showSeparator = false;
+                      if (idx === 0) {
+                        showSeparator = true;
+                      } else {
+                        const prevDateObj = new Date(liveFeeds[idx - 1].created_at);
+                        const prevDateStr = `${prevDateObj.getFullYear()}-${String(prevDateObj.getMonth() + 1).padStart(2, '0')}-${String(prevDateObj.getDate()).padStart(2, '0')}`;
+                        if (currentDateStr !== prevDateStr) {
+                          showSeparator = true;
+                        }
+                      }
+
                       const fullMsg = feed.message || feed.content || '';
                       const match = fullMsg.match(/^\[(.*?)\]/);
                       const categoryName = match ? match[1] : '알림';
@@ -931,20 +946,27 @@ export default function AdminDashboardPage() {
                       const isSuccess = feed.status === '성공';
 
                       return (
-                        <div key={idx} className="px-3 py-1.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-[11px] w-full">
-                          <span className={`text-xs font-black shrink-0 ${isSuccess ? 'text-emerald-500' : 'text-rose-500'}`} title={isSuccess ? '성공' : '실패'}>
-                            {isSuccess ? '✓' : '✗'}
-                          </span>
-                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColorClass} shrink-0`}>
-                            {categoryName}
-                          </span>
-                          <div className="flex gap-1 items-baseline shrink-0 w-[100px]">
-                            <span className="font-extrabold text-slate-700 truncate max-w-[45px]">{feed.target_name || feed.student_name || '학부모'}</span>
-                            <span className="text-[9px] text-slate-400 font-medium truncate">{feed.target_phone || feed.phone || ''}</span>
+                        <React.Fragment key={feed.noti_log_id || idx}>
+                          {showSeparator && (
+                            <div className="bg-slate-100/50 px-3 py-1.5 border-y border-slate-200 flex items-center gap-1.5 sticky top-0 z-10 backdrop-blur-sm">
+                               <span className="text-[10px] font-extrabold text-slate-500">📅 {displayDateStr}</span>
+                            </div>
+                          )}
+                          <div className="px-3 py-1.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-[11px] w-full">
+                            <span className={`text-xs font-black shrink-0 ${isSuccess ? 'text-emerald-500' : 'text-rose-500'}`} title={isSuccess ? '성공' : '실패'}>
+                              {isSuccess ? '✓' : '✗'}
+                            </span>
+                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColorClass} shrink-0`}>
+                              {categoryName}
+                            </span>
+                            <div className="flex gap-1.5 items-baseline shrink-0 w-[130px]">
+                              <span className="font-extrabold text-slate-700 truncate">{feed.target_name || feed.student_name || '학부모'}</span>
+                              <span className="text-[9px] text-slate-400 font-medium truncate">{feed.target_phone || feed.phone || ''}</span>
+                            </div>
+                            <span className="text-[10px] text-slate-600 truncate flex-1" title={descText}>{descText}</span>
+                            <span className="text-[9px] font-bold text-slate-400 shrink-0 ml-1 whitespace-nowrap">{rightSideDateTime}</span>
                           </div>
-                          <span className="text-[10px] text-slate-600 truncate flex-1" title={descText}>{descText}</span>
-                          <span className="text-[9px] font-bold text-slate-400 shrink-0 ml-1">{timeStr}</span>
-                        </div>
+                        </React.Fragment>
                       );
                     })}
                   </div>
@@ -964,15 +986,13 @@ export default function AdminDashboardPage() {
                   const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
                   const msgs = Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs];
                   const newMsgs = msgs.map(m => ({ ...m, queuedAt: m.queuedAt || currentTimeStr }));
-                  return cleanAndDeduplicateQueue([...prev, ...newMsgs]);
+                  return cleanAndDeduplicateQueue([...newMsgs, ...prev]);
                 })} 
               />
             </div>
 
-            {/* 💡 신규 위젯 영역 (기존 결원 모니터링 자리 대체) */}
             <div className="xl:col-span-1 flex flex-col gap-6">
               
-              {/* 위젯 4. 오늘의 주요 일정 및 상담 */}
               <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
                 <div className="flex justify-between items-center mb-3 shrink-0">
                   <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">🗣️ 오늘의 일정 및 상담</span>
@@ -996,7 +1016,6 @@ export default function AdminDashboardPage() {
                 </div>
               </div>
 
-              {/* 위젯 3. 장기 결석 및 이탈 위험군 경고등 */}
               <div className="bg-white rounded-2xl p-5 border border-rose-100 shadow-sm flex flex-col hover:border-rose-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
                 <div className="flex justify-between items-center mb-3 shrink-0">
                   <span className="text-sm font-extrabold text-rose-600 flex items-center gap-1.5">🚨 이탈 위험군 경고등</span>

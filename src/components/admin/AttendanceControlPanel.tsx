@@ -9,11 +9,12 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+// 🌟 출결 리셋 기준을 오전 6시로 변경 (새벽 5:59까지는 전날로 간주)
 const getKSTDateStr = (offsetDays = 0) => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000) + (offsetDays * 86400000));
-  return kst.toISOString().split('T')[0];
+  const kstAdjusted = new Date(utc + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
+  return kstAdjusted.toISOString().split('T')[0];
 };
 
 const formatTimeAsKST = (isoStr: string) => {
@@ -23,6 +24,18 @@ const formatTimeAsKST = (isoStr: string) => {
   const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
   const kst = new Date(utc + (9 * 3600000));
   return `${String(kst.getHours()).padStart(2, '0')}:${String(kst.getMinutes()).padStart(2, '0')}`;
+};
+
+// 날짜 및 요일 포맷 (MM.DD (요일))
+const formatDateAndDayKST = (isoStr?: string) => {
+  const baseDate = isoStr ? new Date(isoStr) : new Date();
+  const utc = baseDate.getTime() + (baseDate.getTimezoneOffset() * 60000);
+  const kst = new Date(utc + (9 * 3600000));
+  const days = ['일', '월', '화', '수', '목', '금', '토'];
+  const mm = String(kst.getMonth() + 1).padStart(2, '0');
+  const dd = String(kst.getDate()).padStart(2, '0');
+  const dayName = days[kst.getDay()];
+  return `${mm}.${dd} (${dayName})`;
 };
 
 interface AttendanceControlPanelProps {
@@ -39,7 +52,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const [manualForm, setManualForm] = useState({ status: "NONE", checkIn: "", checkOut: "" });
 
   const [viewMode, setViewMode] = useState<"card" | "list">("card");
-  
   const [hideGoneHome, setHideGoneHome] = useState<boolean>(false);
 
   const fetchTimeoutRef = useRef<any>(null);
@@ -154,7 +166,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         att_id: todayAtt?.attendance_id, 
         status: currentStatus, 
         checkIn: todayAtt?.check_in_time,
-        checkOut: todayAtt?.check_out_time
+        checkOut: todayAtt?.check_out_time,
+        attDate: todayAtt?.attendance_date || today
       };
     });
 
@@ -265,7 +278,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const entries = Object.entries(groupedStudents).sort(([a], [b]) => a === '미배정' ? 1 : b === '미배정' ? -1 : a.localeCompare(b));
     
     for (const [cName, students] of entries) {
-      // 💡 [핵심 수정] 미등원, 하원, 조퇴, 결석은 전부 빼고, "현재 학원에 있는(등원/지각/클리닉중)" 아이들만 필터링합니다.
       const filtered = hideGoneHome 
         ? students.filter(s => ['출석', '등원', '지각', '클리닉중'].includes(s.status)) 
         : students;
@@ -564,7 +576,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                 checked={hideGoneHome}
                 onChange={(e) => handleToggleHideGoneHome(e.target.checked)}
               />
-              {/* 💡 [수정] 체크박스 레이블을 정확한 의도에 맞게 변경 */}
               <span className="text-[11px] font-bold text-slate-600 select-none">👀 원내 체류자만 보기</span>
             </label>
 
@@ -598,34 +609,36 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         
         <div className="flex flex-col lg:flex-row bg-white border border-t-0 border-slate-200 rounded-b-2xl shadow-sm overflow-hidden min-h-[450px]">
           
-          <div className="w-full lg:w-[260px] bg-slate-50 border-r border-slate-200 flex flex-col shrink-0">
-            <div className="p-5 flex flex-col gap-4 flex-1">
+          {/* 🌟 수정 1. 좌측 사이드바 폭을 250px -> 200px로 줄여서 우측 공간 확보 */}
+          <div className="w-full lg:w-[200px] bg-slate-50 border-r border-slate-200 flex flex-col shrink-0">
+            <div className="p-4 flex flex-col gap-3">
               <div>
                 <span className="text-[11px] font-bold text-slate-500 mb-2 block">
                   {selectedAttClassId === 'all' ? '학원 전체 동선 요약' : '반별 동선 요약'}
                 </span>
-                <div className="flex flex-col gap-2">
-                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
-                    <span className="text-[11px] font-bold text-slate-500">🏫 원내 체류</span><span className="text-sm font-black text-blue-600">{flowSummary.inClass}명</span>
+                <div className="flex flex-col gap-1.5">
+                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2 shadow-sm">
+                    <span className="text-[11px] font-bold text-slate-500">🏫 원내 체류</span>
+                    <span className="text-sm font-black text-blue-600">{flowSummary.inClass}명</span>
                   </div>
-                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
-                    <span className="text-[11px] font-bold text-slate-500">✍️ 클리닉중</span><span className="text-sm font-black text-purple-600">{flowSummary.inClinic}명</span>
+                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2 shadow-sm">
+                    <span className="text-[11px] font-bold text-slate-500">✍️ 클리닉중</span>
+                    <span className="text-sm font-black text-purple-600">{flowSummary.inClinic}명</span>
                   </div>
-                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2.5 shadow-sm">
-                    <span className="text-[11px] font-bold text-slate-500">👋 하원 완료</span><span className="text-sm font-black text-emerald-600">{flowSummary.goneHome}명</span>
+                  <div className="flex justify-between items-center bg-white border border-slate-200 rounded-lg p-2 shadow-sm">
+                    <span className="text-[11px] font-bold text-slate-500">👋 하원 완료</span>
+                    <span className="text-sm font-black text-emerald-600">{flowSummary.goneHome}명</span>
                   </div>
                 </div>
               </div>
               
-              <div className="flex-1"></div>
-              
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-200">
                 <span className="text-[11px] font-bold text-slate-500 mb-0.5">일괄 출결 처리</span>
-                <button onClick={bulkAttend} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-[#002864] text-white py-3 rounded-xl hover:bg-blue-900 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                  일괄 등원 처리 (카톡발송)
+                <button onClick={bulkAttend} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-[#002864] hover:bg-blue-900 text-white py-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                  일괄 등원 처리 (카톡)
                 </button>
-                <button onClick={bulkGoHome} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-emerald-600 text-white py-3 rounded-xl hover:bg-emerald-700 transition-colors shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                  일괄 하원 처리 (카톡발송)
+                <button onClick={bulkGoHome} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                  일괄 하원 처리 (카톡)
                 </button>
               </div>
             </div>
@@ -641,68 +654,77 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
               <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-8">
                 
                 {viewMode === "list" ? (
-                  <div className="overflow-x-auto w-full bg-white rounded-xl border border-slate-200 shadow-sm">
-                    <table className="w-full text-left border-collapse min-w-[800px]">
+                  <div className="w-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+                    <table className="w-full text-left border-collapse table-auto">
                       <thead>
+                        {/* 🌟 수정 3. 리스트 헤더 넓이를 비율에 맞게 쾌적하게 조절 */}
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="py-2.5 px-3 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider w-20">이름</th>
-                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider w-20 text-center">상태</th>
-                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider w-16 text-center">등원</th>
-                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider w-16 text-center">하원</th>
-                          <th className="py-2.5 px-3 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider text-right">출결 관리 (빠른 액션)</th>
+                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">이름</th>
+                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">상태</th>
+                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[60px] text-center">날짜(요일)</th>
+                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[40px] text-center">등원</th>
+                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[40px] text-center">하원</th>
+                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider text-left pl-3 w-full">출결 관리</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredDisplayGroups.map(({ cName, students, totalCount }) => (
                           <React.Fragment key={cName}>
                             <tr className="bg-slate-100/60 border-b border-slate-200">
-                              <td colSpan={5} className="py-2 px-3 text-[11px] font-black text-indigo-700">
+                              <td colSpan={6} className="py-1.5 px-3 text-[11px] font-black text-indigo-700">
                                 <span className="w-1.5 h-3 bg-indigo-500 inline-block align-middle mr-1.5 rounded-full"></span>
                                 {cName} 
                                 <span className="text-slate-400 font-bold ml-1">
-                                  (총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 체류 {students.length}명</span>})
+                                  (총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 {students.length}명</span>})
                                 </span>
                               </td>
                             </tr>
                             {students.map(student => {
                               const isNotArrived = student.status === 'NONE';
                               let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-100 border-slate-200";
-                              if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내(등원)"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
-                              else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
-                              else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
+                              if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "등원"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
+                              else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
+                              else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
                               else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
                               
                               const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "-";
                               const timeOutStr = student.checkOut ? formatTimeAsKST(student.checkOut) : "-";
+                              const dateAndDayStr = formatDateAndDayKST(student.checkIn || student.attDate);
 
                               return (
                                 <tr key={student.id} className={`border-b border-slate-100 last:border-0 hover:bg-indigo-50/40 transition-colors ${isNotArrived ? 'opacity-80 grayscale-[0.3]' : ''}`}>
-                                  <td className="py-2 px-3">
-                                    <span className={`text-[12px] font-extrabold ${isNotArrived ? 'text-slate-500' : 'text-slate-800'}`}>{student.name}</span>
+                                  <td className="py-1.5 px-2 text-center">
+                                    <span className={`text-[11px] font-extrabold truncate block max-w-[60px] mx-auto ${isNotArrived ? 'text-slate-500' : 'text-slate-800'}`} title={student.name}>
+                                      {student.name}
+                                    </span>
                                   </td>
-                                  <td className="py-2 px-2 text-center">
-                                    <span className={`px-2 py-0.5 rounded text-[10px] font-black border ${flowColor} whitespace-nowrap`}>
+                                  <td className="py-1.5 px-1 text-center">
+                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${flowColor} whitespace-nowrap`}>
                                       {flowIcon} {flowText}
                                     </span>
                                   </td>
-                                  <td className="py-2 px-2 text-center text-[11px] font-bold text-slate-500">{timeInStr}</td>
-                                  <td className="py-2 px-2 text-center text-[11px] font-bold text-slate-500">{timeOutStr}</td>
-                                  <td className="py-2 px-3 text-right">
-                                    <div className="flex items-center justify-end gap-1.5">
-                                      <button onClick={() => handleAttAction(student, 'PRESENT')} className="px-2 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-md text-[10px] transition-colors border border-blue-100">등원</button>
-                                      <button onClick={() => handleAttAction(student, 'LATE')} className="px-2 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded-md text-[10px] transition-colors border border-amber-100">지각</button>
-                                      <button onClick={() => handleAttAction(student, 'CLINIC')} className="px-2 py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-md text-[10px] transition-colors border border-purple-100">클리닉</button>
-                                      <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className="px-2 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded-md text-[10px] transition-colors border border-indigo-100">조퇴</button>
-                                      <button onClick={() => handleAttAction(student, 'GO_HOME')} className="px-2 py-1.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-md text-[10px] transition-colors border border-emerald-100">하원</button>
-                                      <button onClick={() => handleAttAction(student, 'ABSENT')} className="px-2 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded-md text-[10px] transition-colors border border-rose-100">결석</button>
+                                  <td className="py-1.5 px-1 text-center text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                                    {dateAndDayStr}
+                                  </td>
+                                  <td className="py-1.5 px-1 text-center text-[10px] font-bold text-blue-700">{timeInStr}</td>
+                                  <td className="py-1.5 px-1 text-center text-[10px] font-bold text-emerald-700">{timeOutStr}</td>
+                                  <td className="py-1.5 px-2 text-left pl-3">
+                                    {/* 🌟 수정 4. 버튼 컨테이너에 flex-nowrap을 추가하여 무조건 1줄로 예쁘게 정렬 */}
+                                    <div className="flex items-center justify-start gap-1 flex-nowrap whitespace-nowrap">
+                                      <button onClick={() => handleAttAction(student, 'PRESENT')} className="px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-[9px] transition-colors border border-blue-100 whitespace-nowrap">등원</button>
+                                      <button onClick={() => handleAttAction(student, 'LATE')} className="px-1.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded text-[9px] transition-colors border border-amber-100 whitespace-nowrap">지각</button>
+                                      <button onClick={() => handleAttAction(student, 'CLINIC')} className="px-1.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded text-[9px] transition-colors border border-purple-100 whitespace-nowrap">클리닉</button>
+                                      <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className="px-1.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded text-[9px] transition-colors border border-indigo-100 whitespace-nowrap">조퇴</button>
+                                      <button onClick={() => handleAttAction(student, 'GO_HOME')} className="px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded text-[9px] transition-colors border border-emerald-100 whitespace-nowrap">하원</button>
+                                      <button onClick={() => handleAttAction(student, 'ABSENT')} className="px-1.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded text-[9px] transition-colors border border-rose-100 whitespace-nowrap">결석</button>
                                       
-                                      <div className="w-[1px] h-4 bg-slate-200 mx-1"></div>
+                                      <div className="w-[1px] h-3 bg-slate-200 mx-0.5 shrink-0"></div>
                                       
-                                      <button onClick={() => openManualModal(student)} className="px-2 py-1.5 text-slate-500 hover:bg-slate-100 border border-slate-200 font-bold rounded-md text-[10px] transition-colors flex items-center gap-1" title="수동 설정">
-                                        ⚙️ 수동
+                                      <button onClick={() => openManualModal(student)} className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 border border-slate-200 font-bold rounded text-[9px] transition-colors" title="수동 설정">
+                                        ⚙️수동
                                       </button>
-                                      <button onClick={() => handleAttAction(student, 'DELETE')} className="px-2 py-1.5 text-rose-500 hover:bg-rose-50 border border-rose-200 font-bold rounded-md text-[10px] transition-colors flex items-center gap-1" title="기록 삭제">
-                                        🗑️ 삭제
+                                      <button onClick={() => handleAttAction(student, 'DELETE')} className="px-1.5 py-1 text-rose-500 hover:bg-rose-50 border border-rose-200 font-bold rounded text-[9px] transition-colors" title="기록 삭제">
+                                        🗑️삭제
                                       </button>
                                     </div>
                                   </td>
@@ -715,71 +737,73 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                     </table>
                   </div>
                 ) : (
-                  <div className="flex flex-col gap-6">
+                  <div className="flex flex-col gap-4">
                     {filteredDisplayGroups.map(({ cName, students, totalCount }) => (
                       <div key={cName}>
-                        <h4 className="text-xs font-extrabold text-slate-700 mb-2.5 flex items-center gap-1.5 pl-1">
-                          <span className="w-1.5 h-3.5 bg-indigo-500 rounded-full"></span>
+                        <h4 className="text-xs font-extrabold text-slate-700 mb-2 flex items-center gap-1.5 pl-1">
+                          <span className="w-1.5 h-3 bg-indigo-500 rounded-full"></span>
                           {cName} 
                           <span className="text-[10px] font-bold text-slate-400 ml-1">
-                            총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 체류 {students.length}명</span>}
+                            총 {totalCount}명 {hideGoneHome && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">원내 {students.length}명</span>}
                           </span>
                         </h4>
                         
-                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-2">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-1.5">
                           {students.map(student => {
                             const isMenuOpen = activeAttMenu === student.id;
                             const isNotArrived = student.status === 'NONE';
 
                             let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-200/50 border-slate-300";
-                            if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내(등원)"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
-                            else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
-                            else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
+                            if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "등원"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
+                            else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
+                            else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
                             else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
 
                             const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "";
                             
                             const cardBgClass = isNotArrived 
-                              ? "bg-slate-100 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
+                              ? "bg-slate-100/80 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
                               : "bg-white border-slate-200 hover:border-indigo-300";
 
                             return (
-                              <div key={student.id} className={`p-2 rounded-xl border flex flex-col text-xs transition-all relative gap-1 ${cardBgClass} ${isMenuOpen ? 'z-50 shadow-lg ring-2 ring-indigo-200' : 'z-10 shadow-sm'}`}>
-                                <div className="flex justify-between items-start w-full">
-                                  <div className="flex flex-col gap-0.5">
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="font-extrabold text-slate-800 text-[12px] truncate max-w-[50px]">{student.name}</span>
-                                      <span className={`px-1 py-0.5 rounded text-[9px] font-black border ${flowColor} whitespace-nowrap`}>
+                              <div key={student.id} className={`p-2 rounded-xl border flex flex-col justify-between transition-all relative gap-1.5 ${cardBgClass} ${isMenuOpen ? 'z-50 shadow-md ring-2 ring-indigo-200' : 'z-10 shadow-sm'}`}>
+                                <div className="flex justify-between items-start w-full min-w-0">
+                                  <div className="flex flex-col gap-0.5 min-w-0 flex-1 pr-1">
+                                    <span className="font-extrabold text-slate-800 text-[12px] truncate w-full leading-tight">{student.name}</span>
+                                    
+                                    {/* 🌟 수정 2. truncate(글씨 잘림)를 완전히 제거하고 양끝으로 밀착 배치하여 "기록 없음" 보호 */}
+                                    <div className="flex items-center justify-between w-full mt-0.5">
+                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-black border ${flowColor} whitespace-nowrap shrink-0`}>
                                         {flowIcon} {flowText}
                                       </span>
+                                      <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap shrink-0 pl-1">
+                                        {timeInStr ? timeInStr : '기록 없음'}
+                                      </span>
                                     </div>
-                                    <span className="text-[9px] font-bold text-slate-400 pl-0.5 mt-0.5">
-                                      {timeInStr ? `${timeInStr} 등원` : '시간 기록없음'}
-                                    </span>
                                   </div>
 
-                                  <div className="relative inline-block shrink-0 kebab-container">
-                                    <button onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors mt-0.5">
+                                  <div className="relative inline-block shrink-0 kebab-container mt-0.5">
+                                    <button onClick={() => setActiveAttMenu(isMenuOpen ? null : student.id)} className="p-0.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded transition-colors">
                                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1.5"></circle><circle cx="12" cy="5" r="1.5"></circle><circle cx="12" cy="19" r="1.5"></circle></svg>
                                     </button>
                                     
                                     {isMenuOpen && (
-                                      <div className="absolute right-0 top-6 w-28 bg-white shadow-2xl rounded-xl border border-slate-200 z-[9999] py-1 text-left">
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'LATE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-amber-600 hover:bg-slate-50 flex items-center gap-1.5">⏰ 지각 처리</button>
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'EARLY_LEAVE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-indigo-600 hover:bg-slate-50 flex items-center gap-1.5">🏃 조퇴 처리</button>
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'ABSENT'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-rose-600 hover:bg-slate-50 flex items-center gap-1.5">❌ 결석 처리</button>
+                                      <div className="absolute right-0 top-5 w-28 bg-white shadow-2xl rounded-xl border border-slate-200 z-[9999] py-1 text-left">
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'LATE'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-amber-600 hover:bg-slate-50 flex items-center gap-1.5">⏰ 지각 처리</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'EARLY_LEAVE'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-indigo-600 hover:bg-slate-50 flex items-center gap-1.5">🏃 조퇴 처리</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'ABSENT'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-rose-600 hover:bg-slate-50 flex items-center gap-1.5">❌ 결석 처리</button>
                                         <hr className="border-slate-100 my-0.5" />
-                                        <button onClick={() => openManualModal(student)} className="w-full text-left px-3 py-2 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">⚙️ 수동 설정</button>
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-3 py-2 text-[10px] font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-1.5">🗑️ 기록 삭제</button>
+                                        <button onClick={() => openManualModal(student)} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">⚙️ 수동 설정</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-1.5">🗑️ 기록 삭제</button>
                                       </div>
                                     )}
                                   </div>
                                 </div>
 
-                                <div className="flex gap-1 mt-1 pt-1.5 border-t border-slate-200/60">
-                                  <button onClick={() => handleAttAction(student, 'PRESENT')} className="flex-1 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-[4px] text-[10px] transition-colors border border-blue-100">등원</button>
-                                  <button onClick={() => handleAttAction(student, 'CLINIC')} className="flex-1 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-[4px] text-[10px] transition-colors border border-purple-100">클리닉</button>
-                                  <button onClick={() => handleAttAction(student, 'GO_HOME')} className="flex-1 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-[4px] text-[10px] transition-colors border border-emerald-100">하원</button>
+                                <div className="flex gap-1 mt-1 pt-1.5 border-t border-slate-100">
+                                  <button onClick={() => handleAttAction(student, 'PRESENT')} className="flex-1 py-1 flex items-center justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-md text-[9px] tracking-tighter whitespace-nowrap transition-colors border border-blue-100">등원</button>
+                                  <button onClick={() => handleAttAction(student, 'CLINIC')} className="flex-1 py-1 flex items-center justify-center bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-md text-[9px] tracking-tighter whitespace-nowrap transition-colors border border-purple-100">클리닉</button>
+                                  <button onClick={() => handleAttAction(student, 'GO_HOME')} className="flex-1 py-1 flex items-center justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-md text-[9px] tracking-tighter whitespace-nowrap transition-colors border border-emerald-100">하원</button>
                                 </div>
                               </div>
                             );

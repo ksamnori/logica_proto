@@ -9,6 +9,13 @@ interface InstructorPerformanceProps {
 }
 
 export default function InstructorPerformance({ instructorsStats, openClassModal }: InstructorPerformanceProps) {
+  // 🌟 실장 권한 제외 필터링 (담임 미배정 직책 제외)
+  const filteredStats = instructorsStats.filter((inst: any) => {
+    const pos = inst.position || '';
+    const role = inst.role || '';
+    return !pos.includes('실장') && !role.includes('실장') && role !== 'MANAGER';
+  });
+
   return (
     <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-blue-300 transition-colors flex-1 min-h-[300px] max-h-[450px]">
       
@@ -22,15 +29,14 @@ export default function InstructorPerformance({ instructorsStats, openClassModal
         </span>
       </div>
 
-      {/* 리스트 렌더링 영역 (카드 형태 -> 슬림형 가로 리스트로 개편) */}
+      {/* 리스트 렌더링 영역 */}
       <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-2.5">
-        {instructorsStats.length === 0 ? (
+        {filteredStats.length === 0 ? (
           <div className="flex h-full items-center justify-center text-xs font-bold text-slate-400">
-            데이터가 없습니다.
+            출력할 강사 데이터가 없습니다.
           </div>
         ) : (
-          instructorsStats.map((inst, idx) => {
-            // 강사별 프로필 아바타 색상 랜덤 배정
+          filteredStats.map((inst, idx) => {
             const avatarColors = [
               'bg-blue-100 text-blue-700 border-blue-200', 
               'bg-indigo-100 text-indigo-700 border-indigo-200', 

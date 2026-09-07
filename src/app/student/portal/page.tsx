@@ -160,7 +160,7 @@ export default function StudentPortal() {
         if (!clinicSessionRef.current?.id) return;
         const { data, error } = await supabaseClient
             .from('clinic_session_state')
-            // 🔥 수정됨: active_rechecks 도 함께 가져와야 포털에서도 찌꺼기를 치울 수 있습니다.
+            // 🔥 핵심 픽스: active_rechecks도 함께 가져오도록 추가
             .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, active_rechecks, away_since')
             .eq('id', clinicSessionRef.current.id)
             .maybeSingle();
@@ -170,6 +170,7 @@ export default function StudentPortal() {
             let needsDbUpdate = false;
             const updatePayload: any = {};
             
+            // 💡 [필살기] DB에 리셋(REFRESH) 도장이 찍혀있으면 무조건 즉시 새로고침
             if (data.active_calls && data.active_calls['REFRESH']) {
                 const newCalls = { ...data.active_calls };
                 delete newCalls['REFRESH'];
@@ -202,7 +203,7 @@ export default function StudentPortal() {
                 setTimeUpModal({ isOpen: true, icon: '🚪', title: '퇴실 처리되었습니다', desc: '조교가 클리닉 이용을 종료했어요.' });
             }
 
-            // 🚨 1. 조교 호출(Call) 결과 알림 및 찌꺼기 청소
+            // 🚨 1. 조교 호출(Call) 결과 알림 및 찌꺼기 청소 (ACK)
             if (data.active_calls) {
                 let callChanged = false;
                 const newCalls = { ...data.active_calls };
@@ -221,7 +222,7 @@ export default function StudentPortal() {
                 setIsPortalCalling(false);
             }
 
-            // 🚨 2. 수동 채점(Recheck) 결과 알림 및 찌꺼기 청소
+            // 🚨 2. 수동 채점(Recheck) 결과 알림 및 찌꺼기 청소 (ACK - 가장 중요)
             if (data.active_rechecks) {
                 let recheckChanged = false;
                 const newRechecks = { ...data.active_rechecks };
@@ -239,15 +240,12 @@ export default function StudentPortal() {
                 }
             }
 
-            // 변경된 내역(ACK) DB 업데이트
+            // 변경된 내역 DB 업데이트 (찌꺼기 삭제 최종 실행)
             if (needsDbUpdate) {
                 await supabaseClient.from('clinic_session_state').update(updatePayload).eq('id', clinicSessionRef.current.id);
             }
 
-            setIsPortalAway(prev => {
-                if (prev && !data.away_since) return false;
-                return prev;
-            });
+            setIsPortalAway(!!data.away_since);
 
             if (endRequestRef.current?.state === 'pending' && data.end_request_status !== 'pending') {
                 if (data.ended_at) {
@@ -625,7 +623,6 @@ export default function StudentPortal() {
                     window.location.reload();
                 }
             })
-            // 🌟 3. 포털에도 DB 감지기 추가
             .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
                 if (runDbSyncRef.current) runDbSyncRef.current();
             })

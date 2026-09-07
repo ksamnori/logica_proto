@@ -293,7 +293,6 @@ export function useSupervisorData() {
         return () => clearInterval(interval);
     }, [isAuthorized]);
 
-    // 🌟 핵심 로직: 5초마다 DB를 조회하여 관리자 화면을 완벽하게 복구하고 동기화합니다.
     useEffect(() => {
         if (!isAuthorized || !isMounted) return;
         const dbCrossValidationInterval = setInterval(async () => {
@@ -398,7 +397,6 @@ export function useSupervisorData() {
                     const dbCalls = dbRecord.active_calls || {};
                     const dbRechecks = dbRecord.active_rechecks || {};
 
-                    // 학생이 아직 처리하지 않아 verdict가 남겨진 상태라면 무시합니다.
                     Object.keys(dbCalls).forEach(qNumKey => {
                         if (dbCalls[qNumKey]?.verdict) return; 
                         if (st.calls[qNumKey]) return;
@@ -933,8 +931,11 @@ export function useSupervisorData() {
         const st = studentsRef.current[seat];
         if (!st) return;
 
+        // 🔥 qNum 추출 (학생이 새로고침해서 uid가 바뀌었을 때를 대비한 절대 좌표)
+        const targetRecheck = st.rechecks?.[uid];
+        const qNum = targetRecheck?.qNum;
+
         if (verdict === 'correct') {
-           const targetRecheck = st.rechecks?.[uid];
            if (targetRecheck) {
                if (targetRecheck.recordId) {
                    await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
@@ -952,12 +953,14 @@ export function useSupervisorData() {
             const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).single();
             if (data && data.active_rechecks && data.active_rechecks[uid]) {
                 const newRechecks = { ...data.active_rechecks };
-                newRechecks[uid].verdict = verdict; // 💡 학생 기기가 읽어갈 수 있도록 결과를 DB에 유지
+                newRechecks[uid].verdict = verdict; 
+                if (qNum) newRechecks[uid].qNum = qNum; // DB에도 qNum 명시 보장
                 await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
             }
         }
 
-        sendToStudent(seat, 'resolve_recheck', { uid, verdict });
+        // 🔥 학생 기기에 웹소켓 쏠 때 반드시 qNum 포함 전송 (uid가 깨져있어도 번호로 찾음)
+        sendToStudent(seat, 'resolve_recheck', { uid, verdict, qNum });
 
         const currentStudents = { ...studentsRef.current };
         if (currentStudents[seat] && currentStudents[seat].rechecks) {
@@ -988,7 +991,7 @@ export function useSupervisorData() {
                 if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
                 sendToStudent(seat, 'force_cancel_call', { qNum });
-                recordTaStat('총책임자', '');
+                recordTaStat('총책임자', 'skip');
             }
         } else if (type === 'clear_away') {
             if (currentStudents[seat]) { 
