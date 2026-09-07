@@ -195,6 +195,13 @@ export function useStep1Data() {
   const generateExam = () => {
     if (selectedItemIds.size === 0) return alert("출제할 단원(유형)이나 테스트를 최소 1개 이상 왼쪽 트리에서 선택해주세요!");
 
+    // 🌟 [캐시 완벽 초기화] 이전 시험지나 클리닉 모드에서 남은 찌꺼기 데이터를 모두 비웁니다.
+    sessionStorage.removeItem("isClinicMode");
+    sessionStorage.removeItem("examTitle");
+    sessionStorage.removeItem("examSubTitle");
+    sessionStorage.removeItem("editExamId");
+    sessionStorage.removeItem("duplicateExamId");
+
     const finalDistributions = isSettingsDisabled 
       ? [10, 20, 40, 20, 10] 
       : [diffBounds[0], diffBounds[1]-diffBounds[0], diffBounds[2]-diffBounds[1], diffBounds[3]-diffBounds[2], 100-diffBounds[3]];
@@ -202,9 +209,9 @@ export function useStep1Data() {
     const finalTypes = isSettingsDisabled ? { obj: true, subj: true, essay: true } : types;
     const finalRateRange = isSettingsDisabled ? [100, 0] : [rateMax, rateMin];
     
-    sessionStorage.removeItem("editExamId");
     sessionStorage.setItem("examMode", currentMode);
     
+    // (이하 기존 로직 동일)
     if (currentMode === 'test') {
       sessionStorage.setItem("testCategory", currentTestGroup);
       if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
@@ -223,7 +230,7 @@ export function useStep1Data() {
     sessionStorage.setItem("problemTypes", JSON.stringify(finalTypes));
     sessionStorage.setItem("correctRateRange", JSON.stringify(finalRateRange));
 
-    // 🌟 [추가] 신규 필터 상태를 sessionStorage에 저장하여 Step2로 전달
+    // 신규 필터 상태 저장
     sessionStorage.setItem("bookName1", bookName1.trim());
     sessionStorage.setItem("bookName2", bookName2.trim());
     sessionStorage.setItem("pageStart", pageStart.trim());
