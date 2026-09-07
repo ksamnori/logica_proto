@@ -5,7 +5,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import { searchStudentsByDigits, loginStudentAction, loginTransferAction, setupStudentPinAction } from "@/app/actions/studentAuth";
-// 🌟 방금 추가한 checkExistingDeviceForSeat 액션을 임포트합니다.
 import { getSeatForDevice, assignPadDevice, listActiveTenants, checkExistingDeviceForSeat } from "@/app/actions/clinicPadDevice";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { getKioskDeviceId } from "@/lib/kioskDevice";
@@ -90,7 +89,6 @@ export default function StudentKioskLogin() {
         return;
       }
 
-      // 🌟 핵심 해결: 서버 액션을 호출하여 관리자 권한으로 DB를 안전하게 뚫고 확인합니다.
       const existingDeviceId = await checkExistingDeviceForSeat(selectedTenantId, seat);
 
       if (existingDeviceId && existingDeviceId !== unregisteredDeviceId) {
@@ -117,13 +115,106 @@ export default function StudentKioskLogin() {
     }
   };
 
-  const finalizeLogin = (result: { studentId: string; name: string; phone?: string; tenant_id?: string }) => {
-    localStorage.setItem("logica_student_id", result.studentId);
-    localStorage.setItem("logica_student_phone", result.phone || "");
-    localStorage.setItem("logica_student_name", result.name);
-    if (result.tenant_id) localStorage.setItem("logica_tenant_id", result.tenant_id);
-    if (kioskSeatRef.current) localStorage.setItem("logica_kiosk_seat", kioskSeatRef.current);
-    router.push("/student/portal");
+  // 🌟 핵심 해결: 패드 로그인 시 입구 키오스크 누락자를 위한 스텔스 자동 등원 체크 로직!
+  const checkAndAutoAttend = async (studentId: string, tenantId: string) => {
+    try {
+      const now = new Date();
+      // KST 기준 절대 날짜 산출 (새벽 6시 리셋 기준)
+      const kstTime = new Date(now.getTime() + (9 * 60 * 60 * 1000) - (6 * 60 * 60 * 1000));
+      const today = kstTime.toISOString().split('T')[0];
+      const timestamp = now.toISOString();
+      
+      const formatKstTimeOnly = new Date(now.getTime() + (9 * 60 * 60 * 1000));
+      // 알림톡에 오해 방지용 안내 문구 덧붙임
+      const timeStr = `${String(formatKstTimeOnly.getUTCHours()).padStart(2,'0')}:${String(formatKstTimeOnly.getUTCMinutes()).padStart(2,'0')} (클리닉실 입실)`;
+
+      // 1. 오늘 등원 기록이 이미 있는지 샅샅이 스캔
+      const { data: attData, error: attError } = await supabaseClient
+        .from('attendance')
+        .select('attendance_id')
+        .eq('student_id', studentId)
+        .eq('attendance_date', today)
+        .limit(1);
+
+      if (attError) throw attError;
+
+      // 2. 만약 오늘 등원 기록이 없다면? (키오스크 안 찍고 클리닉 직행한 학생)
+      if (!attData || attData.length === 0) {
+        // 알림톡 발송을 위해 학부모 전화번호 및 수강 정보 가져오기
+        const { data: stuData } = await supabaseClient
+          .from('student')
+          .select('name, parent(name, phone), enrollment(enrollment_id, class(class_id))')
+          .eq('student_id', studentId)
+          .single();
+
+        if (!stuData) return;
+
+        const parentObj = Array.isArray(stuData.parent) ? stuData.parent[0] : stuData.parent;
+        const parentPhone = parentObj?.phone;
+        const parentName = (parentObj?.name && parentObj.name !== '미입력') ? parentObj.name : stuData.name;
+        const enrollmentId = stuData.enrollment && stuData.enrollment.length > 0 ? (stuData.enrollment as any)[0].enrollment_id : null;
+        const classId = stuData.enrollment && stuData.enrollment.length > 0 && (stuData.enrollment as any)[0].class ? (stuData.enrollment as any)[0].class.class_id : null;
+
+        // DB에 강제 등원 도장 꽝!
+        await supabaseClient.from('attendance').insert({
+          student_id: studentId,
+          tenant_id: tenantId,
+          class_id: classId,
+          enrollment_id: enrollmentId,
+          attendance_date: today,
+          status: '등원',
+          check_in_time: timestamp
+        });
+
+        // 학부모님께 안심 문자 자동 큐잉!
+        if (parentPhone) {
+          // 혹시 모를 중복 대기열 방지
+          await supabaseClient.from('alimtalk_queue')
+            .delete()
+            .eq('student_id', studentId)
+            .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
+            .eq('status', '대기');
+
+          await supabaseClient.from('alimtalk_queue').insert({
+            tenant_id: tenantId,
+            student_id: studentId,
+            student_name: stuData.name,
+            parent_name: parentName,
+            parent_phone: parentPhone,
+            template_id: 'KA01TP260826014520504X1Fplf8R0FH',
+            status_label: '등원',
+            time_string: timeStr,
+            preview_title: '[출결] 등원',
+            preview_desc: `${parentPhone} • ${timeStr}`,
+            status: '대기'
+          });
+        }
+      }
+    } catch (e) {
+      console.error("클리닉 패드 자동 등원 처리 실패:", e);
+    }
+  };
+
+  const finalizeLogin = async (result: { studentId: string; name: string; phone?: string; tenant_id?: string }) => {
+    setIsProcessing(true); // 배경을 로딩 상태로 묶어둠
+    try {
+      localStorage.setItem("logica_student_id", result.studentId);
+      localStorage.setItem("logica_student_phone", result.phone || "");
+      localStorage.setItem("logica_student_name", result.name);
+      
+      const tId = result.tenant_id || localStorage.getItem("logica_tenant_id") || "1ff4299c-d72b-4d99-97b0-45fee08e3b73";
+      if (result.tenant_id) localStorage.setItem("logica_tenant_id", result.tenant_id);
+      if (kioskSeatRef.current) localStorage.setItem("logica_kiosk_seat", kioskSeatRef.current);
+
+      // 🌟 패드에 성공적으로 로그인 한 직후 스텔스 등원 체크 가동
+      await checkAndAutoAttend(result.studentId, tId);
+      
+    } catch (e) {
+      console.error("로그인 후처리 에러:", e);
+    } finally {
+      setIsProcessing(false);
+      router.push("/student/portal");
+    }
   };
 
   useEffect(() => {
@@ -159,9 +250,11 @@ export default function StudentKioskLogin() {
           if (payload?.action !== 'relocated_in' || payload.seat !== seat) return;
           setIsProcessing(true);
           const result = await loginTransferAction(payload.studentId, payload.token, seat);
-          setIsProcessing(false);
-          if (result.success) finalizeLogin(result as any);
-          else alert(result.message || '좌석 이동 인계에 실패했습니다.');
+          if (result.success) await finalizeLogin(result as any);
+          else {
+            setIsProcessing(false);
+            alert(result.message || '좌석 이동 인계에 실패했습니다.');
+          }
         }).subscribe();
       } catch (e) {
         console.error("초기 설정 오류:", e);
@@ -258,17 +351,19 @@ export default function StudentKioskLogin() {
     setIsProcessing(true);
     try {
       const result = await loginStudentAction(selectedStudent.student_id, finalPin);
-      setIsProcessing(false);
-
+      
       if (result.success) {
         if ((result as any).needsPinSetup) {
+          setIsProcessing(false); // 핀 셋업으로 넘어갈 땐 로딩을 품
           setPendingLoginData(result);
           setStep("setup_pin");
           setPasswordInput("");
         } else {
-          finalizeLogin(result as any);
+          // finalize 내부에서 어차피 isProcessing 관리를 하므로 await
+          await finalizeLogin(result as any);
         }
       } else {
+        setIsProcessing(false);
         alert("비밀번호가 일치하지 않습니다. 다시 시도해주세요.");
         setPasswordInput(""); 
       }
@@ -283,11 +378,11 @@ export default function StudentKioskLogin() {
     setIsProcessing(true);
     try {
       const res = await setupStudentPinAction(selectedStudent.student_id, pin);
-      setIsProcessing(false);
       
       if (res.success) {
-        finalizeLogin(pendingLoginData);
+        await finalizeLogin(pendingLoginData);
       } else {
+        setIsProcessing(false);
         alert(res.message || "설정 실패. 다시 시도해주세요.");
         setNewPinInput("");
       }
