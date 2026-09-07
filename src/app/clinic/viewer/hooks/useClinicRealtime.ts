@@ -52,6 +52,7 @@ export function useClinicRealtime({
 }: UseClinicRealtimeProps) {
   
   const clinicChannelRef = useRef<any>(null);
+  const gradingChannelRef = useRef<any>(null); // 🌟 무한 재연결을 위한 레퍼런스 추가
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
 
@@ -69,7 +70,6 @@ export function useClinicRealtime({
 
   const runSelfCorrectionRef = useRef<any>(null);
 
-  // 🌟 1. 무적의 자가 교정 로직 (모달창 갇힘/프리징 완벽 차단 및 연산 오류 픽스)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
     let cancelled = false;
@@ -89,13 +89,11 @@ export function useClinicRealtime({
       let hasChanges = false;
       const { processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview } = callbacksRef.current;
 
-      // 💡 [비상 탈출] 관리자의 강제 새로고침(REFRESH) 감지 시 즉시 탈출
       if (data.active_calls && data.active_calls['REFRESH']) {
           const newCalls = { ...data.active_calls };
           delete newCalls['REFRESH'];
           await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
           
-          // 🔥 강제 새로고침 시 이탈 경고창 안전하게 무시 (프리패스 발급)
           (window as any).__isForceRefreshing = true; 
           window.location.reload();
           return;
@@ -148,7 +146,6 @@ export function useClinicRealtime({
         return prevAway;
       });
 
-      // 💡 수동 채점 갇힘(프리징) 완벽 해결 및 비상 탈출 장치 도입
       const dbRechecks = data.active_rechecks || {};
       const rechecksToDelete: string[] = [];
       
@@ -166,7 +163,7 @@ export function useClinicRealtime({
            });
 
            if (qIdx >= 0 && questions[qIdx]) {
-               recheckState.current[qIdx] = null; // 문제 갇힘 강제 해제!
+               recheckState.current[qIdx] = null; 
                const currentStatus = qBoxStatus.current[qIdx];
                
                if (rec.verdict === 'correct' && currentStatus !== 'correct_blue') {
@@ -181,7 +178,6 @@ export function useClinicRealtime({
                setTimeout(() => setRecheckToast(""), 4000);
                hasChanges = true;
            } else {
-               // 🔥 비상 탈출: 문항 인덱스를 찾지 못했더라도, DB에 해결 내역이 있다면 전체 갇힘 상태를 일괄 해제합니다!
                Object.keys(recheckState.current).forEach(k => { recheckState.current[Number(k)] = null; });
                hasChanges = true;
            }
@@ -230,6 +226,7 @@ export function useClinicRealtime({
     };
   }, [studentInfo.id, questions]); 
 
+  // 🌟 핵심 해결: 채점 기록 리스너망 "무한 재연결(Auto-Reconnect)" 탑재!
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
 
@@ -291,15 +288,32 @@ export function useClinicRealtime({
       }
     };
 
-    const channel = supabaseClient.channel(`student_realtime_grading_listen_${studentInfo.id}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
-          if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
-      })
-      .subscribe();
+    const connectGradingChannel = () => {
+        if (gradingChannelRef.current) supabaseClient.removeChannel(gradingChannelRef.current);
+        
+        const channel = supabaseClient.channel(`student_realtime_grading_listen_${studentInfo.id}`)
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
+              if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
+          });
+          
+        channel.subscribe((status) => {
+            // 통신망이 유휴 상태로 끊어지면 무한 멱살잡이(3초마다 부활)
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+                setTimeout(() => {
+                    if (gradingChannelRef.current === channel) connectGradingChannel();
+                }, 3000);
+            }
+        });
+        gradingChannelRef.current = channel;
+    };
 
-    return () => { supabaseClient.removeChannel(channel); };
+    connectGradingChannel();
+
+    return () => { 
+        if (gradingChannelRef.current) supabaseClient.removeChannel(gradingChannelRef.current); 
+    };
   }, [studentInfo.id, questions]);
 
   handleTaActionRef.current = (payload: any, sId: string, sessionState: any) => {
@@ -377,7 +391,6 @@ export function useClinicRealtime({
             forceUpdate();
           }
       } else {
-          // 🔥 비상 탈출: 문항 인덱스를 잃어버렸더라도 갇힘 상태를 일괄 해제합니다.
           Object.keys(recheckState.current).forEach(k => { recheckState.current[Number(k)] = null; });
           forceUpdate();
       }
@@ -400,7 +413,6 @@ export function useClinicRealtime({
          });
       }
     } else if (payload.action === 'force_refresh') {
-      // 🔥 웹소켓으로 '새로고침' 신호가 왔을 때 경고창을 프리패스시킵니다.
       (window as any).__isForceRefreshing = true;
       window.location.reload();
     }
@@ -415,6 +427,7 @@ export function useClinicRealtime({
     });
   };
 
+  // 🌟 핵심 해결: 관제탑 연결망 "무한 재연결(Auto-Reconnect)" 탑재!
   const connectChannel = async (sId: string, sessionState: any) => {
     if (clinicChannelRef.current) {
       await supabaseClient.removeChannel(clinicChannelRef.current);
@@ -425,6 +438,7 @@ export function useClinicRealtime({
     
     const channel = supabaseClient.channel(channelName);
     clinicChannelRef.current = channel;
+    
     channel
       .on('presence', { event: 'sync' }, () => {
         const state = channel.presenceState();
@@ -441,7 +455,7 @@ export function useClinicRealtime({
         });
 
         if (mySeatRef.current) {
-          if (!amIPresent) trackPresenceRef.current(mySeatRef.current, sId, sessionState);
+          if (!amIPresent) trackPresenceRef.current(mySeatRef.current, sId, clinicSessionStateRef.current || sessionState);
           return;
         }
 
@@ -452,11 +466,21 @@ export function useClinicRealtime({
         if (seat) {
           mySeatRef.current = seat;
           supabaseClient.from('clinic_session_state').update({ seat }).eq('student_id', sId).then();
-          trackPresenceRef.current(seat, sId, sessionState);
+          trackPresenceRef.current(seat, sId, clinicSessionStateRef.current || sessionState);
         }
       })
-      .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionRef.current(payload, sId, sessionState))
-      .subscribe();
+      .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionRef.current(payload, sId, clinicSessionStateRef.current || sessionState))
+      .subscribe((status) => {
+          // 브라우저 절전 등으로 실시간 소켓이 죽었을 때 불사조처럼 무한 부활
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+              setTimeout(() => {
+                  // 의도적으로 연결을 끊은 경우(퇴실 등)가 아닐 때만 복구
+                  if (clinicChannelRef.current === channel) {
+                      connectChannel(sId, clinicSessionStateRef.current || sessionState);
+                  }
+              }, 3000);
+          }
+      });
   };
 
   const assignSeatDirectly = async (sId: string, sessionState: any) => {
@@ -495,10 +519,11 @@ export function useClinicRealtime({
     await connectChannel(sId, sessionData);
   };
 
+  // 퇴실 등 의도적인 연결 종료 시 재연결 고리 끊기
   const untrackPresence = async () => {
     if (clinicChannelRef.current) {
       const ch = clinicChannelRef.current;
-      clinicChannelRef.current = null;
+      clinicChannelRef.current = null; // 여기서 참조를 날려버림으로써 setTimeout 재연결망 무력화
       try { await ch.untrack(); } catch(e) {}
       try { await supabaseClient.removeChannel(ch); } catch(e) {}
     }
@@ -524,7 +549,6 @@ export function useClinicRealtime({
 
     try {
         if (action === 'call' || action === 'cancel_call') {
-            // 🌟 픽스: maybeSingle() 적용
             const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
             let calls = data?.active_calls || {};
             if (action === 'call') {
@@ -535,7 +559,6 @@ export function useClinicRealtime({
             await supabaseClient.from('clinic_session_state').update({ active_calls: calls }).eq('id', sid);
         }
         else if (action === 'recheck_request') {
-            // 🌟 픽스: maybeSingle() 적용
             const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).maybeSingle();
             let rechecks = data?.active_rechecks || {};
             

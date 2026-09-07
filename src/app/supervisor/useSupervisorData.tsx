@@ -293,7 +293,6 @@ export function useSupervisorData() {
         return () => clearInterval(interval);
     }, [isAuthorized]);
 
-    // 🌟 핵심 로직: 5초마다 DB를 조회하여 관리자 화면을 완벽하게 복구하고 동기화합니다.
     useEffect(() => {
         if (!isAuthorized || !isMounted) return;
         const dbCrossValidationInterval = setInterval(async () => {
@@ -361,7 +360,7 @@ export function useSupervisorData() {
                     isModified = true;
                     const justStarted = Date.now() - (new Date(dbRecord.started_at).getTime() || 0) < 10000;
                     if (justStarted) {
-                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-700', '입장', `[${targetSeat}] ${entryName} 입장`, `클리닉에 접속했습니다.`);
+                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '입장', `[${targetSeat}] ${entryName} 입장`, `클리닉에 접속했습니다.`);
                     }
                 } else if (oldSeat === targetSeat) {
                     const isTimeAdjusting = pendingTimeAdjustRef.current[targetSeat] && Date.now() < pendingTimeAdjustRef.current[targetSeat].expiresAt;
@@ -399,7 +398,6 @@ export function useSupervisorData() {
                     const dbRechecks = dbRecord.active_rechecks || {};
 
                     Object.keys(dbCalls).forEach(qNumKey => {
-                        // 🌟 BUG FIX 1: REFRESH 도장이 로그에 스며드는 현상 완벽 차단!
                         if (qNumKey === 'REFRESH') return; 
                         
                         if (dbCalls[qNumKey]?.verdict) return; 
@@ -584,7 +582,6 @@ export function useSupervisorData() {
                         st[activeSeat].status = 'idle';
                     }
 
-                    // 🌟 BUG FIX 2: 학생이 웹소켓으로 신호를 보내면 "난 살아있다!"고 판단하여 오프라인 강제 해제 타이머 갱신
                     st[activeSeat].lastUpdatedAt = Date.now();
 
                     if (action === 'update_activity') { 
@@ -1013,6 +1010,7 @@ export function useSupervisorData() {
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
         } else if (type === 'force_refresh') {
+            // 🌟 킬스위치 1: DB에 강제 REFRESH 신호를 꽂아 넣습니다.
             if (currentStudents[seat]?.sessionId) {
                 supabaseClient.from('clinic_session_state')
                     .select('active_calls')
@@ -1023,6 +1021,7 @@ export function useSupervisorData() {
                         supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', currentStudents[seat].sessionId).then();
                     });
             }
+            // 기존의 웹소켓 신호도 날려줍니다.
             sendToStudent(seat, 'force_refresh');
             appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
         } else if (type === 'force_reset') {
@@ -1038,6 +1037,7 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('recheck', seat);
                 removeLogsByTypeAndSeat('end_request', seat);
                 
+                // 🌟 킬스위치 2: 모든 갇힘 상태를 DB에서 강제로 지우고, 동시에 REFRESH 신호를 보냅니다.
                 if (st.sessionId) {
                     supabaseClient.from('clinic_session_state').update({
                         active_calls: { REFRESH: Date.now() },

@@ -51,10 +51,10 @@ export function useTaHandheld() {
   const [gridSnapshot, setGridSnapshot] = useState<Record<string, StudentData>>({});
   const [callsSnapshot, setCallsSnapshot] = useState<Record<string, CallData>>({});
   const [rechecksSnapshot, setRechecksSnapshot] = useState<Record<string, RecheckData>>({});
-  const [myAssignedSeats, setMyAssignedSeats] = useState<Set<string>>(new Set());
-  const [assignmentMap, setAssignmentMap] = useState<Record<string, string>>({});
+  
   const [claimedByOthers, setClaimedByOthers] = useState<Record<string, string>>({});
   const [totalTaCount, setTotalTaCount] = useState(0);
+  
   const [allSeats, setAllSeats] = useState<string[]>([]);
   const [allSeatObjs, setAllSeatObjs] = useState<Seat[]>([]);
   const [canvasWidth, setCanvasWidth] = useState(DEFAULT_CANVAS_W);
@@ -75,8 +75,7 @@ export function useTaHandheld() {
   const connectChainRef = useRef<Promise<void>>(Promise.resolve());
   const isFetchingSeatsRef = useRef(false);
   const fetchingSeatsStartedAtRef = useRef(0);
-  const allSeatObjsRef = useRef<Seat[]>([]);
-  const prevAssignmentRef = useRef<Record<string, string>>({});
+  const allSeatObjsRef = useRef<Seat[]>([]); // 🌟 이 핵심 기준표가 아까 빠져있었습니다!
 
   useEffect(() => {
     let savedName = localStorage.getItem(TA_NAME_STORAGE_KEY) || "";
@@ -90,7 +89,6 @@ export function useTaHandheld() {
     setTaClientId(savedClientId);
     setTaJoinedAt(Date.now());
 
-    // 💡 이름을 따로 물어보지 않는다 — 강사 로그인 시 저장된 실명을 그대로 쓴다.
     if (!savedName) savedName = getInstructorName();
 
     if (savedName) {
@@ -169,86 +167,6 @@ export function useTaHandheld() {
 
   const syncFromPresenceRef = useRef<() => void>(() => {});
 
-  const spatialPartition = (seats: Seat[], k: number): Seat[][] => {
-    if (k <= 1) return [seats];
-    if (seats.length === 0) return Array.from({ length: k }, () => []);
-    const left = Math.floor(k / 2), right = k - left;
-    const xs = seats.map(s => s.x), ys = seats.map(s => s.y);
-    const spreadX = Math.max(...xs) - Math.min(...xs);
-    const spreadY = Math.max(...ys) - Math.min(...ys);
-    const axis: 'x' | 'y' = spreadX >= spreadY ? 'x' : 'y';
-    const sorted = [...seats].sort((a, b) => a[axis] - b[axis]);
-    const cut = Math.round(sorted.length * left / k);
-    return [...spatialPartition(sorted.slice(0, cut), left), ...spatialPartition(sorted.slice(cut), right)];
-  };
-
-  const computeAssignment = (taMetas: any[], occupiedSeats: string[]) => {
-    const tas = [...taMetas].sort((a, b) => (a.joined_at - b.joined_at) || (a.clientId < b.clientId ? -1 : a.clientId > b.clientId ? 1 : 0));
-    const N = tas.length;
-    if (N === 0 || occupiedSeats.length === 0) { prevAssignmentRef.current = {}; return {}; }
-
-    const seatByNumber = new Map(allSeatObjsRef.current.map(s => [String(s.number), s] as const));
-    const seatObj = (num: string): Seat => seatByNumber.get(num) || { id: num, number: Number(num), x: Number(num), y: 0 };
-
-    const activeIds = new Set(tas.map(t => t.clientId));
-    const occupiedSet = new Set(occupiedSeats);
-
-    const sticky: Record<string, string> = {};
-    Object.entries(prevAssignmentRef.current).forEach(([seat, taId]) => {
-      if (occupiedSet.has(seat) && activeIds.has(taId)) sticky[seat] = taId;
-    });
-
-    let map: Record<string, string>;
-    if (Object.keys(sticky).length === 0) {
-      map = {};
-      const groups = spatialPartition(occupiedSeats.map(seatObj), N);
-      tas.forEach((ta, i) => { (groups[i] || []).forEach(s => { map[String(s.number)] = ta.clientId; }); });
-    } else {
-      map = { ...sticky };
-      const centroidOf = (taId: string) => {
-        const seats = Object.keys(map).filter(s => map[s] === taId).map(seatObj);
-        if (seats.length === 0) return null;
-        return { x: seats.reduce((a, s) => a + s.x, 0) / seats.length, y: seats.reduce((a, s) => a + s.y, 0) / seats.length };
-      };
-      const leftover = occupiedSeats.filter(s => !map[s]).map(seatObj);
-      const overallCentroid = leftover.length === 0
-        ? { x: 0, y: 0 }
-        : { x: leftover.reduce((a, s) => a + s.x, 0) / leftover.length, y: leftover.reduce((a, s) => a + s.y, 0) / leftover.length };
-
-      leftover.forEach(s => {
-        let bestTa = tas[0].clientId, bestDist = Infinity;
-        tas.forEach(ta => {
-          const c = centroidOf(ta.clientId) || overallCentroid;
-          const d = (c.x - s.x) ** 2 + (c.y - s.y) ** 2;
-          if (d < bestDist) { bestDist = d; bestTa = ta.clientId; }
-        });
-        map[String(s.number)] = bestTa;
-      });
-
-      let guard = 0;
-      while (guard++ < occupiedSeats.length * N) {
-        const counts = new Map(tas.map(t => [t.clientId, 0]));
-        Object.values(map).forEach(id => counts.set(id, (counts.get(id) || 0) + 1));
-        let maxTa = tas[0].clientId, maxCount = -Infinity, minTa = tas[0].clientId, minCount = Infinity;
-        tas.forEach(t => {
-          const c = counts.get(t.clientId) || 0;
-          if (c > maxCount) { maxCount = c; maxTa = t.clientId; }
-          if (c < minCount) { minCount = c; minTa = t.clientId; }
-        });
-        if (maxCount - minCount <= 1) break;
-
-        const minCentroid = centroidOf(minTa) || overallCentroid;
-        const candidates = Object.keys(map).filter(s => map[s] === maxTa).map(seatObj)
-          .sort((a, b) => ((a.x - minCentroid.x) ** 2 + (a.y - minCentroid.y) ** 2) - ((b.x - minCentroid.x) ** 2 + (b.y - minCentroid.y) ** 2));
-        if (candidates.length === 0) break;
-        map[String(candidates[0].number)] = minTa;
-      }
-    }
-
-    prevAssignmentRef.current = map;
-    return map;
-  };
-
   const syncFromPresence = useCallback(() => {
     if (!clinicChannelRef.current) return;
     const state = clinicChannelRef.current.presenceState();
@@ -269,13 +187,11 @@ export function useTaHandheld() {
       if (taUpdatedAtByKey[key] === undefined || candidateUpdatedAt > taUpdatedAtByKey[key]) {
         taUpdatedAtByKey[key] = candidateUpdatedAt;
         if (latestMeta.clientId) taMetasMap.set(latestMeta.clientId, { clientId: latestMeta.clientId, joined_at: latestMeta.joined_at || 0 });
+        // 🌟 내가 아닌 다른 조교가 handling 중인 요청이면 잠금(🔒) 처리
         if (latestMeta.handling && latestMeta.clientId !== taClientId) newClaimedByOthers[latestMeta.handling] = latestMeta.name || '다른 조교';
       }
     });
 
-    const newAssignmentMap = computeAssignment(Array.from(taMetasMap.values()), Object.keys(activeStudentsRef.current));
-    setAssignmentMap(newAssignmentMap);
-    setMyAssignedSeats(new Set(Object.keys(newAssignmentMap).filter(s => newAssignmentMap[s] === taClientId)));
     setClaimedByOthers(newClaimedByOthers);
     setTotalTaCount(taMetasMap.size);
     setEditorLocked(hasEditor);
@@ -313,10 +229,8 @@ export function useTaHandheld() {
       .not('seat', 'is', null);
     if (error) return;
 
-    // 💡 clinic_session_state에는 tenant_id 컬럼이 없어 지점으로 직접 필터링할 수 없다. 대신 이미
-    // 지점별로 로드해둔 좌석 배치(allSeatObjsRef)에 실제로 존재하는 좌석 번호로만 좁혀서, 다른 지점의
-    // 활성 세션이 우리 지점 몫으로 섞여 들어와 담당 배정되는 걸 막는다. 좌석 배치가 아예 없는 본사
-    // 계정(tenant_id가 UUID가 아님 → getActiveSeatLayout이 빈 배치 반환)은 이 필터로 자연히 0명이 된다.
+    // 🌟 텅 비어있던 기준 좌석표(`allSeatObjsRef.current`)가 복구되면서, 
+    // 이제 우리 지점의 실제 자리에서 온 호출들만 정확하게 캐치합니다!
     const knownSeats = new Set(allSeatObjsRef.current.map(s => String(s.number)));
     const latestByStudent = new Map<string, any>();
     (sessions || []).filter((r: any) => r.seat && knownSeats.has(String(r.seat))).forEach((r: any) => {
@@ -557,8 +471,10 @@ export function useTaHandheld() {
       const sorted = [...layout.seats].sort((a, b) => a.number - b.number);
       setAllSeats(sorted.map(s => String(s.number)));
       setAllSeatObjs(sorted);
+      
+      // 🌟 핵심 방어선 복구 완료: 이 기준표가 있어야 DB의 좌석 데이터를 화면에 띄울 수 있습니다.
       allSeatObjsRef.current = sorted;
-      prevAssignmentRef.current = {};
+      
       setCanvasWidth(layout.canvasWidth);
       setCanvasHeight(layout.canvasHeight);
       setSeatWidth(layout.seatWidth);
@@ -575,7 +491,6 @@ export function useTaHandheld() {
         clinicChannelRef.current = null;
       }
       
-      // 🌟 [보안 패치 유지] 조교(TA)도 소속 지점의 클리닉 방으로 연결
       const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
       const channelName = `${CLINIC_ROOM}_${myTenantId}`;
       
@@ -596,9 +511,6 @@ export function useTaHandheld() {
     if (!selectedCallKey || !markState[selectedCallKey]) return;
     const c = callsSnapshot[selectedCallKey];
     if (!c) return;
-    // 💡 일반 호출(포털에서 누른 호출)은 qNum이 숫자가 아니라 문자열 'general'이다. 여기서 Number()로
-    // 캐스팅하면 NaN이 되어, 이 broadcast를 받는 다른 조교 패드/감독관 화면의 로컬 상태 키('general')와
-    // 안 맞아서 그 화면에서는 호출 표시가 즉시 안 지워진다(다음 DB 폴링 때야 뒤늦게 정리됨).
     sendToStudent(c.seat, 'force_cancel_call', { qNum: c.qNum, mark: markState[selectedCallKey], taName: taName, taClientId: taClientId });
 
     const sid = activeStudentsRef.current[c.seat]?.sessionId;
@@ -632,7 +544,7 @@ export function useTaHandheld() {
 
   return {
     taName, taClientId, isConnected, gridSnapshot, callsSnapshot, rechecksSnapshot,
-    myAssignedSeats, assignmentMap, claimedByOthers, totalTaCount,
+    claimedByOthers, totalTaCount,
     selectedCallKey, setSelectedCallKey, markState, setMarkState,
     handleConfirmCall, handleConfirmRecheck, formatElapsed, updateHandlingPresence,
     allSeats, allSeatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked,
