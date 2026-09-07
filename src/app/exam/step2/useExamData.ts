@@ -296,6 +296,12 @@ export function useExamData() {
     const testCategory = sessionStorage.getItem("testCategory");
     const selectedItemIdsArray = JSON.parse(itemIdsStr);
 
+    // 💡 Step 1에서 넘겨준 필터값 추출
+    const bookName1 = sessionStorage.getItem("bookName1") || "";
+    const bookName2 = sessionStorage.getItem("bookName2") || "";
+    const pageStart = sessionStorage.getItem("pageStart") || "";
+    const pageEnd = sessionStorage.getItem("pageEnd") || "";
+
     try {
       let allData: any[] = [];
       const searchIds = new Set<string>();
@@ -324,14 +330,24 @@ export function useExamData() {
             finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
         }
 
+        // 💡 1차 필터링: 교재명 ilike 검색 적용 (입력된 단어 모두 포함)
+        if (bookName1) finalQuery = finalQuery.ilike("book_name", `%${bookName1}%`);
+        if (bookName2) finalQuery = finalQuery.ilike("book_name", `%${bookName2}%`);
+
         const { data, error } = await finalQuery.limit(2000);
         if (error) throw error;
         if (data) allData = allData.concat(data);
       }
 
+      // 페이지 번호 필터 활성화 여부
+      const isPageFilterActive = pageStart !== "" || pageEnd !== "";
+      const minPage = pageStart ? parseInt(pageStart, 10) : 0;
+      const maxPage = pageEnd ? parseInt(pageEnd, 10) : 999999;
+
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
+        
         if (examMode !== "test") {
           const pt = String(q.problem_type || '').toUpperCase();
           let isObj = false, isSubj = false, isEssay = false;
@@ -340,10 +356,19 @@ export function useExamData() {
           else isObj = true; 
           if ((isObj && !pTypes.obj) || (isSubj && !pTypes.subj) || (isEssay && !pTypes.essay)) return false;
         }
+        
         if (isRateFilterActive) {
           if (q.solving_probability === null || q.solving_probability === undefined) return true;
           if (q.solving_probability > rateMax || q.solving_probability < rateMin) return false;
         }
+
+        // 💡 2차 필터링: 페이지 번호 범위 제한 (숫자만 추출해서 대소 비교)
+        if (isPageFilterActive) {
+          if (!q.final_printed_page) return false;
+          const pageNum = parseInt(String(q.final_printed_page).replace(/[^0-9]/g, ''), 10);
+          if (isNaN(pageNum) || pageNum < minPage || pageNum > maxPage) return false;
+        }
+
         return true;
       });
 
@@ -459,7 +484,6 @@ export function useExamData() {
   };
 
   const handleDragStart = (e: React.DragEvent, idx: number) => { 
-    // 🌟 고스트 이미지 위치 버그 방지를 위해 비동기 처리
     e.dataTransfer.effectAllowed = "move"; 
     setTimeout(() => {
       setDraggedIdx(idx);

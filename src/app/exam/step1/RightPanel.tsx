@@ -4,7 +4,13 @@ import React, { useEffect, useRef } from "react";
 export default function RightPanel({ step1Data }: { step1Data: any }) {
   const {
     qCount, setQCount, diffBounds, setDiffBounds, rateMax, setRateMax, rateMin, setRateMin,
-    types, setTypes, isSettingsDisabled
+    types, setTypes, isSettingsDisabled,
+    
+    // 신규 필터 상태
+    bookName1, setBookName1,
+    bookName2, setBookName2,
+    pageStart, setPageStart,
+    pageEnd, setPageEnd,
   } = step1Data;
 
   const diffTrackRef = useRef<HTMLDivElement>(null);
@@ -112,8 +118,47 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
           </div>
         </div>
 
+        {/* 🌟 3. 출처 교재 및 페이지 필터 추가 */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">3. 출제 속성 및 포맷</h3>
+          <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">3. 출처 교재 및 페이지 필터 (선택)</h3>
+          <div className="grid grid-cols-2 gap-8">
+            <div>
+              <label className="block text-sm font-bold text-slate-500 mb-3">교재명 키워드 (모두 포함 시 검색)</label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" placeholder="단어 1 (예: 쎈)" 
+                  value={bookName1} onChange={(e) => setBookName1(e.target.value)} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864]" 
+                />
+                <input 
+                  type="text" placeholder="단어 2 (예: 수학상)" 
+                  value={bookName2} onChange={(e) => setBookName2(e.target.value)} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864]" 
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-bold text-slate-500 mb-3">페이지 번호 범위</label>
+              <div className="flex items-center gap-2">
+                <input 
+                  type="number" placeholder="시작" min="1"
+                  value={pageStart} onChange={(e) => setPageStart(e.target.value)} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864] text-center" 
+                />
+                <span className="text-slate-400 font-bold">~</span>
+                <input 
+                  type="number" placeholder="끝" min="1"
+                  value={pageEnd} onChange={(e) => setPageEnd(e.target.value)} 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864] text-center" 
+                />
+                <span className="text-slate-500 font-bold text-sm shrink-0">p</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
+          <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">4. 출제 속성 및 포맷</h3>
           <div className="grid grid-cols-2 gap-8">
             <div>
               <label className="block text-sm font-bold text-slate-500 mb-3">문제 유형 (복수 선택 가능)</label>
