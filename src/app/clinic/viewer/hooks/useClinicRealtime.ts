@@ -69,7 +69,7 @@ export function useClinicRealtime({
 
   const runSelfCorrectionRef = useRef<any>(null);
 
-  // 🌟 1. 무적의 자가 교정 로직 (모달창 갇힘/프리징 완벽 차단 및 연산 오류 픽스)
+  // 🌟 1. 무적의 자가 교정 로직 (모달창 프리징 완벽 차단 및 연산 오류 픽스)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
     let cancelled = false;
@@ -382,7 +382,7 @@ export function useClinicRealtime({
 
       const sid = clinicSessionStateRef.current?.id;
       if (sid) {
-         supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).single().then(({ data }) => {
+         supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).maybeSingle().then(({ data }) => {
              if (data && data.active_rechecks) {
                  const newRechecks = { ...data.active_rechecks };
                  let modified = false;
@@ -502,6 +502,16 @@ export function useClinicRealtime({
   const sendAction = async (action: string, extra: any = {}) => {
     if (clinicChannelRef.current && mySeatRef.current) {
       clinicChannelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: mySeatRef.current, action, data: { name: studentInfo.name, studentId: studentInfo.id, ...extra } } });
+
+      if (action === 'update_activity' && extra.activity) {
+          const sid = clinicSessionStateRef.current?.id;
+          clinicChannelRef.current.track({
+              seat: mySeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
+              activity: extra.activity, updatedAt: Date.now(),
+              startedAt: new Date(clinicSessionStateRef.current?.started_at || Date.now()).getTime(),
+              durationMs: clinicSessionStateRef.current?.duration_ms
+          }).catch(() => {});
+      }
     }
 
     const sid = clinicSessionStateRef.current?.id;
@@ -509,7 +519,8 @@ export function useClinicRealtime({
 
     try {
         if (action === 'call' || action === 'cancel_call') {
-            const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).single();
+            // 🌟 픽스: maybeSingle() 적용
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
             let calls = data?.active_calls || {};
             if (action === 'call') {
                 calls[extra.qNum] = { requestedAt: Date.now(), qNum: extra.qNum };
@@ -519,7 +530,8 @@ export function useClinicRealtime({
             await supabaseClient.from('clinic_session_state').update({ active_calls: calls }).eq('id', sid);
         }
         else if (action === 'recheck_request') {
-            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).single();
+            // 🌟 픽스: maybeSingle() 적용
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', sid).maybeSingle();
             let rechecks = data?.active_rechecks || {};
             
             let safeQNum = extra.qNum;
@@ -563,8 +575,6 @@ export function useClinicRealtime({
       }
       await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
 
-      // 🔥 관리자 화면을 위한 심폐소생 로직 추가!
-      // 학생이 가만히 15초 이상 멈춰있어도, 강제로 서버에 현재 상태(Activity)를 쏘아 관리자 화면 새로고침 시 정보가 증발하는 것을 완벽히 방어합니다.
       if (clinicChannelRef.current && mySeatRef.current) {
         const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
         clinicChannelRef.current.track({

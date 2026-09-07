@@ -158,6 +158,9 @@ export default function SeatGrid({ data }: { data: any }) {
                                     onConfirmCheckout={() => taAction(seat, 'confirm_checkout')}
                                     onOpenEndRequest={() => setEndRequestModal({ isOpen: true, seat })}
                                     onAdjustTime={(delta) => adjustClinicTime(seat, delta)}
+                                    // 🌟 핵심 픽스: 드디어 버튼에 전선 연결!
+                                    onForceReset={() => taAction(seat, 'force_reset')}
+                                    onForceRefresh={() => taAction(seat, 'force_refresh')}
                                 />
                             </div>
                         </div>
@@ -191,7 +194,6 @@ export default function SeatGrid({ data }: { data: any }) {
                             <button onClick={() => setRecheckModal({ isOpen: false, seat: null, uid: null })} className="text-white/80 hover:text-white">✕</button>
                         </div>
                         <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                            {/* 🌟 텅 빈 이미지 src 에러를 막는 조건부 렌더링 적용 */}
                             {activeStudents[recheckModal.seat!]?.rechecks?.[recheckModal.uid!]?.imageDataUrl ? (
                                 <img 
                                     className="w-full rounded-lg border border-slate-200" 

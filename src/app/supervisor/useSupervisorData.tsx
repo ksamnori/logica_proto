@@ -931,35 +931,19 @@ export function useSupervisorData() {
         const st = studentsRef.current[seat];
         if (!st) return;
 
-        // 🔥 qNum 추출 (학생이 새로고침해서 uid가 바뀌었을 때를 대비한 절대 좌표)
         const targetRecheck = st.rechecks?.[uid];
         const qNum = targetRecheck?.qNum;
 
-        if (verdict === 'correct') {
-           if (targetRecheck) {
-               if (targetRecheck.recordId) {
-                   await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
-               } else if (targetRecheck.tqId || targetRecheck.questionId) {
-                   const filterCol = targetRecheck.tqId ? 'tq_id' : 'question_id';
-                   const filterVal = targetRecheck.tqId ?? targetRecheck.questionId;
-                   await supabaseClient.from('student_incorrect_record').delete()
-                       .eq('student_id', st.studentId)
-                       .eq(filterCol, filterVal);
-               }
-           }
-        }
-
+        // 🔥 학생 패드가 통신 지연으로 DB 저장을 누락했더라도 강제로 DB에 도장을 찍어버림 (ACK 보장)
         if (st.sessionId) {
-            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).single();
-            if (data && data.active_rechecks && data.active_rechecks[uid]) {
-                const newRechecks = { ...data.active_rechecks };
-                newRechecks[uid].verdict = verdict; 
-                if (qNum) newRechecks[uid].qNum = qNum; // DB에도 qNum 명시 보장
-                await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
-            }
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).maybeSingle();
+            const newRechecks = data?.active_rechecks || {};
+            if (!newRechecks[uid]) newRechecks[uid] = {}; // 누락 방지 강제 생성
+            newRechecks[uid].verdict = verdict; 
+            if (qNum) newRechecks[uid].qNum = qNum; 
+            await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
         }
 
-        // 🔥 학생 기기에 웹소켓 쏠 때 반드시 qNum 포함 전송 (uid가 깨져있어도 번호로 찾음)
         sendToStudent(seat, 'resolve_recheck', { uid, verdict, qNum });
 
         const currentStudents = { ...studentsRef.current };
@@ -976,17 +960,16 @@ export function useSupervisorData() {
         
         if (type === 'cancel_call') {
             if (qNum !== null) {
-                // 🌟 DB에 결과를 먼저 업데이트 (mark 에러 픽스)
+                // 🌟 DB에 결과를 먼저 업데이트 (mark 에러 픽스 반영)
                 if (currentStudents[seat]?.sessionId) {
-                    const sid = currentStudents[seat].sessionId;
-                    const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).single();
-                    if (data && data.active_calls && data.active_calls[qNum]) {
-                        const newCalls = { ...data.active_calls };
-                        newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' }; 
-                        await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
-                    }
+                     const sid = currentStudents[seat].sessionId;
+                     const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
+                     if (data && data.active_calls && data.active_calls[qNum]) {
+                         const newCalls = { ...data.active_calls };
+                         newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' };
+                         await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+                     }
                 }
-                
                 if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
                 if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
@@ -1009,7 +992,6 @@ export function useSupervisorData() {
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
         } else if (type === 'force_refresh') {
-            // 🌟 강제 새로고침(REFRESH) 명령을 DB에 주입 (소켓이 끊겨도 복구 보장)
             if (currentStudents[seat]?.sessionId) {
                 supabaseClient.from('clinic_session_state')
                     .select('active_calls')
@@ -1035,7 +1017,6 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('recheck', seat);
                 removeLogsByTypeAndSeat('end_request', seat);
                 
-                // 🌟 DB의 찌꺼기를 지우고 강력한 REFRESH 도장 찍기
                 if (st.sessionId) {
                     supabaseClient.from('clinic_session_state').update({
                         active_calls: { REFRESH: Date.now() },

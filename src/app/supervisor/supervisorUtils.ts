@@ -21,10 +21,12 @@ export const PENDING_GUARD_MS = 8000;
 // last_seen_at 갱신이 없으면 전원 종료/크래시 등으로 보고 비정상 종료 처리한다.
 export const HEARTBEAT_TIMEOUT_MS = 45 * 1000;
 
-// 한국 표준시(KST) 기준 날짜 문자열 구하기
+// 한국 표준시(KST) 기준 날짜 문자열 구하기 (오전 6시 리셋)
 export const getKSTDateString = () => {
-    const kstTime = new Date(Date.now() + 9 * 60 * 60 * 1000);
-    return kstTime.toISOString().split('T')[0];
+    // 🌟 오전 6시 리셋을 위해 KST(UTC+9)에서 6시간을 빼줍니다.
+    // 즉, 새벽 5시 59분까지는 어제 날짜로 계산되어 리셋되지 않습니다.
+    const kstAdjusted = new Date(Date.now() + 9 * 60 * 60 * 1000 - 6 * 60 * 60 * 1000);
+    return kstAdjusted.toISOString().split('T')[0];
 };
 
 export const formatDuration = (ms: number) => {
