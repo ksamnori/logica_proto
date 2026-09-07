@@ -160,7 +160,6 @@ export default function StudentPortal() {
         if (!clinicSessionRef.current?.id) return;
         const { data, error } = await supabaseClient
             .from('clinic_session_state')
-            // 🔥 핵심 픽스: active_rechecks도 함께 가져오도록 추가
             .select('duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, active_rechecks, away_since')
             .eq('id', clinicSessionRef.current.id)
             .maybeSingle();
@@ -170,7 +169,6 @@ export default function StudentPortal() {
             let needsDbUpdate = false;
             const updatePayload: any = {};
             
-            // 💡 [필살기] DB에 리셋(REFRESH) 도장이 찍혀있으면 무조건 즉시 새로고침
             if (data.active_calls && data.active_calls['REFRESH']) {
                 const newCalls = { ...data.active_calls };
                 delete newCalls['REFRESH'];
@@ -203,7 +201,6 @@ export default function StudentPortal() {
                 setTimeUpModal({ isOpen: true, icon: '🚪', title: '퇴실 처리되었습니다', desc: '조교가 클리닉 이용을 종료했어요.' });
             }
 
-            // 🚨 1. 조교 호출(Call) 결과 알림 및 찌꺼기 청소 (ACK)
             if (data.active_calls) {
                 let callChanged = false;
                 const newCalls = { ...data.active_calls };
@@ -222,7 +219,6 @@ export default function StudentPortal() {
                 setIsPortalCalling(false);
             }
 
-            // 🚨 2. 수동 채점(Recheck) 결과 알림 및 찌꺼기 청소 (ACK - 가장 중요)
             if (data.active_rechecks) {
                 let recheckChanged = false;
                 const newRechecks = { ...data.active_rechecks };
@@ -230,7 +226,7 @@ export default function StudentPortal() {
                     if (newRechecks[uid].verdict) {
                         setRecheckToast(newRechecks[uid].verdict === 'correct' ? '🎉 조교님이 정답으로 확인했어요!' : '조교 확인 결과 오답이 맞습니다. (상세 내용은 클리닉에서 확인)');
                         setTimeout(() => setRecheckToast(""), 4000);
-                        delete newRechecks[uid]; // 확인했으니 DB에서 파기
+                        delete newRechecks[uid]; 
                         recheckChanged = true;
                     }
                 });
@@ -240,7 +236,6 @@ export default function StudentPortal() {
                 }
             }
 
-            // 변경된 내역 DB 업데이트 (찌꺼기 삭제 최종 실행)
             if (needsDbUpdate) {
                 await supabaseClient.from('clinic_session_state').update(updatePayload).eq('id', clinicSessionRef.current.id);
             }
@@ -297,6 +292,20 @@ export default function StudentPortal() {
             const sid = clinicSessionRef.current?.id;
             if (!sid || cancelled) return;
             await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
+
+            // 🌟 포털에도 15초마다 강제로 상태 덮어쓰기 적용 (유령 찌꺼기 완벽 소멸)
+            if (channelRef.current && trackedSeatRef.current) {
+                channelRef.current.track({
+                    seat: trackedSeatRef.current, 
+                    name: studentInfo.name, 
+                    studentId: studentInfo.id, 
+                    classes: studentInfo.classes,
+                    activity: '포털 대기 중 📋', 
+                    updatedAt: Date.now(),
+                    startedAt: new Date(clinicSessionRef.current?.started_at || Date.now()).getTime(),
+                    durationMs: clinicSessionRef.current?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS
+                }).catch(() => {});
+            }
         };
         beat();
         const iv = setInterval(beat, 15000);
@@ -520,8 +529,13 @@ export default function StudentPortal() {
                 const state = channel.presenceState();
                 setEditorLocked(Object.values(state).some((metas: any) => metas.some((m: any) => m.role === 'editor')));
 
-                const amIOnline = Object.values(state).flat().some((m: any) => m.studentId === studentInfo.id);
-                if (amIOnline) return;
+                // 🌟 수정: 이전에 접속했던 유령 찌꺼기 상태를 무시하고 덮어씌우도록 조건 검증 추가
+                const myPresences = Object.values(state).flat().filter((m: any) => m.studentId === studentInfo.id);
+                const amIOnline = myPresences.length > 0;
+                const isCorrectActivity = myPresences.some((m: any) => m.activity === '포털 대기 중 📋');
+
+                // 찌꺼기 데이터가 아니라 정확히 '포털 대기 중' 상태로 등록되어 있을 때만 통과합니다.
+                if (amIOnline && isCorrectActivity) return;
 
                 const occupied = new Set();
                 Object.values(state).forEach((metas: any) => metas.forEach((m: any) => { if (m.seat) occupied.add(m.seat); }));
@@ -622,9 +636,6 @@ export default function StudentPortal() {
                 else if (payload.action === 'force_refresh') {
                     window.location.reload();
                 }
-            })
-            .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
-                if (runDbSyncRef.current) runDbSyncRef.current();
             })
             .subscribe();
         };
