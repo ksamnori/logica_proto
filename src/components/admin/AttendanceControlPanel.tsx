@@ -9,32 +9,31 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-// 🌟 출결 리셋 기준을 오전 6시로 변경 (새벽 5:59까지는 전날로 간주)
+// 🌟 완벽하게 수정된 시간 계산 공식: 브라우저 환경에 의존하지 않고 절대적인 KST(-6시간 오프셋) 날짜를 구합니다.
 const getKSTDateStr = (offsetDays = 0) => {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kstAdjusted = new Date(utc + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
+  // UTC 기준 시간에 KST(+9시간)를 더하고, 오전 6시 리셋을 위해(-6시간)을 뺍니다.
+  const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
   return kstAdjusted.toISOString().split('T')[0];
 };
 
+// 🌟 안전한 KST 시간 포맷 (어느 국가에서 접속해도 한국 시간을 보장)
 const formatTimeAsKST = (isoStr: string) => {
   if (!isoStr) return "";
   const d = new Date(isoStr);
   if (isNaN(d.getTime())) return "";
-  const utc = d.getTime() + (d.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000));
-  return `${String(kst.getHours()).padStart(2, '0')}:${String(kst.getMinutes()).padStart(2, '0')}`;
+  const kst = new Date(d.getTime() + (9 * 3600000));
+  return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
 };
 
-// 날짜 및 요일 포맷 (MM.DD (요일))
+// 🌟 안전한 KST 날짜 및 요일 포맷 (MM.DD (요일))
 const formatDateAndDayKST = (isoStr?: string) => {
   const baseDate = isoStr ? new Date(isoStr) : new Date();
-  const utc = baseDate.getTime() + (baseDate.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000));
+  if (isNaN(baseDate.getTime())) return "";
+  const kst = new Date(baseDate.getTime() + (9 * 3600000));
   const days = ['일', '월', '화', '수', '목', '금', '토'];
-  const mm = String(kst.getMonth() + 1).padStart(2, '0');
-  const dd = String(kst.getDate()).padStart(2, '0');
-  const dayName = days[kst.getDay()];
+  const mm = String(kst.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(kst.getUTCDate()).padStart(2, '0');
+  const dayName = days[kst.getUTCDay()];
   return `${mm}.${dd} (${dayName})`;
 };
 
@@ -514,6 +513,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const toIsoString = (timeStr: string) => {
       if (!timeStr) return null;
       const [hh, mm] = timeStr.split(':');
+      // UTC 변환을 위한 수동 파싱 (KST 입력값을 UTC로 변환하여 저장)
       const d = new Date(`${today}T${hh}:${mm}:00+09:00`);
       return d.toISOString();
     };
@@ -609,7 +609,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         
         <div className="flex flex-col lg:flex-row bg-white border border-t-0 border-slate-200 rounded-b-2xl shadow-sm overflow-hidden min-h-[450px]">
           
-          {/* 🌟 수정 1. 좌측 사이드바 폭을 250px -> 200px로 줄여서 우측 공간 확보 */}
           <div className="w-full lg:w-[200px] bg-slate-50 border-r border-slate-200 flex flex-col shrink-0">
             <div className="p-4 flex flex-col gap-3">
               <div>
@@ -657,7 +656,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                   <div className="w-full bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <table className="w-full text-left border-collapse table-auto">
                       <thead>
-                        {/* 🌟 수정 3. 리스트 헤더 넓이를 비율에 맞게 쾌적하게 조절 */}
                         <tr className="bg-slate-50 border-b border-slate-200">
                           <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">이름</th>
                           <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">상태</th>
@@ -709,7 +707,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                                   <td className="py-1.5 px-1 text-center text-[10px] font-bold text-blue-700">{timeInStr}</td>
                                   <td className="py-1.5 px-1 text-center text-[10px] font-bold text-emerald-700">{timeOutStr}</td>
                                   <td className="py-1.5 px-2 text-left pl-3">
-                                    {/* 🌟 수정 4. 버튼 컨테이너에 flex-nowrap을 추가하여 무조건 1줄로 예쁘게 정렬 */}
                                     <div className="flex items-center justify-start gap-1 flex-nowrap whitespace-nowrap">
                                       <button onClick={() => handleAttAction(student, 'PRESENT')} className="px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-[9px] transition-colors border border-blue-100 whitespace-nowrap">등원</button>
                                       <button onClick={() => handleAttAction(student, 'LATE')} className="px-1.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded text-[9px] transition-colors border border-amber-100 whitespace-nowrap">지각</button>
@@ -771,7 +768,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                                   <div className="flex flex-col gap-0.5 min-w-0 flex-1 pr-1">
                                     <span className="font-extrabold text-slate-800 text-[12px] truncate w-full leading-tight">{student.name}</span>
                                     
-                                    {/* 🌟 수정 2. truncate(글씨 잘림)를 완전히 제거하고 양끝으로 밀착 배치하여 "기록 없음" 보호 */}
                                     <div className="flex items-center justify-between w-full mt-0.5">
                                       <span className={`px-1.5 py-0.5 rounded text-[8px] font-black border ${flowColor} whitespace-nowrap shrink-0`}>
                                         {flowIcon} {flowText}

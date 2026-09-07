@@ -1,16 +1,53 @@
 // src/app/kiosk/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
 // 등원 후 하원 처리가 가능해지기까지의 최소 대기 시간(분)
-const CHECKOUT_COOLDOWN_MIN = 30;
+const CHECKOUT_COOLDOWN_MIN = 3;
 
 // 학년 정렬 가중치
 const GRADE_ORDER: Record<string, number> = {
   '고3': 1, '고2': 2, '고1': 3, '중3': 4, '중2': 5, '중1': 6,
   '초6': 7, '초5': 8, '초4': 9, '초3': 10, '초2': 11, '초1': 12
+};
+
+// 🎵 Web Audio API를 활용한 효과음 생성기 (외부 파일 없이 브라우저 자체 재생)
+const playSuccessSound = (type: string) => {
+  try {
+    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    
+    const playTone = (freq: number, startTime: number, duration: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, startTime);
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.3, startTime + 0.05); // 부드러운 시작
+      gain.gain.linearRampToValueAtTime(0, startTime + duration); // 부드러운 끝
+      osc.start(startTime);
+      osc.stop(startTime + duration);
+    };
+
+    const t = ctx.currentTime;
+    if (type === 'out') {
+      // 하원: 레-도 (차분한 마무리)
+      playTone(587.33, t, 0.15); // D5
+      playTone(523.25, t + 0.15, 0.3); // C5
+    } else {
+      // 등원/재등원: 도-미-솔 (경쾌한 울림)
+      playTone(523.25, t, 0.1); // C5
+      playTone(659.25, t + 0.1, 0.1); // E5
+      playTone(783.99, t + 0.2, 0.3); // G5
+    }
+  } catch (e) {
+    console.error("Audio playback failed:", e);
+  }
 };
 
 // 아이콘 컴포넌트
@@ -24,13 +61,47 @@ const IconQuestion = () => <svg width="60" height="60" viewBox="0 0 24 24" fill=
 export default function KioskPage() {
   const [digits, setDigits] = useState("");
   const [matchedList, setMatchedList] = useState<any[]>([]);
-  // 최종 확인 팝업 상태 (비밀번호 대신 사용)
   const [confirmStudent, setConfirmStudent] = useState<any>(null);
-  
-  // popup 상태: { name: 학생이름, type: 'in'(등원) | 'out'(하원) | 'reentry'(재등원) }
   const [successPopup, setSuccessPopup] = useState<{ name: string; type: string } | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [currentTime, setCurrentTime] = useState(new Date());
+
+  // 히든 관리자 버튼 제어용
+  const logoClickCountRef = useRef(0);
+  const logoTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const resetState = useCallback(() => {
+    setSuccessPopup(null);
+    setConfirmStudent(null);
+    setDigits('');
+    setMatchedList([]);
+    setIsProcessing(false);
+  }, []);
+
+  // ⏱️ 15초 무응답 자동 초기화 (Idle Timeout)
+  useEffect(() => {
+    let idleTimer: NodeJS.Timeout;
+    
+    const resetIdleTimer = () => {
+      clearTimeout(idleTimer);
+      // 작업 중이 아니고, 무언가 입력된 상태일 때만 15초 타이머 작동
+      if ((digits || matchedList.length > 0 || confirmStudent) && !successPopup && !isProcessing) {
+        idleTimer = setTimeout(() => {
+          resetState();
+        }, 15000);
+      }
+    };
+
+    window.addEventListener('pointerdown', resetIdleTimer);
+    window.addEventListener('keydown', resetIdleTimer);
+    resetIdleTimer();
+
+    return () => {
+      window.removeEventListener('pointerdown', resetIdleTimer);
+      window.removeEventListener('keydown', resetIdleTimer);
+      clearTimeout(idleTimer);
+    };
+  }, [digits, matchedList, confirmStudent, successPopup, isProcessing, resetState]);
 
   // 현재 시계 업데이트
   useEffect(() => {
@@ -53,8 +124,7 @@ export default function KioskPage() {
   };
 
   const handleDigit = (num: string) => {
-    if (isProcessing || confirmStudent) return; // 확인 창이 떠있으면 키패드 무시
-    
+    if (isProcessing || confirmStudent) return;
     if (digits.length < 4) {
       const newDigits = digits + num;
       setDigits(newDigits);
@@ -62,7 +132,6 @@ export default function KioskPage() {
     }
   };
 
-  // 💡 [핵심 연동] 키오스크 처리 내역을 관리자 대시보드의 알림톡 대기열(스토리지)에 담는 로직
   const queueAlimtalk = (student: any, statusLabel: string, timeString: string) => {
     const parentObj = Array.isArray(student.parent) ? student.parent[0] : student.parent;
     const parentPhone = parentObj?.phone;
@@ -89,13 +158,10 @@ export default function KioskPage() {
       if (rawLocal) {
         currentQueue = JSON.parse(rawLocal);
       }
-
-      // 이미 스토리지에 같은 학생의 출결(id)이 있다면 제거 후 최신으로 덮어쓰기
       const filtered = currentQueue.filter((m: any) => m.id !== newMsg.id);
       const nextQueue = [...filtered, newMsg];
 
       localStorage.setItem("logica_queued_messages", JSON.stringify(nextQueue));
-      // 저장 완료 후 이벤트 발송 (대시보드가 열려있으면 즉시 감지)
       window.dispatchEvent(new Event('storage'));
     } catch (e) {
       console.error("대기열 저장 중 오류:", e);
@@ -105,10 +171,8 @@ export default function KioskPage() {
   const searchDBAndProcess = async (code: string) => {
     setIsProcessing(true);
     try {
-      // 🌟 [보안] tenant_id 필터 추가 (지점별 격리)
       const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || '';
 
-      // 💡 [수정] 큐 연동을 위해 parent 데이터에서 name까지 함께 가져오도록 select 변경
       let studentQuery = supabase
         .from('student')
         .select('student_id, name, grade, phone, parent(name, phone), enrollment(enrollment_id, class(class_id, name))')
@@ -131,7 +195,6 @@ export default function KioskPage() {
       let merged: any[] = [...(studentMatch || []), ...(parentMatch || [])];
       let uniqueMap = new Map();
 
-      // 넓은 범위 데이터 중 꼬리표(-1, -2)를 떼고 완벽히 매칭되는지 2차 검증
       merged.forEach((item: any) => {
         const extractCleanDigits = (phoneStr: string) => {
           if (!phoneStr) return "";
@@ -140,7 +203,6 @@ export default function KioskPage() {
         };
 
         const sPhoneCleaned = extractCleanDigits(item.phone);
-        
         let rawPPhone = "";
         const parentObj = item.parent as any; 
         if (parentObj && !Array.isArray(parentObj)) {
@@ -166,14 +228,11 @@ export default function KioskPage() {
         return;
       }
 
-      // 학년 역순 정렬
       matches.sort((a, b) => (GRADE_ORDER[a.grade] || 99) - (GRADE_ORDER[b.grade] || 99));
 
       if (matches.length === 1) {
-        // 단일 검색 결과일 경우 바로 확인 팝업 띄우기
         setConfirmStudent(matches[0]);
       } else {
-        // 다중 검색 결과(형제/자매 등)일 경우 리스트 띄우기
         setMatchedList(matches);
       }
       setIsProcessing(false);
@@ -214,7 +273,6 @@ export default function KioskPage() {
       let statusLabelForAlimtalk = "출석 (등원)";
 
       if (!latest) {
-        // [등원]
         const { error: insertError } = await supabase.from('attendance').insert({
           student_id: student.student_id,
           class_id: classId,
@@ -226,7 +284,6 @@ export default function KioskPage() {
         if (insertError) throw insertError; 
 
       } else if (!latest.check_out_time) {
-        // [쿨타임 확인]
         const minutesSinceCheckIn = (now.getTime() - new Date(latest.check_in_time).getTime()) / 60000;
         if (minutesSinceCheckIn < CHECKOUT_COOLDOWN_MIN) {
           const remaining = Math.ceil(CHECKOUT_COOLDOWN_MIN - minutesSinceCheckIn);
@@ -235,7 +292,6 @@ export default function KioskPage() {
           return;
         }
 
-        // [하원]
         const { error: updateError } = await supabase.from('attendance').update({
           check_out_time: timestamp,
           status: '출석'
@@ -246,7 +302,6 @@ export default function KioskPage() {
         statusLabelForAlimtalk = "수업종료 (하원)";
 
       } else {
-        // [재등원]
         const { error: reentryError } = await supabase.from('attendance').insert({
           student_id: student.student_id,
           class_id: classId,
@@ -261,9 +316,8 @@ export default function KioskPage() {
         statusLabelForAlimtalk = "출석 (등원)";
       }
 
-      // 💡 [핵심] 출결 처리가 정상 완료되면 로컬 스토리지 대기열에 추가합니다.
       queueAlimtalk(student, statusLabelForAlimtalk, timeStr);
-
+      playSuccessSound(popupType); // 🎵 효과음 재생
       setSuccessPopup({ name: student.name, type: popupType });
       
       setTimeout(() => {
@@ -277,18 +331,25 @@ export default function KioskPage() {
     }
   };
 
-  const resetState = () => {
-    setSuccessPopup(null);
-    setConfirmStudent(null);
-    setDigits('');
-    setMatchedList([]);
-    setIsProcessing(false);
+  // 🔑 숨겨진 관리자 로직 (로고 5회 클릭 시 새로고침/전체화면 해제)
+  const handleLogoClick = () => {
+    logoClickCountRef.current += 1;
+    if (logoTimeoutRef.current) clearTimeout(logoTimeoutRef.current);
+
+    if (logoClickCountRef.current >= 5) {
+      if (document.fullscreenElement) {
+        document.exitFullscreen().catch(() => {});
+      }
+      window.location.reload();
+    } else {
+      logoTimeoutRef.current = setTimeout(() => {
+        logoClickCountRef.current = 0;
+      }, 1500);
+    }
   };
 
-  // 팝업 종류별 UI 컴포넌트
   const renderPopupContent = () => {
     if (!successPopup) return null;
-
     if (successPopup.type === "in") {
       return (
         <div className="bg-white rounded-[32px] px-16 py-12 flex flex-col items-center shadow-2xl animate-[bounce_0.5s_ease-in-out]">
@@ -306,7 +367,6 @@ export default function KioskPage() {
         </div>
       );
     } else {
-      // reentry: 하원 처리 후 다시 스캔한 경우 -> 재등원 처리
       return (
         <div className="bg-white rounded-[32px] px-16 py-12 flex flex-col items-center shadow-2xl animate-[bounce_0.5s_ease-in-out]">
           <div className="text-amber-500 mb-5"><IconAlert /></div>
@@ -321,14 +381,12 @@ export default function KioskPage() {
     <div className="min-h-screen flex flex-col items-center justify-center py-12 bg-slate-100 font-pretendard select-none">
       <div className="flex w-[850px] h-[550px] bg-white rounded-[32px] shadow-2xl overflow-hidden relative border border-slate-200">
         
-        {/* 최종 성공 팝업 오버레이 */}
         {successPopup && (
           <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 transition-opacity duration-300">
             {renderPopupContent()}
           </div>
         )}
 
-        {/* 새로운 학생 확인(Yes/No) 팝업 오버레이 */}
         {confirmStudent && !successPopup && !isProcessing && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-40 animate-[fadeIn_0.2s_ease-out]">
             <div className="bg-white rounded-3xl p-10 flex flex-col items-center shadow-2xl w-[400px]">
@@ -342,7 +400,7 @@ export default function KioskPage() {
               
               <div className="flex w-full gap-4">
                 <button 
-                  onClick={() => setConfirmStudent(null)} 
+                  onClick={resetState} 
                   className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl text-lg transition-colors"
                 >
                   아니오
@@ -358,17 +416,22 @@ export default function KioskPage() {
           </div>
         )}
 
-        {/* 로딩 오버레이 */}
         {isProcessing && !successPopup && (
           <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center z-40">
             <div className="text-[#002864] font-bold text-xl animate-pulse">DB 조회 및 처리 중...</div>
           </div>
         )}
 
-        {/* 좌측 화면 (입력 피드백 및 학생 선택) */}
+        {/* 좌측 화면 */}
         <div className="w-1/2 flex flex-col p-10 bg-slate-50 justify-center relative">
-          <div className="absolute bottom-8 left-10">
-            <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-6 opacity-70 grayscale contrast-125" />
+          <div className="absolute bottom-8 left-10 z-50">
+            {/* 🔑 히든 버튼 로고 */}
+            <img 
+              onClick={handleLogoClick} 
+              src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" 
+              alt="Logica" 
+              className="h-6 opacity-70 grayscale contrast-125 cursor-pointer" 
+            />
           </div>
           
           {matchedList.length > 0 ? (

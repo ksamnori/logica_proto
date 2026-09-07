@@ -293,7 +293,6 @@ export default function StudentPortal() {
             if (!sid || cancelled) return;
             await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
 
-            // 🌟 포털에도 15초마다 강제로 상태 덮어쓰기 적용 (유령 찌꺼기 완벽 소멸)
             if (channelRef.current && trackedSeatRef.current) {
                 channelRef.current.track({
                     seat: trackedSeatRef.current, 
@@ -529,12 +528,10 @@ export default function StudentPortal() {
                 const state = channel.presenceState();
                 setEditorLocked(Object.values(state).some((metas: any) => metas.some((m: any) => m.role === 'editor')));
 
-                // 🌟 수정: 이전에 접속했던 유령 찌꺼기 상태를 무시하고 덮어씌우도록 조건 검증 추가
                 const myPresences = Object.values(state).flat().filter((m: any) => m.studentId === studentInfo.id);
                 const amIOnline = myPresences.length > 0;
                 const isCorrectActivity = myPresences.some((m: any) => m.activity === '포털 대기 중 📋');
 
-                // 찌꺼기 데이터가 아니라 정확히 '포털 대기 중' 상태로 등록되어 있을 때만 통과합니다.
                 if (amIOnline && isCorrectActivity) return;
 
                 const occupied = new Set();
@@ -678,7 +675,7 @@ export default function StudentPortal() {
 
     const togglePortalAway = async () => {
         if (awayCooldown.isActive) return;
-        if (isPortalCalling) { alert('조교 호출 중에는 자리비움 상태로 전환할 수 없습니다.'); return; }
+        if (isPortalCalling) { alert('선생님을 불렀을 때는 화장실에 갈 수 없어요.'); return; }
         const sid = clinicSessionRef.current?.id;
         if (sid) {
             const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'away');
@@ -695,7 +692,7 @@ export default function StudentPortal() {
 
     const togglePortalCall = async () => {
         if (callCooldown.isActive) return;
-        if (isPortalAway) { alert('자리비움 중에는 조교를 호출할 수 없습니다.'); return; }
+        if (isPortalAway) { alert('화장실에 간 상태에서는 선생님을 부를 수 없어요.'); return; }
         const sid = clinicSessionRef.current?.id;
         if (sid) {
             const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'call');
@@ -712,7 +709,7 @@ export default function StudentPortal() {
 
     const startClinicBlock = async (className: string, round: number, typeKey: string) => {
         if (isPortalAway || isPortalCalling) {
-            alert('자리비움/호출 처리 중에는 클리닉에 입장할 수 없습니다. 상태를 해제한 후 다시 시도해주세요.');
+            alert('화장실을 가거나 선생님을 불렀을 때는 학습을 시작할 수 없어요. 먼저 상태를 해제해주세요!');
             return;
         }
 
@@ -828,7 +825,7 @@ export default function StudentPortal() {
                             <span>🔒</span> 잠김
                         </button>
                     : 
-                        <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>응시하기</button>
+                        <button onClick={() => startClinicBlock(className, round, typeKey)} className={`bg-white ${theme.btnText} font-black px-6 py-2.5 md:py-3 text-sm md:text-base rounded-xl shadow-lg hover:scale-105 hover:bg-slate-50 transition-all`}>학습하기</button>
                     }
                 </div>
             </div>
@@ -905,16 +902,6 @@ export default function StudentPortal() {
     const m = Math.max(0, Math.floor(remainingMs / 1000 / 60));
     const s = Math.max(0, Math.floor(remainingMs / 1000) % 60);
 
-    useEffect(() => {
-        if (isSameDay && remainingMs <= 0 && isMounted && !sessionEndedRef.current) {
-            sessionEndedRef.current = true;
-            if (clinicSessionRef.current?.id) {
-                closeSessionAtLimit(supabaseClient, clinicSessionRef.current.id, clinicSessionRef.current.started_at, clinicSessionRef.current.duration_ms);
-            }
-            setTimeUpModal({ isOpen: true, icon: '⏰', title: '클리닉 시간이 종료되었습니다', desc: '오늘 배정된 클리닉 이용 시간이 모두 지났어요.\n수고하셨습니다!' });
-        }
-    }, [remainingMs, isSameDay, isMounted]);
-
     return (
         <div className="min-h-screen flex flex-col bg-slate-100 font-['Pretendard']">
             {editorLocked && (
@@ -922,7 +909,7 @@ export default function StudentPortal() {
                     <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-sm">
                         <div className="text-4xl mb-3">🔒</div>
                         <h3 className="text-lg font-extrabold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
-                        <p className="text-sm text-slate-500">관리자가 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
+                        <p className="text-sm text-slate-500">선생님이 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
                     </div>
                 </div>
             )}
@@ -933,6 +920,7 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
+            {/* 🌟 포털 상단 헤더 친절한 워딩으로 교체 */}
             <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center">
@@ -944,17 +932,18 @@ export default function StudentPortal() {
                     {isSameDay && (
                         <div className={`flex items-center gap-1.5 border rounded-full px-3 py-1.5 shadow-sm transition-colors ${isUrgent ? 'bg-rose-100 border-rose-300 animate-pulse' : 'bg-indigo-50 border-indigo-200'}`}>
                             <span className="text-indigo-500 text-sm">🕐</span>
+                            <span className="text-xs font-bold text-indigo-600 opacity-80">남은 시간</span>
                             <span className="text-sm font-black font-lexend text-indigo-600">{isMounted && remainingMs <= 0 ? '종료' : `${m}:${String(s).padStart(2, '0')}`}</span>
                         </div>
                     )}
                     {isSameDay && (
                         <button onClick={togglePortalAway} disabled={isPortalCalling || awayCooldown.isActive} className={`text-xs font-bold rounded-full px-3.5 py-1.5 border shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isPortalAway ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-                            {awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : isPortalAway ? '↩️ 자리 복귀' : '🚶 자리비움'}
+                            {awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : isPortalAway ? '↩️ 자리 복귀' : '🚶 화장실 다녀오기'}
                         </button>
                     )}
                     {isSameDay && (
                         <button onClick={togglePortalCall} disabled={isPortalAway || callCooldown.isActive} className={`text-xs font-bold rounded-full px-3.5 py-1.5 border shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isPortalCalling ? 'bg-rose-600 border-rose-600 text-white animate-pulse' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
-                            {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isPortalCalling ? '🚨 호출 취소' : '🙋 조교 호출'}
+                            {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isPortalCalling ? '🚨 부르기 취소' : '🙋 선생님 부르기'}
                         </button>
                     )}
 
@@ -963,8 +952,8 @@ export default function StudentPortal() {
                     </button>
 
                     <button onClick={() => router.push('/student/shop')} className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-amber-100 transition-colors shadow-sm">
+                        <span className="text-xs font-bold text-amber-700">나의 포인트</span>
                         <span className="text-amber-500 text-sm font-black font-lexend">{mockPoints.toLocaleString()} P</span>
-                        <span className="text-[10px] font-bold text-amber-700 bg-amber-200 px-1.5 rounded-full">상점 가기 🛒</span>
                     </button>
                     <div className="w-px h-5 bg-slate-200 mx-1"></div>
                     <div className="flex items-center gap-3">
@@ -975,12 +964,12 @@ export default function StudentPortal() {
                         <div className="w-10 h-10 rounded-full bg-[#002864] text-white flex items-center justify-center text-xl shadow-md">👦🏻</div>
                         {endRequest.state === 'idle' && (
                             <button onClick={() => setEndRequestConfirmOpen(true)} className="text-xs font-bold text-slate-400 hover:text-rose-500 border border-slate-200 hover:border-rose-300 rounded-full px-3 py-1.5 transition-colors">
-                                클리닉 종료 요청
+                                오늘 공부 끝내기
                             </button>
                         )}
                         {endRequest.state === 'pending' && (
                             <button onClick={endRequest.cancelRequest} className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 animate-pulse">
-                                ⏳ 요청 취소
+                                ⏳ 끝내기 취소
                             </button>
                         )}
                         {endRequest.state === 'cooldown' && (
@@ -1044,11 +1033,11 @@ export default function StudentPortal() {
                 <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[80]">
                     <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-sm text-center">
                         <div className="text-5xl mb-4">🚪</div>
-                        <h3 className="text-xl font-extrabold text-slate-800 mb-4">클리닉 종료 요청</h3>
-                        <p className="text-sm text-slate-600 mb-8">클리닉 종료를 요청하시겠습니까?<br/>조교가 승인해야 종료됩니다.</p>
+                        <h3 className="text-xl font-extrabold text-slate-800 mb-4">학습 종료 요청</h3>
+                        <p className="text-sm text-slate-600 mb-8">오늘 공부를 모두 마치고 종료하시겠어요?<br/>선생님이 확인 후 승인해 줍니다.</p>
                         <div className="flex gap-4">
                             <button onClick={() => setEndRequestConfirmOpen(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-base py-3 rounded-xl hover:bg-slate-200 transition-colors">취소</button>
-                            <button onClick={() => { endRequest.requestEnd(); setEndRequestConfirmOpen(false); }} className="flex-1 bg-rose-600 text-white font-bold text-base py-3 rounded-xl hover:bg-rose-700 transition-colors shadow-sm">요청하기</button>
+                            <button onClick={() => { endRequest.requestEnd(); setEndRequestConfirmOpen(false); }} className="flex-1 bg-rose-600 text-white font-bold text-base py-3 rounded-xl hover:bg-rose-700 transition-colors shadow-sm">종료 요청</button>
                         </div>
                     </div>
                 </div>

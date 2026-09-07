@@ -1,3 +1,4 @@
+// src/app/clinic/viewer/components/ClinicKeypad.tsx
 import React from 'react';
 
 interface ClinicKeypadProps {
@@ -40,18 +41,19 @@ export function ClinicKeypad({
     let label = k;
     if (k === 'back') {
       btnClass = 'bg-slate-200 text-slate-600 text-sm hover:bg-slate-300';
-      label = '⌫';
+      label = '지우기 ⌫';
     } else if (k === 'clear') {
       btnClass = 'bg-rose-100 text-rose-600 text-sm hover:bg-rose-200';
-      label = 'C';
+      label = '전체 삭제 C';
     } else if (k === '0') {
       btnClass = 'col-span-2 bg-slate-50 text-slate-700 text-base hover:bg-slate-100';
     } else if (k === '-' || k === '.' || k === '/') {
       btnClass = 'bg-slate-100 text-slate-600 text-sm hover:bg-slate-200';
-      if (k === '/') label = '분수 /';
+      if (k === '/') label = '분수 ( / )';
     }
     return (
-      <button key={k} onClick={() => pressKeypad(k)} className={`h-10 md:h-12 rounded-lg font-black transition-colors shadow-sm border border-slate-200 ${btnClass}`}>
+      // 🌟 잘림 현상 방지를 위해 버튼 높이를 h-10 -> h-9 (md:h-11) 로 미세하게 축소
+      <button key={k} onClick={() => pressKeypad(k)} className={`h-9 md:h-11 rounded-lg font-black transition-colors shadow-sm border border-slate-200 ${btnClass}`}>
         {label}
       </button>
     );
@@ -63,8 +65,8 @@ export function ClinicKeypad({
   const moveCursor = (pos: number) => { keypadCursor.current[idx] = pos; forceUpdate(); };
 
   return (
-    <div className="w-full flex flex-col gap-3 h-full">
-      <div className="w-full min-h-[4rem] text-3xl font-extrabold text-right px-4 py-3 border-[3px] border-slate-200 rounded-xl bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
+    <div className="w-full flex flex-col gap-2 h-full">
+      <div className="w-full min-h-[3.5rem] text-3xl font-extrabold text-right px-4 py-3 border-[3px] border-slate-200 rounded-xl bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
         {kpVal ? (
           <>
             <span onClick={() => moveCursor(0)} className="inline-block w-2 self-stretch" />
@@ -76,14 +78,15 @@ export function ClinicKeypad({
             ))}
             {kpPos === kpVal.length && <span className="inline-block w-[3px] h-6 bg-[#002864] mx-0.5 animate-pulse" />}
           </>
-        ) : <span className="text-slate-300 font-normal">0</span>}
+        ) : <span className="text-slate-300 font-normal">정답을 입력하세요</span>}
       </div>
       
-      <div className={`flex flex-col flex-1 overflow-hidden transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[800px] opacity-100'}`}>
-        <div className="grid grid-cols-4 gap-1.5 pt-2 flex-1 max-h-[240px]">
-          <button onClick={() => pressKeypad(' ')} className="col-span-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-500 text-sm hover:bg-slate-200 transition-colors shadow-sm border border-slate-200">대분수 ␣ (띄어쓰기)</button>
+      <div className={`flex flex-col flex-1 overflow-y-auto custom-scrollbar transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[800px] opacity-100'}`}>
+        {/* 🌟 pb-4 추가 및 max-h 완화로 밑부분이 잘리는 현상 방어 */}
+        <div className="grid grid-cols-4 gap-1.5 pt-2 pb-4 flex-1">
+          <button onClick={() => pressKeypad(' ')} className="col-span-4 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-500 text-sm hover:bg-slate-200 transition-colors shadow-sm border border-slate-200">대분수 띄어쓰기 ( ␣ )</button>
           {['7','8','9','back','4','5','6','clear','1','2','3','-','0','.','/'].map(renderKeypadButton)}
-          <button onClick={() => pressKeypad(',')} className="col-span-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-500 text-sm hover:bg-slate-200 transition-colors shadow-sm border border-slate-200">쉼표 추가 ( , )</button>
+          <button onClick={() => pressKeypad(',')} className="col-span-4 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-500 text-sm hover:bg-slate-200 transition-colors shadow-sm border border-slate-200">쉼표 추가 ( , )</button>
         </div>
       </div>
     </div>

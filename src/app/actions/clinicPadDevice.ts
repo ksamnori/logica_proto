@@ -99,3 +99,25 @@ export async function unassignPadDevice(seatNumber: string): Promise<{ success: 
     if (error) return { success: false, message: error.message };
     return { success: true };
 }
+
+// src/app/actions/clinicPadDevice.ts 파일 맨 아래에 추가
+
+export async function checkExistingDeviceForSeat(tenantId: string, seat: string) {
+  "use server"; // 서버 전용 액션 강제
+  const { createClient } = await import('@supabase/supabase-js');
+  
+  // 관리자 키(SERVICE_ROLE_KEY)를 사용하여 보안 정책(RLS)을 무사 통과합니다.
+  const supabaseAdmin = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  );
+  
+  const { data } = await supabaseAdmin
+    .from('clinic_pad_device')
+    .select('device_id')
+    .eq('tenant_id', tenantId)
+    .eq('seat_number', String(seat))
+    .maybeSingle();
+    
+  return data?.device_id || null;
+}

@@ -1,10 +1,12 @@
+// src/app/student/login/page.tsx
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
 import { searchStudentsByDigits, loginStudentAction, loginTransferAction, setupStudentPinAction } from "@/app/actions/studentAuth";
-import { getSeatForDevice, assignPadDevice, listActiveTenants } from "@/app/actions/clinicPadDevice";
+// 🌟 방금 추가한 checkExistingDeviceForSeat 액션을 임포트합니다.
+import { getSeatForDevice, assignPadDevice, listActiveTenants, checkExistingDeviceForSeat } from "@/app/actions/clinicPadDevice";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { getKioskDeviceId } from "@/lib/kioskDevice";
 
@@ -86,6 +88,16 @@ export default function StudentKioskLogin() {
         setIsRegisteringSeat(false);
         alert(`이 지점의 좌석 배치도에 ${seat}번 좌석이 없습니다. 좌석번호를 확인해주세요.`);
         return;
+      }
+
+      // 🌟 핵심 해결: 서버 액션을 호출하여 관리자 권한으로 DB를 안전하게 뚫고 확인합니다.
+      const existingDeviceId = await checkExistingDeviceForSeat(selectedTenantId, seat);
+
+      if (existingDeviceId && existingDeviceId !== unregisteredDeviceId) {
+        if (!window.confirm(`⚠️ ${seat}번 좌석에는 이미 다른 패드(${existingDeviceId})가 등록되어 있습니다.\n기존 기기를 삭제하고 현재 패드로 덮어쓰시겠습니까?`)) {
+          setIsRegisteringSeat(false);
+          return;
+        }
       }
 
       const res = await assignPadDevice(unregisteredDeviceId, seat, selectedTenantId);

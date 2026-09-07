@@ -27,7 +27,6 @@ export default function Sidebar() {
 
     setDisplayRole(role);
 
-    // 🌟 강사 뷰(TEACHER) 모드일 때는 pos 텍스트에 '원장'이 남아있더라도 무시합니다.
     const isTeacherMode = role === 'TEACHER';
 
     const isSA = !isTeacherMode && (role === 'SUPER_ADMIN' || pos.includes('최고관리자') || pos.includes('대장'));
@@ -50,7 +49,6 @@ export default function Sidebar() {
         setTenantName("지점 미배정");
       }
 
-      // isSA나 isPrin이 false가 되므로, 강사 모드일 때는 반드시 DB에서 권한을 읽어옵니다.
       if (!(isSA || isPrin) && tId) {
         const { data: permData } = await supabase
           .from('tenant_role_permissions')
@@ -95,15 +93,12 @@ export default function Sidebar() {
   }, [displayRole]);
 
   const canAccess = (path: string) => {
-    // 게스트(GUEST) 계정은 조교 전용 도구에 접근할 수 없도록 최상단에서 먼저 차단
     if (displayRole === 'GUEST' && path === '/ta-tools') return false;
 
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true;
 
-    // 조교(TA) 전용 메뉴는 TA 역할 계정에게 항상 열어준다
     if (path === '/ta-tools' && displayRole === 'TA') return true;
 
-    // 팩토리 메뉴 권한 처리
     const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
     if (factoryPaths.includes(path) && isFactoryWorker) return true;
 
@@ -116,7 +111,8 @@ export default function Sidebar() {
     const disabled = !canAccess(path);
     const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path);
 
-    const baseClass = `flex flex-col items-center justify-center px-2 py-3 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
+    // 🌟 수정: 버튼의 상하 패딩을 py-3에서 py-2로 줄여 높이를 살짝 압축했습니다.
+    const baseClass = `flex flex-col items-center justify-center px-2 py-2 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
 
     if (disabled) {
       return (
@@ -128,7 +124,6 @@ export default function Sidebar() {
       );
     }
 
-    // 기본 테마
     let customBg = active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
     let customLabel = active ? 'font-black' : 'font-bold';
     let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
@@ -158,8 +153,10 @@ export default function Sidebar() {
       customLabel = 'font-black';
       customDesc = active ? 'text-orange-100 font-medium' : 'text-orange-400 font-medium';
     } else if (path === '/consultation') {
-      // 💡 상담 관리 전용 테마 적용
       customBg = active ? 'bg-pink-500 border-pink-600 text-white shadow-md' : 'bg-pink-50/50 border-pink-100 text-pink-700 hover:bg-pink-100 hover:border-pink-200 shadow-sm';
+      customLabel = 'font-black';
+    } else if (path === '/supervisor') {
+      customBg = active ? 'bg-blue-600 border-blue-700 text-white shadow-md' : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 shadow-sm';
       customLabel = 'font-black';
     } else if (path === '/academy-info') {
       customBg = active ? 'bg-[#1f2d26] border-[#1f2d26] text-white shadow-md' : 'bg-[#2e4036] border-[#2e4036] text-white hover:bg-[#24332b] hover:border-[#24332b] shadow-sm';
@@ -167,10 +164,6 @@ export default function Sidebar() {
       customDesc = 'text-emerald-200 font-medium';
     } else if (path === '/permission') {
       customBg = active ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 shadow-sm';
-    } else if (path === '/print-center') {
-      customBg = active ? 'bg-indigo-500 border-indigo-600 text-white shadow-md' : 'bg-indigo-50/50 border-indigo-100 text-indigo-700 hover:bg-indigo-100 hover:border-indigo-200 shadow-sm';
-      customLabel = 'font-black';
-      customDesc = active ? 'text-indigo-100 font-medium' : 'text-indigo-400 font-medium';
     } else if (isFactory) {
       customBg = active
         ? 'bg-amber-50 border-amber-200 text-amber-800 shadow-sm'
@@ -216,14 +209,12 @@ export default function Sidebar() {
 
       <nav className="flex-1 py-5 overflow-y-auto custom-scroll">
 
-        {/* 🌟 1. 학원 관리 */}
         <MenuSection title="학원 관리" icon="🏫">
           <MenuItem path="/home" label="홈 (대시보드)" full />
           <MenuItem path="/student" label="학생 관리" />
           <MenuItem path="/class" label="반 관리" />
         </MenuSection>
 
-        {/* 🌟 2. 수업 관리 */}
         <MenuSection title="수업 관리" icon="👨‍🏫">
           <MenuItem path="/lesson" label="교재 관리" />
           <MenuItem path="/progress" label="진도 관리" />
@@ -232,7 +223,6 @@ export default function Sidebar() {
           <MenuItem path="/makeup" label="보강 관리" />
         </MenuSection>
 
-        {/* 🌟 3. 소통 및 업무 관리 */}
         <MenuSection title="소통 및 업무 관리" icon="💬">
           <MenuItem path="/minutes" label="AI 회의록" />
           <MenuItem path="/task" label="업무 공유" />
@@ -240,13 +230,11 @@ export default function Sidebar() {
           <MenuItem path="/cs" label="학부모 요청/CS" />
         </MenuSection>
 
-        {/* 🌟 4. 출제 및 배포 */}
         <MenuSection title="출제 및 배포" icon="🖨️">
           <MenuItem path="/exam-list" label="문제지 관리" />
           <MenuItem path="/admission" label="진단평가 관리" />
         </MenuSection>
 
-        {/* 🌟 5. 데스크 전용 (팩토리 위로 이동) */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🏢</span>
@@ -255,8 +243,8 @@ export default function Sidebar() {
           </div>
           <div className="grid grid-cols-2 gap-2 px-3">
             <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
-            {/* 💡 상담 관리 메뉴를 운영 대시보드 바로 아래 널찍하게 배치 */}
-            <MenuItem path="/consultation" label="정기 상담 관리" full />
+            <MenuItem path="/consultation" label="정기 상담 관리" />
+            <MenuItem path="/supervisor" label="클리닉 관제탑" />
             <MenuItem path="/billing" label="수납/청구" />
             <MenuItem path="/unpaid" label="미납 관리" />
             <MenuItem path="/shop-admin" label="상점 관리" />
@@ -264,7 +252,6 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* 🌟 6. 조교(TA) 전용 */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">🧑‍🏫</span>
@@ -276,7 +263,6 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* 🌟 7. LOGICA Factory (데스크 아래로 이동) */}
         <div className="mx-3 mb-6 bg-slate-50/80 rounded-xl pt-4 pb-3 border border-slate-200 shadow-sm relative overflow-hidden group">
           <div className="absolute top-0 left-0 w-full h-1.5 bg-[repeating-linear-gradient(45deg,#fcd34d,#fcd34d_8px,#475569_8px,#475569_16px)] opacity-50"></div>
 
@@ -296,7 +282,6 @@ export default function Sidebar() {
           </div>
         </div>
 
-        {/* 🌟 8. 원장·최고관리자 전용 */}
         <div className="mb-6">
           <div className="px-4 flex items-center gap-1.5 mb-3">
             <span className="text-[13px]">👑</span>

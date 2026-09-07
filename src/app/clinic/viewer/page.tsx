@@ -282,10 +282,9 @@ export default function ClinicViewer() {
   const hasPendingRecheckForGuard = Object.values(recheckState.current).some(v => v === 'pending');
   const isNavigationBlocked = myAwayActive || hasActiveCallForGuard || hasPendingRecheckForGuard || awaitingReview;
 
-  // 🌟 핵심 픽스: 강제 새로고침(REFRESH) 시 브라우저 알림창을 무시하는 패스(Pass) 기능 추가
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => { 
-      if ((window as any).__isForceRefreshing) return; // 🔥 관리자 리셋 명령 시 안전장치 패스!
+      if ((window as any).__isForceRefreshing) return;
       if (!isNavigationBlocked) return; 
       e.preventDefault(); 
       e.returnValue = ''; 
@@ -527,7 +526,7 @@ export default function ClinicViewer() {
 
     if (isCorrect) {
       await processCorrectAnswer(qItem, currentQIndex, false);
-      setResultModal({ isCorrect: true, note: gotTaHint ? '조교 힌트를 받아 해결했어요.' : null, canRecheck: false });
+      setResultModal({ isCorrect: true, note: gotTaHint ? '선생님 힌트를 받아 해결했어요.' : null, canRecheck: false });
     } else if (useAI) {
       if (gotTaHint && qItem.record_id) {
           await supabaseClient.from('student_incorrect_record').update({ status: 'TX' }).eq('record_id', qItem.record_id);
@@ -541,7 +540,7 @@ export default function ClinicViewer() {
       sendAction('recheck_request', payload);
       const sid = clinicSessionStateRef.current?.id;
       if (sid) setActiveRecheck(supabaseClient, sid, qItem.uid, payload);
-      setRecheckToast('✏️ 조교 선생님이 확인하고 있어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
+      setRecheckToast('✏️ 선생님이 꼼꼼하게 확인하고 있어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
       forceUpdate();
     } else {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
@@ -567,7 +566,7 @@ export default function ClinicViewer() {
             if (!qItem.record_id && (qItem.tq_id || qItem.question_id)) { qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode); await appendToExistingIncorrectPrint(qItem); }
         }
       }
-      setResultModal({ isCorrect: false, note: gotTaHint ? '조교 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
+      setResultModal({ isCorrect: false, note: gotTaHint ? '선생님 힌트를 받았지만 아직 오답이에요. (TX로 기록됨)' : null, canRecheck: false });
     }
     setIsSubmitting(false);
   };
@@ -691,7 +690,7 @@ export default function ClinicViewer() {
     const sid = clinicSessionStateRef.current?.id;
     if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
     lastGradingContextRef.current = null;
-    setRecheckToast('🔄 조교에게 재확인을 요청했어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
+    setRecheckToast('🔄 선생님께 다시 확인해 달라고 요청했어요. 잠시만 기다려주세요.'); setTimeout(() => setRecheckToast(""), 4000);
     forceUpdate();
   };
 
@@ -729,8 +728,8 @@ export default function ClinicViewer() {
     if (awaitingReview) { alert('선생님이 결과를 확인하고 있어요. 확인이 끝날 때까지 잠시만 기다려주세요.'); return; }
     const hasActiveCall = Object.values(callState.current).some(v => v);
     const hasPendingRecheck = Object.values(recheckState.current).some(v => v === 'pending');
-    if (myAwayActive || hasActiveCall || hasPendingRecheck) { alert('자리비움/호출/재확인 처리 중에는 포탈로 나갈 수 없습니다. 상태 해제 후 다시 시도해주세요.'); return; }
-    if (window.confirm('아직 모든 문제를 푸신 게 아닙니다. 임시저장하고 나가시겠습니까?')) leaveAndGoHome();
+    if (myAwayActive || hasActiveCall || hasPendingRecheck) { alert('자리비움/질문/재확인 처리 중에는 포탈로 나갈 수 없습니다. 상태 해제 후 다시 시도해주세요.'); return; }
+    if (window.confirm('아직 모든 문제를 푼 게 아니에요. 임시저장하고 밖으로 나갈까요?')) leaveAndGoHome();
   };
 
   const finalizeAndGoToLogin = async () => {
@@ -813,27 +812,35 @@ export default function ClinicViewer() {
           <div className="bg-white rounded-3xl shadow-2xl p-10 text-center max-w-sm">
             <div className="text-5xl mb-4">🔒</div>
             <h3 className="text-xl font-extrabold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
-            <p className="text-sm text-slate-500">관리자가 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
+            <p className="text-sm text-slate-500">선생님이 좌석 배치를 편집하는 동안에는<br />기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
           </div>
         </div>
       )}
 
+      {/* 🌟 헤더 UI 친절한 워딩으로 교체 */}
       <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center shrink-0 z-20">
         <div className="flex items-center gap-4">
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-7 object-contain" />
           <div className="w-px h-6 bg-slate-300"></div>
-          <h1 className="text-lg md:text-xl font-bold text-slate-800"><span>{studentInfo.name}</span>의 맞춤 오답 클리닉</h1>
+          <h1 className="text-lg md:text-xl font-bold text-slate-800"><span>{studentInfo.name}</span> 학생의 오답 클리닉</h1>
         </div>
         <div className="flex items-center gap-4">
           <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full shadow-sm transition-colors ${isClinicUrgent ? 'bg-rose-100 border-rose-300 animate-pulse text-rose-600' : 'bg-indigo-50 border border-indigo-200 text-indigo-600'}`} title="전체 이용 가능 시간">
-            <span className="text-xl">🕐</span><span className="text-base font-lexend font-black">{clinicRemainingStr}</span>
+            <span className="text-xl">🕐</span>
+            <span className="text-xs font-bold opacity-80">남은 시간</span>
+            <span className="text-base font-lexend font-black">{clinicRemainingStr}</span>
           </div>
           {isTimedRound && (
             <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full shadow-sm ${roundRemainingSec <= 60 ? 'bg-rose-100 animate-pulse text-rose-600' : 'bg-rose-50 border border-rose-200 text-rose-600'}`}>
-              <span className="text-xl">⏱️</span><span className="text-base font-lexend font-black">{String(Math.floor(roundRemainingSec/60)).padStart(2,'0')}:{String(roundRemainingSec%60).padStart(2,'0')}</span>
+              <span className="text-xl">⏱️</span>
+              <span className="text-xs font-bold opacity-80">타이머</span>
+              <span className="text-base font-lexend font-black">{String(Math.floor(roundRemainingSec/60)).padStart(2,'0')}:{String(roundRemainingSec%60).padStart(2,'0')}</span>
             </div>
           )}
-          <PointBadge points={points} className="bg-yellow-50 border-yellow-200 text-yellow-700" />
+          <div className="flex items-center gap-1.5 bg-yellow-50 border border-yellow-200 rounded-full px-3 py-1.5 shadow-sm">
+             <span className="text-xs font-bold text-yellow-700 pl-1">나의 포인트</span>
+             <PointBadge points={points} className="bg-transparent border-none text-yellow-700 shadow-none px-1 py-0" />
+          </div>
           {params.round !== 1 && !awaitingReview && (
             <>
               <div className="w-px h-5 bg-slate-300"></div>
@@ -888,7 +895,7 @@ export default function ClinicViewer() {
                 </div>
 
                 {isSubjective && curAnsMode === 'pen' && (
-                  <span className="ml-auto shrink-0 bg-[#002864] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-sm">✍️ 여기에 풀이를 쓸 수 있어요</span>
+                  <span className="ml-auto shrink-0 bg-[#002864] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-sm">✍️ 캔버스에 자유롭게 적으세요</span>
                 )}
               </div>
 
@@ -914,15 +921,16 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
-              {isCall && <div className="bg-rose-50 border-t border-rose-100 px-6 py-3 text-center text-base font-extrabold text-rose-600 shrink-0">🚨 {currentQIndex + 1}번 문제를 호출했습니다.</div>}
-              {taHintState.current[currentQIndex] && <div className="bg-amber-50 border-t border-amber-100 px-6 py-3 text-center text-sm font-bold text-amber-600 shrink-0">🧑‍🏫 조교에게 힌트를 받았어요. 이어서 풀어 제출해보세요!</div>}
+              {isCall && <div className="bg-rose-50 border-t border-rose-100 px-6 py-3 text-center text-base font-extrabold text-rose-600 shrink-0">🚨 {currentQIndex + 1}번 문제를 선생님께 질문했어요. 잠시 기다려주세요!</div>}
+              {taHintState.current[currentQIndex] && <div className="bg-amber-50 border-t border-amber-100 px-6 py-3 text-center text-sm font-bold text-amber-600 shrink-0">🧑‍🏫 선생님의 힌트를 받았어요. 이어서 푼 뒤 제출해보세요!</div>}
 
+              {/* 🌟 하단 힌트 및 자리비움 UI 친절하게 수정 */}
               {!isTimedRound && (
                 <div className="absolute left-0 right-0 bottom-0 z-30 p-5 bg-blue-50/95 backdrop-blur-sm border-t border-blue-100 rounded-b-3xl shadow-[0_-12px_30px_-10px_rgba(15,23,42,0.18)]">
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
                     <div className="flex justify-end items-center mb-2">
                       <button onClick={() => setHintPanelExpanded(!hintPanelExpanded)} className="flex items-center gap-1 pl-2 pr-1.5 py-1 rounded-md bg-blue-100 text-blue-600 text-xs font-bold shrink-0">
-                        {hintPanelExpanded ? '힌트 접기' : '힌트 펼치기'}
+                        {hintPanelExpanded ? '힌트 닫기' : '힌트 펼치기'}
                         <span className={`text-[10px] transition-transform ${hintPanelExpanded ? 'rotate-180' : ''}`}>▲</span>
                       </button>
                     </div>
@@ -934,10 +942,10 @@ export default function ClinicViewer() {
                         disabled={hintState.current[currentQIndex]?.revealed} 
                         className={`flex-1 border text-base py-3 rounded-xl shadow-sm font-bold transition-colors ${hintState.current[currentQIndex]?.revealed ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white border-blue-200 hover:bg-blue-100 text-blue-700'}`}
                       >
-                        {hintState.current[currentQIndex]?.revealed ? "💡 힌트 열람 완료" : "💡 힌트 열람하기 (-30P)"}
+                        {hintState.current[currentQIndex]?.revealed ? "💡 힌트 열람 완료" : "💡 힌트 열어보기 (-30 포인트)"}
                       </button>
                     )}
-                    <button onClick={handleAwayToggle} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-base font-bold py-3 px-6 rounded-xl shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 자리비움'}</button>
+                    <button onClick={handleAwayToggle} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-base font-bold py-3 px-6 rounded-xl shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 화장실 다녀오기'}</button>
                   </div>
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
                     <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'}`}>
@@ -961,7 +969,7 @@ export default function ClinicViewer() {
                 {(isCall || isRecheck) && (
                   <div className="absolute inset-0 z-20 bg-white/50 flex flex-col items-center pt-4 backdrop-blur-[2px]">
                     <div className={`border text-sm font-bold rounded-xl p-4 text-center w-[90%] shadow-sm ${isCall ? 'bg-rose-50 border-rose-200 text-rose-600' : 'bg-indigo-50 border-indigo-200 text-indigo-600'}`}>
-                      {isCall ? <>🙋 호출 중에는 정답을 입력할 수 없어요<br/>조교가 올 때까지 잠시 기다려주세요.</> : q.aiGradable === false ? <>✏️ 조교 선생님이 확인하고 있어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</> : <>🕐 조교에게 재확인을 요청했어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</>}
+                      {isCall ? <>🙋 선생님을 불렀어요!<br/>오실 때까지 잠시만 기다려주세요.</> : q.aiGradable === false ? <>✏️ 선생님이 꼼꼼히 확인하고 있어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</> : <>🕐 선생님께 다시 확인해 달라고 부탁했어요<br/>확인이 끝날 때까지 잠시만 기다려주세요.</>}
                     </div>
                   </div>
                 )}
@@ -989,9 +997,10 @@ export default function ClinicViewer() {
                       </label>
                     ))
                   ) : curAnsMode === 'pen' ? (
-                    <div className="w-full h-full flex flex-col gap-4 items-center justify-center">
-                      <p className="text-sm md:text-base font-bold text-slate-400 text-center">✍️ 왼쪽 문제 위에 풀이 과정과 정답을 바로 그려주세요</p>
-                      <div className="w-full flex flex-col gap-3">
+                    // 🌟 손글씨 안내 영역 문구 수정 및 잘림 방지 (shrink-0, py-2, custom-scrollbar)
+                    <div className="w-full h-full flex flex-col gap-2 items-center justify-center py-2 overflow-y-auto custom-scrollbar">
+                      <p className="text-sm md:text-base font-bold text-slate-400 text-center shrink-0 leading-snug break-keep">✍️ 빈 공간에 자유롭게 풀이 과정을 적고 정답을 구해보세요!</p>
+                      <div className="w-full flex flex-col gap-2 my-auto shrink-0 py-2">
                         <div className="flex items-center justify-center gap-3">
                           <button onClick={() => { const w = Math.max(1, currentPenWidth - 1); setCurrentPenWidth(w); }} className="w-12 h-12 rounded-xl bg-slate-100 text-slate-500 font-bold text-2xl">−</button>
                           <span className="text-lg font-bold text-slate-500 w-8 text-center">{currentPenWidth}</span>
@@ -1003,17 +1012,17 @@ export default function ClinicViewer() {
                           ))}
                         </div>
                         <div className="flex items-center gap-3 mt-2">
-                          <button onClick={toggleEraser} className={`flex-1 text-lg font-bold py-3 rounded-xl ${isEraserMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>🧽 {isEraserMode ? '지우개 사용 중' : '지우개'}</button>
-                          <button onClick={handleClearCanvas} className="flex-1 text-lg font-bold text-rose-500 bg-rose-50 py-3 rounded-xl">🗑️ 전체 지우기</button>
+                          <button onClick={toggleEraser} className={`flex-1 text-lg font-bold py-3 rounded-xl ${isEraserMode ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500'}`}>🧽 {isEraserMode ? '지우개 쓰는 중' : '지우개로 지우기'}</button>
+                          <button onClick={handleClearCanvas} className="flex-1 text-lg font-bold text-rose-500 bg-rose-50 py-3 rounded-xl">🗑️ 모두 지우기</button>
                         </div>
                         <div className="flex items-center gap-3 mt-3 w-full">
                           <button onClick={toggleAnswerMode} className="flex-1 text-xl font-black text-[#002864] bg-blue-50 py-4 rounded-xl border-2 border-blue-200 hover:bg-blue-100 shadow-sm transition-colors flex items-center justify-center gap-2">
-                            <span className="text-2xl">🔢</span> 키패드 모드로 전환
+                            <span className="text-2xl">🔢</span> 키패드로 돌아가기
                           </button>
                         </div>
                       </div>
-                      <p className="text-xs text-slate-400 font-medium text-center mt-1">
-                        {isKeypadEnterable(q?.answer) ? '🤖 손글씨 답안은 자동으로 채점돼요' : '✍️ 이 문제는 정답 형식상 손글씨로만 답할 수 있어요'}
+                      <p className="text-[11px] md:text-xs text-slate-400 font-medium text-center shrink-0 px-2 break-keep">
+                        {isKeypadEnterable(q?.answer) ? '🤖 손글씨 정답도 똑똑한 AI가 자동으로 채점해 줄 거예요' : '✍️ 이 문제는 정답의 형태가 복잡해서 손글씨로만 답을 적을 수 있어요'}
                       </p>
                     </div>
                   ) : (
@@ -1025,14 +1034,15 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
+              {/* 🌟 제출 및 호출 버튼 영역 친절하게 변경 */}
               {!isTimedRound && (
                 <div className="flex flex-col gap-3 mt-auto shrink-0">
                   <div className="flex gap-3 w-full">
                     <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting || isCurrentAlreadyCorrect} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-xl py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                      {isCurrentAlreadyCorrect ? '✅ 정답 완료' : isSubmitting ? '채점 중...' : '✅ 정답 입력'}
+                      {isCurrentAlreadyCorrect ? '✅ 채점 통과' : isSubmitting ? '채점 중...' : '✅ 정답 제출하기'}
                     </button>
-                    <button onClick={handleCallAction} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-xl py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
-                      {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 호출 취소' : '🙋 호출'}
+                    <button onClick={handleCallAction} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-lg md:text-xl py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
+                      {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 선생님 부르기 취소' : '🙋 선생님 부르기'}
                     </button>
                   </div>
                 </div>
