@@ -9,14 +9,13 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-// 🌟 완벽하게 수정된 시간 계산 공식: 브라우저 환경에 의존하지 않고 절대적인 KST(-6시간 오프셋) 날짜를 구합니다.
+// 절대적인 KST(-6시간 오프셋) 날짜 공식
 const getKSTDateStr = (offsetDays = 0) => {
-  // UTC 기준 시간에 KST(+9시간)를 더하고, 오전 6시 리셋을 위해(-6시간)을 뺍니다.
   const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
   return kstAdjusted.toISOString().split('T')[0];
 };
 
-// 🌟 안전한 KST 시간 포맷 (어느 국가에서 접속해도 한국 시간을 보장)
+// 안전한 KST 시간 포맷
 const formatTimeAsKST = (isoStr: string) => {
   if (!isoStr) return "";
   const d = new Date(isoStr);
@@ -25,7 +24,6 @@ const formatTimeAsKST = (isoStr: string) => {
   return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
 };
 
-// 🌟 안전한 KST 날짜 및 요일 포맷 (MM.DD (요일))
 const formatDateAndDayKST = (isoStr?: string) => {
   const baseDate = isoStr ? new Date(isoStr) : new Date();
   if (isNaN(baseDate.getTime())) return "";
@@ -62,16 +60,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       if (target.closest('.kebab-container')) return;
       setActiveAttMenu(null);
     };
-
     document.addEventListener("mousedown", closeMenu);
     return () => { document.removeEventListener("mousedown", closeMenu); };
   }, []);
 
   useEffect(() => {
     const savedMode = localStorage.getItem("logica_att_view_mode");
-    if (savedMode === "list" || savedMode === "card") {
-      setViewMode(savedMode);
-    }
+    if (savedMode === "list" || savedMode === "card") setViewMode(savedMode);
     const savedFilter = localStorage.getItem("logica_att_hide_gone_home");
     if (savedFilter === "true") setHideGoneHome(true);
   }, []);
@@ -100,20 +95,27 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const yesterday = getKSTDateStr(-1);
     const tId = localStorage.getItem("logica_tenant_id");
 
+    // 🌟 핵심 1: limit(10000)을 걸어 데이터가 많아도 짤리지 않도록 강제 방어!
     let stQuery = supabase.from("student").select(`
       student_id, name, status, parent(name, phone), 
-      attendance(attendance_id, status, check_in_time, check_out_time, attendance_date),
       enrollment(enrollment_id, class_id, class(name))
-    `).eq("status", "재원");
+    `).eq("status", "재원").limit(10000);
     
     if (tId && tId !== 'hq') stQuery = stQuery.eq("tenant_id", tId);
 
     const clinicQuery = supabase
       .from("clinic_session_state")
       .select("student_id, ended_at, started_at, last_seen_at, session_date")
-      .in("session_date", [today, yesterday]);
+      .in("session_date", [today, yesterday])
+      .limit(10000);
 
-    const [stRes, clinicRes] = await Promise.all([stQuery, clinicQuery]);
+    const attQuery = supabase
+      .from("attendance")
+      .select("attendance_id, student_id, status, check_in_time, check_out_time, attendance_date")
+      .eq("attendance_date", today)
+      .limit(10000);
+
+    const [stRes, clinicRes, attRes] = await Promise.all([stQuery, clinicQuery, attQuery]);
     
     if (stRes.error || !stRes.data) {
       console.error("데이터 로딩 오류:", stRes.error);
@@ -122,6 +124,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     }
 
     const todayClinics = clinicRes.data || [];
+    const todayAtts = attRes.data || [];
     let targetStudents = stRes.data;
     
     if (classId !== "all") {
@@ -131,7 +134,12 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     }
 
     const mappedAtt = targetStudents.map((st: any) => {
-      const todayAtt = st.attendance?.find((a: any) => a.attendance_date === today);
+      const myAtts = todayAtts.filter((a: any) => String(a.student_id) === String(st.student_id));
+      
+      // 🌟 핵심 2: 헷갈리는 시간이 아니라, 명확한 DB 고유 생성 순서(attendance_id)로 절대 정렬
+      myAtts.sort((a: any, b: any) => a.attendance_id - b.attendance_id);
+      const latestAtt = myAtts.length > 0 ? myAtts[myAtts.length - 1] : undefined;
+      
       const parentInfo = unwrap(st.parent);
       
       let mainEnroll = st.enrollment && st.enrollment.length > 0 ? st.enrollment[0] : null;
@@ -140,7 +148,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       }
 
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
-      let currentStatus = todayAtt?.status || "NONE";
+      let currentStatus = latestAtt?.status || "NONE";
+
+      // 🌟 텍스트 통일 로직
+      if (currentStatus === '출석') currentStatus = '등원';
+      if (currentStatus === '등원' && latestAtt?.check_out_time) {
+          currentStatus = '하원';
+      }
 
       const studentClinics = todayClinics.filter(c => String(c.student_id) === String(st.student_id));
       const isActiveInClinic = studentClinics.some(c => {
@@ -162,11 +176,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         enrollId: mainEnroll?.enrollment_id || null,
         parentPhone: parentInfo?.phone || "",
         parentName: parentInfo?.name || "",
-        att_id: todayAtt?.attendance_id, 
+        att_id: latestAtt?.attendance_id, 
         status: currentStatus, 
-        checkIn: todayAtt?.check_in_time,
-        checkOut: todayAtt?.check_out_time,
-        attDate: todayAtt?.attendance_date || today
+        checkIn: latestAtt?.check_in_time,
+        checkOut: latestAtt?.check_out_time,
+        attDate: latestAtt?.attendance_date || today
       };
     });
 
@@ -179,13 +193,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   useEffect(() => {
     if (selectedAttClassId) {
       requestFetch(selectedAttClassId);
-      
-      const syncInterval = setInterval(() => {
-        if (!isBulkProcessing.current) {
-          fetchAttendance(selectedAttClassId);
-        }
-      }, 5000);
-
+      const syncInterval = setInterval(() => { if (!isBulkProcessing.current) fetchAttendance(selectedAttClassId); }, 5000);
       return () => clearInterval(syncInterval);
     } else {
       setAttStudents([]);
@@ -206,11 +214,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           if (!newRecord || !newRecord.student_id) return;
 
           let statusLabel = "";
-          if (['출석', '등원'].includes(newRecord.status)) statusLabel = '등원';
-          else if (newRecord.status === '지각') statusLabel = '지각';
-          else if (newRecord.status === '결석') statusLabel = '결석';
-          else if (newRecord.status === '조퇴') statusLabel = '조퇴';
-          else if (newRecord.status === '하원') statusLabel = '하원';
+          const rawStatus = newRecord.status === '출석' ? '등원' : newRecord.status;
+          
+          if (['등원'].includes(rawStatus)) statusLabel = '등원';
+          else if (rawStatus === '지각') statusLabel = '지각';
+          else if (rawStatus === '결석') statusLabel = '결석';
+          else if (rawStatus === '조퇴') statusLabel = '조퇴';
+          else if (rawStatus === '하원') statusLabel = '하원';
           else return; 
 
           const { data: stData } = await supabase.from("student").select("name, parent(name, phone)").eq("student_id", newRecord.student_id).single();
@@ -229,7 +239,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
             const timeString = `${todayIsoStr.replace(/-/g, '.')} ${nowStr}`;
 
             onQueueMessage({
-              id: `${newRecord.student_id}_${statusLabel}`, 
+              id: `${newRecord.student_id}_${statusLabel}_${Date.now()}`, 
               parentPhone: parentPhone,
               parentName: displayParentName,
               studentName: stData.name,
@@ -278,7 +288,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     
     for (const [cName, students] of entries) {
       const filtered = hideGoneHome 
-        ? students.filter(s => ['출석', '등원', '지각', '클리닉중'].includes(s.status)) 
+        ? students.filter(s => ['등원', '지각', '클리닉중'].includes(s.status)) 
         : students;
 
       if (filtered.length > 0) {
@@ -294,7 +304,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       if (st.status === 'NONE') notArrived++;
       else if (st.status === '결석') absent++;
       else if (st.status === '클리닉중') inClinic++;
-      else if (['출석', '등원', '지각'].includes(st.status)) inClass++;
+      else if (['등원', '지각'].includes(st.status)) inClass++;
       else if (['하원', '조퇴'].includes(st.status)) goneHome++;
     });
     return { notArrived, inClass, inClinic, goneHome, absent };
@@ -319,17 +329,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
     if (action === "DELETE") {
       if (!confirm(`[${student.name}] 학생의 오늘 출결 기록을 완벽히 초기화(삭제)하시겠습니까?\n\n※ 주의: 테스트/실수로 생성된 조교(클리닉) 기록도 함께 파기되어 '미등원' 상태로 강제 리셋됩니다.`)) return;
-      
-      if (existingId) {
-        await supabase.from("attendance").delete().eq("attendance_id", existingId);
-      }
-      
+      if (existingId) await supabase.from("attendance").delete().eq("attendance_id", existingId);
       await supabase.from("clinic_session_state").delete().eq("student_id", student.id).in("session_date", [today, getKSTDateStr(-1)]);
-      
       requestFetch(selectedAttClassId);
       return;
     }
 
+    // 상태 변경 시 '등원' 사용
     if (action === "PRESENT") {
       payload = { status: "등원" };
       if (!student.checkIn) payload.check_in_time = nowTimestamp;
@@ -419,30 +425,15 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         templateId: "KA01TP260826014520504X1Fplf8R0FH"
     }));
 
-    if (newMessages.length > 0) {
-        onQueueMessage(newMessages); 
-    }
+    if (newMessages.length > 0) onQueueMessage(newMessages); 
 
     const inserts = toUpdate.map(s => ({
-      student_id: s.id,
-      class_id: s.classId,
-      enrollment_id: s.enrollId,
-      attendance_date: today,
-      status: "등원",
-      check_in_time: nowTimestamp
+      student_id: s.id, class_id: s.classId, enrollment_id: s.enrollId, attendance_date: today, status: "등원", check_in_time: nowTimestamp
     }));
 
-    try {
-      await supabase.from("attendance").insert(inserts);
-    } catch (e) {
-      console.error(e);
-      alert("일괄 처리 중 오류가 발생했습니다.");
-    } finally {
-      setTimeout(() => {
-        isBulkProcessing.current = false;
-        fetchAttendance(selectedAttClassId);
-      }, 1500);
-    }
+    try { await supabase.from("attendance").insert(inserts); } 
+    catch (e) { console.error(e); alert("일괄 처리 중 오류가 발생했습니다."); } 
+    finally { setTimeout(() => { isBulkProcessing.current = false; fetchAttendance(selectedAttClassId); }, 1500); }
   };
 
   const bulkGoHome = async () => {
@@ -479,23 +470,15 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         templateId: "KA01TP260826014520504X1Fplf8R0FH"
     }));
 
-    if (newMessages.length > 0) {
-        onQueueMessage(newMessages); 
-    }
+    if (newMessages.length > 0) onQueueMessage(newMessages); 
 
     try {
       await Promise.all(toUpdate.map(s => 
         supabase.from("attendance").update({ status: "하원", check_out_time: nowTimestamp }).eq("attendance_id", s.att_id)
       ));
-    } catch (e) {
-      console.error(e);
-      alert("일괄 처리 중 오류가 발생했습니다.");
-    } finally {
-      setTimeout(() => {
-        isBulkProcessing.current = false;
-        fetchAttendance(selectedAttClassId);
-      }, 1500);
-    }
+    } 
+    catch (e) { console.error(e); alert("일괄 처리 중 오류가 발생했습니다."); } 
+    finally { setTimeout(() => { isBulkProcessing.current = false; fetchAttendance(selectedAttClassId); }, 1500); }
   };
 
   const openManualModal = (student: any) => {
@@ -513,7 +496,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const toIsoString = (timeStr: string) => {
       if (!timeStr) return null;
       const [hh, mm] = timeStr.split(':');
-      // UTC 변환을 위한 수동 파싱 (KST 입력값을 UTC로 변환하여 저장)
       const d = new Date(`${today}T${hh}:${mm}:00+09:00`);
       return d.toISOString();
     };
@@ -679,10 +661,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                             </tr>
                             {students.map(student => {
                               const isNotArrived = student.status === 'NONE';
+                              // 🌟 UI 텍스트 완벽 통일: 클리닉이 아니라면 "원내체류"
                               let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-100 border-slate-200";
-                              if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "등원"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
-                              else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
-                              else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
+                              if (['등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내체류"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
+                              else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
+                              else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
                               else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
                               
                               const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "-";
@@ -750,10 +733,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                             const isMenuOpen = activeAttMenu === student.id;
                             const isNotArrived = student.status === 'NONE';
 
+                            // 🌟 UI 텍스트 완벽 통일: 클리닉이 아니라면 "원내체류"
                             let flowIcon = "❓"; let flowText = "미등원"; let flowColor = "text-slate-500 bg-slate-200/50 border-slate-300";
-                            if (['출석', '등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "등원"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
-                            else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
-                            else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
+                            if (['등원', '지각'].includes(student.status)) { flowIcon = "🏫"; flowText = "원내체류"; flowColor = "text-blue-700 bg-blue-50 border-blue-200"; }
+                            else if (student.status === '클리닉중') { flowIcon = "✍️"; flowText = "클리닉중"; flowColor = "text-purple-700 bg-purple-50 border-purple-200"; }
+                            else if (['하원', '조퇴'].includes(student.status)) { flowIcon = "👋"; flowText = "하원완료"; flowColor = "text-emerald-700 bg-emerald-50 border-emerald-200"; }
                             else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
 
                             const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "";
