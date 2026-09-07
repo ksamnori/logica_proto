@@ -70,7 +70,6 @@ export default function AdminDashboardPage() {
   const [classStudents, setClassStudents] = useState<any[]>([]);
   const [classSchedules, setClassSchedules] = useState<any[]>([]);
 
-  // DB 대기열 상태
   const [queuedMessages, setQueuedMessages] = useState<any[]>([]);
   const [isSendingAlimtalk, setIsSendingAlimtalk] = useState(false);
   
@@ -78,42 +77,37 @@ export default function AdminDashboardPage() {
   const [bulkTarget, setBulkTarget] = useState('all');
   const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
 
-  // 🌟 핵심 해결 1: 실시간 동기화 채널용 참조 변수
-  const channelRef = useRef<any>(null);
-
-  // 🌟 안전하게 DB에서 대기열을 불러오는 함수
+  // 🌟 핵심 방어벽: DB에서 2줄이 올라와도 화면엔 무조건 최신 1줄만 찍히게 압축합니다.
   const fetchQueue = async () => {
-    const tId = localStorage.getItem("logica_tenant_id") || "hq";
-    const validTenantId = tId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tId;
+    if (!tenantId) return;
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
     const { data } = await supabase
       .from('alimtalk_queue')
       .select('*')
       .eq('tenant_id', validTenantId)
       .eq('status', '대기')
       .order('created_at', { ascending: false });
-    setQueuedMessages(data || []);
-  };
-
-  // 🌟 내가 변경한 사항을 다른 사람의 모니터에도 즉시 알림!
-  const broadcastQueueUpdate = () => {
-    if (channelRef.current) {
-      channelRef.current.send({ type: 'broadcast', event: 'queue_updated' });
-    }
+      
+    const raw = data || [];
+    const uniqueMap = new Map();
+    raw.forEach(item => {
+        // 출결 알림인 경우 무조건 학생 1명당 1개만 유지 (최신 우선)
+        const key = item.template_id === 'KA01TP260826014520504X1Fplf8R0FH' ? `${item.student_id}_ATT` : item.queue_id;
+        if (!uniqueMap.has(key)) uniqueMap.set(key, item);
+    });
+    setQueuedMessages(Array.from(uniqueMap.values()));
   };
 
   useEffect(() => {
     if (!tenantId) return;
-    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
-
     fetchQueue();
 
-    // 🌟 복잡한 SQL 설정 없이, 즉각적인 100% 실시간 동기화를 보장하는 브로드캐스트 채널!
-    const channel = supabase.channel(`queue_sync_${validTenantId}`);
-    channel.on('broadcast', { event: 'queue_updated' }, () => {
-      fetchQueue(); // 누군가 큐를 변경하면 내 화면도 즉시 새로고침
-    }).subscribe();
-
-    channelRef.current = channel;
+    // 🌟 실시간 DB 감지망 복구 (다른 사람이 키오스크 찍으면 즉각 반응)
+    const channel = supabase.channel('queue_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alimtalk_queue' }, () => {
+        fetchQueue();
+      })
+      .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [tenantId]);
@@ -572,8 +566,7 @@ export default function AdminDashboardPage() {
 
     await supabase.from('alimtalk_queue').insert(newMessages);
     fetchQueue(); 
-    broadcastQueueUpdate(); // 🌟 남의 모니터도 새로고침!
-    alert(`${newMessages.length}건이 발송 대기열에 안전하게 등록되었습니다.`);
+    alert(`${newMessages.length}건이 발송 대기열에 등록되었습니다.`);
     setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
   };
 
@@ -627,7 +620,6 @@ export default function AdminDashboardPage() {
 
     await supabase.from('alimtalk_queue').delete().in('queue_id', ids);
     fetchQueue(); 
-    broadcastQueueUpdate(); // 🌟 발송 완료 후 전체 비우기 동기화!
     setIsSendingAlimtalk(false);
     alert(`메시지 전송 완료!\n(성공: ${successCount}건, 실패: ${failCount}건)`);
   };
@@ -813,7 +805,6 @@ export default function AdminDashboardPage() {
                    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
                    await supabase.from('alimtalk_queue').delete().eq('tenant_id', validTenantId).eq('status', '대기');
                    fetchQueue(); 
-                   broadcastQueueUpdate(); // 🌟 나 말고 다른 사람 화면에서도 즉시 지우기!
                 }} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
               </div>
               
@@ -842,7 +833,6 @@ export default function AdminDashboardPage() {
                           <button onClick={async () => {
                              await supabase.from('alimtalk_queue').delete().eq('queue_id', msg.queue_id);
                              fetchQueue(); 
-                             broadcastQueueUpdate(); // 🌟 삭제 버튼 누르면 남의 모니터에서도 스르륵 삭제!
                           }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-1.5 top-1.5">×</button>
                         </div>
                         
@@ -938,46 +928,35 @@ export default function AdminDashboardPage() {
                 classStats={classStats} 
                 todayIso={todayIso} 
                 onQueueMessage={async (msgOrMsgs) => {
-                  if (msgOrMsgs === 'REFRESH_QUEUE') {
-                    fetchQueue();
-                    return;
-                  }
-
-                  const tId = localStorage.getItem("logica_tenant_id") || "hq";
-                  const validTenantId = tId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tId;
+                  const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
                   const msgs = Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs];
                   
-                  // 🌟 핵심 해결 2: 수동 조작 시 동일 학생의 오늘 기존 알림을 싹 지워 중복 발송을 완벽히 차단합니다.
-                  for (const m of msgs) {
-                    const isAttendance = m.templateId === 'KA01TP260826014520504X1Fplf8R0FH';
-                    const sId = isAttendance ? m.id.split('_')[0] : null;
-
-                    if (isAttendance && sId) {
-                        await supabase.from('alimtalk_queue')
-                            .delete()
-                            .eq('tenant_id', validTenantId)
-                            .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
-                            .eq('student_id', sId)
-                            .eq('status', '대기');
-                    }
-
-                    await supabase.from('alimtalk_queue').insert({
-                        tenant_id: validTenantId,
-                        student_id: sId,
-                        student_name: m.studentName,
-                        parent_name: m.parentName,
-                        parent_phone: m.parentPhone,
-                        template_id: m.templateId,
-                        status_label: m.statusLabel,
-                        time_string: m.timeString,
-                        preview_title: m.previewTitle,
-                        preview_desc: m.previewDesc,
-                        status: '대기'
-                    });
+                  const attMsgs = msgs.filter(m => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
+                  if (attMsgs.length > 0) {
+                      const sIds = attMsgs.map(m => m.id.split('_')[0]);
+                      await supabase.from('alimtalk_queue')
+                          .delete()
+                          .eq('tenant_id', validTenantId)
+                          .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
+                          .in('student_id', sIds);
                   }
-                  
+
+                  const inserts = msgs.map(m => ({
+                      tenant_id: validTenantId,
+                      student_id: m.id.split('_')[0],
+                      student_name: m.studentName,
+                      parent_name: m.parentName,
+                      parent_phone: m.parentPhone,
+                      template_id: m.templateId,
+                      status_label: m.statusLabel,
+                      time_string: m.timeString,
+                      preview_title: m.previewTitle,
+                      preview_desc: m.previewDesc,
+                      status: '대기'
+                  }));
+
+                  await supabase.from('alimtalk_queue').insert(inserts);
                   fetchQueue();
-                  broadcastQueueUpdate(); // 내가 수동 조작한 것도 다른 PC에 즉시 동기화
                 }} 
               />
             </div>

@@ -9,13 +9,11 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-// 절대적인 KST(-6시간 오프셋) 날짜 공식
 const getKSTDateStr = (offsetDays = 0) => {
   const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
   return kstAdjusted.toISOString().split('T')[0];
 };
 
-// 안전한 KST 시간 포맷
 const formatTimeAsKST = (isoStr: string) => {
   if (!isoStr) return "";
   const d = new Date(isoStr);
@@ -95,7 +93,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     const yesterday = getKSTDateStr(-1);
     const tId = localStorage.getItem("logica_tenant_id");
 
-    // 🌟 핵심 1: limit(10000)을 걸어 데이터가 많아도 짤리지 않도록 강제 방어!
     let stQuery = supabase.from("student").select(`
       student_id, name, status, parent(name, phone), 
       enrollment(enrollment_id, class_id, class(name))
@@ -109,10 +106,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       .in("session_date", [today, yesterday])
       .limit(10000);
 
+    // 🌟 핵심 방어벽: 어제오늘 데이터를 모두 불러와서 "시차 때문에 증발하는 현상" 완전 차단!
     const attQuery = supabase
       .from("attendance")
       .select("attendance_id, student_id, status, check_in_time, check_out_time, attendance_date")
-      .eq("attendance_date", today)
+      .in("attendance_date", [today, yesterday])
       .limit(10000);
 
     const [stRes, clinicRes, attRes] = await Promise.all([stQuery, clinicQuery, attQuery]);
@@ -134,9 +132,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     }
 
     const mappedAtt = targetStudents.map((st: any) => {
-      const myAtts = todayAtts.filter((a: any) => String(a.student_id) === String(st.student_id));
+      const myAtts = todayAtts.filter((a: any) => {
+          if (String(a.student_id) !== String(st.student_id)) return false;
+          // DB의 CURRENT_DATE가 꼬였더라도 KST 실제 등원 시간을 역산하여 오늘 기록을 정확히 발라냅니다.
+          const checkInKST = a.check_in_time ? new Date(new Date(a.check_in_time).getTime() + 9 * 3600000 - 6 * 3600000).toISOString().split('T')[0] : a.attendance_date;
+          return checkInKST === today || a.attendance_date === today;
+      });
       
-      // 🌟 핵심 2: 헷갈리는 시간이 아니라, 명확한 DB 고유 생성 순서(attendance_id)로 절대 정렬
       myAtts.sort((a: any, b: any) => a.attendance_id - b.attendance_id);
       const latestAtt = myAtts.length > 0 ? myAtts[myAtts.length - 1] : undefined;
       
@@ -150,9 +152,9 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
       let currentStatus = latestAtt?.status || "NONE";
 
-      // 🌟 텍스트 통일 로직
+      // 🌟 원장님 지시: 출석을 등원으로, 체크아웃 시 무조건 하원으로!
       if (currentStatus === '출석') currentStatus = '등원';
-      if (currentStatus === '등원' && latestAtt?.check_out_time) {
+      if (['등원', '지각'].includes(currentStatus) && latestAtt?.check_out_time) {
           currentStatus = '하원';
       }
 
@@ -164,7 +166,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           return (Date.now() - new Date(targetTime).getTime()) < 3 * 60 * 1000;
       });
 
-      if (isActiveInClinic && !['하원', '조퇴'].includes(currentStatus)) {
+      if (isActiveInClinic && !['하원', '조퇴', '결석'].includes(currentStatus)) {
           currentStatus = "클리닉중";
       }
       
@@ -201,70 +203,20 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   }, [selectedAttClassId]);
 
   useEffect(() => {
+    // 🌟 대기열에 두 번 들어가지 못하도록 감시자 권한을 철저히 박탈하고 화면 새로고침만 허용!
     const attChannel = supabase
       .channel('global_attendance_realtime')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'attendance' },
-        async (payload) => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
           if (isBulkProcessing.current) return; 
           if (selectedAttClassId) requestFetch(selectedAttClassId);
-
-          const newRecord = payload.new as any;
-          if (!newRecord || !newRecord.student_id) return;
-
-          let statusLabel = "";
-          const rawStatus = newRecord.status === '출석' ? '등원' : newRecord.status;
-          
-          if (['등원'].includes(rawStatus)) statusLabel = '등원';
-          else if (rawStatus === '지각') statusLabel = '지각';
-          else if (rawStatus === '결석') statusLabel = '결석';
-          else if (rawStatus === '조퇴') statusLabel = '조퇴';
-          else if (rawStatus === '하원') statusLabel = '하원';
-          else return; 
-
-          const { data: stData } = await supabase.from("student").select("name, parent(name, phone)").eq("student_id", newRecord.student_id).single();
-
-          if (stData) {
-            const parentInfo = unwrap(stData.parent);
-            const parentPhone = parentInfo?.phone || "";
-            if (!parentPhone) return;
-
-            const isValidParentName = parentInfo?.name && parentInfo.name.trim() !== "" && parentInfo.name !== "미입력";
-            const displayParentName = isValidParentName ? parentInfo.name : stData.name;
-
-            const targetTime = newRecord.check_out_time || newRecord.check_in_time || new Date().toISOString();
-            const nowStr = formatTimeAsKST(targetTime);
-            const todayIsoStr = newRecord.attendance_date;
-            const timeString = `${todayIsoStr.replace(/-/g, '.')} ${nowStr}`;
-
-            onQueueMessage({
-              id: `${newRecord.student_id}_${statusLabel}_${Date.now()}`, 
-              parentPhone: parentPhone,
-              parentName: displayParentName,
-              studentName: stData.name,
-              timeString: timeString,
-              statusLabel: statusLabel,
-              previewTitle: `[출결] ${statusLabel}`,
-              previewDesc: `${parentPhone} • ${timeString}`,
-              templateId: "KA01TP260826014520504X1Fplf8R0FH" 
-            });
-          }
-        }
-      )
-      .subscribe();
+      }).subscribe();
 
     const clinicChannel = supabase
       .channel('global_clinic_realtime_radar')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'public', table: 'clinic_session_state' },
-        () => {
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_session_state' }, () => {
           if (isBulkProcessing.current) return;
           if (selectedAttClassId) requestFetch(selectedAttClassId);
-        }
-      )
-      .subscribe();
+      }).subscribe();
 
     return () => { 
       supabase.removeChannel(attChannel); 
@@ -335,7 +287,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       return;
     }
 
-    // 상태 변경 시 '등원' 사용
     if (action === "PRESENT") {
       payload = { status: "등원" };
       if (!student.checkIn) payload.check_in_time = nowTimestamp;
