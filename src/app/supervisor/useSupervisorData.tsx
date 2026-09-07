@@ -293,6 +293,7 @@ export function useSupervisorData() {
         return () => clearInterval(interval);
     }, [isAuthorized]);
 
+    // 🌟 핵심 로직: 5초마다 DB를 조회하여 관리자 화면을 완벽하게 복구하고 동기화합니다.
     useEffect(() => {
         if (!isAuthorized || !isMounted) return;
         const dbCrossValidationInterval = setInterval(async () => {
@@ -398,6 +399,9 @@ export function useSupervisorData() {
                     const dbRechecks = dbRecord.active_rechecks || {};
 
                     Object.keys(dbCalls).forEach(qNumKey => {
+                        // 🌟 BUG FIX 1: REFRESH 도장이 로그에 스며드는 현상 완벽 차단!
+                        if (qNumKey === 'REFRESH') return; 
+                        
                         if (dbCalls[qNumKey]?.verdict) return; 
                         if (st.calls[qNumKey]) return;
                         const qNum = qNumKey === 'general' ? 'general' : Number(qNumKey);
@@ -413,6 +417,7 @@ export function useSupervisorData() {
                     });
                     
                     Object.keys(st.calls).forEach(qNumKey => {
+                        if (qNumKey === 'REFRESH') return;
                         if (dbCalls[qNumKey] && !dbCalls[qNumKey].verdict) return; 
                         delete st.calls[qNumKey];
                         if (Object.keys(st.calls).length === 0 && st.status === 'call') st.status = 'idle';
@@ -578,6 +583,9 @@ export function useSupervisorData() {
                     if (st[activeSeat].status === 'offline') {
                         st[activeSeat].status = 'idle';
                     }
+
+                    // 🌟 BUG FIX 2: 학생이 웹소켓으로 신호를 보내면 "난 살아있다!"고 판단하여 오프라인 강제 해제 타이머 갱신
+                    st[activeSeat].lastUpdatedAt = Date.now();
 
                     if (action === 'update_activity') { 
                         st[activeSeat].activity = data.activity; 
@@ -934,14 +942,28 @@ export function useSupervisorData() {
         const targetRecheck = st.rechecks?.[uid];
         const qNum = targetRecheck?.qNum;
 
-        // 🔥 학생 패드가 통신 지연으로 DB 저장을 누락했더라도 강제로 DB에 도장을 찍어버림 (ACK 보장)
+        if (verdict === 'correct') {
+           if (targetRecheck) {
+               if (targetRecheck.recordId) {
+                   await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
+               } else if (targetRecheck.tqId || targetRecheck.questionId) {
+                   const filterCol = targetRecheck.tqId ? 'tq_id' : 'question_id';
+                   const filterVal = targetRecheck.tqId ?? targetRecheck.questionId;
+                   await supabaseClient.from('student_incorrect_record').delete()
+                       .eq('student_id', st.studentId)
+                       .eq(filterCol, filterVal);
+               }
+           }
+        }
+
         if (st.sessionId) {
-            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).maybeSingle();
-            const newRechecks = data?.active_rechecks || {};
-            if (!newRechecks[uid]) newRechecks[uid] = {}; // 누락 방지 강제 생성
-            newRechecks[uid].verdict = verdict; 
-            if (qNum) newRechecks[uid].qNum = qNum; 
-            await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
+            const { data } = await supabaseClient.from('clinic_session_state').select('active_rechecks').eq('id', st.sessionId).single();
+            if (data && data.active_rechecks && data.active_rechecks[uid]) {
+                const newRechecks = { ...data.active_rechecks };
+                newRechecks[uid].verdict = verdict; 
+                if (qNum) newRechecks[uid].qNum = qNum; 
+                await supabaseClient.from('clinic_session_state').update({ active_rechecks: newRechecks }).eq('id', st.sessionId);
+            }
         }
 
         sendToStudent(seat, 'resolve_recheck', { uid, verdict, qNum });
@@ -960,13 +982,12 @@ export function useSupervisorData() {
         
         if (type === 'cancel_call') {
             if (qNum !== null) {
-                // 🌟 DB에 결과를 먼저 업데이트 (mark 에러 픽스 반영)
                 if (currentStudents[seat]?.sessionId) {
                      const sid = currentStudents[seat].sessionId;
                      const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
                      if (data && data.active_calls && data.active_calls[qNum]) {
                          const newCalls = { ...data.active_calls };
-                         newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' };
+                         newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' }; 
                          await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
                      }
                 }

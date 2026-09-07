@@ -69,7 +69,7 @@ export function useClinicRealtime({
 
   const runSelfCorrectionRef = useRef<any>(null);
 
-  // 🌟 1. 무적의 자가 교정 로직 (모달창 프리징 완벽 차단 및 연산 오류 픽스)
+  // 🌟 1. 무적의 자가 교정 로직 (모달창 갇힘/프리징 완벽 차단 및 연산 오류 픽스)
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
     let cancelled = false;
@@ -94,6 +94,9 @@ export function useClinicRealtime({
           const newCalls = { ...data.active_calls };
           delete newCalls['REFRESH'];
           await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+          
+          // 🔥 강제 새로고침 시 이탈 경고창 안전하게 무시 (프리패스 발급)
+          (window as any).__isForceRefreshing = true; 
           window.location.reload();
           return;
       }
@@ -397,6 +400,8 @@ export function useClinicRealtime({
          });
       }
     } else if (payload.action === 'force_refresh') {
+      // 🔥 웹소켓으로 '새로고침' 신호가 왔을 때 경고창을 프리패스시킵니다.
+      (window as any).__isForceRefreshing = true;
       window.location.reload();
     }
   };

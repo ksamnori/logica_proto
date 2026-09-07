@@ -14,7 +14,6 @@ import PointBadge from "@/components/clinic/PointBadge";
 import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
 import { useClinicTimer } from "./hooks/useClinicTimer";
 import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
-// 🌟 방금 만든 실시간 소켓 훅 Import!
 import { useClinicRealtime } from "./hooks/useClinicRealtime";
 
 import { ClinicCanvas } from "./components/ClinicCanvas";
@@ -80,7 +79,6 @@ export default function ClinicViewer() {
     refs: { studentAnswers, studentDrawings, keypadAnswers, answerModes, qBoxStatus, totalQuestionsInRoundRef, hintState, correctSolvedCountRef, examAssignmentTotalsRef }
   });
 
-  // (아래 정의될 채점 함수들에 대한 사전 참조)
   const processCorrectAnswerRef = useRef<any>(null);
   const handleTimeUpRef = useRef<any>(null);
   const persistExamAnswersToDBRef = useRef<any>(null);
@@ -92,7 +90,6 @@ export default function ClinicViewer() {
     return 'keypad';
   };
 
-  // 🌟 분리된 실시간 통신(네트워크/소켓) 훅 사용
   const { initSession, untrackPresence, sendAction } = useClinicRealtime({
     supabaseClient, studentInfo, params, questions, currentQIndex, isTimedRound,
     mySeatRef, seatKeysRef, clinicSessionStateRef, callState, recheckState, taHintState, qBoxStatus,
@@ -281,14 +278,18 @@ export default function ClinicViewer() {
     if (sid) { next ? setAway(supabaseClient, sid) : clearAway(supabaseClient, sid); }
   };
 
-  // --- (경고: 아래 채점/제출/데이터베이스 조작 관련 거대 함수들은 Step 2에서 useClinicSubmit으로 분리될 예정입니다) ---
-
   const hasActiveCallForGuard = Object.values(callState.current).some(v => v);
   const hasPendingRecheckForGuard = Object.values(recheckState.current).some(v => v === 'pending');
   const isNavigationBlocked = myAwayActive || hasActiveCallForGuard || hasPendingRecheckForGuard || awaitingReview;
 
+  // 🌟 핵심 픽스: 강제 새로고침(REFRESH) 시 브라우저 알림창을 무시하는 패스(Pass) 기능 추가
   useEffect(() => {
-    const handleBeforeUnload = (e: BeforeUnloadEvent) => { if (!isNavigationBlocked) return; e.preventDefault(); e.returnValue = ''; };
+    const handleBeforeUnload = (e: BeforeUnloadEvent) => { 
+      if ((window as any).__isForceRefreshing) return; // 🔥 관리자 리셋 명령 시 안전장치 패스!
+      if (!isNavigationBlocked) return; 
+      e.preventDefault(); 
+      e.returnValue = ''; 
+    };
     window.addEventListener('beforeunload', handleBeforeUnload);
     return () => window.removeEventListener('beforeunload', handleBeforeUnload);
   }, [isNavigationBlocked]);
@@ -650,7 +651,6 @@ export default function ClinicViewer() {
                 if (!Array.isArray(comp)) comp = [];
                 const cSet = new Set(comp.map(Number)); cSet.add(Number(qItem.tq_id));
                 
-                // 💡 조인된 객체가 배열로 넘어올 경우를 대비해 안전하게 언래핑
                 const hwAssign: any = Array.isArray(hwRes.homework_assignment) 
                     ? hwRes.homework_assignment[0] 
                     : hwRes.homework_assignment;
@@ -950,7 +950,6 @@ export default function ClinicViewer() {
 
             <div className="flex flex-col gap-5 min-h-0 overflow-y-auto custom-scrollbar">
               
-              {/* 🌟 1. 모듈화된 문항 네비게이션 적용 */}
               <ClinicQuestionNav 
                 questions={questions} currentQIndex={currentQIndex} setCurrentQIndex={setCurrentQIndex}
                 bookFilter={bookFilter} switchBookFilter={switchBookFilter} availableBooks={availableBooks} visibleIndices={visibleIndices}
@@ -1018,7 +1017,6 @@ export default function ClinicViewer() {
                       </p>
                     </div>
                   ) : (
-                    // 🌟 2. 모듈화된 키패드 적용
                     <ClinicKeypad 
                       currentQIndex={currentQIndex} keypadAnswers={keypadAnswers} keypadCursor={keypadCursor}
                       studentAnswers={studentAnswers} keypadCollapsed={keypadCollapsed} forceUpdate={forceUpdate}
