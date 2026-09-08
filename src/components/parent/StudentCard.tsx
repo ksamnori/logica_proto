@@ -1,12 +1,45 @@
 // src/components/parent/StudentCard.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
+};
+
+const safeParseIds = (raw: any): number[] => {
+  if (!raw) return [];
+  try {
+    let val = raw;
+    if (typeof val === 'string') {
+      if (val === "null" || val.trim() === "") return [];
+      val = JSON.parse(val);
+    }
+    if (Array.isArray(val)) return val.map(Number);
+  } catch (err) {
+    console.warn("데이터 파싱 경고:", err);
+  }
+  return [];
+};
+
+// 💡 오늘의 KST 날짜 구하기 헬퍼 함수
+const getKSTDateStr = (offsetDays = 0) => {
+  const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
+  return kstAdjusted.toISOString().split('T')[0];
+};
+
+// 💡 상담 유형별 테마 컬러 (어드민 패널과 통일)
+const getConsultBadgeColor = (type: string) => {
+  switch(type) {
+    case '퇴원상담': return 'bg-rose-50 text-rose-600 border-rose-200';
+    case '신규상담': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+    case '성적상담': return 'bg-violet-50 text-violet-600 border-violet-200';
+    case '태도상담': return 'bg-amber-50 text-amber-600 border-amber-200';
+    case '입학상담': return 'bg-amber-50 text-amber-700 border-amber-200';
+    default: return 'bg-indigo-50 text-indigo-600 border-indigo-100'; // 재원상담 등
+  }
 };
 
 export default function StudentCard({ student }: { student: any }) {
@@ -31,6 +64,9 @@ export default function StudentCard({ student }: { student: any }) {
   const currentClass = activeEnrollment ? unwrap(activeEnrollment.class) : null;
   const className = currentClass?.name || "소속 반 없음";
   const classId = currentClass?.class_id;
+
+  // 🌟 최근 상담 기록 처리 (내용을 제외하고 시간순 정렬)
+  const consultLogs = student.consultation_log ? [...student.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) : [];
 
   useEffect(() => {
     if (activeTab === "homework" && classId) {
@@ -87,6 +123,44 @@ export default function StudentCard({ student }: { student: any }) {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
+  // 🌟 오늘의 출결 상태 연산 로직
+  const todayStatus = useMemo(() => {
+    const todayStr = getKSTDateStr();
+    const todayAtt = attendanceMap.get(todayStr);
+
+    let text = "오늘 아직 등원 전입니다.";
+    let color = "bg-slate-50 text-slate-500 border-slate-200";
+    let icon = "⏳";
+
+    if (todayAtt) {
+      const inTime = formatTime(todayAtt.check_in_time);
+      const outTime = formatTime(todayAtt.check_out_time);
+
+      if (todayAtt.status === '결석') {
+        text = "오늘 결석 처리되었습니다.";
+        color = "bg-rose-50 text-rose-600 border-rose-200";
+        icon = "❌";
+      } else if (todayAtt.status === '조퇴') {
+        text = `오늘 ${outTime || '조기'} 조퇴 하원했습니다.`;
+        color = "bg-orange-50 text-orange-600 border-orange-200";
+        icon = "🏃";
+      } else if (todayAtt.check_out_time || todayAtt.status === '하원') {
+        text = `오늘 ${outTime} 하원 완료했습니다.`;
+        color = "bg-emerald-50 text-emerald-600 border-emerald-200";
+        icon = "👋";
+      } else if (todayAtt.status === '지각') {
+        text = `오늘 ${inTime} 지각 등원 (원내 체류중)`;
+        color = "bg-amber-50 text-amber-600 border-amber-200";
+        icon = "🏫";
+      } else {
+        text = `오늘 ${inTime} 등원 완료 (원내 체류중)`;
+        color = "bg-blue-50 text-blue-600 border-blue-200";
+        icon = "🏫";
+      }
+    }
+    return { text, color, icon };
+  }, [attendanceMap]);
+
   const renderPageBlocks = (bookPages: number[], pageStatuses: Record<number, 'done' | 'homework' | 'none'>) => {
     if (!bookPages || bookPages.length === 0) {
       return <span className="text-xs font-bold text-slate-400">교재 데이터가 없습니다.</span>;
@@ -132,29 +206,39 @@ export default function StudentCard({ student }: { student: any }) {
           </span>
         </div>
 
+        {/* 🌟 오늘의 출결 현황 배너 신설 */}
+        <div className={`flex items-center gap-2.5 px-4 py-3 rounded-xl border shadow-sm mt-1 mb-1 ${todayStatus.color}`}>
+          <span className="text-xl leading-none shrink-0">{todayStatus.icon}</span>
+          <span className="font-extrabold text-[13px]">{todayStatus.text}</span>
+        </div>
+
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex flex-col gap-2">
-          <div className="flex justify-between text-xs font-bold">
-            <span className="text-slate-500">소속 반</span>
-            <span className="text-[#002864] font-black">{className}</span>
+          <div className="flex justify-between items-center text-xs font-bold">
+            <span className="text-slate-500 shrink-0 mr-2">소속 반</span>
+            <span className="text-[#002864] font-black text-right">{className}</span>
           </div>
           {currentClass?.class_schedule && currentClass.class_schedule.length > 0 && (
-            <div className="flex justify-between text-xs font-bold">
-              <span className="text-slate-500">시간표</span>
-              <span className="text-slate-700 tabular-nums text-right break-words max-w-[65%] leading-relaxed">
-                {currentClass.class_schedule.map((sc: any) => {
-                   // 🌟 [수정] 시작 시간과 종료 시간을 모두 포맷팅해서 출력
+            <div className="flex justify-between items-start text-xs font-bold">
+              <span className="text-slate-500 shrink-0 mr-2 pt-0.5">시간표</span>
+              
+              <div className="flex flex-col items-end gap-1 text-slate-700">
+                {currentClass.class_schedule.map((sc: any, idx: number) => {
                    const sTime = sc.start_time?.substring(0, 5) || "";
                    const eTime = sc.end_time?.substring(0, 5) || "";
-                   const timeString = eTime ? `${sTime} ~ ${eTime}` : sTime;
-                   return `${sc.day_of_week} ${timeString}`;
-                }).join(" / ")}
-              </span>
+                   const timeString = eTime ? `${sTime}~${eTime}` : sTime;
+                   return (
+                     <span key={idx} className="bg-white px-2 py-0.5 rounded border border-slate-200 shadow-sm whitespace-nowrap">
+                       {sc.day_of_week} {timeString}
+                     </span>
+                   );
+                })}
+              </div>
+
             </div>
           )}
         </div>
       </div>
 
-      {/* 🌟 [수정] 탭 너비와 패딩을 줄여 한 화면에 다 들어가도록 조절 (px-3로 감소, gap-1.5, text-[11px]) */}
       <div className="flex px-4 sm:px-6 pt-4 border-b border-slate-100 gap-1.5 overflow-x-auto no-scrollbar justify-start">
         {[
           { id: "attendance", label: "출결" },
@@ -352,7 +436,51 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
-        {["makeup", "exam", "consultation"].includes(activeTab) && (
+        {/* 🌟 학부모용 상담 히스토리 탭 */}
+        {activeTab === "consultation" && (
+          <div className="space-y-3 animate-[fadeIn_0.2s_ease-out]">
+             {consultLogs.length === 0 ? (
+               <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                 <span className="text-3xl block mb-3 opacity-50">💬</span>
+                 아직 등록된 상담 기록이 없습니다.
+               </div>
+             ) : (
+               consultLogs.map((log: any, idx: number) => {
+                 const badgeColor = getConsultBadgeColor(log.consultation_type);
+                 const dateStr = formatDateLabel(log.created_at);
+                 const instName = unwrap(log.instructor)?.name || '학원';
+                 const hasSummary = log.parent_summary && log.parent_summary.trim() !== "";
+
+                 return (
+                   <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 transition-colors hover:bg-slate-50">
+                     <div className="flex justify-between items-center">
+                       <div className="flex items-center gap-2">
+                         <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${badgeColor} whitespace-nowrap shadow-sm`}>
+                           {log.consultation_type || '상담진행'}
+                         </span>
+                         <span className="text-[11px] font-bold text-slate-500">
+                           {dateStr}
+                         </span>
+                       </div>
+                       <div className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200 whitespace-nowrap">
+                         담당: {instName} 선생님
+                       </div>
+                     </div>
+                     
+                     {/* 🌟 상담 주제가 등록되어 있을 경우 하단에 굵게 표시 */}
+                     {hasSummary && (
+                       <div className="text-[13px] font-extrabold text-slate-800 pl-1 mt-1 leading-snug">
+                         {log.parent_summary}
+                       </div>
+                     )}
+                   </div>
+                 );
+               })
+             )}
+          </div>
+        )}
+
+        {["makeup", "exam"].includes(activeTab) && (
           <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm animate-[fadeIn_0.2s_ease-out]">
             <span className="text-3xl block mb-3 opacity-50">🛠️</span>
             해당 영역의 데이터 연동을 준비하고 있습니다.

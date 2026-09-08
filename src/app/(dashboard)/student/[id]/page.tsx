@@ -3,10 +3,10 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "../../../../lib/supabase"; 
-import StudentEditModal from "../../../../components/student/StudentEditModal";
-import ConsultModal from "../../../../components/student/ConsultModal";
-import { BillingModal, PaymentModal } from "../../../../components/student/BillingModals";
+import { supabase } from "@/lib/supabase"; 
+import StudentEditModal from "@/components/student/StudentEditModal";
+import ConsultModal from "@/components/student/ConsultModal";
+import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
 
 // ---------------------------------------------------------
 // 1. 공통 유틸리티 함수
@@ -763,6 +763,15 @@ function ConsultTab({ consultLogs, setSelectedConsultLog, setIsConsultModalOpen,
                       </div>
                     </div>
                   </div>
+                  
+                  {/* 🌟 학부모 노출용 주제 렌더링 영역 추가 */}
+                  {log.parent_summary && (
+                    <div className="mb-2 pl-2 flex items-center gap-1.5">
+                      <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">주제</span>
+                      <span className="text-[12px] font-extrabold text-slate-700">{log.parent_summary}</span>
+                    </div>
+                  )}
+
                   <p className="text-[11px] text-slate-600 leading-relaxed whitespace-pre-line mb-2 pl-2">{log.content}</p>
                   <div className="text-[9px] font-bold text-slate-400 text-right">기록자: {unwrap(log.instructor)?.name || '알 수 없음'} {log.is_admission ? '' : '선생님'}</div>
                 </div>

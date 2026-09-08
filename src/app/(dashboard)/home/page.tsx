@@ -73,6 +73,17 @@ export default function TeacherDashboardPage() {
   });
 
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
+  const isBulkProcessing = useRef<boolean>(false);
+  const fetchTimeoutRef = useRef<any>(null);
+
+  // 🌟 핵심 연동: 데이터베이스 동기화 시차 보완용 헬퍼 함수
+  const requestFetch = (classId: string) => {
+    if (isBulkProcessing.current) return;
+    if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
+    fetchTimeoutRef.current = setTimeout(() => {
+      fetchAttendance(classId);
+    }, 800);
+  };
 
   useEffect(() => {
     const instId = localStorage.getItem("logica_instructor_id") || "1";
@@ -106,24 +117,32 @@ export default function TeacherDashboardPage() {
     return () => { document.removeEventListener("mousedown", closeMenu); };
   }, []);
 
+  // 🌟 핵심 연동: 5초 간격으로 폴링하여 강제 종료(비정상) 상태도 감지
   useEffect(() => {
     if (myClasses.length > 0 && selectedClassId !== "all") {
       fetchClassDetails(selectedClassId);
-      fetchAttendance(selectedClassId);
-    }
-  }, [selectedClassId]);
+      requestFetch(selectedClassId);
 
+      const syncInterval = setInterval(() => {
+        if (!isBulkProcessing.current) fetchAttendance(selectedClassId);
+      }, 5000);
+
+      return () => clearInterval(syncInterval);
+    }
+  }, [selectedClassId, myClasses.length]);
+
+  // 🌟 핵심 연동: 실시간 알림 시 Debounce 헬퍼 함수 사용
   useEffect(() => {
     if (!selectedClassId || selectedClassId === "all") return;
 
     const attendanceChannel = supabase.channel('teacher_attendance_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-          fetchAttendance(selectedClassId);
+          requestFetch(selectedClassId);
       }).subscribe();
 
     const clinicChannel = supabase.channel('teacher_clinic_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_session_state' }, () => {
-          fetchAttendance(selectedClassId);
+          requestFetch(selectedClassId);
       }).subscribe();
 
     return () => {
@@ -268,7 +287,6 @@ export default function TeacherDashboardPage() {
   };
 
   const fetchClassDetails = async (classId: string) => {
-    // 💡 [수정] 400 Bad Request 에러 원인인 student 테이블 조회 쿼리 삭제
     const { data: enrollData } = await supabase
       .from("enrollment")
       .select("student_id")
@@ -386,7 +404,6 @@ export default function TeacherDashboardPage() {
     const today = getKSTDateStr();
     const yesterday = getKSTDateStr(-1);
 
-    // 💡 [수정] 400 Bad Request 에러 원인 쿼리 삭제
     const [ { data: enrollData }, { data: clinicData } ] = await Promise.all([
       supabase.from("enrollment").select("student_id").eq("class_id", classId),
       supabase.from("clinic_session_state").select("student_id, ended_at, started_at, last_seen_at, session_date").in("session_date", [today, yesterday])
@@ -455,6 +472,39 @@ export default function TeacherDashboardPage() {
     return { total, present, inClinic, goneHome, absent };
   }, [attStudents]);
 
+  const queueAlimtalk = async (student: any, statusLabel: string, actionTime: string) => {
+    if (!student.parentPhone || !tenantId) return;
+
+    const today = getKSTDateStr();
+    const timeStr = formatTimeAsKST(actionTime);
+    const displayTimeString = `${today.replace(/-/g, '.')} ${timeStr}`;
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+
+    try {
+      await supabase.from('alimtalk_queue')
+        .delete()
+        .eq('tenant_id', validTenantId)
+        .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
+        .eq('student_id', student.id);
+
+      await supabase.from('alimtalk_queue').insert({
+        tenant_id: validTenantId,
+        student_id: student.id,
+        student_name: student.name,
+        parent_name: student.parentName || student.name,
+        parent_phone: student.parentPhone,
+        template_id: 'KA01TP260826014520504X1Fplf8R0FH',
+        status_label: statusLabel,
+        time_string: displayTimeString,
+        preview_title: `[출결] ${statusLabel}`,
+        preview_desc: `${student.parentPhone} • ${displayTimeString}`,
+        status: '대기'
+      });
+    } catch (e) {
+      console.error("알림톡 대기열 큐 삽입 오류:", e);
+    }
+  };
+
   const handleAttAction = async (student: any, action: string) => {
     const today = getKSTDateStr();
     const nowTimestamp = new Date().toISOString(); 
@@ -469,26 +519,33 @@ export default function TeacherDashboardPage() {
       if (student.att_id) {
         await supabase.from("attendance").delete().eq("attendance_id", student.att_id);
       }
-      fetchAttendance(selectedClassId);
+      requestFetch(selectedClassId);
       return;
     }
+
+    let statusLabel = "";
 
     if (action === "PRESENT") {
       payload = { status: "등원" };
       if (!student.checkIn) payload.check_in_time = nowTimestamp;
+      statusLabel = "등원";
     } else if (action === "LATE") {
       payload = { status: "지각" };
       if (!student.checkIn) payload.check_in_time = nowTimestamp;
+      statusLabel = "지각";
     } else if (action === "ABSENT") {
       payload = { status: "결석", check_in_time: null, check_out_time: null };
+      statusLabel = "결석";
     } else if (action === "EARLY_LEAVE") {
       payload = { status: "조퇴" };
       if (!student.checkOut) payload.check_out_time = nowTimestamp;
+      statusLabel = "조퇴";
     } else if (action === "CLINIC") {
       payload = { status: "클리닉중" };
     } else if (action === "GO_HOME") {
       payload = { status: "하원" };
       if (!student.checkOut) payload.check_out_time = nowTimestamp;
+      statusLabel = "하원";
     }
 
     try {
@@ -500,21 +557,36 @@ export default function TeacherDashboardPage() {
           student_id: student.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
         });
       }
+      
+      if (statusLabel && student.parentPhone) {
+        await queueAlimtalk(student, statusLabel, nowTimestamp);
+      }
+
     } catch (e) { console.error(e); } finally {
-      fetchAttendance(selectedClassId);
+      requestFetch(selectedClassId);
     }
   };
 
   const bulkAttend = async () => {
-    if (!confirm('현재 미처리된 모든 학생을 "등원" 처리하시겠습니까?')) return;
+    if (!confirm('현재 미처리된 모든 학생을 "등원" 처리하시겠습니까?\n(알림톡 발송됨)')) return;
     const toUpdate = attStudents.filter(s => s.status === "NONE");
-    for (const s of toUpdate) await handleAttAction(s, "PRESENT");
+    isBulkProcessing.current = true;
+    for (const s of toUpdate) {
+      await handleAttAction(s, "PRESENT");
+    }
+    isBulkProcessing.current = false;
+    requestFetch(selectedClassId);
   };
 
   const bulkGoHome = async () => {
-    if (!confirm('현재 등원/클리닉 중인 전체 학생을 "하원" 처리하시겠습니까? (알림톡 발송됨)')) return;
+    if (!confirm('현재 등원/클리닉 중인 전체 학생을 "하원" 처리하시겠습니까?\n(알림톡 발송됨)')) return;
     const toUpdate = attStudents.filter(s => s.att_id && !['하원', '조퇴', '결석', 'NONE'].includes(s.status));
-    for (const s of toUpdate) await handleAttAction(s, "GO_HOME");
+    isBulkProcessing.current = true;
+    for (const s of toUpdate) {
+      await handleAttAction(s, "GO_HOME");
+    }
+    isBulkProcessing.current = false;
+    requestFetch(selectedClassId);
   };
 
   const openManualModal = (student: any) => {
@@ -563,12 +635,18 @@ export default function TeacherDashboardPage() {
             student_id: manualModalData.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
           });
         }
+
+        if (['등원', '지각', '결석', '조퇴', '하원'].includes(status) && manualModalData.parentPhone) {
+          const timeTarget = status === '조퇴' || status === '하원' ? checkOut : checkIn;
+          const actionTime = timeTarget ? toIsoString(timeTarget)! : new Date().toISOString();
+          await queueAlimtalk(manualModalData, status, actionTime);
+        }
       }
       alert("✅ 출결이 성공적으로 수동 반영되었습니다.");
     } catch (e) { alert("❌ 업데이트 중 오류가 발생했습니다."); } 
     finally {
       setManualModalData(null);
-      fetchAttendance(selectedClassId);
+      requestFetch(selectedClassId);
     }
   };
 

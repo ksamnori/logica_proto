@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { supabase } from "../../lib/supabase";
+import { supabase } from "@/lib/supabase";
 
 interface ConsultModalProps {
   isOpen: boolean;
@@ -14,7 +14,14 @@ interface ConsultModalProps {
 }
 
 export default function ConsultModal({ isOpen, studentId, instId, logData, onClose, onSuccess }: ConsultModalProps) {
-  const [consultForm, setConsultForm] = useState({ logId: null as any, type: "재원상담", method: "전화", content: "" });
+  // 🌟 summary(상담 주제) 상태 추가
+  const [consultForm, setConsultForm] = useState({ 
+    logId: null as any, 
+    type: "재원상담", 
+    method: "전화", 
+    summary: "", 
+    content: "" 
+  });
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
@@ -24,10 +31,11 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
           logId: logData.consultation_log_id || logData.id, 
           type: logData.consultation_type, 
           method: logData.contact_method, 
+          summary: logData.parent_summary || "", // 기존 데이터 불러오기
           content: logData.content 
         });
       } else {
-        setConsultForm({ logId: null, type: "재원상담", method: "전화", content: "" });
+        setConsultForm({ logId: null, type: "재원상담", method: "전화", summary: "", content: "" });
       }
     }
   }, [isOpen, logData]);
@@ -40,10 +48,12 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
     setIsSaving(true);
     try {
       if (consultForm.logId) {
+        // 🌟 수정 시 parent_summary 업데이트
         const { error } = await supabase.from("consultation_log")
           .update({ 
             consultation_type: consultForm.type, 
             contact_method: consultForm.method, 
+            parent_summary: consultForm.summary,
             content: consultForm.content 
           })
           .eq("consultation_log_id", consultForm.logId);
@@ -55,11 +65,13 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
            setIsSaving(false);
            return;
         }
+        // 🌟 등록 시 parent_summary 포함
         const { error } = await supabase.from("consultation_log").insert({ 
             student_id: studentId, 
             instructor_id: instId, 
             consultation_type: consultForm.type, 
             contact_method: consultForm.method, 
+            parent_summary: consultForm.summary,
             content: consultForm.content,
             tenant_id: myTenantId
         });
@@ -94,14 +106,30 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">연락 방법</label>
               <select value={consultForm.method} onChange={(e: any)=>setConsultForm({...consultForm, method: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500">
-                {/* 🌟 텍스트를 '채널톡 (웹챗)'에서 '학원 메신저'로 변경 */}
                 <option value="전화">전화</option><option value="방문">방문</option><option value="채널톡">학원 메신저</option><option value="문자/카톡">문자/카카오톡</option>
               </select>
             </div>
           </div>
+          
+          {/* 🌟 학부모 노출용 상담 주제 인풋 추가 */}
           <div>
-            <label className="block text-xs font-bold text-slate-500 mb-1">상담 내용</label>
-            <textarea rows={5} value={consultForm.content} onChange={(e: any)=>setConsultForm({...consultForm, content: e.target.value})} placeholder="학부모님과 나눈 대화 내용을 상세히 기록해주세요." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+            <label className="block text-xs font-bold text-slate-500 mb-1">
+              상담 주제 <span className="text-indigo-500 font-normal ml-1">(학부모 앱 노출)</span>
+            </label>
+            <input 
+              type="text" 
+              value={consultForm.summary} 
+              onChange={(e: any) => setConsultForm({...consultForm, summary: e.target.value})} 
+              placeholder="예: 9월 모의고사 성적 분석 및 향후 학습 방향" 
+              className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-bold text-slate-500 mb-1">
+              상세 내용 <span className="text-rose-500 font-normal ml-1">(학원 내부용)</span>
+            </label>
+            <textarea rows={4} value={consultForm.content} onChange={(e: any)=>setConsultForm({...consultForm, content: e.target.value})} placeholder="선생님들만 볼 수 있는 상세 대화 내용을 기록해주세요." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-indigo-500 resize-none"></textarea>
           </div>
         </div>
         <div className="p-5 bg-white border-t border-slate-200 flex justify-end gap-3 shrink-0 rounded-b-2xl">

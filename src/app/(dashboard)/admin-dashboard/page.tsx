@@ -4,14 +4,14 @@
 import { useEffect, useState } from "react";
 import React from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "../../../lib/supabase";
-import AgendaSidebar from "../../../components/dashboard/AgendaSidebar";
-import AttendanceControlPanel from "../../../components/admin/AttendanceControlPanel";
-import QuickSearchWidget from "../../../components/admin/QuickSearchWidget";
-import MemoCreateModal from "../../../components/admin/MemoCreateModal";
-import ClassDetailModal from "../../../components/admin/ClassDetailModal";
-import InstructorPerformance from "../../../components/admin/InstructorPerformance";
-import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "../../actions/alimtalk";
+import { supabase } from "@/lib/supabase";
+import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
+import AttendanceControlPanel from "@/components/admin/AttendanceControlPanel";
+import QuickSearchWidget from "@/components/admin/QuickSearchWidget";
+import MemoCreateModal from "@/components/admin/MemoCreateModal";
+import ClassDetailModal from "@/components/admin/ClassDetailModal";
+import InstructorPerformance from "@/components/admin/InstructorPerformance";
+import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "@/app/actions/alimtalk";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -62,6 +62,9 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
             const kst = new Date(d.getTime() + (9 * 3600000));
             const dateStr = `${kst.getUTCFullYear()}.${String(kst.getUTCMonth()+1).padStart(2,'0')}.${String(kst.getUTCDate()).padStart(2,'0')}`;
             const timeStr = `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
+            
+            // 🌟 주제 유무에 따른 노출 데이터 처리
+            const hasSummary = consult.parent_summary && consult.parent_summary.trim() !== "";
 
             return (
               <div key={`consult-${i}`} className="flex justify-between items-start gap-2 p-3 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200 hover:border-indigo-300 transition-colors shadow-sm group">
@@ -78,9 +81,18 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
                        <span className="font-extrabold text-slate-700 ml-0.5 shrink-0">{consult.studentName} 학생</span>
                     </div>
                   </div>
-                  <span className="text-[10px] font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
-                    {consult.content}
-                  </span>
+                  
+                  {/* 🌟 학부모 노출용 주제가 있으면 주제 표시, 없으면 내용 2줄 표시 */}
+                  {hasSummary ? (
+                    <div className="flex items-center gap-1.5 pl-0.5 mt-0.5">
+                      <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">주제</span>
+                      <span className="text-[11px] font-extrabold text-slate-700 truncate" title={consult.parent_summary}>{consult.parent_summary}</span>
+                    </div>
+                  ) : (
+                    <span className="text-[10px] font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
+                      {consult.content}
+                    </span>
+                  )}
                 </div>
 
                 {/* 우측 영역: 날짜, 시간, 상담자 */}
@@ -302,6 +314,7 @@ export default function AdminDashboardPage() {
       let query = supabase.from("consultation_log")
         .select(`
           content, 
+          parent_summary, 
           created_at, 
           consultation_type, 
           instructor(name),

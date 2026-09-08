@@ -817,7 +817,6 @@ export default function ClinicViewer() {
         </div>
       )}
 
-      {/* 🌟 헤더 UI 친절한 워딩으로 교체 */}
       <header className="bg-white shadow-sm px-6 py-4 flex justify-between items-center shrink-0 z-20">
         <div className="flex items-center gap-4">
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-7 object-contain" />
@@ -894,9 +893,22 @@ export default function ClinicViewer() {
                   )}
                 </div>
 
-                {isSubjective && curAnsMode === 'pen' && (
-                  <span className="ml-auto shrink-0 bg-[#002864] text-white text-xs font-bold px-4 py-1.5 rounded-full shadow-sm">✍️ 캔버스에 자유롭게 적으세요</span>
-                )}
+                {/* 🌟 수정: '선생님 부르기' 버튼을 우측 상단으로 이동 */}
+                <div className="ml-auto flex items-center gap-3 shrink-0">
+                  {isSubjective && curAnsMode === 'pen' && (
+                    <span className="hidden md:inline-block bg-slate-100 text-slate-500 border border-slate-200 text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
+                      ✍️ 캔버스에 자유롭게 적으세요
+                    </span>
+                  )}
+                  <button 
+                    onClick={handleCallAction} 
+                    disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} 
+                    className={`font-extrabold text-sm px-5 py-2 rounded-xl shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}
+                  >
+                    {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 선생님 부르기 취소' : '🙋 선생님 부르기'}
+                  </button>
+                </div>
+
               </div>
 
               <div className="flex-1 relative overflow-hidden">
@@ -924,7 +936,6 @@ export default function ClinicViewer() {
               {isCall && <div className="bg-rose-50 border-t border-rose-100 px-6 py-3 text-center text-base font-extrabold text-rose-600 shrink-0">🚨 {currentQIndex + 1}번 문제를 선생님께 질문했어요. 잠시 기다려주세요!</div>}
               {taHintState.current[currentQIndex] && <div className="bg-amber-50 border-t border-amber-100 px-6 py-3 text-center text-sm font-bold text-amber-600 shrink-0">🧑‍🏫 선생님의 힌트를 받았어요. 이어서 푼 뒤 제출해보세요!</div>}
 
-              {/* 🌟 하단 힌트 및 자리비움 UI 친절하게 수정 */}
               {!isTimedRound && (
                 <div className="absolute left-0 right-0 bottom-0 z-30 p-5 bg-blue-50/95 backdrop-blur-sm border-t border-blue-100 rounded-b-3xl shadow-[0_-12px_30px_-10px_rgba(15,23,42,0.18)]">
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
@@ -997,7 +1008,6 @@ export default function ClinicViewer() {
                       </label>
                     ))
                   ) : curAnsMode === 'pen' ? (
-                    // 🌟 손글씨 안내 영역 문구 수정 및 잘림 방지 (shrink-0, py-2, custom-scrollbar)
                     <div className="w-full h-full flex flex-col gap-2 items-center justify-center py-2 overflow-y-auto custom-scrollbar">
                       <p className="text-sm md:text-base font-bold text-slate-400 text-center shrink-0 leading-snug break-keep">✍️ 빈 공간에 자유롭게 풀이 과정을 적고 정답을 구해보세요!</p>
                       <div className="w-full flex flex-col gap-2 my-auto shrink-0 py-2">
@@ -1034,17 +1044,16 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
-              {/* 🌟 제출 및 호출 버튼 영역 친절하게 변경 */}
+              {/* 🌟 수정: 제출 버튼만 100% 폭으로 크게 배치 */}
               {!isTimedRound && (
                 <div className="flex flex-col gap-3 mt-auto shrink-0">
-                  <div className="flex gap-3 w-full">
-                    <button onClick={submitSingleAnswer} disabled={timeIsUp || isCall || isRecheck || isSubmitting || isCurrentAlreadyCorrect} className="w-2/3 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-xl py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-                      {isCurrentAlreadyCorrect ? '✅ 채점 통과' : isSubmitting ? '채점 중...' : '✅ 정답 제출하기'}
-                    </button>
-                    <button onClick={handleCallAction} disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} className={`w-1/3 font-extrabold text-lg md:text-xl py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}>
-                      {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 선생님 부르기 취소' : '🙋 선생님 부르기'}
-                    </button>
-                  </div>
+                  <button 
+                    onClick={submitSingleAnswer} 
+                    disabled={timeIsUp || isCall || isRecheck || isSubmitting || isCurrentAlreadyCorrect} 
+                    className="w-full bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-xl py-5 rounded-xl shadow-md transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {isCurrentAlreadyCorrect ? '✅ 채점 통과' : isSubmitting ? '채점 중...' : '✅ 정답 제출하기'}
+                  </button>
                 </div>
               )}
             </div>
