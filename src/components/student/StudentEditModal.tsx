@@ -40,9 +40,14 @@ export default function StudentEditModal({
     phone: "",
     passwordHash: "",
     parentId: "", 
+    // 학부모 정보 1 (메인)
     parentName: "", 
     parentRel: "", 
     parentPhone: "", 
+    // 학부모 정보 2 (추가)
+    parentName2: "",
+    parentRel2: "", 
+    parentPhone2: "", 
     newClassId: ""
   });
   
@@ -72,6 +77,9 @@ export default function StudentEditModal({
         parentName: parentObj?.name || "", 
         parentRel: parentObj?.relationship || "", 
         parentPhone: parentObj?.phone?.includes('unassigned') ? "" : (parentObj?.phone || ""), 
+        parentName2: parentObj?.name_2 || "",
+        parentRel2: parentObj?.relationship_2 || "",
+        parentPhone2: parentObj?.phone_2 || "",
         newClassId: ""
       });
       setLevelFilter("전체"); 
@@ -98,7 +106,20 @@ export default function StudentEditModal({
       const inputName = editForm.parentName.trim();
       const inputRel = editForm.parentRel.trim();
 
-      if (!inputPhone && !inputName && !inputRel) {
+      const inputName2 = editForm.parentName2.trim() || null;
+      const inputPhone2 = editForm.parentPhone2.trim() || null;
+      const inputRel2 = editForm.parentRel2.trim() || null;
+
+      const parentPayloadBase = {
+        name: inputName,
+        relationship: inputRel,
+        name_2: inputName2,
+        relationship_2: inputRel2,
+        phone_2: inputPhone2
+      };
+
+      // 학부모 정보 1, 2가 모두 비어있는 경우
+      if (!inputPhone && !inputName && !inputRel && !inputName2 && !inputPhone2 && !inputRel2) {
         finalParentId = null;
       } else {
         if (inputPhone) {
@@ -112,36 +133,37 @@ export default function StudentEditModal({
             finalParentId = existingParent.parent_id;
             const { error: pUpdateErr } = await supabase
               .from("parent")
-              .update({ name: inputName, relationship: inputRel })
+              .update(parentPayloadBase)
               .eq("parent_id", finalParentId);
             if (pUpdateErr) throw pUpdateErr;
           } else if (finalParentId) {
             const { error: pUpdateErr } = await supabase
               .from("parent")
-              .update({ phone: inputPhone, name: inputName, relationship: inputRel })
+              .update({ phone: inputPhone, ...parentPayloadBase })
               .eq("parent_id", finalParentId);
             if (pUpdateErr) throw pUpdateErr;
           } else {
             const { data: newParent, error: pInsertErr } = await supabase
               .from("parent")
-              .insert({ phone: inputPhone, name: inputName, relationship: inputRel })
+              .insert({ phone: inputPhone, ...parentPayloadBase })
               .select()
               .single();
             if (pInsertErr) throw pInsertErr;
             finalParentId = newParent.parent_id;
           }
         } else {
+          // 대표 전화번호가 비어있는 경우
           if (finalParentId) {
             const { error: pUpdateErr } = await supabase
               .from("parent")
-              .update({ name: inputName, relationship: inputRel })
+              .update(parentPayloadBase)
               .eq("parent_id", finalParentId);
             if (pUpdateErr) throw pUpdateErr;
           } else {
             const dummyPhone = `unassigned_${Date.now()}`;
             const { data: newParent, error: pInsertErr } = await supabase
               .from("parent")
-              .insert({ phone: dummyPhone, name: inputName, relationship: inputRel })
+              .insert({ phone: dummyPhone, ...parentPayloadBase })
               .select()
               .single();
             if (pInsertErr) throw pInsertErr;
@@ -174,7 +196,7 @@ export default function StudentEditModal({
     } catch (e: any) { 
       const errMsg = e.message || e.details || JSON.stringify(e) || "알 수 없는 에러";
       if (errMsg.includes("unique constraint") || e.code === "23505") {
-        alert("저장 실패: 입력하신 학부모 연락처가 이미 다른 학부모의 번호로 등록되어 있습니다.");
+        alert("저장 실패: 입력하신 메인 학부모 연락처가 이미 다른 학부모의 번호로 등록되어 있습니다.");
       } else {
         alert("정보 저장 실패: " + errMsg); 
       }
@@ -226,13 +248,9 @@ export default function StudentEditModal({
 
     setIsSaving(true);
     try {
-      // 🌟 [핵심 수정] 출결(attendance) 기록을 student_id를 기준으로 가장 먼저 완벽하게 날려버립니다.
       await supabase.from("attendance").delete().eq("student_id", studentId);
-
-      // 그 다음 수강 배정(enrollment) 기록을 안전하게 삭제합니다.
       await supabase.from("enrollment").delete().eq("student_id", studentId);
 
-      // 나머지 종속 데이터 병렬 삭제 (attendance 제외)
       await Promise.all([
         supabase.from("student_answer").delete().eq("student_id", studentId),
         supabase.from("student_exam_result").delete().eq("student_id", studentId),
@@ -259,7 +277,6 @@ export default function StudentEditModal({
         supabase.from("shop_purchase").delete().eq("student_id", studentId)
       ]);
 
-      // 모든 방해물이 제거된 후 학생 본체 삭제
       const { error: delErr } = await supabase.from("student").delete().eq("student_id", studentId);
       if (delErr) throw delErr;
 
@@ -401,20 +418,91 @@ export default function StudentEditModal({
             </div>
           </div>
 
-          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-            <h4 className="font-bold text-sm text-emerald-600 mb-4 border-b border-slate-100 pb-2">학부모 정보</h4>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">학부모 성함</label>
-                <input type="text" value={editForm.parentName} onChange={e => setEditForm({...editForm, parentName: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+          {/* 학부모 정보 섹션 */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-6">
+            {/* 학부모 1 (대표) */}
+            <div>
+              <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-sm text-emerald-600 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  학부모 정보 1 (대표/알림 수신 기준)
+                </h4>
+                <span className="text-[11px] font-semibold text-slate-400">메인 식별 번호</span>
               </div>
-              <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">관계</label>
-                <input type="text" value={editForm.parentRel} onChange={e => setEditForm({...editForm, parentRel: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">성함 1</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentName} 
+                    onChange={e => setEditForm({...editForm, parentName: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 홍길동"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">관계 1</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentRel} 
+                    onChange={e => setEditForm({...editForm, parentRel: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 모, 부"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">연락처 1 (메인)</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentPhone} 
+                    onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="010-0000-0000 (비워두면 unassigned로 보존)" 
+                  />
+                </div>
               </div>
-              <div className="col-span-2">
-                <label className="block text-xs font-bold text-slate-500 mb-1">학부모 연락처</label>
-                <input type="text" value={editForm.parentPhone} onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" placeholder="연락처를 비워두면 저장/업데이트가 가능합니다." />
+            </div>
+
+            {/* 학부모 2 (서브) */}
+            <div className="pt-2 border-t border-dashed border-slate-200">
+              <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-sm text-slate-700 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                  학부모 정보 2 (추가 연락처)
+                </h4>
+                <span className="text-[11px] font-semibold text-slate-400">비상/참조용</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">성함 2</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentName2} 
+                    onChange={e => setEditForm({...editForm, parentName2: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 김영희"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">관계 2</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentRel2} 
+                    onChange={e => setEditForm({...editForm, parentRel2: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 부, 모"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1">연락처 2</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentPhone2} 
+                    onChange={e => setEditForm({...editForm, parentPhone2: formatPhone(e.target.value)})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="010-0000-0000" 
+                  />
+                </div>
               </div>
             </div>
           </div>

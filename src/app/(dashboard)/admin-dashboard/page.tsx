@@ -31,7 +31,6 @@ const formatTimeAsKST = (isoStr: string) => {
   return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
 };
 
-// 💡 상담 유형별 테마 컬러 헬퍼 함수
 const getConsultBadgeColor = (type: string) => {
   switch(type) {
     case '퇴원상담': return 'bg-rose-50 text-rose-600 border-rose-200';
@@ -39,13 +38,10 @@ const getConsultBadgeColor = (type: string) => {
     case '성적상담': return 'bg-violet-50 text-violet-600 border-violet-200';
     case '태도상담': return 'bg-amber-50 text-amber-600 border-amber-200';
     case '입학상담': return 'bg-amber-50 text-amber-700 border-amber-200';
-    default: return 'bg-indigo-50 text-indigo-600 border-indigo-100'; // 재원상담 등 기본값
+    default: return 'bg-indigo-50 text-indigo-600 border-indigo-100'; 
   }
 };
 
-// -------------------------------------------------------------
-// 💡 분리된 하위 컴포넌트: 최근 상담 패널
-// -------------------------------------------------------------
 function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
   return (
     <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
@@ -63,13 +59,10 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
             const dateStr = `${kst.getUTCFullYear()}.${String(kst.getUTCMonth()+1).padStart(2,'0')}.${String(kst.getUTCDate()).padStart(2,'0')}`;
             const timeStr = `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
             
-            // 🌟 주제 유무에 따른 노출 데이터 처리
             const hasSummary = consult.parent_summary && consult.parent_summary.trim() !== "";
 
             return (
               <div key={`consult-${i}`} className="flex justify-between items-start gap-2 p-3 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200 hover:border-indigo-300 transition-colors shadow-sm group">
-                
-                {/* 좌측 영역: 배지, 소속, 이름, 내용 */}
                 <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColor} whitespace-nowrap`}>
@@ -82,7 +75,6 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
                     </div>
                   </div>
                   
-                  {/* 🌟 학부모 노출용 주제가 있으면 주제 표시, 없으면 내용 2줄 표시 */}
                   {hasSummary ? (
                     <div className="flex items-center gap-1.5 pl-0.5 mt-0.5">
                       <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">주제</span>
@@ -95,7 +87,6 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
                   )}
                 </div>
 
-                {/* 우측 영역: 날짜, 시간, 상담자 */}
                 <div className="flex flex-col items-end shrink-0 text-right gap-1 border-l border-slate-200 pl-3 py-0.5">
                   <div className="flex flex-col items-end leading-tight">
                      <span className="text-[10px] font-extrabold text-slate-500">{dateStr}</span>
@@ -105,7 +96,6 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
                     {consult.consultantName}
                   </span>
                 </div>
-
               </div>
             )
           })
@@ -114,7 +104,6 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
     </div>
   );
 }
-// -------------------------------------------------------------
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -174,7 +163,7 @@ export default function AdminDashboardPage() {
     const raw = data || [];
     const uniqueMap = new Map();
     raw.forEach((item: any) => {
-        const key = item.template_id === 'KA01TP260826014520504X1Fplf8R0FH' ? `${item.student_id}_ATT` : item.queue_id;
+        const key = item.template_id === 'KA01TP260826014520504X1Fplf8R0FH' ? `${item.student_id}_${item.parent_phone}_ATT` : item.queue_id;
         if (!uniqueMap.has(key)) uniqueMap.set(key, item);
     });
     setQueuedMessages(Array.from(uniqueMap.values()));
@@ -284,7 +273,7 @@ export default function AdminDashboardPage() {
 
   const fetchAllSearchData = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
-    let query = supabase.from('student').select('student_id, name, phone, school, grade, status, parent(name, phone), enrollment(status, end_date, class(class_id, name))');
+    let query = supabase.from('student').select('student_id, name, phone, school, grade, status, parent(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(status, end_date, class(class_id, name))');
     if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
     
     const { data } = await query.order('name');
@@ -660,34 +649,41 @@ export default function AdminDashboardPage() {
     const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
     const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
 
-    const newMessages: any[] = targets.map((student: any) => {
-      const parentInfo = unwrap(student.parent);
-      const parentPhone = parentInfo?.phone;
-      if (!parentPhone) return null;
+    const newMessages: any[] = [];
 
-      const isValidParentName = parentInfo.name && parentInfo.name.trim() !== "" && parentInfo.name !== "미입력";
-      const parentName = isValidParentName ? parentInfo.name : student.name;
+    targets.forEach((student: any) => {
+      const pInfo = unwrap(student.parent);
+      if (!pInfo) return;
 
-      if (bulkType === 'schedule') {
-        return {
-          tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: parentName, parent_phone: parentPhone,
-          template_id: 'KA01TP260826015150733a1AW4dFE1qM', schedule_name: bulkForm.scheduleName, apply_date: bulkForm.applyDate, details: bulkForm.details,
-          preview_title: `[일정] ${bulkForm.scheduleName}`, preview_desc: `${student.name} 학부모님`, time_string: currentTimeStr, status: '대기'
-        };
-      } else if (bulkType === 'makeup') {
-        return {
-          tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: parentName, parent_phone: parentPhone,
-          template_id: 'KA01TP260831032803585c1Me7WbxjUe', old_date: bulkForm.oldDate, new_date: bulkForm.newDate, details: bulkForm.details,
-          preview_title: `[보강] ${student.name}`, preview_desc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`, time_string: currentTimeStr, status: '대기'
-        };
-      } else {
-        return {
-          tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: parentName, parent_phone: parentPhone,
-          template_id: 'GENERAL_SMS', details: bulkForm.details,
-          preview_title: `[일반문자]`, preview_desc: `${student.name} 학부모님`, time_string: currentTimeStr, status: '대기'
-        };
-      }
-    }).filter(Boolean);
+      const pushTarget = (phone: string, name: string, rel: string) => {
+        if (!phone || phone.includes('unassigned')) return;
+        const relStr = rel || '학부모';
+        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `학부모(${relStr})`;
+
+        if (bulkType === 'schedule') {
+          newMessages.push({
+            tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
+            template_id: 'KA01TP260826015150733a1AW4dFE1qM', schedule_name: bulkForm.scheduleName, apply_date: bulkForm.applyDate, details: bulkForm.details,
+            preview_title: `[일정] ${bulkForm.scheduleName}`, preview_desc: `${student.name} ${finalName}`, time_string: currentTimeStr, status: '대기'
+          });
+        } else if (bulkType === 'makeup') {
+          newMessages.push({
+            tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
+            template_id: 'KA01TP260831032803585c1Me7WbxjUe', old_date: bulkForm.oldDate, new_date: bulkForm.newDate, details: bulkForm.details,
+            preview_title: `[보강] ${student.name}`, preview_desc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`, time_string: currentTimeStr, status: '대기'
+          });
+        } else {
+          newMessages.push({
+            tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
+            template_id: 'GENERAL_SMS', details: bulkForm.details,
+            preview_title: `[일반문자]`, preview_desc: `${student.name} ${finalName}`, time_string: currentTimeStr, status: '대기'
+          });
+        }
+      };
+
+      pushTarget(pInfo.phone, pInfo.name, pInfo.relationship);
+      pushTarget(pInfo.phone_2, pInfo.name_2, pInfo.relationship_2);
+    });
 
     await supabase.from('alimtalk_queue').insert(newMessages);
     fetchQueue(); 
@@ -736,8 +732,11 @@ export default function AdminDashboardPage() {
       const logMessage = msg.template_id === "GENERAL_SMS" ? `[일반문자] ${msg.details?.substring(0, 30)}...` : msg.preview_title;
 
       await supabase.from('notification_log').insert({
-        tenant_id: validTenantId, target_name: msg.student_name, target_phone: msg.parent_phone,
-        message: logMessage, status: res?.success ? '성공' : '실패'
+        tenant_id: validTenantId, 
+        target_name: `${msg.student_name} / ${msg.parent_name}`, 
+        target_phone: msg.parent_phone,
+        message: logMessage, 
+        status: res?.success ? '성공' : '실패'
       });
 
       if (res?.success) successCount++; else failCount++;
@@ -949,6 +948,7 @@ export default function AdminDashboardPage() {
                             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.preview_title)}`}>{msg.preview_title}</span>
                             <div className="flex items-baseline gap-1">
                               <span className="text-[11px] font-extrabold text-slate-700">{msg.student_name}</span>
+                              <span className="text-[10px] text-indigo-500 font-bold">{msg.parent_name}</span>
                               <span className="text-[9px] text-slate-400 font-medium">{msg.parent_phone}</span>
                             </div>
                           </div>
@@ -1029,8 +1029,8 @@ export default function AdminDashboardPage() {
                             <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColorClass} shrink-0`}>
                               {categoryName}
                             </span>
-                            <div className="flex gap-1.5 items-baseline shrink-0 w-[130px]">
-                              <span className="font-extrabold text-slate-700 truncate">{feed.target_name || feed.student_name || '학부모'}</span>
+                            <div className="flex gap-1.5 items-baseline shrink-0 w-[180px]">
+                              <span className="font-extrabold text-slate-700 truncate" title={feed.target_name || feed.student_name || '학부모'}>{feed.target_name || feed.student_name || '학부모'}</span>
                               <span className="text-[9px] text-slate-400 font-medium truncate">{feed.target_phone || feed.phone || ''}</span>
                             </div>
                             <span className="text-[10px] text-slate-600 truncate flex-1" title={descText}>{descText}</span>
@@ -1056,9 +1056,35 @@ export default function AdminDashboardPage() {
                   const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
                   const msgs = Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs];
                   
-                  const attMsgs = msgs.filter((m: any) => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
+                  const expandedMsgs: any[] = [];
+                  msgs.forEach((m: any) => {
+                    const stuId = m.id.split('_')[0];
+                    const stuData = allStudentsData.find(s => s.student_id === stuId);
+                    const pInfo = stuData ? unwrap(stuData.parent) : null;
+
+                    if (pInfo) {
+                      const pushAttTarget = (phone: string, name: string, rel: string) => {
+                        if (!phone || phone.includes('unassigned')) return;
+                        const relStr = rel || '학부모';
+                        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `학부모(${relStr})`;
+                        expandedMsgs.push({
+                          ...m,
+                          id: `${m.id}_${phone}`,
+                          parentName: finalName,
+                          parentPhone: phone,
+                          previewDesc: `${m.studentName} ${finalName}`
+                        });
+                      };
+                      pushAttTarget(pInfo.phone, pInfo.name, pInfo.relationship);
+                      pushAttTarget(pInfo.phone_2, pInfo.name_2, pInfo.relationship_2);
+                    } else {
+                      expandedMsgs.push(m);
+                    }
+                  });
+
+                  const attMsgs = expandedMsgs.filter((m: any) => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
                   if (attMsgs.length > 0) {
-                      const sIds = attMsgs.map((m: any) => m.id.split('_')[0]);
+                      const sIds = [...new Set(attMsgs.map((m: any) => m.id.split('_')[0]))];
                       await supabase.from('alimtalk_queue')
                           .delete()
                           .eq('tenant_id', validTenantId)
@@ -1066,7 +1092,7 @@ export default function AdminDashboardPage() {
                           .in('student_id', sIds);
                   }
 
-                  const inserts = msgs.map((m: any) => ({
+                  const inserts = expandedMsgs.map((m: any) => ({
                       tenant_id: validTenantId,
                       student_id: m.id.split('_')[0],
                       student_name: m.studentName,
