@@ -519,7 +519,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       <div className="mb-6">
         <div className="px-4 sm:px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 bg-white rounded-t-2xl border shadow-sm relative z-10">
           <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-            <span>📡</span> 실시간 동선 관제 레이더
+            <span>📡</span> 실시간 동선
             
             {/* 🌟 실시간 이름 검색 도구 추가 */}
             <div className="relative ml-2 font-normal">
