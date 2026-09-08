@@ -86,10 +86,11 @@ export default function ExamListPage() {
     }
   }, [isAuthorized]);
 
-  const formatDate = (dateString: string) => {
+  // 💡 수정된 부분: 날짜와 시간을 함께 포맷팅 (요일 제외)
+  const formatDateTime = (dateString: string) => {
     if (!dateString) return '-';
     const d = new Date(dateString);
-    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')} ${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
   };
 
   const loadExams = async () => {
@@ -298,7 +299,8 @@ export default function ExamListPage() {
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-24">학년 범위</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-28">유형 속성</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm">시험지 제목 및 범위</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">생성일</th>
+                {/* 💡 헤더 텍스트 변경: 생성일 -> 생성일시 */}
+                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">생성일시</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">출제자</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-right">관리 액션</th>
               </tr>
@@ -355,7 +357,8 @@ export default function ExamListPage() {
                           <span>{exam.total_questions || 0}문제</span><span className="text-slate-300">|</span><span>{diff}</span><span className="text-slate-300">|</span><span className="truncate max-w-[250px]" title={scope}>{scope}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-5 text-center text-slate-500 font-bold text-xs">{formatDate(exam.created_at)}</td>
+                      {/* 💡 수정된 부분: formatDateTime 함수를 사용하여 날짜와 시간 출력 */}
+                      <td className="py-4 px-5 text-center text-slate-500 font-bold text-xs">{formatDateTime(exam.created_at)}</td>
                       <td className="py-4 px-5 text-center text-slate-600 font-bold text-xs">{creatorName}</td>
                       <td className="py-4 px-5">
                         <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">

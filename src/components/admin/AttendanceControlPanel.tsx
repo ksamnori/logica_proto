@@ -48,8 +48,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
   const [viewMode, setViewMode] = useState<"card" | "list">("card");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
-  // 🌟 테스트 학생 숨기기 체크박스 상태 추가 (기본값 true)
   const [hideTestStudents, setHideTestStudents] = useState<boolean>(true);
+  
+  // 🌟 실시간 이름 검색 상태 추가
+  const [searchQuery, setSearchQuery] = useState<string>("");
 
   const fetchTimeoutRef = useRef<any>(null);
   const isBulkProcessing = useRef<boolean>(false);
@@ -150,7 +152,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
          mainEnroll = st.enrollment.find((e:any) => String(e.class_id) === String(classId)) || mainEnroll;
       }
 
-      // 🌟 담임 선생님 정보를 가져와서 반 이름에 추가합니다.
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";
       const classInstructor = mainEnroll?.class?.instructor?.name || "미정";
 
@@ -177,7 +178,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         id: st.student_id, 
         name: st.name, 
         className: className,
-        classInstructor: classInstructor, // 🌟 선생님 이름 추가 저장
+        classInstructor: classInstructor, 
         classId: mainEnroll?.class_id || null,
         enrollId: mainEnroll?.enrollment_id || null,
         parentPhone: parentInfo?.phone || "",
@@ -227,16 +228,22 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     };
   }, [selectedAttClassId, todayIso]);
 
-  // 🌟 테스트 필터 적용
+  // 🌟 테스트 필터 및 실시간 이름 검색 동시 적용
   const baseStudents = useMemo(() => {
-    return hideTestStudents ? attStudents.filter(s => !s.name.includes('테스트')) : attStudents;
-  }, [attStudents, hideTestStudents]);
+    let filtered = attStudents;
+    if (hideTestStudents) {
+      filtered = filtered.filter(s => !s.name.includes('테스트'));
+    }
+    if (searchQuery.trim() !== "") {
+      filtered = filtered.filter(s => s.name.includes(searchQuery.trim()));
+    }
+    return filtered;
+  }, [attStudents, hideTestStudents, searchQuery]);
 
   const groupedStudents = useMemo(() => {
     const groups: Record<string, any[]> = {};
     baseStudents.forEach(st => {
       const cName = st.className || '미배정';
-      // 리스트 표시용 임시 키로 병합 방지를 위해 cName 유지, instructor 정보는 내부 항목에서 참조
       if (!groups[cName]) groups[cName] = [];
       groups[cName].push(st);
     });
@@ -257,7 +264,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       });
 
       if (filtered.length > 0) {
-        // 첫 번째 학생의 강사 이름을 가져와서 반 전체 강사명으로 사용
         const cInstructor = filtered[0].classInstructor || '미정';
         result.push({ cName, cInstructor, students: filtered, totalCount: students.length });
       }
@@ -513,12 +519,24 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       <div className="mb-6">
         <div className="px-4 sm:px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 bg-white rounded-t-2xl border shadow-sm relative z-10">
           <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
-            <span>📡</span> 실시간 동선 관제 레이더 <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded ml-2">데스크 전용</span>
+            <span>📡</span> 실시간 동선 관제 레이더
+            
+            {/* 🌟 실시간 이름 검색 도구 추가 */}
+            <div className="relative ml-2 font-normal">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400 text-xs">
+                🔍
+              </span>
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="학생 이름 검색"
+                className="pl-7 pr-3 py-1.5 text-xs font-bold border border-slate-200 rounded-lg focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 w-[130px] sm:w-[150px] shadow-inner bg-slate-50 focus:bg-white transition-colors text-slate-700"
+              />
+            </div>
           </h3>
           
-          <div className="flex items-center gap-3 w-full sm:w-auto">
-            
-            {/* 🌟 추가: '테스트' 학생 숨기기 체크박스 */}
+          <div className="flex items-center gap-3 w-full sm:w-auto mt-2 sm:mt-0">
             <label className="flex items-center gap-1.5 cursor-pointer bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0 mr-1">
               <input 
                 type="checkbox" 
@@ -566,7 +584,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                   {selectedAttClassId === 'all' ? '학원 전체 동선 요약' : '반별 동선 요약'}
                 </span>
                 
-                {/* 🌟 다이나믹 필터 버튼 패널로 개조 */}
                 <div className="flex flex-col gap-1.5">
                   <button onClick={() => handleStatusFilterChange(null)} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === null ? 'border-slate-800 ring-1 ring-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
                     <span className="text-[11px] font-bold text-slate-700">🌐 전체 보기</span>
@@ -608,7 +625,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
             {filteredDisplayGroups.length === 0 ? (
               <div className="flex-1 flex flex-col items-center justify-center text-slate-400 font-bold text-sm gap-2">
                 <span className="text-3xl">☕</span>
-                {statusFilter ? "해당 상태의 학생이 없습니다." : "조회된 학생이 없습니다."}
+                {searchQuery ? "검색된 이름이 없습니다." : statusFilter ? "해당 상태의 학생이 없습니다." : "조회된 학생이 없습니다."}
               </div>
             ) : (
               <div className="flex-1 overflow-y-auto custom-scroll p-4 pb-8">
@@ -633,10 +650,9 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                               <td colSpan={6} className="py-1.5 px-3 text-[11px] font-black text-indigo-700">
                                 <span className="w-1.5 h-3 bg-indigo-500 inline-block align-middle mr-1.5 rounded-full"></span>
                                 {cName} 
-                                {/* 🌟 리스트뷰: 반 이름 옆에 담당 선생님 괄호 표시 */}
                                 {cName !== '미배정' && <span className="text-indigo-400 font-bold text-[9px] ml-1">({cInstructor})</span>}
                                 <span className="text-slate-400 font-bold ml-1">
-                                  (반 전체 {totalCount}명 {statusFilter && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>})
+                                  (반 전체 {totalCount}명 {(statusFilter || searchQuery) && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>})
                                 </span>
                               </td>
                             </tr>
@@ -704,7 +720,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                           <span className="w-1.5 h-3 bg-indigo-500 rounded-full"></span>
                           {cName} 
                           <span className="text-[10px] font-bold text-slate-400 ml-1">
-                            반 전체 {totalCount}명 {statusFilter && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>}
+                            반 전체 {totalCount}명 {(statusFilter || searchQuery) && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>}
                           </span>
                         </h4>
                         

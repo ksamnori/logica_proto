@@ -47,7 +47,6 @@ export default function LoginPage() {
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       document.cookie = "logica_tenant_id=; path=/; max-age=0;"; 
 
-      // 🌟 [하이브리드 로직] @가 없으면 예전처럼 @logica.com을 붙이고, 있으면 진짜 이메일로 씁니다!
       const targetEmail = loginId.includes('@') ? loginId : `${loginId}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -90,6 +89,8 @@ export default function LoginPage() {
       const isSuperAdmin = role === 'SUPER_ADMIN' || position.includes('최고관리자') || position.includes('대장');
       const isPrincipal = ['ADMIN', 'VICE_ADMIN', 'MANAGER'].includes(role) || 
                           ['원장', '부원장', '실장'].some((p: string) => position.includes(p));
+      // 💡 신규: 조교(TA) 여부 판별
+      const isTa = role === 'TA' || position.includes('조교');
 
       let isHQ = false;
       const HQ_TENANT_ID = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc';
@@ -126,6 +127,8 @@ export default function LoginPage() {
       localStorage.setItem("logica_instructor_name", instructorData.name);
       localStorage.setItem("logica_instructor_role", instructorData.role || "TEACHER");
       localStorage.setItem("logica_instructor_position", instructorData.position || "");
+      // 💡 구버전 조교 시스템 호환성을 위해 ta_name 변수도 함께 채워줍니다.
+      localStorage.setItem("logica_ta_name", instructorData.name); 
       
       if (instructorData.tenant_id) {
         localStorage.setItem("logica_tenant_id", instructorData.tenant_id);
@@ -133,6 +136,7 @@ export default function LoginPage() {
       }
       sessionStorage.setItem("just_logged_in", "true");
 
+      // 💡 직급에 따른 자동 라우팅 처리
       if (isSuperAdmin) {
         setAdminProfileName(instructorData.name);
         setShowAdminChoice(true);
@@ -140,6 +144,10 @@ export default function LoginPage() {
       } else if (isPrincipal) {
         alert(`로그인 성공! ${instructorData.name}님 환영합니다.`);
         router.replace("/admin-dashboard"); 
+      } else if (isTa) {
+        // 💡 조교 로그인 성공 시 허브로 직행
+        alert(`로그인 성공! ${instructorData.name} 조교님 환영합니다.`);
+        router.replace("/clinic/ta");
       } else {
         alert(`로그인 성공! ${instructorData.name}님 환영합니다.`);
         router.replace("/home"); 
@@ -167,7 +175,6 @@ export default function LoginPage() {
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       document.cookie = "logica_tenant_id=; path=/; max-age=0;"; 
 
-      // 🌟 [하이브리드 로직] 클리닉 관리 로그인에도 똑같이 적용!
       const targetEmail = loginId.includes('@') ? loginId : `${loginId}@logica.com`;
 
       const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
