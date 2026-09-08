@@ -1,15 +1,15 @@
 // src/app/exam/step2/RightPreview.tsx
 import React, { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, renderParentRelations, isThinking, processGroupText } from "./examUtils";
+import { supabase } from "../../../lib/supabase";
+import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, isThinking, processGroupText } from "./examUtils";
 
 export default function RightPreview({ examData }: { examData: any }) {
   const {
     router, questions, setQuestions, isLoading, showAnswer, setShowAnswer,
-    depth6Map, parentSourceMap, editingId, setEditingId, editForm, setEditForm,
+    depth6Map, editingId, setEditingId, editForm, setEditForm,
     handleDragStart, handleDragOver, handleDrop, openTwinSearch, goToStep3,
     draggedIdx, setDraggedIdx,
-    isClinicMode
+    isClinicMode, isRestoredMode // 🌟 추가된 복원 모드 상태 가져오기
   } = examData;
 
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -18,9 +18,30 @@ export default function RightPreview({ examData }: { examData: any }) {
   const [previewBadge, setPreviewBadge] = useState<string | null>(null);
 
   useEffect(() => {
-    setPreviewTitle(sessionStorage.getItem('examTitle'));
-    setPreviewBadge(sessionStorage.getItem('examSubTitle'));
-  }, [questions]); 
+    // 💡 복원 모드(isRestoredMode) 여부에 따라 정확한 제목과 배지를 노출합니다.
+    const examMode = sessionStorage.getItem("examMode"); 
+    const testCategory = sessionStorage.getItem("testCategory");
+    const storedTitle = sessionStorage.getItem("examTitle");
+    const storedBadge = sessionStorage.getItem("examSubTitle");
+
+    if (isClinicMode) {
+      setPreviewTitle(storedTitle || "오답 클리닉 문항");
+      setPreviewBadge(storedBadge || "맞춤형 클리닉");
+    } else if (isRestoredMode) {
+      // 과제 수정 / 시험지 복제 등으로 들어온 경우
+      setPreviewTitle(storedTitle || "출제 문항 미리보기");
+      setPreviewBadge(storedBadge || "편집 모드");
+    } else if (examMode === "test" && testCategory) {
+      setPreviewTitle(`[${testCategory}] 출제 문항`);
+      setPreviewBadge("테스트 전용");
+    } else if (examMode === "regular" || examMode === "thinking") {
+      setPreviewTitle(storedTitle || "신규 출제 시험지");
+      setPreviewBadge(examMode === "regular" ? "정규 교과" : "사고력 교과");
+    } else {
+      setPreviewTitle(storedTitle || "출제 문항 미리보기");
+      setPreviewBadge(storedBadge || "편집 모드");
+    }
+  }, [questions, isClinicMode, isRestoredMode]);
 
   useEffect(() => {
     if (typeof window !== "undefined" && (window as any).MathJax?.typesetPromise) {
@@ -91,7 +112,8 @@ export default function RightPreview({ examData }: { examData: any }) {
           )}
         </div>
         <div className="flex space-x-2">
-          {!isClinicMode && (
+          {/* 🌟 수정/클리닉 모드일 때는 강제로 스텝 1 가기 버튼을 숨깁니다. */}
+          {!isClinicMode && !isRestoredMode && (
              <button onClick={() => router.push('/exam/step1')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">⟵ Step 1 가기</button>
           )}
           <button onClick={() => setShowAnswer(!showAnswer)} className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors border border-blue-200">정답/해설 보기</button>
@@ -114,7 +136,6 @@ export default function RightPreview({ examData }: { examData: any }) {
            const isDragged = draggedIdx === idx;
            const isDragOverTarget = dragOverIdx === idx && draggedIdx !== idx;
 
-           // 🌟 레이아웃 시프트 방지용 일관된 border-2 클래스 적용
            let cardClass = "rounded-xl shadow-sm overflow-hidden flex flex-row group transition-colors duration-200 border-2 ";
            if (isDragged) cardClass += "opacity-40 border-dashed border-[#002864] bg-slate-50 ";
            else if (isDragOverTarget) cardClass += "border-emerald-400 bg-emerald-50/50 z-20 shadow-md ";
@@ -152,7 +173,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                </div>
                
                <div className="flex-1 flex flex-col relative p-5 min-w-0">
-                 <div className="flex justify-between items-center mb-2 border-b border-slate-100 pb-1 pointer-events-none">
+                 <div className="flex justify-between items-center mb-1.5 pointer-events-none">
                    <span className={`text-[14px] font-bold ${isDragOverTarget ? 'text-emerald-700' : 'text-slate-600'}`}>{depth6Name}</span>
                  </div>
                  
@@ -162,24 +183,21 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                  {g.items.map((q: any, subIdx: number) => {
                    const isEditing = editingId === q.question_id;
-                   
                    const textToRender = isGroupMerged && remainders[subIdx] ? remainders[subIdx] : (q.question || q.text_question || '');
 
                    return (
                      <div key={q.question_id} className={`relative ${subIdx < g.items.length - 1 ? 'mb-8 pb-8 border-b-2 border-dashed border-slate-200' : ''}`}>
-                       <div className="flex justify-between items-start mb-2">
-                         <div className="flex-1 flex flex-col gap-1.5 pointer-events-none">
-                           
+                       <div className="flex justify-between items-start mb-0">
+                         {/* 💡 [쌍둥이/유사] 태그 렌더링 코드를 완전 삭제하고, 여백을 타이트하게 끌어올렸습니다. */}
+                         <div className="flex-1 flex items-center pointer-events-none mb-2">
                            <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
-                             <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200">출처</span>
-                             <span>
+                             <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200 leading-none">출처</span>
+                             <span className="leading-none mt-0.5">
                                {q.source_book_name || q.book_name || q.pdf_source || '출처 정보 없음'}
                                {q.final_printed_page || q.detected_page_num ? ` p.${String(q.final_printed_page || q.detected_page_num).replace(/p/gi, '').trim()}` : ''}
                                {q.question_number ? ` ${String(q.question_number).replace(/번/g, '').trim()}번` : ''}
                              </span>
                            </div>
-
-                           {renderParentRelations(q, parentSourceMap)}
                          </div>
                          
                          <div className="flex gap-1.5 shrink-0 z-10 relative ml-2" onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} draggable>
@@ -195,7 +213,7 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                        {!isEditing ? (
                          <>
-                           <div className="flex gap-1.5 items-start mt-0.5">
+                           <div className="flex gap-1.5 items-start mt-0">
                              <div className="flex-1 space-y-3">
                                {textToRender && <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(textToRender) }} />}
                                {q.image_url && <img src={getCleanUrl(q.image_url)} className="max-w-full object-contain my-4 mix-blend-multiply rounded border border-slate-200 pointer-events-none" style={{ maxHeight: '250px' }} alt="" draggable="false" />}

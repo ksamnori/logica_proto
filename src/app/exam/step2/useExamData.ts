@@ -1,7 +1,7 @@
 // src/app/exam/step2/useExamData.ts
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../../lib/supabase";
 import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, extractParentIds } from "./examUtils";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
@@ -15,6 +15,9 @@ export function useExamData() {
   const [isLoading, setIsLoading] = useState(true);
   const [showAnswer, setShowAnswer] = useState(false);
   const [isClinicMode, setIsClinicMode] = useState(false);
+  
+  // 🌟 [핵심 로직] 과제 수정 등 기존 데이터를 불러온 '복원 모드'인지 추적하는 상태
+  const [isRestoredMode, setIsRestoredMode] = useState(false);
 
   const [depth5Map, setDepth5Map] = useState<Record<string, string>>({});
   const [depth6Map, setDepth6Map] = useState<Record<string, string>>({});
@@ -101,7 +104,9 @@ export function useExamData() {
   const fetchAndFilterQuestions = async () => {
     setIsLoading(true);
 
+    // [경로 1] 세션에서 문항 직접 복원 (과제 수정 모드)
     if (sessionStorage.getItem('restoreExamQuestions') === '1' && sessionStorage.getItem('examQuestions')) {
+      setIsRestoredMode(true); // 복원 모드 확정
       setTimeout(() => sessionStorage.removeItem('restoreExamQuestions'), 1500);
       try {
         const parsedGroups = JSON.parse(sessionStorage.getItem('examQuestions') || "[]");
@@ -186,6 +191,7 @@ export function useExamData() {
       }
     }
 
+    // [경로 2] DB 시험지 ID 기반 복원 (과제 수정 모드)
     const urlExamId = searchParams.get('exam_id');
     const duplicateUrlId = searchParams.get('duplicate_exam_id');
     const editExamId = sessionStorage.getItem('editExamId');
@@ -193,6 +199,7 @@ export function useExamData() {
     const loadExamId = urlExamId || duplicateUrlId || editExamId || duplicateSessionId;
 
     if (loadExamId) {
+      setIsRestoredMode(true); // 복원 모드 확정
       try {
         const isDuplicate = !!(duplicateUrlId || duplicateSessionId);
         if (urlExamId) {
@@ -281,6 +288,9 @@ export function useExamData() {
       return;
     }
 
+    // [경로 3] Step 1 필터를 기반으로 신규 추출 (신규 생성 모드)
+    setIsRestoredMode(false); // 🌟 신규 생성 모드 확정
+
     const itemIdsStr = sessionStorage.getItem("selectedItemIds");
     if (!itemIdsStr) {
       alert("선택된 단원 정보가 없습니다. Step 1으로 돌아갑니다.");
@@ -296,7 +306,6 @@ export function useExamData() {
     const testCategory = sessionStorage.getItem("testCategory");
     const selectedItemIdsArray = JSON.parse(itemIdsStr);
 
-    // 💡 Step 1에서 넘겨준 필터값 추출
     const bookName1 = sessionStorage.getItem("bookName1") || "";
     const bookName2 = sessionStorage.getItem("bookName2") || "";
     const pageStart = sessionStorage.getItem("pageStart") || "";
@@ -330,7 +339,6 @@ export function useExamData() {
             finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
         }
 
-        // 💡 1차 필터링: 교재명 ilike 검색 적용 (입력된 단어 모두 포함)
         if (bookName1) finalQuery = finalQuery.ilike("book_name", `%${bookName1}%`);
         if (bookName2) finalQuery = finalQuery.ilike("book_name", `%${bookName2}%`);
 
@@ -339,7 +347,6 @@ export function useExamData() {
         if (data) allData = allData.concat(data);
       }
 
-      // 페이지 번호 필터 활성화 여부
       const isPageFilterActive = pageStart !== "" || pageEnd !== "";
       const minPage = pageStart ? parseInt(pageStart, 10) : 0;
       const maxPage = pageEnd ? parseInt(pageEnd, 10) : 999999;
@@ -362,7 +369,6 @@ export function useExamData() {
           if (q.solving_probability > rateMax || q.solving_probability < rateMin) return false;
         }
 
-        // 💡 2차 필터링: 페이지 번호 범위 제한 (숫자만 추출해서 대소 비교)
         if (isPageFilterActive) {
           if (!q.final_printed_page) return false;
           const pageNum = parseInt(String(q.final_printed_page).replace(/[^0-9]/g, ''), 10);
@@ -666,6 +672,6 @@ export function useExamData() {
     editingId, setEditingId, editForm, setEditForm,
     fetchDepthMappings, fetchParentSources, loadAddTaxonomyTree, goToStep3,
     handleDragStart, handleDragOver, handleDrop, openTwinSearch,
-    isClinicMode 
+    isClinicMode, isRestoredMode // 🌟 반환 객체에 isRestoredMode 추가
   };
 }

@@ -1,6 +1,6 @@
 // src/app/exam/step2/LeftPanel.tsx
 import React, { useState, useMemo, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../../lib/supabase";
 import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, formatText, getCleanUrl, renderParentRelations } from "./examUtils";
 
 const parseId = (id: string) => {
@@ -116,6 +116,12 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const [currentAddD1, setCurrentAddD1] = useState<string>('중학교');
   const [currentAddD2, setCurrentAddD2] = useState<string>('');
 
+  // 🌟 [추가] 새 문제 검색용 필터 상태
+  const [addBookName1, setAddBookName1] = useState("");
+  const [addBookName2, setAddBookName2] = useState("");
+  const [addPageStart, setAddPageStart] = useState("");
+  const [addPageEnd, setAddPageEnd] = useState("");
+
   useEffect(() => {
     if (addMasterData) {
       if (!addMasterData[currentAddD1]) {
@@ -202,7 +208,6 @@ export default function LeftPanel({ examData }: { examData: any }) {
   };
 
   const autoMergeSubQuestions = () => {
-    // 🌟 메시지 수정: 번호 연속 조건 제거
     if (!confirm("페이지 순으로 정렬한 뒤, 공통 지문(8글자 이상)을 가진 서브 문항들을 자동으로 병합하시겠습니까?")) return;
     
     setQuestions((prevQs: any[]) => {
@@ -253,7 +258,6 @@ export default function LeftPanel({ examData }: { examData: any }) {
           
           const hasSameParent = lastItem.parent_question_id && lastItem.parent_question_id !== 'null' && lastItem.parent_question_id === nextItem.parent_question_id;
           
-          // 🌟 문제 번호 연속성 조건 삭제. 8글자 이상 일치하면 병합 수행.
           if (hasSameParent || textOnlyCommon.length >= 8) {
             if (!currentGroup.id.startsWith('merged_')) {
                 currentGroup.id = `merged_${Date.now()}_${currentGroup.items[0].question_id}`;
@@ -289,22 +293,58 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const searchNewQuestions = async () => {
     const selectedCatIds = Array.from(addSelectedCatIds).filter(val => val);
     if (selectedCatIds.length === 0) return alert("검색할 단원이나 유형을 하나 이상 선택해주세요.");
-    setShowAddResults(true); setIsSearchingNew(true);
+    
+    setShowAddResults(true); 
+    setIsSearchingNew(true);
+    
     try {
       let allSearched: any[] = [];
       for (let i = 0; i < selectedCatIds.length; i += 50) {
         const chunk = selectedCatIds.slice(i, i + 50);
-        const { data, error } = await supabase.from('question_db').select('*').or(`item_id.in.(${chunk.join(',')}),taxonomy_id.in.(${chunk.join(',')}),thk_taxonomy_id.in.(${chunk.join(',')})`).limit(300);
+        
+        // 🌟 1. 기본 쿼리 생성
+        let query = supabase.from('question_db').select('*').or(`item_id.in.(${chunk.join(',')}),taxonomy_id.in.(${chunk.join(',')}),thk_taxonomy_id.in.(${chunk.join(',')})`);
+        
+        // 🌟 2. 검색 교재명 필터 적용 (두 단어 모두 포함)
+        if (addBookName1.trim()) query = query.ilike("book_name", `%${addBookName1.trim()}%`);
+        if (addBookName2.trim()) query = query.ilike("book_name", `%${addBookName2.trim()}%`);
+
+        const { data, error } = await query.limit(1000); // 넉넉하게 불러온 뒤 페이지 필터 적용
+        
         if (error) throw error;
         if (data) allSearched = allSearched.concat(data);
       }
       
+      // 🌟 3. 페이지 번호 필터 적용 (숫자 파싱)
+      const isPageFilterActive = addPageStart !== "" || addPageEnd !== "";
+      if (isPageFilterActive) {
+        const minPage = addPageStart ? parseInt(addPageStart, 10) : 0;
+        const maxPage = addPageEnd ? parseInt(addPageEnd, 10) : 999999;
+        
+        allSearched = allSearched.filter(q => {
+          if (!q.final_printed_page) return false;
+          const pageNum = parseInt(String(q.final_printed_page).replace(/[^0-9]/g, ''), 10);
+          if (isNaN(pageNum)) return false;
+          return pageNum >= minPage && pageNum <= maxPage;
+        });
+      }
+
       const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i:any) => i.question_id)), []));
       let newQs = allSearched.filter(q => !existingIds.has(q.question_id) && !q.is_hidden && q.is_hidden !== 'Y');
+      
+      // 랜덤하게 50개만 보여주기
       newQs = newQs.sort(() => 0.5 - Math.random()).slice(0, 50); 
-      await fetchDepthMappings(newQs); await fetchParentSources(newQs);
+      
+      await fetchDepthMappings(newQs); 
+      await fetchParentSources(newQs);
+      
       setNewSearchResults(newQs);
-    } catch (e) { alert("검색 오류"); } finally { setIsSearchingNew(false); }
+      
+    } catch (e) { 
+      alert("검색 중 오류가 발생했습니다."); 
+    } finally { 
+      setIsSearchingNew(false); 
+    }
   };
 
   const addNewQuestionToExam = (q: any) => {
@@ -470,6 +510,44 @@ export default function LeftPanel({ examData }: { examData: any }) {
                 <button onClick={searchNewQuestions} className="px-5 py-2.5 bg-[#002864] text-white text-sm font-extrabold rounded-lg shadow-sm hover:bg-blue-900 transition-colors">문항 검색하기</button>
               </div>
 
+              {/* 🌟 1. 검색 필터 UI 패널 추가 */}
+              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 shadow-inner">
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-2">교재명 키워드 필터</label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="text" placeholder="단어 1 (예: 쎈)" 
+                        value={addBookName1} onChange={(e) => setAddBookName1(e.target.value)} 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                      />
+                      <input 
+                        type="text" placeholder="단어 2 (옵션)" 
+                        value={addBookName2} onChange={(e) => setAddBookName2(e.target.value)} 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-2">페이지 번호 범위 필터</label>
+                    <div className="flex items-center gap-2">
+                      <input 
+                        type="number" placeholder="시작" min="1"
+                        value={addPageStart} onChange={(e) => setAddPageStart(e.target.value)} 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864] text-center" 
+                      />
+                      <span className="text-slate-400 font-bold">~</span>
+                      <input 
+                        type="number" placeholder="끝" min="1"
+                        value={addPageEnd} onChange={(e) => setAddPageEnd(e.target.value)} 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864] text-center" 
+                      />
+                      <span className="text-slate-500 font-bold text-sm shrink-0">p</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               {!addMasterData ? (
                 <div className="flex-1 flex items-center justify-center text-slate-400 font-bold">분류 체계를 불러오는 중...</div>
               ) : (
@@ -533,7 +611,15 @@ export default function LeftPanel({ examData }: { examData: any }) {
                                <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded border ${diffColor}`}>{d}</span>
                                <span className="text-[11px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{d6}</span>
                              </div>
-                             {renderParentRelations(q, parentSourceMap)}
+                             {/* 검색 결과에서도 출처(교재/페이지) 표시 */}
+                             <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5 mt-1">
+                               <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200 leading-none">출처</span>
+                               <span className="leading-none mt-0.5">
+                                 {q.source_book_name || q.book_name || q.pdf_source || '출처 없음'}
+                                 {q.final_printed_page || q.detected_page_num ? ` p.${String(q.final_printed_page || q.detected_page_num).replace(/p/gi, '').trim()}` : ''}
+                                 {q.question_number ? ` ${String(q.question_number).replace(/번/g, '').trim()}번` : ''}
+                               </span>
+                             </div>
                            </div>
                            <button onClick={() => addNewQuestionToExam(q)} className="bg-[#002864] hover:bg-blue-900 text-white text-[12px] font-bold px-4 py-2 rounded shadow-sm transition-colors shrink-0">➕ 추가</button>
                          </div>
