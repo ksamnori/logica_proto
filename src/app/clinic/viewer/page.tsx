@@ -893,17 +893,17 @@ export default function ClinicViewer() {
                   )}
                 </div>
 
-                {/* 🌟 수정: '선생님 부르기' 버튼을 우측 상단으로 이동 */}
                 <div className="ml-auto flex items-center gap-3 shrink-0">
                   {isSubjective && curAnsMode === 'pen' && (
                     <span className="hidden md:inline-block bg-slate-100 text-slate-500 border border-slate-200 text-xs font-bold px-3 py-1.5 rounded-full shadow-sm">
                       ✍️ 캔버스에 자유롭게 적으세요
                     </span>
                   )}
+                  {/* 🌟 수정: 선생님 부르기 버튼의 위아래 패딩(py-2.5)을 늘려 세로 크기 확대 */}
                   <button 
                     onClick={handleCallAction} 
                     disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} 
-                    className={`font-extrabold text-sm px-5 py-2 rounded-xl shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}
+                    className={`font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}
                   >
                     {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 선생님 부르기 취소' : '🙋 선생님 부르기'}
                   </button>
@@ -1044,7 +1044,6 @@ export default function ClinicViewer() {
                 </div>
               </div>
 
-              {/* 🌟 수정: 제출 버튼만 100% 폭으로 크게 배치 */}
               {!isTimedRound && (
                 <div className="flex flex-col gap-3 mt-auto shrink-0">
                   <button 
