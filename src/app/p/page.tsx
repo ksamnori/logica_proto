@@ -106,10 +106,11 @@ export default function ParentPortalPage() {
       const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
       try {
+        // 🌟 phone_2 컬럼으로도 카카오톡 번호를 매칭할 수 있도록 수정
         const { data } = await supabase
           .from("parent")
           .select("parent_id")
-          .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone}`)
+          .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone},phone_2.eq.${rawPhone},phone_2.eq.${formattedPhone}`)
           .limit(1)
           .maybeSingle();
         
@@ -203,22 +204,28 @@ export default function ParentPortalPage() {
     setParentId(pid);
     setAuthState("dashboard");
     try {
-      const { data: pData } = await supabase.from("parent").select("name, phone").eq("parent_id", pid).single();
+      // 🌟 phone_2 컬럼을 포함하여 데이터를 가져오도록 수정
+      const { data: pData } = await supabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
       setInfoName(pData?.name || "");
 
-      if (!pData?.phone) return;
+      if (!pData?.phone && !pData?.phone_2) return;
 
-      const rawPhone = pData.phone.replace(/[^0-9]/g, "");
-      const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
+      // 🌟 다중 연락처 형제자매 묶음 처리 로직 보강
+      const orConditions: string[] = [];
+      [pData?.phone, pData?.phone_2].forEach(p => {
+        if (!p) return;
+        const raw = p.replace(/[^0-9]/g, "");
+        const fmt = raw.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
+        orConditions.push(`phone.eq.${raw},phone.eq.${fmt},phone_2.eq.${raw},phone_2.eq.${fmt}`);
+      });
 
       const { data: allParents } = await supabase
         .from("parent")
         .select("parent_id")
-        .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone}`);
+        .or(orConditions.join(","));
 
       const pids = allParents?.map(p => p.parent_id) || [pid];
 
-      // 🌟 [핵심 변경] class_schedule(day_of_week, start_time, end_time) 으로 종료 시간까지 호출하도록 수정됨
       const { data: sData, error } = await supabase
         .from("student")
         .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time, end_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
