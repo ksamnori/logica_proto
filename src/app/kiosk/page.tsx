@@ -119,36 +119,47 @@ export default function KioskPage() {
     }
   };
 
-  // 🌟 핵심 해결: DB 대기열 연동
+  // 🌟 핵심 해결: 다중 연락처 발송 대기열 추가 로직
   const queueAlimtalk = async (student: any, statusLabel: string, timeString: string) => {
     const parentObj = Array.isArray(student.parent) ? student.parent[0] : student.parent;
-    const parentPhone = parentObj?.phone;
-    if (!parentPhone) return;
+    if (!parentObj) return;
 
-    const isValidParentName = parentObj?.name && parentObj.name.trim() !== "" && parentObj.name !== "미입력";
-    const parentName = isValidParentName ? parentObj.name : student.name;
     const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || localStorage.getItem('logica_tenant_id') || '1ff4299c-d72b-4d99-97b0-45fee08e3b73';
+    const expandedMsgs: any[] = [];
+
+    const pushAttTarget = (phone: string, name: string, rel: string) => {
+      if (!phone || phone.includes('unassigned')) return;
+      const relStr = rel || '학부모';
+      const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `학부모(${relStr})`;
+      expandedMsgs.push({
+        tenant_id: kioskTenantId,
+        student_id: student.student_id,
+        student_name: student.name,
+        parent_name: finalName,
+        parent_phone: phone,
+        template_id: 'KA01TP260826014520504X1Fplf8R0FH',
+        status_label: statusLabel,
+        time_string: timeString,
+        preview_title: `[출결] ${statusLabel}`,
+        preview_desc: `${student.name} ${finalName}`,
+        status: '대기'
+      });
+    };
+
+    pushAttTarget(parentObj.phone, parentObj.name, parentObj.relationship);
+    pushAttTarget(parentObj.phone_2, parentObj.name_2, parentObj.relationship_2);
+
+    if (expandedMsgs.length === 0) return;
 
     try {
+      // 기존 등/하원 대기 메시지가 있다면 지우고 갱신
       await supabase.from('alimtalk_queue')
         .delete()
         .eq('student_id', student.student_id)
         .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
         .eq('status', '대기');
 
-      await supabase.from('alimtalk_queue').insert({
-        tenant_id: kioskTenantId,
-        student_id: student.student_id,
-        student_name: student.name,
-        parent_name: parentName,
-        parent_phone: parentPhone,
-        template_id: 'KA01TP260826014520504X1Fplf8R0FH',
-        status_label: statusLabel,
-        time_string: timeString,
-        preview_title: `[출결] ${statusLabel}`,
-        preview_desc: `${parentPhone} • ${timeString}`,
-        status: '대기'
-      });
+      await supabase.from('alimtalk_queue').insert(expandedMsgs);
     } catch (e) {
       console.error("대기열 저장 중 오류:", e);
     }
@@ -159,26 +170,38 @@ export default function KioskPage() {
     try {
       const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || '';
 
+      // 🌟 DB 쿼리에 phone_2, name_2 추가
       let studentQuery = supabase
         .from('student')
-        .select('student_id, name, grade, phone, parent(name, phone), enrollment(enrollment_id, class(class_id, name))')
+        .select('student_id, name, grade, phone, parent(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
         .eq('status', '재원')
         .like('phone', `%${code}%`);
       if (kioskTenantId) studentQuery = studentQuery.eq('tenant_id', kioskTenantId);
       const { data: studentMatch, error: err1 } = await studentQuery;
 
+      // 학부모 1번 연락처 검색
       let parentQuery = supabase
         .from('student')
-        .select('student_id, name, grade, phone, parent!inner(name, phone), enrollment(enrollment_id, class(class_id, name))')
+        .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
         .eq('status', '재원')
         .like('parent.phone', `%${code}%`);
       if (kioskTenantId) parentQuery = parentQuery.eq('tenant_id', kioskTenantId);
       const { data: parentMatch, error: err2 } = await parentQuery;
 
+      // 🌟 학부모 2번 연락처 검색 추가
+      let parentQuery2 = supabase
+        .from('student')
+        .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
+        .eq('status', '재원')
+        .like('parent.phone_2', `%${code}%`);
+      if (kioskTenantId) parentQuery2 = parentQuery2.eq('tenant_id', kioskTenantId);
+      const { data: parentMatch2, error: err3 } = await parentQuery2;
+
       if (err1) console.error("학생조회 에러:", err1);
       if (err2) console.error("학부모조회 에러:", err2);
+      if (err3) console.error("학부모조회(추가번호) 에러:", err3);
 
-      let merged: any[] = [...(studentMatch || []), ...(parentMatch || [])];
+      let merged: any[] = [...(studentMatch || []), ...(parentMatch || []), ...(parentMatch2 || [])];
       let uniqueMap = new Map();
 
       merged.forEach((item: any) => {
@@ -190,16 +213,22 @@ export default function KioskPage() {
 
         const sPhoneCleaned = extractCleanDigits(item.phone);
         let rawPPhone = "";
+        let rawPPhone2 = "";
+        
         const parentObj = item.parent as any; 
         if (parentObj && !Array.isArray(parentObj)) {
           rawPPhone = parentObj.phone || "";
+          rawPPhone2 = parentObj.phone_2 || "";
         } else if (Array.isArray(parentObj)) {
           rawPPhone = parentObj[0]?.phone || "";
+          rawPPhone2 = parentObj[0]?.phone_2 || "";
         }
+        
         const pPhoneCleaned = extractCleanDigits(rawPPhone);
+        const pPhone2Cleaned = extractCleanDigits(rawPPhone2);
 
         const isStudentMatch = sPhoneCleaned.endsWith(code);
-        const isParentMatch = pPhoneCleaned.endsWith(code);
+        const isParentMatch = pPhoneCleaned.endsWith(code) || pPhone2Cleaned.endsWith(code);
 
         if (isStudentMatch || isParentMatch) {
           uniqueMap.set(item.student_id, item);
