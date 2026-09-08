@@ -2,7 +2,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
+import { supabase } from "../../lib/supabase";
 
 interface ConsultModalProps {
   isOpen: boolean;
@@ -20,7 +20,12 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
   useEffect(() => {
     if (isOpen) {
       if (logData) {
-        setConsultForm({ logId: logData.log_id, type: logData.consultation_type, method: logData.contact_method, content: logData.content });
+        setConsultForm({ 
+          logId: logData.consultation_log_id || logData.id, 
+          type: logData.consultation_type, 
+          method: logData.contact_method, 
+          content: logData.content 
+        });
       } else {
         setConsultForm({ logId: null, type: "재원상담", method: "전화", content: "" });
       }
@@ -30,34 +35,40 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
   const submitConsultLog = async () => {
     if (!consultForm.content.trim()) return alert("상담 내용을 입력해주세요.");
     
-    // 🌟 [추가됨] 새 상담 기록 작성 시 소속 지점 꼬리표를 챙깁니다.
     const myTenantId = localStorage.getItem("logica_tenant_id");
 
     setIsSaving(true);
     try {
       if (consultForm.logId) {
-        // 기존 데이터 수정 시에는 RLS가 알아서 막아주므로 tenant_id를 다시 넣을 필요가 없습니다.
-        await supabase.from("consultation_log").update({ consultation_type: consultForm.type, contact_method: consultForm.method, content: consultForm.content }).eq("log_id", consultForm.logId);
+        const { error } = await supabase.from("consultation_log")
+          .update({ 
+            consultation_type: consultForm.type, 
+            contact_method: consultForm.method, 
+            content: consultForm.content 
+          })
+          .eq("consultation_log_id", consultForm.logId);
+
+        if (error) throw error;
       } else {
         if (!myTenantId) {
            alert("소속 지점 정보가 없어 저장할 수 없습니다. 새로고침 해주세요.");
            setIsSaving(false);
            return;
         }
-        // 🌟 [추가됨] INSERT 할 때 tenant_id 꼬리표 부착!
-        await supabase.from("consultation_log").insert({ 
+        const { error } = await supabase.from("consultation_log").insert({ 
             student_id: studentId, 
             instructor_id: instId, 
             consultation_type: consultForm.type, 
             contact_method: consultForm.method, 
             content: consultForm.content,
-            tenant_id: myTenantId // 👈 꼬리표 추가!
+            tenant_id: myTenantId
         });
+        if (error) throw error;
       }
       onSuccess();
       onClose();
-    } catch (e) { 
-      alert("상담 기록 저장 실패"); 
+    } catch (e: any) { 
+      alert("상담 기록 저장 실패: " + e.message); 
     } finally {
       setIsSaving(false);
     }
@@ -76,20 +87,21 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">상담 유형</label>
-              <select value={consultForm.type} onChange={e=>setConsultForm({...consultForm, type: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500">
+              <select value={consultForm.type} onChange={(e: any)=>setConsultForm({...consultForm, type: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500">
                 <option value="재원상담">재원상담</option><option value="신규상담">신규상담</option><option value="퇴원상담">퇴원상담</option><option value="성적상담">성적상담</option><option value="태도상담">태도상담</option>
               </select>
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">연락 방법</label>
-              <select value={consultForm.method} onChange={e=>setConsultForm({...consultForm, method: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500">
-                <option value="전화">전화</option><option value="방문">방문</option><option value="채널톡">채널톡 (웹챗)</option><option value="문자/카톡">문자/카카오톡</option>
+              <select value={consultForm.method} onChange={(e: any)=>setConsultForm({...consultForm, method: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2.5 text-sm font-bold focus:outline-none focus:border-indigo-500">
+                {/* 🌟 텍스트를 '채널톡 (웹챗)'에서 '학원 메신저'로 변경 */}
+                <option value="전화">전화</option><option value="방문">방문</option><option value="채널톡">학원 메신저</option><option value="문자/카톡">문자/카카오톡</option>
               </select>
             </div>
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">상담 내용</label>
-            <textarea rows={5} value={consultForm.content} onChange={e=>setConsultForm({...consultForm, content: e.target.value})} placeholder="학부모님과 나눈 대화 내용을 상세히 기록해주세요." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+            <textarea rows={5} value={consultForm.content} onChange={(e: any)=>setConsultForm({...consultForm, content: e.target.value})} placeholder="학부모님과 나눈 대화 내용을 상세히 기록해주세요." className="w-full bg-white border border-slate-300 rounded-lg px-3 py-3 text-sm focus:outline-none focus:border-indigo-500 resize-none"></textarea>
           </div>
         </div>
         <div className="p-5 bg-white border-t border-slate-200 flex justify-end gap-3 shrink-0 rounded-b-2xl">

@@ -3,8 +3,8 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
+import { supabase } from "../../../lib/supabase";
+import AgendaSidebar from "../../../components/dashboard/AgendaSidebar";
 
 const getKSTDateStr = (dateString?: string) => {
   if (!dateString) return "기록 없음";
@@ -16,6 +16,19 @@ const getKSTDateStr = (dateString?: string) => {
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
+};
+
+// 💡 헬퍼 함수: 상담 유형에 따른 테마 컬러 클래스 반환
+const getConsultBadgeColor = (type: string, isAdmission: boolean = false) => {
+  if (isAdmission) return 'bg-amber-50 text-amber-700 border-amber-200';
+  
+  switch(type) {
+    case '퇴원상담': return 'bg-rose-50 text-rose-600 border-rose-200';
+    case '신규상담': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+    case '성적상담': return 'bg-violet-50 text-violet-600 border-violet-200';
+    case '태도상담': return 'bg-amber-50 text-amber-600 border-amber-200';
+    default: return 'bg-indigo-50 text-indigo-600 border-indigo-100'; // 재원상담 등 기본값
+  }
 };
 
 export default function ConsultationManagementPage() {
@@ -34,7 +47,6 @@ export default function ConsultationManagementPage() {
   const [selectedClass, setSelectedClass] = useState<string>("all");
   const [overdueOnly, setOverdueOnly] = useState<boolean>(false);
   const [searchTerm, setSearchTerm] = useState<string>(""); 
-  // 💡 신규: '테스트' 학생 숨기기 상태 (기본값 true로 설정하여 쾌적한 뷰 제공)
   const [hideTestStudents, setHideTestStudents] = useState<boolean>(true);
 
   useEffect(() => {
@@ -77,10 +89,12 @@ export default function ConsultationManagementPage() {
     }));
     setClasses(formattedClasses);
 
+    // 💡 학생과 묶인 상담 기록, 그리고 입학 상담 데이터까지 가져옵니다.
     let stQuery = supabase.from("student").select(`
       student_id, name, parent(name, phone),
       enrollment(class_id, class(name, instructor(name))),
-      consultation_log(*, instructor(name)) 
+      consultation_log(*, instructor(name)),
+      admission_application(application_id, counseling_memo, test_result, created_at)
     `).eq("status", "재원");
     
     if (tId && tId !== 'hq') stQuery = stQuery.eq("tenant_id", tId);
@@ -100,9 +114,22 @@ export default function ConsultationManagementPage() {
         const classInstructor = classObj?.instructor?.name || "미정";
         const classId = mainEnroll?.class_id || "none";
 
-        const logs = st.consultation_log || [];
-        logs.sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        const lastLog = logs[0] || null;
+        // 기존 일반 상담 기록
+        const regularLogs = st.consultation_log || [];
+        
+        // 입학 상담 기록 포맷팅
+        const admissionLogs = (st.admission_application || [])
+          .filter((app: any) => app.counseling_memo && app.counseling_memo.trim() !== "")
+          .map((app: any) => ({
+             consultation_type: "입학 상담",
+             created_at: app.created_at,
+             instructor: { name: "입학 담당" },
+             is_admission: true
+          }));
+
+        // 시간순으로 합치기
+        const allLogs = [...regularLogs, ...admissionLogs].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const lastLog = allLogs[0] || null;
 
         let daysPassed = 999;
         if (lastLog && lastLog.created_at) {
@@ -112,6 +139,7 @@ export default function ConsultationManagementPage() {
 
         const consultant = lastLog?.instructor?.name || "-";
         const consultType = lastLog?.consultation_type || "-";
+        const isAdmissionLog = lastLog?.is_admission || false;
 
         return {
           id: st.student_id,
@@ -124,6 +152,7 @@ export default function ConsultationManagementPage() {
           lastConsultDate: lastLog ? lastLog.created_at : null,
           lastConsultant: consultant,
           lastConsultType: consultType,
+          isLastAdmission: isAdmissionLog,
           daysPassed,
           isOverdue: daysPassed >= 30 
         };
@@ -145,7 +174,6 @@ export default function ConsultationManagementPage() {
       filtered = filtered.filter(s => s.isOverdue);
     }
 
-    // 💡 신규: '테스트' 학생 제외 필터 로직
     if (hideTestStudents) {
       filtered = filtered.filter(s => !s.name.includes("테스트"));
     }
@@ -180,7 +208,6 @@ export default function ConsultationManagementPage() {
     return result;
   }, [students, selectedClass, overdueOnly, hideTestStudents, searchTerm]);
 
-  // 상단 통계 수치도 필터링된 배열 기준으로 재계산 (테스트 제외)
   const totalDisplayStudents = useMemo(() => {
     return students.filter(s => hideTestStudents ? !s.name.includes("테스트") : true).length;
   }, [students, hideTestStudents]);
@@ -242,7 +269,6 @@ export default function ConsultationManagementPage() {
                 />
               </div>
 
-              {/* 💡 신규: '테스트' 학생 제외 토글 버튼 */}
               <label className="flex items-center gap-2 cursor-pointer bg-slate-50 hover:bg-slate-100 px-3 py-2 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0">
                 <input 
                   type="checkbox" 
@@ -297,7 +323,7 @@ export default function ConsultationManagementPage() {
                         <tr className="bg-slate-50 border-b border-slate-200">
                           <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase w-32">학생 이름</th>
                           <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase w-48">소속 반</th>
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-40">최근 상담 기록</th>
+                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-56">최근 상담 기록</th>
                           <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-28">담당자</th>
                           <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-32">상태</th>
                           <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-right">관리 액션</th>
@@ -307,7 +333,7 @@ export default function ConsultationManagementPage() {
                         {filteredDisplayGroups.map(({ cName, cInstructor, students, total, overdueCount }) => (
                           <React.Fragment key={cName}>
                             <tr className="bg-slate-100/80 border-b border-slate-200">
-                              <td colSpan={6} className="py-2.5 px-4 text-xs font-black text-indigo-800">
+                              <td colSpan={6} className="py-2.5 px-4 text-xs font-black text-indigo-800 align-middle">
                                 <span className="w-2 h-3.5 bg-indigo-500 inline-block align-middle mr-2 rounded-full"></span>
                                 {cName} 
                                 {cName !== '미배정' && <span className="text-indigo-500 font-bold ml-1.5 text-[11px]">({cInstructor})</span>}
@@ -322,23 +348,36 @@ export default function ConsultationManagementPage() {
                                 ? <span className="bg-rose-100 text-rose-700 border border-rose-300 px-2 py-1 rounded text-[10px] font-black shadow-sm flex items-center justify-center gap-1">🚨 {student.daysPassed === 999 ? '기록 없음' : `${student.daysPassed}일 경과`}</span>
                                 : <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-1 rounded text-[10px] font-bold flex items-center justify-center">✓ 정상 관리중</span>;
 
+                              const typeBadgeColor = getConsultBadgeColor(student.lastConsultType, student.isLastAdmission);
+
                               return (
                                 <tr key={student.id} className={`border-b border-slate-100 last:border-0 transition-colors ${rowBg}`}>
-                                  <td className="py-3 px-4">
+                                  <td className="py-3 px-4 align-middle">
                                     <span className={`text-sm font-extrabold ${isOverdue ? 'text-rose-700' : 'text-slate-800'}`}>{student.name}</span>
                                   </td>
-                                  <td className="py-3 px-4 text-xs font-bold text-slate-600">{student.className}</td>
-                                  <td className="py-3 px-4 text-center">
-                                    <div className="flex flex-col items-center gap-0.5">
-                                      <span className="text-xs font-extrabold text-slate-600">{getKSTDateStr(student.lastConsultDate)}</span>
-                                      {student.lastConsultType !== '-' && <span className="text-[10px] font-bold text-indigo-500 bg-indigo-50 border border-indigo-100 px-1.5 rounded">{student.lastConsultType}</span>}
+                                  <td className="py-3 px-4 text-xs font-bold text-slate-600 align-middle">{student.className}</td>
+                                  
+                                  {/* 💡 높이 및 정렬을 맞춘 최근 상담 기록 뷰 (가로 배치) */}
+                                  <td className="py-3 px-4 text-center align-middle">
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      {student.lastConsultType !== '-' && (
+                                        <span className={`text-[10px] font-bold px-1.5 py-[2px] rounded border leading-none ${typeBadgeColor}`}>
+                                          {student.lastConsultType}
+                                        </span>
+                                      )}
+                                      <span className="text-xs font-extrabold text-slate-600">
+                                        {getKSTDateStr(student.lastConsultDate)}
+                                      </span>
                                     </div>
                                   </td>
-                                  <td className="py-3 px-4 text-center text-xs font-bold text-slate-500">
-                                    <span className="bg-slate-100 px-2 py-1 rounded-md border border-slate-200">{student.lastConsultant}</span>
+                                  
+                                  <td className="py-3 px-4 text-center text-xs font-bold text-slate-500 align-middle">
+                                    <span className="bg-white px-2 py-1 rounded-md border border-slate-200 shadow-sm">{student.lastConsultant}</span>
                                   </td>
-                                  <td className="py-3 px-4 flex justify-center">{statusBadge}</td>
-                                  <td className="py-3 px-4 text-right">
+                                  <td className="py-3 px-4 align-middle">
+                                    <div className="flex justify-center">{statusBadge}</div>
+                                  </td>
+                                  <td className="py-3 px-4 text-right align-middle">
                                     <button 
                                       onClick={() => router.push(`/student/${student.id}?tab=consult`)} 
                                       className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors shadow-sm border ${isOverdue ? 'bg-rose-600 text-white hover:bg-rose-700 border-rose-700' : 'bg-white text-indigo-600 hover:bg-indigo-50 border-indigo-200'}`}
@@ -376,35 +415,36 @@ export default function ConsultationManagementPage() {
                           const isOverdue = student.isOverdue;
                           const cardBg = isOverdue ? "bg-rose-50/50 border-rose-300 hover:border-rose-500" : "bg-white border-slate-200 hover:border-indigo-300";
                           const titleColor = isOverdue ? "text-rose-700" : "text-slate-800";
+                          const typeBadgeColor = getConsultBadgeColor(student.lastConsultType, student.isLastAdmission);
                           
                           return (
                             <div 
                               key={student.id} 
                               onClick={() => router.push(`/student/${student.id}?tab=consult`)}
-                              className={`p-3.5 rounded-xl border flex flex-col gap-2 cursor-pointer transition-all shadow-sm group ${cardBg}`}
+                              className={`p-3 rounded-xl border flex flex-col gap-1.5 cursor-pointer transition-all shadow-sm group ${cardBg}`}
                             >
                               <div className="flex justify-between items-start">
                                 <span className={`text-sm font-extrabold ${titleColor}`}>{student.name}</span>
                                 {isOverdue && <span className="text-[9px] font-black bg-rose-600 text-white px-1.5 py-0.5 rounded shadow-sm animate-pulse">상담요망</span>}
                               </div>
 
-                              <div className="flex flex-col gap-1.5 mt-1 border-t border-slate-100 pt-2">
+                              <div className="flex flex-col gap-1 mt-1 border-t border-slate-100 pt-1.5">
                                 <div className="flex justify-between items-center text-[11px]">
-                                  <span className="font-bold text-slate-400">최근 기록</span>
-                                  <div className="flex items-center gap-1.5">
-                                    {student.lastConsultType !== '-' && <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 border border-indigo-100 px-1 rounded">{student.lastConsultType}</span>}
-                                    <span className={`font-extrabold ${isOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
+                                  <span className="font-bold text-slate-400 shrink-0">최근 기록</span>
+                                  <div className="flex items-center gap-1.5 truncate">
+                                    {student.lastConsultType !== '-' && <span className={`text-[9px] font-bold px-1 rounded border ${typeBadgeColor}`}>{student.lastConsultType}</span>}
+                                    <span className={`font-extrabold truncate ${isOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
                                       {getKSTDateStr(student.lastConsultDate)}
                                     </span>
                                   </div>
                                 </div>
+                                
                                 <div className="flex justify-between items-center text-[11px]">
-                                  <span className="font-bold text-slate-400">담당자</span>
-                                  <span className="font-extrabold text-slate-600 bg-slate-100 px-1.5 rounded">{student.lastConsultant}</span>
-                                </div>
-                                <div className="flex justify-between items-center text-[10px] mt-0.5">
-                                  <span className="font-bold text-slate-400">경과 시간</span>
-                                  <span className={`font-black ${isOverdue ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-slate-400 shrink-0">담당자</span>
+                                    <span className="font-extrabold text-slate-600 bg-slate-100 px-1.5 rounded truncate max-w-[60px]">{student.lastConsultant}</span>
+                                  </div>
+                                  <span className={`text-[10px] font-black shrink-0 ${isOverdue ? 'text-rose-500' : 'text-emerald-500'}`}>
                                     {student.daysPassed === 999 ? '기록없음' : `${student.daysPassed}일 전`}
                                   </span>
                                 </div>

@@ -1,19 +1,17 @@
 // src/app/(dashboard)/admin-dashboard/page.tsx
 "use client";
 
-import { useEffect, useState, useRef, useMemo } from "react";
+import { useEffect, useState } from "react";
 import React from "react";
 import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import Chart from "chart.js/auto";
-import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
-import AttendanceControlPanel from "@/components/admin/AttendanceControlPanel";
-import QuickSearchWidget from "@/components/admin/QuickSearchWidget";
-import MemoCreateModal from "@/components/admin/MemoCreateModal";
-import ClassDetailModal from "@/components/admin/ClassDetailModal";
-import InstructorPerformance from "@/components/admin/InstructorPerformance";
-
-import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "@/app/actions/alimtalk";
+import { supabase } from "../../../lib/supabase";
+import AgendaSidebar from "../../../components/dashboard/AgendaSidebar";
+import AttendanceControlPanel from "../../../components/admin/AttendanceControlPanel";
+import QuickSearchWidget from "../../../components/admin/QuickSearchWidget";
+import MemoCreateModal from "../../../components/admin/MemoCreateModal";
+import ClassDetailModal from "../../../components/admin/ClassDetailModal";
+import InstructorPerformance from "../../../components/admin/InstructorPerformance";
+import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "../../actions/alimtalk";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -32,6 +30,79 @@ const formatTimeAsKST = (isoStr: string) => {
   const kst = new Date(d.getTime() + (9 * 3600000));
   return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
 };
+
+// 💡 상담 유형별 테마 컬러 헬퍼 함수
+const getConsultBadgeColor = (type: string) => {
+  switch(type) {
+    case '퇴원상담': return 'bg-rose-50 text-rose-600 border-rose-200';
+    case '신규상담': return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+    case '성적상담': return 'bg-violet-50 text-violet-600 border-violet-200';
+    case '태도상담': return 'bg-amber-50 text-amber-600 border-amber-200';
+    case '입학상담': return 'bg-amber-50 text-amber-700 border-amber-200';
+    default: return 'bg-indigo-50 text-indigo-600 border-indigo-100'; // 재원상담 등 기본값
+  }
+};
+
+// -------------------------------------------------------------
+// 💡 분리된 하위 컴포넌트: 최근 상담 패널
+// -------------------------------------------------------------
+function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
+  return (
+    <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
+      <div className="flex justify-between items-center mb-3 shrink-0">
+        <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">🗣️ 최근 상담</span>
+      </div>
+      <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-2">
+        {recentConsults.length === 0 ? (
+          <div className="flex h-full items-center justify-center text-xs font-bold text-slate-400">상담 기록이 없습니다.</div>
+        ) : (
+          recentConsults.map((consult: any, i: number) => {
+            const badgeColor = getConsultBadgeColor(consult.consultation_type);
+            const d = new Date(consult.created_at);
+            const kst = new Date(d.getTime() + (9 * 3600000));
+            const dateStr = `${kst.getUTCFullYear()}.${String(kst.getUTCMonth()+1).padStart(2,'0')}.${String(kst.getUTCDate()).padStart(2,'0')}`;
+            const timeStr = `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
+
+            return (
+              <div key={`consult-${i}`} className="flex justify-between items-start gap-2 p-3 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200 hover:border-indigo-300 transition-colors shadow-sm group">
+                
+                {/* 좌측 영역: 배지, 소속, 이름, 내용 */}
+                <div className="flex flex-col gap-1.5 min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColor} whitespace-nowrap`}>
+                      {consult.consultation_type || '상담'}
+                    </span>
+                    <div className="flex items-baseline gap-1 text-[11px] truncate">
+                       <span className="font-black text-indigo-700">{consult.className}</span>
+                       {consult.className !== '미배정' && <span className="font-bold text-indigo-400 text-[9px]">({consult.classInstructor})</span>}
+                       <span className="font-extrabold text-slate-700 ml-0.5 shrink-0">{consult.studentName} 학생</span>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
+                    {consult.content}
+                  </span>
+                </div>
+
+                {/* 우측 영역: 날짜, 시간, 상담자 */}
+                <div className="flex flex-col items-end shrink-0 text-right gap-1 border-l border-slate-200 pl-3 py-0.5">
+                  <div className="flex flex-col items-end leading-tight">
+                     <span className="text-[10px] font-extrabold text-slate-500">{dateStr}</span>
+                     <span className="text-[9px] font-bold text-slate-400">{timeStr}</span>
+                  </div>
+                  <span className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded mt-0.5 border border-slate-200 whitespace-nowrap">
+                    {consult.consultantName}
+                  </span>
+                </div>
+
+              </div>
+            )
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+// -------------------------------------------------------------
 
 export default function AdminDashboardPage() {
   const router = useRouter();
@@ -60,7 +131,7 @@ export default function AdminDashboardPage() {
   const [liveFeeds, setLiveFeeds] = useState<any[]>([]);
 
   const [todayAgendas, setTodayAgendas] = useState<any[]>([]);
-  const [recentConsults, setRecentConsults] = useState<any[]>([]); // 💡 추가: 최근 상담 내역 상태
+  const [recentConsults, setRecentConsults] = useState<any[]>([]);
   const [riskStudents, setRiskStudents] = useState<any[]>([]);
 
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
@@ -90,7 +161,7 @@ export default function AdminDashboardPage() {
       
     const raw = data || [];
     const uniqueMap = new Map();
-    raw.forEach(item => {
+    raw.forEach((item: any) => {
         const key = item.template_id === 'KA01TP260826014520504X1Fplf8R0FH' ? `${item.student_id}_ATT` : item.queue_id;
         if (!uniqueMap.has(key)) uniqueMap.set(key, item);
     });
@@ -225,19 +296,46 @@ export default function AdminDashboardPage() {
     } catch(e) { console.error(e) }
   };
 
-  // 💡 추가: 최근 상담 내역을 가져오는 함수
   const fetchRecentConsults = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     try {
       let query = supabase.from("consultation_log")
-        .select("content, created_at, consultation_type, student(name)")
+        .select(`
+          content, 
+          created_at, 
+          consultation_type, 
+          instructor(name),
+          student(
+            name,
+            enrollment(
+              status,
+              class(name, instructor(name))
+            )
+          )
+        `)
         .order("created_at", { ascending: false })
         .limit(10);
         
       if (tId && tId !== 'hq') query = query.eq('tenant_id', tId);
       
       const { data } = await query;
-      setRecentConsults(data || []);
+      
+      const mappedConsults = (data || []).map((log: any) => {
+        const studentData = unwrap(log.student);
+        const enrolls = Array.isArray(studentData?.enrollment) ? studentData.enrollment : (studentData?.enrollment ? [studentData.enrollment] : []);
+        const activeEnroll = enrolls.find((e: any) => e.status === '수강중') || enrolls[0];
+        const classObj = unwrap(activeEnroll?.class);
+
+        return {
+          ...log,
+          studentName: studentData?.name || '알수없음',
+          className: classObj?.name || '미배정',
+          classInstructor: unwrap(classObj?.instructor)?.name || '미정',
+          consultantName: unwrap(log.instructor)?.name || '시스템'
+        };
+      });
+
+      setRecentConsults(mappedConsults);
     } catch(e) { console.error(e) }
   };
 
@@ -255,7 +353,7 @@ export default function AdminDashboardPage() {
     const oneMonthAgo = new Date(Date.now() - 30 * 86400000).getTime();
     
     const risks: any[] = [];
-    data.forEach(st => {
+    data.forEach((st: any) => {
        let absentCount = 0;
        let lateCount = 0;
        st.attendance?.forEach((a: any) => {
@@ -284,7 +382,7 @@ export default function AdminDashboardPage() {
        }
     });
     
-    risks.sort((a, b) => b.reasons.length - a.reasons.length);
+    risks.sort((a: any, b: any) => b.reasons.length - a.reasons.length);
     setRiskStudents(risks.slice(0, 6)); 
   };
 
@@ -295,7 +393,7 @@ export default function AdminDashboardPage() {
 
     const { data } = await query;
     let enrolled = 0, newM = 0, leftM = 0;
-    data?.forEach(s => {
+    data?.forEach((s: any) => {
       if (s.status === '재원') {
         enrolled++;
         if (s.created_at >= firstDayOfMonth) newM++;
@@ -313,7 +411,7 @@ export default function AdminDashboardPage() {
 
     const { data } = await query;
     let paidAmt = 0, unpaidAmt = 0;
-    data?.forEach(b => {
+    data?.forEach((b: any) => {
       const amt = parseInt(b.amount) || 0;
       if (b.status === '완납') paidAmt += amt; else unpaidAmt += amt;
     });
@@ -329,7 +427,7 @@ export default function AdminDashboardPage() {
     const { data: students } = await stuQuery;
     
     const { data: apps } = await supabase.from('admission_application').select('*').gte('created_at', firstDayOfMonth);
-    const passedCount = apps?.filter(a => ['합격'].includes(a.test_result || a.status || a.application_status)).length || 0;
+    const passedCount = apps?.filter((a: any) => ['합격'].includes(a.test_result || a.status || a.application_status)).length || 0;
     
     setKpi(prev => ({ ...prev, passedStu: passedCount, waitingStu: students?.length || 0 }));
   };
@@ -413,26 +511,26 @@ export default function AdminDashboardPage() {
     };
 
     const insts = (rawInsts || [])
-      .filter(i => i.tenant_id !== hqTenantId) 
-      .filter(i => {
+      .filter((i: any) => i.tenant_id !== hqTenantId) 
+      .filter((i: any) => {
         const pos = i.position || '';
         const role = i.role || '';
         return !(pos.includes('테스트') || pos.includes('체험') || role === 'GUEST' || pos.includes('최고관리자') || role === 'SUPER_ADMIN' || pos.includes('조교') || role === 'TA');
       })
-      .sort((a, b) => {
+      .sort((a: any, b: any) => {
         const rankA = getRoleRank(a.position), rankB = getRoleRank(b.position);
         if (rankA !== rankB) return rankA - rankB;
         return (b.name || '').localeCompare(a.name || '');
       });
 
-    const stats = insts.map(inst => {
-      const myClasses = (classes || []).filter(c => c.instructor_id === inst.instructor_id);
-      const classIds = myClasses.map(c => c.class_id);
+    const stats = insts.map((inst: any) => {
+      const myClasses = (classes || []).filter((c: any) => c.instructor_id === inst.instructor_id);
+      const classIds = myClasses.map((c: any) => c.class_id);
       let myStudents = new Set();
       let newCnt = 0, leftCnt = 0;
 
-      (students || []).forEach(s => {
-        let belongs = classIds.includes(s.class_id) || (enrolls?.some(e => e.student_id === s.student_id && classIds.includes(e.class_id)));
+      (students || []).forEach((s: any) => {
+        let belongs = classIds.includes(s.class_id) || (enrolls?.some((e: any) => e.student_id === s.student_id && classIds.includes(e.class_id)));
         if (belongs) {
           if (s.status === '재원') {
             myStudents.add(s.student_id);
@@ -464,12 +562,12 @@ export default function AdminDashboardPage() {
     ]);
 
     const activeStudentIds = new Set(
-      (students || []).filter(s => s.status === '재원').map(s => s.student_id)
+      (students || []).filter((s: any) => s.status === '재원').map((s: any) => s.student_id)
     );
 
-    const cStats = (classes || []).map(c => {
+    const cStats = (classes || []).map((c: any) => {
       let sCount = 0;
-      (enrolls || []).forEach(e => {
+      (enrolls || []).forEach((e: any) => {
         if (e.class_id === c.class_id && activeStudentIds.has(e.student_id)) {
           sCount++;
         }
@@ -478,10 +576,10 @@ export default function AdminDashboardPage() {
       const vacancy = Math.max(0, capacity - sCount);
       const fillRate = Math.min(100, Math.round((sCount / capacity) * 100));
       return { ...c, sCount, capacity, vacancy, fillRate };
-    }).sort((a, b) => b.vacancy - a.vacancy);
+    }).sort((a: any, b: any) => b.vacancy - a.vacancy);
     
     let lvCounts: any = { 'Ultimate': 0, 'Master': 0, 'Apex': 0, 'Titan': 0, 'Horizon': 0, '기타': 0 };
-    cStats.forEach(c => {
+    cStats.forEach((c: any) => {
       const lv = c.level_name || '기타';
       if (lvCounts[lv] !== undefined) lvCounts[lv] += c.sCount;
       else lvCounts['기타'] += c.sCount;
@@ -502,7 +600,7 @@ export default function AdminDashboardPage() {
     setIsClassModalOpen(true);
 
     const { data: enrollData } = await supabase.from("enrollment").select("student_id").eq("class_id", classItem.class_id);
-    const enrollIds = enrollData?.map(e => e.student_id) || [];
+    const enrollIds = enrollData?.map((e: any) => e.student_id) || [];
     if (enrollIds.length === 0) { setClassStudents([]); return; }
     
     const { data } = await supabase.from("student").select("*, parent(name, phone), enrollment(class(name))").in("student_id", enrollIds);
@@ -536,9 +634,9 @@ export default function AdminDashboardPage() {
     if (bulkType === 'makeup' && (!bulkForm.oldDate || !bulkForm.newDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'general' && !bulkForm.details) return alert('발송할 자유 내용을 입력해주세요.');
 
-    let targets = allStudentsData.filter(s => s.status === '재원');
+    let targets = allStudentsData.filter((s: any) => s.status === '재원');
     if (bulkTarget !== 'all') {
-      targets = targets.filter(s => {
+      targets = targets.filter((s: any) => {
         const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
         return activeEnrolls.some((e:any) => unwrap(e.class)?.class_id === bulkTarget);
       });
@@ -549,7 +647,7 @@ export default function AdminDashboardPage() {
     const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
     const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
 
-    const newMessages: any[] = targets.map(student => {
+    const newMessages: any[] = targets.map((student: any) => {
       const parentInfo = unwrap(student.parent);
       const parentPhone = parentInfo?.phone;
       if (!parentPhone) return null;
@@ -597,7 +695,7 @@ export default function AdminDashboardPage() {
         return;
     }
 
-    const ids = toSend.map(q => q.queue_id);
+    const ids = toSend.map((q: any) => q.queue_id);
     await supabase.from('alimtalk_queue').update({ status: '발송중' }).in('queue_id', ids);
 
     let successCount = 0;
@@ -721,7 +819,7 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1 flex flex-col gap-2 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
                 {csRequests.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">미처리 요청이 없습니다. 🎉</div> : 
-                  csRequests.map(r => {
+                  csRequests.map((r: any) => {
                     const isProcessing = r.status === '처리중';
                     return (
                       <div key={r.request_id} className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 shadow-sm">
@@ -743,7 +841,7 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
                 {memos.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">진행 중인 업무가 없습니다.</div> :
-                  memos.map(m => {
+                  memos.map((m: any) => {
                     let typeColor = 'text-slate-600 bg-slate-100 border-slate-200'; 
                     if (m.memo_type === '긴급공지') typeColor = 'text-rose-600 bg-rose-100 border-rose-200';
                     else if (m.memo_type === '학생인계') typeColor = 'text-blue-600 bg-blue-100 border-blue-200';
@@ -785,7 +883,7 @@ export default function AdminDashboardPage() {
 
                 <select value={bulkTarget} onChange={e => setBulkTarget(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
                   <option value="all">전체 재원생 대상</option>
-                  {classStats.map(c => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
+                  {classStats.map((c: any) => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
                 </select>
 
                 <div className="flex-1 flex flex-col gap-2 mt-2 h-full">
@@ -831,7 +929,7 @@ export default function AdminDashboardPage() {
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1.5">
-                    {queuedMessages.map((msg, idx) => (
+                    {queuedMessages.map((msg: any, idx: number) => (
                       <div key={msg.queue_id || idx} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
@@ -878,7 +976,7 @@ export default function AdminDashboardPage() {
                   <div className="text-center py-10 text-slate-400 font-bold text-sm">최근 발송 내역이 없습니다.</div>
                 ) : (
                   <div className="flex flex-col">
-                    {liveFeeds.map((feed, idx) => {
+                    {liveFeeds.map((feed: any, idx: number) => {
                       const dateObj = new Date(feed.created_at);
                       const days = ['일', '월', '화', '수', '목', '금', '토'];
                       const currentDateStr = `${dateObj.getFullYear()}-${String(dateObj.getMonth() + 1).padStart(2, '0')}-${String(dateObj.getDate()).padStart(2, '0')}`;
@@ -941,13 +1039,13 @@ export default function AdminDashboardPage() {
               <AttendanceControlPanel 
                 classStats={classStats} 
                 todayIso={todayIso} 
-                onQueueMessage={async (msgOrMsgs) => {
+                onQueueMessage={async (msgOrMsgs: any) => {
                   const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
                   const msgs = Array.isArray(msgOrMsgs) ? msgOrMsgs : [msgOrMsgs];
                   
-                  const attMsgs = msgs.filter(m => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
+                  const attMsgs = msgs.filter((m: any) => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
                   if (attMsgs.length > 0) {
-                      const sIds = attMsgs.map(m => m.id.split('_')[0]);
+                      const sIds = attMsgs.map((m: any) => m.id.split('_')[0]);
                       await supabase.from('alimtalk_queue')
                           .delete()
                           .eq('tenant_id', validTenantId)
@@ -955,7 +1053,7 @@ export default function AdminDashboardPage() {
                           .in('student_id', sIds);
                   }
 
-                  const inserts = msgs.map(m => ({
+                  const inserts = msgs.map((m: any) => ({
                       tenant_id: validTenantId,
                       student_id: m.id.split('_')[0],
                       student_name: m.studentName,
@@ -977,76 +1075,32 @@ export default function AdminDashboardPage() {
 
             <div className="xl:col-span-1 flex flex-col gap-6">
               
-              <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
-                <div className="flex justify-between items-center mb-3 shrink-0">
-                  <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">🗣️ 오늘의 일정 및 최근 상담</span>
-                </div>
-                <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-2">
-                  {todayAgendas.length === 0 && recentConsults.length === 0 ? (
-                    <div className="flex h-full items-center justify-center text-xs font-bold text-slate-400">일정 및 상담 기록이 없습니다.</div>
-                  ) : (
-                    <>
-                      {/* 오늘의 일정(Agenda) 리스트 */}
-                      {todayAgendas.map((ag, i) => {
-                         const isMeeting = ag.source === 'Meeting';
-                         return (
-                            <div key={`agenda-${i}`} className="flex items-center gap-2.5 p-2.5 rounded-xl bg-slate-50 border border-slate-100 hover:border-indigo-200 transition-colors">
-                              <span className={`text-[10px] font-black px-2 py-1 rounded shrink-0 ${isMeeting ? 'bg-indigo-100 text-indigo-600' : 'bg-emerald-100 text-emerald-600'}`}>
-                                {formatTimeAsKST(ag.meeting_date)}
-                              </span>
-                              <span className="text-xs font-bold text-slate-700 truncate">{ag.title}</span>
-                            </div>
-                         )
-                      })}
+              <RecentConsultPanel recentConsults={recentConsults} />
 
-                      {/* 최근 상담 내역 리스트 */}
-                      {recentConsults.map((consult, i) => {
-                         const studentName = unwrap(consult.student)?.name || '알수없음';
-                         const timeStr = formatTimeAsKST(consult.created_at);
-                         return (
-                            <div key={`consult-${i}`} className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-blue-50 border border-blue-100 hover:border-blue-200 transition-colors">
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[9px] font-black bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded border border-blue-200">상담</span>
-                                  <span className="text-[11px] font-bold text-slate-700">{studentName} 학생</span>
-                                </div>
-                                <span className="text-[9px] font-bold text-slate-400">{timeStr}</span>
-                              </div>
-                              <span className="text-[10px] font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
-                                {consult.content}
-                              </span>
-                            </div>
-                         )
-                      })}
-                    </>
-                  )}
-                </div>
-              </div>
-
-              <div className="bg-white rounded-2xl p-5 border border-rose-100 shadow-sm flex flex-col hover:border-rose-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
-                <div className="flex justify-between items-center mb-3 shrink-0">
+              <div className="bg-white rounded-2xl p-4 border border-rose-100 shadow-sm flex flex-col hover:border-rose-300 transition-colors flex-1 min-h-[130px] max-h-[150px]">
+                <div className="flex justify-between items-center mb-2 shrink-0">
                   <span className="text-sm font-extrabold text-rose-600 flex items-center gap-1.5">🚨 이탈 위험군 경고등</span>
                 </div>
-                <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-2">
+                <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-1.5">
                   {riskStudents.length === 0 ? (
                     <div className="flex h-full items-center justify-center text-xs font-bold text-slate-400">주의 대상 학생이 없습니다. 🎉</div>
                   ) : (
-                    riskStudents.map((st, i) => (
-                      <div key={i} className="flex flex-col gap-1.5 p-2.5 rounded-xl bg-rose-50 border border-rose-100 hover:bg-rose-100 transition-colors group">
-                        <div className="flex justify-between items-center">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-xs font-extrabold text-slate-800">{st.name}</span>
-                            <span className="text-[9px] text-slate-400 font-medium">{st.phone || ''}</span>
+                    riskStudents.map((st: any, i: number) => (
+                      <div key={i} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-rose-50 border border-rose-100 hover:bg-rose-100 transition-colors group">
+                        <div className="flex items-center gap-2 overflow-hidden">
+                          <div className="flex items-baseline gap-1 shrink-0">
+                            <span className="text-[11px] font-extrabold text-slate-800">{st.name}</span>
+                            <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">{st.phone || ''}</span>
                           </div>
-                          <button onClick={() => router.push(`/student/${st.id}?tab=consult`)} className="text-[10px] text-rose-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
-                            상담기록 ➡️
-                          </button>
+                          <div className="flex flex-wrap items-center gap-1 overflow-hidden h-[18px]">
+                            {st.reasons.map((r: string, j: number) => (
+                              <span key={j} className="text-[9px] font-black bg-white text-rose-600 border border-rose-200 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap leading-none">{r}</span>
+                            ))}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-1">
-                          {st.reasons.map((r: string, j: number) => (
-                            <span key={j} className="text-[9px] font-black bg-white text-rose-600 border border-rose-200 px-1.5 py-0.5 rounded shadow-sm">{r}</span>
-                          ))}
-                        </div>
+                        <button onClick={() => router.push(`/student/${st.id}?tab=consult`)} className="text-[9px] text-rose-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0 bg-white px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">
+                          상담기록 ➡️
+                        </button>
                       </div>
                     ))
                   )}

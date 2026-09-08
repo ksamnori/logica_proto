@@ -19,9 +19,15 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
   // 검색 및 필터 상태
   const [searchQuery, setSearchQuery] = useState("");
   const [searchClassFilter, setSearchClassFilter] = useState("all");
-  const [searchStatusFilter, setSearchStatusFilter] = useState("재원");
+  const [searchStatusFilter, setSearchStatusFilter] = useState("all");
   const [searchGradeFilter, setSearchGradeFilter] = useState("all");
   const [showStudentPhone, setShowStudentPhone] = useState<Record<string, boolean>>({});
+
+  // 💡 사용자가 필터나 검색어를 변경했는지 여부를 판별합니다.
+  const hasActiveSearch = searchQuery.trim() !== "" || 
+                          searchClassFilter !== "all" || 
+                          searchStatusFilter !== "all" || 
+                          searchGradeFilter !== "all";
 
   // 1. 필터용 드롭다운 데이터 추출
   const availableGrades = useMemo(() => {
@@ -54,6 +60,9 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
 
   // 2. 필터링된 결과 연산
   const filteredSearchData = useMemo(() => {
+    // 💡 검색이나 필터 조건이 아예 없다면 렌더링 부하를 막기 위해 빈 배열을 반환합니다.
+    if (!hasActiveSearch) return [];
+
     return allStudentsData.filter(s => {
       // 💡 [핵심 추가] 이름에 '테스트'가 들어간 원생은 리스트 노출에서 완전 제외합니다.
       if ((s.name || '').includes('테스트')) return false;
@@ -78,7 +87,7 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
       }
       return true;
     });
-  }, [allStudentsData, searchQuery, searchClassFilter, searchStatusFilter, searchGradeFilter]);
+  }, [allStudentsData, searchQuery, searchClassFilter, searchStatusFilter, searchGradeFilter, hasActiveSearch]);
 
   return (
     <div className="bg-white rounded-2xl p-5 border border-indigo-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] col-span-1 md:col-span-2 h-64 flex flex-col relative overflow-hidden group">
@@ -114,68 +123,77 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scroll border border-slate-200 rounded-lg bg-slate-50 relative z-10 min-h-0 shadow-inner">
-        <table className="w-full text-left text-[11px] whitespace-nowrap">
-          <thead className="sticky top-0 bg-white border-b border-slate-200 z-10 shadow-sm">
-            <tr>
-              <th className="py-2 px-3 font-extrabold text-slate-500 w-[80px]">이름</th>
-              <th className="py-2 px-3 font-extrabold text-slate-500">학교/학년</th>
-              <th className="py-2 px-3 font-extrabold text-slate-500">수강반</th>
-              <th className="py-2 px-3 font-extrabold text-slate-500">학부모 연락처</th>
-              <th className="py-2 px-3 font-extrabold text-slate-500 text-center">상태</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 font-medium">
-            {filteredSearchData.length === 0 ? (
-              <tr><td colSpan={5} className="py-8 text-center text-slate-400 font-bold">조건에 맞는 학생이 없습니다.</td></tr>
-            ) : (
-              filteredSearchData.map(s => {
-                const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
-                const cNames = activeEnrolls.map((e:any)=>unwrap(e.class)?.name).filter(Boolean).join(", ") || "-";
-                
-                const schoolGradeStr = `${s.school||'-'} ${s.grade||''}`.trim();
-                const parentPhone = unwrap(s.parent)?.phone || '미입력';
+        {/* 💡 검색 대기 상태 렌더링 */}
+        {!hasActiveSearch ? (
+          <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 opacity-80">
+             <span className="text-3xl">⌨️</span>
+             <p className="font-bold text-xs">상단의 검색창을 이용해 학생을 찾아보세요.</p>
+             <p className="text-[10px] text-slate-400">이름, 전화번호, 학교 등으로 검색할 수 있습니다.</p>
+          </div>
+        ) : (
+          <table className="w-full text-left text-[11px] whitespace-nowrap">
+            <thead className="sticky top-0 bg-white border-b border-slate-200 z-10 shadow-sm">
+              <tr>
+                <th className="py-2 px-3 font-extrabold text-slate-500 w-[80px]">이름</th>
+                <th className="py-2 px-3 font-extrabold text-slate-500">학교/학년</th>
+                <th className="py-2 px-3 font-extrabold text-slate-500">수강반</th>
+                <th className="py-2 px-3 font-extrabold text-slate-500">학부모 연락처</th>
+                <th className="py-2 px-3 font-extrabold text-slate-500 text-center">상태</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 font-medium">
+              {filteredSearchData.length === 0 ? (
+                <tr><td colSpan={5} className="py-8 text-center text-slate-400 font-bold">조건에 맞는 학생이 없습니다.</td></tr>
+              ) : (
+                filteredSearchData.map(s => {
+                  const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+                  const cNames = activeEnrolls.map((e:any)=>unwrap(e.class)?.name).filter(Boolean).join(", ") || "-";
+                  
+                  const schoolGradeStr = `${s.school||'-'} ${s.grade||''}`.trim();
+                  const parentPhone = unwrap(s.parent)?.phone || '미입력';
 
-                return (
-                  <tr key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="cursor-pointer hover:bg-indigo-50/50 transition-colors group bg-white">
-                    <td className="py-2 px-3 font-bold text-[#002864] group-hover:text-indigo-600 group-hover:underline max-w-[100px] truncate">{s.name}</td>
-                    <td className="py-2 px-3 text-slate-500 max-w-[120px] truncate" title={schoolGradeStr}>{schoolGradeStr}</td>
-                    <td className="py-2 px-3 text-slate-600 max-w-[120px] truncate" title={cNames}>{cNames}</td>
-                    <td className="py-2 px-3 text-slate-500 align-middle">
-                      <div className="flex flex-col gap-1 justify-center">
-                        <div className="flex items-center gap-1.5">
-                          <span className="font-bold text-slate-700 tabular-nums tracking-tight">{parentPhone}</span>
-                          {s.status === '입학테스트' && parentPhone && (
-                            <span className="text-[8px] bg-rose-50 text-rose-500 border border-rose-100 px-1 py-0.5 rounded shadow-sm leading-none mt-0.5">학부모</span>
-                          )}
-                          {s.phone && !showStudentPhone[s.student_id] && (
-                            <button 
-                              onClick={(e) => { e.stopPropagation(); setShowStudentPhone(p => ({...p, [s.student_id]: true})); }}
-                              className="text-[9px] bg-white border border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 px-1 py-0.5 rounded font-bold transition-colors shadow-sm flex items-center gap-0.5 leading-none mt-0.5"
-                              title="학생 연락처 보기"
-                            >
-                              학생 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                            </button>
+                  return (
+                    <tr key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="cursor-pointer hover:bg-indigo-50/50 transition-colors group bg-white">
+                      <td className="py-2 px-3 font-bold text-[#002864] group-hover:text-indigo-600 group-hover:underline max-w-[100px] truncate">{s.name}</td>
+                      <td className="py-2 px-3 text-slate-500 max-w-[120px] truncate" title={schoolGradeStr}>{schoolGradeStr}</td>
+                      <td className="py-2 px-3 text-slate-600 max-w-[120px] truncate" title={cNames}>{cNames}</td>
+                      <td className="py-2 px-3 text-slate-500 align-middle">
+                        <div className="flex flex-col gap-1 justify-center">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-slate-700 tabular-nums tracking-tight">{parentPhone}</span>
+                            {s.status === '입학테스트' && parentPhone && (
+                              <span className="text-[8px] bg-rose-50 text-rose-500 border border-rose-100 px-1 py-0.5 rounded shadow-sm leading-none mt-0.5">학부모</span>
+                            )}
+                            {s.phone && !showStudentPhone[s.student_id] && (
+                              <button 
+                                onClick={(e) => { e.stopPropagation(); setShowStudentPhone(p => ({...p, [s.student_id]: true})); }}
+                                className="text-[9px] bg-white border border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 px-1 py-0.5 rounded font-bold transition-colors shadow-sm flex items-center gap-0.5 leading-none mt-0.5"
+                                title="학생 연락처 보기"
+                              >
+                                학생 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                              </button>
+                            )}
+                          </div>
+                          {s.phone && showStudentPhone[s.student_id] && (
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[11px] font-bold text-indigo-600 tabular-nums tracking-tight">{s.phone}</span>
+                              <span className="text-[8px] bg-indigo-50 text-indigo-500 border border-indigo-100 px-1 py-0.5 rounded shadow-sm">학생</span>
+                            </div>
                           )}
                         </div>
-                        {s.phone && showStudentPhone[s.student_id] && (
-                          <div className="flex items-center gap-1.5 mt-0.5">
-                            <span className="text-[11px] font-bold text-indigo-600 tabular-nums tracking-tight">{s.phone}</span>
-                            <span className="text-[8px] bg-indigo-50 text-indigo-500 border border-indigo-100 px-1 py-0.5 rounded shadow-sm">학생</span>
-                          </div>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2 px-3 text-center align-middle">
-                      <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shadow-sm border ${s.status==='재원'?'bg-emerald-50 text-emerald-600 border-emerald-100':s.status==='입학테스트'?'bg-amber-50 text-amber-600 border-amber-100':s.status==='휴원'?'bg-rose-50 text-rose-500 border-rose-100':'bg-slate-100 text-slate-500 border-slate-200'}`}>
-                        {s.status === '입학테스트' ? '대기' : s.status}
-                      </span>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+                      </td>
+                      <td className="py-2 px-3 text-center align-middle">
+                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shadow-sm border ${s.status==='재원'?'bg-emerald-50 text-emerald-600 border-emerald-100':s.status==='입학테스트'?'bg-amber-50 text-amber-600 border-amber-100':s.status==='휴원'?'bg-rose-50 text-rose-500 border-rose-100':'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                          {s.status === '입학테스트' ? '대기' : s.status}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        )}
       </div>
     </div>
   );
