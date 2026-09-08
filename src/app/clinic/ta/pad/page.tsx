@@ -80,16 +80,18 @@ export default function TaHandheldDashboard() {
 
       <div className="max-w-[2200px] mx-auto px-4 pt-4 space-y-3 flex-1 flex flex-col pb-6 min-h-0 overflow-hidden w-full">
 
-        <div className="max-w-[1400px] w-full grid grid-cols-[1fr_350px] gap-4 items-stretch min-h-0 shrink-0 h-[40%]">
+        {/* 💡 [핵심 수정] 상단 영역 높이를 h-[32%] ~ h-[35%]로 줄여 하단 문제 영역이 화면의 65% 이상을 차지하도록 끌어올렸습니다. */}
+        {/* 💡 세로 뷰(모바일/태블릿 세로)를 고려해 우측 리스트 폭을 280px로 유연하게 조정했습니다. */}
+        <div className="max-w-[1400px] w-full grid grid-cols-[1fr_280px] md:grid-cols-[1fr_350px] gap-3 md:gap-4 items-stretch min-h-0 shrink-0 h-[32%] md:h-[35%]">
 
           {/* 좌석 현황 패널 */}
-          <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col min-h-0 h-full">
-            <div className="flex items-center justify-between mb-3 shrink-0">
+          <div className="bg-white rounded-2xl shadow-sm p-3 md:p-4 flex flex-col min-h-0 h-full">
+            <div className="flex items-center justify-between mb-2 md:mb-3 shrink-0">
               <h2 className="text-[13px] font-bold text-slate-700">좌석 현황</h2>
             </div>
             
-            <div className="flex flex-1 min-h-0 gap-5 items-stretch">
-              <div className="flex flex-col gap-3 text-[11px] font-semibold text-slate-500 shrink-0 border-r border-slate-100 pr-5 py-2">
+            <div className="flex flex-1 min-h-0 gap-3 md:gap-5 items-stretch">
+              <div className="flex flex-col gap-2 md:gap-3 text-[10px] md:text-[11px] font-semibold text-slate-500 shrink-0 border-r border-slate-100 pr-3 md:pr-5 py-1 md:py-2">
                 <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-red-600 shadow-sm"></span>호출</span>
                 <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-blue-600 shadow-sm"></span>재확인 요청</span>
                 <span className="flex items-center gap-2"><span className="w-3 h-3 rounded bg-[#002864] shadow-sm"></span>착석</span>
@@ -129,8 +131,8 @@ export default function TaHandheldDashboard() {
           </div>
 
           {/* 호출 + 재확인 요청 리스트 패널 */}
-          <div className="bg-white rounded-2xl shadow-sm p-4 flex flex-col min-h-0 h-full">
-            <h2 className="text-[13px] font-bold text-slate-700 mb-3 shrink-0 flex items-center justify-between">
+          <div className="bg-white rounded-2xl shadow-sm p-3 md:p-4 flex flex-col min-h-0 h-full">
+            <h2 className="text-[13px] font-bold text-slate-700 mb-2 md:mb-3 shrink-0 flex items-center justify-between">
               전체 요청 목록 
             </h2>
             <div className="custom-scrollbar flex flex-col gap-2 overflow-y-auto pr-1 flex-1">
@@ -157,8 +159,8 @@ export default function TaHandheldDashboard() {
           </div>
         </div>
 
-        {/* 3. 문제 표시 영역 */}
-        <div className="bg-white rounded-2xl shadow-sm p-6 border-l-4 border-[#002864] flex-1 flex flex-col min-h-0">
+        {/* 3. 문제 표시 영역 (💡 상단 높이를 줄여 이 부분이 화면을 더 넓게 쓰도록 자동 계산됨) */}
+        <div className="bg-white rounded-2xl shadow-sm p-5 md:p-6 border-l-4 border-[#002864] flex-1 flex flex-col min-h-0">
           <h2 className="text-sm font-bold text-slate-700 mb-3 shrink-0">문제 상세</h2>
           <div className="text-[19px] text-slate-600 leading-relaxed overflow-y-auto custom-scrollbar flex-1 pr-2" id="problemArea">
             {!currentCall && !currentRecheck ? <div className="h-full flex items-center justify-center text-slate-400 text-base font-medium">위 목록에서 학생을 선택하면 문제가 여기에 표시됩니다.</div> : currentRecheck ? (

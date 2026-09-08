@@ -74,6 +74,26 @@ export default function ClinicViewer() {
   const callCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
   const awayCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
 
+  // 💡 신규: 선생님 부르기 전용 1분(60초) 쿨타임 로컬 상태
+  const [callCooldownUntil, setCallCooldownUntil] = useState<number>(0);
+  const [remainCallSec, setRemainCallSec] = useState(0);
+
+  // 💡 초 단위 카운트다운 이펙트
+  useEffect(() => {
+    if (callCooldownUntil <= 0) return;
+    const tick = () => {
+      const remain = Math.ceil((callCooldownUntil - Date.now()) / 1000);
+      if (remain <= 0) {
+        setRemainCallSec(0);
+      } else {
+        setRemainCallSec(remain);
+      }
+    };
+    tick(); // 첫 진입 즉시 실행
+    const interval = setInterval(tick, 1000);
+    return () => clearInterval(interval);
+  }, [callCooldownUntil]);
+
   const { questions, setQuestions, pendingQCount, globalExamTitle, isTimedRound, fetchQuestions } = useClinicDataFetch({
     supabaseClient, studentInfo, params, forceUpdate,
     refs: { studentAnswers, studentDrawings, keypadAnswers, answerModes, qBoxStatus, totalQuestionsInRoundRef, hintState, correctSolvedCountRef, examAssignmentTotalsRef }
@@ -241,15 +261,19 @@ export default function ClinicViewer() {
     setIsEraserMode(!isEraserMode);
   };
 
+  // 💡 핵심 교정: 1분 쿨타임 완벽 적용
   const handleCallAction = async () => {
-    if (callCooldown.isActive) return;
-    if (!callState.current[currentQIndex] && myAwayActive) { alert('자리비움 중에는 호출 불가합니다.'); return; }
-    const sid = clinicSessionStateRef.current?.id;
-    if (sid) {
-      const cooldown = await checkAndBumpToggleCooldown(supabaseClient, sid, 'call');
-      callCooldown.startUntil(new Date(cooldown.cooldownUntil).getTime());
-      if (!cooldown.ok) return;
-    } else { callCooldown.start(); }
+    const now = Date.now();
+    if (now < callCooldownUntil) {
+      const remainSec = Math.ceil((callCooldownUntil - now) / 1000);
+      alert(`장난 호출을 막기 위해 1분의 대기 시간이 있습니다.\n${remainSec}초 후에 다시 눌러주세요!`);
+      return;
+    }
+
+    if (!callState.current[currentQIndex] && myAwayActive) { 
+      alert('자리비움 중에는 호출 불가합니다.'); 
+      return; 
+    }
     
     const willCall = !callState.current[currentQIndex];
     callState.current[currentQIndex] = willCall;
@@ -258,8 +282,18 @@ export default function ClinicViewer() {
     const qItem = questions[currentQIndex];
     const callPayload = { qNum: currentQIndex + 1, questionText: qItem.questionText, imageUrl: qItem.imageUrl, options: qItem.options, answer: qItem.answer, explanation: qItem.explanation, source: qItem.source };
     sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 });
+    
+    const sid = clinicSessionStateRef.current?.id;
     if (sid) {
       willCall ? setActiveCall(supabaseClient, sid, currentQIndex + 1, callPayload) : clearActiveCall(supabaseClient, sid, currentQIndex + 1);
+    }
+
+    // ✅ 1분(60초) 쿨타임 세팅
+    setCallCooldownUntil(Date.now() + 60000);
+    setRemainCallSec(60);
+
+    if (willCall) {
+      alert("선생님을 호출했습니다. 자리에서 잠시만 기다려주세요!");
     }
   };
 
@@ -899,13 +933,13 @@ export default function ClinicViewer() {
                       ✍️ 캔버스에 자유롭게 적으세요
                     </span>
                   )}
-                  {/* 🌟 수정: 선생님 부르기 버튼의 위아래 패딩(py-2.5)을 늘려 세로 크기 확대 */}
+                  {/* 💡 선생님 부르기 버튼 쿨타임 로직 연결 완료 */}
                   <button 
                     onClick={handleCallAction} 
-                    disabled={timeIsUp || callCooldown.isActive || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} 
+                    disabled={timeIsUp || remainCallSec > 0 || (!callState.current[currentQIndex] && myAwayActive) || isRecheck} 
                     className={`font-extrabold text-sm px-5 py-2.5 rounded-xl shadow-sm transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${isCall ? 'bg-rose-700 text-white' : 'bg-rose-500 text-white hover:bg-rose-600'}`}
                   >
-                    {callCooldown.isActive ? `⏳ ${Math.ceil(callCooldown.remainingMs / 1000)}초` : isCall ? '🚨 선생님 부르기 취소' : '🙋 선생님 부르기'}
+                    {remainCallSec > 0 ? `⏳ ${remainCallSec}초 대기` : isCall ? '🚨 선생님 부르기 취소' : '🙋 선생님 부르기'}
                   </button>
                 </div>
 

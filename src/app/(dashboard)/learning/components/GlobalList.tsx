@@ -25,17 +25,16 @@ interface GlobalListProps {
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
-  handleBulkPrintAction: (items: any[]) => void; // 🌟 추가됨
+  handleBulkPrintAction: (items: any[]) => void; 
 }
 
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleExtractCommonHomework, handleViewChange, toggleGlobalSelection,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
-  handleBulkPrintAction // 🌟 추가됨
+  handleBulkPrintAction 
 }: GlobalListProps) {
   
-  // 🌟 단일 뷰어로 병합 전송하는 일괄 출력 로직
   const handleBulkPrint = () => {
     const selectedItems = globalList.filter((res, idx) => {
       const safeId = res.assignment_id || res.homework_id || `temp_${idx}`;
@@ -53,7 +52,6 @@ export default function GlobalList({
       const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
       const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
       
-      // 💡 [수정됨] TypeError(replace) 방지를 위해 괄호와 옵셔널 체이닝으로 안전하게 처리
       const rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
       const titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
       
@@ -103,7 +101,6 @@ export default function GlobalList({
               🗑️ 선택 삭제 ({globalSelectedBlocks.length})
             </button>
             
-            {/* 🌟 선택 병합 출력 버튼 */}
             <button onClick={handleBulkPrint} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap shadow-sm">
               🖨️ 선택 한 장에 모아 출력 ({globalSelectedBlocks.length})
             </button>
@@ -121,8 +118,10 @@ export default function GlobalList({
             {globalList.map((res: any, idx: number) => {
               const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
               const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
-              const studentName = activeTab === 'HOMEWORK' && !res.is_exam_hw ? (unwrap(res.student)?.name || '알수없음') : (unwrap(res.student)?.name || '알수없음');
-              const className = activeTab === 'HOMEWORK' ? res.class_name : (unwrap(res.class)?.name || '반 미지정');
+              
+              // 💡 [핵심 수정] fetchHooks에서 억지로 맞춰준 class_name 백업을 최우선으로 쓰도록 변경
+              const studentName = res.student?.name || unwrap(res.student)?.name || '알수없음';
+              const className = res.class_name || unwrap(res.class)?.name || '반 미지정';
               
               const safeId = res.assignment_id || res.homework_id || `temp_${idx}`;
               const itemId = activeTab === 'EXAM' ? `exam_${safeId}_${res.student_id}` 
@@ -143,7 +142,6 @@ export default function GlobalList({
               let typeBadge = activeTab === 'EXAM' ? "📝 시험" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
-              // 💡 [수정됨] 화면 렌더링 시에도 안전하게 변환
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
               let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
               let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
@@ -172,6 +170,7 @@ export default function GlobalList({
                       {formatDateLabel(createdDate, true)}
                     </div>
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 whitespace-nowrap ${typeColor}`}>{typeBadge}</span>
+                    {/* 💡 변경된 className 변수가 여기에 자연스럽게 적용됩니다 */}
                     <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 whitespace-nowrap">{className}</span>
                     <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
                     <div className="flex-1 font-extrabold text-[12px] truncate" title={titleStr}>{titleStr}</div>

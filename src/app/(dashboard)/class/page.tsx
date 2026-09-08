@@ -59,8 +59,9 @@ export default function ClassPage() {
   const [ttFilter, setTtFilter] = useState<'ALL' | 'REGULAR' | 'SPECIAL'>('ALL');
   
   const [showPlanned, setShowPlanned] = useState(false);
-  // 💡 종료/폐강된 유령 반들을 볼 수 있도록 새로운 상태 추가[cite: 3]
   const [showEnded, setShowEnded] = useState(false);
+  // 💡 신규: 테스트 제외 필터 (기본값: true 로 설정하여 기본적으로 감춤)
+  const [hideTest, setHideTest] = useState(true); 
 
   const [filterLevel, setFilterLevel] = useState("all");
   const [filterGrade, setFilterGrade] = useState("all");
@@ -81,7 +82,7 @@ export default function ClassPage() {
       setTimeout(scrollToBottom, 50);
       setTimeout(scrollToBottom, 300);
     }
-  }, [viewMode, classes, ttFilter, showPlanned, showEnded]);
+  }, [viewMode, classes, ttFilter, showPlanned, showEnded, hideTest]);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -147,13 +148,14 @@ export default function ClassPage() {
     const blocks: any[] = [];
     classes.forEach(c => {
       const name = c.name || '';
-      if (name.includes('(테스트)')) return;
+      
+      // 💡 신규 로직: 반 이름에 '테스트'가 들어가고, 테스트 제외가 켜져 있으면 시간표에서 감춤
+      if (hideTest && name.includes('테스트')) return;
 
       const status = c.status || '';
       const isEnded = status.includes('종료') || status.includes('폐강');
       const isOngoing = status === '진행중';
 
-      // 💡 종료/폐강 반 노출 로직 적용[cite: 3]
       if (isEnded && !showEnded) return;
       if (!isEnded && !isOngoing && !showPlanned) return;
 
@@ -161,6 +163,16 @@ export default function ClassPage() {
       
       if (ttFilter === 'REGULAR' && !isRegular) return;
       if (ttFilter === 'SPECIAL' && isRegular) return;
+
+      // 💡 신규 로직: 반 내의 학생들 중에서 이름에 '테스트'가 들어간 학생 제거
+      let filteredEnrollment = c.enrollment || [];
+      if (hideTest) {
+        filteredEnrollment = filteredEnrollment.filter((e: any) => {
+          const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
+          return !(sName && sName.includes('테스트'));
+        });
+      }
+      const classObjToUse = { ...c, enrollment: filteredEnrollment };
 
       c.class_schedule?.forEach((sch: any) => {
         if (!sch.day_of_week || !sch.start_time || sch.day_of_week === '일') return;
@@ -172,7 +184,7 @@ export default function ClassPage() {
         }
 
         blocks.push({
-          classObj: c,
+          classObj: classObjToUse,
           day: sch.day_of_week,
           start: sch.start_time,
           end: finalEndTime,
@@ -181,7 +193,7 @@ export default function ClassPage() {
       });
     });
     return blocks;
-  }, [classes, ttFilter, showPlanned, showEnded]);
+  }, [classes, ttFilter, showPlanned, showEnded, hideTest]);
 
   const { wdStartHour, wdRowCount, wdHours, satStartHour, satRowCount, satHours } = useMemo(() => {
     let wdMin = 14;
@@ -225,11 +237,13 @@ export default function ClassPage() {
 
   const filteredClasses = useMemo(() => {
     let result = classes.filter((c) => {
+      // 💡 신규 로직: 반 이름에 '테스트'가 들어가면 리스트에서 감춤
+      if (hideTest && (c.name || '').includes('테스트')) return false;
+
       const status = c.status || '';
       const isEnded = status.includes('종료') || status.includes('폐강');
       const isOngoing = status === '진행중';
 
-      // 💡 종료/폐강 반 노출 로직 적용[cite: 3]
       if (isEnded && !showEnded) return false;
       if (!isEnded && !isOngoing && !showPlanned) return false;
 
@@ -250,11 +264,22 @@ export default function ClassPage() {
       return matchLevel && matchGrade && matchInst;
     });
 
+    // 💡 신규 로직: 리스트에 배정인원을 보여줄 때도 테스트 학생 제외
+    if (hideTest) {
+      result = result.map(c => {
+        const filteredEnrollment = (c.enrollment || []).filter((e: any) => {
+          const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
+          return !(sName && sName.includes('테스트'));
+        });
+        return { ...c, enrollment: filteredEnrollment };
+      });
+    }
+
     return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [classes, filterLevel, filterGrade, filterInstructor, showPlanned, showEnded]);
+  }, [classes, filterLevel, filterGrade, filterInstructor, showPlanned, showEnded, hideTest]);
 
   const resetFilters = () => { 
-    setFilterLevel("all"); setFilterGrade("all"); setFilterInstructor("all"); setShowPlanned(false); setShowEnded(false); 
+    setFilterLevel("all"); setFilterGrade("all"); setFilterInstructor("all"); setShowPlanned(false); setShowEnded(false); setHideTest(true); 
   };
 
   const openEditModal = (classItem: any) => { setSelectedClass(classItem); setIsEditModalOpen(true); };
@@ -405,6 +430,11 @@ export default function ClassPage() {
                 <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
               </label>
+              {/* 💡 신규 체크박스: 테스트 제외 필터 */}
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={hideTest} onChange={e => setHideTest(e.target.checked)} className="w-4 h-4 accent-rose-600 cursor-pointer" />
+                <span className="text-sm font-bold text-rose-600 hover:text-rose-800 transition-colors">테스트 제외</span>
+              </label>
             </div>
 
             <button onClick={resetFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-lg transition-colors border border-slate-300 flex items-center gap-1 ml-2">🔄 초기화</button>
@@ -442,6 +472,11 @@ export default function ClassPage() {
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
+              </label>
+              {/* 💡 신규 체크박스: 테스트 제외 필터 */}
+              <label className="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" checked={hideTest} onChange={e => setHideTest(e.target.checked)} className="w-4 h-4 accent-rose-600 cursor-pointer" />
+                <span className="text-sm font-bold text-rose-600 hover:text-rose-800 transition-colors">테스트 제외</span>
               </label>
             </div>
           </div>
