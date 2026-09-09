@@ -109,10 +109,12 @@ function HomeworkReviewContent() {
   const [groups, setGroups] = useState<any[]>([]);
   const [gradingMap, setGradingMap] = useState<Record<number, GradeCode | null>>({});
   
+  // 🌟 [추가] 학생의 필기/텍스트 답안을 보관할 상태
   const [studentInputMap, setStudentInputMap] = useState<Record<number, string | null>>({});
   
   const [modalQ, setModalQ] = useState<any>(null);
   
+  // 🌟 [추가] 학생 답안 확인 모달 상태
   const [modalStudentAns, setModalStudentAns] = useState<{ qNum: string; input: string | null } | null>(null);
 
   const hwResultIdRef = useRef<number | null>(null);
@@ -156,13 +158,12 @@ function HomeworkReviewContent() {
         const [ { data: stuData }, { data: aData }, { data: ansData } ] = await Promise.all([
           supabase.from('student').select('name, grade').eq('student_id', studentId).single(),
           supabase.from('exam_assignment').select('*, exam_master(*), class(name)').eq('assignment_id', assignmentId).single(),
-          supabase.from('student_answer').select('question_id, grading_code, student_input').eq('exam_assignment_id', assignmentId)
+          supabase.from('student_answer').select('question_id, grading_code, student_input').eq('exam_assignment_id', assignmentId) // student_input 추가
         ]);
 
         const em = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
         setStudentInfo(stuData);
-        // 🌟 항목명을 무조건 "맞춤 오답..."이 아닌 실제 exam_type 이름으로 출력하게 교정
-        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: em.exam_type || '학습지' } });
+        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: '맞춤 오답/과제프린트' } });
         setHwResult({ status: aData.status, hw_result_id: aData.assignment_id }); 
         
         const { data: items } = await supabase.from('exam_item').select('question_id, sort_order').eq('exam_id', em.exam_id).order('sort_order');
@@ -230,6 +231,7 @@ function HomeworkReviewContent() {
         return;
       }
 
+      // 기존 일반 교재 과제 로직
       const [ { data: stuData }, { data: hwData }, { data: resData }, { data: ansData } ] = await Promise.all([
         supabase.from('student').select('name, grade').eq('student_id', studentId).single(),
         supabase.from('homework_assignment').select('*, textbook(title), class(name)').eq('homework_id', homeworkId).single(),
@@ -558,6 +560,7 @@ function HomeworkReviewContent() {
                           <span className="text-[#002864] font-black text-[18px] whitespace-nowrap">{q.displayQNum}</span>
                           <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full" title="출처 페이지">{q.page_number || q.final_printed_page || q.detected_page_num || '-'}p</span>
                           
+                          {/* 🌟 [수정] 학생 제출 답안 보기 버튼 */}
                           <button 
                             onClick={() => setModalStudentAns({ qNum: q.displayQNum || q.question_number, input: studentInputMap[q.tq_id] || null })} 
                             className={`text-[10px] font-bold py-1 px-1.5 rounded shadow-sm transition-colors w-full mt-1 flex items-center justify-center gap-1 ${hasStudentInput ? 'bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-600' : 'bg-slate-50 border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
@@ -580,6 +583,7 @@ function HomeworkReviewContent() {
                           </div>
                         </div>
 
+                        {/* 🌟 [수정] 풀이 돋보기 버튼 가로 정렬 */}
                         <div className="flex items-center justify-center shrink-0 px-2">
                            <button onClick={() => setModalQ(q)} className="w-[42px] h-[48px] flex flex-col items-center justify-center gap-0.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg shadow-sm transition-colors" title="상세 해설 보기">
                              <span className="text-[14px] leading-none">🔍</span>
@@ -649,7 +653,7 @@ function HomeworkReviewContent() {
         </div>
       )}
 
-      {/* 🌟 학생 답안 팝업 모달 */}
+      {/* 🌟 [추가] 학생 답안 팝업 모달 */}
       {modalStudentAns && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-lg max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">

@@ -21,7 +21,7 @@ interface GlobalListProps {
   handleForceComplete: (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => void;
   handleDeleteExam: (assignmentId: string, studentId: string) => void;
   handleDeleteHomework: (hwId: string, studentId: string) => void;
-  handleDeletePrint: (assignmentId: string, examId: string) => void;
+  handleDeletePrint: (assignmentId: string, examId: string, studentId: string) => void; // 🌟 studentId 매개변수 추가됨
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
@@ -119,7 +119,6 @@ export default function GlobalList({
               const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
               const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
               
-              // 💡 [핵심 수정] fetchHooks에서 억지로 맞춰준 class_name 백업을 최우선으로 쓰도록 변경
               const studentName = res.student?.name || unwrap(res.student)?.name || '알수없음';
               const className = res.class_name || unwrap(res.class)?.name || '반 미지정';
               
@@ -156,10 +155,8 @@ export default function GlobalList({
               let detailHref = '';
               if (activeTab === 'HOMEWORK' && !res.is_exam_hw) {
                 detailHref = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`;
-              } else if (res.is_exam_hw || activeTab === 'INCORRECT' || activeTab === 'SIMILAR' || activeTab === 'OVERDUE') {
-                detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
               } else {
-                detailHref = `/exam/review?assignment_id=${res.assignment_id}`;
+                detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
               }
 
               return (
@@ -170,7 +167,6 @@ export default function GlobalList({
                       {formatDateLabel(createdDate, true)}
                     </div>
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 whitespace-nowrap ${typeColor}`}>{typeBadge}</span>
-                    {/* 💡 변경된 className 변수가 여기에 자연스럽게 적용됩니다 */}
                     <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 whitespace-nowrap">{className}</span>
                     <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
                     <div className="flex-1 font-extrabold text-[12px] truncate" title={titleStr}>{titleStr}</div>
@@ -199,7 +195,8 @@ export default function GlobalList({
                         <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
+                      {/* 🌟 핵심 교정: res.student_id 전달 */}
+                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
                       <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 단일 출력">🖨️</button>
 

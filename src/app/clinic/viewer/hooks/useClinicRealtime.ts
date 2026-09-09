@@ -52,19 +52,19 @@ export function useClinicRealtime({
 }: UseClinicRealtimeProps) {
   
   const clinicChannelRef = useRef<any>(null);
-  const gradingChannelRef = useRef<any>(null); // 🌟 무한 재연결을 위한 레퍼런스 추가
+  const gradingChannelRef = useRef<any>(null);
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
 
   const callbacksRef = useRef({ 
       processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
-      setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview 
+      setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview, persistExamAnswersToDB
   });
   
   useEffect(() => {
     callbacksRef.current = { 
         processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
-        setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview 
+        setCanvasClearTrigger, setMyAwayActive, setPendingRecheckReview, persistExamAnswersToDB
     };
   });
 
@@ -94,8 +94,11 @@ export function useClinicRealtime({
           delete newCalls['REFRESH'];
           await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
           
-          (window as any).__isForceRefreshing = true; 
-          window.location.reload();
+          // 🌟 강제 새로고침을 차단하고 튕기지 않게 알림만 띄웁니다!
+          if (setRecheckToast) {
+              setRecheckToast('🎉 밖에서 채점이 확정되었습니다! (학습 종료 후 포탈에서 확인 가능)');
+              setTimeout(() => setRecheckToast(""), 4000);
+          }
           return;
       }
 
@@ -226,7 +229,6 @@ export function useClinicRealtime({
     };
   }, [studentInfo.id, questions]); 
 
-  // 🌟 핵심 해결: 채점 기록 리스너망 "무한 재연결(Auto-Reconnect)" 탑재!
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
 
@@ -289,9 +291,20 @@ export function useClinicRealtime({
     };
 
     const connectGradingChannel = () => {
-        if (gradingChannelRef.current) supabaseClient.removeChannel(gradingChannelRef.current);
+        if (gradingChannelRef.current) {
+            supabaseClient.removeChannel(gradingChannelRef.current);
+            gradingChannelRef.current = null;
+        }
         
-        const channel = supabaseClient.channel(`student_realtime_grading_listen_${studentInfo.id}`)
+        const channelName = `student_realtime_grading_listen_${studentInfo.id}`;
+        
+        supabaseClient.getChannels().forEach((ch) => {
+            if (ch.topic === `realtime:${channelName}`) {
+                supabaseClient.removeChannel(ch);
+            }
+        });
+        
+        const channel = supabaseClient.channel(channelName)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
           .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
@@ -299,7 +312,6 @@ export function useClinicRealtime({
           });
           
         channel.subscribe((status) => {
-            // 통신망이 유휴 상태로 끊어지면 무한 멱살잡이(3초마다 부활)
             if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
                 setTimeout(() => {
                     if (gradingChannelRef.current === channel) connectGradingChannel();
@@ -336,7 +348,7 @@ export function useClinicRealtime({
           supabaseClient.from('clinic_session_state').update({ draft_progress: draft }).eq('id', sid).then();
         }
       }
-      if (isTimedRound) persistExamAnswersToDB();
+      if (isTimedRound) callbacksRef.current.persistExamAnswersToDB();
       untrackPresence();
       localStorage.removeItem('logica_student_id');
       localStorage.removeItem('logica_student_name');
@@ -362,7 +374,7 @@ export function useClinicRealtime({
       const qNum = payload.qNum;
       const idx = qNum ? Number(qNum) - 1 : questions.findIndex((item:any) => item.uid === payload.uid);
       
-      setPendingRecheckReview(prev => {
+      setPendingRecheckReview((prev: any[]) => {
         const isReviewItem = prev.some(r => r.uid === payload.uid || (qNum && r.qNum === qNum));
         if (isReviewItem) {
           if (idx >= 0) recheckState.current[idx] = null;
@@ -413,8 +425,11 @@ export function useClinicRealtime({
          });
       }
     } else if (payload.action === 'force_refresh') {
-      (window as any).__isForceRefreshing = true;
-      window.location.reload();
+      // 🌟 강제 새로고침을 차단하고 튕기지 않게 알림만 띄웁니다!
+      if (callbacksRef.current.setRecheckToast) {
+          callbacksRef.current.setRecheckToast('🎉 밖에서 채점이 확정되었습니다! (학습 종료 후 포탈에서 확인 가능)');
+          setTimeout(() => callbacksRef.current.setRecheckToast(""), 4000);
+      }
     }
   };
 
@@ -427,7 +442,6 @@ export function useClinicRealtime({
     });
   };
 
-  // 🌟 핵심 해결: 관제탑 연결망 "무한 재연결(Auto-Reconnect)" 탑재!
   const connectChannel = async (sId: string, sessionState: any) => {
     if (clinicChannelRef.current) {
       await supabaseClient.removeChannel(clinicChannelRef.current);
@@ -471,10 +485,8 @@ export function useClinicRealtime({
       })
       .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionRef.current(payload, sId, clinicSessionStateRef.current || sessionState))
       .subscribe((status) => {
-          // 브라우저 절전 등으로 실시간 소켓이 죽었을 때 불사조처럼 무한 부활
           if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
               setTimeout(() => {
-                  // 의도적으로 연결을 끊은 경우(퇴실 등)가 아닐 때만 복구
                   if (clinicChannelRef.current === channel) {
                       connectChannel(sId, clinicSessionStateRef.current || sessionState);
                   }
@@ -519,11 +531,10 @@ export function useClinicRealtime({
     await connectChannel(sId, sessionData);
   };
 
-  // 퇴실 등 의도적인 연결 종료 시 재연결 고리 끊기
   const untrackPresence = async () => {
     if (clinicChannelRef.current) {
       const ch = clinicChannelRef.current;
-      clinicChannelRef.current = null; // 여기서 참조를 날려버림으로써 setTimeout 재연결망 무력화
+      clinicChannelRef.current = null; 
       try { await ch.untrack(); } catch(e) {}
       try { await supabaseClient.removeChannel(ch); } catch(e) {}
     }

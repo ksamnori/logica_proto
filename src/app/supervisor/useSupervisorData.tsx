@@ -40,6 +40,8 @@ export function useSupervisorData() {
     const [reservationModal, setReservationModal] = useState<{ isOpen: boolean; seat: string | null; student: any | null }>({ isOpen: false, seat: null, student: null });
     const RESERVATION_GRACE_MS = 10 * 60 * 1000;
 
+    const [pendingVerifications, setPendingVerifications] = useState<any[]>([]);
+
     const studentsRef = useRef<Record<string, any>>({});
     const channelRef = useRef<any>(null);
 
@@ -168,6 +170,69 @@ export function useSupervisorData() {
         if (!channelRef.current || channelRef.current.state !== 'joined') setReconnectTrigger(p => p + 1);
         const studentId = studentsRef.current[seat]?.studentId;
         channelRef.current?.send({ type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } });
+    };
+
+    const confirmVerification = async (assignmentId: string, studentId: string, overrides: Record<string, boolean>) => {
+        try {
+            const { data: allAnswers } = await supabaseClient.from('student_answer').select('*').eq('exam_assignment_id', assignmentId);
+            
+            let finalCorrect = 0;
+            const updates = [];
+            const toDeleteIncorrectRecords = [];
+            
+            const totalAnsCount = allAnswers ? allAnswers.length : 0;
+            
+            if (allAnswers && totalAnsCount > 0) {
+                for (const ans of allAnswers) {
+                    const isOverridden = overrides[ans.answer_id] !== undefined;
+                    const isCorrect = isOverridden ? overrides[ans.answer_id] : ans.is_correct;
+                    
+                    if (isCorrect) finalCorrect++;
+                    
+                    if (isOverridden) {
+                        updates.push({
+                            answer_id: ans.answer_id,
+                            is_correct: isCorrect,
+                            grading_code: isCorrect ? 'O' : 'X',
+                            earned_score: isCorrect ? (100 / totalAnsCount) : 0
+                        });
+                        if (isCorrect && ans.question_id) {
+                            toDeleteIncorrectRecords.push(ans.question_id);
+                        }
+                    }
+                }
+                
+                if (updates.length > 0) {
+                    await supabaseClient.from('student_answer').upsert(updates);
+                }
+                
+                if (toDeleteIncorrectRecords.length > 0) {
+                    await supabaseClient.from('student_incorrect_record')
+                        .delete()
+                        .eq('student_id', studentId)
+                        .in('question_id', toDeleteIncorrectRecords);
+                }
+            }
+            
+            const totalScore = totalAnsCount > 0 ? Math.round((finalCorrect / totalAnsCount) * 100) : 0;
+            
+            const { error: updateError } = await supabaseClient.from('exam_assignment').update({
+                status: '채점확정',
+                total_score: totalScore
+            }).eq('assignment_id', assignmentId);
+
+            if (updateError) console.error("시험 확정 업데이트 에러:", updateError);
+            
+            const seat = Object.keys(studentsRef.current).find(s => studentsRef.current[s].studentId === studentId);
+            if (seat) {
+                sendToStudent(seat, 'force_refresh'); 
+            }
+            
+            setPendingVerifications(prev => prev.filter(p => p.assignment_id !== assignmentId));
+        } catch (error) {
+            console.error("검수 처리 중 예상치 못한 에러:", error);
+            setPendingVerifications(prev => prev.filter(p => p.assignment_id !== assignmentId));
+        }
     };
 
     useEffect(() => {
@@ -399,11 +464,13 @@ export function useSupervisorData() {
 
                     Object.keys(dbCalls).forEach(qNumKey => {
                         if (qNumKey === 'REFRESH') return; 
-                        
                         if (dbCalls[qNumKey]?.verdict) return; 
                         if (st.calls[qNumKey]) return;
+                        
                         const qNum = qNumKey === 'general' ? 'general' : Number(qNumKey);
-                        st.calls[qNumKey] = dbCalls[qNumKey]?.requestedAt || Date.now();
+                        // 🌟 핵심 수정 1: 단순 시간이 아닌 호출 전체 데이터를 온전히 보관
+                        st.calls[qNumKey] = dbCalls[qNumKey] || { requestedAt: Date.now(), qNum: qNumKey };
+                        
                         if (st.status !== 'offline') st.status = 'call';
                         isModified = true;
                         const isGeneral = qNumKey === 'general';
@@ -491,6 +558,26 @@ export function useSupervisorData() {
                     isModified = true;
                 }
             });
+
+            const { data: pExams } = await supabaseClient
+                .from('exam_assignment')
+                .select('assignment_id, student_id, total_score, exam_master!inner(title, exam_type), student!inner(name)')
+                .eq('status', '제출완료')
+                .gte('created_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+            
+            if (pExams) {
+                const enriched = pExams.map((ex: any) => {
+                    const seatInfo = Object.values(current).find((s:any) => s.studentId === ex.student_id);
+                    const dbName = Array.isArray(ex.student) ? ex.student[0]?.name : ex.student?.name;
+                    const title = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.title : ex.exam_master?.title;
+                    return { 
+                        ...ex, 
+                        studentName: seatInfo ? seatInfo.name : (dbName || '이름 미상'), 
+                        examTitle: title || '테스트' 
+                    };
+                });
+                setPendingVerifications(enriched);
+            }
 
             if (isModified) updateStudents(current);
         }, 5000);
@@ -595,7 +682,9 @@ export function useSupervisorData() {
                             if (studentsRef.current[activeSeat]) updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], isTyping: false } });
                         }, 2000);
                     } else if (action === 'call') {
-                        st[activeSeat].calls[data.qNum] = Date.now(); st[activeSeat].status = 'call';
+                        // 🌟 핵심 수정 2: 데이터 통째로 저장
+                        st[activeSeat].calls[data.qNum] = { ...data, requestedAt: Date.now() }; 
+                        st[activeSeat].status = 'call';
                         if (data.qNum === 'general') {
                             appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '조교호출', `${data.name} 학생이 조교를 호출했습니다.`, `[${activeSeat}] 포탈에서 호출했습니다 · 확인 후 처리하세요.`, 'call', { seat: activeSeat, qNum: data.qNum });
                         } else {
@@ -616,7 +705,7 @@ export function useSupervisorData() {
                         setTimeout(() => { if (studentsRef.current[activeSeat]?.status === 'hint') updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], status: 'idle' } }); }, 10000);
                     } else if (action === 'submit') {
                         st[activeSeat].status = 'submitted'; st[activeSeat].score = data.score;
-                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score} / 5].`);
+                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score}].`, 'submit', { seat: activeSeat, studentId: data.studentId });
                     } else if (action === 'recheck_request') {
                         if (!st[activeSeat].rechecks) st[activeSeat].rechecks = {};
                         st[activeSeat].rechecks[data.uid] = { ...data, seat: activeSeat };
@@ -974,7 +1063,8 @@ export function useSupervisorData() {
         setRecheckModal({ isOpen: false, seat: null, uid: null });
     };
 
-    const taAction = async (seat: string, type: string, qNum: any = null) => {
+    // 🌟 핵심 수정 3: mark 파라미터 추가
+    const taAction = async (seat: string, type: string, qNum: any = null, mark: string = 'skip') => {
         const currentStudents = { ...studentsRef.current };
         
         if (type === 'cancel_call') {
@@ -984,7 +1074,7 @@ export function useSupervisorData() {
                      const { data } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
                      if (data && data.active_calls && data.active_calls[qNum]) {
                          const newCalls = { ...data.active_calls };
-                         newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: 'skip' }; 
+                         newCalls[qNum] = { ...newCalls[qNum], verdict: 'resolved', mark: mark };
                          await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
                      }
                 }
@@ -992,7 +1082,9 @@ export function useSupervisorData() {
                 if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
                 removeLogsByTypeAndSeat('call', seat, qNum);
                 sendToStudent(seat, 'force_cancel_call', { qNum });
-                recordTaStat('총책임자', 'skip');
+                
+                // 🌟 로그에도 어떻게 처리했는지 남기도록 변경
+                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출처리완료', `[${seat}] ${qNum}번 문항 지도 완료`, `원장/실장 · ${mark === 'hint' ? '💡 힌트 제공 후 종료' : '⏭️ 설명 생략하고 넘김'}`);
             }
         } else if (type === 'clear_away') {
             if (currentStudents[seat]) { 
@@ -1010,7 +1102,6 @@ export function useSupervisorData() {
                 pendingDeletesRef.current[seat] = Date.now() + PENDING_GUARD_MS;
             }
         } else if (type === 'force_refresh') {
-            // 🌟 킬스위치 1: DB에 강제 REFRESH 신호를 꽂아 넣습니다.
             if (currentStudents[seat]?.sessionId) {
                 supabaseClient.from('clinic_session_state')
                     .select('active_calls')
@@ -1021,7 +1112,6 @@ export function useSupervisorData() {
                         supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', currentStudents[seat].sessionId).then();
                     });
             }
-            // 기존의 웹소켓 신호도 날려줍니다.
             sendToStudent(seat, 'force_refresh');
             appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
         } else if (type === 'force_reset') {
@@ -1037,7 +1127,6 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('recheck', seat);
                 removeLogsByTypeAndSeat('end_request', seat);
                 
-                // 🌟 킬스위치 2: 모든 갇힘 상태를 DB에서 강제로 지우고, 동시에 REFRESH 신호를 보냅니다.
                 if (st.sessionId) {
                     supabaseClient.from('clinic_session_state').update({
                         active_calls: { REFRESH: Date.now() },
@@ -1067,6 +1156,7 @@ export function useSupervisorData() {
         handlePointerDown, handleListPointerDown, adjustClinicTime, confirmForceCheckout, taAction, sendToStudent, removeLogsByTypeAndSeat, appendLog,
         resolveRecheck,
         ghostRect,
-        seats, seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked
+        seats, seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked,
+        pendingVerifications, confirmVerification
     };
 }

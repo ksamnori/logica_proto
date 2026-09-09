@@ -129,11 +129,14 @@ export function useLearningFetch() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  const fetchStatsForTab = async (students: StudentInfo[]) => {
-    setIsLoading(true);
+  // 🌟 핵심 교정: targetStudentIds를 받아서 해당 학생들만 '빠르게 핀셋 갱신' 하도록 구조 변경
+  const fetchStatsForTab = async (students: StudentInfo[], targetStudentIds?: string[]) => {
+    if (!targetStudentIds) setIsLoading(true); // 타겟팅 갱신일 땐 전체 화면 로딩을 띄우지 않고 백그라운드 갱신
     try {
-      const studentIds = students.map(s => s.id);
-      const classIds = [...new Set(students.flatMap(s => s.allClassIds || [s.classId]))]; 
+      const studentIds = targetStudentIds ? targetStudentIds : students.map(s => s.id);
+      if (studentIds.length === 0) return;
+
+      const classIds = [...new Set(students.filter(s => studentIds.includes(s.id)).flatMap(s => s.allClassIds || [s.classId]))]; 
       let fetchedStats: any[] = [];
       let allCalEvents: any[] = []; 
       const chunkSize = 200;
@@ -196,9 +199,22 @@ export function useLearningFetch() {
           }
         });
       }
-      setCurrentStats(fetchedStats);
-      setClassCalendarEvents(allCalEvents); 
-    } catch (e) { console.error(e); } finally { setIsLoading(false); }
+      
+      // 🌟 타겟 갱신일 경우 기존 배열에 방금 가져온 새 데이터만 교체 삽입
+      if (targetStudentIds) {
+        setCurrentStats(prev => {
+          const filtered = prev.filter(p => !targetStudentIds.includes(p.student_id));
+          return [...filtered, ...fetchedStats];
+        });
+        setClassCalendarEvents(prev => {
+          const filtered = prev.filter(p => !targetStudentIds.includes(p.student_id));
+          return [...filtered, ...allCalEvents];
+        });
+      } else {
+        setCurrentStats(fetchedStats);
+        setClassCalendarEvents(allCalEvents);
+      }
+    } catch (e) { console.error(e); } finally { if (!targetStudentIds) setIsLoading(false); }
   };
 
   const fetchStudentTimeline = async (studentId: string, classId: string, allStudents: StudentInfo[]) => {
@@ -348,7 +364,6 @@ export function useLearningFetch() {
             const counts: Record<string, { o: number; x: number; helped: number }> = {};
             dedupAns.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
             
-            // 💡 [핵심 수정] 과제 자체에 반 정보가 누락되어 있어도, 전체 학생 목록(students)에서 해당 학생의 현재 반 이름을 강제로 가져옵니다.
             const enriched = data.map((d: any) => {
                const em = unwrap(d.exam_master); const cls = unwrap(d.class); const stu = unwrap(d.student);
                const stuFallback = students.find(s => s.id === d.student_id);

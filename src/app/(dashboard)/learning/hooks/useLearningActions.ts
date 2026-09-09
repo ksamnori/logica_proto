@@ -3,6 +3,7 @@ import { supabase } from "@/lib/supabase";
 import { StudentInfo, ViewState, TabType } from "../types";
 import { toast } from "react-toastify"; 
 
+// 🌟 핵심 교정: targetStudentIds 옵션이 추가된 인터페이스 반영
 interface ActionProps {
   currentView: ViewState;
   activeTab: TabType | string; 
@@ -16,7 +17,7 @@ interface ActionProps {
   setDateFilter: (val: 'ALL' | '1W' | '1M') => void;
   fetchStudentTimeline: (sId: string, cId: string, all: StudentInfo[]) => void;
   fetchGlobalListForTab: (tab: TabType | string, all: StudentInfo[]) => void; 
-  fetchStatsForTab: (all: StudentInfo[]) => void;
+  fetchStatsForTab: (all: StudentInfo[], targetStudentIds?: string[]) => void; // ✅
 }
 
 const safeParseIds = (raw: any): number[] => {
@@ -40,7 +41,7 @@ const purgeOldSession = () => {
     'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
     'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
     'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
-    'bulkPrintData' // 🌟 연속 출력용 데이터 키 추가
+    'bulkPrintData' 
   ];
   keysToRemove.forEach(k => sessionStorage.removeItem(k));
 };
@@ -122,7 +123,6 @@ export function useLearningActions({
         }
         window.location.href = '/exam/step2';
       } else {
-        // 🌟 /exam/step2 뷰어가 읽을 수 있도록 세션 스토리지 호환 패치
         sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions));
         sessionStorage.setItem('examTitle', '[병합] 복습 및 오답 교재 과제');
         sessionStorage.setItem('examType', '과제프린트');
@@ -134,7 +134,6 @@ export function useLearningActions({
         } else {
           sessionStorage.setItem('isClinicMode', 'false');
         }
-        // 🌟 올바른 통합 편집 마법사 라우팅 주소로 교체
         window.location.href = '/exam/step2';
       }
       
@@ -150,6 +149,8 @@ export function useLearningActions({
     if (!confirm(`선택한 ${globalSelectedBlocks.length}개의 항목을 강제로 '채점완료' 처리하시겠습니까?`)) return;
     setIsLoading(true);
     try {
+      const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
+      
       for (const block of globalSelectedBlocks) {
         if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
@@ -175,7 +176,9 @@ export function useLearningActions({
       toast.success("✅ 선택 항목이 일괄 완료처리 되었습니다.");
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      // 🌟 핵심 교정: 관련된 학생들만 외과수술식으로 0.1초 갱신
+      fetchStatsForTab(allStudentsList, affectedStudentIds);
     } catch(e: any) {
       console.error(e);
       toast.error("처리 중 오류가 발생했습니다.");
@@ -188,6 +191,8 @@ export function useLearningActions({
     if (!confirm(`선택한 ${globalSelectedBlocks.length}개의 항목을 완전히 삭제하시겠습니까?`)) return;
     setIsLoading(true);
     try {
+      const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
+
       for (const block of globalSelectedBlocks) {
         if (block.startsWith('exam_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
@@ -214,7 +219,9 @@ export function useLearningActions({
       toast.success("🗑️ 선택 항목이 삭제되었습니다.");
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      // 🌟 해당 학생들만 백그라운드 초고속 갱신
+      fetchStatsForTab(allStudentsList, affectedStudentIds);
     } catch(e: any) {
        console.error(e);
        toast.error("삭제 중 오류가 발생했습니다.");
@@ -251,7 +258,9 @@ export function useLearningActions({
       toast.success("✅ 선택 항목이 일괄 완료처리 되었습니다.");
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      // 🌟 이 학생 한 명만 눈 깜짝할 새 백그라운드 갱신
+      fetchStatsForTab(allStudentsList, [currentView.studentId]);
     } catch(e: any) {
        console.error(e);
        toast.error("처리 중 오류가 발생했습니다.");
@@ -289,7 +298,9 @@ export function useLearningActions({
       toast.success("🗑️ 선택 항목이 삭제되었습니다.");
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      // 🌟 이 학생 1명만 즉시 갱신
+      fetchStatsForTab(allStudentsList, [currentView.studentId]);
     } catch(e: any) {
        console.error(e);
        toast.error("삭제 중 오류가 발생했습니다.");
@@ -323,7 +334,9 @@ export function useLearningActions({
       toast.success("✅ 채점 완료 처리되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      // 🌟 단일 학생 핀셋 갱신
+      fetchStatsForTab(allStudentsList, [targetStudentId]);
     } catch (err: any) {
       console.error(err);
       toast.error("완료 처리 중 오류가 발생했습니다.");
@@ -339,7 +352,8 @@ export function useLearningActions({
       toast.success("🗑️ 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      fetchStatsForTab(allStudentsList, [studentId]); // 🌟 핀셋 갱신
     } catch (e) { toast.error("삭제 실패"); }
   };
 
@@ -364,11 +378,13 @@ export function useLearningActions({
       toast.success("🗑️ 삭제되었습니다.");
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab('HOMEWORK', allStudentsList);
-      fetchStatsForTab(allStudentsList);
+      
+      fetchStatsForTab(allStudentsList, [studentId]); // 🌟 핀셋 갱신
     } catch (e) { toast.error("삭제 실패"); }
   };
 
-  const handleDeletePrint = async (assignmentId: string, examId: string) => {
+  // 🌟 핵심 교정: studentId 매개변수 추가 (핀셋 갱신을 위해)
+  const handleDeletePrint = async (assignmentId: string, examId: string, studentId: string) => {
     if (!confirm("해당 프린트를 완전히 삭제하시겠습니까?")) return;
     try {
       await supabase.from('student_answer').delete().eq('exam_assignment_id', assignmentId);
@@ -381,6 +397,8 @@ export function useLearningActions({
       else {
         if (activeTab === 'INCORRECT' || activeTab === 'SIMILAR' || activeTab === 'OVERDUE') fetchGlobalListForTab(activeTab, allStudentsList);
       }
+      
+      fetchStatsForTab(allStudentsList, [studentId]); // 🌟 핀셋 갱신
     } catch (e) { toast.error("삭제 실패"); }
   };
 
@@ -525,7 +543,6 @@ export function useLearningActions({
       sessionStorage.setItem('editStudentId', String(studentId));
       sessionStorage.setItem('editClassId', String(classId));
 
-      // 🌟 올바른 통합 편집 마법사 라우팅 주소로 교체
       window.location.href = '/exam/step2';
 
     } catch (err: any) {

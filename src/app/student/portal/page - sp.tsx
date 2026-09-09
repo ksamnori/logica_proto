@@ -135,6 +135,19 @@ export default function StudentPortal() {
         initData();
     }, [router]);
 
+    useEffect(() => {
+        if (!studentInfo.id) return;
+        const refresh = () => {
+            if (document.visibilityState === 'visible') fetchBlockStates(studentInfo.id, studentInfo.classes);
+        };
+        document.addEventListener('visibilitychange', refresh);
+        window.addEventListener('focus', refresh);
+        return () => {
+            document.removeEventListener('visibilitychange', refresh);
+            window.removeEventListener('focus', refresh);
+        };
+    }, [studentInfo.id, studentInfo.classes]);
+
     const endRequest = useClinicEndRequest({
         supabaseClient, 
         sendAction: (action, extra) => sendClinicAction(action, extra), 
@@ -267,18 +280,12 @@ export default function StudentPortal() {
         scheduleNext();
 
         const handleFocus = () => { if (runDbSyncRef.current) runDbSyncRef.current(); };
-        const handleVisibility = () => { if (document.visibilityState === 'visible' && runDbSyncRef.current) runDbSyncRef.current(); };
-        
         window.addEventListener('focus', handleFocus);
-        document.addEventListener('visibilitychange', handleVisibility);
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible' && runDbSyncRef.current) runDbSyncRef.current();
+        });
 
-        return () => { 
-            cancelled = true; 
-            if (timer) clearTimeout(timer); 
-            window.removeEventListener('focus', handleFocus); 
-            // 🌟 메모리 누수 방지: 익명 함수 대신 기명 함수를 사용하여 리스너 완벽 제거
-            document.removeEventListener('visibilitychange', handleVisibility); 
-        };
+        return () => { cancelled = true; if (timer) clearTimeout(timer); window.removeEventListener('focus', handleFocus); };
     }, [studentInfo.id, isMounted]);
 
     useEffect(() => {
@@ -344,12 +351,14 @@ export default function StudentPortal() {
         }));
         setClassWeekTypes(newClassWeekTypes);
 
+        // 오답 문항 조회 (tq_id 및 question_id)
         const { data: incData } = await supabaseClient.from('student_incorrect_record')
             .select('question_id, tq_id, status')
             .eq('student_id', sid)
             .in('status', ['X', 'TX', 'TO', 'B'])
             .is('resolved_at', null);
 
+        // tq_id들을 question_id로 매핑하여 정확한 문항수 계산
         const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
         let tqToQidMap = new Map();
         if (rawTqIds.length > 0) {
@@ -443,6 +452,7 @@ export default function StudentPortal() {
                 const remain = Math.max(0, (tq || 0) - attempted);
 
                 if (type === '오답프린트' || type === '오답') {
+                    // 단일 오답 블록에서 통합 처리
                 } else if (type === '과제' || type === '과제프린트') {
                     if (!isFinalDone) { hwPending++; hwExamIds.push(ex.assignment_id); hTitles.push(title); if (hwExamIds.length === 1) hCount += remain; }
                 } else if (type === '오답유사' || type === '과제오답유사') {
@@ -500,7 +510,7 @@ export default function StudentPortal() {
                 if (!isPending) return;
                 
                 let tqLen = 0;
-                try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
+                try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions?.length || 0); } catch(e){}
 
                 const attempted = hwAttemptedMap.get(hw.homework_id)?.size || 0;
                 const remain = Math.max(0, tqLen - attempted);
@@ -644,6 +654,7 @@ export default function StudentPortal() {
                     .in('status', ['X', 'TX', 'TO', 'B'])
                     .is('resolved_at', null);
 
+                // tq_id를 실제 question_id로 반드시 변환
                 const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
                 let tqToQidMap = new Map();
                 if (rawTqIds.length > 0) {
@@ -660,6 +671,7 @@ export default function StudentPortal() {
                     return;
                 }
 
+                // 기존 미응시 오답시험지 정리
                 const { data: oldPrints } = await supabaseClient.from('exam_assignment')
                     .select('assignment_id, exam_id, exam_master!inner(exam_type)')
                     .eq('student_id', studentInfo.id)
@@ -789,9 +801,6 @@ export default function StudentPortal() {
         }
         else if (typeKey === 'hw') { qCount = prog.hwQCount; titleName = prog.hwTitle; pendingStacks = prog.hwPendingCount; }
         else if (typeKey === 'print') { qCount = prog.printQCount; titleName = prog.printTitle; pendingStacks = prog.printPendingCount; }
-
-        const scoreData = roundResults[`${className}::${round}`];
-        const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
 
         const isWaitingConfirm = typeKey === 'exam' && examStatus === '제출완료'; 
         const isFixingIncorrect = typeKey === 'exam' && examStatus === '채점확정'; 

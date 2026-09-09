@@ -27,11 +27,11 @@ interface StudentTimelineProps {
   handleForceComplete: (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => void;
   handleDeleteExam: (assignmentId: string, studentId: string) => void;
   handleDeleteHomework: (hwId: string, studentId: string) => void;
-  handleDeletePrint: (assignmentId: string, examId: string) => void;
+  handleDeletePrint: (assignmentId: string, examId: string, studentId: string) => void;
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
-  handleBulkPrintAction: (items: any[]) => void; // 🌟 추가됨
+  handleBulkPrintAction: (items: any[]) => void; 
 }
 
 const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => {
@@ -118,7 +118,7 @@ export default function StudentTimeline({
   handleBulkCompleteStudent, handleBulkDeleteStudent,
   handleGenerateIncorrectPrint, handleExtractCommonHomework, isGeneratingPrint,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
-  handleBulkPrintAction // 🌟 추가됨
+  handleBulkPrintAction 
 }: StudentTimelineProps) {
 
   const [modalTab, setModalTab] = useState<'TAXONOMY' | 'PERIOD' | 'SELECTED' | null>(null);
@@ -497,7 +497,6 @@ export default function StudentTimeline({
     }
   };
 
-  // 🌟 단일 뷰어로 병합 전송하는 일괄 출력 로직
   const handleBulkPrint = () => {
     const selectedItems = filteredTimeline.filter(item => selectedBlocks.includes(item.id));
     if (selectedItems.length === 0) return;
@@ -546,7 +545,6 @@ export default function StudentTimeline({
             <button onClick={handleBulkCompleteStudent} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[12px] disabled:opacity-40">✅ 선택 완료 ({selectedBlocks.length})</button>
             <button onClick={handleBulkDeleteStudent} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[12px] disabled:opacity-40">🗑️ 선택 삭제 ({selectedBlocks.length})</button>
             
-            {/* 🌟 선택 병합 출력 버튼 */}
             <button onClick={handleBulkPrint} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[12px] disabled:opacity-40 shadow-sm whitespace-nowrap">🖨️ 선택 한 장에 모아 출력 ({selectedBlocks.length})</button>
           </div>
 
@@ -627,7 +625,7 @@ export default function StudentTimeline({
 
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
             <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
-              <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs border border-blue-200">생성 마법사</span>
+              <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs border border-blue-200">생 마법사</span>
               {currentView?.studentName} 학생 맞춤 클리닉 출제
             </h2>
             <button onClick={() => setModalTab(null)} className="text-slate-400 hover:text-slate-600 transition-colors">
@@ -864,7 +862,8 @@ export default function StudentTimeline({
                         <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
+                      {/* 🌟 핵심 교정: studentId 매개변수를 전달하여 삭제 후 해당 학생만 핀셋 갱신되도록 처리 */}
+                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
                       <button 
                         onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
@@ -874,15 +873,14 @@ export default function StudentTimeline({
                         🖨️
                       </button>
 
+                      {/* 🌟 14버튼 탑재된 쾌속 채점 도구 (homework/review)로 라우팅 통합 */}
                       <button onClick={(e) => { 
                           e.stopPropagation(); 
                           let detailHref = '';
-                          if (item.type === 'hw_exam' || item.type === 'print' || item.type === 'similar' || item.type === 'overdue') {
-                            detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
-                          } else if (item.type === 'hw') {
+                          if (item.type === 'hw') {
                             detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
                           } else {
-                            detailHref = `/exam/review?assignment_id=${item.realId}`;
+                            detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
                           }
                           window.location.href = detailHref; 
                         }} 

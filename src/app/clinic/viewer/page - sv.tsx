@@ -78,8 +78,6 @@ export default function ClinicViewer() {
   const [callCooldownUntil, setCallCooldownUntil] = useState<number>(0);
   const [remainCallSec, setRemainCallSec] = useState(0);
 
-  const autoLeaveTimerRef = useRef<NodeJS.Timeout | null>(null);
-
   useEffect(() => {
     if (callCooldownUntil <= 0) return;
     const tick = () => {
@@ -94,12 +92,6 @@ export default function ClinicViewer() {
     const interval = setInterval(tick, 1000);
     return () => clearInterval(interval);
   }, [callCooldownUntil]);
-
-  useEffect(() => {
-      return () => {
-          if (autoLeaveTimerRef.current) clearInterval(autoLeaveTimerRef.current);
-      };
-  }, []);
 
   useEffect(() => {
     const sId = localStorage.getItem('logica_student_id');
@@ -301,10 +293,7 @@ export default function ClinicViewer() {
     setRemainCallSec(60);
 
     if (willCall) {
-      // 🌟 핵심 교정: alert()가 브라우저를 멈춰서 DB 통신이 막히는 것을 방지하기 위해 0.1초 지연 실행
-      setTimeout(() => {
-        alert("선생님을 호출했습니다. 자리에서 잠시만 기다려주세요!");
-      }, 100);
+      alert("선생님을 호출했습니다. 자리에서 잠시만 기다려주세요!");
     }
   };
 
@@ -543,14 +532,7 @@ export default function ClinicViewer() {
 
     if (reviewList.length === 0) {
       let sec = 10; setAutoLeaveSec(sec);
-      autoLeaveTimerRef.current = setInterval(() => { 
-          sec--; 
-          setAutoLeaveSec(sec); 
-          if (sec <= 0) { 
-              if (autoLeaveTimerRef.current) clearInterval(autoLeaveTimerRef.current);
-              (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); 
-          } 
-      }, 1000);
+      const itv = setInterval(() => { sec--; setAutoLeaveSec(sec); if (sec <= 0) { clearInterval(itv); (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); } }, 1000);
     }
   };
   handleTimeUpRef.current = handleTimeUp;
@@ -697,6 +679,7 @@ export default function ClinicViewer() {
     const wasWrongBefore = currentStatus === 'wrong_red' || currentStatus === 'X' || currentStatus === 'TX' || currentStatus === 'B';
     const newStatus = helped ? 'TO' : (wasWrongBefore || params.retry ? 'RO' : 'O');
     
+    // 🌟 1% 핵심 교정: 힌트 없이 혼자 풀었을 때(!helped)만 완전한 해결(resolved)로 인정하여 오답에서 날려버립니다.
     const resolved = !helped;
 
     correctSolvedCountRef.current++;
@@ -838,7 +821,6 @@ export default function ClinicViewer() {
   };
 
   const leaveAndGoHome = async () => {
-    if (autoLeaveTimerRef.current) clearInterval(autoLeaveTimerRef.current);
     setIsLoggingOut(true); sendAction('depart'); await untrackPresence(); router.push('/student/portal');
   };
 
@@ -850,7 +832,6 @@ export default function ClinicViewer() {
   };
 
   const finalizeAndGoToLogin = async () => {
-    if (autoLeaveTimerRef.current) clearInterval(autoLeaveTimerRef.current);
     setIsLoggingOut(true); await processSessionEnd(); sendAction('depart'); await untrackPresence();
     localStorage.removeItem('logica_student_id'); localStorage.removeItem('logica_student_name'); localStorage.removeItem('logica_student_phone');
     router.push('/student/login');
