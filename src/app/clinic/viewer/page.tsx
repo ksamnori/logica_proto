@@ -80,6 +80,9 @@ export default function ClinicViewer() {
 
   const autoLeaveTimerRef = useRef<NodeJS.Timeout | null>(null);
 
+  // 🌟 동적으로 설정된 제한 시간(초)을 화면 렌더링에 사용하기 위해 상태 추가
+  const [dynamicTimeLimitMin, setDynamicTimeLimitMin] = useState<number>(20);
+
   useEffect(() => {
     if (callCooldownUntil <= 0) return;
     const tick = () => {
@@ -141,6 +144,13 @@ export default function ClinicViewer() {
   });
 
   const isTimedRound = fetchedIsTimedRound && !params.retry;
+
+  // 🌟 질문 데이터를 다 불러왔을 때, 동적으로 설정된 제한 시간(초)을 분(Minute)으로 변환하여 UI에 반영
+  useEffect(() => {
+    if (questions.length > 0 && typeof window !== 'undefined' && (window as any).__dynamicTimeLimit) {
+        setDynamicTimeLimitMin((window as any).__dynamicTimeLimit / 60);
+    }
+  }, [questions]);
 
   const processCorrectAnswerRef = useRef<any>(null);
   const handleTimeUpRef = useRef<any>(null);
@@ -241,11 +251,9 @@ export default function ClinicViewer() {
     forceUpdate();
   }, [questions, params]);
 
-  // 🌟 [수정됨] 문제 배열 변경으로 인한 실시간 채널 끊김 방지용 Ref
   const questionsRef = useRef(questions);
   useEffect(() => { questionsRef.current = questions; }, [questions]);
 
-  // 🌟 [수정됨] 조교 채점 & PC 리뷰 페이지 실시간 연동 리스너 (INSERT, UPDATE 모두 감지)
   useEffect(() => {
     if (!isStarted || questionsRef.current.length === 0) return;
     
@@ -255,7 +263,6 @@ export default function ClinicViewer() {
     const channelId = `sv_sync_grading_${studentInfo.id}_${Date.now()}`;
 
     const channel = supabaseClient.channel(channelId)
-      // 🚨 'UPDATE'만 수신하던 것을 '*'로 변경하여 선생님의 최초 채점(INSERT)도 100% 감지
       .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
         const newData = payload.new as any;
         if (!newData || String(newData.student_id) !== String(studentInfo.id)) return;
@@ -273,7 +280,6 @@ export default function ClinicViewer() {
              if (code) {
                 let isChanged = false;
 
-                // 조교가 채점 시 "선생님이 확인 중이에요" 락(Lock) 해제
                 if (recheckState.current[idx] === 'pending') {
                    recheckState.current[idx] = null;
                    isChanged = true;
@@ -305,7 +311,7 @@ export default function ClinicViewer() {
       .subscribe();
 
     return () => { supabaseClient.removeChannel(channel); };
-  }, [isStarted, params, studentInfo.id, forceUpdate]); // 🚨 questions 의존성 제거 완료
+  }, [isStarted, params, studentInfo.id, forceUpdate]);
 
   const initMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -974,7 +980,7 @@ export default function ClinicViewer() {
           
           {!noQuestionsLeft ? (
               <button onClick={startClinic} className="w-full bg-[#002864] hover:bg-blue-950 text-white font-bold py-5 text-xl rounded-2xl shadow-md transition-all">
-                {params.retry ? '🚀 오답 정정 시작하기' : (isTimedRound ? '⏱️ 20분 타이머 시작하기' : '🚀 풀이 시작하기')}
+                {params.retry ? '🚀 오답 정정 시작하기' : (isTimedRound ? `⏱️ ${dynamicTimeLimitMin}분 타이머 시작하기` : '🚀 풀이 시작하기')}
               </button>
           ) : (
               <div className="flex flex-col gap-4 mt-2">

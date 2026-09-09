@@ -879,11 +879,14 @@ export default function StudentTimeline({
                         🖨️
                       </button>
 
+                      {/* 🌟 [핵심 수정] 분기평가/분기테스트는 exam/review 로 라우팅 */}
                       <button onClick={(e) => { 
                           e.stopPropagation(); 
                           let detailHref = '';
                           if (item.type === 'hw') {
                             detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
+                          } else if (item.type === 'quarterly') {
+                            detailHref = `/exam/review?assignment_id=${item.realId}&student_id=${currentView.studentId}`;
                           } else {
                             detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
                           }

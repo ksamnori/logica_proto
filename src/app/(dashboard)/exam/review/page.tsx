@@ -62,6 +62,9 @@ function ReviewContent() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isDeletingReport, setIsDeletingReport] = useState(false);
 
+  // 🌟 [핵심 스위치] 소문항이 묶이는 시험(입학테스트, 진단평가)인지 여부를 저장
+  const [isMergedExam, setIsMergedExam] = useState(false);
+
   const [modalQ, setModalQ] = useState<any>(null);
   const [modalWrongLog, setModalWrongLog] = useState<any[] | null>(null);
 
@@ -81,8 +84,6 @@ function ReviewContent() {
     }
   }, [assignmentId, homeworkId, studentIdParam]);
 
-  // 💡 [핵심: 깜빡임 원천 차단] pendingUpdates(버튼 클릭 상태)를 의존성 배열에서 완벽히 제거했습니다.
-  // 이제 버튼을 아무리 눌러도 화면이 깜빡이지 않습니다.
   useEffect(() => {
     const timer = setTimeout(() => {
       if (typeof window !== "undefined" && (window as any).MathJax && (window as any).MathJax.typesetPromise) {
@@ -188,6 +189,7 @@ function ReviewContent() {
 
       setHeaderInfo({ title: `📝 ${title} 채점표`, subtitle: `대상: ${studentName} 학생 | 교재명: ${hwData.textbook?.title || '교재'}`, type: '과제' });
       setShowReportBtn(false);
+      setIsMergedExam(false); // 과제는 병합 없음
 
       let tqIds: number[] = [];
       if (hwData.target_questions) {
@@ -291,12 +293,17 @@ function ReviewContent() {
       const matchTag = (aData.exam_master?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
       const stdName = matchTag ? matchTag[0] : '';
       
+      // 🌟 [핵심 스위치] '입학테스트' 이거나 '진단평가'라는 단어가 포함된 경우에만 소문항 병합 진행
+      const merged = exType.includes('입학테스트') || exType.includes('진단평가');
+      setIsMergedExam(merged);
+
       setContextIds({ studentId: sId, examPaperId: epId, standardName: stdName });
 
       const studentName = Array.isArray(aData.student) ? aData.student[0]?.name : aData.student?.name;
       setHeaderInfo({ title: `📝 ${exTitle} 채점표`, subtitle: `대상: ${studentName} 학생 | 유형: ${exType} [평가기준: ${stdName || '미지정'}]`, type: exType });
 
-      if (exType === '입학테스트') setShowReportBtn(aData.status === '채점완료' || aData.test_status === '채점완료');
+      // 리포트 생성 버튼도 병합 모드(진단)일 때만 표시
+      if (merged) setShowReportBtn(aData.status === '채점완료' || aData.test_status === '채점완료');
 
       const { data: items, error: iErr } = await supabase.from('exam_item').select('*').eq('exam_id', epId).order('sort_order');
       if (iErr) throw iErr;
@@ -364,10 +371,16 @@ function ReviewContent() {
         const wLog = parseWrongLog(ans.wrong_attempts_log);
         if (wLog.length > 0) newWrongLogMap[ans.answer_id] = wLog;
 
-        const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : q.question_id;
-        let gId = `group_q_${baseNum}`;
-        const parentId = q.parent_question_id || q.parent_tq_id;
-        if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') gId = `group_parent_${parentId}`;
+        let gId = '';
+        // 🌟 [핵심 변경] 병합 모드일 때만 번호 묶기를 실행하고, 분기평가 등은 무조건 개별 그룹으로 쪼갬!
+        if (merged) {
+          const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : q.question_id;
+          gId = `group_q_${baseNum}`;
+          const parentId = q.parent_question_id || q.parent_tq_id;
+          if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') gId = `group_parent_${parentId}`;
+        } else {
+          gId = `single_q_${item.question_id}_${Math.random()}`; // 병합 차단 (1문항 = 1줄)
+        }
 
         if (!groupMap.has(gId)) { const newG = { id: gId, sort_order: item.sort_order, items: [] }; groupMap.set(gId, newG); groups.push(newG); }
         groupMap.get(gId).items.push({ sort_order: item.sort_order, assigned_score: item.assigned_score, question: q, answer: ans, question_id: item.question_id, tq_id: q.tq_id });
@@ -375,19 +388,23 @@ function ReviewContent() {
 
       const baseScorePerQuestion = 100 / groups.length;
       let metaScores: any = {};
-      if (exType === '입학테스트' && stdName) {
+      if (merged && stdName) {
         const { data: mData } = await supabase.from('admission_standard_meta').select('question_number, assigned_score').eq('standard_name', stdName);
         mData?.forEach(m => { if (m.question_number) metaScores[m.question_number] = m.assigned_score; });
       }
 
       groups.forEach((g: any, index: number) => {
         g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
-        g.items.sort((a:any, b:any) => {
-          const subA = a.question.sub_num || 0; const subB = b.question.sub_num || 0;
-          if (a.question.question_id === a.question.parent_question_id || subA === 0) return -1;
-          if (b.question.question_id === b.question.parent_question_id || subB === 0) return 1;
-          return subA - subB;
-        });
+        
+        // 🌟 병합 모드(진단/입학) 일 때만 서브 번호 정렬
+        if (merged) {
+          g.items.sort((a:any, b:any) => {
+            const subA = a.question.sub_num || 0; const subB = b.question.sub_num || 0;
+            if (a.question.question_id === a.question.parent_question_id || subA === 0) return -1;
+            if (b.question.question_id === b.question.parent_question_id || subB === 0) return 1;
+            return subA - subB;
+          });
+        }
 
         const qNumStr = String(g.items[0]?.question?.question_number || '');
         const match = qNumStr.match(/\d+/);
@@ -400,7 +417,9 @@ function ReviewContent() {
         if (!maxScore || isNaN(maxScore) || maxScore === 0) {
           maxScore = baseScorePerQuestion;
         }
-        const subScore = maxScore / g.items.length;
+        
+        // 🌟 분기평가는 서브문항이 없으므로(개별 취급) 배점이 그대로 들어감
+        const subScore = merged ? (maxScore / g.items.length) : maxScore;
 
         g.items.forEach((i: any) => {
           i.assigned_score = subScore;
@@ -619,7 +638,7 @@ function ReviewContent() {
 
         await loadExamResults();
         alert(`🎉 [시험] 채점 내역 저장 및 오답노트 연동이 완료되었습니다! (총점: ${finalScore}점)`);
-        if (headerInfo.type === '입학테스트') setShowReportBtn(true);
+        if (isMergedExam) setShowReportBtn(true);
       }
       setPendingUpdates({});
     } catch (err: any) { 
@@ -682,7 +701,6 @@ function ReviewContent() {
         });
       });
 
-      // 💡 [수정] 상(70 이상), 중(40 이상), 하(40 미만)으로 기준 완화
       const getLv = (e: number, m: number) => { if (m===0) return '중'; const p = (e/m)*100; if(p>=70) return '상'; if(p>=40) return '중'; return '하'; };
       const lvThink = getLv(sThink, maxThink); const lvPersist = getLv(sPersist, maxPersist); const lvKnow = getLv(sKnow, maxKnow);
 
@@ -709,7 +727,6 @@ function ReviewContent() {
 
       alert("✅ 진단 리포트 재생성 완료! 이제 새 데이터가 반영됩니다.");
       
-      // 💡 [핵심 수정] 리포트 재생성 후 버튼 즉시 부활!
       setShowReportBtn(true);
       
     } catch(e: any) { 
@@ -742,21 +759,20 @@ function ReviewContent() {
   };
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f1f5f9] w-full">
+    <div className="flex h-screen overflow-hidden bg-[#f1f5f9] w-full font-pretendard">
       <main className="flex-1 overflow-y-auto custom-scroll p-4 sm:p-8 relative">
         <div className="max-w-[1500px] w-full mx-auto relative pb-24">
           
           <div className="bg-[#002864] text-white p-6 rounded-t-2xl shadow-md flex justify-between items-center no-print">
             <div>
-              {/* 💡 상단 뒤로가기 버튼 확대 */}
-              <button onClick={() => window.location.href = '/learning'} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
+              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
               </button>
               <h1 className="text-2xl font-bold tracking-tight">{headerInfo.title}</h1>
               <p className="text-blue-200 text-sm mt-1">{headerInfo.subtitle}</p>
             </div>
             <div className="text-right flex items-center gap-4">
-              {showReportBtn && (
+              {isMergedExam && showReportBtn && (
                 <button onClick={() => window.open(`/print/report?assignment_id=${assignmentId}&t=${Date.now()}`, '_blank')} className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 transition-colors">
                   📊 진단 분석 레포트 열기
                 </button>
@@ -865,10 +881,9 @@ function ReviewContent() {
               </tbody>
             </table>
 
-            {/* 💡 최하단 뒤로가기 버튼 */}
             <div className="mt-8 mb-6 flex justify-center no-print">
               <button 
-                onClick={() => window.location.href = '/learning'} 
+                onClick={() => router.back()} 
                 className="bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
@@ -883,17 +898,17 @@ function ReviewContent() {
               <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                 {isSaving ? "저장 중... ⏳" : "1️⃣ 채점 내역 DB 저장 및 오답노트 전송"}
               </button>
-              {headerInfo.type === '입학테스트' && (
+              {isMergedExam && (
                 <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                   {isGeneratingReport ? "리포트 생성 중... ⏳" : "2️⃣ 진단 리포트 생성하기 🪄"}
                 </button>
               )}
-              {headerInfo.type === '입학테스트' && showReportBtn && (
+              {isMergedExam && showReportBtn && (
                 <button onClick={() => window.open(`/print/report?assignment_id=${assignmentId}&t=${Date.now()}`, '_blank')} className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5">
                   3️⃣ 진단 리포트 열기 📊
                 </button>
               )}
-              {headerInfo.type === '입학테스트' && showReportBtn && (
+              {isMergedExam && showReportBtn && (
                 <button 
                   onClick={handleDeleteReport} 
                   disabled={isDeletingReport} 
@@ -910,12 +925,15 @@ function ReviewContent() {
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
             <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
               <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
-                <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> 문항 상세 및 해설 뷰어</h2>
+                <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> {modalQ.displayQNum || modalQ.question_number}번 문항 상세</h2>
                 <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
               </div>
               <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
+                
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
+                  <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
+                    <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs">질문</span>
+                  </h3>
                   {modalQ.items.map((row: any, idx: number) => {
                     const q = row.question; const pre = modalQ.items.length > 1 ? `<b class="text-blue-600">(${idx + 1})</b> ` : '';
                     return (
@@ -926,8 +944,11 @@ function ReviewContent() {
                     );
                   })}
                 </div>
+                
                 <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                  <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
+                  <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3 flex items-center gap-2">
+                    <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded text-xs">정답</span>
+                  </h3>
                   {modalQ.items.map((row: any, idx: number) => {
                     const q = row.question; const pre = modalQ.items.length > 1 ? `<b class="text-blue-600">(${idx + 1})</b> ` : '';
                     return (
@@ -938,6 +959,7 @@ function ReviewContent() {
                     );
                   })}
                 </div>
+
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                   <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4">해설 및 풀이 단계</h3>
                   <div className="space-y-5 text-sm text-slate-600">

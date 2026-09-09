@@ -37,7 +37,6 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
         setExamType(masterData.exam_type);
       }
 
-      // 🌟 [핵심 수정] student_id 속성을 select에 추가하여 undefined 에러 원천 차단!
       const { data, error } = await supabase
         .from('exam_assignment')
         .select('assignment_id, student_id, status, total_score, created_at, student(name), class(name)')
@@ -75,11 +74,11 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
        return;
     }
 
-    if (['주간테스트', '중간테스트', '중간평가', '과제', '과제프린트'].includes(examType)) {
+    // 🌟 [핵심 수정] 분기평가, 분기테스트는 철저하게 exam/review 로 라우팅
+    if (['분기테스트', '분기평가'].includes(examType)) {
+      window.location.href = `/exam/review?assignment_id=${assignmentId}&student_id=${studentId}`;
+    } else {
       window.location.href = `/homework/review?assignment_id=${assignmentId}&student_id=${studentId}&is_exam_hw=true`;
-    } 
-    else {
-      window.location.href = `/exam/review?assignment_id=${assignmentId}`;
     }
   };
 

@@ -172,7 +172,6 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
         if (data && data.exam_id) {
           matchedExamId = data.exam_id;
-          // 💡 배열 언래핑 추가
           const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
           matchedTitle = master?.title;
           displayLabel = master?.exam_type || '시험';
@@ -198,7 +197,6 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         if (data) {
           matchedAssignId = String(data.assignment_id);
           matchedExamId = data.exam_id;
-          // 💡 배열 언래핑 추가
           const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
           matchedTitle = master?.title;
           displayLabel = master?.exam_type || '시험';
@@ -233,8 +231,19 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       refs.totalQuestionsInRoundRef.current = mapped.length;
       refs.hintState.current = hydrateHintState(sId, mapped);
 
+      // 🌟 [핵심 변경] 시험 유형에 따라 60분 또는 20분 타이머 동적 설정
+      const is60MinTest = ['중간평가', '중간테스트', '분기평가', '분기테스트'].includes(displayLabel) || 
+                          ['중간평가', '중간테스트', '분기평가', '분기테스트'].some(k => (matchedTitle || '').includes(k));
+      
+      if (typeof window !== 'undefined') {
+          // window 객체에 임시로 저장하여 useClinicTimer가 이를 읽어감
+          (window as any).__dynamicTimeLimit = is60MinTest ? 3600 : 1200; 
+      }
+
       const titleBase = matchedTitle || `이번 주 ${displayLabel}`;
-      await loadExistingAnswers(sId, mapped, ((params.round === 1 && week === 'odd') || params.round === 4) ? `${titleBase} (20분 제한)` : titleBase);
+      const limitText = is60MinTest ? '60분 제한' : '20분 제한'; // 화면에 표시될 텍스트 변경
+      
+      await loadExistingAnswers(sId, mapped, ((params.round === 1 && week === 'odd') || params.round === 4) ? `${titleBase} (${limitText})` : titleBase);
       setQuestions(mapped);
     } catch(e) {}
   };
@@ -247,7 +256,6 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
     const { data: items } = await supabaseClient.from('exam_item').select('*, question_db(*)').eq('exam_id', data.exam_id).order('sort_order', { ascending: true });
     const validItems = (items || []).filter((it: any) => it.question_db);
     
-    // 💡 배열 언래핑 추가
     const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
     const title = master?.title || null;
     const bookType = master?.exam_type === '오답프린트' ? '오답' : '기타';

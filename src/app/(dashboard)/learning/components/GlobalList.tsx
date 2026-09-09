@@ -154,9 +154,13 @@ export default function GlobalList({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
+              // 🌟 [핵심 수정] 분기평가/분기테스트는 exam/review 로! (오타 수정)
+              const eType = m?.exam_type || '';
               let detailHref = '';
               if (activeTab === 'HOMEWORK' && !res.is_exam_hw) {
                 detailHref = `/homework/review?homework_id=${hw.homework_id}&student_id=${res.student_id}`;
+              } else if (activeTab === 'QUARTERLY' || ['분기테스트', '분기평가'].includes(eType)) {
+                detailHref = `/exam/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}`;
               } else {
                 detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
               }

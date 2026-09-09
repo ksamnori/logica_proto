@@ -276,7 +276,6 @@ export default function StudentPortal() {
             cancelled = true; 
             if (timer) clearTimeout(timer); 
             window.removeEventListener('focus', handleFocus); 
-            // 🌟 메모리 누수 방지: 익명 함수 대신 기명 함수를 사용하여 리스너 완벽 제거
             document.removeEventListener('visibilitychange', handleVisibility); 
         };
     }, [studentInfo.id, isMounted]);
@@ -320,7 +319,8 @@ export default function StudentPortal() {
                 examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0,
                 examPendingCount: 0, hwPendingCount: 0, printPendingCount: 0, overduePendingCount: 0,
                 examStatus: '대기',
-                examInitialScore: null
+                examInitialScore: null,
+                examType: '' // 🌟 추가: 시험 종류 동적 저장을 위한 필드
             };
         });
 
@@ -418,16 +418,16 @@ export default function StudentPortal() {
             let regularExamIds: number[] = [];
             let regularETitles: string[] = [];
             let regularECount = 0;
-            
             let regularExamStatus = '대기';
             let regularExamScore = null;
-            let similarExamStatus = '대기';
-            let similarExamScore = null;
+            let regularExamType = ''; // 🌟 시험 종류 추적
 
             let similarExamPending = 0;
             let similarExamIds: number[] = [];
             let similarETitles: string[] = [];
             let similarECount = 0;
+            let similarExamStatus = '대기';
+            let similarExamScore = null;
 
             const isEvenWeek = newClassWeekTypes[c] === 'even';
 
@@ -453,9 +453,15 @@ export default function StudentPortal() {
                 } else if (type === '미완료과제') {
                     if (!isFinalDone) { overduePending++; overdueExamIds.push(ex.assignment_id); oTitles.push(title); if (overdueExamIds.length === 1) oCount += remain; }
                 } else { 
+                    // 🌟 분기, 중간, 입학 등 모든 일반 시험들이 이쪽으로 들어옵니다.
                     if (!isFinalDone) { 
                         regularExamPending++; regularExamIds.push(ex.assignment_id); regularETitles.push(title); 
-                        if (regularExamPending === 1) { regularECount += remain; regularExamStatus = ex.status; regularExamScore = ex.total_score; } 
+                        if (regularExamPending === 1) { 
+                            regularECount += remain; 
+                            regularExamStatus = ex.status; 
+                            regularExamScore = ex.total_score; 
+                            regularExamType = type; // 실제 DB의 시험 유형 저장
+                        } 
                     }
                 }
             });
@@ -471,22 +477,27 @@ export default function StudentPortal() {
             
             let finalExamStatus = '대기';
             let finalExamScore = null;
+            let finalExamType = ''; // 🌟 최종 결정된 유형
 
             if (isEvenWeek) {
                 if (hasSimilar) {
                     activeExamMode = 'SIMILAR'; finalExamPending = similarExamPending; finalExamIds = similarExamIds; finalETitles = similarETitles; finalECount = similarECount;
                     finalExamStatus = similarExamStatus; finalExamScore = similarExamScore;
+                    finalExamType = '오답유사';
                 } else if (hasRegular) {
                     activeExamMode = 'TEST'; finalExamPending = regularExamPending; finalExamIds = regularExamIds; finalETitles = regularETitles; finalECount = regularECount;
                     finalExamStatus = regularExamStatus; finalExamScore = regularExamScore;
+                    finalExamType = regularExamType;
                 }
             } else {
                 if (hasRegular) {
                     activeExamMode = 'TEST'; finalExamPending = regularExamPending; finalExamIds = regularExamIds; finalETitles = regularETitles; finalECount = regularECount;
                     finalExamStatus = regularExamStatus; finalExamScore = regularExamScore;
+                    finalExamType = regularExamType;
                 } else if (hasSimilar) {
                     activeExamMode = 'SIMILAR'; finalExamPending = similarExamPending; finalExamIds = similarExamIds; finalETitles = similarETitles; finalECount = similarECount;
                     finalExamStatus = similarExamStatus; finalExamScore = similarExamScore;
+                    finalExamType = '오답유사';
                 }
             }
 
@@ -536,7 +547,8 @@ export default function StudentPortal() {
                 examTitle: getShortTitle(finalETitles), hwTitle: getShortTitle(hTitles), printTitle: totalPrintQCount > 0 ? '[통합] 누적 오답 클리닉' : '', overdueTitle: getShortTitle(oTitles),
                 examQCount: finalECount, hwQCount: hCount, printQCount: totalPrintQCount, overdueQCount: oCount,
                 examPendingCount: finalExamPending, hwPendingCount: hwPending, printPendingCount: totalPrintQCount > 0 ? 1 : 0, overduePendingCount: overduePending,
-                examStatus: finalExamStatus, examInitialScore: finalExamScore
+                examStatus: finalExamStatus, examInitialScore: finalExamScore,
+                examType: finalExamType // 🌟 동적 타입 반영
             };
         });
 
@@ -777,6 +789,7 @@ export default function StudentPortal() {
         const isLocked = typeKey !== 'exam' && !isDoneOriginal && !isExamClearedToProceed; 
 
         const activeExamMode = prog.activeExamMode || 'TEST';
+        const exType = prog.examType || '';
 
         let qCount = 0;
         let titleName = '';
@@ -803,12 +816,22 @@ export default function StudentPortal() {
             pendingStacks = noWrongAnswers ? 0 : prog.examPendingCount; 
         }
 
-        let theme;
+        let theme: any;
         if (typeKey === 'exam') {
             if (activeExamMode === 'SIMILAR') {
                 theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-violet-700 to-violet-600', badge: 'bg-violet-400 text-violet-900', btnText: 'text-violet-900', textColor: 'text-violet-100', accent: 'text-violet-200' };
             } else {
-                theme = { label: '📝 주간테스트', desc: '이번 주 주간테스트를 응시합니다.', bg: 'bg-gradient-to-br from-[#002864] to-blue-800', badge: 'bg-blue-500 text-white', btnText: 'text-[#002864]', textColor: 'text-blue-200', accent: 'text-blue-300' };
+                // 🌟 [핵심 변경] DB의 시험지 속성(exType)을 분석해서 동적으로 라벨과 테마를 띄워줌!
+                if (['분기테스트', '분기평가'].includes(exType)) {
+                    theme = { label: '📅 분기평가', desc: '해당 분기의 학업 성취도를 종합적으로 평가합니다.', bg: 'bg-gradient-to-br from-fuchsia-700 to-fuchsia-600', badge: 'bg-fuchsia-400 text-fuchsia-900', btnText: 'text-fuchsia-900', textColor: 'text-fuchsia-100', accent: 'text-fuchsia-200' };
+                } else if (['중간테스트', '중간평가'].includes(exType)) {
+                    theme = { label: '📝 중간평가', desc: '이번 중간평가를 응시합니다.', bg: 'bg-gradient-to-br from-indigo-700 to-indigo-600', badge: 'bg-indigo-400 text-indigo-900', btnText: 'text-indigo-900', textColor: 'text-indigo-100', accent: 'text-indigo-200' };
+                } else if (['입학테스트', '진단평가'].includes(exType)) {
+                    theme = { label: '📊 진단평가', desc: '현재 실력을 진단하기 위한 평가를 진행합니다.', bg: 'bg-gradient-to-br from-cyan-700 to-cyan-600', badge: 'bg-cyan-400 text-cyan-900', btnText: 'text-cyan-900', textColor: 'text-cyan-100', accent: 'text-cyan-200' };
+                } else {
+                    const finalLabel = exType === '주간테스트' || !exType ? '📝 주간테스트' : `📝 ${exType}`;
+                    theme = { label: finalLabel, desc: '오늘 배정된 테스트를 응시합니다.', bg: 'bg-gradient-to-br from-[#002864] to-blue-800', badge: 'bg-blue-500 text-white', btnText: 'text-[#002864]', textColor: 'text-blue-200', accent: 'text-blue-300' };
+                }
             }
 
             if (isWaitingConfirm) {

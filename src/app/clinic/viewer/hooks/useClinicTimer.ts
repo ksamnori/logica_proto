@@ -1,3 +1,4 @@
+// src/app/clinic/viewer/hooks/useClinicTimer.ts
 import { useState, useEffect, MutableRefObject } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { closeSessionAtLimit } from '@/lib/clinicSession';
@@ -23,13 +24,14 @@ export function useClinicTimer({
   const [clinicRemainingStr, setClinicRemainingStr] = useState("60:00");
   const [isClinicUrgent, setIsClinicUrgent] = useState(false);
   const [roundRemainingSec, setRoundRemainingSec] = useState(ROUND1_TIME_LIMIT_SECONDS);
+  const [isTimerInitialized, setIsTimerInitialized] = useState(false); // 🌟 동적 타이머 초기화 여부
 
   useEffect(() => {
-    // 1. 우측 상단 60분 클리닉 전체 세션 타이머
+    // 1. 우측 상단 전체 세션 타이머
     const sessionTimer = setInterval(() => {
       if (!clinicSessionStateRef.current) return;
       const rem = (new Date(clinicSessionStateRef.current.started_at).getTime() + clinicSessionStateRef.current.duration_ms) - Date.now();
-      setIsClinicUrgent(rem <= 5 * 60 * 1000); // 5분 남으면 긴급(빨간색) 처리
+      setIsClinicUrgent(rem <= 5 * 60 * 1000); 
       
       if (rem <= 0) {
         setClinicRemainingStr("00:00");
@@ -48,9 +50,20 @@ export function useClinicTimer({
       }
     }, 1000);
 
-    // 2. 우측 상단 20분 제한 주간테스트용 타이머
+    // 2. 우측 상단 문항 풀이 타이머 (20분 or 60분 동적 설정)
     let roundTimer: NodeJS.Timeout | null = null;
+
     if (isStarted && isTimedRound && !timeIsUp) {
+      // 🌟 타이머 시작 직전, DataFetch 훅에서 세팅해 둔 시간 제한(3600 or 1200)을 불러옵니다.
+      if (!isTimerInitialized) {
+         const dynamicLimit = (typeof window !== 'undefined' && (window as any).__dynamicTimeLimit) 
+                              ? (window as any).__dynamicTimeLimit 
+                              : ROUND1_TIME_LIMIT_SECONDS;
+         setRoundRemainingSec(dynamicLimit);
+         setIsTimerInitialized(true);
+         return; // 다음 렌더링에 interval 등록
+      }
+
       roundTimer = setInterval(() => {
         setRoundRemainingSec(p => {
           if (p <= 1) { 
@@ -67,7 +80,7 @@ export function useClinicTimer({
       clearInterval(sessionTimer); 
       if (roundTimer) clearInterval(roundTimer); 
     };
-  }, [isStarted, isTimedRound, timeIsUp, clinicSessionStateRef, supabaseClient, handleTimeUp]);
+  }, [isStarted, isTimedRound, timeIsUp, clinicSessionStateRef, supabaseClient, handleTimeUp, isTimerInitialized]);
 
   return { clinicRemainingStr, isClinicUrgent, roundRemainingSec };
 }
