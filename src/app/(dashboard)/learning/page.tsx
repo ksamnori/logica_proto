@@ -143,14 +143,12 @@ export default function LearningPage() {
     return dateFilter === '1W' ? diff <= 7 * 24 * 3600000 : diff <= 30 * 24 * 3600000;
   };
 
-  // 🌟 [수정됨] CLASS 뷰에서 데이터 누락을 방지하는 강력한 필터 로직 적용
   const filteredGlobalList = useMemo(() => {
     return globalList.filter(item => {
       if (currentView.type === 'CLASS') {
         if (item.class_id) {
           if (item.class_id !== currentView.classId) return false;
         } else {
-          // DB에 class_id가 비어있어도, 학생이 해당 반 소속이면 무조건 띄워주기
           const stu = allStudentsList.find(s => s.id === item.student_id);
           if (!stu || (stu.classId !== currentView.classId && !stu.allClassIds?.includes(currentView.classId))) {
             return false;
@@ -168,6 +166,7 @@ export default function LearningPage() {
     return timelineData.filter(item => {
       if (!filterByDate(item.date)) return false;
       if (activeTab === 'EXAM' && item.type !== 'exam') return false;
+      if (activeTab === 'QUARTERLY' && item.type !== 'quarterly') return false; 
       if (activeTab === 'HOMEWORK' && !item.type.includes('hw')) return false;
       if (activeTab === 'INCORRECT' && item.type !== 'print') return false;
       if (activeTab === 'SIMILAR' && item.type !== 'similar') return false; 
@@ -188,6 +187,7 @@ export default function LearningPage() {
       setGlobalSelectedBlocks(filteredGlobalList.map(res => {
          const safeId = res.assignment_id || res.homework_id || Math.random().toString(36).substr(2, 9);
          if (activeTab === 'EXAM') return `exam_${safeId}_${res.student_id}`;
+         if (activeTab === 'QUARTERLY') return `quarterly_${safeId}_${res.student_id}`;
          if (activeTab === 'HOMEWORK') return res.is_exam_hw ? `hw_exam_${safeId}_${res.student_id}` : `hw_${safeId}_${res.student_id}`;
          if (activeTab === 'INCORRECT') return `print_${safeId}_${res.student_id}`;
          if (activeTab === 'SIMILAR') return `similar_${safeId}_${res.student_id}`; 
@@ -344,13 +344,15 @@ export default function LearningPage() {
           <button onClick={() => handleMainTabClick('DASHBOARD')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'DASHBOARD' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📈 학생 대시보드</button>
           <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
           
-          <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 주간테스트</button>
+          <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 주간/중간테스트</button>
           <button onClick={() => handleMainTabClick('HOMEWORK')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'HOMEWORK' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📝 과제</button>
-          
           <button onClick={() => handleMainTabClick('OVERDUE')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'OVERDUE' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>⏰ 미완료과제</button>
-          
           <button onClick={() => handleMainTabClick('INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'INCORRECT' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>❌ 오답</button>
           <button onClick={() => handleMainTabClick('SIMILAR')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'SIMILAR' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔄 오답유사</button>
+          
+          {/* 🌟 원장님 요청: 맨 우측으로 빼고 시각적 구분선(|) 추가 */}
+          <div className="w-px h-6 bg-slate-300 mx-1 shrink-0"></div>
+          <button onClick={() => handleMainTabClick('QUARTERLY')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'QUARTERLY' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📅 분기평가</button>
           
           {currentView.type === 'CLASS' && (
             <>
@@ -436,7 +438,7 @@ export default function LearningPage() {
         </div>
       </div>
 
-      {/* 일괄 배부 모달 */}
+      {/* 일괄 배부 모달 생략(유지) */}
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-[600px] rounded-2xl shadow-2xl flex flex-col overflow-hidden">

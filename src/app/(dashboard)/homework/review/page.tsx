@@ -107,12 +107,11 @@ function HomeworkReviewContent() {
   const [hwResult, setHwResult] = useState<any>(null);
   
   const [groups, setGroups] = useState<any[]>([]);
-  const [gradingMap, setGradingMap] = useState<Record<number, GradeCode | null>>({});
+  const [gradingMap, setGradingMap] = useState<Record<any, GradeCode | null>>({});
   
-  const [studentInputMap, setStudentInputMap] = useState<Record<number, string | null>>({});
+  const [studentInputMap, setStudentInputMap] = useState<Record<any, string | null>>({});
   
   const [modalQ, setModalQ] = useState<any>(null);
-  
   const [modalStudentAns, setModalStudentAns] = useState<{ qNum: string; input: string | null } | null>(null);
 
   const hwResultIdRef = useRef<number | null>(null);
@@ -134,7 +133,6 @@ function HomeworkReviewContent() {
     return () => clearTimeout(timer);
   }, [isLoading, groups, modalQ, modalStudentAns]);
 
-  // 🌟 [추가됨] 학생 뷰어 & 조교 패드 실시간 동기화 리스너
   useEffect(() => {
     if (groups.length === 0) return;
     const tableName = (isExamHw && assignmentId) ? 'student_answer' : 'student_homework_answer';
@@ -144,22 +142,17 @@ function HomeworkReviewContent() {
       .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
         const newData = payload.new as any;
         if (!newData) return;
-        // 다른 학생의 데이터가 섞이지 않도록 차단
         if (String(newData.student_id) !== String(studentId)) return;
 
         if (isExamHw && assignmentId) {
           if (String(newData.exam_assignment_id) === String(assignmentId)) {
             setGradingMap(prev => ({ ...prev, [newData.question_id]: newData.grading_code }));
-            if (newData.student_input) {
-              setStudentInputMap(prev => ({ ...prev, [newData.question_id]: newData.student_input }));
-            }
+            if (newData.student_input) setStudentInputMap(prev => ({ ...prev, [newData.question_id]: newData.student_input }));
           }
         } else if (homeworkId) {
           if (String(newData.homework_id) === String(homeworkId)) {
             setGradingMap(prev => ({ ...prev, [newData.tq_id]: newData.grading_code }));
-            if (newData.student_input) {
-              setStudentInputMap(prev => ({ ...prev, [newData.tq_id]: newData.student_input }));
-            }
+            if (newData.student_input) setStudentInputMap(prev => ({ ...prev, [newData.tq_id]: newData.student_input }));
           }
         }
       })
@@ -293,8 +286,8 @@ function HomeworkReviewContent() {
           
           setGroups(builtGroups);
           
-          const initialGrading: Record<number, GradeCode | null> = {};
-          const initialInputMap: Record<number, string | null> = {};
+          const initialGrading: Record<any, GradeCode | null> = {};
+          const initialInputMap: Record<any, string | null> = {};
 
           if (ansData && ansData.length > 0) {
             ansData.forEach(a => { 
@@ -321,10 +314,10 @@ function HomeworkReviewContent() {
     }
   };
 
-  const updateHomeworkResult = async (newMap: Record<number, GradeCode | null>) => {
+  const updateHomeworkResult = async (newMap: Record<any, GradeCode | null>) => {
     let correctCount = 0; 
     let gradedCount = 0;
-    const incorrectIds: number[] = [];
+    const incorrectIds: any[] = [];
     const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
     
     flatQuestions.forEach((q: any) => {
@@ -336,13 +329,18 @@ function HomeworkReviewContent() {
       }
     });
 
-    const totalQ = flatQuestions.length;
+    const totalQ = flatQuestions.length || 1;
     let newStatus = '미제출';
     if (gradedCount > 0) newStatus = '진행중';
-    if (gradedCount === totalQ && totalQ > 0) newStatus = '채점완료';
+    if (gradedCount === flatQuestions.length && flatQuestions.length > 0) newStatus = '채점완료';
 
+    // 🌟 핵심 수정: isExamHw 모드일 때 exam_assignment 의 total_score를 직접 계산해서 업데이트
     if (isExamHw && assignmentId) {
-      await supabase.from('exam_assignment').update({ status: newStatus }).eq('assignment_id', assignmentId);
+      const calculatedScore = Math.round((correctCount / totalQ) * 100);
+      await supabase.from('exam_assignment').update({ 
+        status: newStatus,
+        total_score: calculatedScore 
+      }).eq('assignment_id', assignmentId);
       return;
     }
 
@@ -366,7 +364,7 @@ function HomeworkReviewContent() {
     }
   };
 
-  const handleGrade = async (tqId: number, mark: GradeCode) => {
+  const handleGrade = async (tqId: any, mark: GradeCode) => {
     const newMap = { ...gradingMap, [tqId]: mark };
     setGradingMap(newMap);
     setSaveStatus("저장 중...");
@@ -374,6 +372,11 @@ function HomeworkReviewContent() {
     try {
       const isCorrect = ['O', 'TO', 'RO'].includes(mark);
       const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
+      
+      // 🌟 문항 수 기반 earned_score 계산 로직 추가
+      const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
+      const totalQ = flatQuestions.length || 1;
+      const earnedScore = isCorrect ? (100 / totalQ) : 0;
 
       if (isExamHw && assignmentId) {
         const [ { data: existingA }, { data: existingI } ] = await Promise.all([
@@ -381,8 +384,8 @@ function HomeworkReviewContent() {
           supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('source_type', '시험지').eq('question_id', tqId).maybeSingle()
         ]);
 
-        if (existingA) await supabase.from('student_answer').update({ grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 }).eq('answer_id', existingA.answer_id);
-        else await supabase.from('student_answer').insert({ exam_assignment_id: assignmentId, student_id: studentId, question_id: tqId, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
+        if (existingA) await supabase.from('student_answer').update({ grading_code: mark, is_correct: isCorrect, earned_score: earnedScore }).eq('answer_id', existingA.answer_id);
+        else await supabase.from('student_answer').insert({ exam_assignment_id: assignmentId, student_id: studentId, question_id: tqId, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
 
         if (isIncorrect) {
           if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null }).eq('record_id', existingI.record_id);
@@ -433,6 +436,9 @@ function HomeworkReviewContent() {
 
       const isCorrect = ['O', 'TO', 'RO'].includes(mark);
       const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
+      
+      const totalQ = flatQuestions.length || 1;
+      const earnedScore = isCorrect ? (100 / totalQ) : 0;
 
       if (isExamHw && assignmentId) {
         const [ { data: existingAns }, { data: existingInc } ] = await Promise.all([
@@ -445,8 +451,8 @@ function HomeworkReviewContent() {
 
         targets.forEach((q: any) => {
           const exA = existingAns?.find(a => a.question_id === q.tq_id);
-          if (exA) ansUpdates.push({ answer_id: exA.answer_id, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
-          else ansInserts.push({ exam_assignment_id: assignmentId, student_id: studentId, question_id: q.tq_id, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
+          if (exA) ansUpdates.push({ answer_id: exA.answer_id, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
+          else ansInserts.push({ exam_assignment_id: assignmentId, student_id: studentId, question_id: q.tq_id, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
 
           const exI = existingInc?.find(i => i.question_id === q.tq_id);
           if (isIncorrect) {
@@ -663,8 +669,8 @@ function HomeworkReviewContent() {
                 <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs">질문</span>
                 </h3>
-                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.question || '-').replace(/\n/g, '<br>') }} />
-                {getCleanUrl(modalQ.image_url) && <img src={getCleanUrl(modalQ.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
+                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.questionText || '-').replace(/\n/g, '<br>') }} />
+                {getCleanUrl(modalQ.imageUrl) && <img src={getCleanUrl(modalQ.imageUrl)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
               </div>
               
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
@@ -682,7 +688,7 @@ function HomeworkReviewContent() {
         </div>
       )}
 
-      {/* 🌟 학생 답안 팝업 모달 */}
+      {/* 학생 답안 팝업 모달 */}
       {modalStudentAns && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-lg max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">

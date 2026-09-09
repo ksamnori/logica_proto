@@ -141,7 +141,6 @@ export function useLearningFetch() {
       let allCalEvents: any[] = []; 
       const chunkSize = 200;
 
-      // 🌟 [추가] 통계용 객체 생성 시 class_id가 비어있으면 학생의 주 소속 반으로 안전하게 매핑
       const mapExamStat = (s: any, type: string) => {
         const fallbackStu = students.find(st => st.id === s.student_id);
         return {
@@ -160,9 +159,14 @@ export function useLearningFetch() {
           .in('student_id', chunk);
 
         if (rawExams) {
-          const examOnly = rawExams.filter((s: any) => s.exam_master?.exam_type === '주간테스트');
+          // 🌟 혼용되는 이름 통합 필터링 (주간/중간)
+          const examOnly = rawExams.filter((s: any) => ['주간테스트', '중간테스트', '중간평가'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => mapExamStat(s, 'EXAM'))];
           examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+
+          // 🌟 혼용되는 이름 통합 필터링 (분기)
+          const quarterlyExams = rawExams.filter((s: any) => ['분기테스트', '분기평가'].includes(s.exam_master?.exam_type));
+          quarterlyExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'quarterly', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const hwExams = rawExams.filter((s: any) => ['과제', '과제프린트'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => mapExamStat(s, 'HW'))];
@@ -286,7 +290,9 @@ export function useLearningFetch() {
       exams?.forEach(ex => {
         const m = unwrap(ex.exam_master);
         let type = 'other';
-        if (m?.exam_type === '주간테스트') type = 'exam';
+        // 🌟 여러 이름 필터링
+        if (['주간테스트', '중간테스트', '중간평가'].includes(m?.exam_type)) type = 'exam';
+        else if (['분기테스트', '분기평가'].includes(m?.exam_type)) type = 'quarterly';
         else if (['오답프린트', '오답'].includes(m?.exam_type)) type = 'print';
         else if (['과제', '과제프린트'].includes(m?.exam_type)) type = 'hw_exam';
         else if (['오답유사', '과제오답유사'].includes(m?.exam_type)) type = 'similar';
@@ -337,13 +343,16 @@ export function useLearningFetch() {
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
 
-        if (tab === 'EXAM' || tab === 'INCORRECT' || tab === 'SIMILAR' || tab === 'OVERDUE') {
+        if (tab === 'EXAM' || tab === 'QUARTERLY' || tab === 'INCORRECT' || tab === 'SIMILAR' || tab === 'OVERDUE') {
           const { data: rawExams } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)').in('student_id', chunk);
           
           if (rawExams) {
             let data: any[] = []; 
             if (tab === 'EXAM') {
-               data = rawExams.filter((d: any) => d.exam_master?.exam_type === '주간테스트');
+               // 🌟 통일된 필터링
+               data = rawExams.filter((d: any) => ['주간테스트', '중간테스트', '중간평가'].includes(d.exam_master?.exam_type));
+            } else if (tab === 'QUARTERLY') {
+               data = rawExams.filter((d: any) => ['분기테스트', '분기평가'].includes(d.exam_master?.exam_type));
             } else if (tab === 'INCORRECT') {
                data = rawExams.filter((d: any) => ['오답프린트', '오답'].includes(d.exam_master?.exam_type));
             } else if (tab === 'SIMILAR') {
@@ -375,7 +384,6 @@ export function useLearningFetch() {
             const counts: Record<string, { o: number; x: number; helped: number }> = {};
             dedupAns.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
             
-            // 🌟 [추가] class_id가 null로 튕기지 않도록 안전하게 삽입
             const enriched = data.map((d: any) => {
                const em = unwrap(d.exam_master); const cls = unwrap(d.class); const stu = unwrap(d.student);
                const stuFallback = students.find(s => s.id === d.student_id);
@@ -383,7 +391,11 @@ export function useLearningFetch() {
                  ...d, 
                  class_id: d.class_id || stuFallback?.classId, 
                  masterId: em?.exam_id, 
-                 type: ['오답프린트', '오답'].includes(em?.exam_type) ? 'print' : (['오답유사', '과제오답유사'].includes(em?.exam_type) ? 'similar' : (em?.exam_type === '미완료과제' ? 'overdue' : (['과제', '과제프린트'].includes(em?.exam_type) ? 'hw_exam' : 'exam'))), 
+                 type: ['오답프린트', '오답'].includes(em?.exam_type) ? 'print' : 
+                       (['오답유사', '과제오답유사'].includes(em?.exam_type) ? 'similar' : 
+                       (em?.exam_type === '미완료과제' ? 'overdue' : 
+                       (['분기테스트', '분기평가'].includes(em?.exam_type) ? 'quarterly' : // 🌟 타입 배정
+                       (['과제', '과제프린트'].includes(em?.exam_type) ? 'hw_exam' : 'exam')))), 
                  is_exam_hw: false,
                  oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0, helpedCount: counts[d.assignment_id]?.helped || 0,
                  totalQ: em?.total_questions || 0, 
@@ -487,7 +499,6 @@ export function useLearningFetch() {
           const eCounts: Record<string, { o: number; x: number; helped: number }> = {};
           dedupEAns.forEach(a => tallyGrading(eCounts, a.exam_assignment_id, a.grading_code));
 
-          // 🌟 [추가] 과제프린트의 class_id 누락 방지
           const formattedExamHws = examData.map((e:any) => {
             const em = unwrap(e.exam_master);
             const stuFallback = students.find(s => s.id === e.student_id);

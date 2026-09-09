@@ -22,5 +22,4 @@ export interface ViewState {
   studentName: string;
 }
 
-// 🌟 'SIMILAR' 탭 추가
-export type TabType = 'DASHBOARD' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR';
+export type TabType = 'DASHBOARD' | 'EXAM' | 'QUARTERLY' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR' | 'OVERDUE';

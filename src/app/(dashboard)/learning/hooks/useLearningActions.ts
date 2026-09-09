@@ -3,7 +3,6 @@ import { supabase } from "@/lib/supabase";
 import { StudentInfo, ViewState, TabType } from "../types";
 import { toast } from "react-toastify"; 
 
-// 🌟 핵심 교정: targetStudentIds 옵션이 추가된 인터페이스 반영
 interface ActionProps {
   currentView: ViewState;
   activeTab: TabType | string; 
@@ -17,7 +16,7 @@ interface ActionProps {
   setDateFilter: (val: 'ALL' | '1W' | '1M') => void;
   fetchStudentTimeline: (sId: string, cId: string, all: StudentInfo[]) => void;
   fetchGlobalListForTab: (tab: TabType | string, all: StudentInfo[]) => void; 
-  fetchStatsForTab: (all: StudentInfo[], targetStudentIds?: string[]) => void; // ✅
+  fetchStatsForTab: (all: StudentInfo[], targetStudentIds?: string[]) => void; 
 }
 
 const safeParseIds = (raw: any): number[] => {
@@ -152,7 +151,8 @@ export function useLearningActions({
       const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
       
       for (const block of globalSelectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
+        // 🌟 quarterly 추가
+        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
           if (error) throw error;
@@ -177,7 +177,6 @@ export function useLearningActions({
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
       
-      // 🌟 핵심 교정: 관련된 학생들만 외과수술식으로 0.1초 갱신
       fetchStatsForTab(allStudentsList, affectedStudentIds);
     } catch(e: any) {
       console.error(e);
@@ -194,7 +193,7 @@ export function useLearningActions({
       const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
 
       for (const block of globalSelectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           await supabase.from('student_answer').delete().eq('exam_assignment_id', aId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', aId);
@@ -220,7 +219,6 @@ export function useLearningActions({
       setGlobalSelectedBlocks([]);
       fetchGlobalListForTab(activeTab, allStudentsList);
       
-      // 🌟 해당 학생들만 백그라운드 초고속 갱신
       fetchStatsForTab(allStudentsList, affectedStudentIds);
     } catch(e: any) {
        console.error(e);
@@ -235,7 +233,7 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', assignId);
           if (error) throw error;
@@ -259,7 +257,6 @@ export function useLearningActions({
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       
-      // 🌟 이 학생 한 명만 눈 깜짝할 새 백그라운드 갱신
       fetchStatsForTab(allStudentsList, [currentView.studentId]);
     } catch(e: any) {
        console.error(e);
@@ -274,7 +271,7 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
           await supabase.from('student_answer').delete().eq('exam_assignment_id', assignId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', assignId);
@@ -299,7 +296,6 @@ export function useLearningActions({
       setSelectedBlocks([]);
       fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       
-      // 🌟 이 학생 1명만 즉시 갱신
       fetchStatsForTab(allStudentsList, [currentView.studentId]);
     } catch(e: any) {
        console.error(e);
@@ -313,7 +309,7 @@ export function useLearningActions({
     if (!confirm("이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
     
     try {
-      if (type === 'exam' || type === 'print' || type === 'similar' || type === 'overdue' || type === 'hw_exam') {
+      if (type === 'exam' || type === 'quarterly' || type === 'print' || type === 'similar' || type === 'overdue' || type === 'hw_exam') {
         const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
         if (error) throw error;
       } else if (type === 'hw') {
@@ -335,7 +331,6 @@ export function useLearningActions({
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
       
-      // 🌟 단일 학생 핀셋 갱신
       fetchStatsForTab(allStudentsList, [targetStudentId]);
     } catch (err: any) {
       console.error(err);
@@ -353,7 +348,7 @@ export function useLearningActions({
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
       
-      fetchStatsForTab(allStudentsList, [studentId]); // 🌟 핀셋 갱신
+      fetchStatsForTab(allStudentsList, [studentId]); 
     } catch (e) { toast.error("삭제 실패"); }
   };
 
@@ -379,11 +374,10 @@ export function useLearningActions({
       if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab('HOMEWORK', allStudentsList);
       
-      fetchStatsForTab(allStudentsList, [studentId]); // 🌟 핀셋 갱신
+      fetchStatsForTab(allStudentsList, [studentId]); 
     } catch (e) { toast.error("삭제 실패"); }
   };
 
-  // 🌟 핵심 교정: studentId 매개변수 추가 (핀셋 갱신을 위해)
   const handleDeletePrint = async (assignmentId: string, examId: string, studentId: string) => {
     if (!confirm("해당 프린트를 완전히 삭제하시겠습니까?")) return;
     try {
@@ -398,7 +392,7 @@ export function useLearningActions({
         if (activeTab === 'INCORRECT' || activeTab === 'SIMILAR' || activeTab === 'OVERDUE') fetchGlobalListForTab(activeTab, allStudentsList);
       }
       
-      fetchStatsForTab(allStudentsList, [studentId]); // 🌟 핀셋 갱신
+      fetchStatsForTab(allStudentsList, [studentId]); 
     } catch (e) { toast.error("삭제 실패"); }
   };
 
@@ -595,9 +589,7 @@ export function useLearningActions({
     }
   };
 
-  const handleGenerateIncorrectPrint = async () => {
-    // 내부 StudentTimeline의 마법사 로직으로 이전됨.
-  };
+  const handleGenerateIncorrectPrint = async () => {};
 
   return {
     handleForceComplete, handleDeleteExam, handleEditHomeworkTitle,

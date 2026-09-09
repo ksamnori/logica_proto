@@ -338,7 +338,7 @@ export default function StudentTimeline({
       } else if (modalTab === 'SELECTED') {
           let tempQIds: string[] = [];
           for (const block of selectedBlocks) {
-            if (block.startsWith('exam_') || block.startsWith('hw_exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
+            if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
               const assignId = block.split('_').reverse()[1]; 
               const { data: ans } = await supabaseClient.from('student_answer')
                 .select('question_id')
@@ -502,7 +502,7 @@ export default function StudentTimeline({
     if (selectedItems.length === 0) return;
 
     const printItems = selectedItems.map(item => ({
-      printType: item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'),
+      printType: item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'),
       masterId: item.masterId,
       targetQuestions: item.target_questions,
       title: (item.title || '제목 없음').replace(/^\[시스템\]\s*/, ''),
@@ -804,7 +804,8 @@ export default function StudentTimeline({
               let badgeColor = "bg-slate-100 text-slate-500";
               let typeLabel = "";
 
-              if (item.type === 'exam') { badgeColor = "bg-blue-100 text-blue-700 border-blue-200"; typeLabel = "📝 주간테스트"; }
+              if (item.type === 'exam') { badgeColor = "bg-blue-100 text-blue-700 border-blue-200"; typeLabel = "📝 주간/중간테스트"; }
+              else if (item.type === 'quarterly') { badgeColor = "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200"; typeLabel = "📅 분기평가"; }
               else if (item.type.includes('hw')) { badgeColor = "bg-amber-100 text-amber-700 border-amber-200"; typeLabel = "📚 과제"; }
               else if (item.type === 'print') { badgeColor = "bg-emerald-100 text-emerald-700 border-emerald-200"; typeLabel = "❌ 오답"; }
               else if (item.type === 'similar') { badgeColor = "bg-violet-100 text-violet-700 border-violet-200"; typeLabel = "🔄 오답유사"; }
@@ -823,56 +824,56 @@ export default function StudentTimeline({
 
               return (
                 <div key={`${item.id}_${idx}`} onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
-                  className={`border-[1.5px] rounded-xl p-2 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}
+                  className={`border-[1.5px] rounded-xl p-3 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}
                 >
-                  <div className="flex items-center gap-2 w-1/2 min-w-0 shrink-0 flex-1">
-                    <input type="checkbox" checked={isSelected} readOnly className="w-3.5 h-3.5 accent-rose-500 pointer-events-none shrink-0" />
-                    <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight truncate">
+                  <div className="flex items-center gap-3 w-1/2 min-w-0 shrink-0 flex-1">
+                    <input type="checkbox" checked={isSelected} readOnly className="w-5 h-5 accent-rose-500 pointer-events-none shrink-0" />
+                    <div className="w-[100px] shrink-0 text-[11px] font-bold text-slate-400 leading-tight truncate">
                       {formatDateLabel(item.date, true)}
                     </div>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 whitespace-nowrap ${badgeColor}`}>{typeLabel}</span>
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border shrink-0 whitespace-nowrap ${badgeColor}`}>{typeLabel}</span>
                     
                     <div className="flex-1 flex items-center gap-2 min-w-0">
                       {item.subTitle && (
-                        <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm shrink-0 whitespace-nowrap">
+                        <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm shrink-0 whitespace-nowrap">
                           {item.subTitle}
                         </span>
                       )}
-                      <div className="font-extrabold text-[12px] truncate" title={displayTitle}>
+                      <div className="font-extrabold text-[14px] truncate" title={displayTitle}>
                         {displayTitle}
                       </div>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0 justify-end w-[350px]">
-                    <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {item.total || 0}문항</div>
+                  <div className="flex items-center gap-3 shrink-0 justify-end w-[480px]">
+                    <div className="text-[12px] font-bold text-slate-500 shrink-0 w-[60px] text-right whitespace-nowrap">총 {item.total || 0}문항</div>
 
-                    <div className="flex flex-row flex-nowrap items-center gap-1 shrink-0 w-[110px] justify-center">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {finalOCount}</span>
-                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {finalXCount}</span>
+                    <div className="flex flex-row flex-nowrap items-center gap-1.5 shrink-0 w-[120px] justify-center">
+                      <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {finalOCount}</span>
+                      <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {finalXCount}</span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0 w-[100px] justify-end">
-                      <button onClick={(e) => handleForceComplete(e, item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : 'exam', item.realId, currentView.studentId)} className="text-[10px] font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0">
+                    <div className="flex items-center gap-1.5 shrink-0 w-[130px] justify-end">
+                      <button onClick={(e) => handleForceComplete(e, (item.type === 'quarterly' || item.type === 'exam') ? 'exam' : item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam', item.realId, currentView.studentId)} className="text-[11px] font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-white border border-slate-200 px-2 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0">
                         ✅ 완료처리
                       </button>
-                      <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 ${isCompleted ? 'bg-slate-300 text-slate-700 border border-slate-400' : 'bg-rose-50 text-rose-500 border border-rose-200'}`}>
+                      <span className={`w-[54px] text-center px-1 py-0.5 rounded text-[10px] font-extrabold whitespace-nowrap shrink-0 ${isCompleted ? 'bg-slate-300 text-slate-700 border border-slate-400' : 'bg-rose-50 text-rose-500 border border-rose-200'}`}>
                         {item.status || '미제출'}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-300 pl-2.5 w-[110px] justify-end">
-                      {item.type === 'exam' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue' ? (
-                        <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0" title="문제 수정">✏️</button>
+                    <div className="flex items-center gap-2.5 shrink-0 border-l border-slate-300 pl-4 w-[160px] justify-end">
+                      {item.type === 'exam' || item.type === 'quarterly' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue' ? (
+                        <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
                       ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0" title="과제 문항 수정">✏️</button>
+                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[14px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0" title="삭제">🗑️</button>
+                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'quarterly' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId); }} className="text-[14px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
                       
                       <button 
-                        onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
-                        className="text-[13px] hover:text-emerald-600 transition-colors shrink-0" 
+                        onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
+                        className="text-[15px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" 
                         title="프린트 단일 출력"
                       >
                         🖨️
@@ -888,7 +889,7 @@ export default function StudentTimeline({
                           }
                           window.location.href = detailHref; 
                         }} 
-                        className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap"
+                        className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-3 py-1.5 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap"
                       >상세 ➔</button>
                     </div>
                   </div>

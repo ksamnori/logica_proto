@@ -39,6 +39,7 @@ export default function GlobalList({
     const selectedItems = globalList.filter((res, idx) => {
       const safeId = res.assignment_id || res.homework_id || `temp_${idx}`;
       const itemId = activeTab === 'EXAM' ? `exam_${safeId}_${res.student_id}` 
+                   : activeTab === 'QUARTERLY' ? `quarterly_${safeId}_${res.student_id}`
                    : activeTab === 'INCORRECT' ? `print_${safeId}_${res.student_id}`
                    : activeTab === 'SIMILAR' ? `similar_${safeId}_${res.student_id}`
                    : activeTab === 'OVERDUE' ? `overdue_${safeId}_${res.student_id}`
@@ -56,7 +57,7 @@ export default function GlobalList({
       const titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
       
       return {
-        printType: res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'),
+        printType: res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'),
         masterId: res.masterId || m?.exam_id,
         targetQuestions: res.target_questions || hw.target_questions,
         title: titleStr,
@@ -74,9 +75,9 @@ export default function GlobalList({
           <div>
             <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
               {currentView.type === 'CLASS' ? (
-                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간테스트 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
               ) : (
-                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간테스트 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
               )}
             </h2>
             <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
@@ -114,7 +115,7 @@ export default function GlobalList({
         ) : globalList.length === 0 ? (
           <div className="text-center font-bold text-slate-400 py-10 text-[12px]">배부된 기록이 없습니다.</div>
         ) : (
-          <div className="space-y-2 pb-20">
+          <div className="space-y-2.5 pb-20">
             {globalList.map((res: any, idx: number) => {
               const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
               const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
@@ -124,6 +125,7 @@ export default function GlobalList({
               
               const safeId = res.assignment_id || res.homework_id || `temp_${idx}`;
               const itemId = activeTab === 'EXAM' ? `exam_${safeId}_${res.student_id}` 
+                           : activeTab === 'QUARTERLY' ? `quarterly_${safeId}_${res.student_id}`
                            : activeTab === 'INCORRECT' ? `print_${safeId}_${res.student_id}`
                            : activeTab === 'SIMILAR' ? `similar_${safeId}_${res.student_id}`
                            : activeTab === 'OVERDUE' ? `overdue_${safeId}_${res.student_id}`
@@ -138,8 +140,8 @@ export default function GlobalList({
               else if(isCompleted) statusBadge = "bg-slate-300 text-slate-700 border border-slate-400";
               else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
 
-              let typeBadge = activeTab === 'EXAM' ? "📝 주간테스트" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
-              let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
+              let typeBadge = activeTab === 'EXAM' ? "📝 주간/중간테스트" : activeTab === 'QUARTERLY' ? "📅 분기평가" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
+              let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'QUARTERLY' ? "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
               let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
@@ -199,7 +201,7 @@ export default function GlobalList({
                       
                       <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0" title="삭제">🗑️</button>
                       
-                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0" title="프린트 단일 출력">🖨️</button>
+                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0" title="프린트 단일 출력">🖨️</button>
 
                       <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>
