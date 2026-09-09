@@ -241,6 +241,72 @@ export default function ClinicViewer() {
     forceUpdate();
   }, [questions, params]);
 
+  // 🌟 [수정됨] 문제 배열 변경으로 인한 실시간 채널 끊김 방지용 Ref
+  const questionsRef = useRef(questions);
+  useEffect(() => { questionsRef.current = questions; }, [questions]);
+
+  // 🌟 [수정됨] 조교 채점 & PC 리뷰 페이지 실시간 연동 리스너 (INSERT, UPDATE 모두 감지)
+  useEffect(() => {
+    if (!isStarted || questionsRef.current.length === 0) return;
+    
+    const currentQs = questionsRef.current;
+    const isHomework = !!currentQs[0]?.homework_id;
+    const tableName = isHomework ? 'student_homework_answer' : 'student_answer';
+    const channelId = `sv_sync_grading_${studentInfo.id}_${Date.now()}`;
+
+    const channel = supabaseClient.channel(channelId)
+      // 🚨 'UPDATE'만 수신하던 것을 '*'로 변경하여 선생님의 최초 채점(INSERT)도 100% 감지
+      .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
+        const newData = payload.new as any;
+        if (!newData || String(newData.student_id) !== String(studentInfo.id)) return;
+        
+        const isMatch = isHomework 
+          ? String(newData.homework_id) === String(currentQs[0].homework_id)
+          : true; 
+          
+        if (isMatch) {
+          const targetQId = isHomework ? newData.tq_id : newData.question_id;
+          const idx = questionsRef.current.findIndex((q: any) => String(isHomework ? q.tq_id : q.question_id) === String(targetQId));
+          
+          if (idx !== -1) {
+             const code = newData.grading_code;
+             if (code) {
+                let isChanged = false;
+
+                // 조교가 채점 시 "선생님이 확인 중이에요" 락(Lock) 해제
+                if (recheckState.current[idx] === 'pending') {
+                   recheckState.current[idx] = null;
+                   isChanged = true;
+                }
+
+                if (['O', 'TO', 'RO'].includes(code)) {
+                   const expectedStatus = code === 'O' ? 'correct_blue' : (code === 'TO' ? 'correct_yellow' : 'retry_yellow');
+                   if (!['correct_blue', 'correct_yellow', 'retry_yellow'].includes(qBoxStatus.current[idx])) {
+                      qBoxStatus.current[idx] = expectedStatus;
+                      correctSolvedCountRef.current++;
+                      isChanged = true;
+                      setRecheckToast(`🎉 선생님이 ${idx + 1}번을 맞게 채점했어요!`);
+                      setTimeout(() => setRecheckToast(""), 4000);
+                   }
+                } else if (['X', 'TX', '☆', 'B'].includes(code)) {
+                   if (qBoxStatus.current[idx] !== 'wrong_red') {
+                      qBoxStatus.current[idx] = 'wrong_red';
+                      isChanged = true;
+                      setRecheckToast(`❌ 선생님이 ${idx + 1}번을 오답 처리했어요.`);
+                      setTimeout(() => setRecheckToast(""), 4000);
+                   }
+                }
+                
+                if (isChanged) forceUpdate();
+             }
+          }
+        }
+      })
+      .subscribe();
+
+    return () => { supabaseClient.removeChannel(channel); };
+  }, [isStarted, params, studentInfo.id, forceUpdate]); // 🚨 questions 의존성 제거 완료
+
   const initMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
       mathJaxRef.current = true;
@@ -301,7 +367,6 @@ export default function ClinicViewer() {
     setRemainCallSec(60);
 
     if (willCall) {
-      // 🌟 핵심 교정: alert()가 브라우저를 멈춰서 DB 통신이 막히는 것을 방지하기 위해 0.1초 지연 실행
       setTimeout(() => {
         alert("선생님을 호출했습니다. 자리에서 잠시만 기다려주세요!");
       }, 100);
@@ -377,7 +442,7 @@ export default function ClinicViewer() {
         if (firstWrongIdx !== -1) {
             setCurrentQIndex(firstWrongIdx);
         } else {
-            setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 없습니다. 홈으로 돌아가세요.' });
+            setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 정없습니다. 홈으로 돌아가세요.' });
         }
     } else if (!isTimedRound && questions.length === 0) {
       setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 없습니다. 홈으로 돌아가세요.' });

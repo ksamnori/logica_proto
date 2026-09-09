@@ -444,7 +444,7 @@ export function useSupervisorData() {
                     if (dbPending && !current[targetSeat].endRequestPending) {
                         current[targetSeat].endRequestPending = true;
                         appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '종료요청',
-                            <span className="underline decoration-dotted cursor-pointer hover:text-rose-600" onClick={() => setEndRequestModal({ isOpen: true, seat: targetSeat })}>{current[targetSeat].name}</span>,
+                            <span className="underline decoration-dotted cursor-pointer hover:text-rose-600" onClick={() => setEndRequestModal({ isOpen: true, seat: targetSeat })}>[{targetSeat}] {current[targetSeat].name}</span>,
                             `클리닉 종료를 요청했습니다 · 클릭해서 승인/거부하세요.`, 'end_request', { seat: targetSeat }
                         );
                         isModified = true;
@@ -468,15 +468,14 @@ export function useSupervisorData() {
                         if (st.calls[qNumKey]) return;
                         
                         const qNum = qNumKey === 'general' ? 'general' : Number(qNumKey);
-                        // 🌟 핵심 수정 1: 단순 시간이 아닌 호출 전체 데이터를 온전히 보관
                         st.calls[qNumKey] = dbCalls[qNumKey] || { requestedAt: Date.now(), qNum: qNumKey };
                         
                         if (st.status !== 'offline') st.status = 'call';
                         isModified = true;
                         const isGeneral = qNumKey === 'general';
                         appendLog('border-rose-500', 'bg-rose-100 text-rose-600', isGeneral ? '조교호출' : '질문호출',
-                            isGeneral ? `${st.name} 학생이 조교를 호출했습니다.` : `[${targetSeat}] ${st.name} 질문 요청`,
-                            isGeneral ? `[${targetSeat}] 포탈에서 호출했습니다 · 확인 후 처리하세요.` : `${qNumKey}번 문항 설명 대기 중`,
+                            isGeneral ? `[${targetSeat}] ${st.name} 조교 호출` : `[${targetSeat}] ${st.name} 질문 요청`,
+                            isGeneral ? `포탈에서 호출했습니다 · 확인 후 처리하세요.` : `${qNumKey}번 문항 설명 대기 중`,
                             'call', { seat: targetSeat, qNum }
                         );
                     });
@@ -496,7 +495,7 @@ export function useSupervisorData() {
                         st.rechecks[uid] = { ...dbRechecks[uid], seat: targetSeat };
                         isModified = true;
                         appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '재확인요청',
-                            <span className="underline decoration-dotted cursor-pointer hover:text-indigo-600" onClick={() => setRecheckModal({ isOpen: true, seat: targetSeat, uid })}>{st.name}</span>,
+                            <span className="underline decoration-dotted cursor-pointer hover:text-indigo-600" onClick={() => setRecheckModal({ isOpen: true, seat: targetSeat, uid })}>[{targetSeat}] {st.name}</span>,
                             `${dbRechecks[uid]?.qNum ?? ''}번 문항 · 직접 확인하세요.`, 'recheck', { seat: targetSeat, uid }
                         );
                     });
@@ -611,7 +610,7 @@ export function useSupervisorData() {
             if (currentStudents[seat]?.calls) delete currentStudents[seat].calls[qNum];
             if (Object.keys(currentStudents[seat]?.calls || {}).length === 0 && currentStudents[seat]?.status !== 'offline') currentStudents[seat].status = 'idle';
             removeLogsByTypeAndSeat('call', seat, qNum);
-            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출해제', `[${seat}] ${qNum}번 문항 지도 종료`, `${taName || '총책임자'} · ${mark === 'hint' ? '힌트 제공 후 종료' : mark === 'skip' ? '설명 없이 넘어감' : '지도 종료'}`);
+            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출해제', `[${seat}] ${currentStudents[seat]?.name || '학생'} 지도 종료`, `${taName || '총책임자'} · ${mark === 'hint' ? '힌트 제공 후 종료' : mark === 'skip' ? '설명 없이 넘어감' : '지도 종료'}`);
             recordTaStat(taClientId || taName || '총책임자', mark);
         } else if (action === 'force_return_to_seat') {
             if (currentStudents[seat]) { 
@@ -619,7 +618,7 @@ export function useSupervisorData() {
                 currentStudents[seat].awaySince = null; 
             }
             removeLogsByTypeAndSeat('away', seat);
-            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '복귀처리', `[${seat}] 자리비움 해제`, `다른 화면에서 해제했습니다.`);
+            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '복귀처리', `[${seat}] ${currentStudents[seat]?.name || '학생'} 자리비움 해제`, `다른 화면에서 해제했습니다.`);
         } else if (action === 'force_checkout' || action === 'force_checkout_by_ta') {
             if (currentStudents[seat]) {
                 const st = currentStudents[seat];
@@ -682,11 +681,10 @@ export function useSupervisorData() {
                             if (studentsRef.current[activeSeat]) updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], isTyping: false } });
                         }, 2000);
                     } else if (action === 'call') {
-                        // 🌟 핵심 수정 2: 데이터 통째로 저장
                         st[activeSeat].calls[data.qNum] = { ...data, requestedAt: Date.now() }; 
                         st[activeSeat].status = 'call';
                         if (data.qNum === 'general') {
-                            appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '조교호출', `${data.name} 학생이 조교를 호출했습니다.`, `[${activeSeat}] 포탈에서 호출했습니다 · 확인 후 처리하세요.`, 'call', { seat: activeSeat, qNum: data.qNum });
+                            appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '조교호출', `[${activeSeat}] ${data.name} 조교 호출`, `포탈에서 호출했습니다 · 확인 후 처리하세요.`, 'call', { seat: activeSeat, qNum: data.qNum });
                         } else {
                             appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '질문호출', `[${activeSeat}] ${data.name} 질문 요청`, `${data.qNum}번 문항 설명 대기 중`, 'call', { seat: activeSeat, qNum: data.qNum });
                         }
@@ -710,13 +708,13 @@ export function useSupervisorData() {
                         if (!st[activeSeat].rechecks) st[activeSeat].rechecks = {};
                         st[activeSeat].rechecks[data.uid] = { ...data, seat: activeSeat };
                         appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '재확인요청',
-                            <span className="underline decoration-dotted cursor-pointer hover:text-indigo-600" onClick={() => setRecheckModal({ isOpen: true, seat: activeSeat, uid: data.uid })}>{data.name}</span>,
+                            <span className="underline decoration-dotted cursor-pointer hover:text-indigo-600" onClick={() => setRecheckModal({ isOpen: true, seat: activeSeat, uid: data.uid })}>[{activeSeat}] {data.name}</span>,
                             `${data.qNum}번 문항 · 직접 확인하세요.`, 'recheck', { seat: activeSeat, uid: data.uid }
                         );
                     } else if (action === 'end_clinic_request') {
                         st[activeSeat].endRequestPending = true;
                         appendLog('border-rose-500', 'bg-rose-100 text-rose-600', '종료요청',
-                            <span className="underline decoration-dotted cursor-pointer hover:text-rose-600" onClick={() => setEndRequestModal({ isOpen: true, seat: activeSeat })}>{data.name}</span>,
+                            <span className="underline decoration-dotted cursor-pointer hover:text-rose-600" onClick={() => setEndRequestModal({ isOpen: true, seat: activeSeat })}>[{activeSeat}] {data.name}</span>,
                             `클리닉 종료를 요청했습니다 · 클릭해서 승인/거부하세요.`, 'end_request', { seat: activeSeat }
                         );
                     } else if (action === 'end_clinic_cancel_request') {
@@ -809,7 +807,7 @@ export function useSupervisorData() {
         Object.keys(current).forEach(seat => {
             const st = current[seat];
             if (st.type === 'reserved' && Date.now() > st.expiresAt) {
-                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '예약만료', `[${seat}] ${st.name}`, `예약 시간이 초과되어 예약이 종료되었습니다.`);
+                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '예약만료', `[${seat}] ${st.name} 예약 만료`, `예약 시간이 초과되어 예약이 종료되었습니다.`);
                 if (st.studentId) supabaseClient.from('clinic_reservation').delete().eq('student_id', st.studentId).eq('session_date', getKSTDateString()).then();
                 delete current[seat];
                 isModified = true;
@@ -880,7 +878,7 @@ export function useSupervisorData() {
                                 .eq('id', sessionId);
                             sendToStudent(draggedSeat!, 'relocated_away', {});
                             sendToStudent(targetSeat, 'relocated_in', { studentId, name: sName, token });
-                            appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '좌석이동', `${sName} 학생`, `[${draggedSeat}] → [${targetSeat}] 이동 요청 — 목적지 패드에서 인계 대기 중`);
+                            appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-600', '좌석이동', `[${draggedSeat}] ${sName} 학생`, `[${draggedSeat}] → [${targetSeat}] 이동 요청 — 목적지 패드에서 인계 대기 중`);
                         }
                     }
                 } else if (studentsRef.current[targetSeat] && targetSeat !== draggedSeat) {
@@ -946,7 +944,7 @@ export function useSupervisorData() {
             reservedFor, expiresAt, calls: {}, totalCalls: 0, totalHints: 0
         };
         updateStudents(currentStudents);
-        appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-700', '예약', `[${seat}] ${student.name}`, `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} 예약 등록`);
+        appendLog('border-indigo-500', 'bg-indigo-100 text-indigo-700', '예약', `[${seat}] ${student.name} 예약`, `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')} 예약 등록`);
         setReservationModal({ isOpen: false, seat: null, student: null });
 
         await supabaseClient.from('clinic_reservation').upsert({
@@ -1016,7 +1014,7 @@ export function useSupervisorData() {
             if (st.studentId) await resolveEndSessionForStudent(supabaseClient, st.studentId, getKSTDateString(), false);
             const currentStudents = { ...studentsRef.current };
             if (currentStudents[seat]) currentStudents[seat].endRequestPending = false;
-            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '종료요청거부', `[${seat}] ${st.name}`, `종료 요청을 거부했습니다 (5분 쿨타임).`);
+            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '종료요청거부', `[${seat}] ${st.name} 종료요청 거부`, `종료 요청을 거부했습니다 (5분 쿨타임).`);
             updateStudents(currentStudents);
         }
     };
@@ -1063,7 +1061,6 @@ export function useSupervisorData() {
         setRecheckModal({ isOpen: false, seat: null, uid: null });
     };
 
-    // 🌟 핵심 수정 3: mark 파라미터 추가
     const taAction = async (seat: string, type: string, qNum: any = null, mark: string = 'skip') => {
         const currentStudents = { ...studentsRef.current };
         
@@ -1083,8 +1080,7 @@ export function useSupervisorData() {
                 removeLogsByTypeAndSeat('call', seat, qNum);
                 sendToStudent(seat, 'force_cancel_call', { qNum });
                 
-                // 🌟 로그에도 어떻게 처리했는지 남기도록 변경
-                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출처리완료', `[${seat}] ${qNum}번 문항 지도 완료`, `원장/실장 · ${mark === 'hint' ? '💡 힌트 제공 후 종료' : '⏭️ 설명 생략하고 넘김'}`);
+                appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '호출처리완료', `[${seat}] ${currentStudents[seat]?.name || '학생'} 지도 완료`, `원장/실장 · ${mark === 'hint' ? '💡 힌트 제공 후 종료' : '⏭️ 설명 생략하고 넘김'}`);
             }
         } else if (type === 'clear_away') {
             if (currentStudents[seat]) { 
@@ -1093,6 +1089,7 @@ export function useSupervisorData() {
             }
             removeLogsByTypeAndSeat('away', seat); sendToStudent(seat, 'force_return_to_seat');
             if (currentStudents[seat]?.sessionId) clearAway(supabaseClient, currentStudents[seat].sessionId);
+            appendLog('border-slate-400', 'bg-slate-100 text-slate-600', '복귀처리', `[${seat}] ${currentStudents[seat]?.name || '학생'} 복귀 처리`, `다른 화면에서 복귀 처리했습니다.`);
         } else if (type === 'confirm_checkout') {
             if (currentStudents[seat]) {
                 const st = currentStudents[seat]; sendToStudent(seat, 'force_checkout');
@@ -1113,7 +1110,7 @@ export function useSupervisorData() {
                     });
             }
             sendToStudent(seat, 'force_refresh');
-            appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
+            appendLog('border-blue-500', 'bg-blue-100 text-blue-700', '새로고침', `[${seat}] ${currentStudents[seat]?.name || '학생'} 기기 새로고침`, `학생 패드에 강제 새로고침 신호를 전송했습니다.`);
         } else if (type === 'force_reset') {
             if (currentStudents[seat]) {
                 const st = currentStudents[seat];

@@ -134,6 +134,40 @@ function HomeworkReviewContent() {
     return () => clearTimeout(timer);
   }, [isLoading, groups, modalQ, modalStudentAns]);
 
+  // 🌟 [추가됨] 학생 뷰어 & 조교 패드 실시간 동기화 리스너
+  useEffect(() => {
+    if (groups.length === 0) return;
+    const tableName = (isExamHw && assignmentId) ? 'student_answer' : 'student_homework_answer';
+    const channelId = `hw_review_sync_${assignmentId || homeworkId}_${studentId}_${Date.now()}`;
+    
+    const channel = supabase.channel(channelId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
+        const newData = payload.new as any;
+        if (!newData) return;
+        // 다른 학생의 데이터가 섞이지 않도록 차단
+        if (String(newData.student_id) !== String(studentId)) return;
+
+        if (isExamHw && assignmentId) {
+          if (String(newData.exam_assignment_id) === String(assignmentId)) {
+            setGradingMap(prev => ({ ...prev, [newData.question_id]: newData.grading_code }));
+            if (newData.student_input) {
+              setStudentInputMap(prev => ({ ...prev, [newData.question_id]: newData.student_input }));
+            }
+          }
+        } else if (homeworkId) {
+          if (String(newData.homework_id) === String(homeworkId)) {
+            setGradingMap(prev => ({ ...prev, [newData.tq_id]: newData.grading_code }));
+            if (newData.student_input) {
+              setStudentInputMap(prev => ({ ...prev, [newData.tq_id]: newData.student_input }));
+            }
+          }
+        }
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [groups, assignmentId, homeworkId, isExamHw, studentId]);
+
   const loadMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
       mathJaxRef.current = true;
@@ -161,7 +195,6 @@ function HomeworkReviewContent() {
 
         const em = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
         setStudentInfo(stuData);
-        // 🌟 항목명을 무조건 "맞춤 오답..."이 아닌 실제 exam_type 이름으로 출력하게 교정
         setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: em.exam_type || '학습지' } });
         setHwResult({ status: aData.status, hw_result_id: aData.assignment_id }); 
         

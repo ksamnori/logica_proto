@@ -5,6 +5,13 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation"; 
 import { supabase } from "@/lib/supabase";
 
+// 🌟 [추가됨] DB 데이터 형태(Array vs Object) 불일치로 인한 화면 뻗음(Crash) 방지용 안전장치
+const unwrap = (obj: any) => (Array.isArray(obj) ? obj[0] : obj);
+const ensureArray = (obj: any) => {
+  if (!obj) return [];
+  return Array.isArray(obj) ? obj : [obj];
+};
+
 export default function StudentPage() {
   const router = useRouter(); 
 
@@ -71,17 +78,26 @@ export default function StudentPage() {
         stuQuery = stuQuery.eq("tenant_id", tenantId);
       }
 
-      const { data: allStuData } = await stuQuery;
+      // 🌟 [수정됨] 쿼리 에러 발생 시 잡아낼 수 있도록 에러 로깅 추가
+      const { data: allStuData, error } = await stuQuery;
       
+      if (error) {
+        console.error("데이터베이스 쿼리 에러:", error);
+      }
+
       if (allStuData) {
         if (isSuper) {
           setStudents(allStuData);
         } else {
-          const myStudents = allStuData.filter((student: any) => 
-            student.enrollment?.some((e: any) => e.class?.instructor_id === myId)
-          );
+          // 🌟 [수정됨] enrollment가 객체로 넘어올 때를 대비해 ensureArray 사용
+          const myStudents = allStuData.filter((student: any) => {
+            const enrolls = ensureArray(student.enrollment);
+            return enrolls.some((e: any) => unwrap(e.class)?.instructor_id === myId);
+          });
           setStudents(myStudents);
         }
+      } else {
+        setStudents([]);
       }
 
     } catch (error) {
@@ -93,13 +109,18 @@ export default function StudentPage() {
 
   const filteredStudents = useMemo(() => {
     return students.filter((s) => {
-      const activeEnrollments = s.enrollment ? s.enrollment.filter((e: any) => e.class && e.class.status !== '예정') : [];
-      const classes = activeEnrollments.map((e: any) => e.class);
+      // 🌟 [수정됨] 데이터를 가공할 때 에러가 나지 않도록 철저하게 래핑
+      const enrolls = ensureArray(s.enrollment);
+      const activeEnrollments = enrolls.filter((e: any) => {
+        const cls = unwrap(e.class);
+        return cls && cls.status !== '예정';
+      });
+      const classes = activeEnrollments.map((e: any) => unwrap(e.class));
       
-      const matchLevel = level === "all" || classes.some((c: any) => c.level_name === level);
+      const matchLevel = level === "all" || classes.some((c: any) => c?.level_name === level);
       const matchGrade = grade === "all" || s.grade?.toString() === grade;
       const matchStatus = status === "all" || s.status === status;
-      const matchInst = instructorId === "all" || classes.some((c: any) => c.instructor_id?.toString() === instructorId);
+      const matchInst = instructorId === "all" || classes.some((c: any) => c?.instructor_id?.toString() === instructorId);
       
       const phone = s.phone || "";
       const matchKeyword = keyword === "" || s.name.includes(keyword) || phone.includes(keyword);
@@ -120,7 +141,7 @@ export default function StudentPage() {
   const currentData = filteredStudents.slice((currentPage - 1) * limit, currentPage * limit);
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 overflow-hidden">
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 overflow-hidden font-pretendard">
       <div className="flex justify-between items-end shrink-0 mb-4">
         <div>
           <h2 className="text-xl font-bold text-slate-800">
@@ -210,9 +231,21 @@ export default function StudentPage() {
                   if (s.status === "휴원") statusClass = "bg-amber-100 text-amber-700";
                   if (s.status === "입학테스트") statusClass = "bg-indigo-100 text-indigo-700";
 
-                  const activeEnrollments = s.enrollment ? s.enrollment.filter((e: any) => e.class && e.class.status !== '예정') : [];
-                  const classNames: string[] = activeEnrollments.map((e: any) => e.class.name);
-                  const instNames: string[] = Array.from(new Set(activeEnrollments.map((e: any) => e.class.instructor?.name).filter(Boolean)));
+                  // 🌟 [수정됨] 화면 렌더링 시 배열/객체 혼용으로 인한 에러 방지
+                  const enrolls = ensureArray(s.enrollment);
+                  const activeEnrollments = enrolls.filter((e: any) => {
+                    const cls = unwrap(e.class);
+                    return cls && cls.status !== '예정';
+                  });
+
+                  const classNames: string[] = activeEnrollments.map((e: any) => unwrap(e.class)?.name).filter(Boolean);
+                  const instNames: string[] = Array.from(new Set(activeEnrollments.map((e: any) => {
+                    const cls = unwrap(e.class);
+                    const inst = unwrap(cls?.instructor);
+                    return inst?.name;
+                  }).filter(Boolean)));
+                  
+                  const parentPhone = unwrap(s.parent)?.phone || "-";
 
                   return (
                     <tr key={s.student_id} className="hover:bg-blue-50/50 transition-colors">
@@ -236,13 +269,12 @@ export default function StudentPage() {
                         )}
                       </td>
                       <td className="py-3 px-4 border-b border-slate-100 text-slate-500 font-bold text-[13px] text-center max-w-[120px] truncate">
-                        {/* 💡 [수정] 혼용되던 school_name을 제거하고 school만 사용하도록 단일화 */}
                         {s.school || "-"}
                       </td>
                       <td className="py-3 px-4 border-b border-slate-100 font-bold text-center">{s.grade || "-"}</td>
                       <td className="py-3 px-4 border-b border-slate-100 text-slate-500 font-bold text-xs text-center">{s.gender || "-"}</td>
                       <td className="py-3 px-4 border-b border-slate-100 text-slate-500 text-xs text-center">{s.phone || "-"}</td>
-                      <td className="py-3 px-4 border-b border-slate-100 text-slate-600 font-bold text-xs text-center">{s.parent?.phone || "-"}</td>
+                      <td className="py-3 px-4 border-b border-slate-100 text-slate-600 font-bold text-xs text-center">{parentPhone}</td>
                       <td className="py-3 px-4 border-b border-slate-100 text-center">
                         <span className={`${statusClass} px-2 py-1 rounded text-xs font-bold whitespace-nowrap`}>{s.status || "-"}</span>
                       </td>

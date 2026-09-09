@@ -255,40 +255,32 @@ export default function StudentDetailPage() {
     setProgressBooks(books);
   };
 
-  // 🌟 [수정됨] 쿼리 누락 방지 & 주간테스트(시험)만 분리
+  // 🌟 [수정됨] O, RO, TO를 직접 세어서 최초/최종 점수를 실시간으로 계산하는 로직 (TypeScript 에러 해결)
   const loadExamResults = async () => {
     try {
-      const { data: assignments, error } = await supabase.from("exam_assignment")
-        .select("assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type)")
+      // 1. 해당 학생의 '완료된' 시험지 목록을 가져옵니다.
+      const { data: assignments } = await supabase.from("exam_assignment")
+        .select("assignment_id, total_score, status, created_at, exam_master(title, total_questions)")
         .eq("student_id", studentId)
-        .order("created_at", { ascending: false });
+        .in("status", ["제출완료", "채점완료", "완료", "최종완료", "채점확정"])
+        .order("created_at", { ascending: false })
+        .limit(10);
 
-      if (error) console.error("시험결과 로드 에러:", error);
-
-      const validAssignments = (assignments || []).filter((a: any) => {
-        if (['응시전', '미응시', '예정', '대기'].includes(a.status)) return false;
-        
-        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-        const eType = master?.exam_type || '';
-        
-        // 🌟 "주간테스트"만 '시험' 탭에 표시되도록 설정 (그 외의 것들은 필터링 아웃)
-        if (eType !== '주간테스트') return false;
-        
-        return true;
-      }).slice(0, 10); 
-
-      if (validAssignments.length === 0) {
+      if (!assignments || assignments.length === 0) {
         setExamResults([]);
         return;
       }
 
-      const assignIds = validAssignments.map((a: any) => a.assignment_id);
+      const assignIds = assignments.map((a: any) => a.assignment_id);
 
+      // 2. 해당 시험지들의 모든 학생 답안(student_answer)을 가져옵니다.
       const { data: answers } = await supabase.from("student_answer")
         .select("exam_assignment_id, grading_code")
         .in("exam_assignment_id", assignIds);
 
-      const results = validAssignments.map((a: any) => {
+      // 3. O, RO, TO 개수를 카운트하여 최초 점수와 최종 점수를 계산합니다.
+      // 🚨 a 파라미터에 명시적으로 : any 를 주어 never 에러를 원천 차단합니다.
+      const results = assignments.map((a: any) => {
         const myAnswers = answers?.filter((ans: any) => ans.exam_assignment_id === a.assignment_id) || [];
         
         let oCount = 0, roCount = 0, toCount = 0, xCount = 0;
@@ -297,31 +289,35 @@ export default function StudentDetailPage() {
           if (ans.grading_code === 'O') oCount++;
           else if (ans.grading_code === 'RO') roCount++;
           else if (ans.grading_code === 'TO') toCount++;
-          else if (['X', 'TX'].includes(ans.grading_code)) xCount++; // 🌟 오답은 X, TX만 카운트
+          else if (['X', 'TX', '☆', 'B'].includes(ans.grading_code)) xCount++;
         });
 
+        // 🚨 배열인지 안전하게 확인하여 title과 total_questions를 추출합니다.
         const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+
+        // 전체 문항 수 (exam_master 우선, 없으면 답안 개수)
         let totalQ = master?.total_questions;
         if (!totalQ || totalQ === 0) totalQ = myAnswers.length || 1;
 
+        // 점수 계산 (100점 만점 기준)
         const originalScore = Math.round((oCount / totalQ) * 100);
-        // 🌟 TO, RO 모두 최종 정답(점수)으로 인정
         const finalScore = Math.round(((oCount + roCount + toCount) / totalQ) * 100);
 
         return {
           assignment_id: a.assignment_id,
-          title: master?.title || '주간테스트',
+          title: master?.title || '시험',
           original_score: originalScore,
           final_score: finalScore,
           oCount,
           roCount,
           toCount,
-          xCount, 
-          class_avg: 0,
+          xCount: totalQ - (oCount + roCount + toCount), // 남은 오답 수
+          class_avg: 0, // 평균은 일단 0으로 처리
           created_at: a.created_at
         };
       });
 
+      // 그래프 표현을 위해 과거->최신 순으로 뒤집어서 저장
       setExamResults(results.reverse());
     } catch (err) {
       console.error("시험 결과 로드 실패:", err);
@@ -512,6 +508,46 @@ export default function StudentDetailPage() {
     </div>
   );
 
+  const renderExamChart = () => {
+    if (examResults.length === 0) return <div className="text-center py-20 text-slate-400 font-bold text-sm bg-slate-50 rounded-xl">최근 시험 데이터가 없습니다.</div>;
+    const width = 800, height = 250, paddingX = 40, paddingY = 40, maxScore = 100;
+    const xStep = examResults.length > 1 ? (width - paddingX * 2) / (examResults.length - 1) : 0;
+    const getY = (score: number) => height - paddingY - (score / maxScore) * (height - paddingY * 2);
+    const studentPoints = examResults.map((r, i) => `${paddingX + i * xStep},${getY(r.final_score || 0)}`).join(" ");
+    const avgPoints = examResults.map((r, i) => `${paddingX + i * xStep},${getY(r.class_avg || 0)}`).join(" ");
+
+    return (
+      <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm overflow-x-auto">
+        <div className="flex justify-end gap-4 mb-4">
+          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5"><div className="w-3 h-1 bg-blue-500 rounded"></div>학생 점수</span>
+          <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5"><div className="w-3 h-1 bg-slate-300 rounded"></div>반 평균</span>
+        </div>
+        <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto min-w-[500px]">
+          {[0, 25, 50, 75, 100].map(score => (
+            <g key={score}>
+              <line x1={paddingX} y1={getY(score)} x2={width - paddingX} y2={getY(score)} stroke="#e2e8f0" strokeWidth="1" strokeDasharray="4 4" />
+              <text x={paddingX - 10} y={getY(score) + 4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="bold">{score}</text>
+            </g>
+          ))}
+          {examResults.length > 1 && (<><polyline points={avgPoints} fill="none" stroke="#cbd5e1" strokeWidth="2" strokeLinejoin="round" /><polyline points={studentPoints} fill="none" stroke="#3b82f6" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></>)}
+          {examResults.map((r, i) => {
+             const cx = paddingX + i * xStep, sy = getY(r.final_score || 0), ay = getY(r.class_avg || 0);
+             const title = unwrap(r.exam_assignment)?.exam_master?.title || '시험';
+             const shortTitle = title.length > 8 ? title.substring(0,8)+'..' : title;
+             return (
+               <g key={i}>
+                 <circle cx={cx} cy={ay} r="3" fill="#cbd5e1" />
+                 <circle cx={cx} cy={sy} r="5" fill="#fff" stroke="#3b82f6" strokeWidth="2" />
+                 <text x={cx} y={sy - 12} fontSize="11" fill="#1e40af" textAnchor="middle" fontWeight="900">{r.final_score}</text>
+                 <text x={cx} y={height - 10} fontSize="9" fill="#64748b" textAnchor="middle" fontWeight="bold">{shortTitle}</text>
+               </g>
+             );
+          })}
+        </svg>
+      </div>
+    );
+  };
+
   if (isNotFound) return (
     <div className="flex-1 flex flex-col items-center justify-center min-h-[80vh] bg-slate-50 p-10 font-pretendard">
       <div className="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 text-center max-w-md w-full animate-[fadeIn_0.3s_ease-out]">
@@ -528,8 +564,7 @@ export default function StudentDetailPage() {
     ...(allowedActions.includes('action_view_consult') ? [{ id: 'consult', name: '상담 기록' }] : []),
     { id: 'attend', name: '출결 기록' },
     { id: 'progress', name: '진도 기록' },
-    // 🌟 원장님 요청: 탭 이름을 '시험 성적'에서 '주간테스트 성적'으로 변경
-    ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '주간테스트 성적' }] : []),
+    ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '시험 성적' }] : []),
     { id: 'hw', name: '과제 현황' },
     ...(allowedActions.includes('action_view_clinic') ? [{ id: 'clinic', name: '오답 클리닉' }] : []),
     { id: 'billing', name: '수납/청구' }
@@ -541,6 +576,7 @@ export default function StudentDetailPage() {
 
       <div className="max-w-[1300px] w-full mx-auto space-y-5 pb-20">
         
+        {/* 학생 헤더 */}
         <div className="flex justify-between items-start bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden shrink-0">
           <div className="absolute top-0 right-0 w-64 h-full bg-gradient-to-l from-blue-50/50 to-transparent"></div>
           <div className="flex items-center gap-5 relative z-10">
@@ -578,11 +614,12 @@ export default function StudentDetailPage() {
 
           <div className="p-6 bg-white flex-1 relative overflow-hidden">
             
+            {/* 🌟 분리된 탭 컴포넌트들 호출 */}
             {activeTab === "info" && <InfoTab student={student} enrollments={enrollments} consultLogs={consultLogs} setActiveTab={setActiveTab} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "consult" && <ConsultTab consultLogs={consultLogs} setSelectedConsultLog={setSelectedConsultLog} setIsConsultModalOpen={setIsConsultModalOpen} deleteConsultLog={deleteConsultLog} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "attend" && <AttendTab calMonth={calMonth} attSummary={attSummary} selectedDate={selectedDate} attendForm={attendForm} setAttendForm={setAttendForm} allowedActions={allowedActions} deleteAttendance={deleteAttendance} saveAttendance={saveAttendance} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "progress" && <ProgressTab progressBooks={progressBooks} />}
-            {activeTab === "exam" && <ExamTab examResults={examResults} schoolExams={schoolExams} setIsSchoolExamModalOpen={setIsSchoolExamModalOpen} deleteSchoolExam={deleteSchoolExam} />}
+            {activeTab === "exam" && <ExamTab examResults={examResults} schoolExams={schoolExams} setIsSchoolExamModalOpen={setIsSchoolExamModalOpen} deleteSchoolExam={deleteSchoolExam} examChart={renderExamChart()} />}
             {activeTab === "hw" && <HwTab hwList={hwList} />}
             {activeTab === "clinic" && <ClinicTab clinicList={clinicList} />}
             {activeTab === "billing" && <BillingTab billingList={billingList} setIsBillingModalOpen={setIsBillingModalOpen} setPayFormInit={setPayFormInit} setIsPaymentModalOpen={setIsPaymentModalOpen} />}
@@ -602,6 +639,7 @@ export default function StudentDetailPage() {
       <BillingModal isOpen={isBillingModalOpen} studentId={studentId} enrollments={enrollments} allClasses={allClasses} onClose={() => setIsBillingModalOpen(false)} onSuccess={loadBillings} />
       <PaymentModal isOpen={isPaymentModalOpen} payFormInit={payFormInit} onClose={() => setIsPaymentModalOpen(false)} onSuccess={loadBillings} />
 
+      {/* 학교 성적 등록 및 재등록 모달은 기존 구조 유지 (가독성 위해 생략하지 않음) */}
       {isSchoolExamModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -752,6 +790,7 @@ function ConsultTab({ consultLogs, setSelectedConsultLog, setIsConsultModalOpen,
           {consultLogs.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold border border-slate-200 rounded-xl bg-slate-50 text-xs">등록된 상담 기록이 없습니다.</div> : 
             consultLogs.map((log: any, idx: number) => {
               
+              // 🌟 테마 색상 로직 적용
               let badgeCol = 'bg-indigo-50 text-indigo-600 border-indigo-100';
               let lineCol = 'bg-indigo-400';
               let borderCol = 'border-slate-200';
@@ -790,6 +829,7 @@ function ConsultTab({ consultLogs, setSelectedConsultLog, setIsConsultModalOpen,
                     </div>
                   </div>
                   
+                  {/* 🌟 학부모 노출용 주제 렌더링 영역 추가 */}
                   {log.parent_summary && (
                     <div className="mb-2 pl-2 flex items-center gap-1.5">
                       <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">주제</span>
@@ -920,10 +960,12 @@ function ProgressTab({ progressBooks }: any) {
 
 function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSchoolExam }: any) {
   
+  // 🌟 [신규 디자인] 누적 막대 그래프 (최초 점수 vs 최종 점수)
   const renderGrowthChart = () => {
     if (examResults.length === 0) return <div className="text-center py-20 text-slate-400 font-bold text-sm bg-slate-50 rounded-xl">최근 시험 데이터가 없습니다.</div>;
     
-    const chartData = examResults.slice(0, 10);
+    // 표시할 데이터 최대 10개로 제한 및 역순 정렬 (오래된 순 -> 최신순)
+    const chartData = examResults.slice(0, 10).reverse();
     
     const width = 800, height = 260, paddingX = 50, paddingY = 40, maxScore = 100;
     const xStep = chartData.length > 1 ? (width - paddingX * 2) / (chartData.length - 1) : 0;
@@ -933,7 +975,7 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm overflow-x-auto">
         <div className="flex justify-between items-end mb-6 min-w-[500px]">
           <div>
-             <h3 className="text-[13px] font-black text-[#002864] mb-1">최근 주간테스트 성장 그래프</h3>
+             <h3 className="text-[13px] font-black text-[#002864] mb-1">최근 시험 성장 그래프</h3>
              <p className="text-[10px] font-bold text-slate-400">최초 정답(O)과 오답 정정(RO, TO) 후의 최종 점수 변화입니다.</p>
           </div>
           <div className="flex gap-3">
@@ -942,6 +984,7 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
           </div>
         </div>
         <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-auto min-w-[500px]">
+          {/* Y축 배경선 */}
           {[0, 25, 50, 75, 100].map(score => (
             <g key={score}>
               <line x1={paddingX - 10} y1={getY(score)} x2={width - paddingX + 10} y2={getY(score)} stroke="#f1f5f9" strokeWidth="1.5" />
@@ -949,8 +992,11 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
             </g>
           ))}
           
+          {/* 누적 막대 그래프 그리기 */}
+          {/* 🌟 수정됨: (r, i) -> (r: any, i: number) 타입 명시 */}
           {chartData.map((r: any, i: number) => {
              const cx = paddingX + i * xStep;
+             // DB에 상세 카운트가 없다면 original_score를 활용 (현재 DB 구조 가정)
              const initialScore = r.original_score || 0; 
              const finalScore = r.final_score || initialScore;
              
@@ -958,16 +1004,23 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
              const yFinal = getY(finalScore);
              const barWidth = 24;
 
-             const title = r.title || '시험';
+             const title = unwrap(r.exam_assignment)?.exam_master?.title || '시험';
              const shortTitle = title.length > 8 ? title.substring(0,8)+'..' : title;
 
              return (
                <g key={i}>
+                 {/* 전체 기둥 배경 (100점 만점 기준 옅은 회색) */}
                  <rect x={cx - barWidth/2} y={getY(100)} width={barWidth} height={height - paddingY * 2} fill="#f8fafc" rx="4" />
+                 
+                 {/* 추가 획득 점수 (RO, TO - 밝은 파란색) */}
                  {finalScore > initialScore && (
                    <rect x={cx - barWidth/2} y={yFinal} width={barWidth} height={yInitial - yFinal} fill="#93c5fd" className="transition-all duration-500" />
                  )}
+                 
+                 {/* 최초 점수 (O - 짙은 파란색) */}
                  <rect x={cx - barWidth/2} y={yInitial} width={barWidth} height={height - paddingY - yInitial} fill="#002864" rx="4" className="transition-all duration-500" />
+                 
+                 {/* 텍스트 표기 */}
                  {finalScore > 0 && <text x={cx} y={yFinal - 8} fontSize="11" fill="#1e3a8a" textAnchor="middle" fontWeight="900">{finalScore}</text>}
                  <text x={cx} y={height - 15} fontSize="10" fill="#64748b" textAnchor="middle" fontWeight="bold">{shortTitle}</text>
                </g>
@@ -984,20 +1037,21 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
       
       <div>
         <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2">
-           <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-emerald-500 rounded-full"></span>주간테스트 상세 기록</h3>
+           <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-emerald-500 rounded-full"></span>자체 테스트 상세 기록</h3>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           {examResults.length === 0 ? <div className="col-span-full text-[11px] text-slate-400 text-center py-4 bg-slate-50 rounded-xl">테스트 기록이 없습니다.</div> :
-             examResults.slice().reverse().map((ex: any, i: number) => {
+             examResults.slice().map((ex: any, i: number) => {
+               const title = unwrap(ex.exam_assignment)?.exam_master?.title;
                const initial = ex.original_score || 0;
                const final = ex.final_score || 0;
                
                return (
                  <div key={i} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-blue-300 transition-colors">
                    <div className="flex justify-between items-start mb-3">
-                      <div className="text-[12px] font-black text-slate-700 truncate" title={ex.title}>{ex.title}</div>
+                      <div className="text-[12px] font-black text-slate-700 truncate" title={title}>{title}</div>
                       <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-[10px] font-black border border-slate-200 shrink-0">
-                         평균 {ex.class_avg ? `${ex.class_avg}점` : '-'}
+                         평균 {ex.class_avg || '-'}점
                       </span>
                    </div>
                    
@@ -1013,11 +1067,11 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
                      </div>
                    </div>
 
+                   {/* 🌟 원장님 요청: 세부 마크 뱃지 출력부 (현재는 예시 데이터, DB 연동 필요) */}
                    <div className="flex flex-wrap gap-1 mt-auto">
-                     {ex.oCount > 0 && <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-black">O 정답 ({ex.oCount})</span>}
-                     {ex.roCount > 0 && <span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-[9px] font-black">RO 스스로 정정 ({ex.roCount})</span>}
-                     {ex.toCount > 0 && <span className="bg-teal-50 text-teal-600 border border-teal-200 px-1.5 py-0.5 rounded text-[9px] font-black">TO 힌트 정답 ({ex.toCount})</span>}
-                     {ex.xCount > 0 && <span className="bg-rose-50 text-rose-500 border border-rose-200 px-1.5 py-0.5 rounded text-[9px] font-black">X 오답 ({ex.xCount})</span>}
+                     <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-black">O 정답</span>
+                     <span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-[9px] font-black">RO 스스로 정정</span>
+                     <span className="bg-rose-50 text-rose-500 border border-rose-200 px-1.5 py-0.5 rounded text-[9px] font-black">X 오답</span>
                    </div>
                  </div>
                )
@@ -1026,6 +1080,7 @@ function ExamTab({ examResults, schoolExams, setIsSchoolExamModalOpen, deleteSch
         </div>
       </div>
       
+      {/* 학교 내신 성적 영역 (기존 유지) */}
       <div>
         <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2 mt-6">
           <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-indigo-500 rounded-full"></span>학교 내신 성적</h3>

@@ -21,7 +21,7 @@ interface GlobalListProps {
   handleForceComplete: (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => void;
   handleDeleteExam: (assignmentId: string, studentId: string) => void;
   handleDeleteHomework: (hwId: string, studentId: string) => void;
-  handleDeletePrint: (assignmentId: string, examId: string, studentId: string) => void; // 🌟 studentId 매개변수 추가됨
+  handleDeletePrint: (assignmentId: string, examId: string, studentId: string) => void; 
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
@@ -74,9 +74,9 @@ export default function GlobalList({
           <div>
             <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
               {currentView.type === 'CLASS' ? (
-                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간테스트 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
               ) : (
-                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '시험 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간테스트 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
               )}
             </h2>
             <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
@@ -114,7 +114,7 @@ export default function GlobalList({
         ) : globalList.length === 0 ? (
           <div className="text-center font-bold text-slate-400 py-10 text-[12px]">배부된 기록이 없습니다.</div>
         ) : (
-          <div className="space-y-2.5 pb-20">
+          <div className="space-y-2 pb-20">
             {globalList.map((res: any, idx: number) => {
               const m = activeTab === 'HOMEWORK' && !res.is_exam_hw ? {} : unwrap(res.exam_master) || {};
               const hw = activeTab === 'HOMEWORK' && !res.is_exam_hw ? res.homework_assignment || {} : {};
@@ -138,7 +138,7 @@ export default function GlobalList({
               else if(isCompleted) statusBadge = "bg-slate-300 text-slate-700 border border-slate-400";
               else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
 
-              let typeBadge = activeTab === 'EXAM' ? "📝 시험" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
+              let typeBadge = activeTab === 'EXAM' ? "📝 주간테스트" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
@@ -159,11 +159,14 @@ export default function GlobalList({
                 detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
               }
 
+              const finalOCount = res.rawAnswers ? res.rawAnswers.filter((a: any) => ['O', 'RO', 'TO'].includes(a.grading_code)).length : (res.oCount || 0);
+              const finalXCount = res.rawAnswers ? res.rawAnswers.filter((a: any) => ['X', 'TX'].includes(a.grading_code)).length : (res.xCount || 0);
+
               return (
-                <div key={`${itemId}_${idx}`} onClick={() => toggleGlobalSelection(itemId)} className={`border-2 rounded-xl p-2 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}>
+                <div key={`${itemId}_${idx}`} onClick={() => toggleGlobalSelection(itemId)} className={`border-[1.5px] rounded-xl p-2 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}>
                   <div className="flex items-center gap-2 w-1/2 min-w-0 shrink-0 flex-1">
-                    <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                    <div className="w-[85px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight truncate">
+                    <input type="checkbox" checked={isSelected} readOnly className="w-3.5 h-3.5 accent-rose-500 pointer-events-none shrink-0" />
+                    <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight truncate">
                       {formatDateLabel(createdDate, true)}
                     </div>
                     <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 whitespace-nowrap ${typeColor}`}>{typeBadge}</span>
@@ -172,35 +175,33 @@ export default function GlobalList({
                     <div className="flex-1 font-extrabold text-[12px] truncate" title={titleStr}>{titleStr}</div>
                   </div>
 
-                  <div className="flex items-center gap-2.5 shrink-0 justify-end w-[380px]">
-                    <div className="text-[11px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ || 0}문항</div>
+                  <div className="flex items-center gap-2 shrink-0 justify-end w-[350px]">
+                    <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ || 0}문항</div>
                     
-                    <div className="flex flex-row flex-nowrap items-center gap-1.5 shrink-0 w-[120px] justify-center">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {res.oCount || 0}</span>
-                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {res.xCount || 0}</span>
-                      {res.helpedCount > 0 && <span className="text-[10px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded-md border border-amber-100 whitespace-nowrap shadow-sm" title="힌트 또는 조교 호출 도움을 받아 푼 문항 수">🧑‍🏫 {res.helpedCount}</span>}
+                    <div className="flex flex-row flex-nowrap items-center gap-1 shrink-0 w-[110px] justify-center">
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {finalOCount}</span>
+                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {finalXCount}</span>
                     </div>
                     
-                    <div className="flex items-center gap-1.5 shrink-0 w-[110px] justify-end">
+                    <div className="flex items-center gap-1.5 shrink-0 w-[100px] justify-end">
                       <button onClick={(e) => handleForceComplete(e, activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam', activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_id : res.assignment_id, res.student_id)} className="text-[10px] font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0">
                         ✅ 완료처리
                       </button>
                       <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 ${statusBadge}`}>{statusStr}</span>
                     </div>
                     
-                    <div className="flex items-center gap-2 shrink-0 border-l border-slate-300 pl-3 w-[140px] justify-end">
+                    <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-300 pl-2.5 w-[110px] justify-end">
                       {!(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
-                        <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="문제 수정">✏️</button>
+                        <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0" title="문제 수정">✏️</button>
                       ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0 mr-0.5" title="과제 문항 수정">✏️</button>
+                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      {/* 🌟 핵심 교정: res.student_id 전달 */}
-                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0 mr-0.5" title="삭제">🗑️</button>
+                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0" title="삭제">🗑️</button>
                       
-                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0 mx-0.5" title="프린트 단일 출력">🖨️</button>
+                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0" title="프린트 단일 출력">🖨️</button>
 
-                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-2 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
+                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
                     </div>
                   </div>
                 </div>

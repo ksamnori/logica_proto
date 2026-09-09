@@ -90,10 +90,10 @@ export default function StudentDashboard({
           </p>
         </div>
         
-        {/* 🌟 건수 중심 + 하단 문항수 표시 UI */}
         <div className="flex gap-3 overflow-x-auto pb-1">
+          {/* 🌟 수정됨: 주간테스트로 라벨 변경 */}
           <div className="bg-blue-50 border border-blue-200 rounded-xl px-3 py-3 flex flex-col items-center min-w-[85px] shadow-sm shrink-0">
-            <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 시험</span>
+            <span className="text-[11px] font-extrabold text-blue-600 mb-1">💯 주간테스트</span>
             <span className="text-2xl font-black text-blue-700">{totalExamC}<span className="text-sm ml-0.5">건</span></span>
             <span className="text-[10px] font-bold text-slate-400 mt-0.5">총 {totalExamQ}문항</span>
           </div>
@@ -135,7 +135,8 @@ export default function StudentDashboard({
                   <th className="py-3.5 px-6 w-16 text-center">순위</th>
                   <th className="py-3.5 px-6 w-48">수강반</th>
                   <th className="py-3.5 px-6 w-32">학생명</th>
-                  <th className="py-3.5 px-3 text-center text-blue-700">시험</th>
+                  {/* 🌟 수정됨: 컬럼명 변경 */}
+                  <th className="py-3.5 px-3 text-center text-blue-700">주간테스트</th>
                   <th className="py-3.5 px-3 text-center text-amber-700">과제</th>
                   <th className="py-3.5 px-3 text-center text-rose-700">미완료</th>
                   <th className="py-3.5 px-3 text-center text-emerald-700">오답</th>
@@ -158,7 +159,6 @@ export default function StudentDashboard({
                       {stu.name}
                     </td>
                     
-                    {/* 🌟 테이블 배지 UI 변경 (건수 뱃지 + 하단 회색 문항수) */}
                     <td className="py-3.5 px-3 text-center">
                       {stu.stats.examC > 0 ? (
                         <div className="flex flex-col items-center gap-1">

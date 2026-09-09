@@ -8,10 +8,11 @@ export const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '�
 
 export const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
+// O, RO, TO만 정답 카운트 / X, TX만 오답 카운트
 export const tallyGrading = (counts: Record<string, { o: number; x: number; helped: number }>, key: any, code: string) => {
   if (!counts[key]) counts[key] = { o: 0, x: 0, helped: 0 };
-  if (['O', 'a', 'b', 'c', 'TO', 'RO'].includes(code)) counts[key].o++;
-  else if (['X', 'TX', '☆', 'B'].includes(code)) counts[key].x++;
+  if (['O', 'RO', 'TO'].includes(code)) counts[key].o++;
+  else if (['X', 'TX'].includes(code)) counts[key].x++;
   if (code === 'TO' || code === 'TX') counts[key].helped++;
 };
 
@@ -129,9 +130,8 @@ export function useLearningFetch() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  // 🌟 핵심 교정: targetStudentIds를 받아서 해당 학생들만 '빠르게 핀셋 갱신' 하도록 구조 변경
   const fetchStatsForTab = async (students: StudentInfo[], targetStudentIds?: string[]) => {
-    if (!targetStudentIds) setIsLoading(true); // 타겟팅 갱신일 땐 전체 화면 로딩을 띄우지 않고 백그라운드 갱신
+    if (!targetStudentIds) setIsLoading(true); 
     try {
       const studentIds = targetStudentIds ? targetStudentIds : students.map(s => s.id);
       if (studentIds.length === 0) return;
@@ -140,6 +140,17 @@ export function useLearningFetch() {
       let fetchedStats: any[] = [];
       let allCalEvents: any[] = []; 
       const chunkSize = 200;
+
+      // 🌟 [추가] 통계용 객체 생성 시 class_id가 비어있으면 학생의 주 소속 반으로 안전하게 매핑
+      const mapExamStat = (s: any, type: string) => {
+        const fallbackStu = students.find(st => st.id === s.student_id);
+        return {
+          ...s,
+          class_id: s.class_id || fallbackStu?.classId,
+          qCount: unwrap(s.exam_master)?.total_questions || 0,
+          type
+        };
+      };
       
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
@@ -149,24 +160,24 @@ export function useLearningFetch() {
           .in('student_id', chunk);
 
         if (rawExams) {
-          const examOnly = rawExams.filter((s: any) => !['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사', '미완료과제'].includes(s.exam_master?.exam_type));
-          fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'EXAM'}))];
+          const examOnly = rawExams.filter((s: any) => s.exam_master?.exam_type === '주간테스트');
+          fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => mapExamStat(s, 'EXAM'))];
           examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const hwExams = rawExams.filter((s: any) => ['과제', '과제프린트'].includes(s.exam_master?.exam_type));
-          fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'HW'}))];
+          fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => mapExamStat(s, 'HW'))];
           hwExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const printExams = rawExams.filter((s: any) => ['오답프린트', '오답'].includes(s.exam_master?.exam_type));
-          fetchedStats = [...fetchedStats, ...printExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'PRINT'}))];
+          fetchedStats = [...fetchedStats, ...printExams.map((s: any) => mapExamStat(s, 'PRINT'))];
           printExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const similarExams = rawExams.filter((s: any) => ['오답유사', '과제오답유사'].includes(s.exam_master?.exam_type));
-          fetchedStats = [...fetchedStats, ...similarExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'SIMILAR'}))];
+          fetchedStats = [...fetchedStats, ...similarExams.map((s: any) => mapExamStat(s, 'SIMILAR'))];
           similarExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'similar', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const overdueExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '미완료과제');
-          fetchedStats = [...fetchedStats, ...overdueExams.map((s: any) => ({...s, qCount: unwrap(s.exam_master)?.total_questions || 0, type: 'OVERDUE'}))];
+          fetchedStats = [...fetchedStats, ...overdueExams.map((s: any) => mapExamStat(s, 'OVERDUE'))];
           overdueExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'overdue', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
         }
         
@@ -200,7 +211,6 @@ export function useLearningFetch() {
         });
       }
       
-      // 🌟 타겟 갱신일 경우 기존 배열에 방금 가져온 새 데이터만 교체 삽입
       if (targetStudentIds) {
         setCurrentStats(prev => {
           const filtered = prev.filter(p => !targetStudentIds.includes(p.student_id));
@@ -275,8 +285,9 @@ export function useLearningFetch() {
       let combined: any[] = [];
       exams?.forEach(ex => {
         const m = unwrap(ex.exam_master);
-        let type = 'exam';
-        if (['오답프린트', '오답'].includes(m?.exam_type)) type = 'print';
+        let type = 'other';
+        if (m?.exam_type === '주간테스트') type = 'exam';
+        else if (['오답프린트', '오답'].includes(m?.exam_type)) type = 'print';
         else if (['과제', '과제프린트'].includes(m?.exam_type)) type = 'hw_exam';
         else if (['오답유사', '과제오답유사'].includes(m?.exam_type)) type = 'similar';
         else if (m?.exam_type === '미완료과제') type = 'overdue'; 
@@ -332,7 +343,7 @@ export function useLearningFetch() {
           if (rawExams) {
             let data: any[] = []; 
             if (tab === 'EXAM') {
-               data = rawExams.filter((d: any) => !['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사', '미완료과제'].includes(d.exam_master?.exam_type));
+               data = rawExams.filter((d: any) => d.exam_master?.exam_type === '주간테스트');
             } else if (tab === 'INCORRECT') {
                data = rawExams.filter((d: any) => ['오답프린트', '오답'].includes(d.exam_master?.exam_type));
             } else if (tab === 'SIMILAR') {
@@ -364,11 +375,14 @@ export function useLearningFetch() {
             const counts: Record<string, { o: number; x: number; helped: number }> = {};
             dedupAns.forEach(a => tallyGrading(counts, a.exam_assignment_id, a.grading_code));
             
+            // 🌟 [추가] class_id가 null로 튕기지 않도록 안전하게 삽입
             const enriched = data.map((d: any) => {
                const em = unwrap(d.exam_master); const cls = unwrap(d.class); const stu = unwrap(d.student);
                const stuFallback = students.find(s => s.id === d.student_id);
                return {
-                 ...d, masterId: em?.exam_id, 
+                 ...d, 
+                 class_id: d.class_id || stuFallback?.classId, 
+                 masterId: em?.exam_id, 
                  type: ['오답프린트', '오답'].includes(em?.exam_type) ? 'print' : (['오답유사', '과제오답유사'].includes(em?.exam_type) ? 'similar' : (em?.exam_type === '미완료과제' ? 'overdue' : (['과제', '과제프린트'].includes(em?.exam_type) ? 'hw_exam' : 'exam'))), 
                  is_exam_hw: false,
                  oCount: counts[d.assignment_id]?.o || 0, xCount: counts[d.assignment_id]?.x || 0, helpedCount: counts[d.assignment_id]?.helped || 0,
@@ -473,11 +487,14 @@ export function useLearningFetch() {
           const eCounts: Record<string, { o: number; x: number; helped: number }> = {};
           dedupEAns.forEach(a => tallyGrading(eCounts, a.exam_assignment_id, a.grading_code));
 
+          // 🌟 [추가] 과제프린트의 class_id 누락 방지
           const formattedExamHws = examData.map((e:any) => {
             const em = unwrap(e.exam_master);
             const stuFallback = students.find(s => s.id === e.student_id);
             return {
-              ...e, masterId: em?.exam_id, type: 'hw_exam', is_exam_hw: true, sort_date: e.created_at, 
+              ...e, 
+              class_id: e.class_id || stuFallback?.classId, 
+              masterId: em?.exam_id, type: 'hw_exam', is_exam_hw: true, sort_date: e.created_at, 
               class_name: unwrap(e.class)?.name || stuFallback?.className || '반 미지정',
               student: { name: unwrap(e.student)?.name || stuFallback?.name || '알수없음' },
               oCount: eCounts[e.assignment_id]?.o || 0, xCount: eCounts[e.assignment_id]?.x || 0, helpedCount: eCounts[e.assignment_id]?.helped || 0, totalQ: em?.total_questions || 0,

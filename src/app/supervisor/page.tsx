@@ -392,7 +392,7 @@ export default function SupervisorDashboard() {
                 </div>
             )}
 
-            {/* 🌟 호출 상세 처리 모달 */}
+            {/* 🌟 호출 상세 처리 모달 (문제 텍스트 크기 조정 및 수식 렌더링 지원) */}
             {callProcessModal && callProcessModal.isOpen && (
                 <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 md:p-8 animate-[fadeIn_0.2s_ease-out]">
                     <div className="bg-slate-100 rounded-[2rem] shadow-2xl w-full max-w-4xl h-full max-h-[85vh] flex flex-col overflow-hidden">
@@ -400,32 +400,44 @@ export default function SupervisorDashboard() {
                             <h2 className="text-2xl font-black">🙋 {activeStudents[callProcessModal.seat]?.name || '학생'} 질문 상세 보기</h2>
                             <button onClick={() => setCallProcessModal(null)} className="text-white/70 hover:text-white text-4xl font-black transition-colors">&times;</button>
                         </div>
-                        <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-6 custom-scroll bg-white">
+                        <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4 custom-scroll bg-white">
                             <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
                                 <span className="text-xl font-extrabold text-rose-600">{callProcessModal.seat} <span className="text-base text-slate-400 font-bold ml-1">좌석</span></span>
                                 <span className="text-sm font-black px-3 py-1.5 rounded bg-rose-600 shadow-sm text-white">{callProcessModal.qNum}번 문항{callProcessModal.callInfo.source ? ' · '+callProcessModal.callInfo.source : ''}</span>
                             </div>
-                            <MathText className="text-[20px] text-slate-800 font-myungjo font-semibold leading-[2.0] break-keep" html={callProcessModal.callInfo.questionText} />
+                            
+                            {/* 🌟 폰트 크기 최적화: text-[16px] md:text-[17px] */}
+                            <MathText className="text-[16px] md:text-[17px] text-slate-800 font-myungjo font-semibold leading-[1.8] break-keep" html={callProcessModal.callInfo.questionText} />
+                            
+                            {/* 🌟 보기에 MathText 추가 */}
                             {callProcessModal.callInfo.options && (
-                                <div className="mt-5 flex flex-col gap-2">
+                                <div className="mt-4 flex flex-col gap-2">
                                     {callProcessModal.callInfo.options.map((opt: string, i: number) => (
-                                        <div key={i} className="text-[17px] text-slate-700 font-medium flex gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100">
-                                            <span className="font-black text-rose-400 shrink-0">{i + 1}.</span><span>{opt}</span>
+                                        <div key={i} className="text-[15px] text-slate-700 font-medium flex gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100">
+                                            <span className="font-black text-rose-400 shrink-0">{i + 1}.</span>
+                                            <MathText className="flex-1" html={opt} />
                                         </div>
                                     ))}
                                 </div>
                             )}
+                            
                             {callProcessModal.callInfo.imageUrl && (
                                 <img src={callProcessModal.callInfo.imageUrl} className="max-w-[720px] w-full rounded-xl border-2 border-slate-200 mt-4 shadow-sm" alt="문제 첨부 이미지" />
                             )}
+                            
+                            {/* 🌟 정답에 MathText 추가 */}
                             <div className="mt-6 pt-4 border-t-2 border-dashed border-slate-200 flex items-start gap-3">
                                 <span className="text-xs font-black px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 shrink-0 mt-0.5">정답</span>
-                                <span className="text-lg font-black text-emerald-700">{callProcessModal.callInfo.answer || '정보 없음'}</span>
+                                <MathText className="text-[16px] md:text-lg font-black text-emerald-700" html={callProcessModal.callInfo.answer ? `$ ${callProcessModal.callInfo.answer.replace(/\$/g, '')} $` : '정보 없음'} />
                             </div>
+                            
+                            {/* 🌟 해설에 MathText 추가 */}
                             {callProcessModal.callInfo.explanation && (
                                 <div className="mt-5 pt-4 border-t-2 border-dashed border-slate-200">
                                     <span className="text-xs font-black px-2 py-1 rounded border border-slate-300 bg-slate-100 text-slate-600">해설</span>
-                                    <p className="text-base text-slate-600 font-medium leading-relaxed mt-2.5 bg-slate-50 p-4 rounded-xl border border-slate-100">{callProcessModal.callInfo.explanation}</p>
+                                    <div className="mt-2.5 bg-slate-50 p-4 rounded-xl border border-slate-100">
+                                        <MathText className="text-[14px] md:text-[15px] text-slate-600 font-medium leading-relaxed" html={callProcessModal.callInfo.explanation.replace(/\n/g, '<br>')} />
+                                    </div>
                                 </div>
                             )}
                         </div>
@@ -552,7 +564,7 @@ export default function SupervisorDashboard() {
                                 <p className="text-[12px] font-bold text-slate-800 leading-tight">{log.title}</p>
                                 <p className="text-[10px] text-slate-600 mt-0.5 leading-snug">{log.subtitle}</p>
                                 
-                                {/* 🌟 핵심 변경: 일반 호출은 바로 종료, 특정 문항 호출은 상세 모달 열기 */}
+                                {/* 🌟 일반 호출은 바로 종료, 문제 호출은 상세 모달 열기 */}
                                 {log.type === 'call' && (
                                     <button 
                                         onClick={() => {

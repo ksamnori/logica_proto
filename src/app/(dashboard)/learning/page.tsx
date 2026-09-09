@@ -143,15 +143,26 @@ export default function LearningPage() {
     return dateFilter === '1W' ? diff <= 7 * 24 * 3600000 : diff <= 30 * 24 * 3600000;
   };
 
+  // 🌟 [수정됨] CLASS 뷰에서 데이터 누락을 방지하는 강력한 필터 로직 적용
   const filteredGlobalList = useMemo(() => {
     return globalList.filter(item => {
-      if (currentView.type === 'CLASS' && item.class_id !== currentView.classId) return false;
+      if (currentView.type === 'CLASS') {
+        if (item.class_id) {
+          if (item.class_id !== currentView.classId) return false;
+        } else {
+          // DB에 class_id가 비어있어도, 학생이 해당 반 소속이면 무조건 띄워주기
+          const stu = allStudentsList.find(s => s.id === item.student_id);
+          if (!stu || (stu.classId !== currentView.classId && !stu.allClassIds?.includes(currentView.classId))) {
+            return false;
+          }
+        }
+      }
       if (!filterByDate(item.sort_date || item.created_at)) return false;
       const isCompleted = ['채점완료', '제출완료', '완료'].includes(item.status);
       if (!showCompleted && isCompleted) return false; 
       return true;
     });
-  }, [globalList, dateFilter, selectedDate, currentView, showCompleted]);
+  }, [globalList, dateFilter, selectedDate, currentView, showCompleted, allStudentsList]);
 
   const filteredTimeline = useMemo(() => {
     return timelineData.filter(item => {
@@ -193,7 +204,6 @@ export default function LearningPage() {
   };
 
   const studentStatsMap = useMemo(() => {
-    // 🌟 [수정] 건수(cCount)와 문항수(qCount)를 분리해서 누적하도록 변경
     const map: Record<string, { examC: number; examQ: number; hwC: number; hwQ: number; printC: number; printQ: number; similarC: number; similarQ: number; overdueC: number; overdueQ: number }> = {};
     currentStats.forEach(e => {
       let statClassId = e.class_id || 'UNKNOWN';
@@ -327,17 +337,16 @@ export default function LearningPage() {
   if (isAuthorized === false) return null; 
 
   return (
-    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative">
+    <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative font-pretendard">
       <div className="flex justify-between items-center shrink-0">
         
         <div className="flex items-center gap-2 p-1.5 bg-slate-200/60 rounded-xl shadow-inner overflow-x-auto">
           <button onClick={() => handleMainTabClick('DASHBOARD')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'DASHBOARD' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📈 학생 대시보드</button>
           <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
           
-          <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 시험</button>
+          <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 주간테스트</button>
           <button onClick={() => handleMainTabClick('HOMEWORK')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'HOMEWORK' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📝 과제</button>
           
-          {/* 🌟 OVERDUE 탭 디자인 통일 */}
           <button onClick={() => handleMainTabClick('OVERDUE')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'OVERDUE' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>⏰ 미완료과제</button>
           
           <button onClick={() => handleMainTabClick('INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'INCORRECT' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>❌ 오답</button>
