@@ -6,16 +6,26 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
-export async function POST(request: Request) {
+export async function GET(request: Request) {
   try {
-    const body = await request.json();
+    const { searchParams } = new URL(request.url);
     
-    // 통신사에서 넘어온 번호 파싱 (하이픈 제거)
-    const callerNumber = body.caller?.replace(/-/g, '');
+    // LG U+ 통신사에서 보내주는 파라미터 추출
+    const sender = searchParams.get('sender');     // 발신자 정보
+    const receiver = searchParams.get('receiver'); // 수신자 070번호
+    const kind = searchParams.get('kind');         // 1: 전화, 2: SMS
 
-    if (!callerNumber) {
-      return NextResponse.json({ error: 'No caller number provided' }, { status: 400 });
+    // 전화 수신(kind=1)이 아닌 SMS 수신(kind=2) 이벤트면 무시
+    if (kind !== '1') {
+      return NextResponse.json({ message: 'Ignored non-call event' }, { status: 200 });
     }
+
+    if (!sender) {
+      return NextResponse.json({ error: 'No sender provided' }, { status: 400 });
+    }
+
+    // 하이픈 제거 및 정규화
+    const callerNumber = sender.replace(/-/g, '');
 
     // 1. parent 테이블에서 번호로 학부모 검색
     const { data: parentData } = await supabaseAdmin
@@ -24,21 +34,22 @@ export async function POST(request: Request) {
       .eq('phone', callerNumber)
       .single();
 
-    // 2. call_log 테이블에 기록 Insert
+    // 2. call_log 테이블에 기록 Insert (Realtime 팝업 트리거)
     const { error: insertError } = await supabaseAdmin
       .from('call_log')
       .insert({
         caller_number: callerNumber,
-        receiver_number: body.called,
+        receiver_number: receiver,
         parent_id: parentData ? parentData.parent_id : null,
       });
 
     if (insertError) throw insertError;
 
-    return NextResponse.json({ success: true, message: 'Call logged successfully' }, { status: 200 });
+    // LG U+ 서버에 정상 처리되었음을 알림
+    return NextResponse.json({ success: true, message: 'Call logged' }, { status: 200 });
 
   } catch (error) {
-    console.error('Webhook Error:', error);
+    console.error('LGU+ Webhook Error:', error);
     return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 });
   }
 }
