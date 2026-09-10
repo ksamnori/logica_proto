@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 import { supabaseClient } from './supervisorUtils';
 import { clearActiveRecheck } from '@/lib/clinicSession';
 import SeatCanvas from '../clinic/_shared/SeatCanvas';
-import EmptySeatTile from '../clinic/_shared/EmptySeatTile';
 import SeatCardBody from './SeatCardBody';
 import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
 
@@ -13,7 +12,7 @@ export default function SeatGrid({ data }: { data: any }) {
         forceCheckoutModal, setForceCheckoutModal, recheckModal, setRecheckModal, confirmForceCheckout,
         endRequestModal, setEndRequestModal, resolveEndRequest,
         reservationModal, setReservationModal, confirmReservation, cancelReservation,
-        handlePointerDown, adjustClinicTime, taAction, sendToStudent, appendLog, removeLogsByTypeAndSeat,
+        handlePointerDown, adjustClinicTime, taAction, sendToStudent, removeLogsByTypeAndSeat,
         seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight,
     } = data;
 
@@ -85,89 +84,95 @@ export default function SeatGrid({ data }: { data: any }) {
     };
 
     return (
-        <main className="flex-1 p-6 bg-slate-200 overflow-y-auto relative">
-            <div className="w-full" style={{ aspectRatio: `${cw} / ${ch}` }}>
-            <SeatCanvas
-                seats={seatObjs || []}
-                canvasWidth={cw}
-                canvasHeight={ch}
-                renderSeat={(seatObj, scale) => {
-                    const seat = String(seatObj.number);
-                    const student = activeStudents[seat];
-                    const outerStyle = { width: RENDER_W * scale, height: RENDER_H * scale } as const;
-                    const innerStyle = { width: RENDER_W, height: RENDER_H, transform: `scale(${scale})`, transformOrigin: 'top left', willChange: 'transform', backfaceVisibility: 'hidden' } as const;
-                    if (!student) {
-                        return (
-                            <div data-seat={seat} style={outerStyle}>
-                                <div style={innerStyle}>
-                                    <EmptySeatTile label={seat} highlighted={!!((draggedSeat || draggedListStudent) && selectedSeatForMove !== seat)} />
+        <main className="flex-1 p-6 bg-slate-200 overflow-hidden relative flex items-center justify-center">
+            <div className="absolute inset-6 flex items-center justify-center">
+                <div className="w-full h-full max-w-full max-h-full flex items-center justify-center" style={{ aspectRatio: `${cw} / ${ch}` }}>
+                <SeatCanvas
+                    seats={seatObjs || []}
+                    canvasWidth={cw}
+                    canvasHeight={ch}
+                    renderSeat={(seatObj, scale) => {
+                        const seat = String(seatObj.number);
+                        const student = activeStudents[seat];
+                        const outerStyle = { width: RENDER_W * scale, height: RENDER_H * scale } as const;
+                        const innerStyle = { width: RENDER_W, height: RENDER_H, transform: `scale(${scale})`, transformOrigin: 'top left', willChange: 'transform', backfaceVisibility: 'hidden' } as const;
+                        
+                        if (!student) {
+                            const isHighlighted = !!((draggedSeat || draggedListStudent) && selectedSeatForMove !== seat);
+                            return (
+                                <div data-seat={seat} style={outerStyle}>
+                                    <div style={innerStyle} className={`w-full h-full rounded-2xl flex items-center justify-center border-2 border-dashed transition-all shadow-sm ${isHighlighted ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300 bg-slate-100 opacity-60 hover:opacity-100'}`}>
+                                        <span className="text-[40px] font-black text-slate-300 pointer-events-none">{seat}</span>
+                                    </div>
                                 </div>
-                            </div>
-                        );
-                    }
+                            );
+                        }
 
-                    if (student.type === 'reserved') {
+                        if (student.type === 'reserved') {
+                            return (
+                                <div data-seat={seat} style={outerStyle}>
+                                <div onPointerDown={(e) => handlePointerDown(e, seat)} style={innerStyle}
+                                     className="relative border-2 border-dashed border-slate-300 bg-slate-100 opacity-80 rounded-xl p-1.5 flex flex-col justify-center cursor-grab active:cursor-grabbing h-full">
+                                    <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`${student.name} 학생의 예약을 취소하시겠습니까?`)) cancelReservation(seat); }} title="예약 취소" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-slate-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-[60] transition-transform hover:scale-125">
+                                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                    <div className="pointer-events-none overflow-hidden h-full flex flex-col justify-center">
+                                        <div className="flex items-center justify-between gap-1 mb-0.5 shrink-0">
+                                            <div className="flex items-center gap-1 min-w-0">
+                                                <span className="shrink-0 bg-slate-500 text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">{seat}</span>
+                                                <span className="font-bold text-slate-700 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
+                                            </div>
+                                            <span className="shrink-0 text-[8px] font-bold px-1 py-px rounded bg-slate-400 text-white leading-none">🕒 예약</span>
+                                        </div>
+                                        <div className="text-[9px] font-bold text-slate-400 truncate mb-0.5 leading-none shrink-0">{student.classes?.length > 0 ? student.classes[0] : '반 없음'}</div>
+                                        <div className="text-[10px] font-bold text-indigo-500 mt-0.5 leading-tight shrink-0">⏰ {new Date(student.reservedFor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })} 예약</div>
+                                    </div>
+                                </div>
+                                </div>
+                            );
+                        }
+
+                        const isCall = student.status === 'call';
+                        const isHint = student.status === 'hint';
+                        const isAway = student.status === 'away';
+                        const isSubmitted = student.status === 'submitted';
+                        const isDragging = draggedSeat === seat;
+
+                        const cardClass = isCall ? 'status-help bg-white'
+                                        : isHint ? 'hint-flash bg-white border-slate-200'
+                                        : isAway ? 'bg-amber-50 border-amber-400'
+                                        : isSubmitted ? 'bg-blue-50 border-blue-400'
+                                        : 'bg-white border-slate-200 hover:shadow-md hover:border-slate-300';
+
                         return (
                             <div data-seat={seat} style={outerStyle}>
                             <div onPointerDown={(e) => handlePointerDown(e, seat)} style={innerStyle}
-                                 className="relative border-2 border-dashed border-slate-300 bg-slate-100 opacity-80 rounded-xl p-2 flex flex-col justify-center cursor-grab active:cursor-grabbing">
-                                <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`${student.name} 학생의 예약을 취소하시겠습니까?`)) cancelReservation(seat); }} title="예약 취소" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-slate-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-30 transition-transform hover:scale-125">
+                                 // 🌟 핵심 방어 해제: 바깥 컨테이너의 overflow-hidden을 삭제하여 X버튼이 자유롭게 튀어나오게 합니다.
+                                 className={`relative border ${isAway || isSubmitted ? 'border-2' : ''} rounded-xl p-1.5 flex flex-col justify-between shadow-sm cursor-grab active:cursor-grabbing transition-[background-color,border-color,box-shadow,opacity] duration-300 h-full ${cardClass} ${isDragging ? 'opacity-[0.85] ring-4 ring-indigo-500 ring-offset-1' : ''}`}>
+                                
+                                {/* 🌟 z-index를 최대로 끌어올려 무조건 맨 위에 위치시킵니다 */}
+                                <button onClick={(e) => { e.stopPropagation(); setForceCheckoutModal({ isOpen: true, seat }); }} title="강제 퇴실" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-[60] transition-transform hover:scale-125">
                                     <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                                 </button>
-                                <div className="pointer-events-none overflow-hidden">
-                                    <div className="flex items-center justify-between gap-1 mb-0.5">
-                                        <div className="flex items-center gap-1 min-w-0">
-                                            <span className="shrink-0 bg-slate-500 text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">{seat}</span>
-                                            <span className="font-bold text-slate-700 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
-                                        </div>
-                                        <span className="shrink-0 text-[8px] font-bold px-1 py-px rounded bg-slate-400 text-white leading-none">🕒 예약</span>
-                                    </div>
-                                    {student.classes?.length > 0 ? (
-                                        <div className="text-[8px] font-bold text-slate-400 truncate mb-0.5 leading-none">{student.classes[0]}</div>
-                                    ) : <div className="text-[8px] font-bold text-slate-300 truncate mb-0.5 leading-none">반 없음</div>}
-                                    <div className="text-[9px] font-bold text-indigo-500 mt-0.5 leading-tight">⏰ {new Date(student.reservedFor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })} 예약</div>
+                                
+                                {/* 내부 컨텐츠 래퍼에만 overflow-hidden을 걸어 내용물이 카드를 벗어나지 않게 합니다 */}
+                                <div className="pointer-events-none overflow-hidden h-full w-full flex flex-col">
+                                    <SeatCardBody
+                                        seat={seat} student={student} now={now} isMounted={isMounted}
+                                        onClearAway={() => taAction(seat, 'clear_away')}
+                                        onConfirmCheckout={() => taAction(seat, 'confirm_checkout')}
+                                        onOpenEndRequest={() => setEndRequestModal({ isOpen: true, seat })}
+                                        onAdjustTime={(delta) => adjustClinicTime(seat, delta)}
+                                        onForceReset={() => taAction(seat, 'force_reset')}
+                                        onForceRefresh={() => taAction(seat, 'force_refresh')}
+                                    />
                                 </div>
                             </div>
                             </div>
                         );
-                    }
-
-                    const isCall = student.status === 'call';
-                    const isHint = student.status === 'hint';
-                    const isAway = student.status === 'away';
-                    const isSubmitted = student.status === 'submitted';
-                    const isDragging = draggedSeat === seat;
-
-                    const cardClass = isCall ? 'status-help bg-white'
-                                    : isHint ? 'hint-flash bg-white border-slate-200'
-                                    : isAway ? 'bg-amber-50 border-amber-400'
-                                    : isSubmitted ? 'bg-blue-50 border-blue-400'
-                                    : 'bg-white border-slate-200 hover:shadow-md hover:border-slate-300';
-
-                    return (
-                        <div data-seat={seat} style={outerStyle}>
-                        <div onPointerDown={(e) => handlePointerDown(e, seat)} style={innerStyle}
-                             className={`relative border ${isAway || isSubmitted ? 'border-2' : ''} rounded-xl p-2 flex flex-col justify-center shadow-sm cursor-grab active:cursor-grabbing transition-[background-color,border-color,box-shadow,opacity] duration-300 ${cardClass} ${isDragging ? 'opacity-[0.85] ring-4 ring-indigo-500 ring-offset-1' : ''}`}>
-                            <button onClick={(e) => { e.stopPropagation(); setForceCheckoutModal({ isOpen: true, seat }); }} title="강제 퇴실" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-30 transition-transform hover:scale-125">
-                                <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                            </button>
-                            <div className="pointer-events-none overflow-hidden">
-                                <SeatCardBody
-                                    seat={seat} student={student} now={now} isMounted={isMounted}
-                                    onClearAway={() => taAction(seat, 'clear_away')}
-                                    onConfirmCheckout={() => taAction(seat, 'confirm_checkout')}
-                                    onOpenEndRequest={() => setEndRequestModal({ isOpen: true, seat })}
-                                    onAdjustTime={(delta) => adjustClinicTime(seat, delta)}
-                                    // 🌟 핵심 픽스: 드디어 버튼에 전선 연결!
-                                    onForceReset={() => taAction(seat, 'force_reset')}
-                                    onForceRefresh={() => taAction(seat, 'force_refresh')}
-                                />
-                            </div>
-                        </div>
-                        </div>
-                    );
-                }}
-            />
+                    }}
+                />
+                </div>
             </div>
 
             {/* 강제 퇴실 모달 */}

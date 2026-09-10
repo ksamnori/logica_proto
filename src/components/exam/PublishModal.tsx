@@ -20,7 +20,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
 
   const [publishTab, setPublishTab] = useState("grade");
   const [publishSearch, setPublishSearch] = useState("");
-  const [alwaysOpen, setAlwaysOpen] = useState(true);
+  const [alwaysOpen, setAlwaysOpen] = useState(false); // 🌟 기본값 OFF 로 변경
   
   const [selectedStudents, setSelectedStudents] = useState<any[]>([]);
   
@@ -54,7 +54,8 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       
       const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장');
 
-      let classQuery = supabase.from('class').select('*');
+      // 🌟 강사 이름(instructor)도 함께 불러오도록 쿼리 수정
+      let classQuery = supabase.from('class').select('*, instructor(name)');
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const [ { data: studentsData }, { data: classesData }, { data: enrollsData } ] = await Promise.all([
@@ -100,7 +101,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       const activeStudentsMap = new Map();
       processedStudents.forEach(s => activeStudentsMap.set(s.student_id, s));
 
-      // 💡 [수정됨] 클래스 정렬 순서 강제: Ultimate -> Master -> Apex -> Titan -> Horizon -> 기타
       const order = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '기타'];
       const getOrder = (c: any) => {
         const targetStr = (c.level_name || c.name || "");
@@ -191,7 +191,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     if (!confirm(`선택한 ${selectedStudents.length}건의 출제를 진행하시겠습니까?`)) return;
 
     try {
-      // 💡 [핵심 추가] '과제프린트'를 학습 관리 페이지에서 인식하도록 '과제'로 타입 강제 업데이트
       const { data: exMaster } = await supabase.from('exam_master').select('exam_type').eq('exam_id', examId).single();
       if (exMaster?.exam_type === '과제프린트') {
         await supabase.from('exam_master').update({ exam_type: '과제' }).eq('exam_id', examId);
@@ -224,7 +223,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     } catch (e: any) { alert(`❌ 출제 실패: ${e.message}`); }
   };
 
-  // 💡 [수정됨] 학년별 오름차순(저학년->고학년) 정렬을 위한 가중치 계산 함수
   const getGradeWeight = (gName: string) => {
     let weight = 0;
     if (gName.includes('초등')) weight = 100;
@@ -251,8 +249,8 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
         
         <div className="px-4 pt-3 shrink-0">
           <div className="flex border border-slate-200 rounded-md overflow-hidden bg-slate-50">
-            <button onClick={() => setPublishTab('grade')} className={`flex-1 py-2 text-sm font-extrabold transition-colors ${publishTab === 'grade' ? 'bg-white text-slate-800 border-b-2 border-[#002864]' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>학년별 선택</button>
-            <button onClick={() => setPublishTab('class')} className={`flex-1 py-2 text-sm font-extrabold transition-colors ${publishTab === 'class' ? 'bg-white text-slate-800 border-b-2 border-[#002864]' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>수강반별 선택</button>
+            <button onClick={() => { setPublishTab('grade'); setPublishSearch(""); }} className={`flex-1 py-2 text-sm font-extrabold transition-colors ${publishTab === 'grade' ? 'bg-white text-slate-800 border-b-2 border-[#002864]' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>학년별 선택</button>
+            <button onClick={() => { setPublishTab('class'); setPublishSearch(""); }} className={`flex-1 py-2 text-sm font-extrabold transition-colors ${publishTab === 'class' ? 'bg-white text-slate-800 border-b-2 border-[#002864]' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>수강반별 선택</button>
           </div>
         </div>
 
@@ -260,7 +258,8 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
           <div className="w-1/2 flex flex-col border border-slate-200 rounded-md overflow-hidden bg-white">
             <div className="p-2 border-b border-slate-200 bg-white relative">
               <svg className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-              <input type="text" value={publishSearch} onChange={e => setPublishSearch(e.target.value)} placeholder="학생 이름 검색" className="w-full pl-8 pr-8 py-1.5 text-sm font-bold border-none focus:outline-none focus:ring-0" />
+              {/* 🌟 선택된 탭에 따라 placeholder 동적 변경 */}
+              <input type="text" value={publishSearch} onChange={e => setPublishSearch(e.target.value)} placeholder={publishTab === 'class' ? "수강반 이름 검색" : "학생 이름 검색"} className="w-full pl-8 pr-8 py-1.5 text-sm font-bold border-none focus:outline-none focus:ring-0" />
               <button onClick={() => setPublishSearch("")} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-300 hover:text-slate-500">✕</button>
             </div>
 
@@ -268,7 +267,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
               {isLoading ? (
                 <div className="absolute inset-0 flex items-center justify-center text-slate-400 font-bold text-sm">데이터를 불러오는 중입니다...</div>
               ) : publishTab === 'grade' ? (
-                // 💡 [수정됨] 알파벳 순(고등->초등)이 아닌 가중치 기반 오름차순(초등->고등)으로 정렬
                 Object.keys(groupedStudents).sort((a, b) => getGradeWeight(a) - getGradeWeight(b)).map(groupName => {
                   const studentsInGroup = groupedStudents[groupName].filter((s: any) => {
                     const defaultClassId = s.classIds && s.classIds.length > 0 ? s.classIds[0] : null;
@@ -311,17 +309,26 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
               ) : (
                 allClasses.map(c => {
                     if (c.students.length === 0) return null;
-                    const studentsInClass = c.students.filter((s: any) => !isSelected(s.student_id, c.class_id) && (publishSearch === '' || s.name.toLowerCase().includes(publishSearch.toLowerCase())));
-                    if (studentsInClass.length === 0 && publishSearch !== '') return null;
+                    
+                    // 🌟 수강반 이름으로 검색 필터 적용
+                    const matchesClassSearch = publishSearch === '' || c.name.toLowerCase().includes(publishSearch.toLowerCase());
+                    if (!matchesClassSearch) return null;
+
+                    const studentsInClass = c.students.filter((s: any) => !isSelected(s.student_id, c.class_id));
                     
                     const isExpanded = alwaysOpen || publishSearch !== '' || expandedClassGroups.includes(c.class_id);
+                    const instName = Array.isArray(c.instructor) ? c.instructor[0]?.name : c.instructor?.name;
 
                     return (
                       <div key={c.class_id} className="border-b border-slate-100">
                         <div className="px-4 py-2.5 bg-slate-50 flex justify-between items-center cursor-pointer hover:bg-slate-100" onClick={() => toggleClassGroup(c.class_id)}>
                           <div className="flex items-center gap-2">
                             <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${isExpanded ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                            <span className="text-sm font-extrabold text-slate-700">{c.name} <span className="text-slate-400 font-bold ml-1">{c.students.length}명</span></span>
+                            <span className="text-sm font-extrabold text-slate-700">
+                              {c.name} 
+                              <span className="text-[11px] text-slate-500 font-bold ml-1">({instName ? `${instName} 선생님` : '선생님 미지정'})</span>
+                              <span className="text-slate-400 font-bold ml-1">{c.students.length}명</span>
+                            </span>
                           </div>
                           <button onClick={(e) => selectAllInClass(c.class_id, e)} className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-xs hover:bg-blue-200 transition-colors shadow-sm ml-2 font-bold">+ 반 전체추가</button>
                         </div>

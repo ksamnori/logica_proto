@@ -34,59 +34,65 @@ export default function SeatCardBody({
     const pe = interactive ? 'pointer-events-auto' : '';
 
     return (
-        <div className="flex flex-col gap-1 h-full relative">
-            <div className="flex items-center justify-between gap-1">
+        <div className="flex flex-col h-full w-full justify-between min-h-0">
+            {/* 1. 상단 헤더: 좌석, 이름, 리셋, 상태 */}
+            <div className="flex items-center justify-between pb-1 border-b border-slate-200 shrink-0">
                 <div className="flex items-center gap-1 min-w-0">
-                    <span className="shrink-0 bg-[#002864] text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">{seat}</span>
-                    <span className="font-bold text-slate-900 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
+                    <span className="shrink-0 bg-[#002864] text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded shadow-sm leading-none">{seat}</span>
+                    <span className="font-extrabold text-slate-900 text-[12px] truncate leading-none" title={student.name}>{student.name}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
-                    {/* 🌟 수정: 강제 초기화(리셋) 버튼을 배지 옆에 작게 배치하여 공간을 밀어내지 않습니다. */}
+                    {/* 🌟 롤백 완료: 다시 예전처럼 호버 시 통째로 색상이 쨍하게 변합니다! */}
                     {interactive && (
-                        <button onClick={(e) => { e.stopPropagation(); onForceReset?.(); }} title="기기 새로고침 및 상태 초기화" className={`text-[8px] font-bold bg-slate-100 text-slate-500 hover:bg-fuchsia-500 hover:text-white px-1.5 py-0.5 rounded leading-none ${pe} transition-colors`}>
+                        <button onClick={(e) => { e.stopPropagation(); onForceReset?.(); }} className={`shrink-0 text-[9px] font-bold bg-slate-100 text-slate-500 hover:bg-fuchsia-500 hover:text-white border border-slate-200 hover:border-fuchsia-500 px-1.5 py-0.5 rounded leading-none transition-colors ${pe}`}>
                             ↻ 리셋
                         </button>
                     )}
-                    <span className={`text-[8px] font-bold px-1 py-px rounded leading-none ${badgeBg}`}>{badgeText}</span>
+                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm leading-none ${badgeBg}`}>{badgeText}</span>
                 </div>
             </div>
-            <div className="flex items-center gap-1.5 min-w-0">
-                {student.classes?.length > 0 ? (
-                    <span className="text-[8px] font-bold text-emerald-600 truncate leading-none">{student.classes[0]}</span>
-                ) : <span className="text-[8px] font-bold text-slate-300 truncate leading-none">반 없음</span>}
-                {student.sessionNo > 1 && <span className="shrink-0 text-[7px] font-bold px-1 py-px rounded bg-indigo-100 text-indigo-600 leading-none">재이용 {student.sessionNo}회차</span>}
-            </div>
-            {student.activity && (
-                <div className="text-[9px] font-bold text-indigo-600 truncate flex items-center gap-1 leading-tight">{student.activity} {student.isTyping && <span className="animate-pulse">✍️</span>}</div>
-            )}
-            {student.endRequestPending && (
-                <button onClick={(e) => { e.stopPropagation(); onOpenEndRequest?.(); }} className={`${pe} w-full text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded px-1 py-0.5 animate-pulse leading-tight`}>🚪 종료 요청 · 클릭해서 처리</button>
-            )}
-            <div className="flex items-center gap-1.5 text-[8px] text-slate-400 font-bold leading-none">
-                <span>⏱ <span className="tabular-nums">{isMounted ? formatDuration(now - student.firstSeenAt) : '00:00'}</span></span>
-                {student.totalCalls > 0 && <span className="text-rose-400">🚨×{student.totalCalls}</span>}
-                {student.totalHints > 0 && <span className="text-amber-400">💡×{student.totalHints}</span>}
-            </div>
-            <div className={pe}>
-                {isAway && <button onClick={(e) => { e.stopPropagation(); onClearAway?.(); }} className="w-full bg-amber-100 text-amber-700 text-[9px] font-bold py-1 rounded border border-amber-300 leading-none">복귀 처리</button>}
-                {isSubmitted && (
-                    <div className="flex flex-col gap-0.5">
-                        <div className="bg-white border border-blue-200 rounded text-center py-px text-[9px] font-bold text-blue-800 leading-tight">{student.score}/5점</div>
-                        <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="bg-slate-800 text-white text-[9px] font-bold py-1 rounded leading-none">퇴실처리</button>
+
+            {/* 2. 중앙 컨텐츠 구역 */}
+            <div className="flex flex-col justify-center flex-1 min-h-0 py-0.5 gap-0.5">
+                <div className="text-[10px] font-bold text-emerald-600 truncate leading-none mt-0.5">
+                    {student.classes?.length > 0 ? student.classes[0] : '반 없음'}
+                </div>
+                <div className="text-[10px] font-bold text-indigo-600 truncate leading-none flex items-center gap-1 mt-0.5">
+                    {student.activity || '-'} {student.isTyping && <span className="animate-pulse">✍️</span>}
+                </div>
+                <div className="flex items-center justify-between text-[10px] text-slate-500 font-bold leading-none mt-1">
+                    <span>⏱ {isMounted ? formatDuration(now - student.firstSeenAt) : '00:00'}</span>
+                    <div className="flex items-center gap-1">
+                        {student.totalCalls > 0 && <span className="text-rose-500">🚨{student.totalCalls}</span>}
+                        {student.totalHints > 0 && <span className="text-amber-500">💡{student.totalHints}</span>}
                     </div>
+                </div>
+            </div>
+
+            {/* 3. 상태 제어 버튼 */}
+            <div className={`flex flex-col gap-0.5 shrink-0 ${pe}`}>
+                {student.endRequestPending && (
+                    <button onClick={(e) => { e.stopPropagation(); onOpenEndRequest?.(); }} className="w-full text-[10px] font-bold text-rose-600 bg-rose-50 border border-rose-200 rounded py-0.5 animate-pulse leading-none shadow-sm">🚪 종료요청 승인</button>
+                )}
+                {isAway && <button onClick={(e) => { e.stopPropagation(); onClearAway?.(); }} className="w-full bg-amber-100 text-amber-700 text-[10px] font-bold py-0.5 rounded border border-amber-300 shadow-sm leading-none">복귀 처리</button>}
+                {isSubmitted && (
+                    <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="w-full bg-slate-800 text-white text-[10px] font-bold py-0.5 rounded shadow-sm leading-none">퇴실처리 ({student.score}점)</button>
                 )}
                 {isOffline && (
-                    <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="w-full bg-slate-800 text-white text-[9px] font-bold py-1 rounded border border-slate-700 leading-none mt-1 animate-pulse">⚠️ 강제 퇴실 처리</button>
+                    <button onClick={(e) => { e.stopPropagation(); onConfirmCheckout?.(); }} className="w-full bg-slate-800 text-white text-[10px] font-bold py-0.5 rounded shadow-sm leading-none animate-pulse">강제퇴실</button>
                 )}
             </div>
-            {/* 🌟 하단 시간 조절 버튼이 정상적으로 노출됩니다 */}
+
+            {/* 4. 하단 영역 */}
             {student.firstSeenAt && student.clinicDurationMs != null && (
-                <div className={`mt-auto flex items-center justify-between pt-1 border-t border-slate-100 ${pe} ${isUrgent ? 'text-rose-600' : 'text-slate-400'}`}>
-                    <span className="text-[8px] font-bold whitespace-nowrap leading-none">⏳ <span className="tabular-nums">{isMounted ? formatDuration(remainingMs) : '00:00'}</span></span>
-                    <div className="flex items-center rounded-md border border-slate-200 overflow-hidden shadow-sm shrink-0">
-                        <button onClick={(e) => { e.stopPropagation(); onAdjustTime?.(-10); }} className="w-4 h-4 flex items-center justify-center bg-white text-slate-400 leading-none text-[10px]">-</button>
-                        <span className="w-px h-3 bg-slate-200"></span>
-                        <button onClick={(e) => { e.stopPropagation(); onAdjustTime?.(10); }} className="w-4 h-4 flex items-center justify-center bg-white text-slate-400 leading-none text-[10px]">+</button>
+                <div className={`flex items-center justify-between border-t border-slate-200 pt-1 mt-0.5 shrink-0 ${pe}`}>
+                    <span className={`text-[11px] font-black leading-none ${isUrgent ? 'text-rose-600' : 'text-slate-700'}`}>
+                        ⏳ {isMounted ? formatDuration(remainingMs) : '00:00'}
+                    </span>
+                    <div className="flex items-center rounded border border-slate-300 bg-white overflow-hidden shadow-sm shrink-0">
+                        <button onClick={(e) => { e.stopPropagation(); onAdjustTime?.(-10); }} className="w-5 h-4 flex items-center justify-center hover:bg-slate-100 active:bg-slate-200 text-slate-600 font-bold leading-none text-[12px] transition-colors">-</button>
+                        <span className="w-px h-3 bg-slate-300"></span>
+                        <button onClick={(e) => { e.stopPropagation(); onAdjustTime?.(10); }} className="w-5 h-4 flex items-center justify-center hover:bg-slate-100 active:bg-slate-200 text-slate-600 font-bold leading-none text-[12px] transition-colors">+</button>
                     </div>
                 </div>
             )}

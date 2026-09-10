@@ -86,7 +86,6 @@ export default function ExamListPage() {
     }
   }, [isAuthorized]);
 
-  // 💡 수정된 부분: 날짜와 시간을 함께 포맷팅 (요일 제외)
   const formatDateTime = (dateString: string) => {
     if (!dateString) return '-';
     const d = new Date(dateString);
@@ -118,7 +117,6 @@ export default function ExamListPage() {
     }))).sort();
   }, [exams]);
 
-  // 🌟 4분류 탭과 서브 필터를 동시에 적용하여 데이터 필터링
   const filteredExams = useMemo(() => {
     return exams.filter(exam => {
       const typeStr = exam.exam_type || '평가';
@@ -156,7 +154,6 @@ export default function ExamListPage() {
 
     if (!confirm("⚠️ 이 문제지를 정말 삭제하시겠습니까?\n(삭제하면 복구할 수 없습니다.)")) return;
     
-    // 오답 및 오답유사 프린트는 자동 배부되므로 복수 삭제 방지
     if (['오답프린트', '오답', '오답유사', '과제오답유사'].includes(examType)) {
       if (assignCount >= 2) {
         alert("🚨 2명 이상의 학생에게 배부된 개인 맞춤 프린트는 직접 삭제할 수 없습니다!\n(다른 학생의 채점 기록이 함께 증발하는 것을 방지합니다.)\n\n해당 학생의 타임라인에서 개별적으로 배부 취소(삭제)를 진행해 주세요.");
@@ -193,15 +190,26 @@ export default function ExamListPage() {
     }
   };
 
+  // 🌟 [핵심 수정] 새 문제지, 수정 모드 진입 시 기존에 쌓인 세션 쓰레기값을 완벽히 청소
+  const clearSessionStorageForExam = () => {
+    const keysToRemove = [
+      'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
+      'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
+      'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
+      'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
+      'isClinicMode'
+    ];
+    keysToRemove.forEach(k => sessionStorage.removeItem(k));
+  };
+
   const createNewExam = () => {
-    sessionStorage.removeItem('editExamId');
-    sessionStorage.removeItem('duplicateExamId');
+    clearSessionStorageForExam();
     router.push('/exam/step1'); 
   };
 
   const editExam = (examId: string) => {
+    clearSessionStorageForExam();
     sessionStorage.setItem('editExamId', examId);
-    sessionStorage.removeItem('duplicateExamId');
     router.push(`/exam/step2?exam_id=${examId}`);
   };
 
@@ -212,8 +220,8 @@ export default function ExamListPage() {
   };
 
   const duplicateAndEditExam = (examId: string) => {
+    clearSessionStorageForExam();
     sessionStorage.setItem('duplicateExamId', examId);
-    sessionStorage.removeItem('editExamId');
     router.push(`/exam/step2?duplicate_exam_id=${examId}`);
   };
 
@@ -237,7 +245,6 @@ export default function ExamListPage() {
 
       <div className="bg-white px-4 py-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 flex-wrap gap-4">
         
-        {/* 🌟 4분류 메인 탭 필터 (학생 대시보드와 동일한 UI/UX 구조) */}
         <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl shadow-inner">
           <button 
             onClick={() => setMainTab('ALL')} 
@@ -299,7 +306,6 @@ export default function ExamListPage() {
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-24">학년 범위</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-28">유형 속성</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm">시험지 제목 및 범위</th>
-                {/* 💡 헤더 텍스트 변경: 생성일 -> 생성일시 */}
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">생성일시</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">출제자</th>
                 <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-right">관리 액션</th>
@@ -327,7 +333,6 @@ export default function ExamListPage() {
                   const createdTime = new Date(exam.created_at).getTime();
                   const isNew = !isNaN(createdTime) && ((Date.now() - createdTime) / (1000 * 3600 * 24)) <= 2;
 
-                  // 🌟 4분류 컬러링
                   let typeColorClass = "bg-slate-100 text-slate-600 border-slate-200";
                   const typeStr = exam.exam_type || '평가';
                   
@@ -357,7 +362,6 @@ export default function ExamListPage() {
                           <span>{exam.total_questions || 0}문제</span><span className="text-slate-300">|</span><span>{diff}</span><span className="text-slate-300">|</span><span className="truncate max-w-[250px]" title={scope}>{scope}</span>
                         </div>
                       </td>
-                      {/* 💡 수정된 부분: formatDateTime 함수를 사용하여 날짜와 시간 출력 */}
                       <td className="py-4 px-5 text-center text-slate-500 font-bold text-xs">{formatDateTime(exam.created_at)}</td>
                       <td className="py-4 px-5 text-center text-slate-600 font-bold text-xs">{creatorName}</td>
                       <td className="py-4 px-5">

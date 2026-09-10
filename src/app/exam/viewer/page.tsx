@@ -360,7 +360,6 @@ export default function ExamViewerPage() {
           finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="exam-grid-admission pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum)}${rHtml}</div>${fHtml}</div>`;
         });
 
-        // 🌟 [수정됨] 강제로 빈 페이지를 토해내게 만들던 인라인 style 제거 완료!
         if (pages.length % 2 !== 0) {
           finalBulkHtml += `
             <div class="a3-page flex flex-col items-center justify-center bg-slate-50/20">
@@ -527,17 +526,25 @@ export default function ExamViewerPage() {
         return; 
 
       } else if (sessionStorage.getItem('examQuestions')) {
+        // 🌟 [핵심 수정] 새 문제지 생성 / 강제 수정 진입 분기 로직
         isNew = true;
         isNewExamRef.current = true;
         
         const editOriginalType = sessionStorage.getItem('editOriginalType');
         const editOriginalId = sessionStorage.getItem('editOriginalId');
         const editMasterId = sessionStorage.getItem('editMasterId'); 
+        const editExamId = sessionStorage.getItem('editExamId'); // 🔥 강제 수정 ID 확인
 
         let loadExamId = null;
         if (editOriginalType === 'exam') {
             loadExamId = editMasterId; 
             rebuildExamIdRef.current = editMasterId; 
+        } else if (editExamId) {
+            // 🔥 강제 수정일 경우, 새 문제지가 아니라 기존 문제지를 갱신
+            loadExamId = editExamId;
+            rebuildExamIdRef.current = editExamId;
+            isNew = false;
+            isNewExamRef.current = false;
         } else {
             rebuildExamIdRef.current = null;
         }
@@ -546,14 +553,27 @@ export default function ExamViewerPage() {
         badge = sessionStorage.getItem('examSubTitle') || '';
         const sessionExamType = sessionStorage.getItem('examType');
 
-        if (sessionStorage.getItem('isClinicMode') === 'true' || sessionExamType === '과제프린트' || sessionExamType === '오답프린트') {
-          lType = sessionExamType || '과제프린트';
+        // 🔥 강제 수정(editExamId) 시 잔여 데이터 무시하고 DB 기준 적용
+        if (loadExamId) {
+            const { data: origExam } = await supabase.from('exam_master').select('*').eq('exam_id', loadExamId).single();
+            if (origExam) {
+                title = origExam.title;
+                badge = origExam.sub_title || '';
+                lType = origExam.exam_type || '선택없음';
+                dbLayoutSettings = origExam.layout_settings || null;
+                wWeek = origExam.test_week || null;
+                wGrade = origExam.target_grade || "";
+            }
         } else {
-          try {
-            const step1Data = JSON.parse(sessionStorage.getItem('exam_step1_data') || '{}');
-            if (step1Data.examType === 'print') lType = '오답프린트';
-            else if (step1Data.examType === 'homework') lType = '과제프린트';
-          } catch(e) {}
+            if (sessionStorage.getItem('isClinicMode') === 'true' || sessionExamType === '과제프린트' || sessionExamType === '오답프린트') {
+              lType = sessionExamType || '과제프린트';
+            } else {
+              try {
+                const step1Data = JSON.parse(sessionStorage.getItem('exam_step1_data') || '{}');
+                if (step1Data.examType === 'print') lType = '오답프린트';
+                else if (step1Data.examType === 'homework') lType = '과제프린트';
+              } catch(e) {}
+            }
         }
 
         const parsedData = JSON.parse(sessionStorage.getItem('examQuestions') || "[]");
@@ -590,20 +610,6 @@ export default function ExamViewerPage() {
 
         let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
         let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
-
-        if (loadExamId) {
-          const { data: origExam } = await supabase.from('exam_master').select('*').eq('exam_id', loadExamId).single();
-          if (origExam) {
-            title = origExam.title;
-            if (sessionStorage.getItem('isClinicMode') !== 'true') {
-              badge = origExam.sub_title || '';
-              lType = origExam.exam_type || '선택없음';
-            }
-            dbLayoutSettings = origExam.layout_settings || null;
-            wWeek = origExam.test_week || null;
-            wGrade = origExam.target_grade || "";
-          }
-        }
 
         if (dbLayoutSettings) {
           const s = typeof dbLayoutSettings === 'string' ? JSON.parse(dbLayoutSettings) : dbLayoutSettings;
@@ -1232,10 +1238,12 @@ export default function ExamViewerPage() {
 
       const editOriginalType = sessionStorage.getItem('editOriginalType');
       const editOriginalId = sessionStorage.getItem('editOriginalId');
-      const editMasterId = sessionStorage.getItem('editMasterId'); 
 
-      let targetStudentId = sessionStorage.getItem('clinicTargetStudentId') || sessionStorage.getItem('editStudentId');
-      let targetClassId = sessionStorage.getItem('clinicTargetClassId') || sessionStorage.getItem('editClassId');
+      // 🔥 강제 수정(editExamId)인 경우에는 세션의 쓰레기값 학생ID(clinicTargetStudentId)를 무시합니다.
+      const editExamId = sessionStorage.getItem('editExamId');
+
+      let targetStudentId = editExamId ? null : (sessionStorage.getItem('clinicTargetStudentId') || sessionStorage.getItem('editStudentId'));
+      let targetClassId = editExamId ? null : (sessionStorage.getItem('clinicTargetClassId') || sessionStorage.getItem('editClassId'));
 
       if (editOriginalType === 'hw' && editOriginalId) {
           const hwNum = Number(editOriginalId);
@@ -1258,18 +1266,23 @@ export default function ExamViewerPage() {
       let examId = currentExamIdRef.current;
 
       const splitHwIdsStr = sessionStorage.getItem('splitHomeworkIds');
-      if (isNewExamRef.current || editOriginalId || splitHwIdsStr) {
-        if (rebuildExamIdRef.current) {
+      
+      const targetExamIdToRebuild = rebuildExamIdRef.current || editExamId;
+
+      if (isNewExamRef.current || editOriginalId || splitHwIdsStr || targetExamIdToRebuild) {
+        if (targetExamIdToRebuild) {
+          // 🔥 기존 시험지 갱신 (강제 수정 포함)
           const { error: rebuildErr } = await supabase.from('exam_master').update({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
             layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
             ...weeklyFields
-          }).eq('exam_id', rebuildExamIdRef.current);
+          }).eq('exam_id', targetExamIdToRebuild);
           if (rebuildErr) throw new Error(`문제지 갱신 실패: ${rebuildErr.message}`);
-          examId = rebuildExamIdRef.current;
+          examId = targetExamIdToRebuild;
           await supabase.from('exam_item').delete().eq('exam_id', examId);
         } else {
+          // 🔥 새 시험지 생성
           const { data, error: insertErr } = await supabase.from('exam_master').insert({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
@@ -1315,7 +1328,8 @@ export default function ExamViewerPage() {
       }
 
       const multiStudentsStr = sessionStorage.getItem('clinicTargetStudentIds');
-      const targetStudents = multiStudentsStr ? JSON.parse(multiStudentsStr) : (targetStudentId ? [targetStudentId] : []);
+      // 🔥 강제수정 시에는 잔여 학생 배부 정보 무시
+      const targetStudents = (multiStudentsStr && !editExamId) ? JSON.parse(multiStudentsStr) : (targetStudentId ? [targetStudentId] : []);
       
       if (targetStudents.length > 0 && examId) {
           for (const stuId of targetStudents) {
@@ -1345,7 +1359,7 @@ export default function ExamViewerPage() {
         'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
         'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
         'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
-        'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds'
+        'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds', 'isClinicMode'
       ];
       keysToRemove.forEach(k => sessionStorage.removeItem(k));
 
