@@ -61,29 +61,8 @@ export default function StudentPortal() {
     const isSyncingSessionRef = useRef(false);
 
     const [isMounted, setIsMounted] = useState(false);
-    const [isFullscreen, setIsFullscreen] = useState(false); 
 
     useEffect(() => { setIsMounted(true); }, []);
-
-    const toggleFullScreen = () => {
-        if (!document.fullscreenElement) {
-            document.documentElement.requestFullscreen().catch(err => {
-                console.log("전체화면을 지원하지 않는 기기입니다.", err);
-            });
-        } else {
-            if (document.exitFullscreen) {
-                document.exitFullscreen();
-            }
-        }
-    };
-
-    useEffect(() => {
-        const handleFullscreenChange = () => {
-            setIsFullscreen(!!document.fullscreenElement);
-        };
-        document.addEventListener("fullscreenchange", handleFullscreenChange);
-        return () => document.removeEventListener("fullscreenchange", handleFullscreenChange);
-    }, []);
 
     useEffect(() => {
         const interval = setInterval(() => setNow(Date.now()), 1000);
@@ -320,7 +299,7 @@ export default function StudentPortal() {
                 examPendingCount: 0, hwPendingCount: 0, printPendingCount: 0, overduePendingCount: 0,
                 examStatus: '대기',
                 examInitialScore: null,
-                examType: '' // 🌟 추가: 시험 종류 동적 저장을 위한 필드
+                examType: ''
             };
         });
 
@@ -420,7 +399,7 @@ export default function StudentPortal() {
             let regularECount = 0;
             let regularExamStatus = '대기';
             let regularExamScore = null;
-            let regularExamType = ''; // 🌟 시험 종류 추적
+            let regularExamType = ''; 
 
             let similarExamPending = 0;
             let similarExamIds: number[] = [];
@@ -453,14 +432,13 @@ export default function StudentPortal() {
                 } else if (type === '미완료과제') {
                     if (!isFinalDone) { overduePending++; overdueExamIds.push(ex.assignment_id); oTitles.push(title); if (overdueExamIds.length === 1) oCount += remain; }
                 } else { 
-                    // 🌟 분기, 중간, 입학 등 모든 일반 시험들이 이쪽으로 들어옵니다.
                     if (!isFinalDone) { 
                         regularExamPending++; regularExamIds.push(ex.assignment_id); regularETitles.push(title); 
                         if (regularExamPending === 1) { 
                             regularECount += remain; 
                             regularExamStatus = ex.status; 
                             regularExamScore = ex.total_score; 
-                            regularExamType = type; // 실제 DB의 시험 유형 저장
+                            regularExamType = type; 
                         } 
                     }
                 }
@@ -477,7 +455,7 @@ export default function StudentPortal() {
             
             let finalExamStatus = '대기';
             let finalExamScore = null;
-            let finalExamType = ''; // 🌟 최종 결정된 유형
+            let finalExamType = ''; 
 
             if (isEvenWeek) {
                 if (hasSimilar) {
@@ -548,7 +526,7 @@ export default function StudentPortal() {
                 examQCount: finalECount, hwQCount: hCount, printQCount: totalPrintQCount, overdueQCount: oCount,
                 examPendingCount: finalExamPending, hwPendingCount: hwPending, printPendingCount: totalPrintQCount > 0 ? 1 : 0, overduePendingCount: overduePending,
                 examStatus: finalExamStatus, examInitialScore: finalExamScore,
-                examType: finalExamType // 🌟 동적 타입 반영
+                examType: finalExamType 
             };
         });
 
@@ -821,7 +799,6 @@ export default function StudentPortal() {
             if (activeExamMode === 'SIMILAR') {
                 theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-violet-700 to-violet-600', badge: 'bg-violet-400 text-violet-900', btnText: 'text-violet-900', textColor: 'text-violet-100', accent: 'text-violet-200' };
             } else {
-                // 🌟 [핵심 변경] DB의 시험지 속성(exType)을 분석해서 동적으로 라벨과 테마를 띄워줌!
                 if (['분기테스트', '분기평가'].includes(exType)) {
                     theme = { label: '📅 분기평가', desc: '해당 분기의 학업 성취도를 종합적으로 평가합니다.', bg: 'bg-gradient-to-br from-fuchsia-700 to-fuchsia-600', badge: 'bg-fuchsia-400 text-fuchsia-900', btnText: 'text-fuchsia-900', textColor: 'text-fuchsia-100', accent: 'text-fuchsia-200' };
                 } else if (['중간테스트', '중간평가'].includes(exType)) {
@@ -840,18 +817,22 @@ export default function StudentPortal() {
                 theme.bg = 'bg-gradient-to-br from-slate-600 to-slate-500';
                 theme.badge = 'bg-slate-400 text-white';
             } else if (isFixingIncorrect) {
-                theme.label = '✍️ 오답 정정하기';
+                // 🌟 테마 색상 완전 변경: 기존 주황색(orange-amber) -> 눈에 확 띄는 핑크색(pink)
+                theme.label = '✍️ 시험지 오답 고치기';
                 theme.desc = '채점이 확정되었습니다. 돌려받은 기존 시험지를 보면서 틀린 문제를 다시 풀고 정답을 입력하세요!';
-                theme.bg = 'bg-gradient-to-br from-orange-600 to-amber-500';
-                theme.badge = 'bg-amber-300 text-amber-900';
-                theme.btnText = 'text-amber-700';
+                theme.bg = 'bg-gradient-to-br from-pink-600 to-pink-500';
+                theme.badge = 'bg-pink-200 text-pink-900';
+                theme.btnText = 'text-pink-700';
+                theme.textColor = 'text-pink-100';
+                theme.accent = 'text-pink-200';
             }
         }
         else if (typeKey === 'hw') theme = { label: '📚 과제', desc: '미제출 과제 문항을 학습합니다.', bg: 'bg-gradient-to-br from-amber-600 to-amber-500', badge: 'bg-amber-400 text-amber-900', btnText: 'text-amber-900', textColor: 'text-amber-100', accent: 'text-amber-200' };
         else theme = { label: '🖨️ 오답', desc: '틀린 문제들만 모아 다시 풉니다.', bg: 'bg-gradient-to-br from-emerald-700 to-emerald-600', badge: 'bg-emerald-400 text-emerald-900', btnText: 'text-emerald-900', textColor: 'text-emerald-100', accent: 'text-emerald-200' };
 
         return (
-            <div key={`${className}-${typeKey}`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[220px] md:min-h-[240px] justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
+            // 🌟 카드의 높이를 100% 꽉 채우도록 설정
+            <div key={`${className}-${typeKey}`} className={`w-full h-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
                 {isLocked && <div className="absolute inset-0 bg-slate-900/10 z-0"></div>}
                 
                 {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-xs md:text-sm font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ 완료 {initialScore != null ? `(최초 ${initialScore}점)` : ''}</span>}
@@ -933,7 +914,8 @@ export default function StudentPortal() {
         };
 
         return (
-            <div key={`${className}-overdue`} className={`w-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col min-h-[220px] md:min-h-[240px] justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
+            // 🌟 카드의 높이를 100% 꽉 채우도록 설정
+            <div key={`${className}-overdue`} className={`w-full h-full ${theme.bg} rounded-[1.5rem] p-6 md:p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
                 {isLocked && <div className="absolute inset-0 bg-slate-900/10 z-0"></div>}
                 
                 {isDone && <span className={`absolute top-5 right-5 bg-white/90 ${theme.btnText} text-xs md:text-sm font-black px-3 py-1.5 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
@@ -977,11 +959,16 @@ export default function StudentPortal() {
     const isSameDay = clinicSession?.session_date === getKSTDateString();
     const remainingMs = isSameDay ? (new Date(clinicSession?.started_at || 0).getTime() + (clinicSession?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS)) - now : 0;
     const isUrgent = remainingMs <= 5 * 60 * 1000;
-    const m = Math.max(0, Math.floor(remainingMs / 1000 / 60));
-    const s = Math.max(0, Math.floor(remainingMs / 1000) % 60);
+    
+    // 🌟 시간 형식을 시:분:초 (H:MM:SS) 로 완벽하게 변경
+    const totalSec = Math.max(0, Math.floor(remainingMs / 1000));
+    const hours = Math.floor(totalSec / 3600);
+    const mins = Math.floor((totalSec % 3600) / 60);
+    const secs = totalSec % 60;
+    const timeStr = `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
 
     return (
-        <div className="min-h-screen flex flex-col bg-slate-100 font-['Pretendard']">
+        <div className="h-screen flex flex-col bg-slate-100 font-['Pretendard'] overflow-hidden">
             {editorLocked && (
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
                     <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-sm">
@@ -998,7 +985,7 @@ export default function StudentPortal() {
                 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
             `}} />
 
-            <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+            <nav className="bg-white px-6 md:px-8 py-2.5 md:py-3 flex justify-between items-center border-b border-slate-200 sticky top-0 z-30 shadow-sm shrink-0">
                 <div className="flex items-center gap-6">
                     <div className="flex items-center">
                         <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-8 object-contain" />
@@ -1010,7 +997,7 @@ export default function StudentPortal() {
                         <div className={`flex items-center gap-1.5 border rounded-full px-3 py-1.5 shadow-sm transition-colors ${isUrgent ? 'bg-rose-100 border-rose-300 animate-pulse' : 'bg-indigo-50 border-indigo-200'}`}>
                             <span className="text-indigo-500 text-sm">🕐</span>
                             <span className="text-xs font-bold text-indigo-600 opacity-80">남은 시간</span>
-                            <span className="text-sm font-black font-lexend text-indigo-600">{isMounted && remainingMs <= 0 ? '종료' : `${m}:${String(s).padStart(2, '0')}`}</span>
+                            <span className="text-sm font-black font-lexend text-indigo-600 tracking-wider">{isMounted && remainingMs <= 0 ? '종료' : timeStr}</span>
                         </div>
                     )}
                     {isSameDay && (
@@ -1024,10 +1011,6 @@ export default function StudentPortal() {
                         </button>
                     )}
 
-                    <button onClick={toggleFullScreen} className="flex items-center gap-1.5 bg-slate-100 border border-slate-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-slate-200 transition-colors shadow-sm hidden sm:flex">
-                        <span className="text-xs font-bold text-slate-600">{isFullscreen ? '🗗 기본화면' : '📺 전체화면'}</span>
-                    </button>
-
                     <button onClick={() => router.push('/student/shop')} className="flex items-center gap-1.5 bg-amber-50 border border-amber-200 rounded-full px-3 py-1.5 cursor-pointer hover:bg-amber-100 transition-colors shadow-sm">
                         <span className="text-xs font-bold text-amber-700">나의 포인트</span>
                         <span className="text-amber-500 text-sm font-black font-lexend">{mockPoints.toLocaleString()} P</span>
@@ -1039,9 +1022,11 @@ export default function StudentPortal() {
                             <p className="text-[11px] font-bold text-emerald-500 mt-0.5">{studentInfo.classes.join(', ')}</p>
                         </div>
                         <div className="w-10 h-10 rounded-full bg-[#002864] text-white flex items-center justify-center text-xl shadow-md">👦🏻</div>
+                        
+                        {/* 🌟 오늘 공부 끝내기 버튼을 더욱 강력하고 눈에 띄게 강조 */}
                         {endRequest.state === 'idle' && (
-                            <button onClick={() => setEndRequestConfirmOpen(true)} className="text-xs font-bold text-slate-400 hover:text-rose-500 border border-slate-200 hover:border-rose-300 rounded-full px-3 py-1.5 transition-colors">
-                                오늘 공부 끝내기
+                            <button onClick={() => setEndRequestConfirmOpen(true)} className="text-xs font-black text-white bg-slate-800 hover:bg-slate-900 border border-slate-700 rounded-full px-4 py-2 transition-colors shadow-sm flex items-center gap-1.5">
+                                👋 오늘 공부 끝내기
                             </button>
                         )}
                         {endRequest.state === 'pending' && (
@@ -1058,10 +1043,11 @@ export default function StudentPortal() {
                 </div>
             </nav>
 
-            <main className="max-w-[1280px] w-full mx-auto py-6 px-6 md:py-8 md:px-8 flex-1">
+            {/* 🌟 여백 완벽 동기화: flex-1을 유지하고 좌우, 하단 패딩을 동일하게 적용 */}
+            <main className="w-full mx-auto p-6 md:p-8 flex-1 flex flex-col min-h-0">
                 {studentInfo.classes.length > 0 && (
-                    <section className="mb-4">
-                        <div className="flex items-center gap-4 mb-6">
+                    <section className="flex flex-col flex-1 min-h-0">
+                        <div className="flex items-center gap-4 mb-6 shrink-0">
                             <h2 className="text-2xl md:text-3xl font-black text-slate-800 flex items-center gap-3">🚀 오늘의 학습 클리닉</h2>
                             {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => {
                                 const prog = hwProgress[cls] || {};
@@ -1083,7 +1069,8 @@ export default function StudentPortal() {
                                 );
                             })}
                         </div>
-                        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 md:gap-6">
+                        {/* 🌟 카드들이 남는 공간을 정확히 4등분하여 채우도록 Grid 설정 */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 grid-rows-2 gap-6 md:gap-8 flex-1 min-h-0">
                             {renderCard('exam', 1, selectedClass)}
                             {renderCard('hw', 2, selectedClass)}
                             {renderOverdueCard(selectedClass)}
