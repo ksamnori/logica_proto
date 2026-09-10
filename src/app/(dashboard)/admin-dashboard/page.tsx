@@ -1,7 +1,7 @@
 // src/app/(dashboard)/admin-dashboard/page.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import React from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
@@ -43,6 +43,8 @@ const getConsultBadgeColor = (type: string) => {
 };
 
 function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
+  const router = useRouter();
+
   return (
     <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
       <div className="flex justify-between items-center mb-3 shrink-0">
@@ -62,7 +64,15 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
             const hasSummary = consult.parent_summary && consult.parent_summary.trim() !== "";
 
             return (
-              <div key={`consult-${i}`} className="flex justify-between items-start gap-2 p-3 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200 hover:border-indigo-300 transition-colors shadow-sm group">
+              <div 
+                key={`consult-${i}`} 
+                onClick={() => {
+                  if (consult.student_id) {
+                    router.push(`/student/${consult.student_id}?tab=consult`);
+                  }
+                }}
+                className={`flex justify-between items-start gap-2 p-3 rounded-xl bg-slate-50/80 hover:bg-white border border-slate-200 hover:border-indigo-300 transition-colors shadow-sm group ${consult.student_id ? 'cursor-pointer' : ''}`}
+              >
                 <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
                     <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColor} whitespace-nowrap`}>
@@ -149,6 +159,22 @@ export default function AdminDashboardPage() {
   const [bulkType, setBulkType] = useState('schedule');
   const [bulkTarget, setBulkTarget] = useState('all');
   const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
+
+  // 유선 문의 대장 (구글 시트) 모달 상태
+  const [isInquiryOpen, setIsInquiryOpen] = useState(false);
+
+  // 단축키(Alt+C) 감지 로직
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Mac(Option+C), Windows(Alt+C). 한영 변환 상태(ㅊ) 방어
+      if (e.altKey && (e.key.toLowerCase() === 'c' || e.key === 'ㅊ')) {
+        e.preventDefault(); 
+        setIsInquiryOpen(prev => !prev);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   const fetchQueue = async () => {
     if (!tenantId) return;
@@ -302,6 +328,7 @@ export default function AdminDashboardPage() {
     try {
       let query = supabase.from("consultation_log")
         .select(`
+          student_id,
           content, 
           parent_summary, 
           created_at, 
@@ -777,6 +804,7 @@ export default function AdminDashboardPage() {
                 <button onClick={() => router.push('/supervisor')} className="shrink-0 ml-3 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white border border-indigo-400/50 px-4 py-1.5 rounded-xl text-sm font-bold shadow-md transition-all flex items-center gap-1.5">
                   <span className="text-lg">📡</span> 클리닉 관제탑
                 </button>
+                {/* 모바일 팝업 테스트용 버튼은 삭제했습니다! */}
               </h1>
               <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">{todayString}</p>
             </div>
@@ -785,45 +813,73 @@ export default function AdminDashboardPage() {
 
         <main className="flex-1 overflow-visible px-8 pb-10 -mt-14 relative z-10 bg-transparent">
           
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-6 mb-6 px-6 sticky top-4 z-[50]">
-            <div className="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden flex flex-col justify-between h-64 col-span-1">
-              <div className="absolute right-[-10px] top-[-10px] w-32 h-32 bg-slate-50 rounded-full opacity-50"></div>
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[repeat(16,minmax(0,1fr))] gap-6 mb-6 px-6 sticky top-4 z-[50]">
+            
+            {/* 1. 재원생/수납 요약 패널 (비율: 2) - 텍스트 넘침 방지 및 슬림화 적용 */}
+            <div className="xl:col-span-2 col-span-1 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden flex flex-col justify-between h-64">
+              <div className="absolute right-[-10px] top-[-10px] w-32 h-32 bg-slate-50 rounded-full opacity-50 pointer-events-none"></div>
               
-              <div className="flex-1 flex justify-between items-center border-b border-slate-100 pb-2 cursor-pointer group relative z-10" onClick={() => router.push('/student')}>
-                 <div>
-                   <div className="text-[11px] font-bold text-slate-500 mb-0.5">전체 재원생</div>
-                   <div className="flex items-end gap-1"><span className="text-2xl font-black text-[#002864] group-hover:text-blue-600 transition-colors">{kpi.totalStu}</span><span className="text-[10px] font-bold text-slate-400 mb-1.5">명</span></div>
+              <div className="flex-1 flex justify-between items-start border-b border-slate-100 pb-2 cursor-pointer group relative z-10" onClick={() => router.push('/student')}>
+                 <div className="flex flex-col">
+                   <span className="text-[11px] font-bold text-slate-500 mb-0.5 whitespace-nowrap">전체 재원생</span>
+                   <div className="flex items-baseline gap-1">
+                     <span className="text-2xl sm:text-3xl font-black text-[#002864] group-hover:text-blue-600 transition-colors leading-none tracking-tight">{kpi.totalStu}</span>
+                     <span className="text-[10px] font-bold text-slate-400">명</span>
+                   </div>
                  </div>
-                 <div className="text-right text-[10px] font-bold flex flex-col gap-0.5">
-                   <span className="text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm">신규 +{kpi.newStu}</span>
-                   <span className="text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm">퇴원 -{kpi.leftStu}</span>
+                 <div className="flex flex-col gap-1 shrink-0 items-end mt-1">
+                   <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm whitespace-nowrap">
+                     신규 +{kpi.newStu}
+                   </span>
+                   <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm whitespace-nowrap">
+                     퇴원 {kpi.leftStu > 0 ? `-${kpi.leftStu}` : '0'}
+                   </span>
                  </div>
               </div>
               
-              <div className="flex-1 flex flex-col justify-center border-b border-slate-100 py-1.5 cursor-pointer group relative z-10" onClick={() => router.push('/billing')}>
-                 <div className="flex justify-between items-end mb-1">
-                   <span className="text-[11px] font-bold text-slate-500">{new Date().getMonth() + 1}월 수납률</span>
-                   <span className="text-lg font-black text-sky-600 group-hover:text-sky-400 transition-colors">{kpi.payRate}%</span>
+              <div className="flex-1 flex flex-col justify-center border-b border-slate-100 py-2 cursor-pointer group relative z-10" onClick={() => router.push('/billing')}>
+                 <div className="flex justify-between items-end mb-1.5">
+                   <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">{new Date().getMonth() + 1}월 수납률</span>
+                   <span className="text-lg font-black text-sky-600 group-hover:text-sky-400 transition-colors leading-none">{kpi.payRate}%</span>
                  </div>
                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner">
                    <div className={`h-full rounded-full transition-all ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
                  </div>
               </div>
 
-              <div className="flex-1 flex justify-between items-center pt-2 cursor-pointer group relative z-10" onClick={() => router.push('/admission')}>
-                 <div>
-                   <div className="text-[11px] font-bold text-slate-500 mb-0.5">입학 대기생</div>
-                   <div className="flex items-end gap-1"><span className="text-2xl font-black text-amber-500 group-hover:text-amber-400 transition-colors">{kpi.waitingStu}</span><span className="text-[10px] font-bold text-slate-400 mb-1.5">명</span></div>
+              <div className="flex-1 flex justify-between items-end pt-2 cursor-pointer group relative z-10" onClick={() => router.push('/admission')}>
+                 <div className="flex flex-col">
+                   <span className="text-[11px] font-bold text-slate-500 mb-0.5 whitespace-nowrap">입학 대기생</span>
+                   <div className="flex items-baseline gap-1">
+                     <span className="text-2xl font-black text-amber-500 group-hover:text-amber-400 transition-colors leading-none tracking-tight">{kpi.waitingStu}</span>
+                     <span className="text-[10px] font-bold text-slate-400">명</span>
+                   </div>
                  </div>
-                 <div className="text-[10px] font-bold text-slate-500 text-right">
-                   이번 달 승인<br/><span className="text-amber-600 font-black text-sm">{kpi.passedStu}</span> 명
+                 <div className="flex flex-col items-end shrink-0 mb-0.5">
+                   <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap mb-0.5">이번 달 승인</span>
+                   <span className="text-[10px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shadow-sm whitespace-nowrap">
+                     {kpi.passedStu} 명
+                   </span>
                  </div>
               </div>
             </div>
 
-            <QuickSearchWidget allStudentsData={allStudentsData} />
+            <div 
+              onClick={() => setIsInquiryOpen(true)}
+              className="xl:col-span-2 col-span-1 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer h-64 flex flex-col items-center justify-center group relative overflow-hidden"
+            >
+              <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-indigo-50 transition-all border border-slate-100 group-hover:border-indigo-100 shadow-sm">
+                 <span className="text-3xl grayscale group-hover:grayscale-0 transition-all duration-300">📞</span>
+              </div>
+              <span className="font-extrabold text-[14px] text-slate-700 mb-2">유선 문의 대장</span>
+              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 group-hover:text-indigo-600 group-hover:bg-indigo-100 transition-colors shadow-sm">단축키: Alt + C</span>
+            </div>
 
-            <div onClick={() => router.push('/cs')} className="bg-white rounded-2xl p-5 border border-rose-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
+            <div className="xl:col-span-6 md:col-span-2 col-span-1 h-64 w-full [&>*]:h-full [&>*]:w-full">
+              <QuickSearchWidget allStudentsData={allStudentsData} />
+            </div>
+
+            <div onClick={() => router.push('/cs')} className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-rose-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
               <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
               <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
                 <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">🚨 학부모 요청</span>
@@ -846,7 +902,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
-            <div className="bg-white rounded-2xl p-5 border border-purple-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
+            <div className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-purple-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
               <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
                 <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
                 <button onClick={(e) => { e.stopPropagation(); setIsMemoModalOpen(true); }} className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1.5 rounded font-bold transition-colors border border-blue-200 shadow-sm">+ 작성</button>
@@ -1160,6 +1216,32 @@ export default function AdminDashboardPage() {
 
       <ClassDetailModal isOpen={isClassModalOpen} onClose={() => setIsClassModalOpen(false)} classModalData={classModalData} classSchedules={classSchedules} classStudents={classStudents} />
       
+      {/* 🚨 유선 문의 대장 오버레이 모달 (단축키 Alt+C) */}
+      {isInquiryOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-6 sm:p-10">
+          <div className="bg-white w-full max-w-7xl h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-[#002864] p-4 flex justify-between items-center text-white shrink-0">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">📞</span>
+                <h2 className="font-black text-lg ml-1">실시간 유선 문의 대장</h2>
+              </div>
+              <div className="flex items-center gap-5">
+                <span className="text-xs font-bold text-blue-200 bg-blue-900/50 px-2.5 py-1 rounded-md shadow-inner border border-blue-800/50">단축키: Alt + C 로 닫기</span>
+                <button onClick={() => setIsInquiryOpen(false)} className="text-white hover:text-rose-400 text-3xl font-bold leading-none transition-colors">&times;</button>
+              </div>
+            </div>
+            
+            {/* 💡 구글 시트 URL 적용부 */}
+            <iframe 
+              src="https://docs.google.com/spreadsheets/d/1rD65o05on4Noavir4c1nqITAjeJnjSK_k7lj5hywAbI/edit?usp=sharing"
+              className="flex-1 w-full border-none bg-slate-50"
+              title="Logica 유선 문의 대장"
+              allowFullScreen
+            />
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

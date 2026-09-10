@@ -110,7 +110,8 @@ export default function StudentPortal() {
             rData?.forEach((r: any) => results[`${r.class_name}::${r.round}`] = r);
             setRoundResults(results);
 
-            await fetchBlockStates(sid, classes);
+            // 🌟 initData 시점에서도 학생 이름을 명시적으로 전달
+            await fetchBlockStates(sid, classes, sname);
         };
 
         initData();
@@ -244,8 +245,9 @@ export default function StudentPortal() {
                 try {
                     await runDbSyncRef.current();
                     tick++;
+                    // 🌟 주기적 호출 시에도 이름 전달
                     if (tick % 2 === 0 && fetchBlockStatesRef.current && studentInfo.classes.length > 0) {
-                        await fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes);
+                        await fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes, studentInfo.name);
                     }
                 } catch (err) {} finally {
                     isSyncingSessionRef.current = false;
@@ -257,12 +259,12 @@ export default function StudentPortal() {
 
         const handleFocus = () => { 
             if (runDbSyncRef.current) runDbSyncRef.current(); 
-            if (fetchBlockStatesRef.current && studentInfo.classes.length > 0) fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes);
+            if (fetchBlockStatesRef.current && studentInfo.classes.length > 0) fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes, studentInfo.name);
         };
         const handleVisibility = () => { 
             if (document.visibilityState === 'visible') {
                 if (runDbSyncRef.current) runDbSyncRef.current(); 
-                if (fetchBlockStatesRef.current && studentInfo.classes.length > 0) fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes);
+                if (fetchBlockStatesRef.current && studentInfo.classes.length > 0) fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes, studentInfo.name);
             }
         };
         
@@ -275,7 +277,7 @@ export default function StudentPortal() {
             window.removeEventListener('focus', handleFocus); 
             document.removeEventListener('visibilitychange', handleVisibility); 
         };
-    }, [studentInfo.id, isMounted, studentInfo.classes]);
+    }, [studentInfo.id, isMounted, studentInfo.classes, studentInfo.name]);
 
     useEffect(() => {
         if (!studentInfo.id) return;
@@ -303,15 +305,45 @@ export default function StudentPortal() {
         return () => { cancelled = true; clearInterval(iv); };
     }, [studentInfo.id]);
 
-    const fetchBlockStates = async (sid: string, classes: string[]) => {
+    // 🌟 학생 이름(sName) 매개변수를 추가하고 스마트 타이틀 클리너를 내부 헬퍼로 구성합니다.
+    const fetchBlockStates = async (sid: string, classes: string[], sName: string) => {
         const today = getKSTDateString();
         const newBlockStates: any = {};
         const newHwProgress: any = {};
+        
+        // 🌟 지저분하고 반복되는 제목을 컴팩트하게 정돈하는 헬퍼 함수
+        const cleanTitle = (raw: string, studentName: string) => {
+            if (!raw) return '제목 없음';
+            let t = raw;
+            
+            // 1. 학생 이름 태그 제거 (예: [(테스트)해원] )
+            if (studentName) {
+                const nameTag = `[${studentName}]`;
+                t = t.split(nameTag).join('').trim();
+            }
+            
+            // 2. 미완료 프린트 반복 축약 (예: 미완료 프린트 미완료 프린트 -> 미완료 프린트 (2차))
+            const overdueMatches = t.match(/(미완료\s*프린트\s*)+/);
+            if (overdueMatches) {
+                const count = overdueMatches[0].match(/미완료\s*프린트/g)?.length || 1;
+                t = t.replace(/(미완료\s*프린트\s*)+/, count > 1 ? `미완료 프린트 (${count}차) ` : '미완료 프린트 ');
+            }
+            
+            // 3. 오답 프린트 반복 축약
+            const wrongMatches = t.match(/(오답\s*프린트\s*)+/);
+            if (wrongMatches) {
+                const count = wrongMatches[0].match(/오답\s*프린트/g)?.length || 1;
+                t = t.replace(/(오답\s*프린트\s*)+/, count > 1 ? `오답 프린트 (${count}차) ` : '오답 프린트 ');
+            }
+            
+            return t.replace(/\s+/g, ' ').trim() || '제목 없음';
+        };
+
         classes.forEach(c => {
             newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA', overdue: 'NO_DATA' };
             newHwProgress[c] = { 
                 activeExamMode: 'DONE',
-                hasAnyExamClearedToday: false, // 🌟 잠금 해제를 위한 플래그 추가
+                hasAnyExamClearedToday: false, 
                 examList: [], hwList: [], overdueList: [], printTitles: [],
                 examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0,
                 examPendingCount: 0, hwPendingCount: 0, printPendingCount: 0, overduePendingCount: 0,
@@ -356,7 +388,6 @@ export default function StudentPortal() {
         const uniqueIncIds = Array.from(new Set(resolvedQids));
         const totalPrintQCount = uniqueIncIds.length;
 
-        // 🌟 exam_assignment 호출 시 created_at을 추가하여 '오늘 진행한 시험'인지 추적합니다.
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
                 .select('homework_id, tq_id')
@@ -409,25 +440,26 @@ export default function StudentPortal() {
             let similarExams: any[] = [];
             let overdueExams: any[] = [];
             let regularExams: any[] = [];
-            let hasAnyExamClearedToday = false; // 🌟 이 반에서 오늘 제출된 시험이 단 하나라도 있는지 확인
+            let hasAnyExamClearedToday = false; 
 
             examsData?.forEach((ex: any) => {
                 if (ex.class_id && ex.class_id !== cid) return;
                 const type = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.exam_type : ex.exam_master?.exam_type;
-                const title = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.title : ex.exam_master?.title;
+                const rawTitle = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.title : ex.exam_master?.title;
                 const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 
                 const isFinalDone = ['최종완료', '완료'].includes(ex.status);
                 const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - attempted);
 
-                // 🌟 테스트 종류(정규/유사)이고, 오늘 생성되었으며, 미응시 상태를 벗어났다면 '단 하나의 제출'로 인정
                 const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(type);
                 if (isTestType && ex.created_at?.startsWith(today) && !['미응시', '진행중', '대기'].includes(ex.status)) {
                     hasAnyExamClearedToday = true;
                 }
 
-                const item = { id: ex.assignment_id, title: title || '제목 없음', remain, status: ex.status, score: ex.total_score, type: 'exam', exType: type };
+                // 🌟 스마트 클리너를 거쳐 압축된 타이틀 사용
+                const cleanedTitle = cleanTitle(rawTitle, sName);
+                const item = { id: ex.assignment_id, title: cleanedTitle, remain, status: ex.status, score: ex.total_score, type: 'exam', exType: type };
 
                 if (type === '오답프린트' || type === '오답') { } 
                 else if (type === '과제' || type === '과제프린트') {
@@ -459,7 +491,9 @@ export default function StudentPortal() {
                 const remain = Math.max(0, tqLen - attempted);
                 if (remain === 0) return;
 
-                const item = { id: hw.homework_id, title: hw.homework_title || '과제', remain, status, score: null, type: 'hw' };
+                // 🌟 과제 타이틀도 동일하게 스마트 클리너 적용
+                const cleanedTitle = cleanTitle(hw.homework_title, sName);
+                const item = { id: hw.homework_id, title: cleanedTitle, remain, status, score: null, type: 'hw' };
 
                 if (hw.due_date && hw.due_date <= today) { 
                     overdueNormalHws.push(item);
@@ -503,7 +537,7 @@ export default function StudentPortal() {
 
             newHwProgress[c] = { 
                 activeExamMode,
-                hasAnyExamClearedToday, // 🌟 저장
+                hasAnyExamClearedToday,
                 examList: finalExamList,
                 hwList: finalHwList,
                 overdueList: finalOverdueList,
@@ -593,8 +627,6 @@ export default function StudentPortal() {
 
         const prog = hwProgress[className] || {};
         const cState = blockStates[className] || {};
-        
-        // 🌟 수정: 첫 번째 시험의 제출 여부가 아니라, '오늘 단 하나라도 제출한 시험이 있는가'로 잠금을 해제합니다.
         const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
 
         if (typeKey !== 'exam' && !isExamClearedToProceed) {
@@ -770,7 +802,6 @@ export default function StudentPortal() {
 
         const isBoxDone = (typeKey === 'print' ? (prog.printPendingCount === 0) : (items.length === 0)) || cState[typeKey] === '최종완료' || cState[typeKey] === '채점완료';
         
-        // 🌟 잠금 해제 조건 수정 완료: 오늘 푼 시험이 하나라도 있으면 바로 잠금 해제
         const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
         const isLocked = typeKey !== 'exam' && !isBoxDone && !isExamClearedToProceed; 
 
@@ -879,7 +910,6 @@ export default function StudentPortal() {
                     </div>
                     
                     <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
-                        {/* 🌟 수정: !isSelectedItemWaiting 조건을 제거하여 현재 카드가 대기중이더라도 다른 시험을 드롭다운에서 고를 수 있게 복구 완료 */}
                         {hasMultiple && !isBoxDone && !isLocked && (
                             <select
                                 value={selectedIdx}
@@ -933,7 +963,7 @@ export default function StudentPortal() {
 
         const isBoxDone = items.length === 0 || cState.overdue === '최종완료';
         
-        // 🌟 잠금 해제 조건 동일 적용
+        const firstExamStatus = prog.examStatus || '대기';
         const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
         const isLocked = !isBoxDone && !isExamClearedToProceed;
 
