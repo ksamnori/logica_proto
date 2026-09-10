@@ -311,6 +311,7 @@ export default function StudentPortal() {
             newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA', overdue: 'NO_DATA' };
             newHwProgress[c] = { 
                 activeExamMode: 'DONE',
+                hasAnyExamClearedToday: false, // 🌟 잠금 해제를 위한 플래그 추가
                 examList: [], hwList: [], overdueList: [], printTitles: [],
                 examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0,
                 examPendingCount: 0, hwPendingCount: 0, printPendingCount: 0, overduePendingCount: 0,
@@ -355,6 +356,7 @@ export default function StudentPortal() {
         const uniqueIncIds = Array.from(new Set(resolvedQids));
         const totalPrintQCount = uniqueIncIds.length;
 
+        // 🌟 exam_assignment 호출 시 created_at을 추가하여 '오늘 진행한 시험'인지 추적합니다.
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
                 .select('homework_id, tq_id')
@@ -365,7 +367,7 @@ export default function StudentPortal() {
                 .eq('student_id', sid)
                 .in('grading_code', ['O', 'X', 'TO', 'RO', 'TX', 'T', '☆']),
             supabaseClient.from('exam_assignment')
-                .select('assignment_id, status, total_score, class_id, exam_master!inner(exam_type, title, total_questions)')
+                .select('assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
                 .eq('student_id', sid)
         ]);
 
@@ -407,6 +409,7 @@ export default function StudentPortal() {
             let similarExams: any[] = [];
             let overdueExams: any[] = [];
             let regularExams: any[] = [];
+            let hasAnyExamClearedToday = false; // 🌟 이 반에서 오늘 제출된 시험이 단 하나라도 있는지 확인
 
             examsData?.forEach((ex: any) => {
                 if (ex.class_id && ex.class_id !== cid) return;
@@ -417,6 +420,12 @@ export default function StudentPortal() {
                 const isFinalDone = ['최종완료', '완료'].includes(ex.status);
                 const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - attempted);
+
+                // 🌟 테스트 종류(정규/유사)이고, 오늘 생성되었으며, 미응시 상태를 벗어났다면 '단 하나의 제출'로 인정
+                const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(type);
+                if (isTestType && ex.created_at?.startsWith(today) && !['미응시', '진행중', '대기'].includes(ex.status)) {
+                    hasAnyExamClearedToday = true;
+                }
 
                 const item = { id: ex.assignment_id, title: title || '제목 없음', remain, status: ex.status, score: ex.total_score, type: 'exam', exType: type };
 
@@ -494,6 +503,7 @@ export default function StudentPortal() {
 
             newHwProgress[c] = { 
                 activeExamMode,
+                hasAnyExamClearedToday, // 🌟 저장
                 examList: finalExamList,
                 hwList: finalHwList,
                 overdueList: finalOverdueList,
@@ -583,7 +593,9 @@ export default function StudentPortal() {
 
         const prog = hwProgress[className] || {};
         const cState = blockStates[className] || {};
-        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(prog.examStatus);
+        
+        // 🌟 수정: 첫 번째 시험의 제출 여부가 아니라, '오늘 단 하나라도 제출한 시험이 있는가'로 잠금을 해제합니다.
+        const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
 
         if (typeKey !== 'exam' && !isExamClearedToProceed) {
             alert('오늘의 첫 번째 학습(테스트/과제오답유사)을 제출한 후에 다른 클리닉을 진행할 수 있습니다.');
@@ -716,7 +728,6 @@ export default function StudentPortal() {
                         testName = '오답 정정중';
                         params.append('retry', 'true');
                     } else {
-                        // 🌟 DB의 정확한 시험 종류명을 반영합니다. (없으면 기본값 '테스트')
                         const exactType = selectedItem.exType || '테스트';
                         testName = `${exactType} 풀이중`;
                     }
@@ -733,7 +744,6 @@ export default function StudentPortal() {
         if (channelRef.current && trackedSeatRef.current) {
             await channelRef.current.send({
                 type: 'broadcast', event: 'student_action',
-                // 🌟 "진입" 이라는 애매한 단어를 빼고 직관적인 텍스트만 전달합니다.
                 payload: { seat: trackedSeatRef.current, action: 'update_activity', data: { studentId: studentInfo.id, activity: `[${className}] ${testName} 🏃‍♂️` } }
             });
             await channelRef.current.untrack();
@@ -760,8 +770,8 @@ export default function StudentPortal() {
 
         const isBoxDone = (typeKey === 'print' ? (prog.printPendingCount === 0) : (items.length === 0)) || cState[typeKey] === '최종완료' || cState[typeKey] === '채점완료';
         
-        const firstExamStatus = prog.examStatus || '대기';
-        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(firstExamStatus);
+        // 🌟 잠금 해제 조건 수정 완료: 오늘 푼 시험이 하나라도 있으면 바로 잠금 해제
+        const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
         const isLocked = typeKey !== 'exam' && !isBoxDone && !isExamClearedToProceed; 
 
         const qCount = typeKey === 'exam' ? prog.examQCount : typeKey === 'hw' ? prog.hwQCount : typeKey === 'print' ? prog.printQCount : 0;
@@ -869,7 +879,8 @@ export default function StudentPortal() {
                     </div>
                     
                     <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
-                        {hasMultiple && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
+                        {/* 🌟 수정: !isSelectedItemWaiting 조건을 제거하여 현재 카드가 대기중이더라도 다른 시험을 드롭다운에서 고를 수 있게 복구 완료 */}
+                        {hasMultiple && !isBoxDone && !isLocked && (
                             <select
                                 value={selectedIdx}
                                 onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
@@ -922,8 +933,8 @@ export default function StudentPortal() {
 
         const isBoxDone = items.length === 0 || cState.overdue === '최종완료';
         
-        const firstExamStatus = prog.examStatus || '대기';
-        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(firstExamStatus);
+        // 🌟 잠금 해제 조건 동일 적용
+        const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
         const isLocked = !isBoxDone && !isExamClearedToProceed;
 
         const qCount = prog.overdueQCount || 0;
