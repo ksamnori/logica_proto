@@ -2,28 +2,14 @@
 "use server";
 
 import { createClient } from "@supabase/supabase-js";
-import { cookies } from "next/headers";
-import { jwtVerify } from "jose";
 import { spendPoints, addPoints } from "./shopPoints";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const SECRET_KEY = new TextEncoder().encode(process.env.SESSION_SECRET_KEY || "fallback-secret-key");
 
 const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
   auth: { autoRefreshToken: false, persistSession: false }
 });
-
-// 🌟 [추가] 쿠키(JWT)에서 안전하게 내 지점 꼬리표 꺼내기
-async function getSecureTenantId() {
-  const cookieStore = await cookies();
-  const token = cookieStore.get("logica_session")?.value;
-  if (!token) return null;
-  try {
-    const { payload } = await jwtVerify(token, SECRET_KEY);
-    return payload.tenant_id as string;
-  } catch { return null; }
-}
 
 export type PurchaseStatus = 'completed' | 'cancelled';
 
@@ -54,61 +40,55 @@ function rowToPurchase(row: any): ShopPurchase {
   };
 }
 
-export async function listProducts(): Promise<ShopProduct[]> {
-  const tenantId = await getSecureTenantId();
+// 🌟 모든 액션에 tenantId 파라미터 추가
+export async function listProducts(tenantId: string): Promise<ShopProduct[]> {
   if (!tenantId) return [];
-
   const { data, error } = await supabaseAdmin.from('shop_product').select('*')
-    .eq('tenant_id', tenantId) // 🌟 내 지점 물품만 로드
+    .eq('tenant_id', tenantId)
     .order('created_at', { ascending: false });
   if (error || !data) return [];
   return data.map(rowToProduct);
 }
 
-export async function createProduct(input: { name: string; description: string; price: number; imageDataUrl: string | null; stock: number | null }): Promise<ShopProduct | null> {
-  const tenantId = await getSecureTenantId();
+export async function createProduct(tenantId: string, input: { name: string; description: string; price: number; imageDataUrl: string | null; stock: number | null }): Promise<ShopProduct | null> {
   if (!tenantId) return null;
-
   const { data, error } = await supabaseAdmin.from('shop_product').insert({
     name: input.name, description: input.description, price: input.price,
     image_data_url: input.imageDataUrl, stock: input.stock,
-    tenant_id: tenantId // 🌟 생성 시 꼬리표 부착
+    tenant_id: tenantId 
   }).select().single();
   if (error || !data) return null;
   return rowToProduct(data);
 }
 
-export async function updateProduct(id: string, input: { name: string; description: string; price: number; imageDataUrl: string | null; stock: number | null }): Promise<ShopProduct | null> {
-  const tenantId = await getSecureTenantId();
-  
+export async function updateProduct(tenantId: string, id: string, input: { name: string; description: string; price: number; imageDataUrl: string | null; stock: number | null }): Promise<ShopProduct | null> {
+  if (!tenantId) return null;
   const { data, error } = await supabaseAdmin.from('shop_product').update({
     name: input.name, description: input.description, price: input.price,
     image_data_url: input.imageDataUrl, stock: input.stock,
-  }).eq('id', id).eq('tenant_id', tenantId).select().single(); // 🌟 내 지점 물품만 수정 허용
+  }).eq('id', id).eq('tenant_id', tenantId).select().single(); 
   if (error || !data) return null;
   return rowToProduct(data);
 }
 
-export async function deleteProduct(id: string): Promise<{ success: boolean; message?: string }> {
-  const tenantId = await getSecureTenantId();
-  const { error } = await supabaseAdmin.from('shop_product').delete().eq('id', id).eq('tenant_id', tenantId); // 🌟 내 지점 것만 삭제 허용
+export async function deleteProduct(tenantId: string, id: string): Promise<{ success: boolean; message?: string }> {
+  if (!tenantId) return { success: false, message: "권한이 없습니다." };
+  const { error } = await supabaseAdmin.from('shop_product').delete().eq('id', id).eq('tenant_id', tenantId); 
   if (error) return { success: false, message: error.message };
   return { success: true };
 }
 
-export async function listPurchases(): Promise<ShopPurchase[]> {
-  const tenantId = await getSecureTenantId();
+export async function listPurchases(tenantId: string): Promise<ShopPurchase[]> {
   if (!tenantId) return [];
-
   const { data, error } = await supabaseAdmin.from('shop_purchase').select('*')
-    .eq('tenant_id', tenantId) // 🌟 내 지점 학생 결제 내역만 로드
+    .eq('tenant_id', tenantId) 
     .order('purchased_at', { ascending: false });
   if (error || !data) return [];
   return data.map(rowToPurchase);
 }
 
-export async function purchaseProduct(studentId: string, studentName: string, productId: string): Promise<{ success: boolean; message?: string; status?: PurchaseStatus }> {
-  const tenantId = await getSecureTenantId();
+export async function purchaseProduct(tenantId: string, studentId: string, studentName: string, productId: string): Promise<{ success: boolean; message?: string; status?: PurchaseStatus }> {
+  if (!tenantId) return { success: false, message: "지점 정보가 없습니다." };
 
   const { data: product } = await supabaseAdmin.from('shop_product').select('*').eq('id', productId).maybeSingle();
   if (!product) return { success: false, message: '존재하지 않는 상품입니다.' };
@@ -133,14 +113,14 @@ export async function purchaseProduct(studentId: string, studentName: string, pr
   const { error } = await supabaseAdmin.from('shop_purchase').insert({
     student_id: studentId, student_name: studentName, product_id: productId,
     product_name: product.name, price_paid: product.price, status,
-    tenant_id: tenantId // 🌟 결제 기록에 지점 꼬리표 부착
+    tenant_id: tenantId 
   });
   if (error) return { success: false, message: error.message };
   return { success: true, status };
 }
 
-export async function cancelPurchase(purchaseId: string): Promise<{ success: boolean; message?: string }> {
-  const tenantId = await getSecureTenantId();
+export async function cancelPurchase(tenantId: string, purchaseId: string): Promise<{ success: boolean; message?: string }> {
+  if (!tenantId) return { success: false, message: "권한이 없습니다." };
 
   const { data: purchase } = await supabaseAdmin.from('shop_purchase').select('*').eq('id', purchaseId).maybeSingle();
   if (!purchase) return { success: false, message: '존재하지 않는 구매입니다.' };
@@ -148,7 +128,7 @@ export async function cancelPurchase(purchaseId: string): Promise<{ success: boo
 
   const { data: claimed } = await supabaseAdmin.from('shop_purchase')
     .update({ status: 'cancelled' })
-    .eq('id', purchaseId).neq('status', 'cancelled').eq('tenant_id', tenantId) // 🌟 권한 검증
+    .eq('id', purchaseId).neq('status', 'cancelled').eq('tenant_id', tenantId) 
     .select().maybeSingle();
   if (!claimed) return { success: false, message: '이미 다른 곳에서 처리된 구매이거나 권한이 없습니다.' };
 
