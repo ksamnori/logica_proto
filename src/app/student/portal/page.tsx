@@ -53,6 +53,8 @@ export default function StudentPortal() {
     
     const [isGeneratingPrint, setIsGeneratingPrint] = useState(false);
     
+    const [selectedTaskIdx, setSelectedTaskIdx] = useState<Record<string, number>>({});
+
     const channelRef = useRef<any>(null);
     const sessionEndedRef = useRef(false);
 
@@ -224,10 +226,14 @@ export default function StudentPortal() {
     const runDbSyncRef = useRef<any>(null);
     useEffect(() => { runDbSyncRef.current = runDbSync; }, [runDbSync]);
 
+    const fetchBlockStatesRef = useRef<any>(null);
+    useEffect(() => { fetchBlockStatesRef.current = fetchBlockStates; });
+
     useEffect(() => {
         if (!studentInfo.id || !isMounted) return;
         let cancelled = false;
         let timer: ReturnType<typeof setTimeout> | null = null;
+        let tick = 0;
         
         const scheduleNext = () => {
             if (cancelled) return;
@@ -237,6 +243,10 @@ export default function StudentPortal() {
                 isSyncingSessionRef.current = true;
                 try {
                     await runDbSyncRef.current();
+                    tick++;
+                    if (tick % 2 === 0 && fetchBlockStatesRef.current && studentInfo.classes.length > 0) {
+                        await fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes);
+                    }
                 } catch (err) {} finally {
                     isSyncingSessionRef.current = false;
                     scheduleNext();
@@ -245,8 +255,16 @@ export default function StudentPortal() {
         };
         scheduleNext();
 
-        const handleFocus = () => { if (runDbSyncRef.current) runDbSyncRef.current(); };
-        const handleVisibility = () => { if (document.visibilityState === 'visible' && runDbSyncRef.current) runDbSyncRef.current(); };
+        const handleFocus = () => { 
+            if (runDbSyncRef.current) runDbSyncRef.current(); 
+            if (fetchBlockStatesRef.current && studentInfo.classes.length > 0) fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes);
+        };
+        const handleVisibility = () => { 
+            if (document.visibilityState === 'visible') {
+                if (runDbSyncRef.current) runDbSyncRef.current(); 
+                if (fetchBlockStatesRef.current && studentInfo.classes.length > 0) fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes);
+            }
+        };
         
         window.addEventListener('focus', handleFocus);
         document.addEventListener('visibilitychange', handleVisibility);
@@ -257,7 +275,7 @@ export default function StudentPortal() {
             window.removeEventListener('focus', handleFocus); 
             document.removeEventListener('visibilitychange', handleVisibility); 
         };
-    }, [studentInfo.id, isMounted]);
+    }, [studentInfo.id, isMounted, studentInfo.classes]);
 
     useEffect(() => {
         if (!studentInfo.id) return;
@@ -293,13 +311,10 @@ export default function StudentPortal() {
             newBlockStates[c] = { exam: 'NO_DATA', hw: 'NO_DATA', print: 'NO_DATA', overdue: 'NO_DATA' };
             newHwProgress[c] = { 
                 activeExamMode: 'DONE',
-                examIds: [], hwExamIds: [], printIds: [], hwIds: [], overdueHwIds: [], overdueExamIds: [],
-                examTitles: [], hwTitles: [], printTitles: [], overdueTitles: [], 
+                examList: [], hwList: [], overdueList: [], printTitles: [],
                 examQCount: 0, hwQCount: 0, printQCount: 0, overdueQCount: 0,
                 examPendingCount: 0, hwPendingCount: 0, printPendingCount: 0, overduePendingCount: 0,
-                examStatus: '대기',
-                examInitialScore: null,
-                examType: ''
+                examStatus: '대기', examInitialScore: null, examType: ''
             };
         });
 
@@ -388,27 +403,10 @@ export default function StudentPortal() {
         classes.forEach(c => {
             const cid = nameToId[c];
 
-            let hwPending = 0, overduePending = 0;
-            let hwExamIds: number[] = [], hwIds: number[] = [], overdueHwIds: number[] = [], overdueExamIds: number[] = [];
-            let hTitles: string[] = [], oTitles: string[] = [];
-            let hCount = 0, oCount = 0;
-
-            let regularExamPending = 0;
-            let regularExamIds: number[] = [];
-            let regularETitles: string[] = [];
-            let regularECount = 0;
-            let regularExamStatus = '대기';
-            let regularExamScore = null;
-            let regularExamType = ''; 
-
-            let similarExamPending = 0;
-            let similarExamIds: number[] = [];
-            let similarETitles: string[] = [];
-            let similarECount = 0;
-            let similarExamStatus = '대기';
-            let similarExamScore = null;
-
-            const isEvenWeek = newClassWeekTypes[c] === 'even';
+            let hwExams: any[] = [];
+            let similarExams: any[] = [];
+            let overdueExams: any[] = [];
+            let regularExams: any[] = [];
 
             examsData?.forEach((ex: any) => {
                 if (ex.class_id && ex.class_id !== cid) return;
@@ -417,68 +415,25 @@ export default function StudentPortal() {
                 const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 
                 const isFinalDone = ['최종완료', '완료'].includes(ex.status);
-
                 const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - attempted);
 
-                if (type === '오답프린트' || type === '오답') {
-                } else if (type === '과제' || type === '과제프린트') {
-                    if (!isFinalDone) { hwPending++; hwExamIds.push(ex.assignment_id); hTitles.push(title); hCount += remain; }
+                const item = { id: ex.assignment_id, title: title || '제목 없음', remain, status: ex.status, score: ex.total_score, type: 'exam', exType: type };
+
+                if (type === '오답프린트' || type === '오답') { } 
+                else if (type === '과제' || type === '과제프린트') {
+                    if (!isFinalDone) hwExams.push(item);
                 } else if (type === '오답유사' || type === '과제오답유사') {
-                    if (!isFinalDone) { 
-                        similarExamPending++; similarExamIds.push(ex.assignment_id); similarETitles.push(title); 
-                        similarECount += remain;
-                        if (similarExamPending === 1) { similarExamStatus = ex.status; similarExamScore = ex.total_score; } 
-                    }
+                    if (!isFinalDone) similarExams.push(item);
                 } else if (type === '미완료과제') {
-                    if (!isFinalDone) { overduePending++; overdueExamIds.push(ex.assignment_id); oTitles.push(title); oCount += remain; }
+                    if (!isFinalDone) overdueExams.push(item);
                 } else { 
-                    if (!isFinalDone) { 
-                        regularExamPending++; regularExamIds.push(ex.assignment_id); regularETitles.push(title); 
-                        regularECount += remain;
-                        if (regularExamPending === 1) { 
-                            regularExamStatus = ex.status; 
-                            regularExamScore = ex.total_score; 
-                            regularExamType = type; 
-                        } 
-                    }
+                    if (!isFinalDone) regularExams.push(item);
                 }
             });
 
-            const hasSimilar = similarExamPending > 0;
-            const hasRegular = regularExamPending > 0;
-
-            let activeExamMode = 'DONE';
-            let finalExamPending = 0;
-            let finalExamIds: number[] = [];
-            let finalETitles: string[] = [];
-            let finalECount = 0;
-            
-            let finalExamStatus = '대기';
-            let finalExamScore = null;
-            let finalExamType = ''; 
-
-            if (isEvenWeek) {
-                if (hasSimilar) {
-                    activeExamMode = 'SIMILAR'; finalExamPending = similarExamPending; finalExamIds = similarExamIds; finalETitles = similarETitles; finalECount = similarECount;
-                    finalExamStatus = similarExamStatus; finalExamScore = similarExamScore;
-                    finalExamType = '오답유사';
-                } else if (hasRegular) {
-                    activeExamMode = 'TEST'; finalExamPending = regularExamPending; finalExamIds = regularExamIds; finalETitles = regularETitles; finalECount = regularECount;
-                    finalExamStatus = regularExamStatus; finalExamScore = regularExamScore;
-                    finalExamType = regularExamType;
-                }
-            } else {
-                if (hasRegular) {
-                    activeExamMode = 'TEST'; finalExamPending = regularExamPending; finalExamIds = regularExamIds; finalETitles = regularETitles; finalECount = regularECount;
-                    finalExamStatus = regularExamStatus; finalExamScore = regularExamScore;
-                    finalExamType = regularExamType;
-                } else if (hasSimilar) {
-                    activeExamMode = 'SIMILAR'; finalExamPending = similarExamPending; finalExamIds = similarExamIds; finalETitles = similarETitles; finalECount = similarECount;
-                    finalExamStatus = similarExamStatus; finalExamScore = similarExamScore;
-                    finalExamType = '오답유사';
-                }
-            }
+            let normalHws: any[] = [];
+            let overdueNormalHws: any[] = [];
 
             hwsData?.forEach((hw: any) => {
                 if (hw.class_id && hw.class_id !== cid) return; 
@@ -486,28 +441,52 @@ export default function StudentPortal() {
                 
                 const resObj = hwResMap.get(hw.homework_id);
                 const status = resObj?.status || '미제출';
-                const isPending = !['제출완료', '채점완료', '완료'].includes(status);
-                if (!isPending) return;
+                if (['제출완료', '채점완료', '완료'].includes(status)) return;
                 
                 let tqLen = 0;
                 try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
 
                 const attempted = hwAttemptedMap.get(hw.homework_id)?.size || 0;
                 const remain = Math.max(0, tqLen - attempted);
-                
                 if (remain === 0) return;
 
+                const item = { id: hw.homework_id, title: hw.homework_title || '과제', remain, status, score: null, type: 'hw' };
+
                 if (hw.due_date && hw.due_date <= today) { 
-                    overduePending++; overdueHwIds.push(hw.homework_id); oTitles.push(hw.homework_title); oCount += remain; 
+                    overdueNormalHws.push(item);
                 } else { 
-                    hwPending++; hwIds.push(hw.homework_id); hTitles.push(hw.homework_title); hCount += remain; 
+                    normalHws.push(item);
                 }
             });
 
-            newBlockStates[c].exam = finalExamPending > 0 ? '미응시' : '최종완료';
-            newBlockStates[c].hw = hwPending > 0 ? '미응시' : '최종완료';
+            const isEvenWeek = newClassWeekTypes[c] === 'even';
+            const hasSimilar = similarExams.length > 0;
+            const hasRegular = regularExams.length > 0;
+
+            let finalExamList: any[] = [];
+            let activeExamMode = 'DONE';
+            
+            if (isEvenWeek) {
+                if (hasSimilar) { activeExamMode = 'SIMILAR'; finalExamList = similarExams; }
+                else if (hasRegular) { activeExamMode = 'TEST'; finalExamList = regularExams; }
+            } else {
+                if (hasRegular) { activeExamMode = 'TEST'; finalExamList = regularExams; }
+                else if (hasSimilar) { activeExamMode = 'SIMILAR'; finalExamList = similarExams; }
+            }
+
+            const finalHwList = [...hwExams, ...normalHws];
+            const finalOverdueList = [...overdueExams, ...overdueNormalHws];
+
+            const eCount = finalExamList.reduce((acc, it) => acc + it.remain, 0);
+            const hCount = finalHwList.reduce((acc, it) => acc + it.remain, 0);
+            const oCount = finalOverdueList.reduce((acc, it) => acc + it.remain, 0);
+
+            const firstExam = finalExamList[0] || {};
+
+            newBlockStates[c].exam = finalExamList.length > 0 ? '미응시' : '최종완료';
+            newBlockStates[c].hw = finalHwList.length > 0 ? '미응시' : '최종완료';
             newBlockStates[c].print = totalPrintQCount > 0 ? '미응시' : '최종완료';
-            newBlockStates[c].overdue = overduePending > 0 ? '미응시' : '최종완료';
+            newBlockStates[c].overdue = finalOverdueList.length > 0 ? '미응시' : '최종완료';
 
             if (roundResults[`${c}::1`]) newBlockStates[c].exam = '최종완료';
             if (roundResults[`${c}::2`]) newBlockStates[c].hw = '최종완료';
@@ -515,15 +494,14 @@ export default function StudentPortal() {
 
             newHwProgress[c] = { 
                 activeExamMode,
-                examIds: finalExamIds, hwExamIds, printIds: [], hwIds, overdueHwIds, overdueExamIds,
-                examTitles: Array.from(new Set(finalETitles)).filter(Boolean),
-                hwTitles: Array.from(new Set(hTitles)).filter(Boolean),
+                examList: finalExamList,
+                hwList: finalHwList,
+                overdueList: finalOverdueList,
                 printTitles: totalPrintQCount > 0 ? ['[통합] 누적 오답 클리닉'] : [],
-                overdueTitles: Array.from(new Set(oTitles)).filter(Boolean),
-                examQCount: finalECount, hwQCount: hCount, printQCount: totalPrintQCount, overdueQCount: oCount,
-                examPendingCount: finalExamPending, hwPendingCount: hwPending, printPendingCount: totalPrintQCount > 0 ? 1 : 0, overduePendingCount: overduePending,
-                examStatus: finalExamStatus, examInitialScore: finalExamScore,
-                examType: finalExamType 
+                
+                examQCount: eCount, hwQCount: hCount, printQCount: totalPrintQCount, overdueQCount: oCount,
+                examPendingCount: finalExamList.length, hwPendingCount: finalHwList.length, printPendingCount: totalPrintQCount > 0 ? 1 : 0, overduePendingCount: finalOverdueList.length,
+                examStatus: firstExam.status || '대기', examType: activeExamMode === 'SIMILAR' ? '오답유사' : (firstExam.exType || '')
             };
         });
 
@@ -539,8 +517,8 @@ export default function StudentPortal() {
 
         const allPendingHwIds: number[] = [];
         Object.values(hwProgress).forEach((prog: any) => {
-            if (prog.hwIds && prog.hwIds.length > 0) {
-                allPendingHwIds.push(...prog.hwIds);
+            if (prog.hwList) {
+                prog.hwList.forEach((it: any) => { if (it.type === 'hw') allPendingHwIds.push(it.id); });
             }
         });
         
@@ -605,7 +583,6 @@ export default function StudentPortal() {
 
         const prog = hwProgress[className] || {};
         const cState = blockStates[className] || {};
-        
         const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(prog.examStatus);
 
         if (typeKey !== 'exam' && !isExamClearedToProceed) {
@@ -614,10 +591,10 @@ export default function StudentPortal() {
         }
 
         const params = new URLSearchParams({ round: String(round), class: className });
-
         let testName = '';
+
         if (typeKey === 'print') {
-            testName = '오답프린트';
+            testName = '오답 클리닉 풀이중';
             setIsGeneratingPrint(true);
             
             try {
@@ -717,30 +694,47 @@ export default function StudentPortal() {
                 return;
             }
             setIsGeneratingPrint(false);
-        } else if (typeKey === 'exam') {
-            if (prog.examStatus === '채점확정') {
-                testName = '시험 오답 정정';
-                params.append('retry', 'true');
-            } else {
-                testName = '시험';
+        } else {
+            const listKey = typeKey === 'exam' ? 'examList' : typeKey === 'hw' ? 'hwList' : typeKey === 'overdue' ? 'overdueList' : null;
+            const items = listKey ? prog[listKey] || [] : [];
+            const cardKey = `${className}-${typeKey}`;
+            const selectedIdx = selectedTaskIdx[cardKey] || 0;
+            const selectedItem = items[selectedIdx] || items[0];
+
+            if (!selectedItem) {
+                alert('수행할 항목이 없습니다.');
+                return;
             }
-            params.append('week', prog.activeExamMode === 'SIMILAR' ? 'even' : 'odd');
-            if (prog.examIds && prog.examIds.length > 0) params.append('assignment_id', prog.examIds[0]);
-        } else if (typeKey === 'hw') {
-            testName = '과제';
-            if (prog.hwIds && prog.hwIds.length > 0) params.append('homework_ids', prog.hwIds.join(','));
-            if (prog.hwExamIds && prog.hwExamIds.length > 0) params.append('assignment_id', prog.hwExamIds[0]);
-        } else if (typeKey === 'overdue') {
-            testName = '미완료 과제';
-            params.append('overdue', '1'); 
-            if (prog.overdueHwIds && prog.overdueHwIds.length > 0) params.append('homework_ids', prog.overdueHwIds.join(','));
-            if (prog.overdueExamIds && prog.overdueExamIds.length > 0) params.append('assignment_id', prog.overdueExamIds[0]);
+
+            if (selectedItem.type === 'hw') {
+                params.append('homework_ids', String(selectedItem.id));
+                testName = '과제 풀이중';
+            } else {
+                params.append('assignment_id', String(selectedItem.id));
+                if (typeKey === 'exam') {
+                    if (selectedItem.status === '채점확정') {
+                        testName = '오답 정정중';
+                        params.append('retry', 'true');
+                    } else {
+                        // 🌟 DB의 정확한 시험 종류명을 반영합니다. (없으면 기본값 '테스트')
+                        const exactType = selectedItem.exType || '테스트';
+                        testName = `${exactType} 풀이중`;
+                    }
+                    params.append('week', prog.activeExamMode === 'SIMILAR' ? 'even' : 'odd');
+                } else if (typeKey === 'hw') {
+                    testName = '과제 풀이중';
+                } else if (typeKey === 'overdue') {
+                    testName = '미완료 과제 풀이중';
+                    params.append('overdue', '1'); 
+                }
+            }
         }
 
         if (channelRef.current && trackedSeatRef.current) {
             await channelRef.current.send({
                 type: 'broadcast', event: 'student_action',
-                payload: { seat: trackedSeatRef.current, action: 'update_activity', data: { studentId: studentInfo.id, activity: `[${className}] ${testName} 진입 🏃‍♂️` } }
+                // 🌟 "진입" 이라는 애매한 단어를 빼고 직관적인 텍스트만 전달합니다.
+                payload: { seat: trackedSeatRef.current, action: 'update_activity', data: { studentId: studentInfo.id, activity: `[${className}] ${testName} 🏃‍♂️` } }
             });
             await channelRef.current.untrack();
         }
@@ -755,46 +749,37 @@ export default function StudentPortal() {
 
     const renderCard = (typeKey: string, round: number, className: string) => {
         const cState = blockStates[className] || {};
-        const isDoneOriginal = cState[typeKey] === '최종완료' || cState[typeKey] === '채점완료';
-        
         const prog = hwProgress[className] || {};
-        const examStatus = prog.examStatus || '대기';
+        const listKey = typeKey === 'exam' ? 'examList' : typeKey === 'hw' ? 'hwList' : typeKey === 'overdue' ? 'overdueList' : null;
+        const items = listKey ? prog[listKey] || [] : [];
+        const cardKey = `${className}-${typeKey}`;
         
-        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(examStatus);
-        const isLocked = typeKey !== 'exam' && !isDoneOriginal && !isExamClearedToProceed; 
+        const selectedIdx = selectedTaskIdx[cardKey] || 0;
+        const selectedItem = items[selectedIdx] || items[0] || {};
+        const hasMultiple = items.length > 1;
 
-        const activeExamMode = prog.activeExamMode || 'TEST';
-        const exType = prog.examType || '';
-
-        let qCount = 0;
-        let pendingStacks = 0;
-        let initialScore = null;
-        let titleArray: string[] = [];
-
-        if (typeKey === 'exam') { 
-            qCount = prog.examQCount; 
-            titleArray = prog.examTitles || [];
-            initialScore = prog.examInitialScore;
-        }
-        else if (typeKey === 'hw') { qCount = prog.hwQCount; titleArray = prog.hwTitles || []; pendingStacks = prog.hwPendingCount; }
-        else if (typeKey === 'print') { qCount = prog.printQCount; titleArray = prog.printTitles || []; pendingStacks = prog.printPendingCount; }
-
-        const scoreData = roundResults[`${className}::${round}`];
-        const scoreLabel = scoreData?.forced_done ? '완료' : (scoreData?.correct != null ? `${scoreData.correct}/${scoreData.total}` : '완료');
-
-        const isWaitingConfirm = typeKey === 'exam' && examStatus === '제출완료'; 
-        const isFixingIncorrect = typeKey === 'exam' && examStatus === '채점확정'; 
+        const isBoxDone = (typeKey === 'print' ? (prog.printPendingCount === 0) : (items.length === 0)) || cState[typeKey] === '최종완료' || cState[typeKey] === '채점완료';
         
-        const noWrongAnswers = isFixingIncorrect && initialScore === 100;
-        const isDone = isDoneOriginal || noWrongAnswers;
+        const firstExamStatus = prog.examStatus || '대기';
+        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(firstExamStatus);
+        const isLocked = typeKey !== 'exam' && !isBoxDone && !isExamClearedToProceed; 
 
-        if (typeKey === 'exam') {
-            pendingStacks = noWrongAnswers ? 0 : prog.examPendingCount; 
-        }
+        const qCount = typeKey === 'exam' ? prog.examQCount : typeKey === 'hw' ? prog.hwQCount : typeKey === 'print' ? prog.printQCount : 0;
+        const pendingStacks = typeKey === 'print' ? prog.printPendingCount : items.length;
+        const titleArray = typeKey === 'print' ? (prog.printTitles || []) : items.map((it:any) => it.title);
+
+        const examStatus = typeKey === 'exam' ? (selectedItem.status || '대기') : '대기';
+        const initialScore = typeKey === 'exam' ? selectedItem.score : null;
+
+        const isSelectedItemWaiting = typeKey === 'exam' && examStatus === '제출완료'; 
+        const isSelectedItemFixing = typeKey === 'exam' && examStatus === '채점확정'; 
+        const isSelectedItem100 = isSelectedItemFixing && initialScore === 100;
+
+        const exType = selectedItem.exType || prog.examType || '';
 
         let theme: any;
         if (typeKey === 'exam') {
-            if (activeExamMode === 'SIMILAR') {
+            if (prog.activeExamMode === 'SIMILAR') {
                 theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-violet-700 to-violet-600', badge: 'bg-violet-400 text-violet-900', btnText: 'text-violet-900', textColor: 'text-violet-100', accent: 'text-violet-300' };
             } else {
                 if (['분기테스트', '분기평가'].includes(exType)) {
@@ -809,12 +794,12 @@ export default function StudentPortal() {
                 }
             }
 
-            if (isWaitingConfirm) {
+            if (isSelectedItemWaiting) {
                 theme.label = '⏳ 채점 대기 중';
                 theme.desc = '제출이 완료되었습니다! 데스크에서 선생님이 확인 후 최종 확정해 주실 때까지 잠시 기다려주세요.';
                 theme.bg = 'bg-gradient-to-br from-slate-600 to-slate-500';
                 theme.badge = 'bg-slate-400 text-white';
-            } else if (isFixingIncorrect) {
+            } else if (isSelectedItemFixing) {
                 theme.label = '✍️ 시험지 오답 고치기';
                 theme.desc = '채점이 확정되었습니다. 돌려받은 기존 시험지를 보면서 틀린 문제를 다시 풀고 정답을 입력하세요!';
                 theme.bg = 'bg-gradient-to-br from-slate-800 to-slate-700';
@@ -830,46 +815,44 @@ export default function StudentPortal() {
         const badgeLabel = typeKey === 'print' ? '통합' : typeKey === 'exam' ? `남은 평가 ${pendingStacks}건` : `남은 과제 ${pendingStacks}건`;
 
         return (
-            <div key={`${className}-${typeKey}`} className={`w-full h-full ${theme.bg} rounded-[2rem] p-8 md:p-10 text-white shadow-xl relative overflow-hidden group flex flex-col transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
+            <div key={cardKey} className={`w-full h-full ${theme.bg} rounded-[2rem] p-8 md:p-10 text-white shadow-xl relative overflow-hidden group flex flex-col transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
                 {isLocked && <div className="absolute inset-0 bg-slate-900/10 z-0"></div>}
                 
-                {isDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText.includes('bg-') ? 'text-slate-800' : theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 완료 {initialScore != null ? `(최초 ${initialScore}점)` : ''}</span>}
+                {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText.includes('bg-') ? 'text-slate-800' : theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 모두 완료됨</span>}
                 
-                {/* 상단 (배지, 제목, 설명) */}
                 <div className="relative z-10 shrink-0">
                     <div className="flex justify-between items-start mb-4">
                         <div className="flex items-center gap-2.5">
                             <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                                 {isLocked ? '🔒 잠김' : theme.label}
                             </span>
-                            {pendingStacks > 1 && !isDone && !isLocked && !isWaitingConfirm && (
+                            {pendingStacks > 1 && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
                                 <span className="text-sm font-bold bg-white/20 text-white px-3 py-1.5 rounded-lg shadow-sm border border-white/30">
                                     {badgeLabel}
                                 </span>
                             )}
                         </div>
-                        {isWaitingConfirm && initialScore !== null && (
+                        {isSelectedItemWaiting && initialScore !== null && (
                             <span className="text-sm md:text-base font-bold text-white bg-black/20 px-3.5 py-1.5 rounded-lg">가채점: {initialScore}점</span>
                         )}
-                        {!isDone && !isWaitingConfirm && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
+                        {!isBoxDone && !isSelectedItemWaiting && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
                     </div>
                     
                     <h3 className={`text-[28px] md:text-[34px] lg:text-[38px] font-black mb-2 leading-tight ${isLocked ? 'text-white/90' : ''}`}>
-                        {isWaitingConfirm || isFixingIncorrect ? '' : theme.label.replace(/[^가-힣 ]/g, '').trim() + ' 클리닉'}
-                        {isWaitingConfirm ? '채점 결과 확인 중' : ''}
-                        {isFixingIncorrect && !noWrongAnswers ? '시험지 오답 고치기' : ''}
-                        {noWrongAnswers ? '모든 문제를 맞췄습니다!' : ''}
+                        {isSelectedItemWaiting || isSelectedItemFixing ? '' : theme.label.replace(/[^가-힣 ]/g, '').trim() + ' 클리닉'}
+                        {isSelectedItemWaiting ? '채점 결과 확인 중' : ''}
+                        {isSelectedItemFixing && !isSelectedItem100 ? '시험지 오답 고치기' : ''}
+                        {isSelectedItem100 ? '모든 문제를 맞췄습니다!' : ''}
                     </h3>
                     
                     <p className={`text-base md:text-lg font-medium mt-1 mb-2 leading-snug ${isLocked ? 'text-white/70' : theme.textColor}`}>
-                        {isLocked ? '첫 번째 학습을 먼저 제출해주세요.' : (noWrongAnswers ? '정정할 오답이 없습니다. 수고하셨습니다!' : theme.desc)}
+                        {isLocked ? '첫 번째 학습을 먼저 제출해주세요.' : (isSelectedItem100 ? '선택하신 학습에 더 이상 정정할 오답이 없습니다!' : theme.desc)}
                     </p>
                 </div>
 
-                {/* 🌟 하단 (리스트 및 버튼 병렬 배치) */}
                 <div className="relative z-10 flex flex-1 min-h-0 items-stretch justify-between gap-4 mt-2">
                     <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col justify-start pb-1">
-                        {!isDone && titleArray.length > 0 && (
+                        {!isBoxDone && titleArray.length > 0 && (
                             <div className="flex flex-col gap-2">
                                 {titleArray.slice(0, 4).map((t: string, idx: number) => (
                                     <div key={idx} className={`text-lg md:text-xl font-bold ${isLocked ? 'text-white/60' : theme.accent} truncate flex items-center gap-3`} title={t}>
@@ -885,12 +868,30 @@ export default function StudentPortal() {
                         )}
                     </div>
                     
-                    <div className="shrink-0 self-end">
-                        {isDone ? 
+                    <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
+                        {hasMultiple && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
+                            <select
+                                value={selectedIdx}
+                                onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
+                                className="w-[180px] md:w-[240px] text-xs md:text-sm font-bold bg-black/20 text-white border border-white/20 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-black/30 transition-colors shadow-sm"
+                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px top 50%', backgroundSize: '10px auto' }}
+                            >
+                                {items.map((item: any, idx: number) => (
+                                    <option key={idx} value={idx} className="text-slate-800 bg-white">
+                                        {item.title} (남은 {item.remain}문제)
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        {isBoxDone ? 
                             <button disabled className={`bg-white/70 ${theme.btnText.includes('bg-') ? 'text-slate-600' : theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
-                                {noWrongAnswers ? '💯 정정할 오답 없음' : '완료됨'}
+                                학습 전체 완료
                             </button> 
-                        : isWaitingConfirm ?
+                        : isSelectedItem100 ?
+                            <button disabled className={`bg-white/70 ${theme.btnText.includes('bg-') ? 'text-slate-600' : theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
+                                💯 정답 완료
+                            </button>
+                        : isSelectedItemWaiting ?
                             <button disabled className="bg-white/30 text-white font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2">
                                 <span>🔒</span> 확인 대기
                             </button>
@@ -900,7 +901,7 @@ export default function StudentPortal() {
                             </button>
                         : 
                             <button disabled={isGeneratingPrint} onClick={() => startClinicBlock(className, round, typeKey)} className={`${theme.btnText.includes('bg-') ? theme.btnText : `bg-white ${theme.btnText}`} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-xl hover:scale-105 transition-all ${isGeneratingPrint && typeKey === 'print' ? 'opacity-70 animate-pulse' : ''}`}>
-                                {isGeneratingPrint && typeKey === 'print' ? '⏳ 통합 생성 중...' : (isFixingIncorrect ? '오답 정정 시작하기' : '학습하기')}
+                                {isGeneratingPrint && typeKey === 'print' ? '⏳ 통합 생성 중...' : (isSelectedItemFixing ? '오답 정정 시작하기' : '학습하기')}
                             </button>
                         }
                     </div>
@@ -910,18 +911,24 @@ export default function StudentPortal() {
     };
 
     const renderOverdueCard = (className: string) => {
+        const typeKey = 'overdue';
         const cState = blockStates[className] || {};
-        const isDone = cState.overdue !== '미응시';
-        
         const prog = hwProgress[className] || {};
-        const examStatus = prog.examStatus || '대기';
+        const items = prog.overdueList || [];
+        const cardKey = `${className}-${typeKey}`;
+        const selectedIdx = selectedTaskIdx[cardKey] || 0;
+        const selectedItem = items[selectedIdx] || items[0] || {};
+        const hasMultiple = items.length > 1;
+
+        const isBoxDone = items.length === 0 || cState.overdue === '최종완료';
         
-        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(examStatus);
-        const isLocked = !isDone && !isExamClearedToProceed;
+        const firstExamStatus = prog.examStatus || '대기';
+        const isExamClearedToProceed = cState.exam === '최종완료' || ['제출완료', '채점확정', '채점완료', '완료', '최종완료'].includes(firstExamStatus);
+        const isLocked = !isBoxDone && !isExamClearedToProceed;
 
         const qCount = prog.overdueQCount || 0;
-        const titleArray = prog.overdueTitles || [];
-        const pendingStacks = prog.overduePendingCount || 0;
+        const titleArray = items.map((it:any) => it.title);
+        const pendingStacks = items.length;
 
         const theme = {
             label: '⏰ 미완료 과제',
@@ -934,10 +941,10 @@ export default function StudentPortal() {
         };
 
         return (
-            <div key={`${className}-overdue`} className={`w-full h-full ${theme.bg} rounded-[2rem] p-8 md:p-10 text-white shadow-xl relative overflow-hidden group flex flex-col transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
+            <div key={cardKey} className={`w-full h-full ${theme.bg} rounded-[2rem] p-8 md:p-10 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${isLocked ? 'grayscale-[60%] opacity-80' : ''}`}>
                 {isLocked && <div className="absolute inset-0 bg-slate-900/10 z-0"></div>}
                 
-                {isDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
+                {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
                 
                 <div className="relative z-10 shrink-0">
                     <div className="flex justify-between items-start mb-4">
@@ -945,25 +952,23 @@ export default function StudentPortal() {
                             <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                                 {isLocked ? '🔒 잠김' : theme.label}
                             </span>
-                            {pendingStacks > 1 && !isDone && !isLocked && (
+                            {pendingStacks > 1 && !isBoxDone && !isLocked && (
                                 <span className="text-sm font-bold bg-white/20 text-white px-3 py-1.5 rounded-lg shadow-sm border border-white/30">
                                     밀린 과제 {pendingStacks}건
                                 </span>
                             )}
                         </div>
-                        {!isDone && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
+                        {!isBoxDone && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
                     </div>
-                    
                     <h3 className={`text-[28px] md:text-[34px] lg:text-[38px] font-black mb-2 leading-tight ${isLocked ? 'text-white/90' : ''}`}>미완료 과제 클리닉</h3>
                     <p className={`text-base md:text-lg font-medium mt-1 mb-2 leading-snug ${isLocked ? 'text-white/70' : theme.textColor}`}>
                         {isLocked ? '첫 번째 학습을 먼저 제출해주세요.' : theme.desc}
                     </p>
                 </div>
 
-                {/* 🌟 하단 영역: 리스트(좌측)와 버튼(우측) 병렬 배치 */}
                 <div className="relative z-10 flex flex-1 min-h-0 items-stretch justify-between gap-4 mt-2">
                     <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col justify-start pb-1">
-                        {!isDone && titleArray.length > 0 && (
+                        {!isBoxDone && titleArray.length > 0 && (
                             <div className="flex flex-col gap-2">
                                 {titleArray.slice(0, 4).map((t: string, idx: number) => (
                                     <div key={idx} className={`text-lg md:text-xl font-bold ${isLocked ? 'text-white/60' : theme.accent} truncate flex items-center gap-3`} title={t}>
@@ -979,8 +984,22 @@ export default function StudentPortal() {
                         )}
                     </div>
                     
-                    <div className="shrink-0 self-end">
-                        {isDone ?
+                    <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
+                        {hasMultiple && !isBoxDone && !isLocked && (
+                            <select
+                                value={selectedIdx}
+                                onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
+                                className="w-[180px] md:w-[240px] text-xs md:text-sm font-bold bg-black/20 text-white border border-white/20 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-black/30 transition-colors shadow-sm"
+                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px top 50%', backgroundSize: '10px auto' }}
+                            >
+                                {items.map((item: any, idx: number) => (
+                                    <option key={idx} value={idx} className="text-slate-800 bg-white">
+                                        {item.title} (남은 {item.remain}문제)
+                                    </option>
+                                ))}
+                            </select>
+                        )}
+                        {isBoxDone ?
                             <button disabled className={`bg-white/70 ${theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
                         : isLocked ?
                             <button disabled className="bg-black/20 text-white/80 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2">
@@ -1027,7 +1046,6 @@ export default function StudentPortal() {
                 <div className="flex items-center gap-8">
                     <div className="flex items-center">
                         <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 object-contain" />
-                        <span className="ml-3 text-blue-500 font-black text-base md:text-lg">Student</span>
                     </div>
                 </div>
                 <div className="flex items-center gap-4 md:gap-5">
