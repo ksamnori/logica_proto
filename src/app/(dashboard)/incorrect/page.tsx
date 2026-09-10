@@ -205,16 +205,42 @@ export default function IncorrectPage() {
 
       let enrichedRecords = records || [];
 
+      // 🌟 [핵심 수정] 숫자형 ID와 문자열(UUID) 형태의 ID를 철저히 분리하여 쿼리
       if (enrichedRecords.length > 0) {
-        const tqIds = enrichedRecords.filter(r => r.tq_id).map(r => r.tq_id);
-        if (tqIds.length > 0) {
-          const { data: tqData } = await supabase.from('textbook_question').select('tq_id, question_number, textbook(title)').in('tq_id', tqIds);
+        const numIds = enrichedRecords
+          .map(r => r.tq_id)
+          .filter(id => id && (typeof id === 'number' || (typeof id === 'string' && !id.includes('-') && !isNaN(Number(id)))))
+          .map(Number);
+          
+        const uuidIds = enrichedRecords
+          .map(r => r.tq_id)
+          .filter(id => id && typeof id === 'string' && id.includes('-'));
+
+        const tqMap: any = {};
+
+        // 숫자형 ID는 textbook_question 테이블에서 조회
+        if (numIds.length > 0) {
+          const { data: tqData } = await supabase.from('textbook_question')
+            .select('tq_id, question_number, textbook(title)')
+            .in('tq_id', numIds);
+            
           if (tqData) {
-            const tqMap: any = {};
             tqData.forEach(t => tqMap[t.tq_id] = t);
-            enrichedRecords = enrichedRecords.map(r => ({ ...r, tq_info: tqMap[r.tq_id] }));
           }
         }
+
+        // UUID형 ID는 question_db 테이블에서 조회하여 통일된 형태로 매핑
+        if (uuidIds.length > 0) {
+          const { data: qData } = await supabase.from('question_db')
+            .select('question_id, source_book_name, question_number')
+            .in('question_id', uuidIds);
+            
+          if (qData) {
+            qData.forEach(q => tqMap[q.question_id] = { textbook: { title: q.source_book_name }, question_number: q.question_number });
+          }
+        }
+
+        enrichedRecords = enrichedRecords.map(r => ({ ...r, tq_info: tqMap[r.tq_id] || null }));
       }
       setStudentRecords(enrichedRecords);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }

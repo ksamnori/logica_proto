@@ -94,8 +94,20 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, tq_id, question_id, source_type').eq('student_id', sId).eq('source_type', '과제오답').is('resolved_at', null);
       if (!records || records.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
 
-      const qIds = [...new Set(records.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
-      const tqIds = [...new Set(records.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))];
+      // 🌟 [핵심 수정] 숫자(tq_id)와 문자열(UUID)을 안전하게 분리
+      let qIds = [...new Set(records.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
+      
+      const tqIds = [...new Set(records.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))]
+        .filter(id => id && (typeof id === 'number' || (typeof id === 'string' && !id.includes('-') && !isNaN(Number(id)))))
+        .map(Number);
+
+      const uuidFromTqIds = [...new Set(records.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))]
+        .filter(id => id && typeof id === 'string' && id.includes('-'));
+
+      if (uuidFromTqIds.length > 0) {
+        qIds = [...new Set([...qIds, ...uuidFromTqIds])];
+      }
+
       const [{ data: qDbRows }, { data: tqRows }] = await Promise.all([
         qIds.length > 0 ? supabaseClient.from('question_db').select('*').in('question_id', qIds) : Promise.resolve({ data: [] }),
         tqIds.length > 0 ? supabaseClient.from('textbook_question').select('*, textbook(book_type, title)').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
@@ -110,8 +122,12 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
       const mapped: any[] = [];
       records.forEach((r:any) => {
-        if (r.question_id && qDbMap.has(r.question_id)) {
-          const qItem = qDbMap.get(r.question_id);
+        // 🌟 [매핑 로직 보강] tq_id에 UUID가 들어있었더라도 question_db에서 안전하게 찾아서 연결
+        const isTqIdUuid = r.tq_id && typeof r.tq_id === 'string' && r.tq_id.includes('-');
+        const targetQId = isTqIdUuid ? r.tq_id : r.question_id;
+
+        if (targetQId && qDbMap.has(targetQId)) {
+          const qItem = qDbMap.get(targetQId);
           const dbHint = combineDbHints(qItem.step_1_concept, qItem.step_2_approach);
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
@@ -123,7 +139,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
             pageNum: qItem.page_number || qItem.final_printed_page || qItem.detected_page_num,
             questionNum: qItem.question_number
           });
-        } else if (r.tq_id && tqMap.has(r.tq_id)) {
+        } else if (!isTqIdUuid && r.tq_id && tqMap.has(r.tq_id)) {
           const tq = tqMap.get(r.tq_id);
           const raw = tq.raw_metadata || {};
           const freshQ: any = qDbMap.get(tq.question_id) || {};
@@ -231,17 +247,15 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       refs.totalQuestionsInRoundRef.current = mapped.length;
       refs.hintState.current = hydrateHintState(sId, mapped);
 
-      // 🌟 [핵심 변경] 시험 유형에 따라 60분 또는 20분 타이머 동적 설정
       const is60MinTest = ['중간평가', '중간테스트', '분기평가', '분기테스트'].includes(displayLabel) || 
                           ['중간평가', '중간테스트', '분기평가', '분기테스트'].some(k => (matchedTitle || '').includes(k));
       
       if (typeof window !== 'undefined') {
-          // window 객체에 임시로 저장하여 useClinicTimer가 이를 읽어감
           (window as any).__dynamicTimeLimit = is60MinTest ? 3600 : 1200; 
       }
 
       const titleBase = matchedTitle || `이번 주 ${displayLabel}`;
-      const limitText = is60MinTest ? '60분 제한' : '20분 제한'; // 화면에 표시될 텍스트 변경
+      const limitText = is60MinTest ? '60분 제한' : '20분 제한';
       
       await loadExistingAnswers(sId, mapped, ((params.round === 1 && week === 'odd') || params.round === 4) ? `${titleBase} (${limitText})` : titleBase);
       setQuestions(mapped);
