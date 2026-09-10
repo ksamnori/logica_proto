@@ -51,6 +51,15 @@ export default function RightPreview({ examData }: { examData: any }) {
     }
   }, [draggedIdx, dragOverIdx]);
 
+  // 🌟 수동 수식 새로고침 함수 추가 (다른 코드는 일절 건드리지 않음)
+  const forceMathRefresh = () => {
+    const mj = (window as any).MathJax;
+    if (mj && mj.typesetPromise) {
+      mj.typesetClear();
+      mj.typesetPromise().catch((err: any) => console.error("MathJax 강제 새로고침 에러:", err));
+    }
+  };
+
   const startEditing = (q: any) => {
     setEditingId(q.question_id);
     setEditForm({
@@ -112,6 +121,11 @@ export default function RightPreview({ examData }: { examData: any }) {
           )}
         </div>
         <div className="flex space-x-2">
+          {/* 🌟 버튼 추가 영역: 수식 깨짐 해결 버튼 */}
+          <button onClick={forceMathRefresh} className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">
+            <span>🔄</span> 수식 깨짐 해결
+          </button>
+          
           {/* 🌟 수정/클리닉 모드일 때는 강제로 스텝 1 가기 버튼을 숨깁니다. */}
           {!isClinicMode && !isRestoredMode && (
              <button onClick={() => router.push('/exam/step1')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">⟵ Step 1 가기</button>
