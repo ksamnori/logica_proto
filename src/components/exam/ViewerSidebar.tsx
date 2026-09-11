@@ -166,6 +166,7 @@ export default function ViewerSidebar({
                               <option value="선택없음">선택없음</option>
                               <option value="과제프린트">과제프린트</option>
                               <option value="오답프린트">오답프린트</option>
+                              <option value="오답유사">오답유사</option>
                               <option value="주간테스트">주간테스트</option>
                               <option value="중간평가">중간평가</option>
                               <option value="분기평가">분기평가</option>

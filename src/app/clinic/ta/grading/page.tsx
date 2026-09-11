@@ -7,7 +7,6 @@ import GradingBoard from "./GradingBoard";
 import TaTopBar from "../TaTopBar";
 import { useTaEntry } from "../TaEntryGate";
 
-// 🌟 5단 분류에 맞게 카운트 필드 추가
 interface StudentInfo {
   id: string;
   name: string;
@@ -78,6 +77,14 @@ const purgeOldSession = () => {
     'editHomeworkId', 'editExamId', 'duplicateExamId'
   ];
   keysToRemove.forEach(k => sessionStorage.removeItem(k));
+};
+
+const getKstDateStr = (iso: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
 };
 
 export default function TaGradingPage() {
@@ -164,7 +171,6 @@ export default function TaGradingPage() {
 
       const allStudentIds = Object.keys(namesMap);
       
-      // 🌟 5단 분류 카운트 맵 준비
       const pendingExamMap: Record<string, number> = {};
       const pendingHwMap: Record<string, number> = {};
       const pendingOverdueMap: Record<string, number> = {};
@@ -182,7 +188,6 @@ export default function TaGradingPage() {
         const m = Array.isArray(e.exam_master) ? e.exam_master[0] : e.exam_master;
         const qCount = m?.total_questions || 0;
         
-        // 🌟 정확한 타입별로 분산 카운트
         if (['오답프린트', '오답'].includes(m?.exam_type)) pendingPrintMap[e.student_id] = (pendingPrintMap[e.student_id] || 0) + qCount;
         else if (['오답유사', '과제오답유사'].includes(m?.exam_type)) pendingSimilarMap[e.student_id] = (pendingSimilarMap[e.student_id] || 0) + qCount;
         else if (m?.exam_type === '미완료과제') pendingOverdueMap[e.student_id] = (pendingOverdueMap[e.student_id] || 0) + qCount;
@@ -355,20 +360,39 @@ export default function TaGradingPage() {
     try {
       let count = 1;
       if (['exam', 'hw_exam', 'print', 'similar', 'overdue'].includes(item.kind)) {
-        const { data: ex } = await supabase.from('exam_assignment').select('exam_id, class_id').eq('assignment_id', item.assignmentId).single();
+        const { data: ex } = await supabase.from('exam_assignment').select('exam_id, class_id, created_at, exam_master!inner(title)').eq('assignment_id', item.assignmentId).single();
         if (ex) {
-          const { count: c } = await supabase.from('exam_assignment').select('*', { count: 'exact', head: true }).eq('exam_id', ex.exam_id).eq('class_id', ex.class_id);
-          count = c || 1;
+          const m = Array.isArray(ex.exam_master) ? ex.exam_master[0] : ex.exam_master;
+          const dateStr = getKstDateStr(ex.created_at);
+          
+          const { data: masters } = await supabase.from('exam_master').select('exam_id').eq('title', m.title);
+          const masterIds = masters?.map(x => x.exam_id) || [];
+          
+          let query = supabase.from('exam_assignment').select('assignment_id, created_at').in('exam_id', masterIds);
+          if (ex.class_id) query = query.eq('class_id', ex.class_id);
+          else query = query.is('class_id', null);
+          
+          const { data: assigns } = await query;
+          const matchingAssigns = assigns?.filter(a => getKstDateStr(a.created_at) === dateStr) || [];
+          count = matchingAssigns.length;
         }
       } else {
-        const { data: hw } = await supabase.from('homework_assignment').select('homework_title, class_id, target_student_id').eq('homework_id', item.homeworkId).single();
+        const { data: hw } = await supabase.from('homework_assignment').select('homework_title, class_id, target_student_id, created_at').eq('homework_id', item.homeworkId).single();
         if (hw) {
-          if (!hw.target_student_id) {
+          const dateStr = getKstDateStr(hw.created_at);
+          
+          let query = supabase.from('homework_assignment').select('homework_id, target_student_id, created_at').eq('homework_title', hw.homework_title);
+          if (hw.class_id) query = query.eq('class_id', hw.class_id);
+          else query = query.is('class_id', null);
+          
+          const { data: hws } = await query;
+          const matchingHws = hws?.filter(h => getKstDateStr(h.created_at) === dateStr) || [];
+          
+          if (!hw.target_student_id && matchingHws.length === 1) {
             const { count: c } = await supabase.from('enrollment').select('*', { count: 'exact', head: true }).eq('class_id', hw.class_id);
             count = c || 1;
           } else {
-            const { data: hws } = await supabase.from('homework_assignment').select('homework_id, target_student_id').eq('class_id', hw.class_id).eq('homework_title', hw.homework_title);
-            count = hws ? hws.length : 1;
+            count = matchingHws.length;
           }
         }
       }
@@ -558,7 +582,6 @@ export default function TaGradingPage() {
                       <span className="font-bold text-[12px] text-[#002864] flex items-center gap-1.5">
                         📁 {c.name}
                         <span className="text-slate-400 font-medium text-[10px]">({c.students.length}명)</span>
-                        {/* 🌟 반별 5단 신호등 표시 */}
                         {(c.hasPendingExam || c.hasPendingHw || c.hasPendingOverdue || c.hasPendingPrint || c.hasPendingSimilar) && (
                           <div className="flex gap-0.5 ml-1">
                             {c.hasPendingExam && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="미채점 시험 있음"></span>}
@@ -579,7 +602,6 @@ export default function TaGradingPage() {
                             <button key={s.id} onClick={() => handleSelectStudent(s)} className="w-full text-left pl-9 pr-4 py-2.5 text-[12px] font-bold text-slate-600 hover:bg-blue-50 hover:text-[#002864] transition-colors border-t border-slate-100/80 flex items-center justify-between gap-2">
                               <span className="flex items-center gap-2 truncate">
                                 👤 {s.name}
-                                {/* 🌟 학생별 5단 동그란 알림 뱃지 적용 */}
                                 <div className="flex items-center gap-1 shrink-0 ml-1">
                                   {s.pendingExamQ > 0 && <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-blue-200" title="시험 미채점">{s.pendingExamQ}</span>}
                                   {s.pendingHwQ > 0 && <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-amber-200" title="과제 미채점">{s.pendingHwQ}</span>}

@@ -79,9 +79,31 @@ export default function ClinicViewer() {
   const [remainCallSec, setRemainCallSec] = useState(0);
 
   const autoLeaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // 🌟 [추가됨] 진짜 출처 타입(`exam_type`)을 담을 ref
+  const sourceTypeRef = useRef<string>('시험지');
 
-  // 🌟 동적으로 설정된 제한 시간(초)을 화면 렌더링에 사용하기 위해 상태 추가
+  // 동적으로 설정된 제한 시간(초)을 화면 렌더링에 사용하기 위해 상태 추가
   const [dynamicTimeLimitMin, setDynamicTimeLimitMin] = useState<number>(20);
+
+  // 🌟 [핵심 변경] 컴포넌트 마운트 및 파라미터 로드 시짜 진짜 타입(exam_type) 추출
+  useEffect(() => {
+    if (!studentInfo.id || params.round === 0) return;
+    const fetchSourceType = async () => {
+      if (params.assignmentId) {
+        const { data } = await supabaseClient.from('exam_assignment').select('exam_master!inner(exam_type)').eq('assignment_id', params.assignmentId).maybeSingle();
+        if (data && data.exam_master) {
+          const m = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+          if (m.exam_type) {
+            sourceTypeRef.current = m.exam_type;
+          }
+        }
+      } else if (params.homeworkIdsStr || params.assignmentIdsStr) {
+        sourceTypeRef.current = '과제';
+      }
+    };
+    fetchSourceType();
+  }, [params, studentInfo.id]);
 
   useEffect(() => {
     if (callCooldownUntil <= 0) return;
@@ -145,7 +167,6 @@ export default function ClinicViewer() {
 
   const isTimedRound = fetchedIsTimedRound && !params.retry;
 
-  // 🌟 질문 데이터를 다 불러왔을 때, 동적으로 설정된 제한 시간(초)을 분(Minute)으로 변환하여 UI에 반영
   useEffect(() => {
     if (questions.length > 0 && typeof window !== 'undefined' && (window as any).__dynamicTimeLimit) {
         setDynamicTimeLimitMin((window as any).__dynamicTimeLimit / 60);
@@ -517,7 +538,8 @@ export default function ClinicViewer() {
       totalScore += score;
 
       inserts.push({ exam_assignment_id: params.assignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
-      if (!isCorrect && qItem.question_id) { incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: '시험지', status: ans === '미입력' ? 'B' : 'X', resolved_at: null }); }
+      // 🌟 [핵심 변경] 하드코딩된 '시험지' 대신 sourceTypeRef.current 사용
+      if (!isCorrect && qItem.question_id) { incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: sourceTypeRef.current, status: ans === '미입력' ? 'B' : 'X', resolved_at: null }); }
     }
 
     if (inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
@@ -894,17 +916,27 @@ export default function ClinicViewer() {
     setPendingRecheckReview(prev => prev.map(r => r.uid === item.uid ? { ...r, requested: true } : r));
   };
 
+  // 🌟 [핵심 변경] 진짜 문제지 타입(sourceTypeRef.current)으로 업데이트
   const bumpIncorrectRecord = async (recordId: number, status: string, resolved: boolean) => {
     const { data: cur } = await supabaseClient.from('student_incorrect_record').select('retry_count').eq('record_id', recordId).maybeSingle();
-    await supabaseClient.from('student_incorrect_record').update({ status, retry_count: (cur?.retry_count || 0) + 1, resolved_at: resolved ? new Date().toISOString() : null }).eq('record_id', recordId);
+    await supabaseClient.from('student_incorrect_record').update({ status, retry_count: (cur?.retry_count || 0) + 1, resolved_at: resolved ? new Date().toISOString() : null, source_type: sourceTypeRef.current }).eq('record_id', recordId);
   };
 
+  // 🌟 [핵심 변경] 진짜 문제지 타입(sourceTypeRef.current)으로 등록/업데이트
   const upsertIncorrectRecord = async (qData: any, status: string): Promise<number | undefined> => {
     const filterCol = qData.tq_id ? 'tq_id' : 'question_id'; const filterVal = qData.tq_id ?? qData.question_id;
     if (!filterVal) return undefined;
     const { data: existingRows } = await supabaseClient.from('student_incorrect_record').select('record_id').eq('student_id', studentInfo.id).eq(filterCol, filterVal).limit(1);
-    if (existingRows?.[0]) { await supabaseClient.from('student_incorrect_record').update({ status, resolved_at: null }).eq('record_id', existingRows[0].record_id); return existingRows[0].record_id; }
-    const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert({ student_id: studentInfo.id, tq_id: qData.tq_id ?? null, question_id: qData.question_id ?? null, source_type: '과제오답', status, resolved_at: null }).select('record_id').single();
+    
+    if (existingRows?.[0]) { 
+      await supabaseClient.from('student_incorrect_record').update({ status, resolved_at: null, source_type: sourceTypeRef.current }).eq('record_id', existingRows[0].record_id); 
+      return existingRows[0].record_id; 
+    }
+    
+    const { data: newRecord } = await supabaseClient.from('student_incorrect_record').insert({ 
+      student_id: studentInfo.id, tq_id: qData.tq_id ?? null, question_id: qData.question_id ?? null, source_type: sourceTypeRef.current, status, resolved_at: null 
+    }).select('record_id').single();
+    
     return newRecord?.record_id;
   };
 

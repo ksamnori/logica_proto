@@ -21,9 +21,10 @@ const GradeButton = memo(({ code, ansId, currentCode, qId, tqId, title, onClick 
   
   if (['O', 'TO'].includes(code)) checkedClass += " bg-[#10b981]";
   else if (['X', 'TX'].includes(code)) checkedClass += " bg-[#ef4444]";
+  else if (code === 'RO') checkedClass += " bg-[#3b82f6]"; // 🌟 RO 컬러 (블루) 매핑 추가
   else if (code === '☆') checkedClass += " bg-[#f59e0b]";
   else if (code === 'B') checkedClass += " bg-[#64748b]";
-  else checkedClass += " bg-[#0ea5e9]";
+  else checkedClass += " bg-[#0ea5e9]"; // a, b, c, x, y, z, p 등
 
   const isChecked = currentCode === code;
 
@@ -62,7 +63,6 @@ function ReviewContent() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isDeletingReport, setIsDeletingReport] = useState(false);
 
-  // 🌟 [핵심 스위치] 소문항이 묶이는 시험(입학테스트, 진단평가)인지 여부를 저장
   const [isMergedExam, setIsMergedExam] = useState(false);
 
   const [modalQ, setModalQ] = useState<any>(null);
@@ -156,9 +156,9 @@ function ReviewContent() {
       ratio = parseFloat(meta.score_ratio) || 0; if (ratio > 1) ratio = ratio / 100;
       isCorrectEq = meta.is_correct === true || String(meta.is_correct).toLowerCase() === 'true';
     } else {
-      if (['O', 'a', 'b', 'c'].includes(code)) { ratio = 1.0; isCorrectEq = true; }
+      // 🌟 RO 정답 처리 속성 추가
+      if (['O', 'RO', 'a', 'b', 'c'].includes(code)) { ratio = 1.0; isCorrectEq = true; }
       else if (code === 'TO') { ratio = 0.8; isCorrectEq = true; }
-      else if (code === 'q') { ratio = 0.5; isCorrectEq = false; }
       else { ratio = 0.0; isCorrectEq = false; }
     }
     return { newEarned: assignedScore * ratio, isCorrectEq };
@@ -189,7 +189,7 @@ function ReviewContent() {
 
       setHeaderInfo({ title: `📝 ${title} 채점표`, subtitle: `대상: ${studentName} 학생 | 교재명: ${hwData.textbook?.title || '교재'}`, type: '과제' });
       setShowReportBtn(false);
-      setIsMergedExam(false); // 과제는 병합 없음
+      setIsMergedExam(false); 
 
       let tqIds: number[] = [];
       if (hwData.target_questions) {
@@ -293,7 +293,6 @@ function ReviewContent() {
       const matchTag = (aData.exam_master?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
       const stdName = matchTag ? matchTag[0] : '';
       
-      // 🌟 [핵심 스위치] '입학테스트' 이거나 '진단평가'라는 단어가 포함된 경우에만 소문항 병합 진행
       const merged = exType.includes('입학테스트') || exType.includes('진단평가');
       setIsMergedExam(merged);
 
@@ -302,7 +301,6 @@ function ReviewContent() {
       const studentName = Array.isArray(aData.student) ? aData.student[0]?.name : aData.student?.name;
       setHeaderInfo({ title: `📝 ${exTitle} 채점표`, subtitle: `대상: ${studentName} 학생 | 유형: ${exType} [평가기준: ${stdName || '미지정'}]`, type: exType });
 
-      // 리포트 생성 버튼도 병합 모드(진단)일 때만 표시
       if (merged) setShowReportBtn(aData.status === '채점완료' || aData.test_status === '채점완료');
 
       const { data: items, error: iErr } = await supabase.from('exam_item').select('*').eq('exam_id', epId).order('sort_order');
@@ -372,14 +370,13 @@ function ReviewContent() {
         if (wLog.length > 0) newWrongLogMap[ans.answer_id] = wLog;
 
         let gId = '';
-        // 🌟 [핵심 변경] 병합 모드일 때만 번호 묶기를 실행하고, 분기평가 등은 무조건 개별 그룹으로 쪼갬!
         if (merged) {
           const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : q.question_id;
           gId = `group_q_${baseNum}`;
           const parentId = q.parent_question_id || q.parent_tq_id;
           if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') gId = `group_parent_${parentId}`;
         } else {
-          gId = `single_q_${item.question_id}_${Math.random()}`; // 병합 차단 (1문항 = 1줄)
+          gId = `single_q_${item.question_id}_${Math.random()}`; 
         }
 
         if (!groupMap.has(gId)) { const newG = { id: gId, sort_order: item.sort_order, items: [] }; groupMap.set(gId, newG); groups.push(newG); }
@@ -396,7 +393,6 @@ function ReviewContent() {
       groups.forEach((g: any, index: number) => {
         g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
         
-        // 🌟 병합 모드(진단/입학) 일 때만 서브 번호 정렬
         if (merged) {
           g.items.sort((a:any, b:any) => {
             const subA = a.question.sub_num || 0; const subB = b.question.sub_num || 0;
@@ -418,7 +414,6 @@ function ReviewContent() {
           maxScore = baseScorePerQuestion;
         }
         
-        // 🌟 분기평가는 서브문항이 없으므로(개별 취급) 배점이 그대로 들어감
         const subScore = merged ? (maxScore / g.items.length) : maxScore;
 
         g.items.forEach((i: any) => {
@@ -484,6 +479,8 @@ function ReviewContent() {
 
     setIsSaving(true);
     try {
+      const dynamicSourceType = headerInfo.type || (isHomeworkMode ? '과제' : '시험지');
+
       if (isHomeworkMode) {
         const ansInserts: any[] = [];
         const ansUpdates: any[] = [];
@@ -528,11 +525,11 @@ function ReviewContent() {
           const data = pendingUpdates[ansId];
           const code = data.grading_code;
           const hadWrong = parseWrongLog(wrongLogByAnswerId[ansId]).length > 0;
-          const isFullyCorrect = ['O', 'a', 'b', 'c'].includes(code) && !hadWrong;
+          const isFullyCorrect = ['O', 'TO', 'RO', 'a', 'b', 'c'].includes(code) && !hadWrong;
           
           if (data.tq_id) {
             const match = exInc?.find(e => String(e.tq_id) === String(data.tq_id));
-            const p = { student_id: contextIds.studentId, tq_id: data.tq_id, question_id: data.question_id || null, source_type: '교재과제', status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
+            const p = { student_id: contextIds.studentId, tq_id: data.tq_id, question_id: data.question_id || null, source_type: dynamicSourceType, status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
             if (match) incUpdates.push({ record_id: match.record_id, ...p });
             else incInserts.push(p);
           }
@@ -544,7 +541,7 @@ function ReviewContent() {
         }
         if (incUpdates.length > 0) {
           const upPromises = incUpdates.map(u => 
-            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at }).eq('record_id', u.record_id)
+            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id)
           );
           const results = await Promise.all(upPromises);
           const errs = results.filter(r => r.error);
@@ -613,11 +610,11 @@ function ReviewContent() {
         updateKeys.forEach(ansId => {
           const data = pendingUpdates[ansId];
           const code = data.grading_code;
-          const isFullyCorrect = ['O', 'a', 'b', 'c'].includes(code);
+          const isFullyCorrect = ['O', 'TO', 'RO', 'a', 'b', 'c'].includes(code);
           
           if (data.question_id) {
             const match = exInc?.find(e => String(e.question_id) === String(data.question_id));
-            const p = { student_id: contextIds.studentId, question_id: data.question_id, source_type: '시험지', status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
+            const p = { student_id: contextIds.studentId, question_id: data.question_id, source_type: dynamicSourceType, status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
             if (match) incUpdates.push({ record_id: match.record_id, ...p });
             else incInserts.push(p);
           }
@@ -629,7 +626,7 @@ function ReviewContent() {
         }
         if (incUpdates.length > 0) {
           const upPromises = incUpdates.map(u => 
-            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at }).eq('record_id', u.record_id)
+            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id)
           );
           const results = await Promise.all(upPromises);
           const errs = results.filter(r => r.error);
@@ -814,14 +811,16 @@ function ReviewContent() {
                       
                       let markHtml = <span className="text-slate-300 font-bold">-</span>;
                       if (currentCode) {
-                        if (['O', 'TO'].includes(currentCode)) markHtml = <span className="text-emerald-500 font-extrabold text-xl">{currentCode}</span>;
+                        // 🌟 RO 정답 HTML 표시 추가
+                        if (['O', 'TO', 'RO'].includes(currentCode)) markHtml = <span className="text-emerald-500 font-extrabold text-xl">{currentCode}</span>;
                         else if (['X', 'TX'].includes(currentCode)) markHtml = <span className="text-red-500 font-extrabold text-xl">{currentCode}</span>;
                         else if (currentCode === '☆') markHtml = <span className="text-amber-500 font-extrabold text-xl">☆</span>;
                         else if (currentCode === 'B') markHtml = <span className="text-slate-500 font-extrabold text-lg block border border-slate-300 rounded bg-white w-6 h-6 mx-auto"></span>;
-                        else if (['a','b','c','x','y','z','p','q'].includes(currentCode)) markHtml = <span className="text-sky-500 font-extrabold text-lg">{currentCode}</span>;
+                        else if (['a','b','c','x','y','z','p'].includes(currentCode)) markHtml = <span className="text-sky-500 font-extrabold text-lg">{currentCode}</span>;
                       }
 
-                      const rowBg = ['O', 'TO', 'a', 'b', 'c'].includes(currentCode) ? 'bg-emerald-50/30' : (['X', 'TX', 'x', 'y', 'z', 'p', 'q', '☆', 'B'].includes(currentCode) ? 'bg-red-50/30' : 'bg-white');
+                      // 🌟 RO 정답 시 초록색 배경(rowBg) 추가
+                      const rowBg = ['O', 'TO', 'RO', 'a', 'b', 'c'].includes(currentCode) ? 'bg-emerald-50/30' : (['X', 'TX', 'x', 'y', 'z', 'p', '☆', 'B'].includes(currentCode) ? 'bg-red-50/30' : 'bg-white');
                       const qPrefix = g.items.length > 1 ? `<span class="text-blue-600 font-bold mr-1">(${subIdx + 1})</span> ` : '';
                       const qAnswer = formatMathTextForWeb(q.answer || "정보 없음");
 
@@ -858,19 +857,22 @@ function ReviewContent() {
                           <td className="p-3 text-center">{markHtml}</td>
                           <td className="p-3 text-left pl-4">
                             <div className="flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
-                              <div className="grid grid-cols-6 gap-1.5">
+                              {/* 🌟 윗줄: 기존 6칸 + RO 추가 = 7칸으로 변경 */}
+                              <div className="grid grid-cols-7 gap-1.5">
                                 <GradeButton code="O" title="정답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="X" title="오답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="TX" title="힌트 후 오답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="TO" title="힌트 후 정답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
+                                <GradeButton code="RO" title="재도전 정답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="☆" title="별표 (질문)" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="B" title="빈칸 (미응시)" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
-                                </div>
-                                <div className="grid grid-cols-8 gap-1 border-t border-slate-200 pt-1.5 mt-0.5">
-                                {['a','b','c','x','y','z','p','q'].map(cd => (
+                              </div>
+                              {/* 🌟 아랫줄: q 제거하여 7칸으로 맞춤 (총 14버튼 대칭) */}
+                              <div className="grid grid-cols-7 gap-1 border-t border-slate-200 pt-1.5 mt-0.5">
+                                {['a','b','c','x','y','z','p'].map(cd => (
                                     <GradeButton key={cd} code={cd} title="세부 채점 옵션" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 ))}
-                                </div>
+                              </div>
                             </div>
                           </td>
                         </tr>

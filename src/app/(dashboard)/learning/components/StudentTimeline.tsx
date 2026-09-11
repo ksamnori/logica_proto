@@ -246,7 +246,7 @@ export default function StudentTimeline({
       }
 
       const { data: incData } = await supabaseClient.from('student_incorrect_record')
-        .select('record_id, question_id, created_at, question_db!inner(taxonomy_id, difficulty)')
+        .select('record_id, question_id, created_at')
         .eq('student_id', currentView.studentId)
         .is('resolved_at', null);
 
@@ -285,13 +285,18 @@ export default function StudentTimeline({
       const topLevelSelected = selectedArray.filter(id => !selectedArray.some(otherId => id !== otherId && id.startsWith(otherId + '-')));
       return topLevelSelected.reduce((acc, id) => acc + (taxonomyStats[id]?.pending || 0), 0);
     } else if (modalTab === 'SELECTED') {
-      return filteredTimeline.filter(item => selectedBlocks.includes(item.id)).reduce((acc, curr) => acc + (curr.xCount || 0), 0);
+      return filteredTimeline.filter(item => selectedBlocks.includes(item.id)).reduce((acc, curr) => {
+        if (curr.rawAnswers) {
+          return acc + curr.rawAnswers.filter((a: any) => ['X', 'TX', '☆', 'B'].includes(a.grading_code)).length;
+        }
+        return acc + (curr.xCount || 0);
+      }, 0);
     } else if (modalTab === 'PERIOD') {
       const targetWQs = allIncorrectRecords.filter(r => {
          const localDate = getLocalDateStr(r.created_at);
          return localDate >= startDate && localDate <= endDate;
       });
-      const uniqueQids = new Set(targetWQs.map(r => r.question_id));
+      const uniqueQids = new Set(targetWQs.map(r => r.question_id).filter(Boolean));
       return uniqueQids.size;
     }
     return 0;
@@ -323,31 +328,36 @@ export default function StudentTimeline({
 
       if (modalTab === 'TAXONOMY') {
           const selArr = Array.from(selectedTaxonomyIds);
-          const targetWQs = allIncorrectRecords.filter(r => {
-              const tax = Array.isArray(r.question_db) ? r.question_db[0]?.taxonomy_id : r.question_db?.taxonomy_id;
-              if (!tax) return false;
-              return selArr.some(sel => tax.startsWith(sel));
-          });
-          uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
+          // 🚨 오답을 직접 찾습니다!
+          const { data: taxData } = await supabaseClient.from('student_answer')
+            .select('question_id')
+            .eq('student_id', currentView.studentId)
+            .in('grading_code', ['X', 'TX', '☆', 'B']);
+          
+          if (taxData) uniqueQids = Array.from(new Set(taxData.map(r => r.question_id).filter(Boolean)));
+
       } else if (modalTab === 'PERIOD') {
           const targetWQs = allIncorrectRecords.filter(r => {
               const localDate = getLocalDateStr(r.created_at);
               return localDate >= startDate && localDate <= endDate;
           });
-          uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id)));
+          uniqueQids = Array.from(new Set(targetWQs.map(r => r.question_id).filter(Boolean)));
+
       } else if (modalTab === 'SELECTED') {
           let tempQIds: string[] = [];
-          for (const block of selectedBlocks) {
-            if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_')) {
-              const assignId = block.split('_').reverse()[1]; 
+          const selectedItems = filteredTimeline.filter(item => selectedBlocks.includes(item.id));
+          
+          for (const item of selectedItems) {
+            if (['exam', 'quarterly', 'hw_exam', 'print', 'similar', 'overdue'].includes(item.type)) {
+              const assignId = item.realId; 
               const { data: ans } = await supabaseClient.from('student_answer')
                 .select('question_id')
                 .eq('exam_assignment_id', assignId)
                 .in('grading_code', ['X', 'TX', '☆', 'B']);
               ans?.forEach(a => { if (a.question_id) tempQIds.push(a.question_id); });
             } 
-            else if (block.startsWith('hw_')) {
-              const hwId = block.split('_')[1];
+            else if (item.type.includes('hw')) {
+              const hwId = item.realId;
               const { data: hwAns } = await supabaseClient.from('student_homework_answer')
                 .select('tq_id, question_id')
                 .eq('homework_id', hwId)
@@ -367,7 +377,13 @@ export default function StudentTimeline({
           uniqueQids = Array.from(new Set(tempQIds.filter(Boolean)));
       }
 
-      if (uniqueQids.length === 0) { setMatchedCache([]); setIsCalculating(false); return; }
+      if (uniqueQids.length === 0) { 
+        alert("선택하신 기간이나 학습지에 실제 오답(X, TX, 별표, 빈칸)이 0개입니다.\n(범위를 다시 확인해주세요)");
+        setMatchedCache([]); 
+        setIsCalculating(false); 
+        return; 
+      }
+      
       if (genMethod === 'SAME') { setMatchedCache(uniqueQids); setIsCalculating(false); return; }
 
       const { data: matchedIds, error } = await supabaseClient.rpc('get_clinic_matches', {
@@ -382,8 +398,12 @@ export default function StudentTimeline({
 
       if (error) {
         console.error("Match Engine RPC Error:", error);
+        alert(`DB 매칭 중 에러가 발생했습니다. 오버로딩 에러일 수 있습니다.\n상세내용: ${error.message}`);
         setMatchedCache([]);
       } else {
+        if (!matchedIds || matchedIds.length === 0) {
+            alert(`원본 오답은 ${uniqueQids.length}개를 찾았으나, DB에서 매칭되는 유사문제를 단 1개도 찾지 못했습니다.\n\n※ 이 경우 'AI 문제 자동 생성기' 기능 연동이 필요합니다.`);
+        }
         setMatchedCache(matchedIds || []);
       }
     } catch (err) {
@@ -689,7 +709,7 @@ export default function StudentTimeline({
                     </div>
                     <ul className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
                       {filteredTimeline.filter(item => selectedBlocks.includes(item.id)).map(item => {
-                        const finalXCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['X', 'TX'].includes(a.grading_code)).length : (item.xCount || 0);
+                        const finalXCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['X', 'TX', '☆', 'B'].includes(a.grading_code)).length : (item.xCount || 0);
                         return (
                           <li key={item.id} className="px-4 py-3 border-b last:border-0 border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors">
                             <span className="font-bold text-sm text-slate-700 truncate w-3/4">{(item.title || '').replace(/^\[시스템\]\s*/, '')}</span>
@@ -820,7 +840,7 @@ export default function StudentTimeline({
               const displayTitle = (item.title || '제목 없음').replace(/^\[시스템\]\s*/, '');
               
               const finalOCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['O', 'RO', 'TO'].includes(a.grading_code)).length : (item.oCount || 0);
-              const finalXCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['X', 'TX'].includes(a.grading_code)).length : (item.xCount || 0);
+              const finalXCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['X', 'TX', '☆', 'B'].includes(a.grading_code)).length : (item.xCount || 0);
 
               return (
                 <div key={`${item.id}_${idx}`} onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
@@ -829,7 +849,7 @@ export default function StudentTimeline({
                   <div className="flex items-center gap-3 w-1/2 min-w-0 shrink-0 flex-1">
                     <input type="checkbox" checked={isSelected} readOnly className="w-5 h-5 accent-rose-500 pointer-events-none shrink-0" />
                     <div className="w-[100px] shrink-0 text-[11px] font-bold text-slate-400 leading-tight truncate">
-                      {formatDateLabel(item.date, true)}
+                      {formatDateLabel(item.created_at || item.date, true)} 
                     </div>
                     <span className={`px-2 py-0.5 rounded text-[10px] font-extrabold border shrink-0 whitespace-nowrap ${badgeColor}`}>{typeLabel}</span>
                     
@@ -879,7 +899,6 @@ export default function StudentTimeline({
                         🖨️
                       </button>
 
-                      {/* 🌟 [핵심 수정] 분기평가/분기테스트는 exam/review 로 라우팅 */}
                       <button onClick={(e) => { 
                           e.stopPropagation(); 
                           let detailHref = '';

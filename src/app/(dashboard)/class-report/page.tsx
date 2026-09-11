@@ -22,6 +22,7 @@ interface AnalyzedItem {
   date: string;
   totalQ: number;
   status: string;
+  underlyingIds: string[]; // 🌟 병합된 원본 ID들
 }
 
 interface MatrixCol {
@@ -34,10 +35,15 @@ interface MatrixCol {
   answer: string;
 }
 
+interface MatrixCell {
+  code: string;
+  isBlocked: boolean; // 🌟 배부되지 않은 문제인지 판별
+}
+
 interface MatrixRow {
   studentId: string;
   studentName: string;
-  cells: Record<string, string>; 
+  cells: Record<string, MatrixCell>; 
   totalCorrect: number;
   status: string; 
 }
@@ -218,37 +224,29 @@ export default function ClassReportPage() {
     fetchClasses();
   }, []);
 
-  // 🌟 [추가] 수업 일지 삭제 함수
   const handleDeleteLog = async (e: React.MouseEvent, logId: number) => {
-    e.stopPropagation(); // 클릭 이벤트 전파 방지 (리스트가 선택되는 것 방지)
-    
-    if (!confirm("정말 이 수업 일지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) {
-      return;
-    }
+    e.stopPropagation(); 
+    if (!confirm("정말 이 수업 일지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) return;
 
     try {
-      const { error } = await supabase
-        .from('daily_lesson_log')
-        .delete()
-        .eq('lesson_log_id', logId);
-
+      const { error } = await supabase.from('daily_lesson_log').delete().eq('lesson_log_id', logId);
       if (error) throw error;
-      
       alert("✅ 성공적으로 삭제되었습니다.");
-      
-      // 삭제 후 목록 다시 불러오기
-      if (selectedLog && selectedLog.lesson_log_id === logId) {
-        setSelectedLog(null); // 우측 뷰어 초기화
-      }
+      if (selectedLog && selectedLog.lesson_log_id === logId) setSelectedLog(null);
       fetchAssignmentsAndLogs(); 
-      
     } catch (err: any) {
       console.error("삭제 에러:", err);
       alert("삭제 중 오류가 발생했습니다: " + err.message);
     }
   };
 
-  // 기존 fetch 로직을 함수로 분리하여 삭제 후 재사용 가능하도록 조치
+  const formatDateLabel = (dateStr: string) => {
+    if (!dateStr) return '-';
+    const d = new Date(dateStr);
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+  };
+
+  // 🌟 [핵심 변경] 날짜+이름을 기준으로 합쳐서 목록을 생성하는 로직
   const fetchAssignmentsAndLogs = async () => {
     if (!selectedClassId) return;
     setIsLoading(true);
@@ -269,39 +267,40 @@ export default function ClassReportPage() {
         .eq('class_id', selectedClassId);
 
       if (examData) {
-        const uniqueExams = new Map<string, any>();
+        const groupedExams = new Map<string, any>();
+        
         examData.forEach((a: any) => {
-          if (!uniqueExams.has(a.exam_id)) {
-            uniqueExams.set(a.exam_id, {
-              id: a.exam_id,
-              date: a.created_at,
-              master: Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master,
-              statuses: [a.status]
+          const m = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+          const dateStr = formatDateLabel(a.created_at);
+          const title = m?.title || '제목 없음';
+          
+          // 💡 날짜와 제목이 같으면 하나의 리스트(아이템)로 취급!
+          const key = `EXAM_${dateStr}_${title}`; 
+
+          if (!groupedExams.has(key)) {
+            let type: ReportTabType = 'EXAM';
+            const eType = m?.exam_type;
+            if (['과제', '과제프린트'].includes(eType)) type = 'HW';
+            else if (['오답프린트', '오답'].includes(eType)) type = 'PRINT';
+            else if (['오답유사', '과제오답유사'].includes(eType)) type = 'SIMILAR';
+            else if (eType === '미완료과제') type = 'OVERDUE'; 
+
+            groupedExams.set(key, {
+              id: key, type, sourceType: 'EXAM', title, date: a.created_at,
+              totalQ: m?.total_questions || 0,
+              statuses: [], underlyingIds: new Set<string>()
             });
-          } else {
-            uniqueExams.get(a.exam_id).statuses.push(a.status);
           }
+          
+          const g = groupedExams.get(key);
+          g.underlyingIds.add(a.exam_id);
+          g.statuses.push(a.status);
+          g.totalQ = Math.max(g.totalQ, m?.total_questions || 0); // 최대 문제 수 반영
         });
 
-        uniqueExams.forEach((val) => {
-          let type: ReportTabType = 'EXAM';
-          const eType = val.master?.exam_type;
-          if (['과제', '과제프린트'].includes(eType)) type = 'HW';
-          else if (['오답프린트', '오답'].includes(eType)) type = 'PRINT';
-          else if (['오답유사', '과제오답유사'].includes(eType)) type = 'SIMILAR';
-          else if (eType === '미완료과제') type = 'OVERDUE'; 
-
-          const isAllDone = val.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
-
-          list.push({
-            id: val.id,
-            type: type,
-            sourceType: 'EXAM',
-            title: val.master?.title || '제목 없음',
-            date: val.date,
-            totalQ: val.master?.total_questions || 0,
-            status: isAllDone ? '완료' : '진행중'
-          });
+        groupedExams.forEach(g => {
+          const isAllDone = g.statuses.length > 0 && g.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
+          list.push({ ...g, status: isAllDone ? '완료' : '진행중', underlyingIds: Array.from(g.underlyingIds) });
         });
       }
 
@@ -312,21 +311,31 @@ export default function ClassReportPage() {
         .neq('homework_title', '[시스템] 수업 진도 완료 기록');
 
       if (hwData) {
+        const groupedHws = new Map<string, any>();
+
         hwData.forEach((hw: any) => {
-          const tqs = safeParseIds(hw.target_questions);
-          let isAllDone = false;
-          if (hw.student_homework_result && hw.student_homework_result.length > 0) {
-             isAllDone = hw.student_homework_result.every((r: any) => ['제출완료', '채점완료', '완료'].includes(r.status));
+          const dateStr = formatDateLabel(hw.created_at);
+          const title = hw.homework_title || '교재 과제';
+          const key = `HW_${dateStr}_${title}`;
+
+          if (!groupedHws.has(key)) {
+            groupedHws.set(key, {
+              id: key, type: 'HW', sourceType: 'TEXTBOOK', title, date: hw.created_at,
+              totalQ: 0, tqSet: new Set<number>(), statuses: [], underlyingIds: new Set<string>()
+            });
           }
-          list.push({
-            id: String(hw.homework_id),
-            type: 'HW',
-            sourceType: 'TEXTBOOK',
-            title: hw.homework_title || '교재 과제',
-            date: hw.created_at,
-            totalQ: tqs.length || 0,
-            status: isAllDone ? '완료' : '진행중'
-          });
+
+          const g = groupedHws.get(key);
+          g.underlyingIds.add(String(hw.homework_id));
+          safeParseIds(hw.target_questions).forEach((id: number) => g.tqSet.add(id));
+          if (hw.student_homework_result) {
+            hw.student_homework_result.forEach((r: any) => g.statuses.push(r.status));
+          }
+        });
+
+        groupedHws.forEach(g => {
+          const isAllDone = g.statuses.length > 0 && g.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
+          list.push({ ...g, totalQ: g.tqSet.size, status: isAllDone ? '완료' : '진행중', underlyingIds: Array.from(g.underlyingIds) });
         });
       }
 
@@ -346,6 +355,7 @@ export default function ClassReportPage() {
     fetchAssignmentsAndLogs();
   }, [selectedClassId]);
 
+  // 🌟 [핵심 변경] 그룹핑된 underlyingIds 를 통해 모든 문제를 합집합(Union) 처리
   useEffect(() => {
     if (!selectedItem || !selectedClassId || activeTab === 'LOG') return;
 
@@ -373,26 +383,54 @@ export default function ClassReportPage() {
           }
         });
 
+        const uIds = selectedItem.underlyingIds;
+
         if (selectedItem.sourceType === 'TEXTBOOK') {
-          const { data: hwData } = await supabase.from('homework_assignment').select('target_questions').eq('homework_id', selectedItem.id).single();
-          let tqs = safeParseIds(hwData?.target_questions); 
-          if (!Array.isArray(tqs)) tqs = []; 
+          const { data: hwData } = await supabase.from('homework_assignment')
+            .select('homework_id, target_student_id, target_questions')
+            .in('homework_id', uIds);
+
+          const tqToHwMap = new Map<string, Set<number>>();
+          let globalTqs: number[] = [];
+
+          hwData?.forEach(hw => {
+            const tqs = safeParseIds(hw.target_questions);
+            if (hw.target_student_id) {
+               if (!tqToHwMap.has(String(hw.target_student_id))) tqToHwMap.set(String(hw.target_student_id), new Set());
+               tqs.forEach(id => tqToHwMap.get(String(hw.target_student_id))!.add(id));
+            } else {
+               rowsMap.forEach((_, sId) => {
+                   if (!tqToHwMap.has(sId)) tqToHwMap.set(sId, new Set());
+                   tqs.forEach(id => tqToHwMap.get(sId)!.add(id));
+               });
+            }
+            globalTqs.push(...tqs);
+          });
+
+          const unionTqs = Array.from(new Set(globalTqs));
           
           let tqDetails: any[] = [];
-          for (let i = 0; i < tqs.length; i += 150) {
-            const chunk = tqs.slice(i, i + 150);
+          for (let i = 0; i < unionTqs.length; i += 150) {
+            const chunk = unionTqs.slice(i, i + 150);
             const { data } = await supabase.from('textbook_question').select('*, question_db(*)').in('tq_id', chunk);
             if (data) tqDetails = [...tqDetails, ...data];
           }
 
+          // 페이지 번호 순으로 정렬
+          tqDetails.sort((a, b) => {
+            const aPage = a.page_number || a.question_db?.page_number || 0;
+            const bPage = b.page_number || b.question_db?.page_number || 0;
+            if (aPage !== bPage) return aPage - bPage;
+            return String(a.question_number || '').localeCompare(String(b.question_number || ''), undefined, { numeric: true });
+          });
+
           const tqMap = new Map();
           tqDetails.forEach(tq => tqMap.set(String(tq.tq_id), tq));
 
-          cols = tqs.map((tqId, idx) => {
-            const tq = tqMap.get(String(tqId)) || {};
+          cols = tqDetails.map((tq, idx) => {
             const q = tq.question_db || {};
             return {
-              qId: String(tqId),
+              qId: String(tq.tq_id),
               displayNum: `${idx + 1}`,
               page: tq.page_number || q.page_number || q.final_printed_page || q.detected_page_num || '',
               number: tq.question_number || q.question_number || '',
@@ -402,25 +440,46 @@ export default function ClassReportPage() {
             };
           });
 
-          const { data: answers } = await supabase.from('student_homework_answer').select('student_id, tq_id, grading_code').eq('homework_id', selectedItem.id);
-          answers?.forEach((a: any) => {
-            const row = rowsMap.get(String(a.student_id));
-            if (row) row.cells[String(a.tq_id)] = a.grading_code;
+          rowsMap.forEach((row, sId) => {
+            cols.forEach(col => {
+               const isBlocked = !(tqToHwMap.get(sId)?.has(Number(col.qId)));
+               row.cells[col.qId] = { code: 'B', isBlocked };
+            });
           });
 
-          const { data: hwResults } = await supabase.from('student_homework_result').select('student_id, status').eq('homework_id', selectedItem.id);
+          const { data: answers } = await supabase.from('student_homework_answer').select('student_id, tq_id, grading_code').in('homework_id', uIds);
+          answers?.forEach((a: any) => {
+            const row = rowsMap.get(String(a.student_id));
+            if (row && row.cells[String(a.tq_id)]) {
+               row.cells[String(a.tq_id)].code = a.grading_code;
+            }
+          });
+
+          const { data: hwResults } = await supabase.from('student_homework_result').select('student_id, status').in('homework_id', uIds);
           hwResults?.forEach((r: any) => {
              const row = rowsMap.get(String(r.student_id));
              if (row) row.status = r.status || '진행중';
           });
 
         } else {
-          const { data: items } = await supabase.from('exam_item').select('question_id, sort_order').eq('exam_id', selectedItem.id).order('sort_order');
-          const qIds = items?.map(i => i.question_id) || [];
+          // EXAM 방식
+          const { data: items } = await supabase.from('exam_item').select('exam_id, question_id, sort_order').in('exam_id', uIds);
+          const examToQMap = new Map<string, Set<string>>();
+          const qSortMap = new Map<string, number>();
+
+          items?.forEach(i => {
+             if (!examToQMap.has(i.exam_id)) examToQMap.set(i.exam_id, new Set());
+             examToQMap.get(i.exam_id)!.add(String(i.question_id));
+             
+             const exist = qSortMap.get(String(i.question_id));
+             if (!exist || i.sort_order < exist) qSortMap.set(String(i.question_id), i.sort_order);
+          });
+
+          const unionQids = Array.from(qSortMap.keys()).sort((a, b) => (qSortMap.get(a) || 0) - (qSortMap.get(b) || 0));
 
           let qDetails: any[] = [];
-          for (let i = 0; i < qIds.length; i += 150) {
-            const chunk = qIds.slice(i, i + 150);
+          for (let i = 0; i < unionQids.length; i += 150) {
+            const chunk = unionQids.slice(i, i + 150);
             const { data } = await supabase.from('question_db').select('*').in('question_id', chunk);
             if (data) qDetails = [...qDetails, ...data];
           }
@@ -428,10 +487,10 @@ export default function ClassReportPage() {
           const qMap = new Map();
           qDetails.forEach(q => qMap.set(String(q.question_id), q));
 
-          cols = (items || []).map((item: any, idx: number) => {
-            const q = qMap.get(String(item.question_id)) || {};
+          cols = unionQids.map((qid, idx) => {
+            const q = qMap.get(qid) || {};
             return {
-              qId: String(item.question_id),
+              qId: qid,
               displayNum: `${idx + 1}`,
               page: q.page_number || q.final_printed_page || q.detected_page_num || '',
               number: q.question_number || '',
@@ -441,13 +500,25 @@ export default function ClassReportPage() {
             };
           });
 
-          const { data: assigns } = await supabase.from('exam_assignment').select('assignment_id, student_id, status').eq('exam_id', selectedItem.id).eq('class_id', selectedClassId);
+          const { data: assigns } = await supabase.from('exam_assignment').select('assignment_id, student_id, exam_id, status').in('exam_id', uIds).eq('class_id', selectedClassId);
+          const stuToExamMap = new Map<string, Set<string>>();
           const assignMap = new Map<string, string>();
           
           assigns?.forEach((a: any) => {
-            assignMap.set(a.assignment_id, a.student_id);
+            assignMap.set(a.assignment_id, String(a.student_id));
+            if (!stuToExamMap.has(String(a.student_id))) stuToExamMap.set(String(a.student_id), new Set());
+            stuToExamMap.get(String(a.student_id))!.add(a.exam_id);
+            
             const row = rowsMap.get(String(a.student_id));
             if (row) row.status = a.status || '미응시';
+          });
+
+          rowsMap.forEach((row, sId) => {
+            cols.forEach(col => {
+               const examIds = stuToExamMap.get(sId);
+               const isBlocked = !(Array.from(examIds || []).some(eid => examToQMap.get(eid)?.has(col.qId)));
+               row.cells[col.qId] = { code: 'B', isBlocked };
+            });
           });
 
           if (assigns && assigns.length > 0) {
@@ -458,7 +529,9 @@ export default function ClassReportPage() {
               const sId = assignMap.get(a.exam_assignment_id);
               if (sId) {
                 const row = rowsMap.get(String(sId));
-                if (row) row.cells[String(a.question_id)] = a.grading_code;
+                if (row && row.cells[String(a.question_id)]) {
+                   row.cells[String(a.question_id)].code = a.grading_code;
+                }
               }
             });
           }
@@ -469,10 +542,13 @@ export default function ClassReportPage() {
           let correctCount = 0;
           let attemptCount = 0;
           rowsMap.forEach(row => {
-            const code = row.cells[col.qId];
-            if (code && code !== 'B') {
-              attemptCount++;
-              if (['O', 'TO', 'RO'].includes(code)) correctCount++;
+            const cell = row.cells[col.qId];
+            if (cell && !cell.isBlocked) {
+              const code = cell.code;
+              if (code && code !== 'B') {
+                attemptCount++;
+                if (['O', 'TO', 'RO'].includes(code)) correctCount++;
+              }
             }
           });
           rates[col.qId] = attemptCount > 0 ? Math.round((correctCount / attemptCount) * 100) : 0;
@@ -480,7 +556,10 @@ export default function ClassReportPage() {
 
         const finalRows = Array.from(rowsMap.values()).map(row => {
           let cCount = 0;
-          cols.forEach(col => { if (['O', 'TO', 'RO'].includes(row.cells[col.qId])) cCount++; });
+          cols.forEach(col => { 
+             const cell = row.cells[col.qId];
+             if (cell && !cell.isBlocked && ['O', 'TO', 'RO'].includes(cell.code)) cCount++; 
+          });
           return { ...row, totalCorrect: cCount };
         }).sort((a, b) => a.studentName.localeCompare(b.studentName));
 
@@ -503,13 +582,12 @@ export default function ClassReportPage() {
     return assignments.filter(a => a.type === activeTab);
   }, [assignments, activeTab]);
 
-  const formatDateLabel = (dateStr: string) => {
-    if (!dateStr) return '-';
-    const d = new Date(dateStr);
-    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
-  };
-
-  const getCellUI = (code: string) => {
+  const getCellUI = (cell: MatrixCell) => {
+    if (!cell || cell.isBlocked) {
+      // 🌟 배부되지 않은 문제 시각적 빗금 처리
+      return <div className="w-full h-full min-h-[30px] bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABAD2OQQ/9rX+aQAAAABJRU5ErkJggg==')] opacity-15 pointer-events-none" title="배부되지 않은 문항"></div>;
+    }
+    const code = cell.code;
     if (!code) return <span className="text-slate-200">-</span>;
     if (code === 'O') return <span className="text-emerald-500 font-black text-[14px]">O</span>;
     if (code === 'TO') return <span className="text-teal-500 font-black text-[14px]">TO</span>;
@@ -628,7 +706,7 @@ export default function ClassReportPage() {
             </h3>
             <div className="text-xs font-bold text-slate-500 mt-1 flex gap-3">
               <span>📅 출제일: {formatDateLabel(selectedItem.date)}</span>
-              <span>📝 총 {matrixCols.length}문항</span>
+              <span>📝 전체 합산 총 {matrixCols.length}문항</span>
               <span>👥 수강생 {matrixRows.length}명</span>
             </div>
           </div>
@@ -645,7 +723,7 @@ export default function ClassReportPage() {
         </div>
 
         <div className="flex-1 overflow-auto custom-scroll relative bg-slate-50/30">
-          <table className="w-max border-collapse">
+          <table className="w-max border-collapse h-full">
             <thead className="sticky top-0 z-20 shadow-sm">
               <tr>
                 <th className="sticky left-0 z-30 bg-slate-100 p-3 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
@@ -675,6 +753,9 @@ export default function ClassReportPage() {
             <tbody>
               {matrixRows.map((row, idx) => {
                 const isCompleted = ['완료', '채점완료', '제출완료'].includes(row.status);
+                let assignedCount = 0;
+                matrixCols.forEach(col => { if (row.cells[col.qId] && !row.cells[col.qId].isBlocked) assignedCount++; });
+
                 return (
                   <tr key={row.studentId} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
                     <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50">
@@ -687,11 +768,11 @@ export default function ClassReportPage() {
                     </td>
                     <td className="p-3 border-r border-b border-slate-200 text-center align-middle min-w-[80px] w-[80px] max-w-[80px]">
                       <span className="text-xs font-black text-[#002864] bg-blue-50 px-2 py-1 rounded border border-blue-100 whitespace-nowrap">
-                        {row.totalCorrect} / {matrixCols.length}
+                        {row.totalCorrect} / {assignedCount}
                       </span>
                     </td>
                     {matrixCols.map(col => (
-                      <td key={col.qId} className="p-2 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[70px] w-[70px]">
+                      <td key={col.qId} className={`p-0 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[70px] w-[70px] ${row.cells[col.qId]?.isBlocked ? 'bg-slate-100/50' : ''}`}>
                         {getCellUI(row.cells[col.qId])}
                       </td>
                     ))}
@@ -707,7 +788,7 @@ export default function ClassReportPage() {
                 {matrixCols.map(col => {
                   const rate = questionRates[col.qId] || 0;
                   let rateColor = "text-slate-700";
-                  if (rate < 50) rateColor = "text-rose-500"; 
+                  if (rate < 50 && rate > 0) rateColor = "text-rose-500"; 
                   else if (rate >= 80) rateColor = "text-emerald-600"; 
 
                   return (
@@ -811,7 +892,6 @@ export default function ClassReportPage() {
                         <span className={`text-[10px] font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>{formatDateLabel(log.actual_date)}</span>
                       </div>
                       
-                      {/* 🌟 [추가] 일지 삭제 버튼 (휴지통 아이콘) */}
                       <button 
                         onClick={(e) => handleDeleteLog(e, log.lesson_log_id)}
                         className="text-slate-300 hover:text-rose-500 transition-colors p-1 rounded-md hover:bg-rose-50"
@@ -848,7 +928,7 @@ export default function ClassReportPage() {
                     {item.title.replace(/^\[시스템\]\s*/, '')}
                   </div>
                   <div className={`mt-2 text-[11px] font-bold ${selectedItem?.id === item.id ? 'text-blue-200' : 'text-slate-500'}`}>
-                    총 {item.totalQ}문항
+                    배부된 전체 문항수: {item.totalQ}
                   </div>
                 </div>
               ))
@@ -856,7 +936,7 @@ export default function ClassReportPage() {
           </div>
         </div>
 
-        {/* 우측 패널: 함수 렌더링 도입으로 문법 오류 원천 차단 */}
+        {/* 우측 패널 */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           {activeTab === 'LOG' ? renderLogView() : renderMatrixView()}
         </div>

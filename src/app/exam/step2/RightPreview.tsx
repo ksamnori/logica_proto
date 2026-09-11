@@ -9,7 +9,7 @@ export default function RightPreview({ examData }: { examData: any }) {
     depth6Map, editingId, setEditingId, editForm, setEditForm,
     handleDragStart, handleDragOver, handleDrop, openTwinSearch, goToStep3,
     draggedIdx, setDraggedIdx,
-    isClinicMode, isRestoredMode // 🌟 추가된 복원 모드 상태 가져오기
+    isClinicMode, isRestoredMode
   } = examData;
 
   const [dragOverIdx, setDragOverIdx] = useState<number | null>(null);
@@ -17,8 +17,14 @@ export default function RightPreview({ examData }: { examData: any }) {
   const [previewTitle, setPreviewTitle] = useState<string | null>(null);
   const [previewBadge, setPreviewBadge] = useState<string | null>(null);
 
+  // AI 유사생성 및 교체 모달 관련 상태
+  const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
+  const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
+  const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
+  const [aiTargetInfo, setAiTargetInfo] = useState<{ idx: number, subIdx: number, q: any } | null>(null);
+  const [isSavingTwin, setIsSavingTwin] = useState(false);
+
   useEffect(() => {
-    // 💡 복원 모드(isRestoredMode) 여부에 따라 정확한 제목과 배지를 노출합니다.
     const examMode = sessionStorage.getItem("examMode"); 
     const testCategory = sessionStorage.getItem("testCategory");
     const storedTitle = sessionStorage.getItem("examTitle");
@@ -28,7 +34,6 @@ export default function RightPreview({ examData }: { examData: any }) {
       setPreviewTitle(storedTitle || "오답 클리닉 문항");
       setPreviewBadge(storedBadge || "맞춤형 클리닉");
     } else if (isRestoredMode) {
-      // 과제 수정 / 시험지 복제 등으로 들어온 경우
       setPreviewTitle(storedTitle || "출제 문항 미리보기");
       setPreviewBadge(storedBadge || "편집 모드");
     } else if (examMode === "test" && testCategory) {
@@ -49,9 +54,8 @@ export default function RightPreview({ examData }: { examData: any }) {
         (window as any).MathJax.typesetPromise().catch(() => {});
       }, 50);
     }
-  }, [draggedIdx, dragOverIdx]);
+  }, [draggedIdx, dragOverIdx, generatedTwins, isTwinModalOpen]);
 
-  // 🌟 수동 수식 새로고침 함수 추가 (다른 코드는 일절 건드리지 않음)
   const forceMathRefresh = () => {
     const mj = (window as any).MathJax;
     if (mj && mj.typesetPromise) {
@@ -108,6 +112,202 @@ export default function RightPreview({ examData }: { examData: any }) {
     });
   };
 
+  const openAiTwinModal = (idx: number, subIdx: number, q: any) => {
+    setAiTargetInfo({ idx, subIdx, q });
+    setGeneratedTwins([]);
+    setIsTwinModalOpen(true);
+  };
+
+  const handleManualCreate = () => {
+    setGeneratedTwins([{
+       question_type: '유사',
+       question: aiTargetInfo?.q.question || '',
+       answer: aiTargetInfo?.q.answer || '',
+       step_1_concept: aiTargetInfo?.q.step_1_concept || '',
+       step_2_approach: aiTargetInfo?.q.step_2_approach || '',
+       step_3_process: aiTargetInfo?.q.step_3_process || '',
+       step_4_conclusion: aiTargetInfo?.q.step_4_conclusion || '',
+       isSelected: true,
+       isPreviewMode: false
+    }]);
+  };
+
+  const handleTriggerAIGeneration = async () => {
+    if (!aiTargetInfo) return;
+    setIsGeneratingTwins(true);
+    setGeneratedTwins([]);
+
+    try {
+      const taxStr = getDepth6Name(aiTargetInfo.q, depth6Map) || '분류 정보 없음';
+      
+      const res = await fetch('/api/gemini-twin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          originalQuestion: aiTargetInfo.q.question, 
+          originalAnswer: aiTargetInfo.q.answer, 
+          taxonomyStr: taxStr,
+          step1Concept: aiTargetInfo.q.step_1_concept || '',
+          step2Approach: aiTargetInfo.q.step_2_approach || '',
+          step3Process: aiTargetInfo.q.step_3_process || '',
+          step4Conclusion: aiTargetInfo.q.step_4_conclusion || ''
+        })
+      });
+
+      const contentType = res.headers.get("content-type");
+      if (!res.ok || !contentType?.includes("application/json")) throw new Error(`AI 서버 연결 오류 (${res.status})`);
+
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error);
+
+      const cleanedTwins = data.data.map((twin: any, idx: number) => ({
+        ...twin,
+        question: twin.question?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        answer: twin.answer?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        step_1_concept: twin.step_1_concept?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        step_2_approach: twin.step_2_approach?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        step_3_process: twin.step_3_process?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        step_4_conclusion: twin.step_4_conclusion?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        isSelected: idx === 0,
+        isPreviewMode: false,
+        question_type: twin.question_type || (idx === 0 ? '쌍둥이' : '유사')
+      }));
+
+      setGeneratedTwins(cleanedTwins);
+    } catch (e: any) {
+      console.error(e);
+      alert("AI 쌍둥이/유사 생성 중 오류 발생: " + e.message);
+    } finally {
+      setIsGeneratingTwins(false);
+    }
+  };
+
+  const handleTwinChange = (index: number, field: string, value: any) => {
+    setGeneratedTwins(prev => {
+      const next = [...prev];
+      if (field === 'isSelected' && value === true) {
+         next.forEach((t, i) => next[i] = { ...t, isSelected: i === index });
+      } else {
+         next[index] = { ...next[index], [field]: value };
+      }
+      return next;
+    });
+  };
+
+  const saveTwinAndReplace = async () => {
+    const selectedTwin = generatedTwins.find(t => t.isSelected);
+    if (!selectedTwin) return alert("교체할 문항을 1개 선택해주세요.");
+    if (!aiTargetInfo) return;
+
+    setIsSavingTwin(true);
+    try {
+      const generateUUID = () => {
+        if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          const r = Math.random() * 16 | 0, v = c === 'x' ? r : ((r & 0x3) | 0x8);
+          return v.toString(16);
+        });
+      };
+      
+      const dbInserts = [];
+      let selectedQuestionUiData = null;
+
+      for (let i = 0; i < generatedTwins.length; i++) {
+        const twin = generatedTwins[i];
+        const newQid = generateUUID();
+        
+        // 🚨 [핵심 에러 해결] 원본 속성 통째 복사(...aiTargetInfo.q) 제거!
+        // question_db 테이블에 실제로 존재하는 컬럼만 명시적으로 담아 DB 에러를 막습니다.
+        const dbData = {
+          source_book_name: aiTargetInfo.q.source_book_name,
+          book_name: aiTargetInfo.q.book_name,
+          pdf_source: aiTargetInfo.q.pdf_source,
+          final_printed_page: aiTargetInfo.q.final_printed_page,
+          detected_page_num: aiTargetInfo.q.detected_page_num,
+          question_number: aiTargetInfo.q.question_number,
+          sub_num: aiTargetInfo.q.sub_num,
+          difficulty: aiTargetInfo.q.difficulty,
+          taxonomy_id: aiTargetInfo.q.taxonomy_id,
+          taxonomy_name: aiTargetInfo.q.taxonomy_name,
+          options: aiTargetInfo.q.options,
+          image_url: aiTargetInfo.q.image_url,
+          image_2_url: aiTargetInfo.q.image_2_url,
+          is_new_trend: aiTargetInfo.q.is_new_trend,
+          ai_gradable: aiTargetInfo.q.ai_gradable,
+
+          question_id: newQid,
+          question: twin.question,
+          answer: twin.answer,
+          step_1_concept: twin.step_1_concept,
+          step_2_approach: twin.step_2_approach,
+          step_3_process: twin.step_3_process,
+          step_4_conclusion: twin.step_4_conclusion,
+          problem_type: twin.question_type || '유사', 
+          parent_question_id: aiTargetInfo.q.question_id, 
+          derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+
+        dbInserts.push(dbData);
+        
+        if (twin.isSelected) {
+          // 🚨 화면에 보여지는 UI 상태는 기존 프론트 전용 속성(sort_order, id 등)이 유지되어야 합니다.
+          selectedQuestionUiData = {
+            ...aiTargetInfo.q,
+            ...dbData
+          };
+        }
+      }
+
+      // 1. 순수 DB 속성만 필터링한 데이터 Insert (이제 에러 발생 안함)
+      const { error } = await supabase.from('question_db').insert(dbInserts);
+      if (error) throw error;
+
+      // 옵션: 연동 교재 테이블에도 삽입
+      if (aiTargetInfo.q.source_book_name) {
+         const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', aiTargetInfo.q.source_book_name).maybeSingle();
+         if (tb) {
+            const tqInserts = dbInserts.map(q => ({
+               book_id: tb.book_id,
+               question_id: q.question_id,
+               page_number: q.final_printed_page || 999,
+               question_number: q.question_number,
+               question: q.question,
+               answer: q.answer,
+               taxonomy_id: q.taxonomy_id,
+               question_category: '일반'
+            }));
+            await supabase.from('textbook_question').insert(tqInserts);
+         }
+      }
+
+      // 🚨 2. (추가 안정성) 현재 시험지 기록에 연결된 문항이었다면, 새 문제 ID로 갈아끼워줍니다.
+      if (aiTargetInfo.q.exam_item_id) {
+         await supabase.from('exam_item')
+           .update({ question_id: selectedQuestionUiData.question_id })
+           .eq('exam_item_id', aiTargetInfo.q.exam_item_id);
+      }
+
+      // 3. 화면 UI 교체 적용
+      setQuestions((prev: any[]) => {
+        const newQs = [...prev];
+        const group = { ...newQs[aiTargetInfo.idx] };
+        group.items = [...group.items];
+        group.items[aiTargetInfo.subIdx] = selectedQuestionUiData;
+        newQs[aiTargetInfo.idx] = group;
+        return newQs;
+      });
+
+      alert(`✅ ${dbInserts.length}개의 AI 문항이 모두 DB에 저장되었으며, 선택한 문항으로 즉시 교체되었습니다!`);
+      setIsTwinModalOpen(false);
+    } catch (err: any) {
+      alert("❌ 교체 및 저장 중 에러가 발생했습니다: " + err.message);
+    } finally {
+      setIsSavingTwin(false);
+    }
+  };
+
   return (
     <section className="flex-1 flex flex-col relative bg-slate-100 min-w-0">
       <div className="bg-white px-6 py-4 border-b border-slate-200 shrink-0 flex justify-between items-center shadow-sm z-10">
@@ -120,13 +320,12 @@ export default function RightPreview({ examData }: { examData: any }) {
              </div>
           )}
         </div>
-        <div className="flex space-x-2">
-          {/* 🌟 버튼 추가 영역: 수식 깨짐 해결 버튼 */}
-          <button onClick={forceMathRefresh} className="flex items-center gap-1.5 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">
+        <div className="flex space-x-2 items-center">
+          
+          <button onClick={forceMathRefresh} className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">
             <span>🔄</span> 수식 깨짐 해결
           </button>
           
-          {/* 🌟 수정/클리닉 모드일 때는 강제로 스텝 1 가기 버튼을 숨깁니다. */}
           {!isClinicMode && !isRestoredMode && (
              <button onClick={() => router.push('/exam/step1')} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">⟵ Step 1 가기</button>
           )}
@@ -198,18 +397,23 @@ export default function RightPreview({ examData }: { examData: any }) {
                  {g.items.map((q: any, subIdx: number) => {
                    const isEditing = editingId === q.question_id;
                    const textToRender = isGroupMerged && remainders[subIdx] ? remainders[subIdx] : (q.question || q.text_question || '');
+                   
+                   // 🌟 쌍둥이 및 유사 라벨 판별 로직
+                   const isTwin = q.problem_type === '쌍둥이' || q.derivation_type === 'TWIN' || q.derivation_type === '쌍둥이';
+                   const isSimilar = q.problem_type === '유사' || q.derivation_type === '유사';
 
                    return (
                      <div key={q.question_id} className={`relative ${subIdx < g.items.length - 1 ? 'mb-8 pb-8 border-b-2 border-dashed border-slate-200' : ''}`}>
                        <div className="flex justify-between items-start mb-0">
-                         {/* 💡 [쌍둥이/유사] 태그 렌더링 코드를 완전 삭제하고, 여백을 타이트하게 끌어올렸습니다. */}
                          <div className="flex-1 flex items-center pointer-events-none mb-2">
                            <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5">
                              <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200 leading-none">출처</span>
-                             <span className="leading-none mt-0.5">
+                             <span className="leading-none mt-0.5 flex items-center">
+                               {isTwin && <span className="text-fuchsia-600 font-black mr-1.5">[쌍둥이]</span>}
+                               {isSimilar && <span className="text-amber-600 font-black mr-1.5">[유사]</span>}
                                {q.source_book_name || q.book_name || q.pdf_source || '출처 정보 없음'}
                                {q.final_printed_page || q.detected_page_num ? ` p.${String(q.final_printed_page || q.detected_page_num).replace(/p/gi, '').trim()}` : ''}
-                               {q.question_number ? ` ${String(q.question_number).replace(/번/g, '').trim()}번` : ''}
+                               {q.question_number ? ` ${String(q.question_number).replace(/번/g, '').trim()}${q.sub_num && String(q.sub_num) !== '0' ? `-${q.sub_num}` : ''}번` : ''}
                              </span>
                            </div>
                          </div>
@@ -293,12 +497,20 @@ export default function RightPreview({ examData }: { examData: any }) {
                          </div>
                        )}
                        
-                       <div className="mt-4 flex justify-end" onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} draggable>
-                         <button onClick={() => openTwinSearch(idx, subIdx, q)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-[12px] rounded shadow-sm flex items-center gap-1.5">
+                       {/* AI 생성 및 기존 문제 검색 버튼 영역 */}
+                       <div className="mt-4 flex justify-end gap-2" onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} draggable>
+                         
+                         <button onClick={() => openAiTwinModal(idx, subIdx, q)} className="px-3 py-1.5 bg-gradient-to-r from-fuchsia-50 to-indigo-50 hover:from-fuchsia-100 hover:to-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] rounded shadow-sm flex items-center gap-1.5 transition-colors">
+                           <span className="text-[14px]">🤖</span>
+                           AI 유사생성 및 교체
+                         </button>
+
+                         <button onClick={() => openTwinSearch(idx, subIdx, q)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-[12px] rounded shadow-sm flex items-center gap-1.5 transition-colors">
                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 00-2-2v8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>
-                           쌍둥이 유사 검색
+                           기존 문제로 교체 검색
                          </button>
                        </div>
+
                      </div>
                    );
                  })}
@@ -308,6 +520,137 @@ export default function RightPreview({ examData }: { examData: any }) {
          })
         }
       </div>
+
+      {/* AI 유사 문항 직접 교체 모달 */}
+      {isTwinModalOpen && (
+        <div className="fixed inset-0 z-[100] bg-slate-900/60 flex flex-col items-center justify-center p-6 sm:p-10 animate-in fade-in backdrop-blur-sm">
+          <div className="bg-white w-full max-w-5xl h-full max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+            <div className="p-5 bg-gradient-to-r from-fuchsia-600 to-indigo-600 flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-xl font-black text-white flex items-center gap-2">
+                  <span>🤖</span> AI 유사 문항 직접 작성 및 교체
+                </h2>
+                <p className="text-fuchsia-100 font-bold text-xs mt-1">기존 문항을 완벽히 대체할 새 문항을 AI로 생성하거나, 직접 타이핑하여 현재 시험지에 즉시 반영합니다.</p>
+              </div>
+              <button onClick={() => setIsTwinModalOpen(false)} className="text-white hover:text-fuchsia-200 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
+                닫기 ✕
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scroll">
+              {isGeneratingTwins ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4">
+                  <span className="text-5xl animate-spin">🌀</span>
+                  <p className="font-extrabold text-lg">AI가 유사 문항을 창조하고 있습니다...</p>
+                  <p className="text-sm font-bold text-slate-400">수식과 4단계 해설을 작성 중이므로 약 10~15초 정도 소요됩니다.</p>
+                </div>
+              ) : generatedTwins.length > 0 ? (
+                <div className="flex flex-col gap-6">
+                  {generatedTwins.map((twin, idx) => (
+                    <div key={idx} className={`bg-white border rounded-2xl p-5 shadow-sm transition-all flex flex-col gap-3 ${twin.isSelected ? 'border-indigo-400 ring-2 ring-indigo-50' : 'border-slate-200 opacity-60'}`}>
+                      <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                        
+                        <label className="flex items-center gap-2 cursor-pointer select-none">
+                          <input 
+                            type="radio" 
+                            name="aiTwinSelect"
+                            checked={twin.isSelected} 
+                            onChange={() => handleTwinChange(idx, 'isSelected', true)}
+                            className="w-4 h-4 text-indigo-600 cursor-pointer" 
+                          />
+                          <span className={`px-2 py-1 rounded text-xs font-black ${twin.question_type === '유사' ? 'bg-amber-100 text-amber-700' : 'bg-fuchsia-100 text-fuchsia-700'}`}>
+                            {twin.question_type === '유사' ? '💡 유사 문항으로 교체' : '👯 쌍둥이 문항으로 교체'}
+                          </span>
+                        </label>
+                        
+                        <button
+                          onClick={() => handleTwinChange(idx, 'isPreviewMode', !twin.isPreviewMode)}
+                          className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold transition-colors shadow-sm ${twin.isPreviewMode ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                        >
+                          {twin.isPreviewMode ? <><span>✏️</span> 텍스트 편집 모드</> : <><span>👀</span> 수식 미리보기</>}
+                        </button>
+                      </div>
+                      
+                      <div className="flex flex-col gap-1.5 flex-1 mt-1">
+                        <label className="text-[11px] font-bold text-slate-500">새 문제 텍스트</label>
+                        {twin.isPreviewMode ? (
+                          <div className="w-full min-h-[6rem] p-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
+                            {twin.question || <span className="text-slate-400 italic text-xs">텍스트가 없습니다.</span>}
+                          </div>
+                        ) : (
+                          <textarea value={twin.question} onChange={(e) => handleTwinChange(idx, 'question', e.target.value)} className="w-full h-24 p-3 text-sm border border-slate-300 rounded-lg bg-yellow-50/30 resize-none outline-none focus:ring-2 focus:ring-indigo-400" />
+                        )}
+                      </div>
+
+                      <div className="flex flex-col gap-1.5 mt-2">
+                        <label className="text-[11px] font-bold text-slate-500">정답</label>
+                        {twin.isPreviewMode ? (
+                          <div className="w-full min-h-[38px] p-2 px-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner font-bold text-emerald-800 flex items-center">
+                            {twin.answer || <span className="text-slate-400 italic text-xs">정답이 없습니다.</span>}
+                          </div>
+                        ) : (
+                          <input type="text" value={twin.answer} onChange={(e) => handleTwinChange(idx, 'answer', e.target.value)} className="w-full p-2 px-3 text-sm font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-indigo-400" />
+                        )}
+                      </div>
+
+                      <details className="group mt-2" open={!twin.isPreviewMode}>
+                        <summary className="text-xs font-bold text-indigo-500 cursor-pointer hover:text-indigo-700 outline-none select-none flex items-center gap-1">
+                          <span>▶</span> 상세 해설 (4단계) 작성/수정
+                        </summary>
+                        <div className="mt-3 flex flex-col gap-2 p-3 bg-slate-50 rounded-xl border border-slate-200">
+                          {twin.isPreviewMode ? (
+                            <div className="flex flex-col gap-2">
+                              {twin.step_1_concept && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">1. 개념</span>{twin.step_1_concept}</div>}
+                              {twin.step_2_approach && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">2. 접근</span>{twin.step_2_approach}</div>}
+                              {twin.step_3_process && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">3. 과정</span>{twin.step_3_process}</div>}
+                              {twin.step_4_conclusion && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">4. 결론</span>{twin.step_4_conclusion}</div>}
+                            </div>
+                          ) : (
+                            <>
+                              <textarea value={twin.step_1_concept} onChange={(e) => handleTwinChange(idx, 'step_1_concept', e.target.value)} placeholder="1. 개념" className="w-full text-xs p-2 border border-slate-300 rounded resize-none h-12 outline-none focus:border-indigo-400" />
+                              <textarea value={twin.step_2_approach} onChange={(e) => handleTwinChange(idx, 'step_2_approach', e.target.value)} placeholder="2. 접근" className="w-full text-xs p-2 border border-slate-300 rounded resize-none h-12 outline-none focus:border-indigo-400" />
+                              <textarea value={twin.step_3_process} onChange={(e) => handleTwinChange(idx, 'step_3_process', e.target.value)} placeholder="3. 과정" className="w-full text-xs p-2 border border-slate-300 rounded resize-none h-16 outline-none focus:border-indigo-400" />
+                              <textarea value={twin.step_4_conclusion} onChange={(e) => handleTwinChange(idx, 'step_4_conclusion', e.target.value)} placeholder="4. 결론" className="w-full text-xs p-2 border border-slate-300 rounded resize-none h-12 outline-none focus:border-indigo-400" />
+                            </>
+                          )}
+                        </div>
+                      </details>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="h-full flex flex-col items-center justify-center gap-6">
+                  <div className="text-center">
+                    <div className="text-6xl mb-4">🪄</div>
+                    <h3 className="text-xl font-black text-slate-800 mb-2">문제를 어떻게 만드시겠습니까?</h3>
+                    <p className="text-slate-500 font-bold text-sm">AI에게 변형을 맡기거나, 직접 백지상태에서 타이핑할 수 있습니다.</p>
+                  </div>
+                  <div className="flex gap-4">
+                    <button onClick={handleTriggerAIGeneration} className="px-6 py-4 bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:scale-105 transition-transform rounded-2xl shadow-lg text-white flex flex-col items-center gap-2 w-48">
+                      <span className="text-3xl">🤖</span>
+                      <span className="font-black">AI 자동 생성 시작</span>
+                    </button>
+                    <button onClick={handleManualCreate} className="px-6 py-4 bg-white border-2 border-slate-200 hover:border-indigo-400 hover:bg-indigo-50 hover:scale-105 transition-transform rounded-2xl shadow-sm text-slate-700 flex flex-col items-center gap-2 w-48">
+                      <span className="text-3xl">⌨️</span>
+                      <span className="font-black text-indigo-700">직접 양식 작성하기</span>
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-5 bg-white border-t border-slate-200 flex justify-end shrink-0">
+              <button 
+                onClick={saveTwinAndReplace} 
+                disabled={isGeneratingTwins || generatedTwins.length === 0 || isSavingTwin}
+                className="px-8 py-3 bg-[#002864] hover:bg-blue-900 disabled:bg-slate-300 text-white font-black rounded-xl shadow-lg transition-colors flex items-center gap-2"
+              >
+                {isSavingTwin ? "저장 중..." : `💾 생성된 ${generatedTwins.length}개 모두 DB 저장 및 선택 문항으로 교체`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </section>
   );
 }

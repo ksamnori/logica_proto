@@ -166,7 +166,6 @@ export default function AdminDashboardPage() {
   // 단축키(Alt+C) 감지 로직
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Mac(Option+C), Windows(Alt+C). 한영 변환 상태(ㅊ) 방어
       if (e.altKey && (e.key.toLowerCase() === 'c' || e.key === 'ㅊ')) {
         e.preventDefault(); 
         setIsInquiryOpen(prev => !prev);
@@ -804,7 +803,6 @@ export default function AdminDashboardPage() {
                 <button onClick={() => router.push('/supervisor')} className="shrink-0 ml-3 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white border border-indigo-400/50 px-4 py-1.5 rounded-xl text-sm font-bold shadow-md transition-all flex items-center gap-1.5">
                   <span className="text-lg">📡</span> 클리닉 관제탑
                 </button>
-                {/* 모바일 팝업 테스트용 버튼은 삭제했습니다! */}
               </h1>
               <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">{todayString}</p>
             </div>
@@ -815,7 +813,6 @@ export default function AdminDashboardPage() {
           
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[repeat(16,minmax(0,1fr))] gap-6 mb-6 px-6 sticky top-4 z-[50]">
             
-            {/* 1. 재원생/수납 요약 패널 (비율: 2) - 텍스트 넘침 방지 및 슬림화 적용 */}
             <div className="xl:col-span-2 col-span-1 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden flex flex-col justify-between h-64">
               <div className="absolute right-[-10px] top-[-10px] w-32 h-32 bg-slate-50 rounded-full opacity-50 pointer-events-none"></div>
               
@@ -1225,17 +1222,26 @@ export default function AdminDashboardPage() {
                 <span className="text-2xl">📞</span>
                 <h2 className="font-black text-lg ml-1">실시간 유선 문의 대장</h2>
               </div>
-              <div className="flex items-center gap-5">
-                <span className="text-xs font-bold text-blue-200 bg-blue-900/50 px-2.5 py-1 rounded-md shadow-inner border border-blue-800/50">단축키: Alt + C 로 닫기</span>
+              <div className="flex items-center gap-3 md:gap-5">
+                {/* 🌟 새 창에서 로그인할 수 있는 탈주 버튼 추가 */}
+                <a 
+                  href="https://docs.google.com/spreadsheets/d/1rD65o05on4Noavir4c1nqITAjeJnjSK_k7lj5hywAbI/edit?usp=sharing" 
+                  target="_blank" 
+                  rel="noopener noreferrer" 
+                  className="text-xs font-bold bg-white text-[#002864] hover:bg-slate-200 px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                >
+                  <span>🔗</span> 새 창에서 열기 (로그인)
+                </a>
+                <span className="text-xs font-bold text-blue-200 bg-blue-900/50 px-2.5 py-1 rounded-md shadow-inner border border-blue-800/50 hidden md:inline-block">단축키: Alt + C 로 닫기</span>
                 <button onClick={() => setIsInquiryOpen(false)} className="text-white hover:text-rose-400 text-3xl font-bold leading-none transition-colors">&times;</button>
               </div>
             </div>
             
-            {/* 💡 구글 시트 URL 적용부 */}
             <iframe 
               src="https://docs.google.com/spreadsheets/d/1rD65o05on4Noavir4c1nqITAjeJnjSK_k7lj5hywAbI/edit?usp=sharing"
               className="flex-1 w-full border-none bg-slate-50"
               title="Logica 유선 문의 대장"
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
               allowFullScreen
             />
           </div>

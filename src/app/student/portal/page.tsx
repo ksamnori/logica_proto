@@ -110,7 +110,6 @@ export default function StudentPortal() {
             rData?.forEach((r: any) => results[`${r.class_name}::${r.round}`] = r);
             setRoundResults(results);
 
-            // 🌟 initData 시점에서도 학생 이름을 명시적으로 전달
             await fetchBlockStates(sid, classes, sname);
         };
 
@@ -245,7 +244,6 @@ export default function StudentPortal() {
                 try {
                     await runDbSyncRef.current();
                     tick++;
-                    // 🌟 주기적 호출 시에도 이름 전달
                     if (tick % 2 === 0 && fetchBlockStatesRef.current && studentInfo.classes.length > 0) {
                         await fetchBlockStatesRef.current(studentInfo.id, studentInfo.classes, studentInfo.name);
                     }
@@ -305,31 +303,26 @@ export default function StudentPortal() {
         return () => { cancelled = true; clearInterval(iv); };
     }, [studentInfo.id]);
 
-    // 🌟 학생 이름(sName) 매개변수를 추가하고 스마트 타이틀 클리너를 내부 헬퍼로 구성합니다.
     const fetchBlockStates = async (sid: string, classes: string[], sName: string) => {
         const today = getKSTDateString();
         const newBlockStates: any = {};
         const newHwProgress: any = {};
         
-        // 🌟 지저분하고 반복되는 제목을 컴팩트하게 정돈하는 헬퍼 함수
         const cleanTitle = (raw: string, studentName: string) => {
             if (!raw) return '제목 없음';
             let t = raw;
             
-            // 1. 학생 이름 태그 제거 (예: [(테스트)해원] )
             if (studentName) {
                 const nameTag = `[${studentName}]`;
                 t = t.split(nameTag).join('').trim();
             }
             
-            // 2. 미완료 프린트 반복 축약 (예: 미완료 프린트 미완료 프린트 -> 미완료 프린트 (2차))
             const overdueMatches = t.match(/(미완료\s*프린트\s*)+/);
             if (overdueMatches) {
                 const count = overdueMatches[0].match(/미완료\s*프린트/g)?.length || 1;
                 t = t.replace(/(미완료\s*프린트\s*)+/, count > 1 ? `미완료 프린트 (${count}차) ` : '미완료 프린트 ');
             }
             
-            // 3. 오답 프린트 반복 축약
             const wrongMatches = t.match(/(오답\s*프린트\s*)+/);
             if (wrongMatches) {
                 const count = wrongMatches[0].match(/오답\s*프린트/g)?.length || 1;
@@ -388,30 +381,31 @@ export default function StudentPortal() {
         const uniqueIncIds = Array.from(new Set(resolvedQids));
         const totalPrintQCount = uniqueIncIds.length;
 
+        // 🌟 [핵심 변경] 완전히 정답(O, TO, RO) 처리된 문항들만 카운트하기 위해 grading_code 필터 적용
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
                 .select('homework_id, tq_id')
                 .eq('student_id', sid)
-                .in('grading_code', ['O', 'X', 'TO', 'RO', 'TX', 'T', '☆']),
+                .in('grading_code', ['O', 'TO', 'RO']), // 🌟 정답 처리된 것만 가져옴!
             supabaseClient.from('student_answer')
                 .select('exam_assignment_id, question_id')
                 .eq('student_id', sid)
-                .in('grading_code', ['O', 'X', 'TO', 'RO', 'TX', 'T', '☆']),
+                .in('grading_code', ['O', 'TO', 'RO']), // 🌟 정답 처리된 것만 가져옴!
             supabaseClient.from('exam_assignment')
                 .select('assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
                 .eq('student_id', sid)
         ]);
 
-        const hwAttemptedMap = new Map<number, Set<number>>();
+        const hwResolvedMap = new Map<number, Set<number>>();
         hwAnsData?.forEach((a: any) => {
-            if (!hwAttemptedMap.has(a.homework_id)) hwAttemptedMap.set(a.homework_id, new Set());
-            hwAttemptedMap.get(a.homework_id)!.add(a.tq_id);
+            if (!hwResolvedMap.has(a.homework_id)) hwResolvedMap.set(a.homework_id, new Set());
+            hwResolvedMap.get(a.homework_id)!.add(a.tq_id);
         });
 
-        const examAttemptedMap = new Map<number, Set<number>>();
+        const examResolvedMap = new Map<number, Set<number>>();
         examAnsData?.forEach((a: any) => {
-            if (!examAttemptedMap.has(a.exam_assignment_id)) examAttemptedMap.set(a.exam_assignment_id, new Set());
-            examAttemptedMap.get(a.exam_assignment_id)!.add(a.question_id);
+            if (!examResolvedMap.has(a.exam_assignment_id)) examResolvedMap.set(a.exam_assignment_id, new Set());
+            examResolvedMap.get(a.exam_assignment_id)!.add(a.question_id);
         });
 
         const classIds = Object.values(nameToId).filter(Boolean);
@@ -449,15 +443,16 @@ export default function StudentPortal() {
                 const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 
                 const isFinalDone = ['최종완료', '완료'].includes(ex.status);
-                const attempted = examAttemptedMap.get(ex.assignment_id)?.size || 0;
-                const remain = Math.max(0, (tq || 0) - attempted);
+                
+                // 🌟 [핵심 변경] 전체 문항 수에서 완전히 맞춘 문항만 뺌 = 남은 문제는 안 푼 문제 + 오답(X, TX) + 빈칸(B) 모두 포함
+                const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
+                const remain = Math.max(0, (tq || 0) - resolved);
 
                 const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(type);
                 if (isTestType && ex.created_at?.startsWith(today) && !['미응시', '진행중', '대기'].includes(ex.status)) {
                     hasAnyExamClearedToday = true;
                 }
 
-                // 🌟 스마트 클리너를 거쳐 압축된 타이틀 사용
                 const cleanedTitle = cleanTitle(rawTitle, sName);
                 const item = { id: ex.assignment_id, title: cleanedTitle, remain, status: ex.status, score: ex.total_score, type: 'exam', exType: type };
 
@@ -487,11 +482,11 @@ export default function StudentPortal() {
                 let tqLen = 0;
                 try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
 
-                const attempted = hwAttemptedMap.get(hw.homework_id)?.size || 0;
-                const remain = Math.max(0, tqLen - attempted);
+                // 🌟 [핵심 변경] 전체 문항 수에서 완전히 맞춘 문항만 뺌
+                const resolved = hwResolvedMap.get(hw.homework_id)?.size || 0;
+                const remain = Math.max(0, tqLen - resolved);
                 if (remain === 0) return;
 
-                // 🌟 과제 타이틀도 동일하게 스마트 클리너 적용
                 const cleanedTitle = cleanTitle(hw.homework_title, sName);
                 const item = { id: hw.homework_id, title: cleanedTitle, remain, status, score: null, type: 'hw' };
 
@@ -502,19 +497,18 @@ export default function StudentPortal() {
                 }
             });
 
-            const isEvenWeek = newClassWeekTypes[c] === 'even';
             const hasSimilar = similarExams.length > 0;
             const hasRegular = regularExams.length > 0;
 
             let finalExamList: any[] = [];
             let activeExamMode = 'DONE';
             
-            if (isEvenWeek) {
-                if (hasSimilar) { activeExamMode = 'SIMILAR'; finalExamList = similarExams; }
-                else if (hasRegular) { activeExamMode = 'TEST'; finalExamList = regularExams; }
-            } else {
-                if (hasRegular) { activeExamMode = 'TEST'; finalExamList = regularExams; }
-                else if (hasSimilar) { activeExamMode = 'SIMILAR'; finalExamList = similarExams; }
+            if (hasRegular) {
+                activeExamMode = 'TEST';
+                finalExamList = regularExams;
+            } else if (hasSimilar) {
+                activeExamMode = 'SIMILAR';
+                finalExamList = similarExams;
             }
 
             const finalHwList = [...hwExams, ...normalHws];
@@ -876,7 +870,7 @@ export default function StudentPortal() {
                         {isSelectedItemWaiting && initialScore !== null && (
                             <span className="text-sm md:text-base font-bold text-white bg-black/20 px-3.5 py-1.5 rounded-lg">가채점: {initialScore}점</span>
                         )}
-                        {!isBoxDone && !isSelectedItemWaiting && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
+                        {!isBoxDone && !isSelectedItemWaiting && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {selectedItem.remain || qCount}</span>}
                     </div>
                     
                     <h3 className={`text-[28px] md:text-[34px] lg:text-[38px] font-black mb-2 leading-tight ${isLocked ? 'text-white/90' : ''}`}>
@@ -999,7 +993,7 @@ export default function StudentPortal() {
                                 </span>
                             )}
                         </div>
-                        {!isBoxDone && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {qCount}</span>}
+                        {!isBoxDone && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {selectedItem.remain || qCount}</span>}
                     </div>
                     <h3 className={`text-[28px] md:text-[34px] lg:text-[38px] font-black mb-2 leading-tight ${isLocked ? 'text-white/90' : ''}`}>미완료 과제 클리닉</h3>
                     <p className={`text-base md:text-lg font-medium mt-1 mb-2 leading-snug ${isLocked ? 'text-white/70' : theme.textColor}`}>

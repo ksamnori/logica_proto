@@ -526,21 +526,19 @@ export default function ExamViewerPage() {
         return; 
 
       } else if (sessionStorage.getItem('examQuestions')) {
-        // 🌟 [핵심 수정] 새 문제지 생성 / 강제 수정 진입 분기 로직
         isNew = true;
         isNewExamRef.current = true;
         
         const editOriginalType = sessionStorage.getItem('editOriginalType');
         const editOriginalId = sessionStorage.getItem('editOriginalId');
         const editMasterId = sessionStorage.getItem('editMasterId'); 
-        const editExamId = sessionStorage.getItem('editExamId'); // 🔥 강제 수정 ID 확인
+        const editExamId = sessionStorage.getItem('editExamId'); 
 
         let loadExamId = null;
         if (editOriginalType === 'exam') {
             loadExamId = editMasterId; 
             rebuildExamIdRef.current = editMasterId; 
         } else if (editExamId) {
-            // 🔥 강제 수정일 경우, 새 문제지가 아니라 기존 문제지를 갱신
             loadExamId = editExamId;
             rebuildExamIdRef.current = editExamId;
             isNew = false;
@@ -551,9 +549,7 @@ export default function ExamViewerPage() {
 
         title = sessionStorage.getItem('examTitle') || '새로운 테스트';
         badge = sessionStorage.getItem('examSubTitle') || '';
-        const sessionExamType = sessionStorage.getItem('examType');
 
-        // 🔥 강제 수정(editExamId) 시 잔여 데이터 무시하고 DB 기준 적용
         if (loadExamId) {
             const { data: origExam } = await supabase.from('exam_master').select('*').eq('exam_id', loadExamId).single();
             if (origExam) {
@@ -565,14 +561,22 @@ export default function ExamViewerPage() {
                 wGrade = origExam.target_grade || "";
             }
         } else {
-            if (sessionStorage.getItem('isClinicMode') === 'true' || sessionExamType === '과제프린트' || sessionExamType === '오답프린트') {
-              lType = sessionExamType || '과제프린트';
+            // 🌟 [최종 수정] 세션 데이터를 최우선으로 읽어 '오답유사' 자동 선택
+            const sessionExamType = sessionStorage.getItem('examType');
+            const isClinic = sessionStorage.getItem('isClinicMode') === 'true';
+            
+            if (sessionExamType === '오답유사' || isClinic) {
+                lType = '오답유사';
+                // 기본 제목이 지정 안 된 경우 오답유사 전용 제목 세팅
+                if (title === '새로운 테스트' || !title) title = '오답 유사 클리닉';
+            } else if (sessionExamType) {
+                lType = sessionExamType;
             } else {
-              try {
-                const step1Data = JSON.parse(sessionStorage.getItem('exam_step1_data') || '{}');
-                if (step1Data.examType === 'print') lType = '오답프린트';
-                else if (step1Data.examType === 'homework') lType = '과제프린트';
-              } catch(e) {}
+                try {
+                    const step1Data = JSON.parse(sessionStorage.getItem('exam_step1_data') || '{}');
+                    if (step1Data.examType === 'print') lType = '오답프린트';
+                    else if (step1Data.examType === 'homework') lType = '과제프린트';
+                } catch(e) {}
             }
         }
 
@@ -1172,6 +1176,10 @@ export default function ExamViewerPage() {
       if (val === '주간테스트') {
         newExamTitle = getISOWeekKST(new Date(testDate + 'T00:00:00Z')) + "주차 평가";
         setExamTitle(newExamTitle);
+      } else if (val === '오답유사') {
+        // 🌟 양식 선택 시 제목도 '오답 유사 클리닉'으로 자동 변경
+        newExamTitle = examTitle === '시험지' ? '오답 유사 클리닉' : examTitle;
+        setExamTitle(newExamTitle);
       }
 
       if (val === '입학테스트') {
@@ -1239,7 +1247,6 @@ export default function ExamViewerPage() {
       const editOriginalType = sessionStorage.getItem('editOriginalType');
       const editOriginalId = sessionStorage.getItem('editOriginalId');
 
-      // 🔥 강제 수정(editExamId)인 경우에는 세션의 쓰레기값 학생ID(clinicTargetStudentId)를 무시합니다.
       const editExamId = sessionStorage.getItem('editExamId');
 
       let targetStudentId = editExamId ? null : (sessionStorage.getItem('clinicTargetStudentId') || sessionStorage.getItem('editStudentId'));
@@ -1271,7 +1278,6 @@ export default function ExamViewerPage() {
 
       if (isNewExamRef.current || editOriginalId || splitHwIdsStr || targetExamIdToRebuild) {
         if (targetExamIdToRebuild) {
-          // 🔥 기존 시험지 갱신 (강제 수정 포함)
           const { error: rebuildErr } = await supabase.from('exam_master').update({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
@@ -1282,7 +1288,6 @@ export default function ExamViewerPage() {
           examId = targetExamIdToRebuild;
           await supabase.from('exam_item').delete().eq('exam_id', examId);
         } else {
-          // 🔥 새 시험지 생성
           const { data, error: insertErr } = await supabase.from('exam_master').insert({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
@@ -1328,7 +1333,6 @@ export default function ExamViewerPage() {
       }
 
       const multiStudentsStr = sessionStorage.getItem('clinicTargetStudentIds');
-      // 🔥 강제수정 시에는 잔여 학생 배부 정보 무시
       const targetStudents = (multiStudentsStr && !editExamId) ? JSON.parse(multiStudentsStr) : (targetStudentId ? [targetStudentId] : []);
       
       if (targetStudents.length > 0 && examId) {

@@ -146,7 +146,9 @@ export default function GlobalList({
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
               let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
               let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
-              let createdDate = activeTab === 'HOMEWORK' ? (res.sort_date || res.created_at) : res.created_at;
+              
+              // 🌟 [핵심 변경] 모든 문제지/과제의 기준 시간을 `created_at`으로 통일
+              let createdDate = res.created_at;
 
               const rowBgClass = isSelected 
                 ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' 
@@ -154,7 +156,6 @@ export default function GlobalList({
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
                   : 'bg-white border-slate-200 hover:border-[#002864]';
 
-              // 🌟 [핵심 수정] 분기평가/분기테스트는 exam/review 로! (오타 수정)
               const eType = m?.exam_type || '';
               let detailHref = '';
               if (activeTab === 'HOMEWORK' && !res.is_exam_hw) {

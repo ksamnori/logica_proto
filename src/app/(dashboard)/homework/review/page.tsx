@@ -176,6 +176,21 @@ function HomeworkReviewContent() {
     }
   };
 
+  // 🌟 [새로 추가된 수식 새로고침 헬퍼]
+  const handleRefreshMathJax = () => {
+    if (typeof window !== "undefined" && (window as any).MathJax) {
+      // 캐시를 클리어하고 전체 DOM을 다시 파싱하도록 강제
+      if ((window as any).MathJax.typesetClear) {
+        (window as any).MathJax.typesetClear();
+      }
+      if ((window as any).MathJax.typesetPromise) {
+        (window as any).MathJax.typesetPromise().catch((err: any) => {
+          console.error("MathJax 강제 새로고침 오류:", err);
+        });
+      }
+    }
+  };
+
   const loadHomeworkData = async () => {
     setIsLoading(true);
     try {
@@ -188,7 +203,7 @@ function HomeworkReviewContent() {
 
         const em = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
         setStudentInfo(stuData);
-        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: em.exam_type || '학습지' } });
+        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: em.exam_type || '학습지' }, exam_type: em.exam_type });
         setHwResult({ status: aData.status, hw_result_id: aData.assignment_id }); 
         
         const { data: items } = await supabase.from('exam_item').select('question_id, sort_order').eq('exam_id', em.exam_id).order('sort_order');
@@ -334,7 +349,6 @@ function HomeworkReviewContent() {
     if (gradedCount > 0) newStatus = '진행중';
     if (gradedCount === flatQuestions.length && flatQuestions.length > 0) newStatus = '채점완료';
 
-    // 🌟 핵심 수정: isExamHw 모드일 때 exam_assignment 의 total_score를 직접 계산해서 업데이트
     if (isExamHw && assignmentId) {
       const calculatedScore = Math.round((correctCount / totalQ) * 100);
       await supabase.from('exam_assignment').update({ 
@@ -373,40 +387,41 @@ function HomeworkReviewContent() {
       const isCorrect = ['O', 'TO', 'RO'].includes(mark);
       const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
       
-      // 🌟 문항 수 기반 earned_score 계산 로직 추가
       const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
       const totalQ = flatQuestions.length || 1;
       const earnedScore = isCorrect ? (100 / totalQ) : 0;
 
+      const dynamicSourceType = isExamHw ? (homeworkInfo?.exam_type || '시험지') : '교재과제';
+
       if (isExamHw && assignmentId) {
         const [ { data: existingA }, { data: existingI } ] = await Promise.all([
           supabase.from('student_answer').select('answer_id').eq('exam_assignment_id', assignmentId).eq('question_id', tqId).maybeSingle(),
-          supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('source_type', '시험지').eq('question_id', tqId).maybeSingle()
+          supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('question_id', tqId).maybeSingle()
         ]);
 
         if (existingA) await supabase.from('student_answer').update({ grading_code: mark, is_correct: isCorrect, earned_score: earnedScore }).eq('answer_id', existingA.answer_id);
         else await supabase.from('student_answer').insert({ exam_assignment_id: assignmentId, student_id: studentId, question_id: tqId, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
 
         if (isIncorrect) {
-          if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null }).eq('record_id', existingI.record_id);
-          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, question_id: tqId, source_type: '시험지', status: mark });
+          if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, question_id: tqId, source_type: dynamicSourceType, status: mark });
         } else if (isCorrect && existingI) {
-          await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: new Date().toISOString() }).eq('record_id', existingI.record_id);
+          await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
         }
       } else {
         const [ { data: existingA }, { data: existingI } ] = await Promise.all([
           supabase.from('student_homework_answer').select('hw_answer_id').eq('homework_id', homeworkId).eq('student_id', studentId).eq('tq_id', tqId).maybeSingle(),
-          supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('source_type', '교재과제').eq('tq_id', tqId).maybeSingle()
+          supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('tq_id', tqId).maybeSingle()
         ]);
 
         if (existingA) await supabase.from('student_homework_answer').update({ grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 }).eq('hw_answer_id', existingA.hw_answer_id);
         else await supabase.from('student_homework_answer').insert({ homework_id: Number(homeworkId), student_id: studentId, tq_id: tqId, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
 
         if (isIncorrect) {
-          if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null }).eq('record_id', existingI.record_id);
-          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, tq_id: tqId, source_type: '교재과제', status: mark });
+          if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, tq_id: tqId, source_type: dynamicSourceType, status: mark });
         } else if (isCorrect && existingI) {
-          await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: new Date().toISOString() }).eq('record_id', existingI.record_id);
+          await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
         }
       }
 
@@ -440,10 +455,12 @@ function HomeworkReviewContent() {
       const totalQ = flatQuestions.length || 1;
       const earnedScore = isCorrect ? (100 / totalQ) : 0;
 
+      const dynamicSourceType = isExamHw ? (homeworkInfo?.exam_type || '시험지') : '교재과제';
+
       if (isExamHw && assignmentId) {
         const [ { data: existingAns }, { data: existingInc } ] = await Promise.all([
           supabase.from('student_answer').select('answer_id, question_id').eq('exam_assignment_id', assignmentId).eq('student_id', studentId),
-          supabase.from('student_incorrect_record').select('record_id, question_id').eq('student_id', studentId).eq('source_type', '시험지')
+          supabase.from('student_incorrect_record').select('record_id, question_id').eq('student_id', studentId)
         ]);
 
         const ansInserts: any[] = []; const ansUpdates: any[] = [];
@@ -456,10 +473,10 @@ function HomeworkReviewContent() {
 
           const exI = existingInc?.find(i => i.question_id === q.tq_id);
           if (isIncorrect) {
-            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null });
-            else incInserts.push({ student_id: studentId, question_id: q.tq_id, source_type: '시험지', status: mark });
+            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
+            else incInserts.push({ student_id: studentId, question_id: q.tq_id, source_type: dynamicSourceType, status: mark });
           } else if (isCorrect && exI) {
-            incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString() });
+            incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
           }
         });
 
@@ -467,12 +484,12 @@ function HomeworkReviewContent() {
         for(const u of ansUpdates) await supabase.from('student_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('answer_id', u.answer_id);
         
         if (incInserts.length > 0) await supabase.from('student_incorrect_record').insert(incInserts);
-        for(const u of incUpdates) await supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at }).eq('record_id', u.record_id);
+        for(const u of incUpdates) await supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id);
 
       } else {
         const [ { data: existingAns }, { data: existingInc } ] = await Promise.all([
           supabase.from('student_homework_answer').select('hw_answer_id, tq_id').eq('homework_id', homeworkId).eq('student_id', studentId),
-          supabase.from('student_incorrect_record').select('record_id, tq_id').eq('student_id', studentId).eq('source_type', '교재과제')
+          supabase.from('student_incorrect_record').select('record_id, tq_id').eq('student_id', studentId)
         ]);
 
         const ansInserts: any[] = []; const ansUpdates: any[] = [];
@@ -485,10 +502,10 @@ function HomeworkReviewContent() {
 
           const exI = existingInc?.find(i => i.tq_id === q.tq_id);
           if (isIncorrect) {
-            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null });
-            else incInserts.push({ student_id: studentId, tq_id: q.tq_id, source_type: '교재과제', status: mark });
+            if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
+            else incInserts.push({ student_id: studentId, tq_id: q.tq_id, source_type: dynamicSourceType, status: mark });
           } else if (isCorrect && exI) {
-            incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString() });
+            incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
           }
         });
 
@@ -496,7 +513,7 @@ function HomeworkReviewContent() {
         for(const u of ansUpdates) await supabase.from('student_homework_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('hw_answer_id', u.hw_answer_id);
         
         if (incInserts.length > 0) await supabase.from('student_incorrect_record').insert(incInserts);
-        for(const u of incUpdates) await supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at }).eq('record_id', u.record_id);
+        for(const u of incUpdates) await supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id);
       }
 
       await updateHomeworkResult(newMap);
@@ -551,6 +568,10 @@ function HomeworkReviewContent() {
       <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 shrink-0 flex justify-between items-center shadow-inner">
         <span className="text-xs font-bold text-slate-500">항목명: <span className="text-slate-800">{homeworkInfo?.textbook?.title || '-'}</span></span>
         <div className="flex gap-2">
+          {/* 🌟 [추가됨] 수식 새로고침 버튼 */}
+          <button onClick={handleRefreshMathJax} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-xs font-bold hover:bg-indigo-100 transition-colors shadow-sm">
+            🔄 수식 새로고침
+          </button>
           <button onClick={() => setAllRemaining('O')} className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-xs font-bold hover:bg-emerald-100 transition-colors shadow-sm">
             ✅ 미채점 전체 정답 (O)
           </button>

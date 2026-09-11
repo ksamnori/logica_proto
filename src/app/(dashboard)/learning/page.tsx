@@ -38,6 +38,15 @@ export default function LearningPage() {
     return d.toISOString().split('T')[0];
   });
 
+  const [bulkFilters, setBulkFilters] = useState({
+    exam: true,      // 주간/중간테스트
+    homework: true,  // 과제
+    overdue: true,   // 미완료과제
+    print: true,     // 오답
+    similar: true    // 오답유사
+  });
+
+  const [isBulkTargetDateActive, setIsBulkTargetDateActive] = useState(false);
   const [bulkTargetDate, setBulkTargetDate] = useState(() => {
     const d = new Date(Date.now() + 9 * 60 * 60 * 1000);
     return d.toISOString().split('T')[0];
@@ -240,10 +249,23 @@ export default function LearningPage() {
     const studentsInClass = allStudentsList.filter(s => s.classId === currentView.classId);
     if (studentsInClass.length === 0) return alert('선택하신 반에 등록된 학생이 없습니다.');
 
+    const allowedSourceTypes = [];
+    if (bulkFilters.exam) allowedSourceTypes.push('주간테스트', '중간평가', '중간테스트', '입학테스트', '진단평가', '분기평가', '분기테스트', '시험지');
+    if (bulkFilters.homework) allowedSourceTypes.push('과제', '과제프린트', '교재과제');
+    if (bulkFilters.overdue) allowedSourceTypes.push('미완료과제');
+    if (bulkFilters.print) allowedSourceTypes.push('오답프린트', '오답');
+    if (bulkFilters.similar) allowedSourceTypes.push('오답유사', '과제오답유사');
+    
+    if (allowedSourceTypes.length === 0) {
+      alert('오답 지정 범위를 최소 1개 이상 선택해주세요.');
+      return;
+    }
+
     setBulkStatus({ isRunning: true, current: 0, total: studentsInClass.length, studentName: '' });
 
     let successCount = 0;
-    let skipCount = 0;
+    let skipNoSource = 0; 
+    let skipNoMatch = 0;  
 
     const myTenantId = localStorage.getItem("logica_tenant_id") || 'hq';
     const instId = localStorage.getItem('logica_instructor_id') || 'system';
@@ -253,23 +275,83 @@ export default function LearningPage() {
       setBulkStatus({ isRunning: true, current: i + 1, total: studentsInClass.length, studentName: st.name });
 
       try {
-        const { data: records, error: recErr } = await supabase.from('student_incorrect_record')
-          .select('question_id, created_at')
-          .eq('student_id', st.id)
-          .is('resolved_at', null);
+        const targetQids = new Set<string>();
 
-        if (recErr || !records || records.length === 0) { skipCount++; continue; }
+        const { data: exams, error: exErr } = await supabase.from('exam_assignment')
+          .select('assignment_id, created_at, exam_master(exam_type)')
+          .eq('student_id', st.id);
 
-        const targetQids = records.filter(r => {
-          const d = new Date(r.created_at);
-          const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
-          return kst >= bulkStartDate && kst <= bulkEndDate;
-        }).map(r => r.question_id).filter(Boolean);
+        if (!exErr && exams) {
+          const validAssignIds = (exams as any[]).filter(ex => {
+            const kst = new Date(new Date(ex.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+            if (kst < bulkStartDate || kst > bulkEndDate) return false;
+            
+            const m = ex.exam_master;
+            const type = m ? (Array.isArray(m) ? m[0]?.exam_type : m.exam_type) : '';
+            const t = type || '';
+            
+            if (bulkFilters.print && ['오답프린트', '오답'].includes(t)) return true;
+            if (bulkFilters.similar && ['오답유사', '과제오답유사'].includes(t)) return true;
+            if (bulkFilters.homework && ['과제', '과제프린트'].includes(t)) return true;
+            if (bulkFilters.overdue && t === '미완료과제') return true;
+            if (bulkFilters.exam && !['과제', '과제프린트', '미완료과제', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(t)) return true;
+            
+            return false;
+          }).map(ex => ex.assignment_id);
 
-        const uniqueQids = Array.from(new Set(targetQids));
-        if (uniqueQids.length === 0) { skipCount++; continue; }
+          if (validAssignIds.length > 0) {
+            const { data: ans } = await supabase.from('student_answer')
+              .select('question_id')
+              .in('exam_assignment_id', validAssignIds)
+              .in('grading_code', ['X', 'TX', '☆', 'B']);
+              
+            ans?.forEach(a => { if (a.question_id) targetQids.add(a.question_id); });
+          }
+        }
 
-        const { data: matchedIds } = await supabase.rpc('get_clinic_matches', {
+        if (bulkFilters.homework) {
+          const { data: hwRes, error: hwErr } = await supabase.from('student_homework_result')
+            .select('homework_id, homework_assignment(created_at)')
+            .eq('student_id', st.id);
+            
+          if (!hwErr && hwRes) {
+            const validHwIds = (hwRes as any[]).filter(r => {
+              const hwObj = r.homework_assignment;
+              const hw = hwObj ? (Array.isArray(hwObj) ? hwObj[0] : hwObj) : null;
+              if (!hw || !hw.created_at) return false;
+              
+              const kst = new Date(new Date(hw.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+              return kst >= bulkStartDate && kst <= bulkEndDate;
+            }).map(r => r.homework_id);
+
+            if (validHwIds.length > 0) {
+              const { data: hwAns } = await supabase.from('student_homework_answer')
+                .select('tq_id, question_id')
+                .eq('student_id', st.id)
+                .in('homework_id', validHwIds)
+                .in('grading_code', ['X', 'TX', '☆', 'B']);
+                
+              if (hwAns && hwAns.length > 0) {
+                const tqIds = hwAns.map(a => a.tq_id).filter(Boolean);
+                if (tqIds.length > 0) {
+                  const { data: tqs } = await supabase.from('textbook_question').select('question_id').in('tq_id', tqIds);
+                  tqs?.forEach(t => { if(t.question_id) targetQids.add(t.question_id); });
+                }
+                hwAns.forEach(a => { if(a.question_id) targetQids.add(a.question_id); });
+              }
+            }
+          }
+        }
+
+        const uniqueQids = Array.from(targetQids);
+        
+        if (uniqueQids.length === 0) { 
+            console.log(`[스킵] ${st.name}: 조건에 맞는 원본 오답을 찾지 못함.`);
+            skipNoSource++; 
+            continue; 
+        }
+
+        const { data: matchedIds, error: matchErr } = await supabase.rpc('get_clinic_matches', {
           p_target_qids: uniqueQids,
           p_twin_count: bulkTwin,
           p_sim_count: bulkSim,
@@ -279,26 +361,37 @@ export default function LearningPage() {
           p_is_limit_active: bulkLimitActive
         });
 
-        if (!matchedIds || matchedIds.length === 0) { skipCount++; continue; }
+        if (matchErr) {
+            console.error("🔥 DB 매칭 에러 발생! 오버로딩 또는 파라미터 충돌:", matchErr);
+            alert(`학생 [${st.name}] 매칭 중 DB 에러가 발생했습니다: ${matchErr.message}`);
+            skipNoMatch++;
+            continue;
+        }
+
+        if (!matchedIds || matchedIds.length === 0) { 
+            console.log(`[스킵] ${st.name}: DB 매칭이 0개입니다.`);
+            skipNoMatch++; 
+            continue; 
+        }
 
         let finalMatchedIds = matchedIds;
         if (bulkTotalLimitActive && bulkTotalLimit > 0) {
             finalMatchedIds = matchedIds.slice(0, bulkTotalLimit);
         }
 
-        if (finalMatchedIds.length === 0) { skipCount++; continue; }
+        if (finalMatchedIds.length === 0) { skipNoMatch++; continue; }
 
-        const formattedTargetDate = `${bulkTargetDate.split('-')[1]}월 ${bulkTargetDate.split('-')[2]}일`;
         const examTitle = `[${currentView.className}] ${st.name} 오답유사 클리닉`;
-        const subTitle = `${formattedTargetDate} 수행 목표`;
+        const subTitle = isBulkTargetDateActive ? `${bulkTargetDate.split('-')[1]}월 ${bulkTargetDate.split('-')[2]}일 수행 목표` : '-';
+        const finalExamDate = isBulkTargetDateActive ? bulkTargetDate : null;
 
         const { data: masterData, error: mstErr } = await supabase.from('exam_master').insert({
           title: examTitle, sub_title: subTitle, exam_type: '오답유사', total_questions: finalMatchedIds.length,
           instructor_id: instId, tenant_id: myTenantId,
-          layout_settings: { column: 2, split: 4, titleMode: 'all', template: 'basic1', numberColor: '#175b6a', titleColor: '#002864', lineColor: '#94a3b8', examDate: bulkTargetDate }
+          layout_settings: { column: 2, split: 4, titleMode: 'all', template: 'basic1', numberColor: '#175b6a', titleColor: '#002864', lineColor: '#94a3b8', examDate: finalExamDate }
         }).select().single();
 
-        if (mstErr || !masterData) { skipCount++; continue; }
+        if (mstErr || !masterData) { skipNoMatch++; continue; }
 
         const examItems = finalMatchedIds.map((qId: string, idx: number) => ({ exam_id: masterData.exam_id, question_id: qId, sort_order: idx + 1 }));
         await supabase.from('exam_item').insert(examItems);
@@ -311,11 +404,11 @@ export default function LearningPage() {
         successCount++;
       } catch (err) {
         console.error("Bulk Generate Error for student " + st.name, err);
-        skipCount++;
+        skipNoSource++;
       }
     }
 
-    alert(`✅ 일괄 생성이 완료되었습니다.\n- 성공: ${successCount}명 배부 완료\n- 스킵(조건에 맞는 오답 없음): ${skipCount}명`);
+    alert(`✅ 일괄 생성이 완료되었습니다.\n- 🟢 성공: ${successCount}명 배부 완료\n- 🔴 스킵 (기간 내 오답 없음): ${skipNoSource}명\n- 🟡 스킵 (유사 문제 DB 부족 또는 에러): ${skipNoMatch}명\n\n※ 유사문제가 부족하여 스킵된 경우 AI 유사문제 생성기 도입이 필요합니다.`);
     setBulkStatus({ isRunning: false, current: 0, total: 0, studentName: '' });
     setIsBulkModalOpen(false);
 
@@ -350,7 +443,6 @@ export default function LearningPage() {
           <button onClick={() => handleMainTabClick('INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'INCORRECT' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>❌ 오답</button>
           <button onClick={() => handleMainTabClick('SIMILAR')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'SIMILAR' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔄 오답유사</button>
           
-          {/* 🌟 원장님 요청: 맨 우측으로 빼고 시각적 구분선(|) 추가 */}
           <div className="w-px h-6 bg-slate-300 mx-1 shrink-0"></div>
           <button onClick={() => handleMainTabClick('QUARTERLY')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'QUARTERLY' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📅 분기평가</button>
           
@@ -438,7 +530,6 @@ export default function LearningPage() {
         </div>
       </div>
 
-      {/* 일괄 배부 모달 생략(유지) */}
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-[600px] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -476,7 +567,33 @@ export default function LearningPage() {
                   </div>
 
                   <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 mt-2">
-                    <label className="text-sm font-extrabold text-slate-800">2. 생성 옵션 설정</label>
+                    <label className="text-sm font-extrabold text-slate-800">2. 오답 지정 범위 설정</label>
+                    <div className="flex flex-wrap gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={bulkFilters.exam} onChange={e => setBulkFilters(p => ({...p, exam: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                        <span className="text-[13px] font-bold text-slate-700">주간/중간테스트</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={bulkFilters.homework} onChange={e => setBulkFilters(p => ({...p, homework: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                        <span className="text-[13px] font-bold text-slate-700">과제</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={bulkFilters.overdue} onChange={e => setBulkFilters(p => ({...p, overdue: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                        <span className="text-[13px] font-bold text-slate-700">미완료과제</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={bulkFilters.print} onChange={e => setBulkFilters(p => ({...p, print: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                        <span className="text-[13px] font-bold text-slate-700">오답</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" checked={bulkFilters.similar} onChange={e => setBulkFilters(p => ({...p, similar: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                        <span className="text-[13px] font-bold text-slate-700">오답유사</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 mt-2">
+                    <label className="text-sm font-extrabold text-slate-800">3. 생성 옵션 설정</label>
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-[14px] font-bold text-slate-600 leading-loose shadow-sm break-keep">
                       해당 기간 오답의 <span className="text-violet-500 font-black">쌍둥이</span>
                       <select value={bulkTwin} onChange={e => setBulkTwin(Number(e.target.value))} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-black shadow-sm">
@@ -525,14 +642,25 @@ export default function LearningPage() {
                   </div>
 
                   <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 mt-2">
-                    <label className="text-sm font-extrabold text-slate-800">3. 클리닉 수행 목표일 지정 <span className="text-xs text-slate-400 font-medium">(선택)</span></label>
-                    <div className="flex items-center gap-3">
+                    <label className="flex items-center gap-2 cursor-pointer group w-max">
+                      <input 
+                        type="checkbox" 
+                        checked={isBulkTargetDateActive} 
+                        onChange={e => setIsBulkTargetDateActive(e.target.checked)} 
+                        className="w-4 h-4 rounded border-slate-300 accent-violet-500 cursor-pointer" 
+                      />
+                      <span className="text-sm font-extrabold text-slate-800">
+                        4. 클리닉 수행 목표일 지정 <span className="text-xs text-slate-400 font-medium">(선택)</span>
+                      </span>
+                    </label>
+                    <div className={`flex items-center gap-3 transition-opacity ${!isBulkTargetDateActive ? 'opacity-40 pointer-events-none' : ''}`}>
                       <input 
                         type="date" 
                         style={{ colorScheme: 'light' }}
                         value={bulkTargetDate} 
                         onChange={e => setBulkTargetDate(e.target.value)} 
-                        className="flex-1 px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl font-bold text-violet-700 outline-none focus:border-violet-500 shadow-sm" 
+                        disabled={!isBulkTargetDateActive}
+                        className="flex-1 px-4 py-3 bg-violet-50 border border-violet-200 rounded-xl font-bold text-violet-700 outline-none focus:border-violet-500 shadow-sm disabled:bg-slate-100 disabled:border-slate-200 disabled:text-slate-400" 
                       />
                       <span className="text-[12px] font-bold text-slate-500 flex-1 pl-2">
                         지정된 날짜가 학생 화면에 표시되어, <br/> 언제 풀어야 하는지 명확히 인지하게 합니다.
