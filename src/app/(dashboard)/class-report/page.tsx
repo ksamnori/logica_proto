@@ -10,8 +10,8 @@ interface ClassInfo {
   class_id: string;
   name: string;
   status?: string;
-  schedule_days?: string;
-  class_schedule?: any[];
+  instructor_id?: string;
+  instructor?: any; 
 }
 
 interface AnalyzedItem {
@@ -22,7 +22,7 @@ interface AnalyzedItem {
   date: string;
   totalQ: number;
   status: string;
-  underlyingIds: string[]; // 🌟 병합된 원본 ID들
+  underlyingIds: string[]; 
 }
 
 interface MatrixCol {
@@ -37,7 +37,7 @@ interface MatrixCol {
 
 interface MatrixCell {
   code: string;
-  isBlocked: boolean; // 🌟 배부되지 않은 문제인지 판별
+  isBlocked: boolean; 
 }
 
 interface MatrixRow {
@@ -192,11 +192,13 @@ export default function ClassReportPage() {
       
       const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('원장') || pos.includes('최고관리자');
 
-      let query = supabase.from('class').select('class_id, name, status, schedule_days, class_schedule(day_of_week, start_time, end_time)').order('name');
+      let query = supabase.from('class').select('class_id, name, status, instructor_id, instructor(name)').order('name');
       if (tenantId && tenantId !== 'hq') query = query.eq('tenant_id', tenantId);
       if (!isAdmin && instId) query = query.eq('instructor_id', instId);
 
-      const { data } = await query;
+      const { data, error } = await query;
+      if (error) console.error("클래스 데이터 로딩 실패:", error);
+
       if (data && data.length > 0) {
         const activeClasses = data.filter((c: any) => c.status !== "종료" && c.status !== "폐강");
         setClasses(activeClasses);
@@ -246,7 +248,6 @@ export default function ClassReportPage() {
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
 
-  // 🌟 [핵심 변경] 날짜+이름을 기준으로 합쳐서 목록을 생성하는 로직
   const fetchAssignmentsAndLogs = async () => {
     if (!selectedClassId) return;
     setIsLoading(true);
@@ -274,7 +275,6 @@ export default function ClassReportPage() {
           const dateStr = formatDateLabel(a.created_at);
           const title = m?.title || '제목 없음';
           
-          // 💡 날짜와 제목이 같으면 하나의 리스트(아이템)로 취급!
           const key = `EXAM_${dateStr}_${title}`; 
 
           if (!groupedExams.has(key)) {
@@ -295,7 +295,7 @@ export default function ClassReportPage() {
           const g = groupedExams.get(key);
           g.underlyingIds.add(a.exam_id);
           g.statuses.push(a.status);
-          g.totalQ = Math.max(g.totalQ, m?.total_questions || 0); // 최대 문제 수 반영
+          g.totalQ = Math.max(g.totalQ, m?.total_questions || 0); 
         });
 
         groupedExams.forEach(g => {
@@ -355,7 +355,6 @@ export default function ClassReportPage() {
     fetchAssignmentsAndLogs();
   }, [selectedClassId]);
 
-  // 🌟 [핵심 변경] 그룹핑된 underlyingIds 를 통해 모든 문제를 합집합(Union) 처리
   useEffect(() => {
     if (!selectedItem || !selectedClassId || activeTab === 'LOG') return;
 
@@ -416,7 +415,6 @@ export default function ClassReportPage() {
             if (data) tqDetails = [...tqDetails, ...data];
           }
 
-          // 페이지 번호 순으로 정렬
           tqDetails.sort((a, b) => {
             const aPage = a.page_number || a.question_db?.page_number || 0;
             const bPage = b.page_number || b.question_db?.page_number || 0;
@@ -462,7 +460,6 @@ export default function ClassReportPage() {
           });
 
         } else {
-          // EXAM 방식
           const { data: items } = await supabase.from('exam_item').select('exam_id, question_id, sort_order').in('exam_id', uIds);
           const examToQMap = new Map<string, Set<string>>();
           const qSortMap = new Map<string, number>();
@@ -554,14 +551,20 @@ export default function ClassReportPage() {
           rates[col.qId] = attemptCount > 0 ? Math.round((correctCount / attemptCount) * 100) : 0;
         });
 
-        const finalRows = Array.from(rowsMap.values()).map(row => {
-          let cCount = 0;
-          cols.forEach(col => { 
-             const cell = row.cells[col.qId];
-             if (cell && !cell.isBlocked && ['O', 'TO', 'RO'].includes(cell.code)) cCount++; 
-          });
-          return { ...row, totalCorrect: cCount };
-        }).sort((a, b) => a.studentName.localeCompare(b.studentName));
+        // 🌟 핵심 버그 수정: 이 시험/과제에 배부된 문제가 단 하나도 없는 학생은 매트릭스에서 제외합니다.
+        const finalRows = Array.from(rowsMap.values())
+          .filter(row => {
+             return cols.some(col => row.cells[col.qId] && !row.cells[col.qId].isBlocked);
+          })
+          .map(row => {
+            let cCount = 0;
+            cols.forEach(col => { 
+               const cell = row.cells[col.qId];
+               if (cell && !cell.isBlocked && ['O', 'TO', 'RO'].includes(cell.code)) cCount++; 
+            });
+            return { ...row, totalCorrect: cCount };
+          })
+          .sort((a, b) => a.studentName.localeCompare(b.studentName));
 
         setMatrixCols(cols);
         setMatrixRows(finalRows);
@@ -584,8 +587,7 @@ export default function ClassReportPage() {
 
   const getCellUI = (cell: MatrixCell) => {
     if (!cell || cell.isBlocked) {
-      // 🌟 배부되지 않은 문제 시각적 빗금 처리
-      return <div className="w-full h-full min-h-[30px] bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABAD2OQQ/9rX+aQAAAABJRU5ErkJggg==')] opacity-15 pointer-events-none" title="배부되지 않은 문항"></div>;
+      return <div className="w-full h-full min-h-[50px] bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABAD2OQQ/9rX+aQAAAABJRU5ErkJggg==')] opacity-15 pointer-events-none" title="배부되지 않은 문항"></div>;
     }
     const code = cell.code;
     if (!code) return <span className="text-slate-200">-</span>;
@@ -707,7 +709,8 @@ export default function ClassReportPage() {
             <div className="text-xs font-bold text-slate-500 mt-1 flex gap-3">
               <span>📅 출제일: {formatDateLabel(selectedItem.date)}</span>
               <span>📝 전체 합산 총 {matrixCols.length}문항</span>
-              <span>👥 수강생 {matrixRows.length}명</span>
+              {/* 🌟 수강생 명칭을 상황에 맞게 변경 */}
+              <span>👥 배부 인원 {matrixRows.length}명</span>
             </div>
           </div>
           
@@ -723,7 +726,7 @@ export default function ClassReportPage() {
         </div>
 
         <div className="flex-1 overflow-auto custom-scroll relative bg-slate-50/30">
-          <table className="w-max border-collapse h-full">
+          <table className="w-max border-collapse">
             <thead className="sticky top-0 z-20 shadow-sm">
               <tr>
                 <th className="sticky left-0 z-30 bg-slate-100 p-3 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
@@ -734,15 +737,15 @@ export default function ClassReportPage() {
                 </th>
                 
                 {matrixCols.map(col => (
-                  <th key={col.qId} className="bg-blue-50 p-2 min-w-[70px] w-[70px] border-r border-b border-slate-200 text-center align-middle">
+                  <th key={col.qId} className="bg-blue-50 p-1 min-w-[50px] w-[50px] max-w-[50px] border-r border-b border-slate-200 text-center align-middle">
                     <div className="flex flex-col items-center justify-center gap-0.5">
-                      <div className="flex items-center gap-1">
-                        <span className="text-[13px] font-black text-[#002864]">{col.displayNum}</span>
-                        <button onClick={() => setModalQuestion(col)} className="text-[11px] text-blue-400 hover:text-blue-700 transition-colors leading-none" title="문제 상세 보기">🔍</button>
+                      <div className="flex items-center gap-0.5">
+                        <span className="text-[13px] font-black text-[#002864] leading-none">{col.displayNum}</span>
+                        <button onClick={() => setModalQuestion(col)} className="text-[10px] text-blue-400 hover:text-blue-700 transition-colors leading-none" title="문제 상세 보기">🔍</button>
                       </div>
                       {(col.page || col.number) && (
-                        <span className="text-[9px] font-bold text-blue-500 whitespace-nowrap tracking-tighter">
-                          {col.page ? `p.${col.page}` : ''}{col.page && col.number ? '-' : ''}{col.number ? `${col.number}번` : ''}
+                        <span className="text-[8px] font-bold text-blue-500 leading-none tracking-tighter truncate w-full px-0.5" title={`${col.page ? `p.${col.page}` : ''}${col.page && col.number ? '-' : ''}${col.number ? `${col.number}번` : ''}`}>
+                          {col.page ? `p${col.page}` : ''}{col.page && col.number ? '-' : ''}{col.number}
                         </span>
                       )}
                     </div>
@@ -758,22 +761,24 @@ export default function ClassReportPage() {
 
                 return (
                   <tr key={row.studentId} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
-                    <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50">
-                      <div className="flex flex-col items-center justify-center gap-1 w-full">
+                    <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50 h-[50px]">
+                      <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
                         <span className="truncate w-full text-center">{row.studentName}</span>
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${isCompleted ? 'text-slate-400 bg-slate-100' : 'text-rose-500 bg-rose-50 border border-rose-100'}`}>
                           {row.status || '미제출'}
                         </span>
                       </div>
                     </td>
-                    <td className="p-3 border-r border-b border-slate-200 text-center align-middle min-w-[80px] w-[80px] max-w-[80px]">
+                    <td className="p-2 border-r border-b border-slate-200 text-center align-middle min-w-[80px] w-[80px] max-w-[80px] h-[50px]">
                       <span className="text-xs font-black text-[#002864] bg-blue-50 px-2 py-1 rounded border border-blue-100 whitespace-nowrap">
                         {row.totalCorrect} / {assignedCount}
                       </span>
                     </td>
                     {matrixCols.map(col => (
-                      <td key={col.qId} className={`p-0 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[70px] w-[70px] ${row.cells[col.qId]?.isBlocked ? 'bg-slate-100/50' : ''}`}>
-                        {getCellUI(row.cells[col.qId])}
+                      <td key={col.qId} className={`p-0 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[50px] w-[50px] max-w-[50px] h-[50px] ${row.cells[col.qId]?.isBlocked ? 'bg-slate-100/50' : ''}`}>
+                        <div className="flex items-center justify-center w-full h-full">
+                          {getCellUI(row.cells[col.qId])}
+                        </div>
                       </td>
                     ))}
                   </tr>
@@ -782,7 +787,7 @@ export default function ClassReportPage() {
             </tbody>
             <tfoot className="sticky bottom-0 z-20 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
               <tr>
-                <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 p-3 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
+                <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 p-2 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)] h-[40px]">
                   <span className="text-xs font-black text-slate-700">문항별 정답률</span>
                 </th>
                 {matrixCols.map(col => {
@@ -792,7 +797,7 @@ export default function ClassReportPage() {
                   else if (rate >= 80) rateColor = "text-emerald-600"; 
 
                   return (
-                    <th key={col.qId} className="bg-slate-50 p-2 border-r border-t border-slate-200 text-center align-middle min-w-[70px] w-[70px]">
+                    <th key={col.qId} className="bg-slate-50 p-1 border-r border-t border-slate-200 text-center align-middle min-w-[50px] w-[50px] max-w-[50px] h-[40px]">
                       <span className={`text-[12px] font-black ${rateColor}`}>{rate}%</span>
                     </th>
                   );
@@ -826,30 +831,18 @@ export default function ClassReportPage() {
         >
           {classes.length === 0 ? <span className="text-sm font-bold text-slate-400 py-2">배정된 반이 없습니다.</span> :
             classes.map((c) => {
-              let scheduleStr = "시간표 미설정";
-              
-              const scheduleArr = c.class_schedule;
-              if (scheduleArr && scheduleArr.length > 0) {
-                const days = ["월", "화", "수", "목", "금", "토", "일"];
-                const sortedSchedule = [...scheduleArr].sort((a: any, b: any) => days.indexOf(a.day_of_week) - days.indexOf(b.day_of_week));
-                scheduleStr = sortedSchedule.map((sc: any) => {
-                  const st = sc.start_time?.substring(0, 5) || ""; const et = sc.end_time?.substring(0, 5) || "";
-                  return et ? `${sc.day_of_week} ${st}~${et}` : `${sc.day_of_week} ${st}`;
-                }).join(", ");
-              } else if (c.schedule_days) {
-                scheduleStr = c.schedule_days;
-              }
-
+              const instName = Array.isArray(c.instructor) ? c.instructor[0]?.name : c.instructor?.name;
+              const displayInstructor = instName ? `${instName} 선생님` : '담당 미정';
               const isActive = selectedClassId === c.class_id;
               return (
                 <button 
                   key={c.class_id} 
                   data-class-id={c.class_id}
                   onClick={(e) => handleClassClick(e, c.class_id)}
-                  className={`px-4 py-2 rounded-xl border-2 shadow-sm flex flex-col items-start transition-all text-left min-w-[140px] max-w-[200px] shrink-0 ${isActive ? "bg-[#002864] text-white border-[#002864] transform scale-[1.02]" : "bg-white text-slate-500 border-transparent hover:border-slate-300 hover:text-slate-700"}`}
+                  className={`px-4 py-2 rounded-xl border-2 shadow-sm flex flex-col items-start transition-all text-left min-w-[120px] max-w-[160px] shrink-0 ${isActive ? "bg-[#002864] text-white border-[#002864] transform scale-[1.02]" : "bg-white text-slate-500 border-transparent hover:border-slate-300 hover:text-slate-700"}`}
                 >
                   <span className="text-sm font-extrabold tracking-tight leading-tight truncate w-full">{c.name}</span>
-                  <span className="text-[10px] mt-0.5 font-medium opacity-80 leading-none tracking-tight whitespace-nowrap truncate w-full">{scheduleStr}</span>
+                  <span className="text-[10px] mt-0.5 font-medium opacity-80 leading-none tracking-tight whitespace-nowrap truncate w-full">👤 {displayInstructor}</span>
                 </button>
               );
             })
@@ -861,10 +854,10 @@ export default function ClassReportPage() {
       <div className="flex flex-1 gap-4 overflow-hidden">
         
         {/* 좌측 패널 */}
-        <div className="w-[390px] 2xl:w-[430px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm shrink-0 overflow-hidden">
-          <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-nowrap items-center gap-1 shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+        <div className="w-[320px] 2xl:w-[350px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm shrink-0 overflow-hidden">
+          <div className="p-3 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center gap-1.5 shrink-0 justify-start">
             <button onClick={() => setActiveTab('LOG')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'LOG' ? 'bg-indigo-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>📝 수업일지</button>
-            <div className="w-px bg-slate-200 h-4 mx-1"></div>
+            <div className="w-px bg-slate-200 h-4 mx-0.5"></div>
             <button onClick={() => setActiveTab('ALL')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'ALL' ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>전체 분석</button>
             <button onClick={() => setActiveTab('EXAM')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'EXAM' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>💯 시험</button>
             <button onClick={() => setActiveTab('HW')} className={`px-2.5 py-1.5 rounded-lg text-[11px] font-black transition-colors whitespace-nowrap ${activeTab === 'HW' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>📝 과제</button>
