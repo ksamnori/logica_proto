@@ -158,12 +158,17 @@ export default function AdminDashboardPage() {
   
   const [bulkType, setBulkType] = useState('schedule');
   const [bulkTarget, setBulkTarget] = useState('all');
-  const [bulkForm, setBulkForm] = useState({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
+  
+  // 🌟 과제 전용 필드 (homeworkTitle, dueDate) 추가
+  const [bulkForm, setBulkForm] = useState({ 
+    scheduleName: '', applyDate: '', 
+    oldDate: '', newDate: '', 
+    homeworkTitle: '', dueDate: '', 
+    details: '' 
+  });
 
-  // 유선 문의 대장 (구글 시트) 모달 상태
   const [isInquiryOpen, setIsInquiryOpen] = useState(false);
 
-  // 단축키(Alt+C) 감지 로직
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.altKey && (e.key.toLowerCase() === 'c' || e.key === 'ㅊ')) {
@@ -658,8 +663,10 @@ export default function AdminDashboardPage() {
   };
 
   const handleAddBulkToQueue = async () => {
+    // 🌟 과제 안내 유효성 검사 추가
     if (bulkType === 'schedule' && (!bulkForm.scheduleName || !bulkForm.applyDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'makeup' && (!bulkForm.oldDate || !bulkForm.newDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
+    if (bulkType === 'homework' && (!bulkForm.homeworkTitle || !bulkForm.dueDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'general' && !bulkForm.details) return alert('발송할 자유 내용을 입력해주세요.');
 
     let targets = allStudentsData.filter((s: any) => s.status === '재원');
@@ -698,6 +705,14 @@ export default function AdminDashboardPage() {
             template_id: 'KA01TP260831032803585c1Me7WbxjUe', old_date: bulkForm.oldDate, new_date: bulkForm.newDate, details: bulkForm.details,
             preview_title: `[보강] ${student.name}`, preview_desc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`, time_string: currentTimeStr, status: '대기'
           });
+        } else if (bulkType === 'homework') {
+          // 🌟 과제 안내는 일반 SMS/LMS 형태로 변환하여 큐에 등록
+          const fullDetails = `[과제명]: ${bulkForm.homeworkTitle}\n[제출기한]: ${bulkForm.dueDate}\n\n${bulkForm.details}`;
+          newMessages.push({
+            tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
+            template_id: 'GENERAL_SMS', details: fullDetails,
+            preview_title: `[과제] ${bulkForm.homeworkTitle}`, preview_desc: `${student.name} ${finalName}`, time_string: currentTimeStr, status: '대기'
+          });
         } else {
           newMessages.push({
             tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
@@ -714,7 +729,7 @@ export default function AdminDashboardPage() {
     await supabase.from('alimtalk_queue').insert(newMessages);
     fetchQueue(); 
     alert(`${newMessages.length}건이 발송 대기열에 등록되었습니다.`);
-    setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' });
+    setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', homeworkTitle: '', dueDate: '', details: '' });
   };
 
   const handleSendQueuedMessages = async () => {
@@ -755,7 +770,8 @@ export default function AdminDashboardPage() {
         res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
       }
 
-      const logMessage = msg.template_id === "GENERAL_SMS" ? `[일반문자] ${msg.details?.substring(0, 30)}...` : msg.preview_title;
+      // 🌟 과제 안내도 일반문자로 처리되므로 로깅을 안전하게 추출
+      const logMessage = msg.template_id === "GENERAL_SMS" ? `${msg.preview_title} 발송` : msg.preview_title;
 
       await supabase.from('notification_log').insert({
         tenant_id: validTenantId, 
@@ -782,6 +798,7 @@ export default function AdminDashboardPage() {
     if (title.includes('결석')) return 'bg-rose-50 text-rose-500 border-rose-100';
     if (title.includes('일정')) return 'bg-indigo-50 text-indigo-600 border-indigo-100';
     if (title.includes('보강')) return 'bg-purple-50 text-purple-600 border-purple-100';
+    if (title.includes('과제')) return 'bg-cyan-50 text-cyan-600 border-cyan-200'; // 🌟 과제 배지 색상 추가
     if (title.includes('일반문자')) return 'bg-slate-100 text-slate-600 border-slate-300';
     return 'bg-slate-100 text-slate-600 border-slate-200';
   };
@@ -940,9 +957,11 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-5 flex flex-col gap-3">
                 
-                <select value={bulkType} onChange={e => { setBulkType(e.target.value); setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', details: '' }); }} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
+                {/* 🌟 과제 안내 옵션 추가 */}
+                <select value={bulkType} onChange={e => { setBulkType(e.target.value); setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', homeworkTitle: '', dueDate: '', details: '' }); }} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
                   <option value="schedule">📅 학사일정 (개강/휴원) 안내</option>
                   <option value="makeup">⏰ 시간표 변경 및 보강 안내</option>
+                  <option value="homework">📚 과제 및 학습 안내 (일반 문자)</option>
                   <option value="general">💬 자유 내용 (일반 SMS/LMS 발송)</option>
                 </select>
 
@@ -954,6 +973,12 @@ export default function AdminDashboardPage() {
                 <div className="flex-1 flex flex-col gap-2 mt-2 h-full">
                   {bulkType === 'general' ? (
                     <textarea placeholder="학부모님들께 발송할 자유 내용을 입력하세요... (카카오톡 미가입자에게도 SMS로 발송됩니다)" value={bulkForm.details} onChange={e=>setBulkForm({...bulkForm, details: e.target.value})} className="border border-slate-300 p-2 rounded-lg text-xs font-bold text-slate-800 flex-1 resize-none min-h-[100px] h-full focus:border-indigo-500 focus:outline-none placeholder:font-normal leading-relaxed"></textarea>
+                  ) : bulkType === 'homework' ? (
+                    <>
+                      <input type="text" placeholder="과제명 (예: 9월 2주차 주간지)" value={bulkForm.homeworkTitle} onChange={e=>setBulkForm({...bulkForm, homeworkTitle: e.target.value})} className="border border-slate-300 p-2 rounded-lg text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none placeholder:font-normal" />
+                      <input type="text" placeholder="제출 기한 (예: 9/14(수) 22:00까지)" value={bulkForm.dueDate} onChange={e=>setBulkForm({...bulkForm, dueDate: e.target.value})} className="border border-slate-300 p-2 rounded-lg text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none placeholder:font-normal" />
+                      <textarea placeholder="과제 상세 내용 및 제출 방법..." value={bulkForm.details} onChange={e=>setBulkForm({...bulkForm, details: e.target.value})} className="border border-slate-300 p-2 rounded-lg text-xs font-bold text-slate-800 flex-1 resize-none min-h-[60px] h-full focus:border-indigo-500 focus:outline-none placeholder:font-normal"></textarea>
+                    </>
                   ) : bulkType === 'schedule' ? (
                     <>
                       <input type="text" placeholder="일정 구분 (예: 11월 대개강, 중간고사 휴원)" value={bulkForm.scheduleName} onChange={e=>setBulkForm({...bulkForm, scheduleName: e.target.value})} className="border border-slate-300 p-2 rounded-lg text-xs font-bold text-slate-800 focus:border-indigo-500 focus:outline-none placeholder:font-normal" />

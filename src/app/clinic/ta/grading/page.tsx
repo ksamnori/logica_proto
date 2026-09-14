@@ -689,9 +689,9 @@ export default function TaGradingPage() {
               <div className="flex items-center justify-center h-full bg-white rounded-xl border border-slate-200 shadow-sm text-slate-400 font-bold text-sm">일치하는 학생이 없습니다.</div>
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
-                {renderClassColumn('MF 반', mfGroups)}
-                {renderClassColumn('TT 반', ttGroups)}
-                {renderClassColumn('WS 반', wsGroups)}
+                {renderClassColumn('MF(월금) 반', mfGroups)}
+                {renderClassColumn('TT(화목) 반', ttGroups)}
+                {renderClassColumn('WS(수토) 반', wsGroups)}
                 {renderClassColumn('그 외 반', otherGroups)}
               </div>
             )}

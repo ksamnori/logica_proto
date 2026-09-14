@@ -416,6 +416,45 @@ export default function LearningPage() {
     fetchStatsForTab(allStudentsList);
   };
 
+  // 🌟 [추가됨] 이름(타이틀) 수동 변경 헬퍼
+  const handleRenameItem = async (e: React.MouseEvent, type: string, realId: string, masterId: string | null, currentTitle: string) => {
+    e.stopPropagation();
+    const cleanCurrent = currentTitle.replace(/^\[시스템\]\s*/, '');
+    const newTitle = window.prompt("새로운 이름을 입력하세요:", cleanCurrent);
+    if (!newTitle || newTitle.trim() === "" || newTitle === cleanCurrent) return;
+
+    try {
+      setIsLoading(true);
+      const isExamType = ['exam', 'quarterly', 'print', 'similar', 'overdue', 'hw_exam'].includes(type);
+      const isHwType = type === 'hw' || (type.includes('hw') && type !== 'hw_exam');
+
+      if (isHwType) {
+        const { error } = await supabase.from('homework_assignment')
+          .update({ homework_title: newTitle.trim() })
+          .eq('homework_id', realId);
+        if (error) throw error;
+      } else if (isExamType) {
+        if (!masterId) throw new Error("마스터 ID를 찾을 수 없습니다.");
+        const { error } = await supabase.from('exam_master')
+          .update({ title: newTitle.trim() })
+          .eq('exam_id', masterId);
+        if (error) throw error;
+      }
+
+      // 화면 즉시 갱신
+      if (currentView.type === 'STUDENT') {
+        await fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
+      } else {
+        await fetchGlobalListForTab(activeTab, allStudentsList);
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(`이름 변경 실패: ${err.message}`);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   if (isAuthorized === null) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
@@ -496,6 +535,7 @@ export default function LearningPage() {
                 globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
                 toggleGlobalSelection={toggleGlobalSelection} formatDateLabel={formatDateLabel} 
                 handleViewChange={handleViewChange} 
+                handleRenameItem={handleRenameItem} // 🌟 헬퍼 전달
                 {...actions} 
               />
             </div>
@@ -515,6 +555,7 @@ export default function LearningPage() {
                 isLoading={isLoading} filteredTimeline={filteredTimeline} selectedBlocks={selectedBlocks} 
                 setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
                 isGeneratingPrint={isGeneratingPrint} formatDateLabel={formatDateLabel} 
+                handleRenameItem={handleRenameItem} // 🌟 헬퍼 전달
                 {...actions} 
               />
             </div>

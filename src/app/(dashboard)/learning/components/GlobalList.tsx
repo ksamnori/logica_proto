@@ -26,13 +26,14 @@ interface GlobalListProps {
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
   handleBulkPrintAction: (items: any[]) => void; 
+  handleRenameItem: (e: React.MouseEvent, type: string, realId: string, masterId: string | null, currentTitle: string) => void; 
 }
 
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleExtractCommonHomework, handleViewChange, toggleGlobalSelection,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
-  handleBulkPrintAction 
+  handleBulkPrintAction, handleRenameItem 
 }: GlobalListProps) {
   
   const handleBulkPrint = () => {
@@ -75,9 +76,9 @@ export default function GlobalList({
           <div>
             <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
               {currentView.type === 'CLASS' ? (
-                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
               ) : (
-                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 리스트' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
               )}
             </h2>
             <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
@@ -111,7 +112,7 @@ export default function GlobalList({
       
       <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50">
         {isLoading ? (
-          <div className="text-center font-bold text-slate-400 py-10 text-[12px]">전체 리스트를 불러오는 중입니다...</div>
+          <div className="text-center font-bold text-slate-400 py-10 text-[12px]">전체 목록을 불러오는 중입니다...</div>
         ) : globalList.length === 0 ? (
           <div className="text-center font-bold text-slate-400 py-10 text-[12px]">배부된 기록이 없습니다.</div>
         ) : (
@@ -146,8 +147,6 @@ export default function GlobalList({
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
               let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
               let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
-              
-              // 🌟 [핵심 변경] 모든 문제지/과제의 기준 시간을 `created_at`으로 통일
               let createdDate = res.created_at;
 
               const rowBgClass = isSelected 
@@ -169,46 +168,58 @@ export default function GlobalList({
               const finalOCount = res.rawAnswers ? res.rawAnswers.filter((a: any) => ['O', 'RO', 'TO'].includes(a.grading_code)).length : (res.oCount || 0);
               const finalXCount = res.rawAnswers ? res.rawAnswers.filter((a: any) => ['X', 'TX'].includes(a.grading_code)).length : (res.xCount || 0);
 
+              let inferredType = res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue');
+              const rId = inferredType === 'hw' ? hw.homework_id : res.assignment_id;
+
               return (
                 <div key={`${itemId}_${idx}`} onClick={() => toggleGlobalSelection(itemId)} className={`border-[1.5px] rounded-xl p-2 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}>
-                  <div className="flex items-center gap-2 w-1/2 min-w-0 shrink-0 flex-1">
-                    <input type="checkbox" checked={isSelected} readOnly className="w-3.5 h-3.5 accent-rose-500 pointer-events-none shrink-0" />
-                    <div className="w-[80px] shrink-0 text-[10px] font-bold text-slate-400 leading-tight truncate">
+                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                    <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
+                    <div className="shrink-0 text-[10px] font-bold text-slate-400 leading-none">
                       {formatDateLabel(createdDate, true)}
                     </div>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 whitespace-nowrap ${typeColor}`}>{typeBadge}</span>
-                    <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 whitespace-nowrap">{className}</span>
-                    <span className="text-[11px] font-bold text-slate-700 shrink-0 w-[50px] truncate">{studentName}</span>
-                    <div className="flex-1 font-extrabold text-[12px] truncate" title={titleStr}>{titleStr}</div>
+                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 leading-none whitespace-nowrap ${typeColor}`}>{typeBadge}</span>
+                    <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 leading-none">{className}</span>
+                    <span className="text-[11px] font-bold text-slate-700 shrink-0 truncate max-w-[60px] leading-none pt-[1px]">{studentName}</span>
+                    <div className="flex-1 font-extrabold text-[12px] text-slate-700 truncate leading-none pt-[1px]" title={titleStr}>{titleStr}</div>
                   </div>
 
-                  <div className="flex items-center gap-2 shrink-0 justify-end w-[350px]">
-                    <div className="text-[10px] font-bold text-slate-500 shrink-0 w-[50px] text-right whitespace-nowrap">총 {totalQ || 0}문항</div>
+                  <div className="flex items-center gap-2 shrink-0 justify-end ml-2">
+                    <div className="text-[10px] font-bold text-slate-500 whitespace-nowrap">총 {totalQ || 0}문항</div>
                     
-                    <div className="flex flex-row flex-nowrap items-center gap-1 shrink-0 w-[110px] justify-center">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md border border-emerald-100 whitespace-nowrap shadow-sm">✅ {finalOCount}</span>
-                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded-md border border-rose-100 whitespace-nowrap shadow-sm">❌ {finalXCount}</span>
+                    <div className="flex items-center gap-1">
+                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm leading-none">✅ {finalOCount}</span>
+                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm leading-none">❌ {finalXCount}</span>
                     </div>
                     
-                    <div className="flex items-center gap-1.5 shrink-0 w-[100px] justify-end">
-                      <button onClick={(e) => handleForceComplete(e, activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam', activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_id : res.assignment_id, res.student_id)} className="text-[10px] font-bold text-slate-600 hover:text-emerald-600 transition-colors bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0">
+                    <div className="flex items-center gap-1.5 ml-1">
+                      <button onClick={(e) => handleForceComplete(e, activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam', activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_id : res.assignment_id, res.student_id)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0 transition-colors">
                         ✅ 완료처리
                       </button>
-                      <span className={`w-[50px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 ${statusBadge}`}>{statusStr}</span>
+                      <span className={`w-[44px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 leading-none ${statusBadge}`}>{statusStr}</span>
                     </div>
                     
-                    <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-300 pl-2.5 w-[110px] justify-end">
+                    {/* 🌟 1080p 대응 압축 레이아웃: 여백과 폰트를 줄이고 버튼들을 그룹화 */}
+                    <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2.5 ml-1">
+                      <button 
+                        onClick={(e) => handleRenameItem(e, inferredType, rId, m?.exam_id, titleStr)} 
+                        className="text-[12px] hover:text-amber-500 transition-colors" 
+                        title="이름 변경"
+                      >
+                        🏷️
+                      </button>
+
                       {!(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
-                        <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0" title="문제 수정">✏️</button>
+                        <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors" title="문제 수정">✏️</button>
                       ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors shrink-0" title="과제 문항 수정">✏️</button>
+                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors shrink-0" title="삭제">🗑️</button>
+                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
                       
-                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors shrink-0" title="프린트 단일 출력">🖨️</button>
+                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors" title="프린트 단일 출력">🖨️</button>
 
-                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[10px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 shrink-0 whitespace-nowrap">상세 ➔</button>
+                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[9px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 whitespace-nowrap">상세 ➔</button>
                     </div>
                   </div>
                 </div>
