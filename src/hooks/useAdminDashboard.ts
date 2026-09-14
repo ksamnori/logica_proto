@@ -55,7 +55,8 @@ export function useAdminDashboard() {
       { data: csLog }, { data: memos }, { data: admissions }, 
       { data: feeds }, { data: classes }, { data: enrolls }, { data: rawInsts }
     ] = await Promise.all([
-      supabase.from('student').select('student_id, name, status, created_at, updated_at, class_id'),
+      // 🌟 수정됨: select에서 class_id를 제거했습니다[cite: 6].
+      supabase.from('student').select('student_id, name, status, created_at, updated_at'),
       supabase.from('academy_billing').select('amount, status').eq('billing_month', thisMonthStr),
       supabase.from('admission_application').select('test_result, status, application_status').gte('created_at', firstDayOfMonth),
       supabase.from('parent_request_log').select('*, student(name)').eq('status', '대기').order('created_at', { ascending: false }).limit(15),
@@ -113,7 +114,9 @@ export function useAdminDashboard() {
       let newCnt = 0, leftCnt = 0;
 
       (students || []).forEach(s => {
-        let belongs = classIds.includes(s.class_id) || (enrolls?.some(e => e.student_id === s.student_id && classIds.includes(e.class_id)));
+        // 🌟 수정됨: s.class_id 참조 제거, 오로지 enrolls만 바라보게 수정[cite: 6].
+        let belongs = enrolls?.some(e => e.student_id === s.student_id && classIds.includes(e.class_id));
+        
         if (belongs) {
           if (s.status === '재원') {
             myStudents.add(s.student_id);
@@ -129,11 +132,13 @@ export function useAdminDashboard() {
     // 5. 수강반 결원 모니터링 및 레벨별 통계 (중복 카운트 문제 해결)
     let lvCounts: any = { 'Ultimate': 0, 'Master': 0, 'Apex': 0, 'Titan': 0, 'Horizon': 0, '기타': 0 };
     
-    // [수정됨] 레벨은 '고유 학생'을 기준으로 세팅합니다.
+    // 레벨은 '고유 학생'을 기준으로 세팅합니다.
     const activeStudents = students?.filter(s => s.status === '재원') || [];
     activeStudents.forEach(stu => {
-      // 학생의 주 클래스(class_id)를 기준으로 레벨을 찾음
-      const mainClass = classes?.find(c => c.class_id === stu.class_id);
+      // 🌟 수정됨: 학생의 주 클래스를 enrollment를 통해 찾습니다[cite: 6].
+      const stuEnroll = enrolls?.find(e => e.student_id === stu.student_id);
+      const mainClass = classes?.find(c => c.class_id === stuEnroll?.class_id);
+      
       const lv = mainClass?.level_name || '기타';
       if (lvCounts[lv] !== undefined) lvCounts[lv]++;
       else lvCounts['기타']++;
@@ -142,7 +147,8 @@ export function useAdminDashboard() {
     const classStats = (classes || []).map(c => {
       let sCount = 0;
       (students || []).forEach(s => {
-        if (s.class_id === c.class_id || (enrolls?.some(e => e.student_id === s.student_id && e.class_id === c.class_id))) sCount++;
+        // 🌟 수정됨: s.class_id 참조 제거[cite: 6].
+        if (enrolls?.some(e => e.student_id === s.student_id && e.class_id === c.class_id)) sCount++;
       });
       const capacity = 12, vacancy = capacity - sCount, fillRate = Math.min(100, Math.round((sCount / capacity) * 100));
       return { ...c, sCount, capacity, vacancy, fillRate };
@@ -155,7 +161,7 @@ export function useAdminDashboard() {
       liveFeeds: feeds || [],
       instructorsStats,
       classStats,
-      levelCounts: lvCounts // ✅ 계산된 lvCounts 변수를 매핑
+      levelCounts: lvCounts
     })
   };
 
