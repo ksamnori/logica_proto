@@ -23,6 +23,7 @@ interface StudentInfo {
 interface ClassInfo {
   class_id: string;
   name: string;
+  teacherName?: string;
   students: StudentInfo[];
   totalPending: number;
   hasPendingExam: boolean;
@@ -150,7 +151,8 @@ export default function TaGradingPage() {
       const tenantId = localStorage.getItem("logica_tenant_id") || "";
       if (!tenantId) { setGroupedClasses([]); setIsLoading(false); return; }
 
-      let classQuery = supabase.from('class').select('class_id, name').order('name');
+      // 🌟 class 테이블에서 instructor 테이블을 조인하여 강사 이름을 함께 가져옵니다.
+      let classQuery = supabase.from('class').select('*, instructor(name)').order('name');
       if (tenantId !== 'hq') classQuery = classQuery.eq('tenant_id', tenantId);
       const { data: classes } = await classQuery;
       if (!classes || classes.length === 0) { setGroupedClasses([]); setIsLoading(false); return; }
@@ -263,7 +265,18 @@ export default function TaGradingPage() {
           return a.name.localeCompare(b.name);
         });
 
-        return { class_id: c.class_id, name: c.name, students: studentsInClass, hasPendingExam, hasPendingHw, hasPendingOverdue, hasPendingPrint, hasPendingSimilar, totalPending: classTotalPending };
+        // 🌟 조인된 instructor 객체에서 이름을 추출
+        const instObj = Array.isArray(c.instructor) ? c.instructor[0] : c.instructor;
+        const extractedTeacherName = instObj?.name || '';
+
+        return { 
+          class_id: c.class_id, 
+          name: c.name, 
+          teacherName: extractedTeacherName,
+          students: studentsInClass, 
+          hasPendingExam, hasPendingHw, hasPendingOverdue, hasPendingPrint, hasPendingSimilar, 
+          totalPending: classTotalPending 
+        };
       }).filter(c => c.students.length > 0);
 
       groups.sort((a, b) => {
@@ -316,9 +329,12 @@ export default function TaGradingPage() {
           if (kind === 'hw_exam') subTitleStr = '맞춤 과제(프린트)';
           else if (kind === 'overdue') subTitleStr = '미완료 과제';
           
+          const rawTitle = m?.title || '제목 없음';
+          const cleanTitle = rawTitle.replace(/\[시스템\]\s*/g, '');
+          
           return {
             key: `exam_${e.assignment_id}`, kind, examType: m.exam_type, totalQ: m.total_questions || 0,
-            title: m?.title || '제목 없음', subtitle: subTitleStr,
+            title: cleanTitle, subtitle: subTitleStr,
             date: e.created_at, status: ['채점완료', '완료'].includes(e.status) ? `채점완료 (${e.total_score ?? 0}점)` : (e.status || '미응시'), 
             assignmentId: String(e.assignment_id), masterId: m?.exam_id,
           };
@@ -342,8 +358,12 @@ export default function TaGradingPage() {
         .map((h: any) => {
           let targetQs = []; try { targetQs = typeof h.target_questions === 'string' ? JSON.parse(h.target_questions) : (h.target_questions || []); } catch(e){}
           const res = resultMap.get(h.homework_id); const tb = Array.isArray(h.textbook) ? h.textbook[0] : h.textbook;
+          
+          const rawTitle = h.homework_title || '교재 과제';
+          const cleanTitle = rawTitle.replace(/\[시스템\]\s*/g, '');
+          
           return {
-            key: `hw_${h.homework_id}`, kind: 'hw', totalQ: targetQs.length, title: h.homework_title || '교재 과제',
+            key: `hw_${h.homework_id}`, kind: 'hw', totalQ: targetQs.length, title: cleanTitle,
             subtitle: tb?.title || '교재', date: h.due_date || h.created_at, status: res?.status || '미제출', 
             homeworkId: String(h.homework_id), target_questions: targetQs
           };
@@ -359,40 +379,49 @@ export default function TaGradingPage() {
     setIsLoadingItems(true);
     try {
       let count = 1;
+      
       if (['exam', 'hw_exam', 'print', 'similar', 'overdue'].includes(item.kind)) {
-        const { data: ex } = await supabase.from('exam_assignment').select('exam_id, class_id, created_at, exam_master!inner(title)').eq('assignment_id', item.assignmentId).single();
-        if (ex) {
-          const m = Array.isArray(ex.exam_master) ? ex.exam_master[0] : ex.exam_master;
-          const dateStr = getKstDateStr(ex.created_at);
+        const { data: baseEx } = await supabase.from('exam_assignment').select('exam_id, class_id, exam_master!inner(title)').eq('assignment_id', item.assignmentId).single();
+        
+        if (baseEx && baseEx.class_id) {
+          const m = Array.isArray(baseEx.exam_master) ? baseEx.exam_master[0] : baseEx.exam_master;
+          const exTitle = m?.title;
           
-          const { data: masters } = await supabase.from('exam_master').select('exam_id').eq('title', m.title);
+          const { data: masters } = await supabase.from('exam_master').select('exam_id').eq('title', exTitle);
           const masterIds = masters?.map(x => x.exam_id) || [];
           
-          let query = supabase.from('exam_assignment').select('assignment_id, created_at').in('exam_id', masterIds);
-          if (ex.class_id) query = query.eq('class_id', ex.class_id);
-          else query = query.is('class_id', null);
+          const { data: assigns } = await supabase.from('exam_assignment').select('student_id').in('exam_id', masterIds).eq('class_id', baseEx.class_id);
           
-          const { data: assigns } = await query;
-          const matchingAssigns = assigns?.filter(a => getKstDateStr(a.created_at) === dateStr) || [];
-          count = matchingAssigns.length;
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseEx.class_id);
+          const currentEnrolledIds = new Set(
+            enrolls?.filter((e: any) => (Array.isArray(e.student) ? e.student[0] : e.student)?.status === '재원').map(e => String(e.student_id))
+          );
+          
+          const validStudentIds = new Set(
+            assigns?.filter(a => currentEnrolledIds.has(String(a.student_id))).map(a => String(a.student_id))
+          );
+          
+          count = validStudentIds.size || 1;
         }
       } else {
-        const { data: hw } = await supabase.from('homework_assignment').select('homework_title, class_id, target_student_id, created_at').eq('homework_id', item.homeworkId).single();
-        if (hw) {
-          const dateStr = getKstDateStr(hw.created_at);
+        const { data: baseHw } = await supabase.from('homework_assignment').select('homework_title, class_id').eq('homework_id', item.homeworkId).single();
+        
+        if (baseHw && baseHw.class_id) {
+          const { data: hws } = await supabase.from('homework_assignment').select('target_student_id').eq('homework_title', baseHw.homework_title).eq('class_id', baseHw.class_id);
           
-          let query = supabase.from('homework_assignment').select('homework_id, target_student_id, created_at').eq('homework_title', hw.homework_title);
-          if (hw.class_id) query = query.eq('class_id', hw.class_id);
-          else query = query.is('class_id', null);
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseHw.class_id);
+          const currentEnrolledIds = new Set(
+            enrolls?.filter((e: any) => (Array.isArray(e.student) ? e.student[0] : e.student)?.status === '재원').map(e => String(e.student_id))
+          );
           
-          const { data: hws } = await query;
-          const matchingHws = hws?.filter(h => getKstDateStr(h.created_at) === dateStr) || [];
-          
-          if (!hw.target_student_id && matchingHws.length === 1) {
-            const { count: c } = await supabase.from('enrollment').select('*', { count: 'exact', head: true }).eq('class_id', hw.class_id);
-            count = c || 1;
+          const hasGlobal = hws?.some(h => !h.target_student_id);
+          if (hasGlobal) {
+            count = currentEnrolledIds.size || 1;
           } else {
-            count = matchingHws.length;
+            const validStudentIds = new Set(
+              hws?.filter(h => h.target_student_id && currentEnrolledIds.has(String(h.target_student_id))).map(h => String(h.target_student_id))
+            );
+            count = validStudentIds.size || 1;
           }
         }
       }
@@ -563,62 +592,108 @@ export default function TaGradingPage() {
     } finally { setIsLoading(false); }
   };
 
-  if (!ready || !isStateLoaded) return <div className="h-screen bg-slate-100" />;
+  // 🌟 반 정렬 로직 (U -> M -> A -> T -> H -> 나머지 순)
+  const classSort = (a: ClassInfo, b: ClassInfo) => {
+    const order: Record<string, number> = { 'U': 1, 'M': 2, 'A': 3, 'T': 4, 'H': 5 };
+    const aFirst = a.name.charAt(0).toUpperCase();
+    const bFirst = b.name.charAt(0).toUpperCase();
 
-  const activePanel = panels.find(p => p.id === activePanelId) || null;
+    const aRank = order[aFirst] !== undefined ? order[aFirst] : 99;
+    const bRank = order[bFirst] !== undefined ? order[bFirst] : 99;
+
+    if (aRank !== bRank) return aRank - bRank;
+    return a.name.localeCompare(b.name);
+  };
+
+  // 🌟 4분할 레이아웃을 위한 그룹핑 (커스텀 정렬 적용)
+  const mfGroups = filteredGroups.filter(c => c.name.includes('MF')).sort(classSort);
+  const ttGroups = filteredGroups.filter(c => c.name.includes('TT')).sort(classSort);
+  const wsGroups = filteredGroups.filter(c => c.name.includes('WS')).sort(classSort);
+  const otherGroups = filteredGroups.filter(c => !c.name.includes('MF') && !c.name.includes('TT') && !c.name.includes('WS')).sort(classSort);
+
+  // 🌟 컬럼 렌더링 헬퍼
+  const renderClassColumn = (title: string, groups: ClassInfo[]) => (
+    <div className="flex flex-col bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden h-full">
+      <div className="bg-[#002864]/5 border-b border-slate-200 px-3 py-2 shrink-0 flex justify-between items-center">
+        <h3 className="font-extrabold text-[12px] text-[#002864]">{title}</h3>
+        <span className="text-[10px] font-bold text-[#002864] bg-blue-100/50 border border-blue-200 px-1.5 py-0.5 rounded-full leading-none">{groups.length}</span>
+      </div>
+      <div className="flex-1 overflow-y-auto custom-scroll p-2 space-y-2">
+        {groups.length === 0 ? (
+          <div className="p-4 text-center text-slate-400 text-[11px] font-bold">해당 반이 없습니다.</div>
+        ) : groups.map(c => {
+          const isOpen = expandedClasses.includes(c.class_id);
+          return (
+            <div key={c.class_id} className="border border-slate-200 rounded-lg overflow-hidden shadow-sm">
+              <button onClick={() => toggleClass(c.class_id)} className={`w-full flex flex-col px-3 py-2 transition-colors ${isOpen ? 'bg-slate-50' : 'bg-white hover:bg-slate-50'}`}>
+                <div className="w-full flex justify-between items-center mb-1">
+                  <span className="font-black text-[12px] text-[#002864] truncate" title={c.name}>📁 {c.name}</span>
+                  <svg className={`shrink-0 w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                </div>
+                <div className="w-full flex justify-between items-center mt-1">
+                  {/* 🌟 선생님 이름과 인원수 분리 표시 */}
+                  <span className="text-[10px] font-bold text-slate-500 truncate shrink min-w-0" title={c.teacherName || '미지정'}>
+                    👨‍🏫 {c.teacherName || '미지정'}
+                    <span className="text-slate-300 mx-1.5">|</span>
+                    {c.students.length}명
+                  </span>
+                  {(c.hasPendingExam || c.hasPendingHw || c.hasPendingOverdue || c.hasPendingPrint || c.hasPendingSimilar) && (
+                    <div className="flex gap-1 shrink-0 ml-2">
+                      {c.hasPendingExam && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="미채점 시험"></span>}
+                      {c.hasPendingHw && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="미채점 과제"></span>}
+                      {c.hasPendingOverdue && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title="미완료과제"></span>}
+                      {c.hasPendingPrint && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="오답프린트"></span>}
+                      {c.hasPendingSimilar && <span className="w-1.5 h-1.5 rounded-full bg-violet-500" title="오답유사"></span>}
+                    </div>
+                  )}
+                </div>
+              </button>
+              {isOpen && (
+                <div className="flex flex-col bg-slate-50 border-t border-slate-100">
+                  {c.students.map(s => {
+                    const alreadyOpen = panels.some(p => p.studentId === s.id && !p.gradeAll);
+                    return (
+                      <button key={s.id} onClick={() => handleSelectStudent(s)} className="w-full text-left pl-4 pr-3 py-2.5 text-[11px] font-bold text-slate-700 hover:bg-blue-100 hover:text-[#002864] transition-colors border-b border-slate-100/50 last:border-0 flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5 truncate">
+                          👤 {s.name}
+                          <div className="flex items-center gap-0.5 shrink-0">
+                            {s.pendingExamQ > 0 && <span className="w-3.5 h-3.5 flex items-center justify-center bg-blue-100 text-blue-700 rounded-full font-black text-[8px] shadow-sm border border-blue-200" title="시험">{s.pendingExamQ}</span>}
+                            {s.pendingHwQ > 0 && <span className="w-3.5 h-3.5 flex items-center justify-center bg-amber-100 text-amber-700 rounded-full font-black text-[8px] shadow-sm border border-amber-200" title="과제">{s.pendingHwQ}</span>}
+                            {s.pendingOverdueQ > 0 && <span className="w-3.5 h-3.5 flex items-center justify-center bg-rose-100 text-rose-700 rounded-full font-black text-[8px] shadow-sm border border-rose-200" title="미완료과제">{s.pendingOverdueQ}</span>}
+                            {s.pendingPrintQ > 0 && <span className="w-3.5 h-3.5 flex items-center justify-center bg-emerald-100 text-emerald-700 rounded-full font-black text-[8px] shadow-sm border border-emerald-200" title="오답">{s.pendingPrintQ}</span>}
+                            {s.pendingSimilarQ > 0 && <span className="w-3.5 h-3.5 flex items-center justify-center bg-violet-100 text-violet-700 rounded-full font-black text-[8px] shadow-sm border border-violet-200" title="유사">{s.pendingSimilarQ}</span>}
+                          </div>
+                        </span>
+                        {alreadyOpen && <span className="text-[8px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">열림</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 
   const pickerBlock = (
     <>
       {step === 'STUDENT' && (
-        <div className="max-w-2xl mx-auto h-full flex flex-col w-full">
-          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="학생 이름으로 검색..." className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 focus:outline-none focus:border-[#002864] bg-white shadow-sm mb-3" />
-          <div className="flex-1 overflow-y-auto custom-scroll bg-white rounded-xl border border-slate-200 shadow-sm">
-            {isLoading ? <div className="p-10 text-center text-slate-400 font-bold text-sm">학생 목록을 불러오는 중...</div> : filteredGroups.length === 0 ? <div className="p-10 text-center text-slate-400 font-bold text-sm">일치하는 학생이 없습니다.</div> : (
-              filteredGroups.map(c => {
-                const isOpen = expandedClasses.includes(c.class_id);
-                return (
-                  <div key={c.class_id} className="border-b border-slate-100 last:border-0">
-                    <button onClick={() => toggleClass(c.class_id)} className={`w-full flex justify-between items-center px-4 py-2.5 transition-colors ${isOpen ? 'bg-slate-100' : 'hover:bg-slate-50'}`}>
-                      <span className="font-bold text-[12px] text-[#002864] flex items-center gap-1.5">
-                        📁 {c.name}
-                        <span className="text-slate-400 font-medium text-[10px]">({c.students.length}명)</span>
-                        {(c.hasPendingExam || c.hasPendingHw || c.hasPendingOverdue || c.hasPendingPrint || c.hasPendingSimilar) && (
-                          <div className="flex gap-0.5 ml-1">
-                            {c.hasPendingExam && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" title="미채점 시험 있음"></span>}
-                            {c.hasPendingHw && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" title="미채점 과제 있음"></span>}
-                            {c.hasPendingOverdue && <span className="w-1.5 h-1.5 rounded-full bg-rose-500" title="미채점 미완료과제 있음"></span>}
-                            {c.hasPendingPrint && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" title="미채점 오답프린트 있음"></span>}
-                            {c.hasPendingSimilar && <span className="w-1.5 h-1.5 rounded-full bg-violet-500" title="미채점 오답유사 있음"></span>}
-                          </div>
-                        )}
-                      </span>
-                      <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                    </button>
-                    {isOpen && (
-                      <div className="flex flex-col bg-slate-50/50">
-                        {c.students.map(s => {
-                          const alreadyOpen = panels.some(p => p.studentId === s.id && !p.gradeAll);
-                          return (
-                            <button key={s.id} onClick={() => handleSelectStudent(s)} className="w-full text-left pl-9 pr-4 py-2.5 text-[12px] font-bold text-slate-600 hover:bg-blue-50 hover:text-[#002864] transition-colors border-t border-slate-100/80 flex items-center justify-between gap-2">
-                              <span className="flex items-center gap-2 truncate">
-                                👤 {s.name}
-                                <div className="flex items-center gap-1 shrink-0 ml-1">
-                                  {s.pendingExamQ > 0 && <span className="inline-flex items-center justify-center bg-blue-100 text-blue-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-blue-200" title="시험 미채점">{s.pendingExamQ}</span>}
-                                  {s.pendingHwQ > 0 && <span className="inline-flex items-center justify-center bg-amber-100 text-amber-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-amber-200" title="과제 미채점">{s.pendingHwQ}</span>}
-                                  {s.pendingOverdueQ > 0 && <span className="inline-flex items-center justify-center bg-rose-100 text-rose-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-rose-200" title="미완료과제 미채점">{s.pendingOverdueQ}</span>}
-                                  {s.pendingPrintQ > 0 && <span className="inline-flex items-center justify-center bg-emerald-100 text-emerald-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-emerald-200" title="오답 미채점">{s.pendingPrintQ}</span>}
-                                  {s.pendingSimilarQ > 0 && <span className="inline-flex items-center justify-center bg-violet-100 text-violet-700 w-5 h-5 rounded-full font-black text-[9px] shadow-sm border border-violet-200" title="오답유사 미채점">{s.pendingSimilarQ}</span>}
-                                </div>
-                              </span>
-                              {alreadyOpen && <span className="text-[9px] font-extrabold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 shrink-0">채점 중</span>}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })
+        <div className="mx-auto h-full flex flex-col w-full">
+          <input type="text" value={search} onChange={e => setSearch(e.target.value)} placeholder="학생 이름으로 검색..." className="max-w-2xl mx-auto w-full border border-slate-200 rounded-xl px-4 py-3 text-sm font-semibold text-slate-700 focus:outline-none focus:border-[#002864] bg-white shadow-sm mb-4 shrink-0" />
+          <div className="flex-1 min-h-0">
+            {isLoading ? (
+              <div className="flex items-center justify-center h-full bg-white rounded-xl border border-slate-200 shadow-sm text-slate-400 font-bold text-sm">학생 목록을 불러오는 중...</div>
+            ) : filteredGroups.length === 0 ? (
+              <div className="flex items-center justify-center h-full bg-white rounded-xl border border-slate-200 shadow-sm text-slate-400 font-bold text-sm">일치하는 학생이 없습니다.</div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 h-full">
+                {renderClassColumn('MF 반', mfGroups)}
+                {renderClassColumn('TT 반', ttGroups)}
+                {renderClassColumn('WS 반', wsGroups)}
+                {renderClassColumn('그 외 반', otherGroups)}
+              </div>
             )}
           </div>
         </div>
@@ -682,6 +757,12 @@ export default function TaGradingPage() {
       )}
     </>
   );
+
+  if (!ready || !isStateLoaded) return <div className="h-screen bg-slate-100" />;
+
+  const activePanel = panels.find(p => p.id === activePanelId) || null;
+  
+  const containerMaxWidth = step === 'STUDENT' ? 'max-w-[95vw] xl:max-w-[1400px]' : 'max-w-2xl';
 
   return (
     <div className="h-screen flex flex-col overflow-hidden bg-slate-50 font-pretendard">
@@ -753,17 +834,19 @@ export default function TaGradingPage() {
 
         <div className="flex-1 overflow-hidden relative">
           {panels.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-slate-400 font-bold text-sm px-6 text-center gap-4">
-              <p>학생과 문제지를 골라 채점을 시작하세요.</p>
-              <button 
-                onClick={openPicker}
-                className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm transition-colors text-sm flex items-center gap-2"
-              >
-                <span>🔍</span> 학생 / 문제지 선택하기
-              </button>
-            </div>
+            /* 🌟 팝업이 닫혀있을 때만 이 텍스트와 버튼이 통째로 렌더링되도록 수정 */
+            !pickerOpen && (
+              <div className="h-full flex flex-col items-center justify-center text-slate-400 font-bold text-sm px-6 text-center gap-4">
+                <p>학생과 문제지를 골라 채점을 시작하세요.</p>
+                <button 
+                  onClick={openPicker}
+                  className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm transition-colors text-sm flex items-center gap-2"
+                >
+                  <span>🔍</span> 학생 / 문제지 선택하기
+                </button>
+              </div>
+            )
           ) : activePanel ? (
-
             <div className="h-full flex flex-col bg-slate-100">
               <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-between gap-2">
                 <span className="text-[12px] font-black text-[#002864] truncate">
@@ -795,7 +878,7 @@ export default function TaGradingPage() {
 
           {pickerOpen && !confirmGroup && (
             <div className={`absolute inset-0 z-20 flex flex-col ${panels.length > 0 ? 'bg-slate-900/40 backdrop-blur-sm p-4 sm:p-6' : ''}`}>
-              <div className={`flex-1 flex flex-col overflow-hidden min-h-0 ${panels.length > 0 ? 'bg-slate-50 rounded-2xl shadow-2xl p-4 sm:p-6 max-w-2xl w-full mx-auto' : 'p-4 sm:p-6'}`}>
+              <div className={`flex-1 flex flex-col overflow-hidden min-h-0 ${panels.length > 0 ? `bg-slate-50 rounded-2xl shadow-2xl p-4 sm:p-6 w-full mx-auto transition-all duration-300 ${containerMaxWidth}` : 'p-4 sm:p-6'}`}>
                 {panels.length > 0 && (
                   <div className="flex justify-between items-center mb-2 shrink-0">
                     <span className="text-xs font-bold text-slate-400">채점할 학생 및 항목을 새로 골라주세요</span>
@@ -818,10 +901,10 @@ export default function TaGradingPage() {
                 <div className="p-6 text-center flex flex-col gap-4">
                   <div className="text-4xl mb-2">📊</div>
                   <h3 className="text-lg font-black text-slate-800">
-                    반 전체 <span className="text-rose-500">{confirmGroup.count}명</span>이 보유한 항목입니다.
+                    해당 반에서 <span className="text-rose-500">{confirmGroup.count}명</span>이 보유한 항목입니다.
                   </h3>
                   <p className="text-sm font-bold text-slate-500 break-keep">
-                    선택하신 <span className="text-[#002864] font-extrabold">{confirmGroup.item.title}</span> 항목은 같은 반 내의 다른 학생들에게도 동일하게 나갔습니다.
+                    선택하신 <span className="text-[#002864] font-extrabold">{confirmGroup.item.title}</span> 항목은 반 내의 다른 일부 학생들에게도 동일하게 나갔습니다.
                     <br/><br/>해당 학생들을 한 화면에 나열하여 한 번에 채점하시겠습니까?
                   </p>
                 </div>
@@ -830,7 +913,7 @@ export default function TaGradingPage() {
                     👤 {confirmGroup.student.name} 학생만
                   </button>
                   <button onClick={() => executeSelect(confirmGroup.item, confirmGroup.student, true)} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm transition-colors text-sm">
-                    👥 반 전체 뷰로 열기
+                    👥 그룹 뷰로 열기
                   </button>
                 </div>
               </div>

@@ -48,7 +48,7 @@ const getKstDateStr = (iso: string) => {
 
 interface GradeButtonProps {
   code: string;
-  currentCode: string;
+  currentCode: string | null;
   onClick: () => void;
 }
 
@@ -208,7 +208,8 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     return validUrl;
   };
 
-  const calcScoreRatio = (code: string, assignedScore: number, metaMap: any) => {
+  const calcScoreRatio = (code: string | null, assignedScore: number, metaMap: any) => {
+    if (!code) return { newEarned: 0, isCorrectEq: false };
     let meta = metaMap[code]; let ratio = 0; let isCorrectEq = false;
     if (meta) {
       ratio = parseFloat(meta.score_ratio) || 0; if (ratio > 1) ratio = ratio / 100;
@@ -218,7 +219,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       else if (code === 'TO') { ratio = 0.8; isCorrectEq = true; }
       else { ratio = 0.0; isCorrectEq = false; }
     }
-    return { newEarned: assignedScore * ratio, isCorrectEq };
+    return { newEarned: (Number(assignedScore) || 0) * ratio, isCorrectEq };
   };
 
   const loadMatrixHomework = async () => {
@@ -230,16 +231,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name)').eq('homework_id', homeworkId).single();
       if (!baseHw) { alert("과제 기준 데이터를 찾을 수 없습니다."); onBack(); return; }
 
-      const baseDate = getKstDateStr(baseHw.created_at);
-
-      setHeaderInfo({ title: `📚 ${baseHw.homework_title} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
+      // 🌟 [시스템] 텍스트 숨김 처리
+      const cleanTitle = (baseHw.homework_title || '').replace(/\[시스템\]\s*/g, '');
+      setHeaderInfo({ title: `📚 ${cleanTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
 
       let hwQ = supabase.from('homework_assignment').select('*').eq('homework_title', baseHw.homework_title);
       if (baseHw.class_id) hwQ = hwQ.eq('class_id', baseHw.class_id);
       else hwQ = hwQ.is('class_id', null);
       
       const { data: allHwsRaw } = await hwQ;
-      const allHws = allHwsRaw?.filter((h: any) => getKstDateStr(h.created_at) === baseDate) || [];
+      const allHws = allHwsRaw || []; 
       const hwIdsToFetchStatus = allHws.map((h: any) => h.homework_id);
       const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
 
@@ -387,13 +388,14 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const m = Array.isArray(baseEx.exam_master) ? baseEx.exam_master[0] : baseEx.exam_master;
       const exTitle = m?.title || '문제지';
       const exType = m?.exam_type || '';
-      const baseDate = getKstDateStr(baseEx.created_at);
       
       const matchTag = (m?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
       const stdName = matchTag ? matchTag[0] : '';
       setStandardName(stdName);
 
-      setHeaderInfo({ title: `📝 ${exTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: exType });
+      // 🌟 [시스템] 텍스트 숨김 처리
+      const cleanTitle = exTitle.replace(/\[시스템\]\s*/g, '');
+      setHeaderInfo({ title: `📝 ${cleanTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: exType });
 
       const { data: masters } = await supabase.from('exam_master').select('exam_id').eq('title', exTitle);
       const masterIds = masters?.map(x => x.exam_id) || [];
@@ -403,23 +405,32 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       else assignQuery = assignQuery.is('class_id', null);
 
       const { data: allAssignsRaw } = await assignQuery;
-      const allAssigns = allAssignsRaw?.filter((a: any) => getKstDateStr(a.created_at) === baseDate) || [];
+      let allAssigns = allAssignsRaw || [];
 
-      let cols = allAssigns
-        .map((a: any) => {
-          const sObj = Array.isArray(a.student) ? a.student[0] : a.student;
-          return {
-            id: a.student_id,
-            name: sObj?.name || '알수없음',
-            assignmentId: a.assignment_id,
-            exam_id: a.exam_id, 
-            status: a.status,
-            testStatus: a.test_status,
-            totalScore: a.total_score || 0,
-            hasReport: false
-          };
-        }).sort((a: any, b: any) => a.name.localeCompare(b.name));
+      if (gradeAll && baseEx.class_id) {
+        const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseEx.class_id);
+        const currentEnrolledIds = new Set(
+          enrolls?.filter((e: any) => {
+            const s = Array.isArray(e.student) ? e.student[0] : e.student;
+            return s?.status === '재원';
+          }).map(e => String(e.student_id))
+        );
+        allAssigns = allAssigns.filter((a: any) => currentEnrolledIds.has(String(a.student_id)));
+      }
 
+      let colsTemp = allAssigns.map((a: any) => {
+        const sObj = Array.isArray(a.student) ? a.student[0] : a.student;
+        return {
+          id: a.student_id, name: sObj?.name || '알수없음', assignmentId: a.assignment_id,
+          exam_id: a.exam_id, status: a.status, testStatus: a.test_status,
+          totalScore: a.total_score || 0, hasReport: false
+        };
+      });
+
+      const uniqueCols = new Map();
+      colsTemp.sort((a, b) => b.assignmentId - a.assignmentId).forEach(c => uniqueCols.set(c.id, c));
+      let cols = Array.from(uniqueCols.values()).sort((a: any, b: any) => a.name.localeCompare(b.name));
+      
       if (!gradeAll && studentIdParam) cols = cols.filter((c: any) => String(c.id) === String(studentIdParam));
       if (cols.length === 0) { alert("채점할 대상 학생 데이터가 없습니다."); onBack(); return; }
 
@@ -566,7 +577,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         if (updates.length > 0) {
           const results = await Promise.all(updates.map(u => supabase.from('student_homework_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('hw_answer_id', u.hw_answer_id).select()));
           results.forEach(res => {
-            if (res.error) console.error(res.error);
+            if (res.error) console.warn("DB Update Warning:", res.error);
             if (res.data) successIds.push(...res.data.map(d => `${d.student_id}_${d.tq_id}`));
           });
         }
@@ -597,7 +608,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         if (updates.length > 0) {
           const results = await Promise.all(updates.map(u => supabase.from('student_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('answer_id', u.answer_id).select()));
           results.forEach(res => {
-            if (res.error) console.error(res.error);
+            if (res.error) console.warn("DB Update Warning:", res.error);
             if (res.data) successIds.push(...res.data.map(d => `${d.student_id}_${d.question_id}`));
           });
         }
@@ -620,11 +631,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     const cell = matrixData.cellMap.get(key);
     if (!cell || cell.isBlocked) return;
 
-    const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
+    const isCanceling = cell.currentCode === code;
+    const nextCode = isCanceling ? null : code;
+
+    const { newEarned, isCorrectEq } = isCanceling 
+      ? { newEarned: 0, isCorrectEq: false } 
+      : calcScoreRatio(nextCode, cell.assignedScore, gradingCodeMeta);
     
     setMatrixData(prev => {
       const newMap = new Map(prev.cellMap);
-      newMap.set(key, { ...cell, currentCode: code });
+      newMap.set(key, { ...cell, currentCode: nextCode });
       return { ...prev, cellMap: newMap };
     });
 
@@ -636,7 +652,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       student_id: sId,
       q_id: cell.qId,
       tq_id: cell.tqId,
-      grading_code: code,
+      grading_code: nextCode,
       is_correct: isCorrectEq,
       earned_score: newEarned
     };
@@ -758,7 +774,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       const uniqueStudents = Array.from(new Set(Array.from(studentStatuses).map(s => s.split('_')[1])));
       for (const stId of uniqueStudents) {
-        // 🌟 [수정됨] 제한적인 source_type 조건을 풀어서 모든 타입의 이전 기록을 매칭할 수 있도록 함
         const { data: exInc } = await supabase.from('student_incorrect_record').select('*').eq('student_id', stId);
         
         const incInserts: any[] = [];
@@ -777,7 +792,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
           const match = exInc?.find(e => String(e[matchField]) === String(targetQId));
           
-          // 🌟 [핵심 변경] 하드코딩된 '교재과제'/'시험지' 대신 현재 문제지의 진짜 타입을 추출하여 등록
           const dynamicSourceType = headerInfo.type || (isHomeworkMode ? '과제' : '시험지');
 
           const p = { 
@@ -1007,7 +1021,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                       return <td key={key} className="border-r border-b bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABAD2OQQ/9rX+aQAAAABJRU5ErkJggg==')] opacity-15 pointer-events-none" />;
                     }
 
-                    const currentCode = pendingUpdates[key]?.grading_code || cell.currentCode;
+                    const currentCode = pendingUpdates[key]?.grading_code !== undefined ? pendingUpdates[key].grading_code : cell.currentCode;
                     const hasInput = cell.studentInput && cell.studentInput !== '미입력';
                     
                     const cleanInputUrl = getCleanUrl(cell.studentInput);

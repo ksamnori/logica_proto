@@ -17,12 +17,43 @@ export default function RightPreview({ examData }: { examData: any }) {
   const [previewTitle, setPreviewTitle] = useState<string | null>(null);
   const [previewBadge, setPreviewBadge] = useState<string | null>(null);
 
+  const [hideSubNumber, setHideSubNumber] = useState(false);
+
   // AI 유사생성 및 교체 모달 관련 상태
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
   const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [aiTargetInfo, setAiTargetInfo] = useState<{ idx: number, subIdx: number, q: any } | null>(null);
   const [isSavingTwin, setIsSavingTwin] = useState(false);
+
+  // 🌟 [추가됨] AI 기능 접근 권한 상태
+  const [hasTwinPerm, setHasTwinPerm] = useState(false);
+
+  // 🌟 [추가됨] 초기 렌더링 시 권한을 검사합니다.
+  useEffect(() => {
+    const checkTwinPermission = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      
+      // 원장, 부원장, 최고관리자 직급은 기본으로 무조건 패스!
+      if (role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'VICE_ADMIN' || ["최고관리자", "대장", "원장", "부원장"].some(p => pos.includes(p))) {
+        setHasTwinPerm(true);
+        return;
+      }
+
+      // 일반 강사는 권한 테이블을 조회하여 action_generate_twins_exam 권한이 있는지 확인
+      if (tId && role) {
+        const { data } = await supabase.from('tenant_role_permissions').select('allowed_menus').eq('tenant_id', tId).eq('role_name', role).single();
+        if (data?.allowed_menus?.includes("action_generate_twins_exam")) {
+          setHasTwinPerm(true);
+        } else {
+          setHasTwinPerm(false);
+        }
+      }
+    };
+    checkTwinPermission();
+  }, []);
 
   useEffect(() => {
     const examMode = sessionStorage.getItem("examMode"); 
@@ -54,7 +85,7 @@ export default function RightPreview({ examData }: { examData: any }) {
         (window as any).MathJax.typesetPromise().catch(() => {});
       }, 50);
     }
-  }, [draggedIdx, dragOverIdx, generatedTwins, isTwinModalOpen]);
+  }, [draggedIdx, dragOverIdx, generatedTwins, isTwinModalOpen, hideSubNumber]);
 
   const forceMathRefresh = () => {
     const mj = (window as any).MathJax;
@@ -216,8 +247,6 @@ export default function RightPreview({ examData }: { examData: any }) {
         const twin = generatedTwins[i];
         const newQid = generateUUID();
         
-        // 🚨 [핵심 에러 해결] 원본 속성 통째 복사(...aiTargetInfo.q) 제거!
-        // question_db 테이블에 실제로 존재하는 컬럼만 명시적으로 담아 DB 에러를 막습니다.
         const dbData = {
           source_book_name: aiTargetInfo.q.source_book_name,
           book_name: aiTargetInfo.q.book_name,
@@ -252,19 +281,13 @@ export default function RightPreview({ examData }: { examData: any }) {
         dbInserts.push(dbData);
         
         if (twin.isSelected) {
-          // 🚨 화면에 보여지는 UI 상태는 기존 프론트 전용 속성(sort_order, id 등)이 유지되어야 합니다.
-          selectedQuestionUiData = {
-            ...aiTargetInfo.q,
-            ...dbData
-          };
+          selectedQuestionUiData = { ...aiTargetInfo.q, ...dbData };
         }
       }
 
-      // 1. 순수 DB 속성만 필터링한 데이터 Insert (이제 에러 발생 안함)
       const { error } = await supabase.from('question_db').insert(dbInserts);
       if (error) throw error;
 
-      // 옵션: 연동 교재 테이블에도 삽입
       if (aiTargetInfo.q.source_book_name) {
          const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', aiTargetInfo.q.source_book_name).maybeSingle();
          if (tb) {
@@ -282,14 +305,10 @@ export default function RightPreview({ examData }: { examData: any }) {
          }
       }
 
-      // 🚨 2. (추가 안정성) 현재 시험지 기록에 연결된 문항이었다면, 새 문제 ID로 갈아끼워줍니다.
       if (aiTargetInfo.q.exam_item_id) {
-         await supabase.from('exam_item')
-           .update({ question_id: selectedQuestionUiData.question_id })
-           .eq('exam_item_id', aiTargetInfo.q.exam_item_id);
+         await supabase.from('exam_item').update({ question_id: selectedQuestionUiData.question_id }).eq('exam_item_id', aiTargetInfo.q.exam_item_id);
       }
 
-      // 3. 화면 UI 교체 적용
       setQuestions((prev: any[]) => {
         const newQs = [...prev];
         const group = { ...newQs[aiTargetInfo.idx] };
@@ -322,6 +341,14 @@ export default function RightPreview({ examData }: { examData: any }) {
         </div>
         <div className="flex space-x-2 items-center">
           
+          <button 
+            onClick={() => setHideSubNumber(!hideSubNumber)} 
+            className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[13px] rounded-lg transition-colors border shadow-sm ${hideSubNumber ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}
+            title="문제 텍스트(DB) 앞단에 적혀있는 (1), (2), ① 등의 꼬리 문항 번호를 정규식으로 깔끔하게 지워줍니다."
+          >
+            {hideSubNumber ? '🙈 (1) 꼬리번호 숨김' : '🐵 (1) 꼬리번호 보기'}
+          </button>
+
           <button onClick={forceMathRefresh} className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">
             <span>🔄</span> 수식 깨짐 해결
           </button>
@@ -396,9 +423,13 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                  {g.items.map((q: any, subIdx: number) => {
                    const isEditing = editingId === q.question_id;
-                   const textToRender = isGroupMerged && remainders[subIdx] ? remainders[subIdx] : (q.question || q.text_question || '');
                    
-                   // 🌟 쌍둥이 및 유사 라벨 판별 로직
+                   let textToRender = isGroupMerged && remainders[subIdx] ? remainders[subIdx] : (q.question || q.text_question || '');
+                   if (hideSubNumber && textToRender && !isEditing) {
+                     textToRender = textToRender.replace(/^((?:\s*<[^>]+>\s*)*)\(?\s*\d+\s*\)\s*/, '$1');
+                     textToRender = textToRender.replace(/^((?:\s*<[^>]+>\s*)*)[①-⑩]\s*/, '$1');
+                   }
+
                    const isTwin = q.problem_type === '쌍둥이' || q.derivation_type === 'TWIN' || q.derivation_type === '쌍둥이';
                    const isSimilar = q.problem_type === '유사' || q.derivation_type === '유사';
 
@@ -500,10 +531,13 @@ export default function RightPreview({ examData }: { examData: any }) {
                        {/* AI 생성 및 기존 문제 검색 버튼 영역 */}
                        <div className="mt-4 flex justify-end gap-2" onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} draggable>
                          
-                         <button onClick={() => openAiTwinModal(idx, subIdx, q)} className="px-3 py-1.5 bg-gradient-to-r from-fuchsia-50 to-indigo-50 hover:from-fuchsia-100 hover:to-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] rounded shadow-sm flex items-center gap-1.5 transition-colors">
-                           <span className="text-[14px]">🤖</span>
-                           AI 유사생성 및 교체
-                         </button>
+                         {/* 🌟 권한이 있는 경우에만 AI 생성 및 교체 버튼 노출 */}
+                         {hasTwinPerm && (
+                           <button onClick={() => openAiTwinModal(idx, subIdx, q)} className="px-3 py-1.5 bg-gradient-to-r from-fuchsia-50 to-indigo-50 hover:from-fuchsia-100 hover:to-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] rounded shadow-sm flex items-center gap-1.5 transition-colors">
+                             <span className="text-[14px]">🤖</span>
+                             AI 유사생성 및 교체
+                           </button>
+                         )}
 
                          <button onClick={() => openTwinSearch(idx, subIdx, q)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-[12px] rounded shadow-sm flex items-center gap-1.5 transition-colors">
                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 00-2-2v8a2 2 0 00-2 2v8a2 2 0 002 2z"></path></svg>

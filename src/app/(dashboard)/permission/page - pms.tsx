@@ -5,6 +5,7 @@ import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+// 💡 사이드바 카테고리 순서(1~8)에 맞춰 권한 그룹을 재배치하고 누락된 메뉴 추가
 const PERMISSION_GROUPS = [
   {
     category: "1. 학원 관리",
@@ -28,6 +29,7 @@ const PERMISSION_GROUPS = [
       { id: "/progress", label: "진도 관리 (교재 진도 체크)" },
       { id: "/learning", label: "학습 관리 (시험/과제/오답 현황)" },
       { id: "action_delete_learning_exam", label: "↳ [권한] 타임라인 학습지(시험/과제) 강제 삭제", isAction: true },
+      // 💡 신규 추가: 학습 결과 접근 제어
       { id: "/class-report", label: "학습 결과 (학생별 성취도 리포트)" }, 
       { id: "/makeup", label: "보강 관리 (1:1 개별 보강)" },
       { id: "action_edit_makeup", label: "↳ [권한] 개별 보강 일정 수정", isAction: true },
@@ -62,6 +64,7 @@ const PERMISSION_GROUPS = [
       { id: "action_delete_cs_comment", label: "↳ [권한] 타인의 소통 노트(댓글) 삭제", isAction: true },
       { id: "action_submit_cs_agenda", label: "↳ [권한] 회의 안건 상정", isAction: true },
       
+      // 💡 신규 추가: 정기 상담 관리 접근 제어
       { id: "/consultation", label: "정기 상담 관리 (대상자 확인 및 일지)" },
     ]
   },
@@ -70,8 +73,6 @@ const PERMISSION_GROUPS = [
     items: [
       { id: "/exam-list", label: "문제지 보관함 (출제 및 채점)" },
       { id: "action_delete_exam", label: "↳ [권한] 출제된 문제지 삭제", isAction: true },
-      // 🌟 [추가됨] 미리보기 화면용 권한 체크박스
-      { id: "action_generate_twins_exam", label: "↳ [권한] 문제 편집 시 AI 쌍둥이/유사 생성 및 교체", isAction: true },
       { id: "/admission", label: "진단평가 및 대기생 관리" },
       { id: "action_create_admission", label: "↳ [권한] 진단평가 새 일정 만들기", isAction: true },
       { id: "action_bulk_admission", label: "↳ [권한] 진단평가 일괄 관리 (상태/삭제)", isAction: true },
@@ -105,7 +106,7 @@ const PERMISSION_GROUPS = [
       { id: "action_add_question", label: "↳ [권한] 새 문항 추가", isAction: true },
       { id: "action_delete_question", label: "↳ [권한] 문항 완전 삭제", isAction: true },
       { id: "action_edit_question", label: "↳ [권한] 문항 & 해설 & 이미지 수정", isAction: true },
-      { id: "action_generate_twins", label: "↳ [권한] 팩토리 전용 쌍둥이/유사 문제 생성", isAction: true },
+      { id: "action_generate_twins", label: "↳ [권한] 쌍둥이/유사 문제 AI 자동 생성", isAction: true },
       { id: "/mapper", label: "교재 수동 연결 도구" },
       { id: "/book-upload", label: "교재 구조 (textbook) 일괄 업로드" },
       { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },
