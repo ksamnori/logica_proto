@@ -166,16 +166,15 @@ export default function ProgressPage() {
 
   const fetchClassDetails = async (classId: string) => {
     try {
+      // 🌟 문제의 directStudents 쿼리 제거
       const [
         { data: classBooks }, 
-        { data: directStudents }, 
         { data: enrolls },
         { data: classData },
         { data: holidayData },
         { data: extraData }
       ] = await Promise.all([
         supabase.from("class_textbook").select("book_id, textbook(title, book_type)").eq("class_id", classId),
-        supabase.from("student").select("student_id, name").eq("class_id", classId),
         supabase.from("enrollment").select("student_id, student(name, status)").eq("class_id", classId),
         supabase.from("class").select("class_schedule(day_of_week)").eq("class_id", classId).maybeSingle(),
         supabase.from("class_holiday").select("holiday_date").eq("class_id", classId),
@@ -203,7 +202,7 @@ export default function ProgressPage() {
       if (!wbs.find(b => b.book_id === selectedWbId)) setSelectedWbId("");
 
       const sMap = new Map();
-      directStudents?.forEach(s => sMap.set(s.student_id, s.name));
+      // 🌟 기존 directStudents 매핑 로직 제거
       enrolls?.forEach((e: any) => {
         if (e.student && e.student.status === '재원') {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student.name;
