@@ -1,7 +1,7 @@
 // src/app/(dashboard)/homework/review/page.tsx
 "use client";
 
-import React, { useEffect, useState, useRef, Suspense } from "react";
+import React, { useEffect, useState, useRef, Suspense, memo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -35,6 +35,25 @@ const getCleanUrl = (url: string) => {
     validUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/question_images/${validUrl}`; 
   }
   return validUrl;
+};
+
+const parseQNum = (numStr: any) => {
+  if (!numStr) return { main: 99999, dash: 0, paren: 0, orig: '' };
+  const s = String(numStr).trim();
+  let main = 0, dash = 0, paren = 0;
+  
+  const mMain = s.match(/^(\d+)/);
+  if (mMain) main = parseInt(mMain[1], 10);
+  else return { main: 99999, dash: 0, paren: 0, orig: s };
+
+  const noParen = s.replace(/\(\d+\)/g, ''); 
+  const mDash = noParen.match(/-(\d+)/);
+  if (mDash) dash = parseInt(mDash[1], 10);
+
+  const mParen = s.match(/\((\d+)\)/);
+  if (mParen) paren = parseInt(mParen[1], 10);
+
+  return { main, dash, paren, orig: s };
 };
 
 const processGroupText = (items: any[]) => {
@@ -87,6 +106,33 @@ const processGroupText = (items: any[]) => {
 
   return { common, remainders };
 };
+
+const MathText = memo(({ html, className = "", isDiv = false }: { html: string, className?: string, isDiv?: boolean }) => {
+  if (isDiv) {
+    return <div className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+  }
+  return <span className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+});
+MathText.displayName = "MathText";
+
+const QuestionContent = memo(({ textToRender, imageUrl, answer }: { textToRender: string, imageUrl: string, answer: string }) => {
+  return (
+    <div className="flex-1 bg-white/60 px-4 py-3 rounded-lg border border-slate-200 flex flex-col gap-2 overflow-hidden shadow-inner">
+      <div className="font-bold text-slate-800 text-[14px] math-text whitespace-pre-wrap">
+        <MathText html={textToRender} />
+        {imageUrl && <img src={imageUrl} className="max-w-full max-h-40 mt-2 mix-blend-multiply" alt="" />}
+      </div>
+      <div className="mt-2 pt-2 border-t border-dashed border-slate-200 flex items-center gap-2">
+         <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-extrabold shrink-0">DB 정답</span>
+         <div className="font-bold text-blue-800 text-[13px] math-text truncate">
+           {answer ? <MathText html={answer} /> : <span className="text-slate-400 font-normal italic">-</span>}
+         </div>
+      </div>
+    </div>
+  );
+});
+QuestionContent.displayName = "QuestionContent";
+
 
 type GradeCode = 'O' | 'X' | 'TX' | 'TO' | '☆' | 'B' | 'RO';
 
@@ -176,10 +222,8 @@ function HomeworkReviewContent() {
     }
   };
 
-  // 🌟 [새로 추가된 수식 새로고침 헬퍼]
   const handleRefreshMathJax = () => {
     if (typeof window !== "undefined" && (window as any).MathJax) {
-      // 캐시를 클리어하고 전체 DOM을 다시 파싱하도록 강제
       if ((window as any).MathJax.typesetClear) {
         (window as any).MathJax.typesetClear();
       }
@@ -288,9 +332,25 @@ function HomeworkReviewContent() {
         if (tqIds.length > 0) {
           const { data: tqs } = await supabase.from('textbook_question')
             .select('*, question_db(*)')
-            .in('tq_id', tqIds)
-            .order('page_number', { ascending: true })
-            .order('question_number', { ascending: true });
+            .in('tq_id', tqIds);
+
+          tqs?.sort((a: any, b: any) => {
+            const qA_db = a.question_db || {};
+            const qB_db = b.question_db || {};
+            
+            const pageA = parseInt(a.page_number || qA_db.page_number || qA_db.final_printed_page || qA_db.detected_page_num || '0', 10) || 0;
+            const pageB = parseInt(b.page_number || qB_db.page_number || qB_db.final_printed_page || qB_db.detected_page_num || '0', 10) || 0;
+            if (pageA !== pageB) return pageA - pageB;
+            
+            const qA = parseQNum(a.question_number || qA_db.question_number);
+            const qB = parseQNum(b.question_number || qB_db.question_number);
+            
+            if (qA.main !== qB.main) return qA.main - qB.main;
+            if (qA.dash !== qB.dash) return qA.dash - qB.dash;
+            if (qA.paren !== qB.paren) return qA.paren - qB.paren;
+            
+            return qA.orig.localeCompare(qB.orig, undefined, { numeric: true });
+          });
           
           const builtGroups: any[] = [];
           tqs?.forEach((tq: any, idx: number) => {
@@ -378,14 +438,17 @@ function HomeworkReviewContent() {
     }
   };
 
-  const handleGrade = async (tqId: any, mark: GradeCode) => {
-    const newMap = { ...gradingMap, [tqId]: mark };
+  const handleGrade = async (tqId: any, clickedMark: GradeCode) => {
+    const isCanceling = gradingMap[tqId] === clickedMark;
+    const nextMark = isCanceling ? null : clickedMark;
+
+    const newMap = { ...gradingMap, [tqId]: nextMark };
     setGradingMap(newMap);
     setSaveStatus("저장 중...");
 
     try {
-      const isCorrect = ['O', 'TO', 'RO'].includes(mark);
-      const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
+      const isCorrect = nextMark ? ['O', 'TO', 'RO'].includes(nextMark) : false;
+      const isIncorrect = nextMark ? ['X', 'TX', '☆', 'B'].includes(nextMark) : false;
       
       const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
       const totalQ = flatQuestions.length || 1;
@@ -399,14 +462,19 @@ function HomeworkReviewContent() {
           supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('question_id', tqId).maybeSingle()
         ]);
 
-        if (existingA) await supabase.from('student_answer').update({ grading_code: mark, is_correct: isCorrect, earned_score: earnedScore }).eq('answer_id', existingA.answer_id);
-        else await supabase.from('student_answer').insert({ exam_assignment_id: assignmentId, student_id: studentId, question_id: tqId, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
+        if (existingA) {
+          await supabase.from('student_answer').update({ grading_code: nextMark, is_correct: isCorrect, earned_score: earnedScore }).eq('answer_id', existingA.answer_id);
+        } else if (nextMark) {
+          await supabase.from('student_answer').insert({ exam_assignment_id: assignmentId, student_id: studentId, question_id: tqId, grading_code: nextMark, is_correct: isCorrect, earned_score: earnedScore });
+        }
 
         if (isIncorrect) {
-          if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
-          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, question_id: tqId, source_type: dynamicSourceType, status: mark });
+          if (existingI) await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, question_id: tqId, source_type: dynamicSourceType, status: nextMark });
         } else if (isCorrect && existingI) {
-          await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+        } else if (isCanceling && existingI) {
+          await supabase.from('student_incorrect_record').delete().eq('record_id', existingI.record_id);
         }
       } else {
         const [ { data: existingA }, { data: existingI } ] = await Promise.all([
@@ -414,14 +482,19 @@ function HomeworkReviewContent() {
           supabase.from('student_incorrect_record').select('record_id').eq('student_id', studentId).eq('tq_id', tqId).maybeSingle()
         ]);
 
-        if (existingA) await supabase.from('student_homework_answer').update({ grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 }).eq('hw_answer_id', existingA.hw_answer_id);
-        else await supabase.from('student_homework_answer').insert({ homework_id: Number(homeworkId), student_id: studentId, tq_id: tqId, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
+        if (existingA) {
+          await supabase.from('student_homework_answer').update({ grading_code: nextMark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 }).eq('hw_answer_id', existingA.hw_answer_id);
+        } else if (nextMark) {
+          await supabase.from('student_homework_answer').insert({ homework_id: Number(homeworkId), student_id: studentId, tq_id: tqId, grading_code: nextMark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
+        }
 
         if (isIncorrect) {
-          if (existingI) await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
-          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, tq_id: tqId, source_type: dynamicSourceType, status: mark });
+          if (existingI) await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: null, source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          else await supabase.from('student_incorrect_record').insert({ student_id: studentId, tq_id: tqId, source_type: dynamicSourceType, status: nextMark });
         } else if (isCorrect && existingI) {
-          await supabase.from('student_incorrect_record').update({ status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+          await supabase.from('student_incorrect_record').update({ status: nextMark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType }).eq('record_id', existingI.record_id);
+        } else if (isCanceling && existingI) {
+          await supabase.from('student_incorrect_record').delete().eq('record_id', existingI.record_id);
         }
       }
 
@@ -568,7 +641,6 @@ function HomeworkReviewContent() {
       <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 shrink-0 flex justify-between items-center shadow-inner">
         <span className="text-xs font-bold text-slate-500">항목명: <span className="text-slate-800">{homeworkInfo?.textbook?.title || '-'}</span></span>
         <div className="flex gap-2">
-          {/* 🌟 [추가됨] 수식 새로고침 버튼 */}
           <button onClick={handleRefreshMathJax} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-xs font-bold hover:bg-indigo-100 transition-colors shadow-sm">
             🔄 수식 새로고침
           </button>
@@ -593,7 +665,7 @@ function HomeworkReviewContent() {
                 <div key={`group_${gIdx}`} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden mb-6">
                   {g.is_merged_text && common && (
                      <div className="bg-slate-50 border-b border-slate-100 px-5 py-4">
-                        <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(common) }} />
+                        <MathText isDiv className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep" html={formatMathTextForWeb(common)} />
                      </div>
                   )}
 
@@ -614,31 +686,35 @@ function HomeworkReviewContent() {
 
                     return (
                       <div key={q.tq_id} className={`flex items-center p-4 gap-4 ${subIdx > 0 ? 'border-t border-slate-100' : ''} ${rowBg} transition-colors`}>
-                        <div className="flex flex-col items-center justify-center shrink-0 w-16 gap-1.5">
-                          <span className="text-[#002864] font-black text-[18px] whitespace-nowrap">{q.displayQNum}</span>
-                          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 truncate max-w-full" title="출처 페이지">{q.page_number || q.final_printed_page || q.detected_page_num || '-'}p</span>
+                        {/* 🌟 수정된 왼쪽 문항정보 레이아웃 */}
+                        <div className="flex flex-col items-center justify-start shrink-0 w-[72px] gap-1.5 pt-1">
+                          <span className="text-[#002864] font-black text-[18px] whitespace-nowrap leading-none">{q.displayQNum}</span>
+                          
+                          <div className="flex flex-col items-center gap-0.5 w-full mt-1">
+                            <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="출처 페이지">
+                              {q.page_number || q.final_printed_page || q.detected_page_num || '-'}p
+                            </span>
+                            {q.question_number && (
+                              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="실제 문제 번호">
+                                No.{q.question_number}
+                              </span>
+                            )}
+                          </div>
                           
                           <button 
                             onClick={() => setModalStudentAns({ qNum: q.displayQNum || q.question_number, input: studentInputMap[q.tq_id] || null })} 
-                            className={`text-[10px] font-bold py-1 px-1.5 rounded shadow-sm transition-colors w-full mt-1 flex items-center justify-center gap-1 ${hasStudentInput ? 'bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-600' : 'bg-slate-50 border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
+                            className={`text-[10px] font-bold py-1 px-1.5 rounded shadow-sm transition-colors w-full mt-auto flex items-center justify-center gap-1 ${hasStudentInput ? 'bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-600' : 'bg-slate-50 border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
                             title="학생이 제출한 필기/텍스트 답안 보기"
                           >
                             📝 답안
                           </button>
                         </div>
 
-                        <div className="flex-1 bg-white/60 px-4 py-3 rounded-lg border border-slate-200 flex flex-col gap-2 overflow-hidden shadow-inner">
-                          <div className="font-bold text-slate-800 text-[14px] math-text whitespace-pre-wrap">
-                            <span dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(textToRender) }} />
-                            {getCleanUrl(q.image_url) && <img src={getCleanUrl(q.image_url)} className="max-w-full max-h-40 mt-2 mix-blend-multiply" alt="" />}
-                          </div>
-                          <div className="mt-2 pt-2 border-t border-dashed border-slate-200 flex items-center gap-2">
-                             <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-extrabold shrink-0">DB 정답</span>
-                             <div className="font-bold text-blue-800 text-[13px] math-text truncate">
-                               {q.answer ? <span dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(q.answer)} $` }} /> : <span className="text-slate-400 font-normal italic">-</span>}
-                             </div>
-                          </div>
-                        </div>
+                        <QuestionContent 
+                          textToRender={formatMathTextForWeb(textToRender)} 
+                          imageUrl={getCleanUrl(q.image_url)} 
+                          answer={q.answer ? `$ ${formatMathTextForWeb(q.answer)} $` : ''} 
+                        />
 
                         <div className="flex items-center justify-center shrink-0 px-2">
                            <button onClick={() => setModalQ(q)} className="w-[42px] h-[48px] flex flex-col items-center justify-center gap-0.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg shadow-sm transition-colors" title="상세 해설 보기">
@@ -690,15 +766,15 @@ function HomeworkReviewContent() {
                 <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs">질문</span>
                 </h3>
-                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.questionText || '-').replace(/\n/g, '<br>') }} />
-                {getCleanUrl(modalQ.imageUrl) && <img src={getCleanUrl(modalQ.imageUrl)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
+                <MathText isDiv className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" html={formatMathTextForWeb(modalQ.question || modalQ.text_question || '-').replace(/\n/g, '<br>')} />
+                {getCleanUrl(modalQ.image_url) && <img src={getCleanUrl(modalQ.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
               </div>
               
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
                 <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded text-xs">정답</span>
                 </h3>
-                <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(modalQ.answer || '-')} $` }} />
+                <MathText isDiv className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" html={`$ ${formatMathTextForWeb(modalQ.answer || '-')} $`} />
               </div>
 
             </div>
@@ -723,7 +799,7 @@ function HomeworkReviewContent() {
               ) : (modalStudentAns.input.startsWith('data:image') || /\.(jpeg|jpg|gif|png|svg|webp)$/i.test(modalStudentAns.input) || /^[\w-]+\.[\w]+$/.test(modalStudentAns.input) || /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(modalStudentAns.input)) ? (
                 <img src={getCleanUrl(modalStudentAns.input)} alt="student_answer" className="max-w-full rounded-lg border border-slate-200 shadow-sm mix-blend-multiply" />
               ) : (
-                <div className="math-text text-slate-800 font-bold text-xl whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalStudentAns.input) }} />
+                <MathText isDiv className="math-text text-slate-800 font-bold text-xl whitespace-pre-wrap" html={formatMathTextForWeb(modalStudentAns.input)} />
               )}
             </div>
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">

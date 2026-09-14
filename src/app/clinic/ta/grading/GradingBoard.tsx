@@ -231,7 +231,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name)').eq('homework_id', homeworkId).single();
       if (!baseHw) { alert("과제 기준 데이터를 찾을 수 없습니다."); onBack(); return; }
 
-      // 🌟 [시스템] 텍스트 숨김 처리
       const cleanTitle = (baseHw.homework_title || '').replace(/\[시스템\]\s*/g, '');
       setHeaderInfo({ title: `📚 ${cleanTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
 
@@ -328,6 +327,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           qId: q.question_id,
           displayNum: `${index + 1}`,
           pageNum: tq.page_number || q.page_number || q.final_printed_page || q.detected_page_num || null,
+          qNumber: q.question_number || tq.question_number || null,
           answer: tq.answer || q.answer,
           fullQuestion: { displayQNum: `${index + 1}`, items: [{ question: { ...q, question: tq.question || q.question, answer: tq.answer || q.answer } }] },
           assignedScore: 100 / (tqData.length || 1)
@@ -393,7 +393,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const stdName = matchTag ? matchTag[0] : '';
       setStandardName(stdName);
 
-      // 🌟 [시스템] 텍스트 숨김 처리
       const cleanTitle = exTitle.replace(/\[시스템\]\s*/g, '');
       setHeaderInfo({ title: `📝 ${cleanTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: exType });
 
@@ -499,6 +498,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           id: qid,
           displayNum,
           pageNum: pageInfo,
+          qNumber: q.question_number || null,
           answer: q.answer,
           fullQuestion: { displayQNum: displayNum, items: [{ question: q }] },
           assignedScore: assignedScore
@@ -988,28 +988,36 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
             <tbody>
               {matrixData.rows.map((r, idx) => (
                 <tr key={r.id} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
-                  <td className="sticky left-0 z-10 bg-white p-2 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-top min-w-[150px] w-[150px]">
-                    <div className="flex justify-between items-center mb-1.5 border-b border-slate-100 pb-1.5 px-0.5">
-                      <div className="flex items-baseline gap-1.5 min-w-0">
-                        {r.pageNum && <span className="text-[10px] font-bold text-slate-400">{r.pageNum}p</span>}
-                        {r.pageNum && <span className="text-[10px] text-slate-300">|</span>}
-                        <span className="text-[12px] font-black text-[#002864] truncate whitespace-nowrap">
+                  {/* 🌟 수정된 왼쪽 문항 정보 영역: 컴팩트한 배치 적용 */}
+                  <td className="sticky left-0 z-10 bg-white p-1.5 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle min-w-[150px] w-[150px]">
+                    <div className="flex justify-between items-center mb-1 border-b border-slate-100 pb-1 px-0.5">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-[12px] font-black text-[#002864] shrink-0">
                           {r.displayNum}{r.displayNum.includes('(') ? '' : '번'}
                         </span>
+                        <div className="flex items-center text-[9px] font-bold text-slate-400 bg-slate-50 px-1 py-0.5 rounded border border-slate-200 truncate leading-none mt-0.5">
+                          <span title="출처 페이지">{r.pageNum ? `${r.pageNum}p` : '-p'}</span>
+                          {r.qNumber && (
+                            <>
+                              <span className="text-slate-300 mx-1">|</span>
+                              <span title="실제 문제 번호">#{r.qNumber}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <button onClick={()=>setModalQ(r.fullQuestion)} className="text-[11px] text-slate-400 hover:text-blue-500 font-bold px-1 transition-colors" title="상세 보기">🔍</button>
+                      <button onClick={()=>setModalQ(r.fullQuestion)} className="text-[11px] text-slate-400 hover:text-blue-500 font-bold px-0.5 transition-colors shrink-0" title="상세 보기">🔍</button>
                     </div>
                     
                     <div 
                       onClick={()=>setModalQ(r.fullQuestion)}
-                      className="text-[11px] text-blue-700 font-bold bg-blue-50/50 hover:bg-blue-100 px-1 py-2 rounded border border-blue-100 mb-2 cursor-pointer transition-colors text-center overflow-hidden line-clamp-2 break-all" 
+                      className="text-[10px] text-blue-700 font-bold bg-blue-50/50 hover:bg-blue-100 px-1 py-1 rounded border border-blue-100 mb-1 cursor-pointer transition-colors text-center overflow-hidden line-clamp-1 break-all" 
                       title="클릭하여 문제/정답 전체 보기"
                       dangerouslySetInnerHTML={{__html: formatMathTextForWeb(r.answer || "-")}} 
                     />
                     
                     <div className="flex mt-auto">
-                      <button onClick={()=>markRow(r.id, 'O')} className="flex-1 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-[10px] font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
-                      <button onClick={()=>markRow(r.id, 'X')} className="flex-1 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-[10px] font-bold hover:bg-rose-100 transition-colors">전체 X</button>
+                      <button onClick={()=>markRow(r.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-[10px] font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
+                      <button onClick={()=>markRow(r.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-[10px] font-bold hover:bg-rose-100 transition-colors">전체 X</button>
                     </div>
                   </td>
                   
