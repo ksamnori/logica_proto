@@ -60,7 +60,6 @@ export default function ClassPage() {
   
   const [showPlanned, setShowPlanned] = useState(false);
   const [showEnded, setShowEnded] = useState(false);
-  // 💡 신규: 테스트 제외 필터 (기본값: true 로 설정하여 기본적으로 감춤)
   const [hideTest, setHideTest] = useState(true); 
 
   const [filterLevel, setFilterLevel] = useState("all");
@@ -135,9 +134,10 @@ export default function ClassPage() {
     const tenantId = localStorage.getItem("logica_tenant_id");
     if (!tenantId) { setClasses([]); setIsLoading(false); return; }
     
+    // 🌟 student(name, status) 로 상태값을 추가로 불러옵니다.
     const { data, error } = await supabase
       .from("class")
-      .select("*, instructor(name, position), enrollment(student_id, student(name)), class_schedule(*)")
+      .select("*, instructor(name, position), enrollment(student_id, status, student(name, status)), class_schedule(*)")
       .eq("tenant_id", tenantId);
 
     if (!error && data) setClasses(data);
@@ -149,7 +149,6 @@ export default function ClassPage() {
     classes.forEach(c => {
       const name = c.name || '';
       
-      // 💡 신규 로직: 반 이름에 '테스트'가 들어가고, 테스트 제외가 켜져 있으면 시간표에서 감춤
       if (hideTest && name.includes('테스트')) return;
 
       const status = c.status || '';
@@ -164,14 +163,22 @@ export default function ClassPage() {
       if (ttFilter === 'REGULAR' && !isRegular) return;
       if (ttFilter === 'SPECIAL' && isRegular) return;
 
-      // 💡 신규 로직: 반 내의 학생들 중에서 이름에 '테스트'가 들어간 학생 제거
-      let filteredEnrollment = c.enrollment || [];
-      if (hideTest) {
-        filteredEnrollment = filteredEnrollment.filter((e: any) => {
+      // 🌟 신규 로직: 수강종료 및 학생 상태가 휴원/퇴원인 경우 시간표에서 제외
+      let filteredEnrollment = (c.enrollment || []).filter((e: any) => {
+        const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
+        
+        // 수강종료 이력이거나, 학생 본인의 상태가 휴원/퇴원인 경우 제외
+        if (e.status === '수강종료' || sStatus === '휴원' || sStatus === '퇴원') return false;
+
+        // 이름에 '테스트'가 들어간 학생 제외 처리
+        if (hideTest) {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
-          return !(sName && sName.includes('테스트'));
-        });
-      }
+          if (sName && sName.includes('테스트')) return false;
+        }
+        
+        return true;
+      });
+
       const classObjToUse = { ...c, enrollment: filteredEnrollment };
 
       c.class_schedule?.forEach((sch: any) => {
@@ -237,7 +244,6 @@ export default function ClassPage() {
 
   const filteredClasses = useMemo(() => {
     let result = classes.filter((c) => {
-      // 💡 신규 로직: 반 이름에 '테스트'가 들어가면 리스트에서 감춤
       if (hideTest && (c.name || '').includes('테스트')) return false;
 
       const status = c.status || '';
@@ -264,16 +270,20 @@ export default function ClassPage() {
       return matchLevel && matchGrade && matchInst;
     });
 
-    // 💡 신규 로직: 리스트에 배정인원을 보여줄 때도 테스트 학생 제외
-    if (hideTest) {
-      result = result.map(c => {
-        const filteredEnrollment = (c.enrollment || []).filter((e: any) => {
+    // 🌟 리스트의 배정인원에서도 휴원/퇴원 및 수강종료 필터링 적용
+    result = result.map(c => {
+      const filteredEnrollment = (c.enrollment || []).filter((e: any) => {
+        const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
+        if (e.status === '수강종료' || sStatus === '휴원' || sStatus === '퇴원') return false;
+
+        if (hideTest) {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
-          return !(sName && sName.includes('테스트'));
-        });
-        return { ...c, enrollment: filteredEnrollment };
+          if (sName && sName.includes('테스트')) return false;
+        }
+        return true;
       });
-    }
+      return { ...c, enrollment: filteredEnrollment };
+    });
 
     return result.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
   }, [classes, filterLevel, filterGrade, filterInstructor, showPlanned, showEnded, hideTest]);
@@ -430,7 +440,6 @@ export default function ClassPage() {
                 <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
               </label>
-              {/* 💡 신규 체크박스: 테스트 제외 필터 */}
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="checkbox" checked={hideTest} onChange={e => setHideTest(e.target.checked)} className="w-4 h-4 accent-rose-600 cursor-pointer" />
                 <span className="text-sm font-bold text-rose-600 hover:text-rose-800 transition-colors">테스트 제외</span>
@@ -473,7 +482,6 @@ export default function ClassPage() {
                 <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
               </label>
-              {/* 💡 신규 체크박스: 테스트 제외 필터 */}
               <label className="flex items-center gap-1.5 cursor-pointer">
                 <input type="checkbox" checked={hideTest} onChange={e => setHideTest(e.target.checked)} className="w-4 h-4 accent-rose-600 cursor-pointer" />
                 <span className="text-sm font-bold text-rose-600 hover:text-rose-800 transition-colors">테스트 제외</span>

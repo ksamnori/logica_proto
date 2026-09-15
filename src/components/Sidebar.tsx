@@ -12,8 +12,6 @@ export default function Sidebar() {
 
   const [strictSuperAdmin, setStrictSuperAdmin] = useState(false);
   const [isPrincipal, setIsPrincipal] = useState(false);
-  const [isManager, setIsManager] = useState(false);
-  const [isFactoryWorker, setIsFactoryWorker] = useState(false);
 
   const [tenantName, setTenantName] = useState<string>("로딩중...");
   const [displayRole, setDisplayRole] = useState<string>("TEACHER");
@@ -28,16 +26,11 @@ export default function Sidebar() {
     setDisplayRole(role);
 
     const isTeacherMode = role === 'TEACHER';
-
     const isSA = !isTeacherMode && (role === 'SUPER_ADMIN' || pos.includes('최고관리자') || pos.includes('대장'));
     const isPrin = !isTeacherMode && (role === 'ADMIN' || pos.includes('원장'));
-    const isMgr = !isTeacherMode && (role === 'MANAGER' || pos.includes('실장'));
-    const isFW = isSA || isPrin || isMgr || pos.includes('부원장') || pos.includes('전임강사') || isTeacherMode;
 
     setStrictSuperAdmin(isSA);
     setIsPrincipal(isPrin);
-    setIsManager(isMgr || isPrin || isSA);
-    setIsFactoryWorker(isFW);
 
     const fetchData = async () => {
       const tId = localStorage.getItem('logica_tenant_id');
@@ -60,6 +53,7 @@ export default function Sidebar() {
         if (permData && permData.allowed_menus) {
           setAllowedMenus(permData.allowed_menus);
         } else {
+          // DB에 데이터가 없을 때의 기본 폴백 (팩토리 메뉴 제외됨)
           setAllowedMenus(['/home', '/student', '/class', '/lesson', '/progress', '/learning', '/class-report', '/makeup', '/minutes', '/task', '/cs', '/supply', '/exam-list', '/admission']);
         }
       }
@@ -92,16 +86,21 @@ export default function Sidebar() {
     }
   }, [displayRole]);
 
+  // 🌟 핵심 로직 변경: 팩토리 메뉴의 강제 하드 블락을 해제하고 DB 권한 설정에 완벽히 동기화
   const canAccess = (path: string) => {
     if (displayRole === 'GUEST' && path === '/ta-tools') return false;
-
+    
+    // 원장, 최고관리자, 게스트(뷰어)는 프리패스
     if (strictSuperAdmin || isPrincipal || displayRole === 'GUEST') return true;
-
+    
+    // 조교 전용 페이지
     if (path === '/ta-tools' && displayRole === 'TA') return true;
 
-    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'];
-    if (factoryPaths.includes(path) && isFactoryWorker) return true;
+    // 조교(TA)는 팩토리 영역(DB 건드리는 메뉴) 원천 차단
+    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload'];
+    if (factoryPaths.includes(path) && displayRole === 'TA') return false;
 
+    // 🌟 그 외 모든 직급(파트강사 포함)은 오직 DB(권한 관리 페이지) 설정값에 따릅니다.
     if (isLoadingPerms) return false;
     return allowedMenus.includes(path);
   };
@@ -109,14 +108,13 @@ export default function Sidebar() {
   const MenuItem = ({ path, linkTo, label, desc, full = false }: { path: string, linkTo?: string, label: string, desc?: string, full?: boolean }) => {
     const active = pathname === (linkTo || path) || pathname.startsWith((linkTo || path) + "/");
     const disabled = !canAccess(path);
-    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/qdb-upload', '/book-upload'].includes(path);
+    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload'].includes(path);
 
-    // 🌟 수정: 버튼의 상하 패딩을 py-3에서 py-2로 줄여 높이를 살짝 압축했습니다.
     const baseClass = `flex flex-col items-center justify-center px-2 py-2 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
 
     if (disabled) {
       return (
-        <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`} title="접근 권한이 없습니다">
+        <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`} title="접근 권한이 없습니다 (권한 관리 페이지에서 허용 필요)">
           <span className="text-[13px] font-bold truncate w-full text-center">{label}</span>
           {desc && <span className="text-[10px] font-medium mt-0.5">{desc}</span>}
           <span className="absolute top-1 right-2 text-[8px] font-black text-slate-300">🔒</span>
@@ -275,6 +273,8 @@ export default function Sidebar() {
             <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
             <MenuItem path="/pdf-parser" label="PDF 문항 추출기" full />
             <MenuItem path="/taxonomy-editor" label="문제 교정 및 쌍둥이/유사 생성" full />
+            
+            <MenuItem path="/twin-manager" label="쌍둥이 문제 팩토리 (수동 배정)" full />
             <MenuItem path="/mapper" label="교재 수동 연결 도구" full />
 
             <MenuItem path="/book-upload" label="교재 DB 업로드" />

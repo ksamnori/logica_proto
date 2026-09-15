@@ -6,8 +6,6 @@ import { supabase } from "@/lib/supabase";
 import ClassWeekCalendar from "./ClassWeekCalendar";
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
-// 🌟 대치 본원 고유 ID
-const DAECHI_TENANT_ID = "1ff4299c-d72b-4d99-97b0-45fee08e3b73";
 
 interface ClassEditModalProps {
   isOpen: boolean;
@@ -26,28 +24,38 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const [classStudents, setClassStudents] = useState<any[]>([]);
   const [allStudents, setAllStudents] = useState<any[]>([]);
   const [searchGrade, setSearchGrade] = useState("");
-  const [searchStatus, setSearchStatus] = useState("재원"); // 🌟 기본값을 재원으로 설정
+  const [searchStatus, setSearchStatus] = useState("재원"); 
   const [searchKeyword, setSearchKeyword] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   
   const [scheduleRefreshKey, setScheduleRefreshKey] = useState(0);
-  const [daechiInstructors, setDaechiInstructors] = useState<any[]>([]);
+  const [availableInstructors, setAvailableInstructors] = useState<any[]>([]);
+
+  // 🌟 반 배정 시 상태 선택 (기본값: 수강중)
+  const [assignStatus, setAssignStatus] = useState("수강중");
 
   useEffect(() => {
     if (isOpen) {
-      const fetchDaechiInstructors = async () => {
-        const { data } = await supabase
+      const fetchInstructors = async () => {
+        const myTenantId = localStorage.getItem("logica_tenant_id");
+        
+        let query = supabase
           .from("instructor")
           .select("instructor_id, name")
-          .eq("tenant_id", DAECHI_TENANT_ID) 
-          .eq("status", "재직") 
+          .eq("status", "재직")
           .order("name");
         
+        if (myTenantId) {
+          query = query.eq("tenant_id", myTenantId);
+        }
+        
+        const { data } = await query;
+        
         if (data) {
-          setDaechiInstructors(data);
+          setAvailableInstructors(data);
         }
       };
-      fetchDaechiInstructors();
+      fetchInstructors();
     }
   }, [isOpen]);
 
@@ -61,26 +69,36 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       setModalSchedules(schedules);
       setIsEditMode(false);
       setSearchKeyword("");
+      setAssignStatus("수강중"); // 모달 열릴 때 배정 상태 초기화
 
       fetchClassStudents(classItem.class_id);
-      searchAllStudents("", "재원"); // 🌟 모달 열릴 때 상태 초기화
+      searchAllStudents("", "재원");
     }
   }, [isOpen, classItem]);
 
   const fetchClassStudents = async (classId: string) => {
-    const { data: enrollData } = await supabase.from("enrollment").select("student_id").eq("class_id", classId);
+    const { data: enrollData } = await supabase
+      .from("enrollment")
+      .select("student_id")
+      .eq("class_id", classId)
+      .neq("status", "수강종료"); 
+
     const enrollIds = enrollData?.map(e => e.student_id) || [];
     if (enrollIds.length === 0) { setClassStudents([]); return; }
-    const { data } = await supabase.from("student").select("*, parent(phone), enrollment(class(name))").in("student_id", enrollIds);
+    
+    // 🌟 목록에 '예약'/'수강중' 여부를 띄워주기 위해 enrollment의 status를 같이 호출
+    const { data } = await supabase
+      .from("student")
+      .select("*, parent(phone), enrollment(class_id, status, class(name))")
+      .in("student_id", enrollIds);
+      
     setClassStudents(data || []);
   };
 
-  // 🌟 학년 및 상태 필터 연동 로직
   const searchAllStudents = async (grade: string, status: string) => {
     setSearchGrade(grade);
     setSearchStatus(status);
     
-    // limit를 1000으로 늘려 데이터 누락 방지 및 상태(status) 정보 추가 호출 (수정됨: school_name 제거)
     let query = supabase.from("student").select("student_id, name, phone, grade, school, status").order("name").limit(1000); 
     
     if (grade) {
@@ -134,17 +152,28 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         const match = s.phone.match(/(\d{4})(?:-\d+)?$/);
         if (match) contactEnd = match[1];
       }
-      // 🌟 표시 텍스트와 정확히 매칭되도록 상태값 포함 (수정됨: s.school_name 제거)
       const visibleText = `[${s.status || '상태미상'}] ${s.name} (${s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
       return visibleText === searchKeyword;
     });
 
     if (!selected) return alert("검색 목록에서 학생을 정확히 선택해주세요.");
 
-    const { data: existing } = await supabase.from("enrollment").select("enrollment_id").match({ student_id: selected.student_id, class_id: modalData.class_id });
-    if (existing && existing.length > 0) return alert("이미 이 반에 배정된 학생입니다.");
+    const { data: existing } = await supabase.from("enrollment").select("enrollment_id, status").match({ student_id: selected.student_id, class_id: modalData.class_id });
+    
+    if (existing && existing.length > 0) {
+       const prevEnroll = existing[0];
+       if (prevEnroll.status !== '수강종료') {
+           return alert(`이미 이 반에 ${prevEnroll.status} 상태인 학생입니다.`);
+       } else {
+           // 🌟 수강종료였던 학생을 다시 살릴 때 선택한 상태(수강중 or 예약)로 업데이트
+           const { error } = await supabase.from("enrollment").update({ status: assignStatus, end_date: null, start_date: new Date().toISOString().split("T")[0] }).eq('enrollment_id', prevEnroll.enrollment_id);
+           if (error) return alert("재배정 실패: " + error.message);
+           setSearchKeyword(""); fetchClassStudents(modalData.class_id); onSuccess(); return;
+       }
+    }
 
-    const { error } = await supabase.from("enrollment").insert([{ student_id: selected.student_id, class_id: modalData.class_id, start_date: new Date().toISOString().split("T")[0] }]);
+    // 🌟 신규 배정 시 선택한 상태(수강중 or 예약) 삽입
+    const { error } = await supabase.from("enrollment").insert([{ student_id: selected.student_id, class_id: modalData.class_id, status: assignStatus, start_date: new Date().toISOString().split("T")[0] }]);
     if (error) {
       return alert("배정 실패: " + error.message);
     }
@@ -154,21 +183,20 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   };
 
   const removeStudent = async (studentId: string) => {
-    if (!confirm("정말 수강생 목록에서 제외하시겠습니까?\n(이 반에서 발생한 해당 학생의 출결 기록도 함께 삭제됩니다.)")) return;
+    if (!confirm("해당 학생의 수강을 종료하시겠습니까?\n(출결 등 과거 수강 기록은 보존되며, 상태가 '수강종료'로 변경됩니다.)")) return;
     
-    const { data: targetEnroll } = await supabase
+    const today = new Date().toISOString().split("T")[0];
+
+    const { error } = await supabase
       .from("enrollment")
-      .select("enrollment_id")
-      .match({ student_id: studentId, class_id: modalData.class_id })
-      .single();
+      .update({
+        status: "수강종료",
+        end_date: today
+      })
+      .match({ student_id: studentId, class_id: modalData.class_id });
 
-    if (targetEnroll) {
-      await supabase.from("attendance").delete().eq("enrollment_id", targetEnroll.enrollment_id);
-    }
-
-    const { error } = await supabase.from("enrollment").delete().match({ student_id: studentId, class_id: modalData.class_id });
     if (error) {
-      return alert("제외 실패: " + error.message);
+      return alert("수강 종료 처리 실패: " + error.message);
     }
     
     fetchClassStudents(modalData.class_id);
@@ -329,7 +357,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               </div>
             </div>
 
-            {/* 🌟 특강/메이크업용 기간/회차 표시 및 수정 영역 */}
             {isSpecialOrMakeup && (
               <div className="col-span-2 bg-indigo-50 border border-indigo-200 rounded-lg p-4 grid grid-cols-3 gap-4">
                 <div>
@@ -403,12 +430,11 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               <label className="block text-xs font-bold text-slate-500 mb-1">담당 강사</label>
               <select disabled={!isEditMode} value={modalData.instructor_id || ""} onChange={e => handleModalChange("instructor_id", e.target.value)} className={`w-full px-3 py-2 rounded border border-slate-300 font-bold ${!isEditMode ? 'bg-slate-100' : ''}`}>
                 <option value="">미지정</option>
-                {daechiInstructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name} 선생님</option>)}
+                {availableInstructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name} 선생님</option>)}
               </select>
             </div>
           </div>
 
-          {/* 🌟 상태 필터가 추가된 수강 학생 배정 영역 */}
           <div className="flex justify-between items-end mb-3 border-b border-slate-200 pb-2">
             <h3 className="font-bold text-slate-800">👨‍🎓 수강 학생 리스트</h3>
             {isEditMode && canEdit && (
@@ -420,9 +446,12 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                   <option value="7">중1</option><option value="8">중2</option><option value="9">중3</option>
                   <option value="10">고1</option><option value="11">고2</option><option value="12">고3</option>
                 </select>
+                
+                {/* 🌟 '예약' 검색 옵션 추가 */}
                 <select value={searchStatus} onChange={e => searchAllStudents(searchGrade, e.target.value)} className="px-3 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
                   <option value="">전체 상태</option>
                   <option value="재원">재원</option>
+                  <option value="예약">예약</option> 
                   <option value="퇴원">퇴원</option>
                   <option value="휴원">휴원</option>
                   <option value="입학테스트">입학테스트(대기)</option>
@@ -437,11 +466,17 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                 <datalist id="all_students_list">
                   {allStudents.map(s => {
                     let contactEnd = s.phone?.match(/(\d{4})(?:-\d+)?$/)?.[1] || "번호없음";
-                    // 🌟 데이터 리스트에 상태값 노출 (수정됨: s.school_name 제거)
                     const text = `[${s.status || '상태미상'}] ${s.name} (${s.school || '학교미상'}, ${s.grade || '학년미상'}, ${contactEnd})`;
                     return <option key={s.student_id} value={text} />;
                   })}
                 </datalist>
+
+                {/* 🌟 배정 시 수강 상태 선택 박스 추가 */}
+                <select value={assignStatus} onChange={e => setAssignStatus(e.target.value)} className="px-2 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
+                  <option value="수강중">수강중</option>
+                  <option value="예약">예약</option>
+                </select>
+
                 <button onClick={assignStudent} className="bg-emerald-600 text-white px-4 py-1.5 rounded text-sm font-bold shadow-sm">배정하기</button>
               </div>
             )}
@@ -452,20 +487,35 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                 <tr>
                   <th className="py-2.5 px-4 font-bold text-slate-500">이름</th>
                   <th className="py-2.5 px-4 font-bold text-slate-500">학년</th>
+                  {/* 🌟 수강상태 항목명 추가 */}
+                  <th className="py-2.5 px-4 font-bold text-slate-500 text-center">수강상태</th>
                   <th className="py-2.5 px-4 font-bold text-slate-500">수강반</th>
                   <th className="py-2.5 px-4 font-bold text-slate-500 text-right">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
                 {classStudents.length === 0 ? (
-                  <tr><td colSpan={4} className="py-6 text-center text-slate-400 font-bold">배정된 학생이 없습니다.</td></tr>
+                  <tr><td colSpan={5} className="py-6 text-center text-slate-400 font-bold">배정된 학생이 없습니다.</td></tr>
                 ) : (
                   classStudents.map(s => {
                     const uniqueClasses = Array.from(new Set(s.enrollment?.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
+                    
                     return (
                       <tr key={s.student_id}>
                         <td className="py-2.5 px-4 font-bold text-[#002864]">{s.name}</td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold">{s.grade || "-"}</td>
+                        {/* 🌟 현재 배정된 수강상태를 명확하게 표기 */}
+                        <td className="py-2.5 px-4 text-center">
+                          {(() => {
+                            const classEnroll = s.enrollment?.find((en: any) => en.class_id === modalData.class_id);
+                            const stat = classEnroll?.status || '수강중';
+                            return stat === '예약' ? (
+                              <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-[10px] font-black border">예약</span>
+                            ) : (
+                              <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black border">수강중</span>
+                            );
+                          })()}
+                        </td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold max-w-[150px] truncate">{uniqueClasses}</td>
                         <td className="py-2.5 px-4 text-right">
                           {isEditMode && canEdit && (

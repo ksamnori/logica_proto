@@ -70,7 +70,6 @@ const PERMISSION_GROUPS = [
     items: [
       { id: "/exam-list", label: "문제지 보관함 (출제 및 채점)" },
       { id: "action_delete_exam", label: "↳ [권한] 출제된 문제지 삭제", isAction: true },
-      // 🌟 [추가됨] 미리보기 화면용 권한 체크박스
       { id: "action_generate_twins_exam", label: "↳ [권한] 문제 편집 시 AI 쌍둥이/유사 생성 및 교체", isAction: true },
       { id: "/admission", label: "진단평가 및 대기생 관리" },
       { id: "action_create_admission", label: "↳ [권한] 진단평가 새 일정 만들기", isAction: true },
@@ -106,6 +105,13 @@ const PERMISSION_GROUPS = [
       { id: "action_delete_question", label: "↳ [권한] 문항 완전 삭제", isAction: true },
       { id: "action_edit_question", label: "↳ [권한] 문항 & 해설 & 이미지 수정", isAction: true },
       { id: "action_generate_twins", label: "↳ [권한] 팩토리 전용 쌍둥이/유사 문제 생성", isAction: true },
+      
+      // 🌟 [추가됨] 쌍둥이 문제 팩토리 (수동 배정) 메뉴 및 기능 권한
+      { id: "/twin-manager", label: "쌍둥이 문제 팩토리 (수동 배정)" },
+      { id: "action_twin_generate", label: "↳ [권한] AI 쌍둥이/유사 자동 생성", isAction: true },
+      { id: "action_twin_edit", label: "↳ [권한] 개별 문항 상세 편집", isAction: true },
+      { id: "action_twin_delete", label: "↳ [권한] 문항 영구 삭제 (위험)", isAction: true },
+
       { id: "/mapper", label: "교재 수동 연결 도구" },
       { id: "/book-upload", label: "교재 구조 (textbook) 일괄 업로드" },
       { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },

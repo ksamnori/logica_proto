@@ -255,7 +255,6 @@ export default function StudentDetailPage() {
     setProgressBooks(books);
   };
 
-  // 🌟 [수정됨] 쿼리 누락 방지 & 주간테스트(시험)만 분리
   const loadExamResults = async () => {
     try {
       const { data: assignments, error } = await supabase.from("exam_assignment")
@@ -271,7 +270,6 @@ export default function StudentDetailPage() {
         const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
         const eType = master?.exam_type || '';
         
-        // 🌟 "주간테스트"만 '시험' 탭에 표시되도록 설정 (그 외의 것들은 필터링 아웃)
         if (eType !== '주간테스트') return false;
         
         return true;
@@ -297,7 +295,7 @@ export default function StudentDetailPage() {
           if (ans.grading_code === 'O') oCount++;
           else if (ans.grading_code === 'RO') roCount++;
           else if (ans.grading_code === 'TO') toCount++;
-          else if (['X', 'TX'].includes(ans.grading_code)) xCount++; // 🌟 오답은 X, TX만 카운트
+          else if (['X', 'TX'].includes(ans.grading_code)) xCount++; 
         });
 
         const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
@@ -305,7 +303,6 @@ export default function StudentDetailPage() {
         if (!totalQ || totalQ === 0) totalQ = myAnswers.length || 1;
 
         const originalScore = Math.round((oCount / totalQ) * 100);
-        // 🌟 TO, RO 모두 최종 정답(점수)으로 인정
         const finalScore = Math.round(((oCount + roCount + toCount) / totalQ) * 100);
 
         return {
@@ -441,8 +438,8 @@ export default function StudentDetailPage() {
   };
 
   const getEnrolledClassNames = () => {
-    const activeEnrolls = enrollments.filter((e: any) => !e.end_date || e.status === '수강중');
-    return activeEnrolls.length > 0 ? activeEnrolls.map((e: any) => unwrap(e.class as any)?.name).join(", ") : "미배정";
+    const allEnrolledClassNames = Array.from(new Set(enrollments.map((e: any) => unwrap(e.class as any)?.name).filter(Boolean)));
+    return allEnrolledClassNames.length > 0 ? allEnrolledClassNames.join(", ") : "미배정";
   };
 
   // ---------------------------------------------------------
@@ -528,7 +525,6 @@ export default function StudentDetailPage() {
     ...(allowedActions.includes('action_view_consult') ? [{ id: 'consult', name: '상담 기록' }] : []),
     { id: 'attend', name: '출결 기록' },
     { id: 'progress', name: '진도 기록' },
-    // 🌟 원장님 요청: 탭 이름을 '시험 성적'에서 '주간테스트 성적'으로 변경
     ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '주간테스트 성적' }] : []),
     { id: 'hw', name: '과제 현황' },
     ...(allowedActions.includes('action_view_clinic') ? [{ id: 'clinic', name: '오답 클리닉' }] : []),
@@ -703,15 +699,32 @@ function InfoTab({ student, enrollments, consultLogs, setActiveTab, calendarBloc
         <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm flex-1">
           <h3 className="text-[12px] font-black text-slate-600 mb-3 flex items-center gap-1.5"><span className="w-1 h-3.5 bg-purple-500 rounded-full"></span>수강 이력</h3>
           <div className="space-y-2">
-            {enrollments.length === 0 ? <div className="text-[11px] text-slate-400 font-bold">이력이 없습니다.</div> : enrollments.map((en: any) => (
-              <div key={en.enrollment_id} className="flex justify-between items-center bg-white p-2.5 rounded border border-slate-100 shadow-sm">
-                <div className="flex items-center gap-2.5">
-                   <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${!en.end_date || en.status === '수강중' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>{!en.end_date || en.status === '수강중' ? '수강중' : '수강종료'}</span>
-                   <span className="text-[13px] font-bold text-slate-700">{unwrap(en.class)?.name}</span>
+            {enrollments.length === 0 ? <div className="text-[11px] text-slate-400 font-bold">이력이 없습니다.</div> : enrollments.map((en: any) => {
+              
+              // 🌟 뱃지 스타일 분기 처리
+              let badgeText = '수강중';
+              let badgeColorClass = 'bg-emerald-50 text-emerald-600 border-emerald-200';
+              
+              if (en.status === '예약') {
+                badgeText = '예약중';
+                badgeColorClass = 'bg-amber-50 text-amber-600 border-amber-200';
+              } else if (en.status === '수강종료' || en.end_date) {
+                badgeText = '수강종료';
+                badgeColorClass = 'bg-slate-100 text-slate-500 border-slate-200';
+              }
+
+              return (
+                <div key={en.enrollment_id} className="flex justify-between items-center bg-white p-2.5 rounded border border-slate-100 shadow-sm">
+                  <div className="flex items-center gap-2.5">
+                    <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${badgeColorClass}`}>
+                      {badgeText}
+                    </span>
+                    <span className="text-[13px] font-bold text-slate-700">{unwrap(en.class)?.name}</span>
+                  </div>
+                  <span className="text-[11px] text-slate-400 font-bold">{en.start_date} ~ {en.end_date || '현재'}</span>
                 </div>
-                <span className="text-[11px] text-slate-400 font-bold">{en.start_date} ~ {en.end_date || '현재'}</span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       </div>
