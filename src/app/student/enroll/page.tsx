@@ -15,30 +15,27 @@ function StudentEnrollContent() {
     name: "",
     password: "",
     studentContact: "",
-    parentContact: "",
+    parentContact: "", // 🌟 ID 역할 (필수)
     school: "",
     grade: "초1",
+    gender: "", // 선택 항목 (초기값 없음)
+    registrationPath: "", // 선택 항목 (초기값 없음)
     status: isAdmission ? "입학테스트" : "재원",
-    tenant_id: "", // 🌟 [추가] 꼬리표를 달 공간 마련
+    tenant_id: "", 
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 🌟 [추가] 페이지가 켜질 때 내 소속 학원(tenant_id)을 확인해서 폼에 몰래 넣어둡니다.
   useEffect(() => {
     const myTenantId = localStorage.getItem("logica_tenant_id") || "";
     setFormData(prev => ({ ...prev, tenant_id: myTenantId }));
   }, []);
 
-  // === UI 텍스트 동적 렌더링 ===
   const headerTitle = isAdmission ? "📝 로지카 입학 대기생 등록" : "👨‍🎓 로지카 신규 학생 등록";
   const headerDesc = isAdmission
     ? "입학테스트를 대기 중인 학생의 정보를 DB에 저장합니다."
     : "학원에 등록한 정규 재원생의 정보를 DB에 저장합니다.";
 
-  // ==========================================
-  // 유틸: 휴대폰 번호 자동 하이픈 (-)
-  // ==========================================
   const handlePhoneInput = (field: "studentContact" | "parentContact", value: string) => {
     const formatted = value
       .replace(/[^0-9]/g, "")
@@ -55,15 +52,16 @@ function StudentEnrollContent() {
   // DB 등록 처리 로직 (서버 액션 호출)
   // ==========================================
   const registerStudent = async () => {
-    const { name, password, studentContact, parentContact, school, grade, status, tenant_id } = formData;
+    const { name, password, studentContact, parentContact, tenant_id } = formData;
 
-    if (!name || !studentContact || !password) {
-      alert("이름, 학생 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
+    // 🌟 필수값 체크: 학부모 연락처
+    if (!name || !parentContact || !password) {
+      alert("이름, 학부모 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
       return;
     }
 
-    if (studentContact.length < 12) {
-      alert("올바른 연락처 형식을 입력해주세요. (예: 010-1234-5678)");
+    if (parentContact.length < 12) {
+      alert("올바른 학부모 연락처 형식을 입력해주세요. (예: 010-1234-5678)");
       return;
     }
 
@@ -75,17 +73,24 @@ function StudentEnrollContent() {
     setIsSubmitting(true);
 
     try {
-      // 💡 클라이언트에서 준비한 꼬리표(tenant_id)가 포함된 formData를 서버 액션으로 전송!
-      const result = await registerStudentAction(formData);
+      // 🌟 [수정된 부분] 학생 연락처가 비어있으면 학부모 연락처를 기본 ID로 복사해서 서버로 보냅니다.
+      const finalStudentContact = studentContact.trim() === "" ? parentContact : studentContact;
+      
+      const payload = {
+        ...formData,
+        studentContact: finalStudentContact
+      };
+
+      // payload를 서버 액션으로 전송!
+      const result = await registerStudentAction(payload);
 
       if (result.success) {
         if (result.hasModifiedId) {
-          alert(`ℹ️ 알림: 동일한 연락처가 존재하여, 형제/자매 구분을 위해 학생 ID를 [ ${result.finalContact} ](으)로 자동 변경하여 등록합니다.\n\n🎉 [${name}] 학생이 성공적으로 등록되었습니다!`);
+          alert(`ℹ️ 알림: 동일한 학부모 연락처가 존재하여, 형제/자매 구분을 위해 학생 ID를 [ ${result.finalContact} ](으)로 자동 변경하여 등록합니다.\n\n🎉 [${name}] 학생이 성공적으로 등록되었습니다!`);
         } else {
           alert(`🎉 [${name}] 학생이 성공적으로 등록되었습니다!`);
         }
 
-        // 부모 창 새로고침 트리거
         try {
           if (window.opener && !window.opener.closed && window.opener.refreshStudents) {
             window.opener.refreshStudents();
@@ -93,7 +98,6 @@ function StudentEnrollContent() {
         } catch (e) {}
         localStorage.setItem("logica_refresh_signal", JSON.stringify({ target: "student", time: Date.now() }));
 
-        // 입력 폼 초기화 (학년, 상태, tenant_id는 유지)
         setFormData((prev) => ({
           ...prev,
           name: "",
@@ -101,11 +105,12 @@ function StudentEnrollContent() {
           studentContact: "",
           parentContact: "",
           school: "",
+          gender: "",
+          registrationPath: "",
         }));
       } else {
         alert(`❌ 학생 등록 실패:\n${result.message}`);
       }
-
     } catch (error: any) {
       console.error("클라이언트 통신 에러:", error);
       alert("서버와 통신하는 중 문제가 발생했습니다.");
@@ -118,13 +123,11 @@ function StudentEnrollContent() {
     <div className="flex items-center justify-center min-h-screen bg-slate-50 p-6 font-pretendard">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden flex flex-col">
         
-        {/* 헤더 */}
         <div className="bg-[#002864] text-white p-6 shrink-0">
           <h1 className="text-2xl font-bold tracking-tight">{headerTitle}</h1>
           <p className="text-blue-200 text-sm mt-1">{headerDesc}</p>
         </div>
 
-        {/* 폼 영역 */}
         <div className="p-8">
           <div className="space-y-6">
             <div className="grid grid-cols-2 gap-5">
@@ -136,58 +139,77 @@ function StudentEnrollContent() {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
                   placeholder="예: 홍길동"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  초기 비밀번호 <span className="text-red-500">*</span>
+                  성별 (선택)
+                </label>
+                <div className="flex gap-4 mt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="gender"
+                      value="남"
+                      checked={formData.gender === "남"}
+                      onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                      className="w-5 h-5 text-[#002864] focus:ring-[#002864]"
+                    />
+                    <span className="text-slate-700 font-medium">남학생</span>
+                  </label>
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="radio"
+                      name="gender"
+                      value="여"
+                      checked={formData.gender === "여"}
+                      onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
+                      className="w-5 h-5 text-[#002864] focus:ring-[#002864]"
+                    />
+                    <span className="text-slate-700 font-medium">여학생</span>
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  학부모 연락처 (ID 역할) <span className="text-red-500">*</span>
                 </label>
                 <input
-                  type="password"
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all"
-                  placeholder="비밀번호 입력"
+                  type="text"
+                  maxLength={13}
+                  value={formData.parentContact}
+                  onChange={(e) => handlePhoneInput("parentContact", e.target.value)}
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  placeholder="010-0000-0000"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">
-                  학생 연락처 (ID 역할) <span className="text-red-500">*</span>
+                  학생 본인 연락처 (선택)
                 </label>
                 <input
                   type="text"
                   maxLength={13}
                   value={formData.studentContact}
                   onChange={(e) => handlePhoneInput("studentContact", e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
                   placeholder="010-0000-0000"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">학부모 연락처</label>
-                <input
-                  type="text"
-                  maxLength={13}
-                  value={formData.parentContact}
-                  onChange={(e) => handlePhoneInput("parentContact", e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all"
-                  placeholder="010-0000-0000"
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-bold text-slate-700 mb-1">학교</label>
+                <label className="block text-sm font-bold text-slate-700 mb-1">학교 (선택)</label>
                 <input
                   type="text"
                   value={formData.school}
                   onChange={(e) => setFormData({ ...formData, school: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all"
-                  placeholder="예: 로지카중학교"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  placeholder="예: 대치중학교"
                 />
               </div>
 
@@ -198,7 +220,7 @@ function StudentEnrollContent() {
                 <select
                   value={formData.grade}
                   onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all text-slate-700"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all text-slate-700"
                 >
                   <option value="7세 반">미취학 (7세 반)</option>
                   <option value="초1">초등학교 1학년 (초1)</option>
@@ -216,6 +238,37 @@ function StudentEnrollContent() {
                 </select>
               </div>
 
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  등록 경로 (선택)
+                </label>
+                <select
+                  value={formData.registrationPath}
+                  onChange={(e) => setFormData({ ...formData, registrationPath: e.target.value })}
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all text-slate-700"
+                >
+                  <option value="">-- 선택 안 함 --</option>
+                  <option value="지인 소개">지인 소개</option>
+                  <option value="블로그/SNS">블로그 / SNS</option>
+                  <option value="전단지/현수막">전단지 / 현수막</option>
+                  <option value="학원 앞 방문">학원 앞 방문(워크인)</option>
+                  <option value="기타">기타</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-slate-700 mb-1">
+                  초기 비밀번호 <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="password"
+                  value={formData.password}
+                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  placeholder="비밀번호 입력"
+                />
+              </div>
+
               <div className="col-span-2">
                 <label className="block text-sm font-bold text-slate-700 mb-1">
                   학생 상태 <span className="text-red-500">*</span>
@@ -223,7 +276,7 @@ function StudentEnrollContent() {
                 <select
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] focus:border-transparent transition-all bg-blue-50"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all bg-blue-50"
                 >
                   <option value="재원">✅ 정규 재원생 (기본)</option>
                   <option value="입학테스트">📝 입학테스트 대기</option>
@@ -258,7 +311,6 @@ function StudentEnrollContent() {
   );
 }
 
-// Next.js 빌드 에러 방지를 위한 Suspense 래핑
 export default function StudentEnrollPage() {
   return (
     <Suspense fallback={<div className="flex h-screen items-center justify-center font-bold text-slate-500">로딩 중...</div>}>
