@@ -777,7 +777,7 @@ export default function AdminDashboardPage() {
         tenant_id: validTenantId, 
         target_name: `${msg.student_name} / ${msg.parent_name}`, 
         target_phone: msg.parent_phone,
-        message: logMessage, 
+        message_content: logMessage, // 수정됨. 260917
         status: res?.success ? '성공' : '실패'
       });
 
@@ -1086,7 +1086,7 @@ export default function AdminDashboardPage() {
                         }
                       }
 
-                      const fullMsg = feed.message || feed.content || '';
+                      const fullMsg = feed.message_content || feed.content || ''; // 수정. 260917
                       const match = fullMsg.match(/^\[(.*?)\]/);
                       const categoryName = match ? match[1] : '알림';
                       const descText = match ? fullMsg.replace(/^\[.*?\]\s*/, '') : fullMsg;
