@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import { useRouter } from 'next/navigation';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -121,6 +122,8 @@ export default function StudentTimeline({
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
   handleBulkPrintAction, handleRenameItem 
 }: StudentTimelineProps) {
+  
+  const router = useRouter();
 
   const [modalTab, setModalTab] = useState<'TAXONOMY' | 'PERIOD' | 'SELECTED' | null>(null);
   const [isEngineRunning, setIsEngineRunning] = useState(false);
@@ -539,7 +542,13 @@ export default function StudentTimeline({
         <div className="flex justify-between items-center">
           <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
             <span className="bg-[#002864] text-white text-[11px] font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap">{currentView?.className || '반 미지정'}</span>
-            <span className="text-[#002864] whitespace-nowrap">{currentView?.studentName || '알 수 없음'}</span> 학생 전체 활동 타임라인
+            <span 
+              onClick={() => currentView?.studentId && router.push(`/student/${currentView.studentId}`)}
+              className="text-[#002864] whitespace-nowrap cursor-pointer hover:underline hover:text-blue-600 transition-colors"
+              title="학생 상세 페이지로 이동"
+            >
+              {currentView?.studentName || '알 수 없음'}
+            </span> 학생 전체 활동 타임라인
           </h2>
           <div className="flex bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm">
             <button onClick={() => setDateFilter('1W')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1W' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1주일</button>

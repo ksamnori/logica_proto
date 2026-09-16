@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 type ReportTabType = 'LOG' | 'ALL' | 'EXAM' | 'HW' | 'OVERDUE' | 'PRINT' | 'SIMILAR';
 
@@ -64,6 +65,8 @@ const safeParseIds = (raw: any): number[] => {
 };
 
 export default function ClassReportPage() {
+  const router = useRouter(); // 라우터 훅 추가
+  
   const [classes, setClasses] = useState<ClassInfo[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>("");
   const [activeTab, setActiveTab] = useState<ReportTabType>('ALL');
@@ -551,7 +554,6 @@ export default function ClassReportPage() {
           rates[col.qId] = attemptCount > 0 ? Math.round((correctCount / attemptCount) * 100) : 0;
         });
 
-        // 🌟 핵심 버그 수정: 이 시험/과제에 배부된 문제가 단 하나도 없는 학생은 매트릭스에서 제외합니다.
         const finalRows = Array.from(rowsMap.values())
           .filter(row => {
              return cols.some(col => row.cells[col.qId] && !row.cells[col.qId].isBlocked);
@@ -709,7 +711,6 @@ export default function ClassReportPage() {
             <div className="text-xs font-bold text-slate-500 mt-1 flex gap-3">
               <span>📅 출제일: {formatDateLabel(selectedItem.date)}</span>
               <span>📝 전체 합산 총 {matrixCols.length}문항</span>
-              {/* 🌟 수강생 명칭을 상황에 맞게 변경 */}
               <span>👥 배부 인원 {matrixRows.length}명</span>
             </div>
           </div>
@@ -763,7 +764,14 @@ export default function ClassReportPage() {
                   <tr key={row.studentId} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
                     <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50 h-[50px]">
                       <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
-                        <span className="truncate w-full text-center">{row.studentName}</span>
+                        {/* 🌟 수정: 학생명 클릭 시 상세 페이지로 이동하도록 라우터 연결 및 스타일 추가 */}
+                        <span 
+                          onClick={() => router.push(`/student/${row.studentId}`)}
+                          className="truncate w-full text-center cursor-pointer hover:underline hover:text-blue-600 transition-colors"
+                          title="학생 상세 기록 보기"
+                        >
+                          {row.studentName}
+                        </span>
                         <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${isCompleted ? 'text-slate-400 bg-slate-100' : 'text-rose-500 bg-rose-50 border border-rose-100'}`}>
                           {row.status || '미제출'}
                         </span>
