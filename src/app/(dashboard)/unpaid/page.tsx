@@ -138,7 +138,7 @@ export default function UnpaidPage() {
                             <td className="px-4 py-3 font-bold text-slate-500 text-xs">{item.billing_month}</td>
                             <td className="px-4 py-3 text-[11px] font-bold text-slate-400">{dText}</td>
                             <td className="px-4 py-3 text-xs font-bold text-slate-600 truncate max-w-[120px]">{className}</td>
-                            <td className="px-4 py-3 font-extrabold text-[#002864] hover:underline" onClick={e => { e.stopPropagation(); window.open(`/student/detail?id=${item.student_id}`); }}>{studentName}</td>
+                            <td className="px-4 py-3 font-extrabold text-[#002864] hover:underline" onClick={e => {e.stopPropagation(); window.open(`/student/${item.student_id}?tab=billing`, '_blank');}}>{studentName} </td>
                             <td className="px-4 py-3 text-right font-black text-rose-600 text-base">{(parseInt(item.amount) || 0).toLocaleString()}원</td>
                             <td className="px-4 py-3 text-center">{notiBadge}</td>
                           </tr>
