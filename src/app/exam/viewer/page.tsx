@@ -37,6 +37,9 @@ const safeParseIds = (raw: any): number[] => {
   return [];
 };
 
+// 🌟 [추가] 프론트엔드 전용 꼬리표(_added_...)를 떼고 순수 DB ID만 추출하는 함수
+const getRealId = (id: string) => String(id).replace(/_added_\d+$/, '');
+
 export default function ExamViewerPage() {
   const router = useRouter();
 
@@ -213,7 +216,8 @@ export default function ExamViewerPage() {
 
       for (const item of bulkItems) {
         if (item.type === 'hw') {
-          item.examQuestions.forEach((id: string) => allQids.add(String(id)));
+          // 🌟 꼬리표 떼고 DB 검색용 ID 추출
+          item.examQuestions.forEach((id: string) => allQids.add(getRealId(id)));
         } else if (item.exam_id) {
           const { data: examItems } = await supabase.from('exam_item').select('question_id').eq('exam_id', item.exam_id);
           examItems?.forEach((i: any) => allQids.add(String(i.question_id)));
@@ -239,8 +243,9 @@ export default function ExamViewerPage() {
           lType = item.examType || '과제프린트';
           
           item.examQuestions.forEach((qid: string, idx: number) => {
-             const q = qMap.get(String(qid));
-             if (q) orderedQuestions.push({ ...q, sort_order: idx + 1 });
+             const realId = getRealId(qid);
+             const q = qMap.get(realId);
+             if (q) orderedQuestions.push({ ...q, question_id: qid, sort_order: idx + 1 });
           });
         } else {
           const { data: examData } = await supabase.from('exam_master').select('*').eq('exam_id', item.exam_id).single();
@@ -280,10 +285,10 @@ export default function ExamViewerPage() {
 
         const groupMap = new Map<string, any>();
         orderedQuestions.forEach((q: any) => {
-           let gId = customGroupMap.get(String(q.question_id));
+           let gId = customGroupMap.get(getRealId(q.question_id));
            if (!gId) gId = `single_${q.question_id}_${Math.random()}`;
            if (!groupMap.has(gId)) {
-              groupMap.set(gId, { id: gId, questions: [], repQ: q, is_merged_text: !!customGroupMap.get(String(q.question_id)) });
+              groupMap.set(gId, { id: gId, questions: [], repQ: q, is_merged_text: !!customGroupMap.get(getRealId(q.question_id)) });
            }
            groupMap.get(gId).questions.push(q);
         });
@@ -561,13 +566,11 @@ export default function ExamViewerPage() {
                 wGrade = origExam.target_grade || "";
             }
         } else {
-            // 🌟 [최종 수정] 세션 데이터를 최우선으로 읽어 '오답유사' 자동 선택
             const sessionExamType = sessionStorage.getItem('examType');
             const isClinic = sessionStorage.getItem('isClinicMode') === 'true';
             
             if (sessionExamType === '오답유사' || isClinic) {
                 lType = '오답유사';
-                // 기본 제목이 지정 안 된 경우 오답유사 전용 제목 세팅
                 if (title === '새로운 테스트' || !title) title = '오답 유사 클리닉';
             } else if (sessionExamType) {
                 lType = sessionExamType;
@@ -580,10 +583,15 @@ export default function ExamViewerPage() {
             }
         }
 
+        // 🌟 [핵심 수술 부위] 세션 데이터 파싱 및 DB 조회 로직 수정
         const parsedData = JSON.parse(sessionStorage.getItem('examQuestions') || "[]");
         const flatQIds = parsedData.reduce((acc: string[], val: any) => acc.concat(Array.isArray(val) ? val.map(String) : [String(val)]), []);
 
-        const { data: questions } = await supabase.from('question_db').select('*').in('question_id', flatQIds);
+        // 🚨 새로 추가된 문제의 _added_ 꼬리표를 떼어내고 진짜 DB ID만 모읍니다.
+        const realQIds = flatQIds.map((id: string) => getRealId(id));
+
+        // 진짜 ID들로만 DB에서 조회합니다.
+        const { data: questions } = await supabase.from('question_db').select('*').in('question_id', realQIds);
         
         let userMergedTextQuestions: any[][] = [];
         if (sessionStorage.getItem('examUserMergedTextQuestions')) {
@@ -592,13 +600,19 @@ export default function ExamViewerPage() {
 
         const customGroupMap = new Map<string, boolean>();
         userMergedTextQuestions.forEach((arr: any[]) => {
-            if (arr.length > 0) customGroupMap.set(String(arr[0]), true); 
+            if (arr.length > 0) customGroupMap.set(getRealId(String(arr[0])), true); 
         });
 
         const groups: any[] = [];
         parsedData.forEach((group: any, gIdx: number) => {
             const qids = Array.isArray(group) ? group.map(String) : [String(group)];
-            const items = qids.map((qid: string) => questions?.find(qu => String(qu.question_id) === qid)).filter(Boolean);
+            const items = qids.map((qid: string) => {
+                const realId = getRealId(qid);
+                const dbQ = questions?.find(qu => String(qu.question_id) === realId);
+                // 🚨 찾은 데이터에 화면용 가짜 ID(_added_)를 다시 덮어씌워 React 렌더링 충돌 방지
+                return dbQ ? { ...dbQ, question_id: qid } : null; 
+            }).filter(Boolean);
+
             if (items.length > 0) {
                 const firstQid = items[0].question_id;
                 groups.push({
@@ -607,7 +621,7 @@ export default function ExamViewerPage() {
                     repQ: items[0],
                     sort_order: gIdx + 1,
                     displayNum: gIdx + 1,
-                    is_merged_text: !!customGroupMap.get(String(firstQid))
+                    is_merged_text: !!customGroupMap.get(getRealId(String(firstQid)))
                 });
             }
         });
@@ -1177,7 +1191,6 @@ export default function ExamViewerPage() {
         newExamTitle = getISOWeekKST(new Date(testDate + 'T00:00:00Z')) + "주차 평가";
         setExamTitle(newExamTitle);
       } else if (val === '오답유사') {
-        // 🌟 양식 선택 시 제목도 '오답 유사 클리닉'으로 자동 변경
         newExamTitle = examTitle === '시험지' ? '오답 유사 클리닉' : examTitle;
         setExamTitle(newExamTitle);
       }
@@ -1222,7 +1235,8 @@ export default function ExamViewerPage() {
       if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다.");
       if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
 
-      const flatQIds = examStateRef.current?.groups.reduce((acc: string[], g: any) => acc.concat(g.questions.map((q: any) => String(q.question_id))), []) || [];
+      // 🌟 [핵심 변경 2] 저장 시에도 _added_ 꼬리표 떼어내고 진짜 ID만 DB에 반영
+      const flatQIds = examStateRef.current?.groups.reduce((acc: string[], g: any) => acc.concat(g.questions.map((q: any) => getRealId(q.question_id))), []) || [];
       
       let userMergedTextQuestions: string[][] = [];
       if (sessionStorage.getItem('examUserMergedTextQuestions')) {
@@ -1230,7 +1244,7 @@ export default function ExamViewerPage() {
       } else if (examStateRef.current?.groups) {
          userMergedTextQuestions = examStateRef.current.groups
             .filter((g: any) => g.is_merged_text)
-            .map((g: any) => g.questions.map((q: any) => q.question_id));
+            .map((g: any) => g.questions.map((q: any) => getRealId(q.question_id)));
       }
 
       const finalLayoutSettings = { 
@@ -1301,7 +1315,14 @@ export default function ExamViewerPage() {
         const items: any[] = []; let fIdx = 1;
         examStateRef.current?.groups.forEach((g: any, gIdx: number) => {
           const score = layoutType === '입학테스트' ? [2,3,4,5][(gIdx < 4 ? 0 : gIdx < 13 ? 1 : gIdx < 20 ? 2 : gIdx === 20 ? 3 : gIdx < 23 ? 0 : gIdx < 25 ? 1 : gIdx < 28 ? 2 : 3)] : null;
-          g.questions.forEach((q: any) => items.push({ exam_id: examId, question_id: q.question_id, sort_order: fIdx++, assigned_score: score }));
+          
+          // 🌟 꼬리표 뗀 진짜 ID로 exam_item에 Insert
+          g.questions.forEach((q: any) => items.push({ 
+             exam_id: examId, 
+             question_id: getRealId(q.question_id), 
+             sort_order: fIdx++, 
+             assigned_score: score 
+          }));
         });
         const { error: itemsErr } = await supabase.from('exam_item').insert(items);
         if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
@@ -1347,6 +1368,8 @@ export default function ExamViewerPage() {
                   });
               }
               const tasks: any[] = [];
+              
+              // 🌟 꼬리표 뗀 ID로 태스크 배정
               flatQIds.forEach((qId: string) => {
                   tasks.push({ student_id: stuId, task_type: '유형오답클리닉', question_id: qId, status: '대기' });
               });

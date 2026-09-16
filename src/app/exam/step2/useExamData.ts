@@ -16,7 +16,6 @@ export function useExamData() {
   const [showAnswer, setShowAnswer] = useState(false);
   const [isClinicMode, setIsClinicMode] = useState(false);
   
-  // 🌟 [핵심 로직] 과제 수정 등 기존 데이터를 불러온 '복원 모드'인지 추적하는 상태
   const [isRestoredMode, setIsRestoredMode] = useState(false);
 
   const [depth5Map, setDepth5Map] = useState<Record<string, string>>({});
@@ -104,9 +103,8 @@ export function useExamData() {
   const fetchAndFilterQuestions = async () => {
     setIsLoading(true);
 
-    // [경로 1] 세션에서 문항 직접 복원 (과제 수정 모드)
     if (sessionStorage.getItem('restoreExamQuestions') === '1' && sessionStorage.getItem('examQuestions')) {
-      setIsRestoredMode(true); // 복원 모드 확정
+      setIsRestoredMode(true); 
       setTimeout(() => sessionStorage.removeItem('restoreExamQuestions'), 1500);
       try {
         const parsedGroups = JSON.parse(sessionStorage.getItem('examQuestions') || "[]");
@@ -191,7 +189,6 @@ export function useExamData() {
       }
     }
 
-    // [경로 2] DB 시험지 ID 기반 복원 (과제 수정 모드)
     const urlExamId = searchParams.get('exam_id');
     const duplicateUrlId = searchParams.get('duplicate_exam_id');
     const editExamId = sessionStorage.getItem('editExamId');
@@ -199,9 +196,8 @@ export function useExamData() {
     const loadExamId = urlExamId || duplicateUrlId || editExamId || duplicateSessionId;
 
     if (loadExamId) {
-      setIsRestoredMode(true); // 복원 모드 확정
+      setIsRestoredMode(true); 
       try {
-        const isDuplicate = !!(duplicateUrlId || duplicateSessionId);
         if (urlExamId) {
           sessionStorage.setItem('editExamId', urlExamId);
           sessionStorage.removeItem('duplicateExamId');
@@ -212,6 +208,7 @@ export function useExamData() {
 
         const { data: examData } = await supabase.from('exam_master').select('title, layout_settings').eq('exam_id', loadExamId).single();
         if (examData && examData.title) {
+            const isDuplicate = !!(duplicateUrlId || duplicateSessionId);
             const titleToSet = isDuplicate ? `${examData.title} (복제본)` : examData.title;
             sessionStorage.setItem('examTitle', titleToSet);
         }
@@ -288,8 +285,7 @@ export function useExamData() {
       return;
     }
 
-    // [경로 3] Step 1 필터를 기반으로 신규 추출 (신규 생성 모드)
-    setIsRestoredMode(false); // 🌟 신규 생성 모드 확정
+    setIsRestoredMode(false); 
 
     const itemIdsStr = sessionStorage.getItem("selectedItemIds");
     if (!itemIdsStr) {
@@ -588,9 +584,21 @@ export function useExamData() {
     }
   };
 
+  // 🌟 [핵심 변경] Step 3로 이동할 때 현재 화면의 1~6번 '모든' 문제를 빠짐없이 세션에 저장합니다!
   const goToStep3 = () => {
     if (questions.length === 0) return alert("출제할 문항이 없습니다.");
-    sessionStorage.setItem("examQuestions", JSON.stringify(questions.map(g => g.items.map((i:any) => i.question_id))));
+    
+    // 💡 질문 리스트(questions) 안에 있는 모든 문항 ID들을 배열로 추출하여 세션에 구워줍니다.
+    const allQuestionIds = questions.map(g => {
+        if (g.is_merged_text) {
+           // 병합 문항은 배열 형태로 묶어줍니다.
+           return g.items.map((i: any) => i.question_id);
+        }
+        // 일반 문항은 단일 ID로 저장합니다.
+        return g.items[0].question_id;
+    });
+
+    sessionStorage.setItem("examQuestions", JSON.stringify(allQuestionIds));
     sessionStorage.setItem("qCount", String(questions.length));
     
     const userMergedTextQuestions = questions
@@ -672,6 +680,6 @@ export function useExamData() {
     editingId, setEditingId, editForm, setEditForm,
     fetchDepthMappings, fetchParentSources, loadAddTaxonomyTree, goToStep3,
     handleDragStart, handleDragOver, handleDrop, openTwinSearch,
-    isClinicMode, isRestoredMode // 🌟 반환 객체에 isRestoredMode 추가
+    isClinicMode, isRestoredMode
   };
 }
