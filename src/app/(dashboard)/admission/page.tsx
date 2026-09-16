@@ -76,9 +76,8 @@ const formatDateTimeDisplay = (dtString: string) => {
 export default function AdmissionPage() {
   const router = useRouter();
 
-  // 🌟 [보안 로직 추가] 권한 확인 상태
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const [hasReportAuth, setHasReportAuth] = useState(false); // 🌟 리포트 접근 권한 상태 추가
+  const [hasReportAuth, setHasReportAuth] = useState(false);
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
@@ -105,9 +104,12 @@ export default function AdmissionPage() {
 
   const [isFiltersLoaded, setIsFiltersLoaded] = useState(false);
 
+  // 🌟 [신규] 페이지네이션을 위한 상태 (페이지당 10개씩 노출)
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+
   const appsScrollRef = useRef<HTMLDivElement>(null);
 
-  // 🌟 컴포넌트 마운트 시 즉시 권한 검사 및 리포트 권한 설정
   useEffect(() => {
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -119,7 +121,7 @@ export default function AdmissionPage() {
       
       if (isGodMode) {
         setIsAuthorized(true);
-        setHasReportAuth(true); // 관리자는 무조건 리포트 권한 허용
+        setHasReportAuth(true);
         return;
       }
 
@@ -141,7 +143,6 @@ export default function AdmissionPage() {
         router.replace("/home");
       } else {
         setIsAuthorized(true);
-        // 🌟 DB에 리포트 열람 권한이 있는지 체크
         if (data.allowed_menus.includes("action_manage_admission_report")) {
           setHasReportAuth(true);
         }
@@ -168,8 +169,16 @@ export default function AdmissionPage() {
       sessionStorage.setItem('logica_adm_filter_dt', filterDateTime);
       sessionStorage.setItem('logica_adm_filter_gr', filterGrade);
       sessionStorage.setItem('logica_adm_filter_kw', searchKeyword);
+      
+      // 🌟 필터 조건이 바뀌면 1페이지로 초기화
+      setCurrentPage(1); 
     }
   }, [filterDateTime, filterGrade, searchKeyword, isFiltersLoaded]);
+
+  // 🌟 정렬 기준이 바뀌어도 1페이지로 초기화
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [primarySort, dateSortOrder, gradeSortOrder]);
 
   const formatGrade = (grade: any) => {
     if (!grade) return '-';
@@ -282,7 +291,6 @@ export default function AdmissionPage() {
     }
   };
 
-  // 권한이 통과되었을 때만 데이터 페칭을 시작하도록 방어
   useEffect(() => {
     if (isAuthorized) {
       fetchSessions();
@@ -385,6 +393,7 @@ export default function AdmissionPage() {
     setFilterDateTime("ALL");
     setFilterGrade("ALL");
     setSearchKeyword("");
+    setCurrentPage(1); // 초기화 시 1페이지로
     sessionStorage.removeItem('logica_adm_filter_dt');
     sessionStorage.removeItem('logica_adm_filter_gr');
     sessionStorage.removeItem('logica_adm_filter_kw');
@@ -490,13 +499,34 @@ export default function AdmissionPage() {
     }
   };
 
-  // 권한 확인이 끝나지 않았거나 권한이 없으면 렌더링하지 않음
+  // 🌟 [신규] 현재 페이지에 해당하는 데이터만 잘라내기
+  const totalPages = Math.ceil(filteredSessions.length / ITEMS_PER_PAGE);
+  const currentSessions = filteredSessions.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+
+  // 페이지네이션 버튼 번호 계산 로직
+  const getPageNumbers = () => {
+    const pages = [];
+    const maxButtons = 5; // 한 번에 보여줄 페이지 버튼 개수
+    let start = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+    let end = start + maxButtons - 1;
+
+    if (end > totalPages) {
+      end = totalPages;
+      start = Math.max(1, end - maxButtons + 1);
+    }
+
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    return pages;
+  };
+
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
   
   if (isAuthorized === false) {
-    return null; // 이미 useEffect에서 alert 후 home으로 튕겨냅니다.
+    return null;
   }
 
   return (
@@ -504,7 +534,8 @@ export default function AdmissionPage() {
       
       <div className="flex justify-between items-end shrink-0">
         <div>
-          <h2 className="text-xl font-bold text-slate-800">입학테스트 관리 및 채점 대시보드</h2>
+          {/* 🌟 타이틀 변경 적용 */}
+          <h2 className="text-xl font-bold text-slate-800">진단평가 관리 및 채점 대시보드</h2>
           <p className="text-sm font-bold text-slate-400 mt-1">개설된 입학테스트 일정과 배정된 대기생을 관리합니다.</p>
         </div>
       </div>
@@ -594,16 +625,17 @@ export default function AdmissionPage() {
             <button onClick={() => setRefreshTrigger(prev => prev + 1)} className="text-[12px] font-bold text-slate-500 hover:text-[#002864]">새로고침 ↻</button>
           </div>
 
-          <div className="flex-1 overflow-y-auto custom-scroll">
+          <div className="flex-1 overflow-y-auto custom-scroll flex flex-col">
             {isLoadingSessions ? (
               <div className="p-5 text-center text-slate-400 font-bold">로딩 중...</div>
-            ) : filteredSessions.length === 0 ? (
+            ) : currentSessions.length === 0 ? (
               <div className="p-10 text-center flex flex-col items-center">
                 <span className="text-4xl mb-2">🕵️‍♂️</span>
                 <span className="text-slate-400 font-bold">조건에 맞는 일정이 없습니다.</span>
               </div>
             ) : (
-              filteredSessions.map(s => {
+              // 🌟 잘라낸 현재 페이지 데이터만 렌더링
+              currentSessions.map(s => {
                 const fullExamName = s.exam_master ? `${s.exam_master.title} ${s.exam_master.sub_title ? `[${s.exam_master.sub_title}]` : ''}` : '시험지 미지정';
                 const isSelected = String(selectedSession?.admission_session_id) === String(s.admission_session_id);
                 const sessionDt = `${s.test_date} ${s.start_time ? s.start_time.substring(0, 5) : ''}`.trim();
@@ -614,9 +646,8 @@ export default function AdmissionPage() {
                       setSelectedSession(s); 
                       sessionStorage.setItem('logica_adm_selected_session_id', String(s.admission_session_id));
                     }} 
-                    className={`px-4 py-2 border-b border-slate-100 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 border-blue-200 shadow-inner' : 'hover:bg-blue-50'}`}
+                    className={`px-4 py-3 border-b border-slate-100 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 border-blue-200 shadow-inner' : 'hover:bg-blue-50/60'}`}
                   >
-                    
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center gap-2 min-w-0">
                         {/* 일자 및 시간 */}
@@ -663,12 +694,42 @@ export default function AdmissionPage() {
                         </>
                       ) : <span className="text-[11px] font-bold text-slate-400 truncate shrink-0">📝 시험지 미지정</span>}
                     </div>
-
                   </div>
                 );
               })
             )}
           </div>
+          
+          {/* 🌟 [신규] 하단 페이지네이션 컴포넌트 */}
+          {totalPages > 1 && (
+            <div className="border-t border-slate-200 bg-white p-2.5 flex justify-center items-center shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
+              <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                <button 
+                  onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
+                  disabled={currentPage === 1}
+                  className="px-2.5 py-1 text-slate-500 font-bold text-xs rounded hover:bg-white hover:text-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                >
+                  ◀
+                </button>
+                {getPageNumbers().map(num => (
+                  <button 
+                    key={num} 
+                    onClick={() => setCurrentPage(num)}
+                    className={`px-3 py-1 font-bold text-xs rounded transition-colors ${currentPage === num ? 'bg-[#002864] text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-[#002864]'}`}
+                  >
+                    {num}
+                  </button>
+                ))}
+                <button 
+                  onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
+                  disabled={currentPage === totalPages}
+                  className="px-2.5 py-1 text-slate-500 font-bold text-xs rounded hover:bg-white hover:text-slate-800 disabled:opacity-30 disabled:hover:bg-transparent transition-colors"
+                >
+                  ▶
+                </button>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* 우측 패널: 배정 명단 */}
