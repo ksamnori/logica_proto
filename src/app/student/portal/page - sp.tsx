@@ -379,7 +379,8 @@ export default function StudentPortal() {
         }
 
         const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
-        let uniqueIncIds = Array.from(new Set(resolvedQids)) as number[];
+        const uniqueIncIds = Array.from(new Set(resolvedQids));
+        const totalPrintQCount = uniqueIncIds.length;
 
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
@@ -394,23 +395,6 @@ export default function StudentPortal() {
                 .select('assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
                 .eq('student_id', sid)
         ]);
-
-        // 🌟 [핵심 변경] 오답 정정 중(채점확정)인 시험에 속한 문항들은 오답 클리닉 카운트에서 통째로 제외
-        let fixingQids = new Set<number>();
-        const fixingExamIds = (examsData || [])
-            .filter((ex: any) => ex.status === '채점확정')
-            .map((ex: any) => ex.assignment_id);
-
-        if (fixingExamIds.length > 0) {
-            const { data: fixingAnswers } = await supabaseClient.from('student_answer')
-                .select('question_id')
-                .in('exam_assignment_id', fixingExamIds);
-            fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
-        }
-
-        // 🌟 채점확정 시험의 문제들은 제외하고 진짜 최종 오답만 남깁니다.
-        uniqueIncIds = uniqueIncIds.filter(id => !fixingQids.has(id));
-        const totalPrintQCount = uniqueIncIds.length;
 
         const hwResolvedMap = new Map<number, Set<number>>();
         hwAnsData?.forEach((a: any) => {
@@ -673,23 +657,7 @@ export default function StudentPortal() {
 
                 const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
                 
-                // 🌟 [핵심 변경] 클리닉 시험지를 만들 때도 채점확정인 문항은 제외하고 생성합니다.
-                const { data: fixingExams } = await supabaseClient.from('exam_assignment')
-                    .select('assignment_id')
-                    .eq('student_id', studentInfo.id)
-                    .eq('status', '채점확정');
-                    
-                let fixingQids = new Set<number>();
-                if (fixingExams && fixingExams.length > 0) {
-                    const fIds = fixingExams.map((ex: any) => ex.assignment_id);
-                    const { data: fixingAnswers } = await supabaseClient.from('student_answer')
-                        .select('question_id')
-                        .in('exam_assignment_id', fIds);
-                    fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
-                }
-
-                const filteredQids = resolvedQids.filter((id: number) => !fixingQids.has(id));
-                const uniqueQids = Array.from(new Set(filteredQids)) as number[];
+                const uniqueQids = Array.from(new Set(resolvedQids)) as number[];
                 
                 if (uniqueQids.length === 0) {
                     alert('정정할 오답이 없습니다.');
@@ -845,6 +813,7 @@ export default function StudentPortal() {
                 {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText.includes('bg-') ? 'text-slate-800' : theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 모두 완료됨</span>}
                 
                 <div className="relative z-10 shrink-0">
+                    {/* 🌟 수정 1: 좌측 상단 배지 컨테이너 - 우측 absolute 영역을 피하기 위해 padding-right 적용 */}
                     <div className="flex flex-wrap items-center gap-2.5 mb-3 pr-[120px] md:pr-[220px]">
                         <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                             {isLocked ? '🔒 잠김' : theme.label}
@@ -856,6 +825,7 @@ export default function StudentPortal() {
                         )}
                     </div>
                     
+                    {/* 🌟 수정 2: 우측 상단 드롭다운 및 점수를 아예 공중으로 띄워(absolute) 제목 라인을 밀어내지 않음 */}
                     <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto max-w-[55%] md:max-w-[300px]">
                         <div className="flex items-center gap-2">
                             {isSelectedItemWaiting && initialScore !== null && (
@@ -879,6 +849,7 @@ export default function StudentPortal() {
                         )}
                     </div>
                     
+                    {/* 🌟 제목 및 설명 사이즈 최적화 및 겹침 방지 여백 설정 */}
                     <h3 className={`text-[26px] md:text-[32px] lg:text-[36px] font-black mb-1.5 leading-tight ${isLocked ? 'text-white/90' : ''} pr-[80px] md:pr-[120px]`}>
                         {isSelectedItemWaiting || isSelectedItemFixing ? '' : theme.label.replace(/[^가-힣 ]/g, '').trim() + ' 클리닉'}
                         {isSelectedItemWaiting ? '채점 결과 확인 중' : ''}
