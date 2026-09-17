@@ -167,9 +167,22 @@ export function useSupervisorData() {
     }, []);
 
     const sendToStudent = (seat: string, action: string, extra = {}) => {
-        if (!channelRef.current || channelRef.current.state !== 'joined') setReconnectTrigger(p => p + 1);
+        if (!channelRef.current) return;
         const studentId = studentsRef.current[seat]?.studentId;
-        channelRef.current?.send({ type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } });
+        const payload = { type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } };
+        
+        // 🌟 웹소켓이 정상 연결되어 있으면 표준 send() 사용
+        if (channelRef.current.state === 'joined') {
+            channelRef.current.send(payload);
+        } else {
+            // 🌟 끊겨 있으면 재연결을 시도하면서, Supabase의 권장대로 httpSend()를 명시적으로 사용
+            setReconnectTrigger(p => p + 1);
+            if (typeof channelRef.current.httpSend === 'function') {
+                channelRef.current.httpSend(payload);
+            } else {
+                channelRef.current.send(payload); // 구버전 호환용 안전장치
+            }
+        }
     };
 
     const confirmVerification = async (assignmentId: string, studentId: string, overrides: Record<string, boolean>) => {
