@@ -7,6 +7,8 @@ import { supabase } from "@/lib/supabase";
 import StudentEditModal from "@/components/student/StudentEditModal";
 import ConsultModal from "@/components/student/ConsultModal";
 import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
+import { deleteConsultLog as deleteConsultLogAction } from "@/app/actions/consultation";
+import { deleteStudentCompletely } from "@/app/actions/consultation";
 
 // ---------------------------------------------------------
 // 1. 공통 유틸리티 함수
@@ -545,8 +547,8 @@ export default function StudentDetailPage() {
   const deleteConsultLog = async (targetId: string | number) => {
     if (!confirm("이 기록을 삭제하시겠습니까?")) return;
     if (typeof targetId === 'string' && targetId.startsWith('admission_')) return alert("입학 상담 기록은 입학 관리 메뉴에서 수정/삭제해야 합니다.");
-    const { error } = await supabase.from("consultation_log").delete().eq("consultation_log_id", targetId);
-    if (error) alert("삭제 실패: " + error.message); else loadConsultLogs();
+    const res = await deleteConsultLogAction(targetId);
+    if (!res.success) alert("삭제 실패: " + res.message); else loadConsultLogs();
   };
 
   const formatTimeForInput = (isoStr: string | null | undefined) => {
@@ -589,21 +591,13 @@ export default function StudentDetailPage() {
     if (!currentUser.isAdmin) return alert("🚫 학생의 모든 데이터를 완전히 삭제하는 기능은 원장 및 관리자만 수행할 수 있습니다.");
     if (!confirm("⚠️ 경고: 학생의 기본 정보뿐만 전적, 출결, 수납 등 모든 기록이 완전히 삭제되며 절대 복구할 수 없습니다.\n\n정말 삭제하시겠습니까?")) return;
     try {
-      await Promise.all([
-        supabase.from('student_homework_result').delete().eq('student_id', studentId),
-        supabase.from('student_exam_result').delete().eq('student_id', studentId),
-        supabase.from('student_school_exam').delete().eq('student_id', studentId),
-        supabase.from('student_incorrect_record').delete().eq('student_id', studentId),
-        supabase.from('student_progress').delete().eq('student_id', studentId),
-        supabase.from('admission_test_report').delete().eq('student_id', studentId),
-        supabase.from('exam_assignment').delete().eq('student_id', studentId),
-        supabase.from('attendance').delete().eq('student_id', studentId),
-        supabase.from('consultation_log').delete().eq('student_id', studentId),
-        supabase.from('academy_billing').delete().eq('student_id', studentId),
-        supabase.from('enrollment').delete().eq('student_id', studentId)
-      ]);
-      await supabase.from('student').delete().eq('student_id', studentId);
-      alert("✅ 학생 데이터가 완전히 삭제되었습니다."); router.back(); 
+      const res = await deleteStudentCompletely(studentId);
+      if (!res.success) {
+        alert("삭제 실패: " + res.message);
+        return;
+      }
+      alert("✅ 학생 데이터가 완전히 삭제되었습니다.");
+      router.back();
     } catch (error: any) { alert("삭제 실패: " + error.message); }
   };
 

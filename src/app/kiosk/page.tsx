@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
+import { queueAttendanceAlimtalk } from "@/app/actions/alimtalk";
 import { supabase } from "@/lib/supabase";
 
 const CHECKOUT_COOLDOWN_MIN = 3;
@@ -119,49 +120,21 @@ export default function KioskPage() {
     }
   };
 
-  // 🌟 핵심 해결: 다중 연락처 발송 대기열 추가 로직
+  // 🌟 서버 액션 경유로 변경 — 브라우저가 alimtalk_queue를 직접 건드리지 않습니다.
   const queueAlimtalk = async (student: any, statusLabel: string, timeString: string) => {
-    const parentObj = Array.isArray(student.parent) ? student.parent[0] : student.parent;
-    if (!parentObj) return;
+    if (!student?.student_id) return;
 
-    const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || localStorage.getItem('logica_tenant_id') || '1ff4299c-d72b-4d99-97b0-45fee08e3b73';
-    const expandedMsgs: any[] = [];
+    const res = await queueAttendanceAlimtalk({
+      studentId: student.student_id,
+      statusLabel,
+      timeString,
+    });
 
-    const pushAttTarget = (phone: string, name: string, rel: string) => {
-      if (!phone || phone.includes('unassigned')) return;
-      const relStr = rel || '학부모';
-      const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `학부모(${relStr})`;
-      expandedMsgs.push({
-        tenant_id: kioskTenantId,
-        student_id: student.student_id,
-        student_name: student.name,
-        parent_name: finalName,
-        parent_phone: phone,
-        template_id: 'KA01TP260826014520504X1Fplf8R0FH',
-        status_label: statusLabel,
-        time_string: timeString,
-        preview_title: `[출결] ${statusLabel}`,
-        preview_desc: `${student.name} ${finalName}`,
-        status: '대기'
-      });
-    };
-
-    pushAttTarget(parentObj.phone, parentObj.name, parentObj.relationship);
-    pushAttTarget(parentObj.phone_2, parentObj.name_2, parentObj.relationship_2);
-
-    if (expandedMsgs.length === 0) return;
-
-    try {
-      // 기존 등/하원 대기 메시지가 있다면 지우고 갱신
-      await supabase.from('alimtalk_queue')
-        .delete()
-        .eq('student_id', student.student_id)
-        .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
-        .eq('status', '대기');
-
-      await supabase.from('alimtalk_queue').insert(expandedMsgs);
-    } catch (e) {
-      console.error("대기열 저장 중 오류:", e);
+    // 🌟 이전엔 실패가 조용히 묻혔습니다. 이제는 반드시 드러납니다.
+    if (!res.success) {
+      console.error("[알림톡 대기열 실패]", res.message);
+    } else if (res.queued === 0) {
+      console.warn("[알림톡] 발송 대상 없음:", res.message);
     }
   };
 

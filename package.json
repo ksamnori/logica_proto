@@ -13,6 +13,7 @@
     "@google/generative-ai": "^0.24.1",
     "@sparticuz/chromium-min": "^149.0.0",
     "@supabase/supabase-js": "^2.110.8",
+    "bcryptjs": "^3.0.3",
     "canvas-confetti": "^1.9.4",
     "chart.js": "^4.5.1",
     "googleapis": "^174.0.1",
@@ -28,6 +29,7 @@
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/bcryptjs": "^2.4.6",
     "@types/canvas-confetti": "^1.9.0",
     "@types/node": "^20.19.43",
     "@types/react": "^19",

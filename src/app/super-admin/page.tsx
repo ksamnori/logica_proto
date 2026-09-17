@@ -3,8 +3,9 @@
 
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
-// 🌟 수정됨: 절대 경로(@/lib/supabase)를 상대 경로로 변경했습니다.
-import { supabase } from "../../lib/supabase"; 
+import { supabase } from "@/lib/supabase"; 
+import { hashPin } from "@/app/actions/studentAuth";
+import { deleteStudentCompletely } from "@/app/actions/consultation";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfwlmbwornivkrvoeqdh.supabase.co';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtmd2xtYndvcm5pdmtydm9lcWRoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzk3NDUzNzQsImV4cCI6MjA5NTMyMTM3NH0.Kh9MPHzUxf9xLRYTH_UqoIhxOm4lybA_OL8Z60H9vqo';
@@ -221,7 +222,7 @@ export default function AdminDashboardPage() {
 
       const { error: studentError } = await supabase.from('student').insert([{
           name: sName, grade: String(sGrade), school: sSchool, phone: finalContact,
-          password_hash: sPw, status: sStatus, parent_id: finalParentId, tenant_id: sTenantId 
+          password_hash: sPw ? await hashPin(sPw) : null, status: sStatus, parent_id: finalParentId, tenant_id: sTenantId
       }]);
       if (studentError) throw studentError;
 
@@ -279,21 +280,11 @@ export default function AdminDashboardPage() {
   const hardDeleteStudent = async (id: string, name: string) => {
     if (!confirm(`[🚨 초강력 경고]\n[${name}] 학생을 영구 삭제하시겠습니까?\n모든 과제, 성적, 출결 내역이 함께 파괴됩니다.`)) return;
     try {
-      await Promise.all([
-        supabase.from('student_homework_result').delete().eq('student_id', id),
-        supabase.from('student_exam_result').delete().eq('student_id', id),
-        supabase.from('student_school_exam').delete().eq('student_id', id),
-        supabase.from('student_incorrect_record').delete().eq('student_id', id),
-        supabase.from('student_progress').delete().eq('student_id', id),
-        supabase.from('admission_test_report').delete().eq('student_id', id),
-        supabase.from('exam_assignment').delete().eq('student_id', id),
-        supabase.from('attendance').delete().eq('student_id', id),
-        supabase.from('consultation_log').delete().eq('student_id', id),
-        supabase.from('academy_billing').delete().eq('student_id', id),
-        supabase.from('enrollment').delete().eq('student_id', id),
-        supabase.from('clinic_task').delete().eq('student_id', id)
-      ]);
-      await supabase.from('student').delete().eq('student_id', id);
+      const res = await deleteStudentCompletely(id);
+      if (!res.success) {
+        alert("삭제 실패: " + res.message);
+        return;
+      }
       alert("✅ 학생 데이터가 완전히 삭제되었습니다.");
       loadStudents();
     } catch (e: any) { alert("삭제 실패: " + e.message); }

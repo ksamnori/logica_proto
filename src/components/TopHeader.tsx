@@ -68,6 +68,10 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   const [unreadNotiCount, setUnreadNotiCount] = useState(0);
 
   const [currentUid, setCurrentUid] = useState(instId);
+  useEffect(() => {
+    if (instId && instId !== currentUid) setCurrentUid(instId);
+  }, [instId]);
+
   const [currentName, setCurrentName] = useState(instructorName);
   const [currentProfileImg, setCurrentProfileImg] = useState(profileImgUrl);
   const [imgError, setImgError] = useState(false);
@@ -160,7 +164,9 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                     ["최고관리자", "대장", "원장", "실장"].some((p: string) => pos.includes(p));
 
     const clearedStr = localStorage.getItem(`noti_cleared_at_${currentUid}`);
-    const clearedTime = clearedStr ? new Date(clearedStr).getTime() : 0;
+    // 🌟 지운 적이 없으면 최근 14일치만 봅니다. (예전엔 1970년 기준이라 전부 떴습니다)
+    const defaultFrom = Date.now() - 14 * 24 * 60 * 60 * 1000;
+    const clearedTime = clearedStr ? new Date(clearedStr).getTime() : defaultFrom;
     const clearedIso = new Date(clearedTime).toISOString();
 
     const res = await getSecureNotifications(clearedTime);
@@ -210,9 +216,9 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       allNotis = [...allNotis, ...csNotis];
     }
 
-    allNotis.sort((a: NotificationItem, b: NotificationItem) => b.time.getTime() - a.time.getTime());
+    allNotis.sort((a, b) => b.time.getTime() - a.time.getTime());
+    console.log("[헤더] 알림 개수 =", allNotis.length);                         // 추가
     setNotifications(allNotis);
-    
     setUnreadNotiCount(allNotis.length);
   }, [currentUid]);
 
@@ -221,24 +227,39 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
     loadNotifications();
 
-    const notiChannel = supabase.channel('header_noti_channel')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_memo' }, () => {
-        loadNotifications(); 
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, () => {
+    // 🌟 채널을 테이블별로 분리하고, 이름에 난수를 붙여 중복 마운트 시 충돌을 막습니다.
+    const suffix = `${currentUid}_${Math.random().toString(36).slice(2, 8)}`;
+
+    const memoChannel = supabase
+      .channel(`hdr_memo_${suffix}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'instructor_memo' }, (payload) => {
+        console.log("[헤더] memo 이벤트", payload.eventType);
         loadNotifications();
       })
-      .subscribe();
+      .subscribe((status) => {
+        console.log("[헤더] memo 구독 =", status);
+      });
 
-    return () => { 
-      supabase.removeChannel(notiChannel); 
+    const csChannel = supabase
+      .channel(`hdr_cs_${suffix}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'parent_request_log' }, (payload) => {
+        console.log("[헤더] cs 이벤트", payload.eventType);
+        loadNotifications();
+      })
+      .subscribe((status) => {
+        console.log("[헤더] cs 구독 =", status);
+      });
+
+    return () => {
+      supabase.removeChannel(memoChannel);
+      supabase.removeChannel(csChannel);
     };
   }, [currentUid, loadNotifications]);
 
   const toggleNotiWindow = () => {
     if (!isNotiOpen) loadNotifications(); 
     setIsNotiOpen(!isNotiOpen);
-    setUnreadNotiCount(0); 
+    // 🌟 열어봤다고 0으로 만들지 않습니다. 실제 처리되지 않은 건수를 계속 보여줍니다.
   };
 
   const clearNotifications = () => {
@@ -441,7 +462,11 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
         <div className={`relative shrink-0 transition-all duration-500 ${isHeaderExpanded ? 'ml-2' : 'ml-1'}`}>
           <button onClick={toggleNotiWindow} className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors focus:outline-none">
-            🔔 {unreadNotiCount > 0 && !isNotiOpen && <span className="absolute top-0 right-0 w-3 h-3 bg-rose-500 rounded-full border-2 border-white"></span>}
+            🔔 {unreadNotiCount > 0 && (
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full border-2 border-white flex items-center justify-center leading-none">
+                {unreadNotiCount > 99 ? "99+" : unreadNotiCount}
+              </span>
+            )}
           </button>
 
           {isNotiOpen && (

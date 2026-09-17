@@ -5,6 +5,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
+import { queueAttendanceNotice, queueAttendanceNoticeBulk } from "@/app/actions/alimtalk";
 
 const getKSTDateStr = (offsetDays = 0) => {
   const now = new Date();
@@ -428,7 +429,8 @@ export default function TeacherDashboardPage() {
     const todayClinics = clinicData || [];
 
     const mappedAtt = (classStudents || []).map((st: any) => {
-      const todayAtt = st.attendance?.find((a: any) => a.attendance_date === today);
+      const todayAttList = (st.attendance || []).filter((a: any) => a.attendance_date === today);
+      const todayAtt = todayAttList.sort((a: any, b: any) => (b.attendance_id || 0) - (a.attendance_id || 0))[0];
       const parentInfo = Array.isArray(st.parent) ? st.parent[0] : st.parent; 
 
       let currentStatus = todayAtt?.status || "NONE";
@@ -471,39 +473,6 @@ export default function TeacherDashboardPage() {
     });
     return { total, present, inClinic, goneHome, absent };
   }, [attStudents]);
-
-  const queueAlimtalk = async (student: any, statusLabel: string, actionTime: string) => {
-    if (!student.parentPhone || !tenantId) return;
-
-    const today = getKSTDateStr();
-    const timeStr = formatTimeAsKST(actionTime);
-    const displayTimeString = `${today.replace(/-/g, '.')} ${timeStr}`;
-    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
-
-    try {
-      await supabase.from('alimtalk_queue')
-        .delete()
-        .eq('tenant_id', validTenantId)
-        .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
-        .eq('student_id', student.id);
-
-      await supabase.from('alimtalk_queue').insert({
-        tenant_id: validTenantId,
-        student_id: student.id,
-        student_name: student.name,
-        parent_name: student.parentName || student.name,
-        parent_phone: student.parentPhone,
-        template_id: 'KA01TP260826014520504X1Fplf8R0FH',
-        status_label: statusLabel,
-        time_string: displayTimeString,
-        preview_title: `[출결] ${statusLabel}`,
-        preview_desc: `${student.parentPhone} • ${displayTimeString}`,
-        status: '대기'
-      });
-    } catch (e) {
-      console.error("알림톡 대기열 큐 삽입 오류:", e);
-    }
-  };
 
   const handleAttAction = async (student: any, action: string) => {
     const today = getKSTDateStr();
@@ -558,8 +527,14 @@ export default function TeacherDashboardPage() {
         });
       }
       
-      if (statusLabel && student.parentPhone) {
-        await queueAlimtalk(student, statusLabel, nowTimestamp);
+            // 🌟 서버 액션 경유. 일괄 처리 중에는 건너뛰고 마지막에 모아서 보냅니다.
+      if (statusLabel && !isBulkProcessing.current) {
+        const res = await queueAttendanceNotice({
+          studentId: student.id,
+          statusLabel,
+          actionTime: nowTimestamp,
+        });
+        if (!res.success) console.error("[알림톡 대기열 실패]", res.message);
       }
 
     } catch (e) { console.error(e); } finally {
@@ -567,25 +542,46 @@ export default function TeacherDashboardPage() {
     }
   };
 
-  const bulkAttend = async () => {
+    const bulkAttend = async () => {
     if (!confirm('현재 미처리된 모든 학생을 "등원" 처리하시겠습니까?\n(알림톡 발송됨)')) return;
     const toUpdate = attStudents.filter(s => s.status === "NONE");
+    const at = new Date().toISOString();
+
     isBulkProcessing.current = true;
     for (const s of toUpdate) {
       await handleAttAction(s, "PRESENT");
     }
     isBulkProcessing.current = false;
+
+    // 🌟 알림톡은 한 번의 왕복으로 일괄 적재
+    if (toUpdate.length > 0) {
+      const res = await queueAttendanceNoticeBulk(
+        toUpdate.map(s => ({ studentId: s.id, statusLabel: "등원", actionTime: at }))
+      );
+      if (!res.success) console.error("[일괄 알림톡 일부 실패]", res);
+    }
+
     requestFetch(selectedClassId);
   };
 
   const bulkGoHome = async () => {
     if (!confirm('현재 등원/클리닉 중인 전체 학생을 "하원" 처리하시겠습니까?\n(알림톡 발송됨)')) return;
     const toUpdate = attStudents.filter(s => s.att_id && !['하원', '조퇴', '결석', 'NONE'].includes(s.status));
+    const at = new Date().toISOString();
+
     isBulkProcessing.current = true;
     for (const s of toUpdate) {
       await handleAttAction(s, "GO_HOME");
     }
     isBulkProcessing.current = false;
+
+    if (toUpdate.length > 0) {
+      const res = await queueAttendanceNoticeBulk(
+        toUpdate.map(s => ({ studentId: s.id, statusLabel: "하원", actionTime: at }))
+      );
+      if (!res.success) console.error("[일괄 알림톡 일부 실패]", res);
+    }
+
     requestFetch(selectedClassId);
   };
 
@@ -636,10 +632,16 @@ export default function TeacherDashboardPage() {
           });
         }
 
-        if (['등원', '지각', '결석', '조퇴', '하원'].includes(status) && manualModalData.parentPhone) {
+                if (['등원', '지각', '결석', '조퇴', '하원'].includes(status)) {
           const timeTarget = status === '조퇴' || status === '하원' ? checkOut : checkIn;
           const actionTime = timeTarget ? toIsoString(timeTarget)! : new Date().toISOString();
-          await queueAlimtalk(manualModalData, status, actionTime);
+
+          const res = await queueAttendanceNotice({
+            studentId: manualModalData.id,
+            statusLabel: status,
+            actionTime,
+          });
+          if (!res.success) console.error("[알림톡 대기열 실패]", res.message);
         }
       }
       alert("✅ 출결이 성공적으로 수동 반영되었습니다.");
@@ -1027,6 +1029,7 @@ export default function TeacherDashboardPage() {
                     else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
 
                     const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "";
+                    const timeOutStr = student.checkOut ? formatTimeAsKST(student.checkOut) : "";
                     
                     const cardBgClass = isNotArrived 
                       ? "bg-slate-100 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
@@ -1043,7 +1046,13 @@ export default function TeacherDashboardPage() {
                               </span>
                             </div>
                             <span className="text-[9px] font-bold text-slate-400 pl-0.5 mt-0.5">
-                              {timeInStr ? `${timeInStr} 등원` : '시간 기록없음'}
+                              {!timeInStr && !timeOutStr ? '시간 기록없음' : (
+                                <>
+                                  {timeInStr && <span>{timeInStr} 등원</span>}
+                                  {timeInStr && timeOutStr && <span className="text-slate-300 mx-1">›</span>}
+                                  {timeOutStr && <span className="text-emerald-600">{timeOutStr} 하원</span>}
+                                </>
+                              )}
                             </span>
                           </div>
 

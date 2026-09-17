@@ -3,6 +3,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import bcrypt from "bcryptjs";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -92,7 +93,7 @@ export async function registerStudentAction(data: {
         grade: grade,
         school: school.trim(),
         phone: finalContact,
-        password_hash: password.trim(),
+        password_hash: password.trim() ? await bcrypt.hash(password.trim(), 10) : null,
         status: status,
         parent_id: finalParentId,
         tenant_id: secureTenantId, 

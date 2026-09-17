@@ -667,7 +667,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                               const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "-";
                               const timeOutStr = student.checkOut ? formatTimeAsKST(student.checkOut) : "-";
                               const dateAndDayStr = formatDateAndDayKST(student.checkIn || student.attDate);
-
+                              
                               return (
                                 <tr key={student.id} className={`border-b border-slate-100 last:border-0 hover:bg-indigo-50/40 transition-colors ${isNotArrived ? 'opacity-80 grayscale-[0.3]' : ''}`}>
                                   <td className="py-1.5 px-2 text-center">
@@ -736,6 +736,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                             else if (student.status === '결석') { flowIcon = "❌"; flowText = "결석"; flowColor = "text-rose-700 bg-rose-50 border-rose-200"; }
 
                             const timeInStr = student.checkIn ? formatTimeAsKST(student.checkIn) : "";
+                            const timeOutStr = student.checkOut ? formatTimeAsKST(student.checkOut) : "";                            
                             
                             const cardBgClass = isNotArrived 
                               ? "bg-slate-100/80 border-slate-300 border-dashed opacity-80 hover:opacity-100" 
@@ -752,7 +753,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                                         {flowIcon} {flowText}
                                       </span>
                                       <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap shrink-0 pl-1">
-                                        {timeInStr ? timeInStr : '기록 없음'}
+                                        {!timeInStr && !timeOutStr ? '기록 없음' : (
+                                          <>
+                                            {timeInStr && <span className="text-blue-600">{timeInStr}</span>}
+                                            {timeInStr && timeOutStr && <span className="text-slate-300 mx-0.5">›</span>}
+                                            {timeOutStr && <span className="text-emerald-600">{timeOutStr}</span>}
+                                          </>
+                                        )}
                                       </span>
                                     </div>
                                   </div>

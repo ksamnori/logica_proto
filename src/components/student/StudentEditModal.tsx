@@ -2,7 +2,9 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { supabase } from "@/lib/supabase"; 
+import { supabase } from "@/lib/supabase";
+import { hashPin } from "@/app/actions/studentAuth"; 
+import { deleteStudentCompletely } from "@/app/actions/consultation";
 
 interface StudentEditModalProps {
   isOpen: boolean;
@@ -39,6 +41,7 @@ export default function StudentEditModal({
     grade: "", 
     phone: "",
     passwordHash: "",
+    hasPin: false,
     parentId: "", 
     // 학부모 정보 1 (메인)
     parentName: "", 
@@ -72,7 +75,8 @@ export default function StudentEditModal({
         school: student.school || "", 
         grade: student.grade || "", 
         phone: student.phone || "",
-        passwordHash: student.password_hash || "", 
+        passwordHash: "", 
+        hasPin: !!(student.password_hash && String(student.password_hash).trim() !== ""),
         parentId: student.parent_id || parentObj?.parent_id || "", 
         parentName: parentObj?.name || "", 
         parentRel: parentObj?.relationship || "", 
@@ -172,16 +176,21 @@ export default function StudentEditModal({
         }
       }
 
-      const studentUpdates = { 
+      const studentUpdates: any = {
         name: editForm.name, 
         gender: editForm.gender || null, 
         status: editForm.status, 
         school: editForm.school, 
         grade: editForm.grade, 
         phone: editForm.phone,
-        password_hash: editForm.passwordHash || null, 
+        // 빈칸이면 기존 PIN 유지 (아래에서 조건부로 추가)
         parent_id: finalParentId
       };
+
+      // 🌟 PIN 칸에 입력이 있을 때만 변경. 빈칸이면 기존 PIN 그대로 유지됩니다.
+      if (editForm.passwordHash) {
+        studentUpdates.password_hash = await hashPin(editForm.passwordHash);
+      }
 
       const { error: studentUpdateError } = await supabase
         .from("student")
@@ -251,34 +260,8 @@ export default function StudentEditModal({
       await supabase.from("attendance").delete().eq("student_id", studentId);
       await supabase.from("enrollment").delete().eq("student_id", studentId);
 
-      await Promise.all([
-        supabase.from("student_answer").delete().eq("student_id", studentId),
-        supabase.from("student_exam_result").delete().eq("student_id", studentId),
-        supabase.from("student_progress").delete().eq("student_id", studentId),
-        supabase.from("student_incorrect_record").delete().eq("student_id", studentId), 
-        supabase.from("admission_application").delete().eq("student_id", studentId),
-        supabase.from("admission_test_report").delete().eq("student_id", studentId),
-        supabase.from("individual_makeup").delete().eq("student_id", studentId),
-        supabase.from("parent_request_log").delete().eq("student_id", studentId),
-        supabase.from("clinic_session_state").delete().eq("student_id", studentId),
-        supabase.from("clinic_round_result").delete().eq("student_id", studentId),  
-        supabase.from("student_points").delete().eq("student_id", studentId),
-        supabase.from("consultation_log").delete().eq("student_id", studentId),
-        supabase.from("point_log").delete().eq("student_id", studentId),
-        supabase.from("student_category_analysis").delete().eq("student_id", studentId),
-        supabase.from("clinic_task").delete().eq("student_id", studentId),
-        supabase.from("clinic_log").delete().eq("student_id", studentId),
-        supabase.from("student_homework_result").delete().eq("student_id", studentId),
-        supabase.from("student_homework_answer").delete().eq("student_id", studentId),
-        supabase.from("student_school_exam").delete().eq("student_id", studentId),
-        supabase.from("clinic_reservation").delete().eq("student_id", studentId),
-        supabase.from("exam_assignment").delete().eq("student_id", studentId),
-        supabase.from("academy_billing").delete().eq("student_id", studentId),
-        supabase.from("shop_purchase").delete().eq("student_id", studentId)
-      ]);
-
-      const { error: delErr } = await supabase.from("student").delete().eq("student_id", studentId);
-      if (delErr) throw delErr;
+      const res = await deleteStudentCompletely(studentId);
+      if (!res.success) throw new Error(res.message);
 
       alert(`🎉 [${editForm.name}] 학생의 모든 데이터가 완벽하게 삭제되었습니다.`);
       onSuccess();
@@ -368,9 +351,9 @@ export default function StudentEditModal({
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
                   비밀번호 (PIN 4자리)
-                  {editForm.passwordHash ? <span className="text-[10px] text-blue-500 font-normal">설정됨</span> : <span className="text-[10px] text-amber-500 font-normal">미설정</span>}
+                  {editForm.hasPin ? <span className="text-[10px] text-blue-500 font-normal">설정됨</span> : <span className="text-[10px] text-amber-500 font-normal">미설정</span>}
                 </label>
-                <input type="text" maxLength={4} placeholder="미설정 (0000 등으로 자동 로그인됨)" value={editForm.passwordHash} onChange={e => { const onlyNums = e.target.value.replace(/[^0-9]/g, ''); setEditForm({...editForm, passwordHash: onlyNums}); }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864] placeholder:text-slate-300 placeholder:font-normal" />
+                <input type="text" maxLength={4} placeholder={editForm.hasPin ? "변경하려면 새 4자리 입력" : "미설정 (0000으로 자동 로그인됨)"} value={editForm.passwordHash} onChange={e => { const onlyNums = e.target.value.replace(/[^0-9]/g, ''); setEditForm({...editForm, passwordHash: onlyNums}); }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864] placeholder:text-slate-300 placeholder:font-normal" />
               </div>
               
               <div className="col-span-2 bg-blue-50/50 p-4 rounded-lg border border-blue-100 mt-2">

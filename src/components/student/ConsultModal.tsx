@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
+import { createConsultLog, updateConsultLog } from "@/app/actions/consultation";
 
 interface ConsultModalProps {
   isOpen: boolean;
@@ -47,36 +48,29 @@ export default function ConsultModal({ isOpen, studentId, instId, logData, onClo
 
     setIsSaving(true);
     try {
-      if (consultForm.logId) {
-        // 🌟 수정 시 parent_summary 업데이트
-        const { error } = await supabase.from("consultation_log")
-          .update({ 
-            consultation_type: consultForm.type, 
-            contact_method: consultForm.method, 
-            parent_summary: consultForm.summary,
-            content: consultForm.content 
-          })
-          .eq("consultation_log_id", consultForm.logId);
+            let res;
 
-        if (error) throw error;
-      } else {
-        if (!myTenantId) {
-           alert("소속 지점 정보가 없어 저장할 수 없습니다. 새로고침 해주세요.");
-           setIsSaving(false);
-           return;
-        }
-        // 🌟 등록 시 parent_summary 포함
-        const { error } = await supabase.from("consultation_log").insert({ 
-            student_id: studentId, 
-            instructor_id: instId, 
-            consultation_type: consultForm.type, 
-            contact_method: consultForm.method, 
-            parent_summary: consultForm.summary,
-            content: consultForm.content,
-            tenant_id: myTenantId
+      if (consultForm.logId) {
+        res = await updateConsultLog({
+          logId: consultForm.logId,
+          consultationType: consultForm.type,
+          contactMethod: consultForm.method,
+          parentSummary: consultForm.summary,
+          content: consultForm.content,
         });
-        if (error) throw error;
+      } else {
+        res = await createConsultLog({
+          studentId,
+          instructorId: instId,
+          consultationType: consultForm.type,
+          contactMethod: consultForm.method,
+          parentSummary: consultForm.summary,
+          content: consultForm.content,
+        });
       }
+
+      if (!res.success) throw new Error(res.message);
+
       onSuccess();
       onClose();
     } catch (e: any) { 

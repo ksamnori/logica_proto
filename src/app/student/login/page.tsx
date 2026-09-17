@@ -8,6 +8,7 @@ import { searchStudentsByDigits, loginStudentAction, loginTransferAction, setupS
 import { getSeatForDevice, assignPadDevice, listActiveTenants, checkExistingDeviceForSeat } from "@/app/actions/clinicPadDevice";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { getKioskDeviceId } from "@/lib/kioskDevice";
+import { autoAttendOnPadLogin } from "@/app/actions/studentAuth";
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -115,82 +116,6 @@ export default function StudentKioskLogin() {
     }
   };
 
-  const checkAndAutoAttend = async (studentId: string, tenantId: string) => {
-    try {
-      const now = new Date();
-      const kstTime = new Date(now.getTime() + (9 * 60 * 60 * 1000) - (6 * 60 * 60 * 1000));
-      const today = kstTime.toISOString().split('T')[0];
-      const timestamp = now.toISOString();
-      
-      const formatKstTimeOnly = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-      const timeStr = `${String(formatKstTimeOnly.getUTCHours()).padStart(2,'0')}:${String(formatKstTimeOnly.getUTCMinutes()).padStart(2,'0')} (클리닉실 입실)`;
-
-      // 🌟 오늘 가장 최근 기록 조회 (재등원 여부 파악을 위해)
-      const { data: attData, error: attError } = await supabaseClient
-        .from('attendance')
-        .select('*')
-        .eq('student_id', studentId)
-        .eq('attendance_date', today)
-        .order('attendance_id', { ascending: false })
-        .limit(1);
-
-      if (attError) throw attError;
-
-      const latestAtt = attData && attData.length > 0 ? attData[0] : null;
-
-      // 🌟 핵심 방어: 첫 등원이거나, 이미 '하원(check_out)' 후 다시 패드에 접속한 경우 새 기록 생성!
-      if (!latestAtt || latestAtt.check_out_time) {
-        const { data: stuData } = await supabaseClient
-          .from('student')
-          .select('name, parent(name, phone), enrollment(enrollment_id, class(class_id))')
-          .eq('student_id', studentId)
-          .single();
-
-        if (!stuData) return;
-
-        const parentObj = Array.isArray(stuData.parent) ? stuData.parent[0] : stuData.parent;
-        const parentPhone = parentObj?.phone;
-        const parentName = (parentObj?.name && parentObj.name !== '미입력') ? parentObj.name : stuData.name;
-        const enrollmentId = stuData.enrollment && stuData.enrollment.length > 0 ? (stuData.enrollment as any)[0].enrollment_id : null;
-        const classId = stuData.enrollment && stuData.enrollment.length > 0 && (stuData.enrollment as any)[0].class ? (stuData.enrollment as any)[0].class.class_id : null;
-
-        await supabaseClient.from('attendance').insert({
-          student_id: studentId,
-          tenant_id: tenantId,
-          class_id: classId,
-          enrollment_id: enrollmentId,
-          attendance_date: today,
-          status: '등원',
-          check_in_time: timestamp
-        });
-
-        if (parentPhone) {
-          await supabaseClient.from('alimtalk_queue')
-            .delete()
-            .eq('student_id', studentId)
-            .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
-            .eq('status', '대기');
-
-          await supabaseClient.from('alimtalk_queue').insert({
-            tenant_id: tenantId,
-            student_id: studentId,
-            student_name: stuData.name,
-            parent_name: parentName,
-            parent_phone: parentPhone,
-            template_id: 'KA01TP260826014520504X1Fplf8R0FH',
-            status_label: '등원',
-            time_string: timeStr,
-            preview_title: '[출결] 등원',
-            preview_desc: `${parentPhone} • ${timeStr}`,
-            status: '대기'
-          });
-        }
-      }
-    } catch (e) {
-      console.error("클리닉 패드 자동 등원 처리 실패:", e);
-    }
-  };
-
   const finalizeLogin = async (result: { studentId: string; name: string; phone?: string; tenant_id?: string }) => {
     setIsProcessing(true); 
     try {
@@ -202,7 +127,11 @@ export default function StudentKioskLogin() {
       if (result.tenant_id) localStorage.setItem("logica_tenant_id", result.tenant_id);
       if (kioskSeatRef.current) localStorage.setItem("logica_kiosk_seat", kioskSeatRef.current);
 
-      await checkAndAutoAttend(result.studentId, tId);
+            // 🌟 서버 액션 경유 — attendance / alimtalk_queue를 브라우저가 직접 건드리지 않습니다.
+      const attRes = await autoAttendOnPadLogin(result.studentId);
+      if (!attRes.success) {
+        console.error("[자동 등원 실패]", attRes.message);
+      }
       
     } catch (e) {
       console.error("로그인 후처리 에러:", e);

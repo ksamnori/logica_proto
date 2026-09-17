@@ -11,7 +11,7 @@ import QuickSearchWidget from "@/components/admin/QuickSearchWidget";
 import MemoCreateModal from "@/components/admin/MemoCreateModal";
 import ClassDetailModal from "@/components/admin/ClassDetailModal";
 import InstructorPerformance from "@/components/admin/InstructorPerformance";
-import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage } from "@/app/actions/alimtalk";
+import { sendAttendanceAlimtalk, sendScheduleNoticeAlimtalk, sendClassChangeAlimtalk, sendGeneralMessage, sendQueuedMessages, clearQueue, deleteQueueItem, addToQueue } from "@/app/actions/alimtalk";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -726,9 +726,13 @@ export default function AdminDashboardPage() {
       pushTarget(pInfo.phone_2, pInfo.name_2, pInfo.relationship_2);
     });
 
-    await supabase.from('alimtalk_queue').insert(newMessages);
+    const res = await addToQueue(newMessages);
     fetchQueue(); 
-    alert(`${newMessages.length}건이 발송 대기열에 등록되었습니다.`);
+    if (!res.success) {
+      alert(`대기열 등록 실패: ${res.message}`);
+      return;
+    }
+    alert(`${res.inserted}건이 발송 대기열에 등록되었습니다.`);
     setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', homeworkTitle: '', dueDate: '', details: '' });
   };
 
@@ -737,57 +741,18 @@ export default function AdminDashboardPage() {
     if (!confirm(`대기 중인 ${queuedMessages.length}건의 메시지를 발송하시겠습니까?`)) return;
 
     setIsSendingAlimtalk(true);
-    
     const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
-    const { data: toSend } = await supabase.from('alimtalk_queue').select('*').eq('tenant_id', validTenantId).eq('status', '대기');
-    if (!toSend || toSend.length === 0) {
-        setIsSendingAlimtalk(false);
-        return;
-    }
 
-    const ids = toSend.map((q: any) => q.queue_id);
-    await supabase.from('alimtalk_queue').update({ status: '발송중' }).in('queue_id', ids);
+    const res = await sendQueuedMessages(validTenantId);
 
-    let successCount = 0;
-    let failCount = 0;
-
-    for (const msg of toSend) {
-      let res: any;
-      const apiPayload = {
-          id: msg.queue_id, templateId: msg.template_id, parentPhone: msg.parent_phone, parentName: msg.parent_name, studentName: msg.student_name,
-          statusLabel: msg.status_label, timeString: msg.time_string, scheduleName: msg.schedule_name, applyDate: msg.apply_date,
-          oldDate: msg.old_date, newDate: msg.new_date, details: msg.details, previewTitle: msg.preview_title, previewDesc: msg.preview_desc
-      };
-
-      if (msg.template_id === "KA01TP260826014520504X1Fplf8R0FH") {
-        res = await sendAttendanceAlimtalk(apiPayload);
-      } else if (msg.template_id === "KA01TP260826015150733a1AW4dFE1qM") {
-        res = await sendScheduleNoticeAlimtalk(apiPayload);
-      } else if (msg.template_id === "KA01TP260831032803585c1Me7WbxjUe") {
-        res = await sendClassChangeAlimtalk(apiPayload);
-      } else if (msg.template_id === "GENERAL_SMS") {
-        const textContent = `[로지카 학원 대치본원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
-        res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
-      }
-
-      // 🌟 과제 안내도 일반문자로 처리되므로 로깅을 안전하게 추출
-      const logMessage = msg.template_id === "GENERAL_SMS" ? `${msg.preview_title} 발송` : msg.preview_title;
-
-      await supabase.from('notification_log').insert({
-        tenant_id: validTenantId, 
-        target_name: `${msg.student_name} / ${msg.parent_name}`, 
-        target_phone: msg.parent_phone,
-        message_content: logMessage, // 수정됨. 260917
-        status: res?.success ? '성공' : '실패'
-      });
-
-      if (res?.success) successCount++; else failCount++;
-    }
-
-    await supabase.from('alimtalk_queue').delete().in('queue_id', ids);
-    fetchQueue(); 
     setIsSendingAlimtalk(false);
-    alert(`메시지 전송 완료!\n(성공: ${successCount}건, 실패: ${failCount}건)`);
+    fetchQueue();
+
+    if (!res.success) {
+      alert(`발송 중 오류가 발생했습니다.\n${res.message || ""}`);
+      return;
+    }
+    alert(`메시지 전송 완료!\n(성공: ${res.sent}건, 실패: ${res.failed}건)`);
   };
 
   const getBadgeColor = (title: string) => {
@@ -1003,9 +968,10 @@ export default function AdminDashboardPage() {
                   💬 발송 대기열
                   {queuedMessages.length > 0 && <span className="text-[10px] font-bold text-[#3a2929] bg-[#fef01b] px-2 py-0.5 rounded-full shadow-sm">{queuedMessages.length}건 대기중</span>}
                 </h3>
-                {queuedMessages.length > 0 && <button onClick={async () => {
+                  {queuedMessages.length > 0 && <button onClick={async () => {
                    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
-                   await supabase.from('alimtalk_queue').delete().eq('tenant_id', validTenantId).eq('status', '대기');
+                   const res = await clearQueue(validTenantId);
+                   if (!res.success) alert(`삭제 실패: ${res.message}`);
                    fetchQueue(); 
                 }} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
               </div>
@@ -1033,8 +999,9 @@ export default function AdminDashboardPage() {
                           <div className="flex items-center pr-5">
                             <span className="text-[9px] font-bold text-slate-400">{msg.time_string || ''}</span>
                           </div>
-                          <button onClick={async () => {
-                             await supabase.from('alimtalk_queue').delete().eq('queue_id', msg.queue_id);
+                                                    <button onClick={async () => {
+                             const res = await deleteQueueItem(msg.queue_id);
+                             if (!res.success) alert(`삭제 실패: ${res.message}`);
                              fetchQueue(); 
                           }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-1.5 top-1.5">×</button>
                         </div>
@@ -1161,14 +1128,9 @@ export default function AdminDashboardPage() {
                   });
 
                   const attMsgs = expandedMsgs.filter((m: any) => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
-                  if (attMsgs.length > 0) {
-                      const sIds = [...new Set(attMsgs.map((m: any) => m.id.split('_')[0]))];
-                      await supabase.from('alimtalk_queue')
-                          .delete()
-                          .eq('tenant_id', validTenantId)
-                          .eq('template_id', 'KA01TP260826014520504X1Fplf8R0FH')
-                          .in('student_id', sIds);
-                  }
+                  const replaceIds = attMsgs.length > 0
+                    ? [...new Set(attMsgs.map((m: any) => m.id.split('_')[0]))] as string[]
+                    : [];
 
                   const inserts = expandedMsgs.map((m: any) => ({
                       tenant_id: validTenantId,
@@ -1184,7 +1146,8 @@ export default function AdminDashboardPage() {
                       status: '대기'
                   }));
 
-                  await supabase.from('alimtalk_queue').insert(inserts);
+                  const res = await addToQueue(inserts, { replaceAttendanceFor: replaceIds });
+                  if (!res.success) alert(`대기열 등록 실패: ${res.message}`);
                   fetchQueue();
                 }} 
               />
