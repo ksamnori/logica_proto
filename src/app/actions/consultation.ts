@@ -106,8 +106,6 @@ export async function deleteConsultLog(logId: string | number) {
 // ------------------------------------------------------------------
 const STUDENT_CHILD_TABLES = [
   "student_answer",
-  "student_exam_result",
-  "student_progress",
   "student_incorrect_record",
   "admission_application",
   "admission_test_report",

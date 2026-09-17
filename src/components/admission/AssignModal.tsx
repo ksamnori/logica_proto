@@ -87,7 +87,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
       
       const { data: formalStus } = await supabase
         .from('student')
-        .select('student_id, name, grade, school, school_name, created_at, test_date, parent(phone)')
+        .select('student_id, name, grade, school, created_at, test_date, parent(phone)')
         .eq('status', '입학테스트')
         .order('created_at', { ascending: true });
         
@@ -97,7 +97,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           id: s.student_id,
           student_name: s.name,
           grade: s.grade || "미입력",
-          school_name: s.school_name || s.school || "",
+          school_name: s.school || "",
           contact: Array.isArray(s.parent) ? s.parent[0]?.phone : (s.parent?.phone || "번호없음"),
           test_date: s.test_date, 
           created_at: s.created_at,
@@ -114,7 +114,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
       const dateVal = formatTestDate(s.test_date) || "날짜없음";
       const matchDate = filterDate === 'all' || dateVal === filterDate;
       const keyword = searchKeyword.toLowerCase().trim();
-      const school = s.school_name || "";
+      const school = s.school || s.school_name || "";
       const phone = s.contact || "";
       
       const matchKeyword = !keyword || 
@@ -183,7 +183,6 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           const { data: newStudent, error: sErr } = await supabase.from("student").insert({
             name: temp.student_name,
             grade: temp.grade || "미입력",
-            school_name: temp.school_name,
             school: temp.school_name,
             parent_id: parentId,
             status: "입학테스트",
