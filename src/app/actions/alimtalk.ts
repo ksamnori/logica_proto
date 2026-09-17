@@ -538,3 +538,110 @@ export async function addToQueue(
     return { success: false, inserted: 0, message: error?.message || String(error) };
   }
 }
+
+// ------------------------------------------------------------------
+// 11. 키오스크 출결 처리 (등원 / 하원 / 재등원)
+//     - attendance를 service_role로 처리하므로 RLS를 켜도 통과합니다.
+//     - 쿨다운 판정도 서버에서 하여 단말 시계 조작을 막습니다.
+// ------------------------------------------------------------------
+const CHECKOUT_COOLDOWN_MIN = 3;
+
+export async function kioskAttendance(studentId: string) {
+  if (!studentId) return { success: false, message: "studentId 누락" };
+
+  try {
+    const now = new Date();
+    const kstTime = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+    const today = kstTime.toISOString().split("T")[0];
+    const timestamp = now.toISOString();
+    const timeStr =
+      `${String(kstTime.getUTCHours()).padStart(2, "0")}:` +
+      `${String(kstTime.getUTCMinutes()).padStart(2, "0")}`;
+
+    // 학생 + 반 정보를 서버에서 조회
+    const { data: stu, error: sErr } = await supabaseAdmin
+      .from("student")
+      .select("student_id, name, tenant_id, enrollment(enrollment_id, class(class_id))")
+      .eq("student_id", studentId)
+      .maybeSingle();
+
+    if (sErr) throw sErr;
+    if (!stu) return { success: false, message: "학생을 찾을 수 없습니다." };
+
+    const enr: any = Array.isArray(stu.enrollment) ? stu.enrollment[0] : stu.enrollment;
+    const enrollmentId = enr?.enrollment_id ?? null;
+    const classId = enr?.class?.class_id ?? null;
+
+    // 오늘 기록 조회
+    const { data: rawRecords, error: fErr } = await supabaseAdmin
+      .from("attendance")
+      .select("*")
+      .eq("student_id", studentId)
+      .eq("attendance_date", today)
+      .order("attendance_id", { ascending: true });
+
+    if (fErr) throw fErr;
+
+    const records = rawRecords || [];
+    const latest = records.length > 0 ? records[records.length - 1] : null;
+
+    let popupType: "in" | "out" | "reentry" = "in";
+    let statusLabel = "등원";
+
+    if (!latest) {
+      const { error } = await supabaseAdmin.from("attendance").insert({
+        student_id: stu.student_id,
+        tenant_id: stu.tenant_id,
+        class_id: classId,
+        enrollment_id: enrollmentId,
+        attendance_date: today,
+        status: "등원",
+        check_in_time: timestamp,
+      });
+      if (error) throw error;
+
+    } else if (!latest.check_out_time) {
+      const mins = (now.getTime() - new Date(latest.check_in_time).getTime()) / 60000;
+      if (mins < CHECKOUT_COOLDOWN_MIN) {
+        const remaining = Math.ceil(CHECKOUT_COOLDOWN_MIN - mins);
+        return { success: false, cooldown: true, remaining, message: `등원 후 ${CHECKOUT_COOLDOWN_MIN}분이 지나야 하원할 수 있습니다. (${remaining}분 남음)` };
+      }
+
+      const { error } = await supabaseAdmin
+        .from("attendance")
+        .update({ check_out_time: timestamp, status: "하원" })
+        .eq("attendance_id", latest.attendance_id);
+      if (error) throw error;
+
+      popupType = "out";
+      statusLabel = "하원";
+
+    } else {
+      const { error } = await supabaseAdmin.from("attendance").insert({
+        student_id: stu.student_id,
+        tenant_id: stu.tenant_id,
+        class_id: classId,
+        enrollment_id: enrollmentId,
+        attendance_date: today,
+        status: "등원",
+        check_in_time: timestamp,
+      });
+      if (error) throw error;
+
+      popupType = "reentry";
+      statusLabel = "등원";
+    }
+
+    // 알림톡 대기열 적재 (기존 함수 재사용)
+    const q = await queueAttendanceAlimtalk({
+      studentId: stu.student_id,
+      statusLabel,
+      timeString: timeStr,
+    });
+
+    return { success: true, popupType, statusLabel, queued: q.queued ?? 0, name: stu.name };
+  } catch (error: any) {
+    console.error("[kioskAttendance]", error);
+    return { success: false, message: error?.message || String(error) };
+  }
+}

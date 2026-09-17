@@ -4,6 +4,7 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { queueAttendanceAlimtalk } from "@/app/actions/alimtalk";
 import { supabase } from "@/lib/supabase";
+import { kioskAttendance } from "@/app/actions/alimtalk";
 
 const CHECKOUT_COOLDOWN_MIN = 3;
 
@@ -237,79 +238,17 @@ export default function KioskPage() {
     setConfirmStudent(null); 
 
     try {
-      const now = new Date();
-      const kstTime = new Date(now.getTime() + (9 * 60 * 60 * 1000));
-      const today = kstTime.toISOString().split('T')[0];
-      const timestamp = new Date().toISOString();
-      const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
+      const res = await kioskAttendance(student.student_id);
 
-      let enrollmentId = (student.enrollment && student.enrollment.length > 0) ? student.enrollment[0].enrollment_id : null;
-      let classId = getClassId(student);
-
-      const { data: rawRecords, error: fetchError } = await supabase
-        .from('attendance')
-        .select('*')
-        .eq('student_id', student.student_id)
-        .eq('attendance_date', today);
-
-      if (fetchError) throw fetchError;
-
-      const todayRecords = rawRecords || [];
-      todayRecords.sort((a, b) => a.attendance_id - b.attendance_id);
-
-      const latest = todayRecords.length > 0 ? todayRecords[todayRecords.length - 1] : null;
-
-      let popupType = "in"; 
-      let statusLabelForAlimtalk = "등원"; 
-
-      if (!latest) {
-        const { error: insertError } = await supabase.from('attendance').insert({
-          student_id: student.student_id,
-          class_id: classId,
-          enrollment_id: enrollmentId,
-          attendance_date: today,
-          status: '등원',
-          check_in_time: timestamp
-        });
-        if (insertError) throw insertError; 
-
-      } else if (!latest.check_out_time) {
-        const minutesSinceCheckIn = (now.getTime() - new Date(latest.check_in_time).getTime()) / 60000;
-        if (minutesSinceCheckIn < CHECKOUT_COOLDOWN_MIN) {
-          const remaining = Math.ceil(CHECKOUT_COOLDOWN_MIN - minutesSinceCheckIn);
-          alert(`등원 후 ${CHECKOUT_COOLDOWN_MIN}분이 지나야 하원할 수 있습니다. (${remaining}분 남음)`);
-          resetState();
-          return;
-        }
-
-        const { error: updateError } = await supabase.from('attendance').update({
-          check_out_time: timestamp,
-          status: '하원'
-        }).eq('attendance_id', latest.attendance_id);
-        if (updateError) throw updateError; 
-        
-        popupType = "out";
-        statusLabelForAlimtalk = "하원"; 
-
-      } else {
-        const { error: reentryError } = await supabase.from('attendance').insert({
-          student_id: student.student_id,
-          class_id: classId,
-          enrollment_id: enrollmentId,
-          attendance_date: today,
-          status: '등원',
-          check_in_time: timestamp
-        });
-        if (reentryError) throw reentryError; 
-
-        popupType = "reentry";
-        statusLabelForAlimtalk = "등원"; 
+      if (!res.success) {
+        alert(res.message || "출결 처리에 실패했습니다.");
+        resetState();
+        return;
       }
 
-      await queueAlimtalk(student, statusLabelForAlimtalk, timeStr);
-      playSuccessSound(popupType);
-      setSuccessPopup({ name: student.name, type: popupType });
-      
+      playSuccessSound(res.popupType!);
+      setSuccessPopup({ name: student.name, type: res.popupType! });
+
       setTimeout(() => {
         resetState();
       }, 3000);
