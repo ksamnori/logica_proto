@@ -26,7 +26,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const lastPos = useRef<{x: number, y: number} | null>(null);
   const lastMid = useRef<{x: number, y: number} | null>(null);
   
-  // 🌟 핵심 해결: 필기 렉(끊김) 방지용 지연 저장 타이머
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const drawWritableHint = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
@@ -53,7 +52,8 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
     
-    const ctx = canvas.getContext('2d', { desynchronized: true });
+    // 🌟 버그 수정 1: 특정 패드에서 배경이 까맣게 타버리는 현상을 막기 위해 desynchronized 옵션 제거
+    const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
     ctxRef.current = ctx;
@@ -75,9 +75,9 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     }
   };
 
-  // 🌟 강제 저장 함수 (비동기 처리로 메인 스레드 블로킹 방지)
   const saveCanvasData = useCallback(() => {
     if (canvasRef.current) {
+      // 🌟 버그 수정 2: 안드로이드 기기에서 webp 투명도를 검은색으로 저장해버리는 버그 방지를 위해 PNG로 변경
       canvasRef.current.toBlob((blob) => {
         if (!blob) return;
         const reader = new FileReader();
@@ -88,7 +88,7 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
           forceUpdate();
         };
         reader.readAsDataURL(blob);
-      }, 'image/webp', 0.5);
+      }, 'image/png');
     }
   }, [qIndex, studentDrawings, studentAnswers, forceUpdate]);
 
@@ -97,7 +97,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     return () => clearTimeout(timer);
   }, [qIndex, clearTrigger]);
 
-  // 언마운트되거나 다음 문제로 넘어갈 때, 아직 저장 안 된 필기가 있다면 강제로 일괄 저장!
   useEffect(() => {
     return () => {
       if (saveTimeoutRef.current) {
@@ -126,7 +125,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   };
 
   const startDraw = (e: any) => {
-    // 🌟 추가된 로직: 새 획을 긋기 시작하면 기존 저장 예약 취소
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
       saveTimeoutRef.current = null;
@@ -196,8 +194,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
 
     try { if (e?.pointerId != null) canvasRef.current.releasePointerCapture(e.pointerId); } catch (err) {}
     
-    // 🌟 짧게 끊어 쓰는(빠른) 필기 대응: 펜을 뗄 때마다 무겁게 저장하지 않음!
-    // 필기가 멈추고 0.4초(400ms)동안 새로운 획이 안 들어오면 그제야 일괄 저장
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
