@@ -2,9 +2,8 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { queueAttendanceAlimtalk } from "@/app/actions/alimtalk";
+import { queueAttendanceAlimtalk, kioskAttendance} from "@/app/actions/alimtalk";
 import { supabase } from "@/lib/supabase";
-import { kioskAttendance } from "@/app/actions/alimtalk";
 
 const CHECKOUT_COOLDOWN_MIN = 3;
 
@@ -118,24 +117,6 @@ export default function KioskPage() {
       const newDigits = digits + num;
       setDigits(newDigits);
       if (newDigits.length === 4) searchDBAndProcess(newDigits);
-    }
-  };
-
-  // 🌟 서버 액션 경유로 변경 — 브라우저가 alimtalk_queue를 직접 건드리지 않습니다.
-  const queueAlimtalk = async (student: any, statusLabel: string, timeString: string) => {
-    if (!student?.student_id) return;
-
-    const res = await queueAttendanceAlimtalk({
-      studentId: student.student_id,
-      statusLabel,
-      timeString,
-    });
-
-    // 🌟 이전엔 실패가 조용히 묻혔습니다. 이제는 반드시 드러납니다.
-    if (!res.success) {
-      console.error("[알림톡 대기열 실패]", res.message);
-    } else if (res.queued === 0) {
-      console.warn("[알림톡] 발송 대상 없음:", res.message);
     }
   };
 
