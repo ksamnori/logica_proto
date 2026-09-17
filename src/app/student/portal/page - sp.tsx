@@ -10,6 +10,7 @@ import { useClinicEndRequest } from '@/hooks/useClinicEndRequest';
 import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from '@/hooks/useToggleCooldown';
 import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
+// 🌟 서버 액션 임포트
 import { processIncompleteHomeworks, generateIncorrectClinic } from '@/app/actions/clinicActions';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
@@ -382,15 +383,16 @@ export default function StudentPortal() {
         const uniqueIncIds = Array.from(new Set(resolvedQids));
         const totalPrintQCount = uniqueIncIds.length;
 
+        // 🌟 [핵심 변경] 완전히 정답(O, TO, RO) 처리된 문항들만 카운트하기 위해 grading_code 필터 적용
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
                 .select('homework_id, tq_id')
                 .eq('student_id', sid)
-                .in('grading_code', ['O', 'TO', 'RO']),
+                .in('grading_code', ['O', 'TO', 'RO']), // 🌟 정답 처리된 것만 가져옴!
             supabaseClient.from('student_answer')
                 .select('exam_assignment_id, question_id')
                 .eq('student_id', sid)
-                .in('grading_code', ['O', 'TO', 'RO']),
+                .in('grading_code', ['O', 'TO', 'RO']), // 🌟 정답 처리된 것만 가져옴!
             supabaseClient.from('exam_assignment')
                 .select('assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
                 .eq('student_id', sid)
@@ -444,6 +446,7 @@ export default function StudentPortal() {
                 
                 const isFinalDone = ['최종완료', '완료', '채점완료'].includes(ex.status);
                 
+                // 🌟 [핵심 변경] 전체 문항 수에서 완전히 맞춘 문항만 뺌 = 남은 문제는 안 푼 문제 + 오답(X, TX) + 빈칸(B) 모두 포함
                 const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - resolved);
 
@@ -481,6 +484,7 @@ export default function StudentPortal() {
                 let tqLen = 0;
                 try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions).length : (hw.target_questions?.length || 0); } catch(e){}
 
+                // 🌟 [핵심 변경] 전체 문항 수에서 완전히 맞춘 문항만 뺌
                 const resolved = hwResolvedMap.get(hw.homework_id)?.size || 0;
                 const remain = Math.max(0, tqLen - resolved);
                 if (remain === 0) return;
@@ -561,11 +565,12 @@ export default function StudentPortal() {
         if (allPendingHwIds.length > 0) {
             const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
             
+            // 🌟 Server Action을 호출하여 관리자 권한으로 DB 작업 수행 (RLS 우회)
             const result = await processIncompleteHomeworks(studentInfo.id, allPendingHwIds, myTenantId);
             
             if (!result.success) {
                 alert(`보안 정책으로 인해 미완료 과제를 생성하지 못했습니다.\n원장님/선생님께 문의해주세요: ${result.error}`);
-                return; 
+                return; // 🚨 실패 시 그냥 로그아웃 되지 않고 원인을 확인할 수 있도록 막음
             }
         }
 
@@ -657,6 +662,7 @@ export default function StudentPortal() {
 
                 const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
                 
+                // 🌟 FIX: uniqueQids가 any[]로 추론되는 것을 명시적으로 number[]로 캐스팅
                 const uniqueQids = Array.from(new Set(resolvedQids)) as number[];
                 
                 if (uniqueQids.length === 0) {
@@ -667,12 +673,13 @@ export default function StudentPortal() {
                 
                 const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
                 
+                // 🌟 Server Action을 호출하여 관리자 권한으로 DB 작업 수행 (RLS 우회)
                 const result = await generateIncorrectClinic({
                     studentId: studentInfo.id,
                     studentName: studentInfo.name,
                     targetClassId,
                     targetInstructorId,
-                    uniqueQids, 
+                    uniqueQids, // 🌟 이제 에러 없이 정상적으로 전달됨
                     tenantId: myTenantId
                 });
 
@@ -814,9 +821,8 @@ export default function StudentPortal() {
                 {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText.includes('bg-') ? 'text-slate-800' : theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 모두 완료됨</span>}
                 
                 <div className="relative z-10 shrink-0">
-                    {/* 🌟 수정 1: 상단 헤더의 드롭다운 배치를 flex container로 변경하여 겹침 원천 차단 */}
-                    <div className="flex justify-between items-start mb-4 relative z-20 gap-4">
-                        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-2.5">
                             <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                                 {isLocked ? '🔒 잠김' : theme.label}
                             </span>
@@ -826,30 +832,10 @@ export default function StudentPortal() {
                                 </span>
                             )}
                         </div>
-                        
-                        <div className="flex flex-col items-end gap-2.5 shrink min-w-0">
-                            <div className="flex items-center gap-2">
-                                {isSelectedItemWaiting && initialScore !== null && (
-                                    <span className="text-sm md:text-base font-bold text-white bg-black/20 px-3.5 py-1.5 rounded-lg whitespace-nowrap">가채점: {initialScore}점</span>
-                                )}
-                                {!isBoxDone && !isSelectedItemWaiting && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg whitespace-nowrap`}>남은 문제: {selectedItem.remain || qCount}</span>}
-                            </div>
-                            {/* 🌟 수정 2: 하단에 있던 드롭다운을 최상단 우측으로 이동 */}
-                            {hasMultiple && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
-                                <select
-                                    value={selectedIdx}
-                                    onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
-                                    className="max-w-full w-[240px] text-xs md:text-sm font-bold bg-black/20 text-white border border-white/20 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-black/30 transition-colors shadow-sm"
-                                    style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px top 50%', backgroundSize: '10px auto' }}
-                                >
-                                    {items.map((item: any, idx: number) => (
-                                        <option key={idx} value={idx} className="text-slate-800 bg-white">
-                                            {item.title} (남은 {item.remain}문제)
-                                        </option>
-                                    ))}
-                                </select>
-                            )}
-                        </div>
+                        {isSelectedItemWaiting && initialScore !== null && (
+                            <span className="text-sm md:text-base font-bold text-white bg-black/20 px-3.5 py-1.5 rounded-lg">가채점: {initialScore}점</span>
+                        )}
+                        {!isBoxDone && !isSelectedItemWaiting && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {selectedItem.remain || qCount}</span>}
                     </div>
                     
                     <h3 className={`text-[28px] md:text-[34px] lg:text-[38px] font-black mb-2 leading-tight ${isLocked ? 'text-white/90' : ''}`}>
@@ -882,8 +868,21 @@ export default function StudentPortal() {
                         )}
                     </div>
                     
-                    {/* 🌟 드롭다운이 최상단으로 이동했으므로 버튼 전용 영역으로 단순화됨 */}
                     <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
+                        {hasMultiple && !isBoxDone && !isLocked && (
+                            <select
+                                value={selectedIdx}
+                                onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
+                                className="w-[180px] md:w-[240px] text-xs md:text-sm font-bold bg-black/20 text-white border border-white/20 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-black/30 transition-colors shadow-sm"
+                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px top 50%', backgroundSize: '10px auto' }}
+                            >
+                                {items.map((item: any, idx: number) => (
+                                    <option key={idx} value={idx} className="text-slate-800 bg-white">
+                                        {item.title} (남은 {item.remain}문제)
+                                    </option>
+                                ))}
+                            </select>
+                        )}
                         {isBoxDone ? 
                             <button disabled className={`bg-white/70 ${theme.btnText.includes('bg-') ? 'text-slate-600' : theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
                                 학습 전체 완료
@@ -948,9 +947,8 @@ export default function StudentPortal() {
                 {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 ${theme.btnText} text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
                 
                 <div className="relative z-10 shrink-0">
-                    {/* 🌟 미완료 카드도 동일하게 드롭다운을 최상단 우측으로 이동 */}
-                    <div className="flex justify-between items-start mb-4 relative z-20 gap-4">
-                        <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+                    <div className="flex justify-between items-start mb-4">
+                        <div className="flex items-center gap-2.5">
                             <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/30 text-white shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                                 {isLocked ? '🔒 잠김' : theme.label}
                             </span>
@@ -960,26 +958,8 @@ export default function StudentPortal() {
                                 </span>
                             )}
                         </div>
-                        
-                        <div className="flex flex-col items-end gap-2.5 shrink min-w-0">
-                            {!isBoxDone && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg whitespace-nowrap`}>남은 문제: {selectedItem.remain || qCount}</span>}
-                            {hasMultiple && !isBoxDone && !isLocked && (
-                                <select
-                                    value={selectedIdx}
-                                    onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
-                                    className="max-w-full w-[240px] text-xs md:text-sm font-bold bg-black/20 text-white border border-white/20 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-black/30 transition-colors shadow-sm"
-                                    style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px top 50%', backgroundSize: '10px auto' }}
-                                >
-                                    {items.map((item: any, idx: number) => (
-                                        <option key={idx} value={idx} className="text-slate-800 bg-white">
-                                            {item.title} (남은 {item.remain}문제)
-                                        </option>
-                                    ))}
-                                </select>
-                            )}
-                        </div>
+                        {!isBoxDone && qCount > 0 && <span className={`text-sm md:text-base font-bold ${isLocked ? 'text-white/70 bg-black/20' : theme.textColor + ' bg-black/10'} px-3.5 py-1.5 rounded-lg`}>남은 문제: {selectedItem.remain || qCount}</span>}
                     </div>
-                    
                     <h3 className={`text-[28px] md:text-[34px] lg:text-[38px] font-black mb-2 leading-tight ${isLocked ? 'text-white/90' : ''}`}>미완료 과제 클리닉</h3>
                     <p className={`text-base md:text-lg font-medium mt-1 mb-2 leading-snug ${isLocked ? 'text-white/70' : theme.textColor}`}>
                         {isLocked ? '첫 번째 학습을 먼저 제출해주세요.' : theme.desc}
@@ -1005,6 +985,20 @@ export default function StudentPortal() {
                     </div>
                     
                     <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
+                        {hasMultiple && !isBoxDone && !isLocked && (
+                            <select
+                                value={selectedIdx}
+                                onChange={(e) => setSelectedTaskIdx(prev => ({ ...prev, [cardKey]: Number(e.target.value) }))}
+                                className="w-[180px] md:w-[240px] text-xs md:text-sm font-bold bg-black/20 text-white border border-white/20 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-black/30 transition-colors shadow-sm"
+                                style={{ backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23FFFFFF%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 12px top 50%', backgroundSize: '10px auto' }}
+                            >
+                                {items.map((item: any, idx: number) => (
+                                    <option key={idx} value={idx} className="text-slate-800 bg-white">
+                                        {item.title} (남은 {item.remain}문제)
+                                    </option>
+                                ))}
+                            </select>
+                        )}
                         {isBoxDone ?
                             <button disabled className={`bg-white/70 ${theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
                         : isLocked ?
