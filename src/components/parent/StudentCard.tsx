@@ -162,11 +162,15 @@ export default function StudentCard({ student }: { student: any }) {
   const [lessonLogs, setLessonLogs] = useState<any[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   
-  // 🌟 성적 데이터 상태 추가
+  // 성적 데이터 상태
   const [examResults, setExamResults] = useState<any[]>([]);
   const [categoryAnalysis, setCategoryAnalysis] = useState<any[]>([]);
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
   const [isExamLoading, setIsExamLoading] = useState(false);
+
+  // 🌟 [추가] 보강 관리 상태
+  const [makeups, setMakeups] = useState<any[]>([]);
+  const [isMakeupLoading, setIsMakeupLoading] = useState(false);
 
   // 토스트 팝업 상태 관리
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -182,6 +186,7 @@ export default function StudentCard({ student }: { student: any }) {
 
   const consultLogs = student.consultation_log ? [...student.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) : [];
 
+  // 과제 데이터 로드
   useEffect(() => {
     if (activeTab === "homework" && classId) {
       const fetchLogs = async () => {
@@ -205,7 +210,7 @@ export default function StudentCard({ student }: { student: any }) {
     }
   }, [activeTab, classId]);
 
-  // 🌟 성적 탭 진입 시 데이터 통합 로딩
+  // 성적 데이터 로드
   useEffect(() => {
     if (activeTab === "exam" && student?.student_id) {
       const loadAllExamData = async () => {
@@ -220,6 +225,28 @@ export default function StudentCard({ student }: { student: any }) {
       loadAllExamData();
     }
   }, [activeTab, student]);
+
+  // 🌟 [추가] 보강 일정 데이터 로드
+  useEffect(() => {
+    if (activeTab === "makeup" && student?.student_id) {
+      const fetchMakeups = async () => {
+        setIsMakeupLoading(true);
+        try {
+          const { data } = await supabase
+            .from('individual_makeup')
+            .select('*, instructor(name)')
+            .eq('student_id', student.student_id)
+            .order('schedule_date', { ascending: false });
+          setMakeups(data || []);
+        } catch (err) {
+          console.error("보강 내역 로드 에러:", err);
+        } finally {
+          setIsMakeupLoading(false);
+        }
+      };
+      fetchMakeups();
+    }
+  }, [activeTab, student?.student_id]);
 
   const loadExamResults = async () => {
     try {
@@ -498,7 +525,6 @@ export default function StudentCard({ student }: { student: any }) {
     );
   };
 
-  // 🌟 성적 탭: 막대 그래프
   const renderGrowthChart = () => {
     if (examResults.length === 0) return <div className="text-center py-20 text-slate-400 font-bold text-sm bg-slate-50 rounded-xl">최근 시험 데이터가 없습니다.</div>;
     
@@ -539,7 +565,6 @@ export default function StudentCard({ student }: { student: any }) {
 
         <div className="w-full overflow-x-auto overflow-y-hidden custom-scroll pb-2">
           <svg viewBox={`0 0 ${dynamicWidth} ${height}`} className="w-full" style={{ minWidth: dynamicWidth, height: height }}>
-            {/* 1. 가로 그리드 선 */}
             {[0, 25, 50, 75, 100].map(score => (
               <g key={score}>
                 <line x1={paddingX - 10} y1={getY(score)} x2={dynamicWidth - 10} y2={getY(score)} stroke="#f1f5f9" strokeWidth="1.5" />
@@ -547,14 +572,12 @@ export default function StudentCard({ student }: { student: any }) {
               </g>
             ))}
             
-            {/* 2. 회색 배경 막대 (트랙) */}
             {chartData.map((r: any, i: number) => {
                const cx = paddingX + (i * xStep) + 20; 
                const barWidth = 32;
                return <rect key={`bg-${i}`} x={cx - barWidth/2} y={getY(100)} width={barWidth} height={height - paddingY * 2} fill="#f8fafc" rx="6" />;
             })}
 
-            {/* 🌟 3. 내 점수 막대 및 하단 텍스트 (선을 덮어버리지 않도록 여기서 먼저 그림) */}
             {chartData.map((r: any, i: number) => {
                const cx = paddingX + (i * xStep) + 20; 
                const initialScore = r.original_score || 0; 
@@ -574,11 +597,9 @@ export default function StudentCard({ student }: { student: any }) {
                );
             })}
 
-            {/* 🌟 4. 평균 점수 꺾은선 (점선) (이제 막대보다 나중에 그려서 맨 앞으로 튀어나옴) */}
             <polyline points={pointsInitAvg} fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeDasharray="4 4" />
             <polyline points={pointsFinAvg} fill="none" stroke="#10b981" strokeWidth="2.5" strokeDasharray="4 4" />
             
-            {/* 🌟 5. 평균 점수 마커 (동그라미) */}
             {chartData.map((r: any, i: number) => {
                const cx = paddingX + (i * xStep) + 20; 
                return (
@@ -589,7 +610,6 @@ export default function StudentCard({ student }: { student: any }) {
                );
             })}
 
-            {/* 🌟 6. 내 점수 텍스트 (허공 최상단 100점 라인 위 고정 배치) */}
             {chartData.map((r: any, i: number) => {
                const cx = paddingX + (i * xStep) + 20; 
                const finalScore = r.final_score || (r.original_score || 0);
@@ -649,27 +669,31 @@ export default function StudentCard({ student }: { student: any }) {
         </div>
       </div>
 
-      <div className="flex px-4 sm:px-6 pt-4 border-b border-slate-100 gap-1.5 overflow-x-auto no-scrollbar justify-start">
-        {[
-          { id: "attendance", label: "출결" },
-          { id: "progress", label: "진도" },
-          { id: "homework", label: "과제" },
-          { id: "makeup", label: "보강" },
-          { id: "exam", label: "성적" },
-          { id: "consultation", label: "상담" },
-        ].map((tab) => (
-          <button
-            key={tab.id}
-            onClick={() => setActiveTab(tab.id as any)}
-            className={`px-3 py-1.5 text-[11px] font-extrabold rounded-full transition-all shrink-0 border ${
-              activeTab === tab.id
-                ? "bg-[#002864] text-white border-[#002864] shadow-sm"
-                : "bg-white text-slate-500 border-slate-200 hover:bg-slate-50"
-            }`}
-          >
-            {tab.label}
-          </button>
-        ))}
+      {/* 🌟 완전히 새로워진 2행 3열 세그먼트 컨트롤 메뉴 디자인 */}
+      <div className="px-4 sm:px-6 py-4 bg-white border-b border-slate-100">
+        <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#f1f5f9] rounded-[18px] shadow-inner border border-slate-200/60">
+          {[
+            { id: "attendance", label: "출결", e_label: "Attendance" },
+            { id: "progress", label: "진도", e_label: "Progress" },
+            { id: "homework", label: "과제", e_label: "Homework" },
+            { id: "makeup", label: "보강", e_label: "Makeup" },
+            { id: "exam", label: "성적", e_label: "Report" },
+            { id: "consultation", label: "상담", e_label: "Counsel" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as any)}
+              className={`relative flex flex-col items-center justify-center py-2.5 rounded-xl transition-all duration-300 ${
+                activeTab === tab.id
+                  ? "bg-white text-[#002864] shadow-[0_2px_10px_-3px_rgba(0,0,0,0.1)] border border-slate-200/50 transform scale-[1.02] z-10"
+                  : "text-slate-400 hover:text-slate-600 hover:bg-slate-200/50"
+              }`}
+            >
+              <span className="text-[13px] font-black">{tab.label}</span>
+              <span className={`text-[9px] font-bold mt-[2px] transition-colors duration-300 ${activeTab === tab.id ? 'text-blue-500/70' : 'text-slate-300'}`}>{tab.e_label}</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       <div className="p-5 sm:p-6 bg-slate-50/50 min-h-[400px]">
@@ -846,6 +870,65 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
+        {/* 🌟 보강 (개별 클리닉/메이크업 일정 연동 뷰) */}
+        {activeTab === "makeup" && (
+          <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
+            {isMakeupLoading ? (
+              <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                <div className="w-6 h-6 border-4 border-[#002864] border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                보강 일정을 불러오는 중입니다...
+              </div>
+            ) : makeups.length === 0 ? (
+              <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                {/* 🌟 빈 화면 아이콘 💡(전구)로 교체 */}
+                <span className="text-3xl block mb-3 opacity-50">💡</span>
+                등록된 보강/클리닉 일정이 없습니다.
+              </div>
+            ) : (
+              makeups.map((m: any) => {
+                const d = new Date(m.schedule_date);
+                const dateStr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+                const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+                const instName = m.instructor?.name ? `${m.instructor.name} 선생님` : '담당 미정';
+                
+                let statusColor = "bg-slate-100 text-slate-600 border-slate-200";
+                if (m.status === '예정') statusColor = "bg-blue-50 text-blue-600 border-blue-200";
+                else if (m.status === '진행중') statusColor = "bg-amber-50 text-amber-600 border-amber-200";
+                else if (m.status === '완료') statusColor = "bg-emerald-50 text-emerald-600 border-emerald-200";
+                else if (m.status === '취소') statusColor = "bg-rose-50 text-rose-500 border-rose-200";
+
+                return (
+                  <div key={m.makeup_id} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3 transition-shadow hover:shadow-md">
+                    <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${statusColor} shadow-sm`}>
+                          {m.status || '예정'}
+                        </span>
+                        <span className="text-[14px] font-black text-[#002864] tracking-tight">
+                          {dateStr} {timeStr}
+                        </span>
+                      </div>
+                      <span className="text-[11px] font-bold text-slate-500 bg-slate-50 px-2 py-1 rounded border border-slate-100">
+                        {instName}
+                      </span>
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <div className="flex items-start gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 w-12 pt-0.5 shrink-0">보강내용</span>
+                        <span className="text-[13px] font-bold text-slate-700 leading-snug">{m.target_category_id || '내용 미정'}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold text-slate-400 w-12 shrink-0">강의실</span>
+                        <span className="text-[12px] font-medium text-slate-600">{m.classroom || '-'}</span>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        )}
+
         {activeTab === "consultation" && (
           <div className="space-y-3 animate-[fadeIn_0.2s_ease-out]">
              {consultLogs.length === 0 ? (
@@ -887,7 +970,6 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
-        {/* 🌟 모바일 최적화 성적 탭 (원 스크롤 1단 배치) */}
         {activeTab === "exam" && (
           <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
             {isExamLoading ? (
@@ -1005,13 +1087,6 @@ export default function StudentCard({ student }: { student: any }) {
 
               </div>
             )}
-          </div>
-        )}
-
-        {activeTab === "makeup" && (
-          <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm animate-[fadeIn_0.2s_ease-out]">
-            <span className="text-3xl block mb-3 opacity-50">🛠️</span>
-            해당 영역의 데이터 연동을 준비하고 있습니다.
           </div>
         )}
       </div>

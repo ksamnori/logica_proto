@@ -155,17 +155,25 @@ export const generateOverduePrint = async (
         }
 
         if (!merged) {
-            const { data: cls } = await supabaseClient.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
-            const classData: any = cls?.class;
-            let instId = Array.isArray(classData) ? classData[0]?.instructor_id : classData?.instructor_id;
+            const { data: cls } = await supabaseClient.from('enrollment').select('class_id, class(instructor_id, tenant_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
+            const classData: any = Array.isArray(cls?.class) ? cls?.class[0] : cls?.class;
+            let instId = classData?.instructor_id;
+            const tenantId = classData?.tenant_id || null;
+            const classId = cls?.class_id || null;
 
             if (!instId) { const { data: fb } = await supabaseClient.from('instructor').select('instructor_id').limit(1).maybeSingle(); instId = fb?.instructor_id; }
             if (!instId) return;
 
-            const { data: ex } = await supabaseClient.from('exam_master').insert({ title, exam_type: '미완료과제', instructor_id: instId, total_questions: uIds.length }).select().single();
+            const { data: ex } = await supabaseClient.from('exam_master').insert({ 
+                title, exam_type: '미완료과제', instructor_id: instId, 
+                total_questions: uIds.length, tenant_id: tenantId 
+            }).select().single();
             const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round(100 / uIds.length) }));
             await supabaseClient.from('exam_item').insert(items);
-            await supabaseClient.from('exam_assignment').insert({ exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시' });
+            await supabaseClient.from('exam_assignment').insert({ 
+                exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시', 
+                class_id: classId, tenant_id: tenantId 
+            });
         }
     } catch (e) {
         console.error('generateOverduePrint 오류:', e);
@@ -187,11 +195,11 @@ export const finalizeSessionData = async (
         await generateIncorrectPrint(supabaseClient, studentInfo, incorrectQIds, globalExamTitle, isTimedRound, statusMap);
     }
 
-    if (unansweredQIds.length > 0 && params.round === 2) {
+    if (unansweredQIds.length > 0) {
         await generateOverduePrint(supabaseClient, studentInfo, unansweredQIds, globalExamTitle);
     }
 
-    if (params.round === 2) {
+    if (params.round === 2 || unansweredQIds.length > 0) {
         const hwIdsProcessed = new Set<number>();
         const examAssignIdsProcessed = new Set<string>();
         questions.forEach(q => {

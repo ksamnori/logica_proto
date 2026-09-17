@@ -77,7 +77,6 @@ export default function TeacherDashboardPage() {
   const isBulkProcessing = useRef<boolean>(false);
   const fetchTimeoutRef = useRef<any>(null);
 
-  // 🌟 핵심 연동: 데이터베이스 동기화 시차 보완용 헬퍼 함수
   const requestFetch = (classId: string) => {
     if (isBulkProcessing.current) return;
     if (fetchTimeoutRef.current) clearTimeout(fetchTimeoutRef.current);
@@ -118,7 +117,6 @@ export default function TeacherDashboardPage() {
     return () => { document.removeEventListener("mousedown", closeMenu); };
   }, []);
 
-  // 🌟 핵심 연동: 5초 간격으로 폴링하여 강제 종료(비정상) 상태도 감지
   useEffect(() => {
     if (myClasses.length > 0 && selectedClassId !== "all") {
       fetchClassDetails(selectedClassId);
@@ -132,7 +130,6 @@ export default function TeacherDashboardPage() {
     }
   }, [selectedClassId, myClasses.length]);
 
-  // 🌟 핵심 연동: 실시간 알림 시 Debounce 헬퍼 함수 사용
   useEffect(() => {
     if (!selectedClassId || selectedClassId === "all") return;
 
@@ -232,28 +229,35 @@ export default function TeacherDashboardPage() {
       }
     }
 
-    fetchUpcomingSchedules();
+    fetchUpcomingSchedules(instId); 
     fetchMemos();
   };
 
-  const fetchUpcomingSchedules = async () => {
+  const fetchUpcomingSchedules = async (instId: string) => {
     const todayStr = getKSTDateStr();
 
     try {
       const { data: makeups } = await supabase
-        .from("agenda")
-        .select("title, meeting_date")
-        .in('source', ['Makeup', 'Clinic', '보강', '클리닉'])
-        .gte("meeting_date", todayStr)
-        .order("meeting_date", { ascending: true })
+        .from("individual_makeup")
+        .select("schedule_date, classroom, status, student(name), target_category_id")
+        .eq("instructor_id", instId)
+        .in("status", ["예정", "진행중"])
+        .gte("schedule_date", todayStr)
+        .order("schedule_date", { ascending: true })
         .limit(1);
 
       if (makeups && makeups.length > 0) {
-        const dateObj = new Date(makeups[0].meeting_date);
-        const timeStr = formatTimeAsKST(makeups[0].meeting_date);
+        const m = makeups[0];
+        const dateObj = new Date(m.schedule_date);
+        const timeStr = formatTimeAsKST(m.schedule_date);
+        
+        // 🌟 TS 에러 완벽 해결 (Array 우회)
+        const stuData: any = m.student;
+        const stuName = Array.isArray(stuData) ? stuData[0]?.name : stuData?.name;
+        
         setUpcomingMakeup({
-          title: makeups[0].title,
-          time: timeStr !== '00:00' ? `${dateObj.getMonth()+1}.${dateObj.getDate()} ${timeStr}` : `${dateObj.getMonth()+1}.${dateObj.getDate()}`
+          title: `${stuName || '학생'} 개별보강 (${m.classroom || '미정'})`,
+          time: `${dateObj.getMonth() + 1}.${dateObj.getDate()} ${timeStr}`
         });
       } else {
         setUpcomingMakeup(null);
@@ -527,7 +531,6 @@ export default function TeacherDashboardPage() {
         });
       }
       
-            // 🌟 서버 액션 경유. 일괄 처리 중에는 건너뛰고 마지막에 모아서 보냅니다.
       if (statusLabel && !isBulkProcessing.current) {
         const res = await queueAttendanceNotice({
           studentId: student.id,
@@ -542,7 +545,7 @@ export default function TeacherDashboardPage() {
     }
   };
 
-    const bulkAttend = async () => {
+  const bulkAttend = async () => {
     if (!confirm('현재 미처리된 모든 학생을 "등원" 처리하시겠습니까?\n(알림톡 발송됨)')) return;
     const toUpdate = attStudents.filter(s => s.status === "NONE");
     const at = new Date().toISOString();
@@ -553,7 +556,6 @@ export default function TeacherDashboardPage() {
     }
     isBulkProcessing.current = false;
 
-    // 🌟 알림톡은 한 번의 왕복으로 일괄 적재
     if (toUpdate.length > 0) {
       const res = await queueAttendanceNoticeBulk(
         toUpdate.map(s => ({ studentId: s.id, statusLabel: "등원", actionTime: at }))
@@ -632,7 +634,7 @@ export default function TeacherDashboardPage() {
           });
         }
 
-                if (['등원', '지각', '결석', '조퇴', '하원'].includes(status)) {
+        if (['등원', '지각', '결석', '조퇴', '하원'].includes(status)) {
           const timeTarget = status === '조퇴' || status === '하원' ? checkOut : checkIn;
           const actionTime = timeTarget ? toIsoString(timeTarget)! : new Date().toISOString();
 
@@ -845,7 +847,8 @@ export default function TeacherDashboardPage() {
               </div>
               
               <div onClick={() => hasAccess('/makeup') ? router.push('/makeup') : alert("접근 권한이 없습니다.")} className={`flex flex-col justify-center bg-emerald-50 p-3 rounded-xl border border-emerald-100 transition-colors h-[68px] ${hasAccess('/makeup') ? 'cursor-pointer hover:bg-emerald-100' : 'cursor-not-allowed opacity-70'}`}>
-                <span className="text-[10px] font-bold text-emerald-500 mb-1">🏥 임박한 보강/클리닉</span>
+                {/* 🌟 💡 아이콘으로 수정 완료 */}
+                <span className="text-[10px] font-bold text-emerald-500 mb-1">💡 임박한 보강/클리닉</span>
                 {upcomingMakeup ? (
                    <div className="flex items-center gap-2">
                       <span className="text-xs font-black bg-white text-emerald-600 px-1.5 py-0.5 rounded border border-emerald-200 shrink-0">{upcomingMakeup.time}</span>

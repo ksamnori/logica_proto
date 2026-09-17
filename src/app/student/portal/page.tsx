@@ -10,6 +10,8 @@ import { useClinicEndRequest } from '@/hooks/useClinicEndRequest';
 import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from '@/hooks/useToggleCooldown';
 import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
+// 🌟 서버 액션 임포트
+import { processIncompleteHomeworks, generateIncorrectClinic } from '@/app/actions/clinicActions';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -442,14 +444,14 @@ export default function StudentPortal() {
                 const rawTitle = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.title : ex.exam_master?.title;
                 const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
                 
-                const isFinalDone = ['최종완료', '완료'].includes(ex.status);
+                const isFinalDone = ['최종완료', '완료', '채점완료'].includes(ex.status);
                 
                 // 🌟 [핵심 변경] 전체 문항 수에서 완전히 맞춘 문항만 뺌 = 남은 문제는 안 푼 문제 + 오답(X, TX) + 빈칸(B) 모두 포함
                 const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - resolved);
 
                 const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(type);
-                if (isTestType && ex.created_at?.startsWith(today) && !['미응시', '진행중', '대기'].includes(ex.status)) {
+                if (isTestType && !['미응시', '진행중', '대기'].includes(ex.status)) {
                     hasAnyExamClearedToday = true;
                 }
 
@@ -490,7 +492,7 @@ export default function StudentPortal() {
                 const cleanedTitle = cleanTitle(hw.homework_title, sName);
                 const item = { id: hw.homework_id, title: cleanedTitle, remain, status, score: null, type: 'hw' };
 
-                if (hw.due_date && hw.due_date <= today) { 
+                if (hw.due_date && hw.due_date < today) {
                     overdueNormalHws.push(item);
                 } else { 
                     normalHws.push(item);
@@ -561,10 +563,15 @@ export default function StudentPortal() {
         });
         
         if (allPendingHwIds.length > 0) {
-            const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-            await supabaseClient.from('homework_assignment')
-                .update({ due_date: yesterday })
-                .in('homework_id', allPendingHwIds);
+            const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+            
+            // 🌟 Server Action을 호출하여 관리자 권한으로 DB 작업 수행 (RLS 우회)
+            const result = await processIncompleteHomeworks(studentInfo.id, allPendingHwIds, myTenantId);
+            
+            if (!result.success) {
+                alert(`보안 정책으로 인해 미완료 과제를 생성하지 못했습니다.\n원장님/선생님께 문의해주세요: ${result.error}`);
+                return; // 🚨 실패 시 그냥 로그아웃 되지 않고 원인을 확인할 수 있도록 막음
+            }
         }
 
         localStorage.removeItem('logica_student_id');
@@ -638,7 +645,7 @@ export default function StudentPortal() {
             try {
                 const { data: classData } = await supabaseClient.from('class').select('class_id, instructor_id').eq('name', className).limit(1).maybeSingle();
                 const targetClassId = classData?.class_id || null;
-                const targetInstructorId = classData?.instructor_id || 'system';
+                const targetInstructorId = classData?.instructor_id || null;
 
                 const { data: incData } = await supabaseClient.from('student_incorrect_record')
                     .select('question_id, tq_id, status')
@@ -654,77 +661,33 @@ export default function StudentPortal() {
                 }
 
                 const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
-                const uniqueQids = Array.from(new Set(resolvedQids));
+                
+                // 🌟 FIX: uniqueQids가 any[]로 추론되는 것을 명시적으로 number[]로 캐스팅
+                const uniqueQids = Array.from(new Set(resolvedQids)) as number[];
                 
                 if (uniqueQids.length === 0) {
                     alert('정정할 오답이 없습니다.');
                     setIsGeneratingPrint(false);
                     return;
                 }
-
-                const { data: oldPrints } = await supabaseClient.from('exam_assignment')
-                    .select('assignment_id, exam_id, exam_master!inner(exam_type)')
-                    .eq('student_id', studentInfo.id)
-                    .in('status', ['미응시', '진행중', '대기'])
-                    .eq('exam_master.exam_type', '오답프린트');
-                    
-                if (oldPrints && oldPrints.length > 0) {
-                    const oldAssignIds = oldPrints.map((p: any) => p.assignment_id);
-                    const oldExamIds = oldPrints.map((p: any) => p.exam_id);
-                    await supabaseClient.from('student_answer').delete().in('exam_assignment_id', oldAssignIds);
-                    await supabaseClient.from('exam_assignment').delete().in('assignment_id', oldAssignIds);
-                    await supabaseClient.from('exam_item').delete().in('exam_id', oldExamIds);
-                    await supabaseClient.from('exam_master').delete().in('exam_id', oldExamIds);
-                }
-
+                
                 const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
                 
-                const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
-                    title: `[통합] ${studentInfo.name} 오답 클리닉`,
-                    sub_title: '누적 오답 모음',
-                    exam_type: '오답프린트',
-                    total_questions: uniqueQids.length,
-                    tenant_id: myTenantId,
-                    instructor_id: targetInstructorId,
-                    layout_settings: {
-                        column: 2,
-                        split: 4,
-                        titleMode: 'all',
-                        template: 'basic1',
-                        numberColor: '#175b6a',
-                        titleColor: '#002864',
-                        lineColor: '#94a3b8'
-                    }
-                }).select().single();
-                
-                if (masterErr || !masterData) {
-                    throw new Error(masterErr?.message || "시험지 생성을 실패했습니다.");
+                // 🌟 Server Action을 호출하여 관리자 권한으로 DB 작업 수행 (RLS 우회)
+                const result = await generateIncorrectClinic({
+                    studentId: studentInfo.id,
+                    studentName: studentInfo.name,
+                    targetClassId,
+                    targetInstructorId,
+                    uniqueQids, // 🌟 이제 에러 없이 정상적으로 전달됨
+                    tenantId: myTenantId
+                });
+
+                if (!result.success || !result.assignmentId) {
+                    throw new Error(result.error || "시험지 배부를 실패했습니다.");
                 }
 
-                const newExamId = masterData.exam_id;
-                
-                const examItems = uniqueQids.map((qId, idx) => ({
-                    exam_id: newExamId,
-                    question_id: qId,
-                    sort_order: idx + 1
-                }));
-                
-                for (let i = 0; i < examItems.length; i += 100) {
-                    await supabaseClient.from('exam_item').insert(examItems.slice(i, i + 100));
-                }
-                
-                const { data: assignData, error: assignErr } = await supabaseClient.from('exam_assignment').insert({
-                    exam_id: newExamId,
-                    student_id: studentInfo.id,
-                    class_id: targetClassId,
-                    status: '미응시'
-                }).select().single();
-
-                if (assignErr || !assignData) {
-                    throw new Error(assignErr?.message || "시험지 배부를 실패했습니다.");
-                }
-
-                params.append('assignment_id', assignData.assignment_id);
+                params.append('assignment_id', String(result.assignmentId));
             } catch (e: any) {
                 console.error(e);
                 alert(`문제지를 통합 생성하는 중 오류가 발생했습니다: ${e.message}`);
@@ -796,7 +759,9 @@ export default function StudentPortal() {
 
         const isBoxDone = (typeKey === 'print' ? (prog.printPendingCount === 0) : (items.length === 0)) || cState[typeKey] === '최종완료' || cState[typeKey] === '채점완료';
         
-        const isExamClearedToProceed = cState.exam === '최종완료' || prog.hasAnyExamClearedToday;
+        const isExamClearedToProceed = cState.exam === '최종완료' 
+            || prog.hasAnyExamClearedToday 
+            || (prog.examList?.length || 0) === 0;
         const isLocked = typeKey !== 'exam' && !isBoxDone && !isExamClearedToProceed; 
 
         const qCount = typeKey === 'exam' ? prog.examQCount : typeKey === 'hw' ? prog.hwQCount : typeKey === 'print' ? prog.printQCount : 0;

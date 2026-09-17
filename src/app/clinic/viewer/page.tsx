@@ -572,9 +572,9 @@ export default function ClinicViewer() {
                 const isBlank = !ans || String(ans).trim() === '' || String(ans).trim() === '미입력';
 
                 if (isBlank) {
-                    if (params.round === 2) unansweredQIds.push(qItem.question_id); 
-                    else { incorrectQIds.push(qItem.question_id); statusMap[qItem.question_id] = 'B'; }
+                    unansweredQIds.push(qItem.question_id);
                 } else {
+                
                     incorrectQIds.push(qItem.question_id);
                     statusMap[qItem.question_id] = 'X';
                 }

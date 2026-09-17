@@ -9,6 +9,7 @@ import { supabaseClient } from './supervisorUtils';
 import LeftPanel from './LeftPanel';
 import SeatGrid from './SeatGrid';
 import SeatCardBody from './SeatCardBody';
+import UnlockPanel from "@/components/clinic/UnlockPanel";
 
 // 🌟 재사용 가능한 MathText 컴포넌트 추가
 const MathText = React.memo(function MathText({ html, className }: { html: string; className?: string }) {
@@ -569,6 +570,11 @@ export default function SupervisorDashboard() {
                 <SeatGrid data={supervisorData} />
 
                 <aside className="w-[260px] bg-white border-l border-slate-300 flex flex-col h-full shadow-2xl z-10 shrink-0">
+
+                    <div className="p-2 shrink-0">
+                      <UnlockPanel />
+                    </div>
+
                     <div className="bg-slate-800 text-white px-4 py-2 font-bold text-[12px] flex justify-between items-center shrink-0">
                         <span>⚡ 현장 라이브 로그</span>
                         <span className="text-[10px] bg-rose-500 px-1.5 py-0.5 rounded animate-pulse">Live</span>
