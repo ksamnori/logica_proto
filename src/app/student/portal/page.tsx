@@ -365,8 +365,9 @@ export default function StudentPortal() {
         }));
         setClassWeekTypes(newClassWeekTypes);
 
+        // 🌟 수정됨: record_id 추가 셀렉트
         const { data: incData } = await supabaseClient.from('student_incorrect_record')
-            .select('question_id, tq_id, status')
+            .select('record_id, question_id, tq_id, status')
             .eq('student_id', sid)
             .in('status', ['X', 'TX', 'TO', 'B'])
             .is('resolved_at', null);
@@ -374,20 +375,35 @@ export default function StudentPortal() {
         const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
         let tqToQidMap = new Map();
         if (rawTqIds.length > 0) {
-            const { data: tqRows } = await supabaseClient.from('textbook_question').select('tq_id, question_id').in('tq_id', rawTqIds);
-            tqRows?.forEach((t: any) => { if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id); });
+            // 🌟 "Q-1번" 같은 비정형 텍스트로 인한 에러를 방지하기 위해 숫자 형태만 교차조회
+            const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
+            if (safeTqIds.length > 0) {
+                const { data: tqRows } = await supabaseClient.from('textbook_question').select('tq_id, question_id').in('tq_id', safeTqIds);
+                tqRows?.forEach((t: any) => { if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id); });
+            }
         }
 
+        // 🌟 셀프 힐링 1: question_id가 누락된 오답 기록이 있다면 알아서 채워넣습니다.
+        const recordsToHealMissingQid = (incData || []).filter((r: any) => !r.question_id && r.tq_id && tqToQidMap.has(r.tq_id));
+        if (recordsToHealMissingQid.length > 0) {
+            Promise.all(recordsToHealMissingQid.map((r: any) => 
+                supabaseClient.from('student_incorrect_record')
+                    .update({ question_id: tqToQidMap.get(r.tq_id) })
+                    .eq('record_id', r.record_id)
+            )).catch(err => console.error('Self-healing failed', err));
+        }
+
+        // 🌟 "Q-1번" 같은 문자열 식별자를 지원하기 위해 any[] 캐스팅
         const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
-        let uniqueIncIds = Array.from(new Set(resolvedQids)) as number[];
+        let uniqueIncIds = Array.from(new Set(resolvedQids)) as any[];
 
         const [{ data: hwAnsData }, { data: examAnsData }, { data: examsData }] = await Promise.all([
             supabaseClient.from('student_homework_answer')
-                .select('homework_id, tq_id')
+                .select('homework_id, tq_id, grading_code')
                 .eq('student_id', sid)
                 .in('grading_code', ['O', 'TO', 'RO']),
             supabaseClient.from('student_answer')
-                .select('exam_assignment_id, question_id')
+                .select('exam_assignment_id, question_id, grading_code')
                 .eq('student_id', sid)
                 .in('grading_code', ['O', 'TO', 'RO']),
             supabaseClient.from('exam_assignment')
@@ -395,8 +411,39 @@ export default function StudentPortal() {
                 .eq('student_id', sid)
         ]);
 
-        // 🌟 [핵심 변경] 오답 정정 중(채점확정)인 시험에 속한 문항들은 오답 클리닉 카운트에서 통째로 제외
-        let fixingQids = new Set<number>();
+        // 🌟 셀프 힐링 2: 오답프린트에서 '완벽히(O, RO)' 맞췄는데 미처 처리되지 못한 좀비 기록 소탕
+        const printExamIds = new Set(
+            (examsData || [])
+            .filter((ex: any) => ['오답프린트', '오답'].includes(ex.exam_master?.exam_type))
+            .map((ex: any) => ex.assignment_id)
+        );
+
+        const fullyResolvedQids = new Set<any>();
+        examAnsData?.forEach((a: any) => {
+            if (printExamIds.has(a.exam_assignment_id) && ['O', 'RO'].includes(a.grading_code)) {
+                fullyResolvedQids.add(a.question_id);
+            }
+        });
+
+        const recordsToHealResolved = (incData || []).filter((r: any) => {
+            const qid = r.question_id || tqToQidMap.get(r.tq_id);
+            return qid && fullyResolvedQids.has(qid);
+        });
+
+        if (recordsToHealResolved.length > 0) {
+            const rIdsToHeal = recordsToHealResolved.map((r: any) => r.record_id);
+            // 백그라운드에서 DB 업데이트 (시간 소요 방지)
+            supabaseClient.from('student_incorrect_record')
+                .update({ resolved_at: new Date().toISOString(), status: 'RO' })
+                .in('record_id', rIdsToHeal)
+                .then(() => {});
+            
+            // 화면 상에서는 즉시 날려버립니다.
+            uniqueIncIds = uniqueIncIds.filter(id => !fullyResolvedQids.has(id));
+        }
+
+        // 🌟 오답 정정 중(채점확정)인 시험에 속한 문항들은 오답 클리닉 카운트에서 통째로 제외
+        let fixingQids = new Set<any>();
         const fixingExamIds = (examsData || [])
             .filter((ex: any) => ex.status === '채점확정')
             .map((ex: any) => ex.assignment_id);
@@ -418,7 +465,7 @@ export default function StudentPortal() {
             hwResolvedMap.get(a.homework_id)!.add(a.tq_id);
         });
 
-        const examResolvedMap = new Map<number, Set<number>>();
+        const examResolvedMap = new Map<number, Set<any>>();
         examAnsData?.forEach((a: any) => {
             if (!examResolvedMap.has(a.exam_assignment_id)) examResolvedMap.set(a.exam_assignment_id, new Set());
             examResolvedMap.get(a.exam_assignment_id)!.add(a.question_id);
@@ -667,19 +714,21 @@ export default function StudentPortal() {
                 const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
                 let tqToQidMap = new Map();
                 if (rawTqIds.length > 0) {
-                    const { data: tqRows } = await supabaseClient.from('textbook_question').select('tq_id, question_id').in('tq_id', rawTqIds);
-                    tqRows?.forEach((t: any) => { if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id); });
+                    const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
+                    if (safeTqIds.length > 0) {
+                        const { data: tqRows } = await supabaseClient.from('textbook_question').select('tq_id, question_id').in('tq_id', safeTqIds);
+                        tqRows?.forEach((t: any) => { if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id); });
+                    }
                 }
 
                 const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
                 
-                // 🌟 [핵심 변경] 클리닉 시험지를 만들 때도 채점확정인 문항은 제외하고 생성합니다.
                 const { data: fixingExams } = await supabaseClient.from('exam_assignment')
                     .select('assignment_id')
                     .eq('student_id', studentInfo.id)
                     .eq('status', '채점확정');
                     
-                let fixingQids = new Set<number>();
+                let fixingQids = new Set<any>();
                 if (fixingExams && fixingExams.length > 0) {
                     const fIds = fixingExams.map((ex: any) => ex.assignment_id);
                     const { data: fixingAnswers } = await supabaseClient.from('student_answer')
@@ -688,8 +737,8 @@ export default function StudentPortal() {
                     fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
                 }
 
-                const filteredQids = resolvedQids.filter((id: number) => !fixingQids.has(id));
-                const uniqueQids = Array.from(new Set(filteredQids)) as number[];
+                const filteredQids = resolvedQids.filter((id: any) => !fixingQids.has(id));
+                const uniqueQids = Array.from(new Set(filteredQids)) as any[];
                 
                 if (uniqueQids.length === 0) {
                     alert('정정할 오답이 없습니다.');
@@ -704,7 +753,7 @@ export default function StudentPortal() {
                     studentName: studentInfo.name,
                     targetClassId,
                     targetInstructorId,
-                    uniqueQids, 
+                    uniqueQids: uniqueQids as number[], // 캐스팅 유지 
                     tenantId: myTenantId
                 });
 

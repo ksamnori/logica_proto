@@ -109,7 +109,7 @@ export function useLearningActions({
       sessionStorage.clear();
       
       if (assignments[0].is_exam_hw) {
-        sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions));
+        sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions.map(String)));
         sessionStorage.setItem('examTitle', '[병합] 오답 및 유사 문제 프린트');
         sessionStorage.setItem('examType', '과제프린트');
         
@@ -122,7 +122,7 @@ export function useLearningActions({
         }
         window.location.href = '/exam/step2';
       } else {
-        sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions));
+        sessionStorage.setItem('examQuestions', JSON.stringify(commonQuestions.map(String)));
         sessionStorage.setItem('examTitle', '[병합] 복습 및 오답 교재 과제');
         sessionStorage.setItem('examType', '과제프린트');
         
@@ -151,7 +151,6 @@ export function useLearningActions({
       const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
       
       for (const block of globalSelectedBlocks) {
-        // 🌟 quarterly 추가
         if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
@@ -193,7 +192,29 @@ export function useLearningActions({
       const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
 
       for (const block of globalSelectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_')) {
+        // 🔥 원본 오답 & 해결된 오답 덩어리 영구 파기 로직
+        if (block.startsWith('raw_inc_') || block.startsWith('archive_')) {
+          const isArchive = block.startsWith('archive_');
+          const parts = block.split('_');
+          let month = '';
+          let sId = '';
+          if (isArchive) { month = parts[1]; sId = parts[2]; }
+          else { month = parts[2]; sId = parts[3]; }
+
+          if (month !== 'Unknown') {
+            const [y, m] = month.split('-').map(Number);
+            const start = `${month}-01T00:00:00.000+09:00`;
+            const nextD = new Date(y, m, 1);
+            const end = `${nextD.getFullYear()}-${String(nextD.getMonth()+1).padStart(2,'0')}-01T00:00:00.000+09:00`;
+
+            if (isArchive) {
+              await supabase.from('student_incorrect_record').delete().eq('student_id', sId).not('resolved_at', 'is', null).gte('resolved_at', start).lt('resolved_at', end);
+            } else {
+              await supabase.from('student_incorrect_record').delete().eq('student_id', sId).is('resolved_at', null).gte('created_at', start).lt('created_at', end);
+            }
+          }
+        }
+        else if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
           await supabase.from('student_answer').delete().eq('exam_assignment_id', aId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', aId);
@@ -271,7 +292,27 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_')) {
+        // 🔥 원본 오답 & 해결된 오답 덩어리 영구 파기 로직
+        if (block.startsWith('raw_inc_') || block.startsWith('archive_')) {
+          const isArchive = block.startsWith('archive_');
+          let month = '';
+          if (isArchive) month = block.replace('archive_', '');
+          else month = block.replace('raw_inc_', '');
+
+          if (month !== 'Unknown') {
+            const [y, m] = month.split('-').map(Number);
+            const start = `${month}-01T00:00:00.000+09:00`;
+            const nextD = new Date(y, m, 1);
+            const end = `${nextD.getFullYear()}-${String(nextD.getMonth()+1).padStart(2,'0')}-01T00:00:00.000+09:00`;
+
+            if (isArchive) {
+              await supabase.from('student_incorrect_record').delete().eq('student_id', currentView.studentId).not('resolved_at', 'is', null).gte('resolved_at', start).lt('resolved_at', end);
+            } else {
+              await supabase.from('student_incorrect_record').delete().eq('student_id', currentView.studentId).is('resolved_at', null).gte('created_at', start).lt('created_at', end);
+            }
+          }
+        }
+        else if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
           await supabase.from('student_answer').delete().eq('exam_assignment_id', assignId);
           await supabase.from('exam_assignment').delete().eq('assignment_id', assignId);
@@ -396,6 +437,34 @@ export function useLearningActions({
     } catch (e) { toast.error("삭제 실패"); }
   };
 
+  // 🌟 [신규] 원본 오답 덩어리 전용 개별 삭제 (휴지통 버튼용)
+  const handleDeleteRawIncArchive = async (month: string, studentId: string, isArchive: boolean) => {
+    if (!confirm(`이 달의 ${isArchive ? '해결된' : '미해결'} 오답 기록 전체를 완전히 파기하시겠습니까?\n(이 작업은 되돌릴 수 없습니다.)`)) return;
+    setIsLoading(true);
+    try {
+      if (month !== 'Unknown') {
+        const [y, m] = month.split('-').map(Number);
+        const start = `${month}-01T00:00:00.000+09:00`;
+        const nextD = new Date(y, m, 1);
+        const end = `${nextD.getFullYear()}-${String(nextD.getMonth()+1).padStart(2,'0')}-01T00:00:00.000+09:00`;
+
+        if (isArchive) {
+          await supabase.from('student_incorrect_record').delete().eq('student_id', studentId).not('resolved_at', 'is', null).gte('resolved_at', start).lt('resolved_at', end);
+        } else {
+          await supabase.from('student_incorrect_record').delete().eq('student_id', studentId).is('resolved_at', null).gte('created_at', start).lt('created_at', end);
+        }
+      }
+      toast.success("🗑️ 오답 기록이 완전히 삭제되었습니다.");
+      if (currentView.type === 'STUDENT') fetchStudentTimeline(studentId, currentView.classId, allStudentsList);
+      else fetchGlobalListForTab(activeTab, allStudentsList);
+    } catch (e) {
+      console.error(e);
+      toast.error("삭제 실패");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const handlePrintItem = async (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => {
     e.stopPropagation();
     
@@ -407,23 +476,45 @@ export function useLearningActions({
             qIds = targetQuestions;
         }
     }
+
+    if (type === 'raw_inc' || type === 'archive') {
+      if (qIds.length === 0) { toast.warning('확인할 문항이 없습니다.'); return; }
+      purgeOldSession();
+      const finalQIds = qIds.map(String).filter(Boolean);
+      sessionStorage.setItem('examQuestions', JSON.stringify(finalQIds));
+      sessionStorage.setItem('examTitle', title || '오답 리스트');
+      sessionStorage.setItem('examType', '오답프린트');
+      window.open('/exam/viewer', '_blank');
+      return;
+    }
     
     if (type === 'hw') {
       if (qIds.length === 0) { toast.warning('출력할 문항이 없습니다.'); return; }
       try {
         setIsLoading(true);
-        const tqIds = qIds.map(id => Number(id)).filter(id => !isNaN(id));
-        const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', tqIds);
-        if (error) throw error;
+        const numericIds = qIds.filter(id => !isNaN(Number(id))).map(Number);
+        const stringIds = qIds.filter(id => isNaN(Number(id))).map(String);
 
-        const tqMap = new Map();
-        tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
-        const finalQIds = tqIds.map(id => tqMap.get(id)).filter(Boolean);
+        let mappedQIds: string[] = [...stringIds];
 
-        if (finalQIds.length === 0) { toast.error('해당 과제에 연결된 실제 문항 데이터를 찾을 수 없습니다.'); return; }
+        if (numericIds.length > 0) {
+            const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', numericIds);
+            if (error) throw error;
+            const tqMap = new Map();
+            tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
+            numericIds.forEach(id => {
+                if (tqMap.get(id)) mappedQIds.push(String(tqMap.get(id)));
+            });
+        }
+
+        const finalQIds = Array.from(new Set(mappedQIds)).filter(Boolean);
+
+        if (finalQIds.length === 0) { 
+            toast.error('해당 과제에 DB 이미지가 연결된 문항이 없어 뷰어를 열 수 없습니다.'); 
+            return; 
+        }
 
         purgeOldSession();
-        
         sessionStorage.setItem('examQuestions', JSON.stringify(finalQIds));
         sessionStorage.setItem('examTitle', title || '교재 과제');
         sessionStorage.setItem('examSubTitle', subTitle || '과제 프린트');
@@ -460,13 +551,22 @@ export function useLearningActions({
         
         if (item.printType === 'hw') {
           if (qIds.length === 0) continue;
-          const tqIds = qIds.map((id: any) => Number(id)).filter((id: any) => !isNaN(id));
-          const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', tqIds);
-          if (error) throw error;
+
+          const numericIds = qIds.filter(id => !isNaN(Number(id))).map(Number);
+          const stringIds = qIds.filter(id => isNaN(Number(id))).map(String);
+          let mappedQIds: string[] = [...stringIds];
+
+          if (numericIds.length > 0) {
+              const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', numericIds);
+              if (error) throw error;
+              const tqMap = new Map();
+              tqData?.forEach(i => { if (i.question_id) tqMap.set(i.tq_id, i.question_id); });
+              numericIds.forEach(id => {
+                  if (tqMap.get(id)) mappedQIds.push(String(tqMap.get(id)));
+              });
+          }
           
-          const tqMap = new Map();
-          tqData?.forEach(i => { if (i.question_id) tqMap.set(i.tq_id, i.question_id); });
-          const finalQIds = tqIds.map((id: any) => tqMap.get(id)).filter(Boolean);
+          const finalQIds = Array.from(new Set(mappedQIds)).filter(Boolean);
           
           if (finalQIds.length > 0) {
             bulkData.push({
@@ -507,19 +607,44 @@ export function useLearningActions({
 
   const handleEditHomeworkToStep2 = async (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => {
     e.stopPropagation();
-    if (!targetQuestions || targetQuestions.length === 0) { toast.warning('수정할 문항이 없습니다.'); return; }
+    
+    let parsedQIds: any[] = [];
+    if (targetQuestions) {
+        if (typeof targetQuestions === 'string') {
+            try { parsedQIds = JSON.parse(targetQuestions); } catch(err){}
+        } else if (Array.isArray(targetQuestions)) {
+            parsedQIds = targetQuestions;
+        }
+    }
+
+    if (!parsedQIds || parsedQIds.length === 0) { toast.warning('수정할 문항이 없습니다.'); return; }
 
     try {
       setIsLoading(true);
-      const tqIds = targetQuestions.map(id => Number(id)).filter(id => !isNaN(id));
-      const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', tqIds);
-      if (error) throw error;
 
-      const tqMap = new Map();
-      tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
-      const qIds = tqIds.map(id => tqMap.get(id)).filter(Boolean);
+      const numericIds = parsedQIds.filter(id => !isNaN(Number(id))).map(Number);
+      const stringIds = parsedQIds.filter(id => isNaN(Number(id))).map(String);
 
-      if (qIds.length === 0) { toast.error('연결된 문제 데이터를 찾을 수 없습니다.'); return; }
+      let mappedQIds: string[] = [...stringIds]; 
+
+      if (numericIds.length > 0) {
+          const { data: tqData, error } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', numericIds);
+          if (error) throw error;
+          const tqMap = new Map();
+          tqData?.forEach(item => { if (item.question_id) tqMap.set(item.tq_id, item.question_id); });
+          
+          numericIds.forEach(id => {
+              if (tqMap.get(id)) mappedQIds.push(String(tqMap.get(id)));
+          });
+      }
+
+      const qIds = Array.from(new Set(mappedQIds)).filter(Boolean);
+
+      if (qIds.length === 0) { 
+          toast.warning('DB에 연결된 본교재 문항이 없습니다.\n빈 화면 우측 검색 패널을 통해 문제를 직접 추가해주세요.', { autoClose: 5000 }); 
+      } else if (qIds.length < parsedQIds.length) {
+          toast.info(`본교재 문항 중 DB에 없는 ${parsedQIds.length - qIds.length}개는 화면에서 제외되었습니다.`, { autoClose: 4000 });
+      }
 
       const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
       const finalTitle = `${safeStudentName}${title || '과제 문항 수정'}`;
@@ -589,6 +714,37 @@ export function useLearningActions({
     }
   };
 
+  const handleEditRawIncorrectToStep2 = async (e: React.MouseEvent, targetQuestions: any[], title: string, studentName: string, studentId: string, classId: string) => {
+    e.stopPropagation();
+    
+    let parsedQIds: any[] = [];
+    if (targetQuestions) {
+        if (typeof targetQuestions === 'string') {
+            try { parsedQIds = JSON.parse(targetQuestions); } catch(err){}
+        } else if (Array.isArray(targetQuestions)) {
+            parsedQIds = targetQuestions;
+        }
+    }
+
+    if (parsedQIds.length === 0) { toast.warning('수정할 문항이 없습니다.'); return; }
+
+    const safeStudentName = studentName && studentName !== '알수없음' ? `[${studentName}] ` : '';
+    const finalTitle = title.startsWith('[') ? title : `${safeStudentName}${title}`;
+
+    purgeOldSession();
+
+    sessionStorage.setItem('restoreExamQuestions', '1');
+    sessionStorage.setItem('examQuestions', JSON.stringify(parsedQIds.map(String)));
+    sessionStorage.setItem('examTitle', finalTitle);
+    sessionStorage.setItem('examSubTitle', '월별 누적 오답 복습'); 
+    sessionStorage.setItem('examType', '오답유사');
+    sessionStorage.setItem('clinicTargetStudentId', String(studentId));
+    sessionStorage.setItem('clinicTargetClassId', String(classId));
+    sessionStorage.setItem('isClinicMode', 'true');
+
+    window.location.href = '/exam/step2?source=clinic_incorrect';
+  };
+
   const handleGenerateIncorrectPrint = async () => {};
 
   return {
@@ -596,6 +752,7 @@ export function useLearningActions({
     handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2,
     handleEditExamToStep2, handleExtractCommonHomework,
     handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleBulkCompleteStudent,
-    handleBulkDeleteStudent, handleGenerateIncorrectPrint, handleBulkPrintAction
+    handleBulkDeleteStudent, handleGenerateIncorrectPrint, handleBulkPrintAction,
+    handleEditRawIncorrectToStep2, handleDeleteRawIncArchive // 🔥 반환 객체에 영구 삭제 포함
   };
 }

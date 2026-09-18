@@ -54,12 +54,14 @@ export async function resolveTodaySession(supabaseClient: any, studentId: string
 
     if (!latest) {
         const fresh = { student_id: studentId, session_date: todayStr, session_no: 1, started_at: new Date().toISOString(), duration_ms: DEFAULT_CLINIC_SESSION_DURATION_MS, seat: fixedSeat || null, manual_seat: null, ended_at: null };
-        const { data: inserted } = await supabaseClient.from('clinic_session_state').insert(fresh).select().single();
-        // 💡 같은 학생 화면이 거의 동시에 두 번 마운트되면(React strict mode의 effect 중복 실행,
-        // 새로고침 겹침 등) 둘 다 "오늘 세션 없음"을 보고 동시에 insert를 시도할 수 있다. 이때 진
-        // 쪽은 (student_id, session_date, session_no) unique 제약으로 insert가 실패하는데, 그 결과를
-        // 그대로 id 없는 로컬 fresh 객체로 반환해버리면 이후 좌석 배정/호출/자리비움 DB 갱신이
-        // 전부 조용히 씹힌다. insert가 실패하면 이긴 쪽이 이미 만들어둔 실제 행을 다시 읽어와 쓴다.
+        // 🌟 수정: 동시성 문제(Race Condition) 해결을 위해 upsert 및 ignoreDuplicates: true 옵션 적용
+        const { data: inserted } = await supabaseClient
+            .from('clinic_session_state')
+            .upsert(fresh, { onConflict: 'student_id,session_date,session_no', ignoreDuplicates: true })
+            .select()
+            .maybeSingle();
+
+        // 중복 시 upsert가 무시하고 null을 반환하므로, 이미 만들어진 진짜 세션을 fetchLatestSession으로 다시 가져옵니다.
         return inserted || await fetchLatestSession(supabaseClient, studentId, todayStr) || fresh;
     }
 
@@ -68,7 +70,14 @@ export async function resolveTodaySession(supabaseClient: any, studentId: string
         // 방금 끝난 회차는 좌석을 반납하고 종료 시각을 남겨 기록을 완결시킨다.
         await supabaseClient.from('clinic_session_state').update({ seat: null, ended_at: latest.ended_at || new Date().toISOString() }).eq('id', latest.id);
         const fresh = { student_id: studentId, session_date: todayStr, session_no: latest.session_no + 1, started_at: new Date().toISOString(), duration_ms: RENEWAL_CLINIC_SESSION_DURATION_MS, seat: fixedSeat || null, manual_seat: latest.manual_seat || null, ended_at: null };
-        const { data: inserted } = await supabaseClient.from('clinic_session_state').insert(fresh).select().single();
+        
+        // 🌟 수정: 재이용 세션 생성 시에도 동시성 충돌 방지
+        const { data: inserted } = await supabaseClient
+            .from('clinic_session_state')
+            .upsert(fresh, { onConflict: 'student_id,session_date,session_no', ignoreDuplicates: true })
+            .select()
+            .maybeSingle();
+            
         return inserted || await fetchLatestSession(supabaseClient, studentId, todayStr) || fresh;
     }
 
@@ -104,7 +113,7 @@ export async function requestEndSession(supabaseClient: any, sessionId: string) 
     return true;
 }
 
-// 학생이 대기 중이던 종료 요청을 스스로 취소한다 — 취소도 거부와 동일하게 5분 쿨타임이 붙는다.
+// 학생이 대기 중이던 종료 요청을 스스로 취소한다 — 취소도 거부와 동일하게 5분 쿨타임을 붙는다.
 export async function cancelEndSession(supabaseClient: any, sessionId: string) {
     const cooldownUntil = new Date(Date.now() + END_REQUEST_COOLDOWN_MS).toISOString();
     await supabaseClient.from('clinic_session_state').update({ end_request_status: null, end_request_cooldown_until: cooldownUntil }).eq('id', sessionId);

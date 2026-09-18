@@ -27,13 +27,15 @@ interface GlobalListProps {
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
   handleBulkPrintAction: (items: any[]) => void; 
   handleRenameItem: (e: React.MouseEvent, type: string, realId: string, masterId: string | null, currentTitle: string) => void; 
+  openRawIncManageModal: (studentId: string, studentName: string, month: string) => void;
+  handleEditRawIncorrectToStep2: (e: React.MouseEvent, targetQuestions: any[], title: string, studentName: string, studentId: string, classId: string) => void;
 }
 
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleExtractCommonHomework, handleViewChange, toggleGlobalSelection,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
-  handleBulkPrintAction, handleRenameItem 
+  handleBulkPrintAction, handleRenameItem, openRawIncManageModal, handleEditRawIncorrectToStep2
 }: GlobalListProps) {
   
   const handleBulkPrint = () => {
@@ -44,6 +46,8 @@ export default function GlobalList({
                    : activeTab === 'INCORRECT' ? `print_${safeId}_${res.student_id}`
                    : activeTab === 'SIMILAR' ? `similar_${safeId}_${res.student_id}`
                    : activeTab === 'OVERDUE' ? `overdue_${safeId}_${res.student_id}`
+                   : activeTab === 'ARCHIVE' ? `archive_${res.realId}_${res.student_id}`
+                   : activeTab === 'RAW_INCORRECT' ? `raw_inc_${res.realId}_${res.student_id}`
                    : res.is_exam_hw ? `hw_exam_${safeId}_${res.student_id}` : `hw_${safeId}_${res.student_id}`;
       return globalSelectedBlocks.includes(itemId);
     });
@@ -76,9 +80,9 @@ export default function GlobalList({
           <div>
             <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
               {currentView.type === 'CLASS' ? (
-                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : activeTab === 'RAW_INCORRECT' ? '누적 원본 오답 목록' : activeTab === 'ARCHIVE' ? '해결된 오답 목록' : '미완료 과제 목록'}</span> 
               ) : (
-                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : activeTab === 'RAW_INCORRECT' ? '누적 원본 오답 목록' : activeTab === 'ARCHIVE' ? '해결된 오답 목록' : '미완료 과제 목록'}</span> 
               )}
             </h2>
             <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
@@ -130,6 +134,8 @@ export default function GlobalList({
                            : activeTab === 'INCORRECT' ? `print_${safeId}_${res.student_id}`
                            : activeTab === 'SIMILAR' ? `similar_${safeId}_${res.student_id}`
                            : activeTab === 'OVERDUE' ? `overdue_${safeId}_${res.student_id}`
+                           : activeTab === 'ARCHIVE' ? `archive_${res.realId}_${res.student_id}`
+                           : activeTab === 'RAW_INCORRECT' ? `raw_inc_${res.realId}_${res.student_id}`
                            : res.is_exam_hw ? `hw_exam_${safeId}_${res.student_id}` : `hw_${safeId}_${res.student_id}`;
               const isSelected = globalSelectedBlocks.includes(itemId);
               
@@ -141,13 +147,14 @@ export default function GlobalList({
               else if(isCompleted) statusBadge = "bg-slate-300 text-slate-700 border border-slate-400";
               else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
 
-              let typeBadge = activeTab === 'EXAM' ? "📝 주간/중간테스트" : activeTab === 'QUARTERLY' ? "📅 분기평가" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
-              let typeColor = activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'QUARTERLY' ? "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
+              let typeBadge = res.type === 'archive' ? "📦 보존됨" : res.type === 'raw_inc' ? "🔥 원본오답" : activeTab === 'EXAM' ? "📝 주간/중간테스트" : activeTab === 'QUARTERLY' ? "📅 분기평가" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
+              let typeColor = res.type === 'archive' ? "bg-slate-700 text-amber-400 border-slate-600" : res.type === 'raw_inc' ? "bg-rose-800 text-rose-100 border-rose-700" : activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'QUARTERLY' ? "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';
+              if (res.type === 'archive' || res.type === 'raw_inc') rawTitle = res.title;
               let titleStr = rawTitle.replace(/^\[시스템\]\s*/, '');
-              let totalQ = activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0);
-              let createdDate = res.created_at;
+              let totalQ = res.totalQ ?? (activeTab === 'HOMEWORK' ? res.totalQ : (m.title ? m.total_questions : 0));
+              let createdDate = res.sort_date || res.created_at;
 
               const rowBgClass = isSelected 
                 ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' 
@@ -165,8 +172,8 @@ export default function GlobalList({
                 detailHref = `/homework/review?assignment_id=${res.assignment_id}&student_id=${res.student_id}&is_exam_hw=true`;
               }
 
-              const finalOCount = res.rawAnswers ? res.rawAnswers.filter((a: any) => ['O', 'RO', 'TO'].includes(a.grading_code)).length : (res.oCount || 0);
-              const finalXCount = res.rawAnswers ? res.rawAnswers.filter((a: any) => ['X', 'TX'].includes(a.grading_code)).length : (res.xCount || 0);
+              const finalOCount = res.oCount ?? (res.rawAnswers ? res.rawAnswers.filter((a: any) => ['O', 'RO', 'TO'].includes(a.grading_code)).length : 0);
+              const finalXCount = res.xCount ?? (res.rawAnswers ? res.rawAnswers.filter((a: any) => ['X', 'TX'].includes(a.grading_code)).length : 0);
 
               let inferredType = res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue');
               const rId = inferredType === 'hw' ? hw.homework_id : res.assignment_id;
@@ -199,8 +206,17 @@ export default function GlobalList({
                       <span className={`w-[44px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 leading-none ${statusBadge}`}>{statusStr}</span>
                     </div>
                     
-                    {/* 🌟 1080p 대응 압축 레이아웃: 여백과 폰트를 줄이고 버튼들을 그룹화 */}
                     <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2.5 ml-1">
+                      {res.type === 'raw_inc' && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); openRawIncManageModal(res.student_id, studentName, res.realId); }} 
+                          className="text-[13px] hover:text-rose-600 transition-colors" 
+                          title="이 덩어리 안의 개별 문항 확인 및 삭제"
+                        >
+                          ✂️
+                        </button>
+                      )}
+
                       <button 
                         onClick={(e) => handleRenameItem(e, inferredType, rId, m?.exam_id, titleStr)} 
                         className="text-[12px] hover:text-amber-500 transition-colors" 
@@ -209,7 +225,9 @@ export default function GlobalList({
                         🏷️
                       </button>
 
-                      {!(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
+                      {(res.type === 'raw_inc' || res.type === 'archive') ? (
+                        <button onClick={(e) => handleEditRawIncorrectToStep2?.(e, res.target_questions, titleStr, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors" title="맞춤 오답 다시 출제하기">✏️</button>
+                      ) : !(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
                         <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors" title="문제 수정">✏️</button>
                       ) : (
                         <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors" title="과제 문항 수정">✏️</button>
@@ -217,9 +235,29 @@ export default function GlobalList({
                       
                       <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
                       
-                      <button onClick={(e) => handlePrintItem(e, res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} className="text-[13px] hover:text-emerald-600 transition-colors" title="프린트 단일 출력">🖨️</button>
+                      <button 
+                        onClick={(e) => handlePrintItem(e, res.type === 'raw_inc' || res.type === 'archive' ? 'raw_inc' : res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} 
+                        className="text-[13px] hover:text-emerald-600 transition-colors" 
+                        title="전체 문제 눈으로 확인하기 / 단일 출력"
+                      >
+                        🖨️
+                      </button>
 
-                      <button onClick={(e) => { e.stopPropagation(); window.location.href = detailHref; }} className="text-[9px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 whitespace-nowrap">상세 ➔</button>
+                      {(inferredType === 'raw_inc' || inferredType === 'archive' || res.type === 'raw_inc' || res.type === 'archive') ? (
+                        <button onClick={(e) => { 
+                            e.stopPropagation(); 
+                            handlePrintItem(e, 'raw_inc', null, res.target_questions || hw.target_questions, titleStr, res.subTitle);
+                          }} 
+                          className="text-[9px] font-bold text-white bg-rose-600 hover:bg-rose-700 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 whitespace-nowrap"
+                        >문제 보기 ➔</button>
+                      ) : (
+                        <button onClick={(e) => { 
+                            e.stopPropagation(); 
+                            window.location.href = detailHref; 
+                          }} 
+                          className="text-[9px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 whitespace-nowrap"
+                        >상세 ➔</button>
+                      )}
                     </div>
                   </div>
                 </div>

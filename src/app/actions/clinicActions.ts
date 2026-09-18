@@ -124,9 +124,9 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
                 }
             }
 
-            // 🌟 버그 수정: 'id' 컬럼이 없으므로 'result_id' 컬럼으로 조회 및 업데이트 수행
+            // 🌟 확실한 픽스: 'hw_result_id' 컬럼 사용
             const { data: existingResult } = await supabaseAdmin.from('student_homework_result')
-                .select('result_id')
+                .select('hw_result_id')
                 .eq('student_id', studentId)
                 .eq('homework_id', hw.homework_id)
                 .maybeSingle();
@@ -134,7 +134,7 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
             if (existingResult) {
                 await supabaseAdmin.from('student_homework_result')
                     .update({ status: '완료' })
-                    .eq('result_id', existingResult.result_id);
+                    .eq('hw_result_id', existingResult.hw_result_id);
             } else {
                 await supabaseAdmin.from('student_homework_result')
                     .insert({ student_id: studentId, homework_id: hw.homework_id, status: '완료' });

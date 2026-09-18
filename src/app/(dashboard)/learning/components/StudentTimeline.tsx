@@ -34,6 +34,9 @@ interface StudentTimelineProps {
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
   handleBulkPrintAction: (items: any[]) => void; 
   handleRenameItem: (e: React.MouseEvent, type: string, realId: string, masterId: string | null, currentTitle: string) => void; 
+  openRawIncManageModal: (studentId: string, studentName: string, month: string) => void;
+  handleEditRawIncorrectToStep2: (e: React.MouseEvent, targetQuestions: any[], title: string, studentName: string, studentId: string, classId: string) => void;
+  handleDeleteRawIncArchive: (month: string, studentId: string, isArchive: boolean) => void; // 🔥 추가
 }
 
 const formatTaxonomyName = (id: string, categoryMap: Record<string, string>) => {
@@ -120,7 +123,7 @@ export default function StudentTimeline({
   handleBulkCompleteStudent, handleBulkDeleteStudent,
   handleGenerateIncorrectPrint, handleExtractCommonHomework, isGeneratingPrint,
   formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
-  handleBulkPrintAction, handleRenameItem 
+  handleBulkPrintAction, handleRenameItem, openRawIncManageModal, handleEditRawIncorrectToStep2, handleDeleteRawIncArchive
 }: StudentTimelineProps) {
   
   const router = useRouter();
@@ -839,6 +842,8 @@ export default function StudentTimeline({
               else if (item.type === 'print') { badgeColor = "bg-emerald-100 text-emerald-700 border-emerald-200"; typeLabel = "❌ 오답"; }
               else if (item.type === 'similar') { badgeColor = "bg-violet-100 text-violet-700 border-violet-200"; typeLabel = "🔄 오답유사"; }
               else if (item.type === 'overdue') { badgeColor = "bg-rose-100 text-rose-700 border-rose-200"; typeLabel = "⏰ 미완료과제"; }
+              else if (item.type === 'archive') { badgeColor = "bg-slate-700 text-amber-400 border-slate-600"; typeLabel = "📦 보존됨"; }
+              else if (item.type === 'raw_inc') { badgeColor = "bg-rose-800 text-rose-100 border-rose-700"; typeLabel = "🔥 원본오답"; }
 
               const rowBgClass = isSelected
                 ? 'border-rose-400 bg-rose-50/30 shadow-rose-100'
@@ -889,8 +894,17 @@ export default function StudentTimeline({
                       </span>
                     </div>
 
-                    {/* 🌟 1080p 대응 압축 레이아웃: 여백과 폰트를 줄이고 버튼들을 그룹화 */}
                     <div className="flex items-center gap-2 shrink-0 border-l border-slate-200 pl-3 ml-1">
+                      {item.type === 'raw_inc' && (
+                        <button 
+                          onClick={(e) => { e.stopPropagation(); openRawIncManageModal(currentView.studentId, currentView.studentName, item.realId); }} 
+                          className="text-[14px] hover:text-rose-600 transition-colors" 
+                          title="이 덩어리 안의 개별 문항 확인 및 삭제"
+                        >
+                          ✂️
+                        </button>
+                      )}
+
                       <button 
                         onClick={(e) => handleRenameItem(e, item.type, item.realId, item.masterId, displayTitle)} 
                         className="text-[13px] hover:text-amber-500 transition-colors" 
@@ -899,36 +913,47 @@ export default function StudentTimeline({
                         🏷️
                       </button>
 
-                      {item.type === 'exam' || item.type === 'quarterly' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue' ? (
+                      {(item.type === 'raw_inc' || item.type === 'archive') ? (
+                        <button onClick={(e) => handleEditRawIncorrectToStep2?.(e, item.target_questions, displayTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[13px] hover:text-blue-600 transition-colors" title="맞춤 오답 다시 출제하기">✏️</button>
+                      ) : (item.type === 'exam' || item.type === 'quarterly' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue') ? (
                         <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[13px] hover:text-blue-600 transition-colors" title="문제 수정">✏️</button>
                       ) : (
                         <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[13px] hover:text-blue-600 transition-colors" title="과제 문항 수정">✏️</button>
                       )}
                       
-                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'quarterly' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
+                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'quarterly' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId); else if(item.type === 'raw_inc' || item.type === 'archive') handleDeleteRawIncArchive(item.realId, currentView.studentId, item.type === 'archive'); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
                       
                       <button 
-                        onClick={(e) => handlePrintItem(e, item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
+                        onClick={(e) => handlePrintItem(e, item.type === 'raw_inc' || item.type === 'archive' ? 'raw_inc' : item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
                         className="text-[14px] hover:text-emerald-600 transition-colors" 
-                        title="프린트 단일 출력"
+                        title="전체 문제 눈으로 확인하기 / 단일 출력"
                       >
                         🖨️
                       </button>
 
-                      <button onClick={(e) => { 
-                          e.stopPropagation(); 
-                          let detailHref = '';
-                          if (item.type === 'hw') {
-                            detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
-                          } else if (item.type === 'quarterly') {
-                            detailHref = `/exam/review?assignment_id=${item.realId}&student_id=${currentView.studentId}`;
-                          } else {
-                            detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
-                          }
-                          window.location.href = detailHref; 
-                        }} 
-                        className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-2 py-1 rounded transition-colors shadow-sm ml-1 whitespace-nowrap"
-                      >상세 ➔</button>
+                      {(item.type === 'raw_inc' || item.type === 'archive') ? (
+                        <button onClick={(e) => { 
+                            e.stopPropagation(); 
+                            handlePrintItem(e, 'raw_inc', null, item.target_questions, displayTitle, item.subTitle);
+                          }} 
+                          className="text-[10px] font-bold text-white bg-rose-600 hover:bg-rose-700 px-2 py-1 rounded transition-colors shadow-sm ml-1 whitespace-nowrap"
+                        >문제 보기 ➔</button>
+                      ) : (
+                        <button onClick={(e) => { 
+                            e.stopPropagation(); 
+                            let detailHref = '';
+                            if (item.type === 'hw') {
+                              detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
+                            } else if (item.type === 'quarterly') {
+                              detailHref = `/exam/review?assignment_id=${item.realId}&student_id=${currentView.studentId}`;
+                            } else {
+                              detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
+                            }
+                            window.location.href = detailHref; 
+                          }} 
+                          className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-2 py-1 rounded transition-colors shadow-sm ml-1 whitespace-nowrap"
+                        >상세 ➔</button>
+                      )}
                     </div>
                   </div>
                 </div>

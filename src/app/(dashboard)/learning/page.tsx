@@ -28,6 +28,15 @@ export default function LearningPage() {
 
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   
+  // 🌟 클리닉 미리보기 모달 상태
+  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; studentName: string; stats: any } | null>(null);
+
+  // 🌟 개별 오답 관리 모달 상태
+  const [rawIncManageModal, setRawIncManageModal] = useState<{ isOpen: boolean; studentId: string; studentName: string; month: string; records: any[] } | null>(null);
+
+  // 🌟 문제/정답 간단 확인 모달 상태
+  const [singleQuestionPreview, setSingleQuestionPreview] = useState<any | null>(null);
+
   const [bulkStartDate, setBulkStartDate] = useState(() => {
     const d = new Date(Date.now() + 9 * 60 * 60 * 1000); 
     d.setDate(d.getDate() - 7); 
@@ -68,7 +77,7 @@ export default function LearningPage() {
     groupedClasses, allStudentsList, currentStats,
     globalList, setGlobalList, timelineData, setTimelineData,
     classCalendarEvents,
-    fetchBaseData, fetchStatsForTab, fetchStudentTimeline, fetchGlobalListForTab
+    fetchBaseData, fetchStatsForTab, fetchStudentTimeline, fetchGlobalListForTab, fetchStudentClinicPreview
   } = useLearningFetch();
 
   const actions = useLearningActions({
@@ -180,7 +189,9 @@ export default function LearningPage() {
       if (activeTab === 'INCORRECT' && item.type !== 'print') return false;
       if (activeTab === 'SIMILAR' && item.type !== 'similar') return false; 
       if (activeTab === 'OVERDUE' && item.type !== 'overdue') return false; 
-      if (!showCompleted && item.isCompleted) return false; 
+      if (activeTab === 'ARCHIVE' && item.type !== 'archive') return false;
+      if (activeTab === 'RAW_INCORRECT' && item.type !== 'raw_inc') return false;
+      if (!showCompleted && item.isCompleted && activeTab !== 'ARCHIVE' && activeTab !== 'RAW_INCORRECT') return false; 
       return true;
     });
   }, [timelineData, dateFilter, activeTab, selectedDate, showCompleted]);
@@ -201,6 +212,8 @@ export default function LearningPage() {
          if (activeTab === 'INCORRECT') return `print_${safeId}_${res.student_id}`;
          if (activeTab === 'SIMILAR') return `similar_${safeId}_${res.student_id}`; 
          if (activeTab === 'OVERDUE') return `overdue_${safeId}_${res.student_id}`; 
+         if (activeTab === 'ARCHIVE') return `archive_${res.realId}_${res.student_id}`;
+         if (activeTab === 'RAW_INCORRECT') return `raw_inc_${res.realId}_${res.student_id}`;
          return '';
       }));
     }
@@ -237,10 +250,92 @@ export default function LearningPage() {
     return map;
   }, [currentStats]);
 
+  const handleOpenPreview = async () => {
+    if (currentView.type !== 'STUDENT') return;
+    setIsLoading(true);
+    const stats = await fetchStudentClinicPreview(currentView.studentId, currentView.classId);
+    const statKey = `${currentView.studentId}_${currentView.classId}`;
+    const localStats = studentStatsMap[statKey] || { examQ: 0, hwQ: 0, overdueQ: 0, printQ: 0 };
+    
+    const mergedStats = {
+      ...stats,
+      examQCount: localStats.examQ,
+      hwQCount: localStats.hwQ,
+      overdueQCount: localStats.overdueQ,
+      printQCount: localStats.printQ
+    };
+
+    setPreviewModal({ isOpen: true, studentName: currentView.studentName, stats: mergedStats });
+    setIsLoading(false);
+  };
+
+  const openRawIncManageModal = async (studentId: string, studentName: string, month: string) => {
+    setIsLoading(true);
+    const { data } = await supabase.from('student_incorrect_record')
+      .select('record_id, source_type, created_at, question_id, tq_id')
+      .eq('student_id', studentId)
+      .is('resolved_at', null);
+
+    const records = (data || [])
+      .filter(d => d.created_at && d.created_at.startsWith(month))
+      .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+    setRawIncManageModal({ isOpen: true, studentId, studentName, month, records });
+    setIsLoading(false);
+  };
+
+  const handleDeleteSingleRawInc = async (recordId: number) => {
+    if (!confirm('이 문항을 오답 목록에서 완전히 삭제(해결 처리)하시겠습니까?')) return;
+    try {
+      await supabase.from('student_incorrect_record')
+        .update({ resolved_at: new Date().toISOString(), status: 'B' }) 
+        .eq('record_id', recordId);
+        
+      setRawIncManageModal(prev => prev ? { ...prev, records: prev.records.filter(r => r.record_id !== recordId) } : null);
+      
+      // 🔥 actions. 없이 직접 호출
+      if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
+      else fetchGlobalListForTab(activeTab, allStudentsList);
+    } catch (e) {
+      alert('삭제 중 오류가 발생했습니다.');
+    }
+  };
+
+  // 🔥 [초강력 방어 로직] question_db, textbook_question 완벽 매핑
+  const handleViewSingleRawInc = async (qId: string | number | null) => {
+    if (!qId) return alert('문항 식별자가 존재하지 않습니다.');
+    setIsLoading(true);
+    try {
+        let finalQId = String(qId);
+        
+        // 교재 ID(숫자)일 경우 먼저 textbook_question 뒤져서 문제은행 UUID 획득
+        if (!isNaN(Number(qId))) {
+            const { data: tqData } = await supabase.from('textbook_question').select('question_id').eq('tq_id', Number(qId)).maybeSingle();
+            if (tqData?.question_id) {
+                finalQId = tqData.question_id;
+            }
+        }
+
+        // 🌟 question_db에서 긁어오기
+        const { data: qData, error } = await supabase.from('question_db').select('*').eq('question_id', finalQId).maybeSingle();
+
+        if (error || !qData) {
+            alert(`DB에서 해당 문제(${qId} -> ${finalQId})를 찾을 수 없습니다.\n삭제되었거나 데이터 연결이 유실된 문항입니다.`);
+        } else {
+            setSingleQuestionPreview(qData);
+        }
+    } catch (e) {
+        console.error(e);
+        alert('문제 정보를 불러오는 중 오류가 발생했습니다.');
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
   const formatDateLabel = (dateStr: string, includeTime = false) => {
     if (!dateStr) return '-';
     const d = new Date(dateStr);
-    const dt = `${d.getMonth()+1}/${d.getDate()}(${['일','월','화','수','목','금','토'][d.getDay()]})`;
+    const dt = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')} (${['일','월','화','수','목','금','토'][d.getDay()]})`;
     if (includeTime) return `${dt} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     return dt;
   };
@@ -416,7 +511,7 @@ export default function LearningPage() {
     fetchStatsForTab(allStudentsList);
   };
 
-  // 🌟 [추가됨] 이름(타이틀) 수동 변경 헬퍼
+  // 🔥 밖으로 빼놓은 handleRenameItem
   const handleRenameItem = async (e: React.MouseEvent, type: string, realId: string, masterId: string | null, currentTitle: string) => {
     e.stopPropagation();
     const cleanCurrent = currentTitle.replace(/^\[시스템\]\s*/, '');
@@ -441,7 +536,6 @@ export default function LearningPage() {
         if (error) throw error;
       }
 
-      // 화면 즉시 갱신
       if (currentView.type === 'STUDENT') {
         await fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       } else {
@@ -485,6 +579,10 @@ export default function LearningPage() {
           <div className="w-px h-6 bg-slate-300 mx-1 shrink-0"></div>
           <button onClick={() => handleMainTabClick('QUARTERLY')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'QUARTERLY' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📅 분기평가</button>
           
+          <div className="w-px h-6 bg-slate-300 mx-1 shrink-0"></div>
+          <button onClick={() => handleMainTabClick('RAW_INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'RAW_INCORRECT' ? 'bg-rose-800 text-rose-100 shadow-md border border-rose-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔥 누적 원본 오답</button>
+          <button onClick={() => handleMainTabClick('ARCHIVE')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'ARCHIVE' ? 'bg-slate-800 text-amber-400 shadow-md border border-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📦 해결된 오답</button>
+
           {currentView.type === 'CLASS' && (
             <>
               <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
@@ -508,6 +606,29 @@ export default function LearningPage() {
         />
 
         <div className="flex-1 flex flex-col relative bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+          
+          {currentView.type === 'STUDENT' && (
+            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0">
+               <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-[#002864] text-white flex items-center justify-center font-black shadow-sm">
+                     {currentView.studentName.charAt(0)}
+                  </div>
+                  <div>
+                     <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                        {currentView.studentName} 학생
+                        <span className="text-xs font-bold bg-white text-slate-500 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm">{currentView.className}</span>
+                     </h2>
+                  </div>
+               </div>
+               <button 
+                  onClick={handleOpenPreview}
+                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-extrabold rounded-xl shadow-sm transition-all"
+               >
+                  <span className="text-lg">👀</span> 학생 포털 미리보기
+               </button>
+            </div>
+          )}
+
           { (currentView.type === 'ALL' || currentView.type === 'CLASS') && activeTab === 'DASHBOARD' && (
             <StudentDashboard currentView={currentView} activeTab={activeTab} isFilterActive={isFilterActive} setIsFilterActive={setIsFilterActive} handleViewChange={handleViewChange} handleStudentClick={handleStudentClick} groupedClasses={groupedClasses} studentStatsMap={studentStatsMap} LEVEL_ORDER={LEVEL_ORDER} />
           )}  
@@ -525,6 +646,28 @@ export default function LearningPage() {
                   </div>
                 </div>
               )}
+              {activeTab === 'ARCHIVE' && (
+                <div className="bg-amber-50/80 border border-amber-200 p-4 m-6 mb-2 rounded-xl flex items-center justify-between shadow-sm shrink-0">
+                  <div className="flex flex-col gap-1">
+                     <h3 className="text-amber-800 font-extrabold text-[13px] flex items-center gap-1.5"><span>📦</span> 영구 보존 오답 아카이브</h3>
+                     <p className="text-amber-700/90 font-bold text-[11px] pl-5 leading-relaxed">
+                        학생이 과거에 틀렸던 문제 중 클리닉을 통해 완벽히 극복(O, RO, TO)하여 <strong className="text-amber-800 font-black">'해결됨'</strong> 처리된 문항들입니다.<br/>
+                        이곳의 데이터는 더 초과로 오답 클리닉 문제지로 출제되지 않습니다.
+                     </p>
+                  </div>
+                </div>
+              )}
+              {activeTab === 'RAW_INCORRECT' && (
+                <div className="bg-rose-50/80 border border-rose-200 p-4 m-6 mb-2 rounded-xl flex items-center justify-between shadow-sm shrink-0">
+                  <div className="flex flex-col gap-1">
+                     <h3 className="text-rose-800 font-extrabold text-[13px] flex items-center gap-1.5"><span>🔥</span> 누적 원본 오답 리스트</h3>
+                     <p className="text-rose-700/90 font-bold text-[11px] pl-5 leading-relaxed">
+                        월별로 누적된 <strong className="text-rose-800 font-black">'순수 미해결 오답 원본'</strong>들을 모아놓은 목록입니다.<br/>
+                        우측의 프린트(🖨️) 버튼을 누르면 해당 월에 틀린 모든 오답을 즉시 눈으로 확인할 수 있습니다.
+                     </p>
+                  </div>
+                </div>
+              )}
               <div className="w-full flex justify-end px-5 pt-3 pb-1 -mb-1 relative z-20 pointer-events-none">
                  <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-[#002864] hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
                     <span>{showCompleted ? '✅' : '🔒'}</span><span>{showCompleted ? '완료 포함' : '미완료만 보기'}</span>
@@ -535,7 +678,8 @@ export default function LearningPage() {
                 globalSelectedBlocks={globalSelectedBlocks} handleSelectAllGlobal={handleSelectAllGlobal} 
                 toggleGlobalSelection={toggleGlobalSelection} formatDateLabel={formatDateLabel} 
                 handleViewChange={handleViewChange} 
-                handleRenameItem={handleRenameItem} // 🌟 헬퍼 전달
+                openRawIncManageModal={openRawIncManageModal}
+                handleRenameItem={handleRenameItem} // 🔥 여기서 다시 직접 넘김
                 {...actions} 
               />
             </div>
@@ -544,7 +688,17 @@ export default function LearningPage() {
           {currentView.type === 'STUDENT' && (
             <div className="flex flex-col h-full overflow-hidden">
               {activeTab !== 'DASHBOARD' && (
-                <div className="w-full flex justify-end px-5 pt-3 pb-1 -mb-1 relative z-20 pointer-events-none">
+                <div className="w-full flex justify-end px-5 pt-3 pb-1 -mb-1 relative z-20 pointer-events-none flex-col items-end gap-2">
+                   {activeTab === 'ARCHIVE' && (
+                      <span className="text-xs font-bold text-amber-600 bg-amber-50 border border-amber-200 px-3 py-1.5 rounded-lg shadow-sm pointer-events-auto">
+                        📦 완전히 극복하여 클리닉에서 제외된 오답 기록입니다.
+                      </span>
+                   )}
+                   {activeTab === 'RAW_INCORRECT' && (
+                      <span className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 px-3 py-1.5 rounded-lg shadow-sm pointer-events-auto">
+                        🔥 개별 문항 삭제/관리 버튼(✂️)을 눌러 원치 않는 오답을 영구 삭제할 수 있습니다.
+                      </span>
+                   )}
                    <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-[#002864] hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
                       <span>{showCompleted ? '✅' : '🔒'}</span><span>{showCompleted ? '완료 포함' : '미완료만 보기'}</span>
                    </button>
@@ -555,7 +709,8 @@ export default function LearningPage() {
                 isLoading={isLoading} filteredTimeline={filteredTimeline} selectedBlocks={selectedBlocks} 
                 setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
                 isGeneratingPrint={isGeneratingPrint} formatDateLabel={formatDateLabel} 
-                handleRenameItem={handleRenameItem} // 🌟 헬퍼 전달
+                openRawIncManageModal={openRawIncManageModal}
+                handleRenameItem={handleRenameItem} // 🔥 여기서 다시 직접 넘김
                 {...actions} 
               />
             </div>
@@ -570,6 +725,248 @@ export default function LearningPage() {
           />
         </div>
       </div>
+
+      {/* 🌟 클리닉 미리보기 모달 UI */}
+      {previewModal?.isOpen && (
+        <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out] p-4">
+          <div className="bg-slate-100 w-[950px] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-8 py-5 border-b border-slate-200 bg-white shrink-0">
+              <h2 className="text-xl font-black text-slate-800 flex items-center gap-3">
+                <span className="text-2xl">👀</span>
+                <span className="text-[#002864]">{previewModal.studentName}</span> 학생의 포털 진입 화면
+              </h2>
+              <button onClick={() => setPreviewModal(null)} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-50 hover:bg-slate-100 p-2 rounded-full">
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+            
+            <div className="p-8 grid grid-cols-2 grid-rows-2 gap-8 bg-slate-100">
+              {/* 1. 주간테스트 (EXAM) */}
+              <div className="w-full h-[220px] bg-gradient-to-br from-[#002864] to-blue-800 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
+                <div className="relative z-10 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
+                    <span className="text-sm font-black bg-blue-500 text-white px-4 py-2 rounded-xl shadow-sm flex items-center">📝 주간테스트</span>
+                  </div>
+                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
+                    <span className="text-sm font-bold text-blue-200 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
+                      남은 문제: {previewModal.stats.examQCount ?? 0}
+                    </span>
+                  </div>
+                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">주간테스트 클리닉</h3>
+                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-blue-200 pr-[60px]">
+                    오늘 배정된 테스트를 응시합니다.
+                  </p>
+                </div>
+              </div>
+
+              {/* 2. 과제 (HW) */}
+              <div className="w-full h-[220px] bg-gradient-to-br from-amber-600 to-amber-500 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
+                <div className="relative z-10 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
+                    <span className="text-sm font-black bg-amber-400 text-amber-900 px-4 py-2 rounded-xl shadow-sm flex items-center">📚 과제</span>
+                  </div>
+                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
+                    <span className="text-sm font-bold text-amber-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
+                      남은 문제: {previewModal.stats.hwQCount ?? 0}
+                    </span>
+                  </div>
+                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">과제 클리닉</h3>
+                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-amber-100 pr-[60px]">
+                    미제출 과제 문항을 학습합니다.
+                  </p>
+                </div>
+              </div>
+
+              {/* 3. 미완료 과제 (OVERDUE) */}
+              <div className="w-full h-[220px] bg-gradient-to-br from-rose-700 to-rose-600 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
+                <div className="relative z-10 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
+                    <span className="text-sm font-black bg-rose-400 text-rose-900 px-4 py-2 rounded-xl shadow-sm flex items-center">⏰ 미완료 과제</span>
+                  </div>
+                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
+                    <span className="text-sm font-bold text-rose-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
+                      남은 문제: {previewModal.stats.overdueQCount ?? 0}
+                    </span>
+                  </div>
+                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">미완료 과제 클리닉</h3>
+                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-rose-100 pr-[60px]">
+                    다음 수업 전까지 끝내지 못해 밀린 과제입니다.
+                  </p>
+                </div>
+              </div>
+
+              {/* 4. 오답 (PRINT) */}
+              <div className="w-full h-[220px] bg-gradient-to-br from-emerald-700 to-emerald-600 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
+                <div className="relative z-10 shrink-0">
+                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
+                    <span className="text-sm font-black bg-emerald-400 text-emerald-900 px-4 py-2 rounded-xl shadow-sm flex items-center">🖨️ 누적 오답</span>
+                  </div>
+                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
+                    <span className="text-sm font-bold text-emerald-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
+                      남은 문제: {previewModal.stats.printQCount ?? 0}
+                    </span>
+                  </div>
+                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">통합 오답 클리닉</h3>
+                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-emerald-100 pr-[60px]">
+                    틀린 문제들만 모아 다시 풉니다.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-8 py-5 bg-white border-t border-slate-200 text-center text-sm font-bold text-slate-500">
+               학생이 포털 화면에서 마주하게 될 실제 디자인 및 잔여 문제(문항) 수와 동일하게 구성된 미리보기입니다.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 [신규] 개별 오답 목록 관리 모달 UI */}
+      {rawIncManageModal?.isOpen && (
+        <div className="fixed inset-0 z-[110] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out] p-4">
+          <div className="bg-white w-[700px] max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="flex justify-between items-center px-6 py-5 border-b border-slate-200 bg-rose-50 shrink-0">
+              <h2 className="text-lg font-black text-rose-800 flex items-center gap-2">
+                <span className="text-xl">✂️</span>
+                {rawIncManageModal.studentName} 학생 - {rawIncManageModal.month}월 누적 오답 개별 관리
+              </h2>
+              <button onClick={() => setRawIncManageModal(null)} className="text-slate-400 hover:text-rose-600 transition-colors bg-white p-2 rounded-full shadow-sm">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+              </button>
+            </div>
+
+            <div className="p-6 overflow-y-auto bg-slate-50 flex-1">
+              {rawIncManageModal.records.length === 0 ? (
+                 <div className="text-center py-20 text-slate-400 font-bold">이 달의 남은 미해결 오답이 없습니다.</div>
+              ) : (
+                 <div className="space-y-2">
+                   {rawIncManageModal.records.map((r, i) => (
+                      <div key={r.record_id} className="bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between shadow-sm">
+                        <div className="flex items-center gap-3">
+                           <span className="text-xs font-bold text-slate-400">{i + 1}</span>
+                           <div className="flex flex-col">
+                              <span className="text-sm font-bold text-slate-700">{formatDateLabel(r.created_at)} 발생</span>
+                              <span className="text-xs font-bold text-slate-500 mt-0.5">출처: {r.source_type || '알 수 없음'}</span>
+                           </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                           <button 
+                             onClick={() => handleViewSingleRawInc(r.question_id || r.tq_id)}
+                             className="px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg text-xs font-bold transition-colors border border-blue-200"
+                           >
+                             👁️ 눈으로 확인
+                           </button>
+                           <button 
+                             onClick={() => handleDeleteSingleRawInc(r.record_id)}
+                             className="px-3 py-1.5 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded-lg text-xs font-bold transition-colors border border-rose-200"
+                           >
+                             🗑️ 해결(삭제) 처리
+                           </button>
+                        </div>
+                      </div>
+                   ))}
+                 </div>
+              )}
+            </div>
+            
+            <div className="px-6 py-4 bg-white border-t border-slate-200 text-center">
+              <span className="text-xs font-bold text-slate-500">
+                 개별 삭제 처리된 문항은 '해결된 오답' 탭으로 이동하며 오답 클리닉에서 영구 제외됩니다.
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 🌟 [신규] 개별 문항 눈으로 확인하기 전용 모달 UI */}
+      {singleQuestionPreview && (() => {
+        // question_db 테이블 스키마에 맞춘 완벽한 이미지/텍스트 파싱
+        const qImg = singleQuestionPreview.image_url;
+        const qImg2 = singleQuestionPreview.image_2_url;
+        const aText = singleQuestionPreview.answer;
+        const aImg = singleQuestionPreview.answer_image_url;
+        const aImg2 = singleQuestionPreview.answer_image_2_url;
+        const expText = singleQuestionPreview.explanation;
+        const solText = singleQuestionPreview.solution;
+        const qText = singleQuestionPreview.question;
+
+        return (
+          <div className="fixed inset-0 z-[120] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm p-4 animate-[fadeIn_0.2s_ease-out]">
+            <div className="bg-white w-[700px] max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
+              <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
+                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                  <span className="text-xl">👁️</span> 문항 및 정답 미리보기
+                </h2>
+                <button onClick={() => setSingleQuestionPreview(null)} className="text-slate-400 hover:text-rose-600 transition-colors bg-white p-2 rounded-full shadow-sm">
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+              </div>
+
+              <div className="p-6 overflow-y-auto bg-slate-100 flex-1 flex flex-col gap-6 custom-scrollbar">
+                 {/* 문제 영역 */}
+                 <div>
+                    <h3 className="text-sm font-extrabold text-slate-500 mb-2 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-blue-500"></span>문제
+                    </h3>
+                    {qImg || qImg2 ? (
+                      <div className="space-y-2 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                        {qImg && <img src={qImg} alt="문제1" className="w-full object-contain" />}
+                        {qImg2 && <img src={qImg2} alt="문제2" className="w-full object-contain mt-2 border-t border-slate-100 pt-2" />}
+                      </div>
+                    ) : qText ? (
+                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm text-slate-700 whitespace-pre-wrap">
+                        {qText}
+                      </div>
+                    ) : (
+                      <div className="w-full h-32 bg-white rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 font-bold text-sm shadow-sm">등록된 문제 데이터가 없습니다.</div>
+                    )}
+                 </div>
+
+                 {/* 정답 및 해설 영역 */}
+                 <div>
+                    <h3 className="text-sm font-extrabold text-slate-500 mb-2 flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500"></span>정답 및 해설
+                    </h3>
+                    <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
+                        {/* 텍스트 정답 */}
+                        {aText && (
+                            <div className="text-lg font-black text-[#002864] bg-blue-50 p-3 rounded-lg text-center border border-blue-100">
+                               정답: {aText}
+                            </div>
+                        )}
+                        
+                        {/* 이미지 정답 */}
+                        {(aImg || aImg2) && (
+                          <div className="space-y-2">
+                             {aImg && <img src={aImg} alt="정답 이미지" className="w-full object-contain rounded-lg border border-slate-100" />}
+                             {aImg2 && <img src={aImg2} alt="정답 이미지 2" className="w-full object-contain rounded-lg border border-slate-100" />}
+                          </div>
+                        )}
+
+                        {/* 텍스트 풀이 및 해설 */}
+                        {(expText || solText) && (
+                          <div className="mt-2 text-sm text-slate-700 bg-slate-50 p-4 rounded-lg border border-slate-100 whitespace-pre-wrap leading-relaxed">
+                            {solText && <div className="mb-2"><strong className="text-slate-800">풀이:</strong><br/>{solText}</div>}
+                            {expText && <div><strong className="text-slate-800">해설:</strong><br/>{expText}</div>}
+                          </div>
+                        )}
+
+                        {!aText && !aImg && !aImg2 && !expText && !solText && (
+                          <div className="text-slate-400 font-bold text-sm text-center py-4">등록된 정답/해설 데이터가 없습니다.</div>
+                        )}
+                    </div>
+                 </div>
+              </div>
+              
+              <div className="px-6 py-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
+                <button onClick={() => setSingleQuestionPreview(null)} className="px-6 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl shadow-sm transition-colors">
+                   닫기
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {isBulkModalOpen && (
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">

@@ -80,13 +80,10 @@ export default function ClinicViewer() {
 
   const autoLeaveTimerRef = useRef<NodeJS.Timeout | null>(null);
   
-  // 🌟 [추가됨] 진짜 출처 타입(`exam_type`)을 담을 ref
   const sourceTypeRef = useRef<string>('시험지');
 
-  // 동적으로 설정된 제한 시간(초)을 화면 렌더링에 사용하기 위해 상태 추가
   const [dynamicTimeLimitMin, setDynamicTimeLimitMin] = useState<number>(20);
 
-  // 🌟 [핵심 변경] 컴포넌트 마운트 및 파라미터 로드 시짜 진짜 타입(exam_type) 추출
   useEffect(() => {
     if (!studentInfo.id || params.round === 0) return;
     const fetchSourceType = async () => {
@@ -469,7 +466,7 @@ export default function ClinicViewer() {
         if (firstWrongIdx !== -1) {
             setCurrentQIndex(firstWrongIdx);
         } else {
-            setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 정없습니다. 홈으로 돌아가세요.' });
+            setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 없습니다. 홈으로 돌아가세요.' });
         }
     } else if (!isTimedRound && questions.length === 0) {
       setEmptyState({ title: '모든 오답을 해결했습니다!', desc: '더 이상 풀 문제가 없습니다. 홈으로 돌아가세요.' });
@@ -538,7 +535,6 @@ export default function ClinicViewer() {
       totalScore += score;
 
       inserts.push({ exam_assignment_id: params.assignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
-      // 🌟 [핵심 변경] 하드코딩된 '시험지' 대신 sourceTypeRef.current 사용
       if (!isCorrect && qItem.question_id) { incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: sourceTypeRef.current, status: ans === '미입력' ? 'B' : 'X', resolved_at: null }); }
     }
 
@@ -574,14 +570,17 @@ export default function ClinicViewer() {
                 if (isBlank) {
                     unansweredQIds.push(qItem.question_id);
                 } else {
-                
                     incorrectQIds.push(qItem.question_id);
                     statusMap[qItem.question_id] = 'X';
                 }
             }
         });
         correctSolvedCountRef.current = corrects;
-        await finalizeSessionData(supabaseClient, studentInfo, params, globalExamTitle, isTimedRound, incorrectQIds, unansweredQIds, statusMap, questions);
+        
+        const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(sourceTypeRef.current);
+        const finalIncorrectQIds = isTestType ? [] : incorrectQIds;
+
+        await finalizeSessionData(supabaseClient, studentInfo, params, globalExamTitle, isTimedRound, finalIncorrectQIds, unansweredQIds, statusMap, questions);
     } catch (err) { console.error('Error during processSessionEnd:', err); }
   };
 
@@ -650,6 +649,12 @@ export default function ClinicViewer() {
 
   const appendToExistingIncorrectPrint = async (qItem: any) => {
     if (!qItem.question_id) return;
+    
+    // 🌟 핵심 픽스: 이미 오답 클리닉을 풀고 있는 중이라면, 자기 자신에게 또 오답을 추가하는 무한 증식(우로보로스)을 막습니다.
+    if (sourceTypeRef.current === '오답프린트' || sourceTypeRef.current === '오답') {
+        return;
+    }
+
     try {
       const { data: assignments } = await supabaseClient.from('exam_assignment')
         .select('assignment_id, exam_id, status, exam_master!inner(exam_type, total_questions)').eq('student_id', studentInfo.id).eq('exam_master.exam_type', '오답프린트')
@@ -657,7 +662,7 @@ export default function ClinicViewer() {
 
       if (assignments && assignments.length > 0) {
         const assign = assignments[0]; const examId = assign.exam_id;
-        const { data: existingItem } = await supabaseClient.from('exam_item').select('item_id').eq('exam_id', examId).eq('question_id', qItem.question_id).maybeSingle();
+        const { data: existingItem } = await supabaseClient.from('exam_item').select('question_id').eq('exam_id', examId).eq('question_id', qItem.question_id).maybeSingle();
         if (!existingItem) {
           const { count } = await supabaseClient.from('exam_item').select('*', { count: 'exact', head: true }).eq('exam_id', examId);
           const nextSortOrder = (count || 0) + 1;
@@ -882,7 +887,11 @@ export default function ClinicViewer() {
       
       const incorrectQIds: number[] = []; const statusMap: Record<number, string> = {};
       questions.forEach((qi, i) => { const st = qBoxStatus.current[i]; if ((st === 'wrong_red' || st === 'X' || st === 'TX') && qi.question_id) { incorrectQIds.push(qi.question_id); statusMap[qi.question_id] = 'X'; } });
-      if (incorrectQIds.length > 0) { await generateIncorrectPrint(supabaseClient, studentInfo, incorrectQIds, globalExamTitle, isTimedRound, statusMap); }
+      
+      const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(sourceTypeRef.current);
+      if (incorrectQIds.length > 0 && !isTestType) { 
+        await generateIncorrectPrint(supabaseClient, studentInfo, incorrectQIds, globalExamTitle, isTimedRound, statusMap); 
+      }
     } else {
       setCurrentQIndex(nextIdx);
       setTimeout(() => setCanvasClearTrigger(p=>p+1), 100);
@@ -916,13 +925,11 @@ export default function ClinicViewer() {
     setPendingRecheckReview(prev => prev.map(r => r.uid === item.uid ? { ...r, requested: true } : r));
   };
 
-  // 🌟 [핵심 변경] 진짜 문제지 타입(sourceTypeRef.current)으로 업데이트
   const bumpIncorrectRecord = async (recordId: number, status: string, resolved: boolean) => {
     const { data: cur } = await supabaseClient.from('student_incorrect_record').select('retry_count').eq('record_id', recordId).maybeSingle();
     await supabaseClient.from('student_incorrect_record').update({ status, retry_count: (cur?.retry_count || 0) + 1, resolved_at: resolved ? new Date().toISOString() : null, source_type: sourceTypeRef.current }).eq('record_id', recordId);
   };
 
-  // 🌟 [핵심 변경] 진짜 문제지 타입(sourceTypeRef.current)으로 등록/업데이트
   const upsertIncorrectRecord = async (qData: any, status: string): Promise<number | undefined> => {
     const filterCol = qData.tq_id ? 'tq_id' : 'question_id'; const filterVal = qData.tq_id ?? qData.question_id;
     if (!filterVal) return undefined;

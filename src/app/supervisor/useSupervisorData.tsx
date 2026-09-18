@@ -169,19 +169,15 @@ export function useSupervisorData() {
     const sendToStudent = (seat: string, action: string, extra = {}) => {
         if (!channelRef.current) return;
         const studentId = studentsRef.current[seat]?.studentId;
-        const payload = { type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } };
+        const msg = { type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } };
         
-        // 🌟 웹소켓이 정상 연결되어 있으면 표준 send() 사용
+        // 🌟 웹소켓이 정상 연결되어 있을 때만 안전하게 전송 (경고 및 에러 원천 차단)
         if (channelRef.current.state === 'joined') {
-            channelRef.current.send(payload);
+            channelRef.current.send(msg);
         } else {
-            // 🌟 끊겨 있으면 재연결을 시도하면서, Supabase의 권장대로 httpSend()를 명시적으로 사용
+            // 끊겨 있다면 무리하게 우회 전송하지 않고 조용히 재연결만 시도
+            // (핵심 데이터는 이미 DB에 업데이트되었으므로 학생 패드가 복구 시 자동 동기화됨)
             setReconnectTrigger(p => p + 1);
-            if (typeof channelRef.current.httpSend === 'function') {
-                channelRef.current.httpSend(payload);
-            } else {
-                channelRef.current.send(payload); // 구버전 호환용 안전장치
-            }
         }
     };
 
