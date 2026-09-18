@@ -68,7 +68,6 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
 
         const fallbackInstId = await getFallbackInstructorId(supabaseAdmin);
 
-        // 🌟 수정됨: hwData를 any[]로 캐스팅하여 'never' 타입 에러 우회
         for (const hw of (hwData as any[]) || []) {
             let tqs = [];
             try { tqs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions || []); } catch(e){}
@@ -125,16 +124,20 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
                 }
             }
 
+            // 🌟 버그 수정: 'id' 컬럼이 없으므로 'result_id' 컬럼으로 조회 및 업데이트 수행
             const { data: existingResult } = await supabaseAdmin.from('student_homework_result')
-                .select('id')
+                .select('result_id')
                 .eq('student_id', studentId)
                 .eq('homework_id', hw.homework_id)
                 .maybeSingle();
 
             if (existingResult) {
-                await supabaseAdmin.from('student_homework_result').update({ status: '완료' }).eq('id', existingResult.id);
+                await supabaseAdmin.from('student_homework_result')
+                    .update({ status: '완료' })
+                    .eq('result_id', existingResult.result_id);
             } else {
-                await supabaseAdmin.from('student_homework_result').insert({ student_id: studentId, homework_id: hw.homework_id, status: '완료' });
+                await supabaseAdmin.from('student_homework_result')
+                    .insert({ student_id: studentId, homework_id: hw.homework_id, status: '완료' });
             }
         }
 
