@@ -94,7 +94,6 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, tq_id, question_id, source_type').eq('student_id', sId).eq('source_type', '과제오답').is('resolved_at', null);
       if (!records || records.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
 
-      // 🌟 [핵심 수정] 숫자(tq_id)와 문자열(UUID)을 안전하게 분리
       let qIds = [...new Set(records.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
       
       const tqIds = [...new Set(records.filter((r:any) => r.tq_id).map((r:any) => r.tq_id))]
@@ -122,7 +121,6 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
       const mapped: any[] = [];
       records.forEach((r:any) => {
-        // 🌟 [매핑 로직 보강] tq_id에 UUID가 들어있었더라도 question_db에서 안전하게 찾아서 연결
         const isTqIdUuid = r.tq_id && typeof r.tq_id === 'string' && r.tq_id.includes('-');
         const targetQId = isTqIdUuid ? r.tq_id : r.question_id;
 
@@ -156,7 +154,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
             needsAiHint: !dbHint && tbFields.needsAiHint,
             bookId: tq.book_id, bookType: tq.textbook?.book_type, bookTitle: tq.textbook?.title,
             aiGradable: tq.ai_gradable !== false,
-            pageNum: tq.page_number || freshQ.page_number || raw.page_number || raw.detected_page_num,
+            pageNum: tq.page_number || freshQ.final_printed_page || freshQ.detected_page_num || raw.page_number || raw.detected_page_num,
             questionNum: tq.question_number || freshQ.question_number || raw.question_number
           });
         }
@@ -321,7 +319,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
       const hwQIds = qs.map((qItem: any) => qItem.question_id).filter(Boolean);
       const { data: freshQDb } = hwQIds.length > 0 
-        ? await supabaseClient.from('question_db').select('question_id, step_1_concept, step_2_approach, page_number, question_number').in('question_id', hwQIds)
+        // 🌟 버그 수정: page_number 제거하고 final_printed_page, detected_page_num 안전하게 추가
+        ? await supabaseClient.from('question_db').select('question_id, step_1_concept, step_2_approach, final_printed_page, detected_page_num, question_number').in('question_id', hwQIds)
         : { data: [] };
       const freshQDbMap = new Map((freshQDb || []).map((qItem: any) => [qItem.question_id, qItem]));
 
@@ -341,7 +340,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           needsAiHint: !dbHint && tbFields.needsAiHint,
           bookId: qItem.book_id, bookType: qItem.bookType, bookTitle: qItem.bookTitle,
           aiGradable: qItem.ai_gradable !== false,
-          pageNum: qItem.page_number || freshQ.page_number || raw.page_number || raw.detected_page_num,
+          pageNum: qItem.page_number || freshQ.final_printed_page || freshQ.detected_page_num || raw.page_number || raw.detected_page_num,
           questionNum: qItem.question_number || freshQ.question_number || raw.question_number
         };
       });
