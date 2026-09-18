@@ -124,7 +124,7 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
                 }
             }
 
-            // 🌟 확실한 픽스: 'hw_result_id' 컬럼 사용
+            // 🌟 확실한 픽스: 'hw_result_id' 컬럼 사용 및 스키마 기반 업데이트
             const { data: existingResult } = await supabaseAdmin.from('student_homework_result')
                 .select('hw_result_id')
                 .eq('student_id', studentId)
@@ -210,7 +210,7 @@ export async function generateIncorrectClinic(params: {
         
         const examItems = uniqueQids.map((qId, idx) => ({
             exam_id: newExamId,
-            question_id: qId,
+            question_id: String(qId), // 🔥 안전한 파싱을 위해 String 캐스팅
             sort_order: idx + 1
         }));
         

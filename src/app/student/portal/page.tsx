@@ -53,6 +53,7 @@ export default function StudentPortal() {
     const [recheckToast, setRecheckToast] = useState("");
     
     const [isGeneratingPrint, setIsGeneratingPrint] = useState(false);
+    const [isProcessingEnd, setIsProcessingEnd] = useState(false); // 🔥 다중 클릭 방지 상태 추가
     
     const [selectedTaskIdx, setSelectedTaskIdx] = useState<Record<string, number>>({});
 
@@ -365,7 +366,6 @@ export default function StudentPortal() {
         }));
         setClassWeekTypes(newClassWeekTypes);
 
-        // 🌟 수정됨: record_id 추가 셀렉트
         const { data: incData } = await supabaseClient.from('student_incorrect_record')
             .select('record_id, question_id, tq_id, status')
             .eq('student_id', sid)
@@ -375,7 +375,6 @@ export default function StudentPortal() {
         const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
         let tqToQidMap = new Map();
         if (rawTqIds.length > 0) {
-            // 🌟 "Q-1번" 같은 비정형 텍스트로 인한 에러를 방지하기 위해 숫자 형태만 교차조회
             const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
             if (safeTqIds.length > 0) {
                 const { data: tqRows } = await supabaseClient.from('textbook_question').select('tq_id, question_id').in('tq_id', safeTqIds);
@@ -383,7 +382,6 @@ export default function StudentPortal() {
             }
         }
 
-        // 🌟 셀프 힐링 1: question_id가 누락된 오답 기록이 있다면 알아서 채워넣습니다.
         const recordsToHealMissingQid = (incData || []).filter((r: any) => !r.question_id && r.tq_id && tqToQidMap.has(r.tq_id));
         if (recordsToHealMissingQid.length > 0) {
             Promise.all(recordsToHealMissingQid.map((r: any) => 
@@ -393,7 +391,6 @@ export default function StudentPortal() {
             )).catch(err => console.error('Self-healing failed', err));
         }
 
-        // 🌟 "Q-1번" 같은 문자열 식별자를 지원하기 위해 any[] 캐스팅
         const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
         let uniqueIncIds = Array.from(new Set(resolvedQids)) as any[];
 
@@ -411,7 +408,6 @@ export default function StudentPortal() {
                 .eq('student_id', sid)
         ]);
 
-        // 🌟 셀프 힐링 2: 오답프린트에서 '완벽히(O, RO)' 맞췄는데 미처 처리되지 못한 좀비 기록 소탕
         const printExamIds = new Set(
             (examsData || [])
             .filter((ex: any) => ['오답프린트', '오답'].includes(ex.exam_master?.exam_type))
@@ -432,17 +428,14 @@ export default function StudentPortal() {
 
         if (recordsToHealResolved.length > 0) {
             const rIdsToHeal = recordsToHealResolved.map((r: any) => r.record_id);
-            // 백그라운드에서 DB 업데이트 (시간 소요 방지)
             supabaseClient.from('student_incorrect_record')
                 .update({ resolved_at: new Date().toISOString(), status: 'RO' })
                 .in('record_id', rIdsToHeal)
                 .then(() => {});
             
-            // 화면 상에서는 즉시 날려버립니다.
             uniqueIncIds = uniqueIncIds.filter(id => !fullyResolvedQids.has(id));
         }
 
-        // 🌟 오답 정정 중(채점확정)인 시험에 속한 문항들은 오답 클리닉 카운트에서 통째로 제외
         let fixingQids = new Set<any>();
         const fixingExamIds = (examsData || [])
             .filter((ex: any) => ex.status === '채점확정')
@@ -455,7 +448,6 @@ export default function StudentPortal() {
             fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
         }
 
-        // 🌟 채점확정 시험의 문제들은 제외하고 진짜 최종 오답만 남깁니다.
         uniqueIncIds = uniqueIncIds.filter(id => !fixingQids.has(id));
         const totalPrintQCount = uniqueIncIds.length;
 
@@ -609,33 +601,43 @@ export default function StudentPortal() {
     };
 
     const finalizeAndGoToLogin = async () => {
-        if (channelRef.current && trackedSeatRef.current) {
-            await channelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: trackedSeatRef.current, action: 'depart', data: { studentId: studentInfo.id, name: studentInfo.name } } });
-            await channelRef.current.untrack();
-        }
+        if (isProcessingEnd) return; // 🔥 다중 클릭 방지 락
+        setIsProcessingEnd(true);
 
-        const allPendingHwIds: number[] = [];
-        Object.values(hwProgress).forEach((prog: any) => {
-            if (prog.hwList) {
-                prog.hwList.forEach((it: any) => { if (it.type === 'hw') allPendingHwIds.push(it.id); });
+        try {
+            if (channelRef.current && trackedSeatRef.current) {
+                await channelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: trackedSeatRef.current, action: 'depart', data: { studentId: studentInfo.id, name: studentInfo.name } } });
+                await channelRef.current.untrack();
             }
-        });
-        
-        if (allPendingHwIds.length > 0) {
-            const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
-            
-            const result = await processIncompleteHomeworks(studentInfo.id, allPendingHwIds, myTenantId);
-            
-            if (!result.success) {
-                alert(`보안 정책으로 인해 미완료 과제를 생성하지 못했습니다.\n원장님/선생님께 문의해주세요: ${result.error}`);
-                return; 
-            }
-        }
 
-        localStorage.removeItem('logica_student_id');
-        localStorage.removeItem('logica_student_name');
-        localStorage.removeItem('logica_student_phone');
-        router.push('/student/login');
+            const allPendingHwIds: number[] = [];
+            Object.values(hwProgress).forEach((prog: any) => {
+                if (prog.hwList) {
+                    prog.hwList.forEach((it: any) => { if (it.type === 'hw') allPendingHwIds.push(it.id); });
+                }
+            });
+            
+            if (allPendingHwIds.length > 0) {
+                const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
+                
+                // 🔥 여기서 에러나 충돌이 나도 포털 퇴실 및 세션 삭제는 보장되도록 예외 처리
+                try {
+                    const result = await processIncompleteHomeworks(studentInfo.id, allPendingHwIds, myTenantId);
+                    if (!result.success) {
+                        alert(`미완료 과제 전환 중 일부 오류가 발생했습니다.\n원장님/선생님께 확인을 부탁드려주세요: ${result.error}`);
+                    }
+                } catch (processErr) {
+                    console.error("미완료 과제 전환 실패:", processErr);
+                }
+            }
+
+            localStorage.removeItem('logica_student_id');
+            localStorage.removeItem('logica_student_name');
+            localStorage.removeItem('logica_student_phone');
+            router.push('/student/login');
+        } finally {
+            setIsProcessingEnd(false);
+        }
     };
 
     const sendClinicAction = (action: string, extra: any = {}) => {
@@ -753,7 +755,7 @@ export default function StudentPortal() {
                     studentName: studentInfo.name,
                     targetClassId,
                     targetInstructorId,
-                    uniqueQids: uniqueQids as number[], // 캐스팅 유지 
+                    uniqueQids: uniqueQids as number[], 
                     tenantId: myTenantId
                 });
 

@@ -439,11 +439,16 @@ export default function StudentCard({ student }: { student: any }) {
   const handlePrevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const handleNextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
 
+  // 🌟 출결 데이터 매핑 (출결 상태 보정 로직 적용)
   const attendanceMap = new Map();
   if (student.attendance) {
     student.attendance.forEach((record: any) => {
       if (record.attendance_date) {
-        attendanceMap.set(record.attendance_date, record);
+        let st = record.status;
+        if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || record.check_in_time)) {
+          st = '출석';
+        }
+        attendanceMap.set(record.attendance_date, { ...record, status: st });
       }
     });
   }
@@ -773,7 +778,7 @@ export default function StudentCard({ student }: { student: any }) {
                        <div className="flex-1 bg-slate-50 p-3 rounded-lg flex flex-col items-center justify-center border border-slate-100">
                          <span className="text-[10px] font-bold text-slate-400 mb-1">하원 시간</span>
                          <span className="text-base font-black text-slate-700">
-                           {formatTime(selectedAtt.check_out_time) || <span className="text-sm text-emerald-500">학습 진행중</span>}
+                           {formatTime(selectedAtt.check_out_time) || "--:--"}
                          </span>
                        </div>
                      </div>

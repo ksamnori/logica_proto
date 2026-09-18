@@ -127,9 +127,15 @@ export default function StudentDetailPage() {
     if (selectedDate) {
       const record = attendances.find(a => a.attendance_date === selectedDate);
       if (record) {
+        let st = record.status;
+        // 조퇴/결석/지각이 아닐 때 등원시간(check_in_time)이 있거나 '등원' 상태면 무조건 '출석'
+        if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || record.check_in_time)) {
+          st = '출석';
+        }
+        
         setAttendForm({ 
           id: record.attendance_id, 
-          status: record.status || "출석", 
+          status: st || "출석", 
           checkIn: formatTimeForInput(record.check_in_time), 
           checkOut: formatTimeForInput(record.check_out_time), 
           remark: record.remark || "" 
@@ -612,8 +618,19 @@ export default function StudentDetailPage() {
   const calendarDays = useMemo(() => {
     const firstDay = new Date(calYear, calMonth, 1).getDay();
     const daysInMonth = new Date(calYear, calMonth + 1, 0).getDate();
-    let attendMap: any = {}; attendances.forEach(a => attendMap[a.attendance_date] = a.status);
-    let consultMap: any = {}; consultLogs.forEach(c => consultMap[new Date(c.created_at).toISOString().split('T')[0]] = true);
+    
+    let attendMap: any = {}; 
+    attendances.forEach(a => {
+      let st = a.status;
+      // 상태 보정: 등원 시간이 있거나 등원 상태면 무조건 '출석' 렌더링
+      if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || a.check_in_time)) {
+        st = '출석';
+      }
+      attendMap[a.attendance_date] = st;
+    });
+    
+    let consultMap: any = {}; 
+    consultLogs.forEach(c => consultMap[new Date(c.created_at).toISOString().split('T')[0]] = true);
 
     const blanks = Array.from({ length: firstDay }).map((_, i) => <div key={`blank-${i}`} className="aspect-square"></div>);
     const days = Array.from({ length: daysInMonth }).map((_, i) => {
@@ -640,11 +657,17 @@ export default function StudentDetailPage() {
     const currStart = new Date(calYear, calMonth, 1).toISOString().split('T')[0], currEnd = new Date(calYear, calMonth + 1, 0).toISOString().split('T')[0];
     const prevStart = new Date(calYear, calMonth - 1, 1).toISOString().split('T')[0], prevEnd = new Date(calYear, calMonth, 0).toISOString().split('T')[0];
 
-    attendances.forEach(st => {
-      if (st.attendance_date >= currStart && st.attendance_date <= currEnd) {
-        curr.total++; if (st.status === "결석") curr.absent++; else if (st.status === "조퇴") curr.leave++; else if (["출석", "지각"].includes(st.status)) curr.present++;
-      } else if (st.attendance_date >= prevStart && st.attendance_date <= prevEnd) {
-        prev.total++; if (st.status === "결석") prev.absent++; else if (st.status === "조퇴") prev.leave++; else if (["출석", "지각"].includes(st.status)) prev.present++;
+    attendances.forEach(a => {
+      let st = a.status;
+      // 상태 보정: 등원 시간이 있거나 등원 상태면 무조건 '출석' 카운트
+      if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || a.check_in_time)) {
+        st = '출석';
+      }
+
+      if (a.attendance_date >= currStart && a.attendance_date <= currEnd) {
+        curr.total++; if (st === "결석") curr.absent++; else if (st === "조퇴") curr.leave++; else if (["출석", "지각"].includes(st)) curr.present++;
+      } else if (a.attendance_date >= prevStart && a.attendance_date <= prevEnd) {
+        prev.total++; if (st === "결석") prev.absent++; else if (st === "조퇴") prev.leave++; else if (["출석", "지각"].includes(st)) prev.present++;
       }
     });
     return { curr, prev };
