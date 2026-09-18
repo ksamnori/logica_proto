@@ -321,7 +321,6 @@ export function useLearningFetch() {
         });
       });
 
-      // 🌟 오답 아카이브(완료된 오답) 월별 덩어리 병합
       const { data: archives } = await supabase.from('student_incorrect_record')
         .select('record_id, source_type, status, resolved_at, created_at, question_id, tq_id')
         .eq('student_id', studentId)
@@ -337,7 +336,6 @@ export function useLearningFetch() {
 
         Object.keys(groupedArchive).forEach(month => {
           const items = groupedArchive[month];
-          // 🔥 뷰어나 마법사에 넘겨주기 위해 중복 없는 유효한 question_id만 추출
           const qIds = Array.from(new Set(items.map((i:any) => i.question_id).filter(Boolean)));
 
           combined.push({
@@ -352,7 +350,6 @@ export function useLearningFetch() {
         });
       }
 
-      // 🌟 원본 오답(미해결) 월별 덩어리 병합
       const { data: rawIncs } = await supabase.from('student_incorrect_record')
         .select('record_id, source_type, status, created_at, question_id, tq_id')
         .eq('student_id', studentId)
@@ -368,7 +365,6 @@ export function useLearningFetch() {
 
         Object.keys(groupedRaw).forEach(month => {
           const items = groupedRaw[month];
-          // 🔥 뷰어나 마법사에 넘겨주기 위해 중복 없는 유효한 question_id만 추출
           const qIds = Array.from(new Set(items.map((i:any) => i.question_id).filter(Boolean)));
           
           combined.push({
@@ -399,7 +395,6 @@ export function useLearningFetch() {
 
       const getStudentName = (sId: string) => { const s = students.find(st => st.id === sId); return s ? s.name : '알수없음'; };
 
-      // 🌟 오답 아카이브 및 원본 오답 전역 탭 처리 (월별/학생별 그룹화)
       if (tab === 'ARCHIVE' || tab === 'RAW_INCORRECT') {
         const isArchive = tab === 'ARCHIVE';
         for (let i = 0; i < studentIds.length; i += chunkSize) {
@@ -427,7 +422,6 @@ export function useLearningFetch() {
              const enriched = Object.values(grouped).map((group: any) => {
                 const stuFallback = students.find(s => s.id === group.student_id);
                 const items = group.items;
-                // 🔥 뷰어나 마법사에 넘겨주기 위해 중복 없는 유효한 question_id만 추출
                 const qIds = Array.from(new Set(items.map((i:any) => i.question_id).filter(Boolean)));
                 
                 return {
@@ -633,35 +627,69 @@ export function useLearningFetch() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
+  // 🌟 [추가] 클리닉 미리보기를 위한 미결 문항 수 집계 (학생 포털과 로직 100% 동일화)
   const fetchStudentClinicPreview = async (studentId: string, classId: string) => {
     try {
+      // 1. 순수 오답 데이터 추출
       const { data: incData } = await supabase.from('student_incorrect_record')
-        .select('question_id, tq_id')
+        .select('record_id, question_id, tq_id, status')
         .eq('student_id', studentId)
         .in('status', ['X', 'TX', 'TO', 'B'])
         .is('resolved_at', null);
 
-      const { data: fixingExams } = await supabase.from('exam_assignment').select('assignment_id').eq('student_id', studentId).eq('status', '채점확정');
-      let fixingQids = new Set<any>();
-      if (fixingExams && fixingExams.length > 0) {
-          const fIds = fixingExams.map((ex: any) => ex.assignment_id);
-          const { data: fixingAnswers } = await supabase.from('student_answer').select('question_id').in('exam_assignment_id', fIds);
-          fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
+      // 2. 셀프 힐링: 교재문항(tq_id)를 고유 question_id로 치환
+      const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
+      let tqToQidMap = new Map();
+      if (rawTqIds.length > 0) {
+          const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
+          if (safeTqIds.length > 0) {
+              const { data: tqRows } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', safeTqIds);
+              tqRows?.forEach((t: any) => { if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id); });
+          }
       }
 
-      let printCount = 0;
-      incData?.forEach(r => {
-          const qid = r.question_id || r.tq_id;
-          if (qid && !fixingQids.has(qid)) printCount++;
-      });
+      // 3. Set을 이용한 완벽한 중복 제거
+      const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
+      let uniqueIncIds = Array.from(new Set(resolvedQids)) as any[];
 
+      // 4. 셀프 힐링을 위한 학습 데이터 교차 로드
       const [{ data: examAnsData }, { data: examsData }, { data: hwAnsData }, { data: hwsData }, { data: hwResData }] = await Promise.all([
-          supabase.from('student_answer').select('exam_assignment_id, question_id').eq('student_id', studentId).in('grading_code', ['O', 'TO', 'RO']),
+          supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code').eq('student_id', studentId).in('grading_code', ['O', 'TO', 'RO']),
           supabase.from('exam_assignment').select('assignment_id, status, exam_master!inner(exam_type, total_questions)').eq('student_id', studentId),
           supabase.from('student_homework_answer').select('homework_id, tq_id').eq('student_id', studentId).in('grading_code', ['O', 'TO', 'RO']),
           supabase.from('homework_assignment').select('homework_id, target_questions, due_date').or(`class_id.eq.${classId},target_student_id.eq.${studentId}`).neq('homework_title', '[시스템] 수업 진도 완료 기록'),
           supabase.from('student_homework_result').select('homework_id, status').eq('student_id', studentId)
       ]);
+
+      // 5. 오답프린트에서 이미 완벽히 맞춘(O, RO) 문제 필터링
+      const printExamIds = new Set(
+          (examsData || [])
+          .filter((ex: any) => ['오답프린트', '오답'].includes(unwrap(ex.exam_master)?.exam_type))
+          .map((ex: any) => ex.assignment_id)
+      );
+
+      const fullyResolvedQids = new Set<any>();
+      examAnsData?.forEach((a: any) => {
+          if (printExamIds.has(a.exam_assignment_id) && ['O', 'RO'].includes(a.grading_code)) {
+              fullyResolvedQids.add(a.question_id);
+          }
+      });
+      uniqueIncIds = uniqueIncIds.filter(id => !fullyResolvedQids.has(id));
+
+      // 6. 현재 채점확정(오답 고치기 진행 중)인 시험지에 속한 문항 보류
+      let fixingQids = new Set<any>();
+      const fixingExamIds = (examsData || [])
+          .filter((ex: any) => ex.status === '채점확정')
+          .map((ex: any) => ex.assignment_id);
+
+      if (fixingExamIds.length > 0) {
+          const { data: fixingAnswers } = await supabase.from('student_answer').select('question_id').in('exam_assignment_id', fixingExamIds);
+          fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
+      }
+      uniqueIncIds = uniqueIncIds.filter(id => !fixingQids.has(id));
+      
+      // 7. 학생 포털과 100% 동일하게 산출된 최종 오답 문항 수
+      const printCount = uniqueIncIds.length;
 
       const examResolvedMap = new Map();
       examAnsData?.forEach((a:any) => {

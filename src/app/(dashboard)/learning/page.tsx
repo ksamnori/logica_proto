@@ -262,7 +262,7 @@ export default function LearningPage() {
       examQCount: localStats.examQ,
       hwQCount: localStats.hwQ,
       overdueQCount: localStats.overdueQ,
-      printQCount: localStats.printQ
+      printQCount: stats.printCount 
     };
 
     setPreviewModal({ isOpen: true, studentName: currentView.studentName, stats: mergedStats });
@@ -293,7 +293,7 @@ export default function LearningPage() {
         
       setRawIncManageModal(prev => prev ? { ...prev, records: prev.records.filter(r => r.record_id !== recordId) } : null);
       
-      // 🔥 actions. 없이 직접 호출
+      // 🔥 actions. 제거하고 fetchStudentTimeline, fetchGlobalListForTab 직접 호출
       if (currentView.type === 'STUDENT') fetchStudentTimeline(currentView.studentId, currentView.classId, allStudentsList);
       else fetchGlobalListForTab(activeTab, allStudentsList);
     } catch (e) {
@@ -301,14 +301,12 @@ export default function LearningPage() {
     }
   };
 
-  // 🔥 [초강력 방어 로직] question_db, textbook_question 완벽 매핑
   const handleViewSingleRawInc = async (qId: string | number | null) => {
     if (!qId) return alert('문항 식별자가 존재하지 않습니다.');
     setIsLoading(true);
     try {
         let finalQId = String(qId);
         
-        // 교재 ID(숫자)일 경우 먼저 textbook_question 뒤져서 문제은행 UUID 획득
         if (!isNaN(Number(qId))) {
             const { data: tqData } = await supabase.from('textbook_question').select('question_id').eq('tq_id', Number(qId)).maybeSingle();
             if (tqData?.question_id) {
@@ -316,7 +314,6 @@ export default function LearningPage() {
             }
         }
 
-        // 🌟 question_db에서 긁어오기
         const { data: qData, error } = await supabase.from('question_db').select('*').eq('question_id', finalQId).maybeSingle();
 
         if (error || !qData) {
@@ -511,7 +508,7 @@ export default function LearningPage() {
     fetchStatsForTab(allStudentsList);
   };
 
-  // 🔥 밖으로 빼놓은 handleRenameItem
+  // 🔥 핸들러 직접 정의: actions 객체와 무관함
   const handleRenameItem = async (e: React.MouseEvent, type: string, realId: string, masterId: string | null, currentTitle: string) => {
     e.stopPropagation();
     const cleanCurrent = currentTitle.replace(/^\[시스템\]\s*/, '');
@@ -679,7 +676,7 @@ export default function LearningPage() {
                 toggleGlobalSelection={toggleGlobalSelection} formatDateLabel={formatDateLabel} 
                 handleViewChange={handleViewChange} 
                 openRawIncManageModal={openRawIncManageModal}
-                handleRenameItem={handleRenameItem} // 🔥 여기서 다시 직접 넘김
+                handleRenameItem={handleRenameItem} // 🔥 여기서 명시적으로 전달 
                 {...actions} 
               />
             </div>
@@ -710,7 +707,7 @@ export default function LearningPage() {
                 setSelectedBlocks={setSelectedBlocks} handleSelectAllStudent={handleSelectAllStudent} 
                 isGeneratingPrint={isGeneratingPrint} formatDateLabel={formatDateLabel} 
                 openRawIncManageModal={openRawIncManageModal}
-                handleRenameItem={handleRenameItem} // 🔥 여기서 다시 직접 넘김
+                handleRenameItem={handleRenameItem} // 🔥 여기서 명시적으로 전달
                 {...actions} 
               />
             </div>
