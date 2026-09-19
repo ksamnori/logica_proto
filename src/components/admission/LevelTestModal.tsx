@@ -80,7 +80,7 @@ const getKSTDateStr = (isoString?: string) => {
 interface LevelTestModalProps {
   onClose: () => void;
   onSuccess: () => void;
-  tenantId?: string; // 🌟 프롭스로 tenantId 받기
+  tenantId?: string;
 }
 
 export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTestModalProps) {
@@ -104,7 +104,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
   const [sessionDateFilter, setSessionDateFilter] = useState("");
   const [sessionTimeFilter, setSessionTimeFilter] = useState(""); 
-  const [sessionSortOrder, setSessionSortOrder] = useState<"asc" | "desc">("asc");
+  const [sessionSortOrder, setSessionSortOrder] = useState<"asc" | "desc">("desc");
   const [sessionGradeOrder, setSessionGradeOrder] = useState<"asc" | "desc">("asc");
   
   const [leftDateFilter, setLeftDateFilter] = useState("all"); 
@@ -129,6 +129,14 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
   const todayKst = getKSTDateStr(new Date().toISOString());
 
+  // 🌟 [수정] 좌측 일정 리스트 페이지네이션 (6개)
+  const [leftCurrentPage, setLeftCurrentPage] = useState(1);
+  const leftItemsPerPage = 6;
+
+  // 🌟 [수정] 우측 지원자 리스트 페이지네이션 (6개)
+  const [rightCurrentPage, setRightCurrentPage] = useState(1);
+  const rightItemsPerPage = 6;
+
   const filteredStudents = waitingStudents.filter(std => {
     const keyword = searchKeyword.trim().toLowerCase();
     const rawContact = std.contact ? std.contact.replace(/[^0-9]/g, "") : "";
@@ -152,17 +160,37 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
   const uniqueDates = Array.from(
     new Set(waitingStudents.map(s => formatTestDate(s.test_date) || "날짜없음"))
-  ).sort();
+  ).sort((a, b) => b.localeCompare(a));
 
   const uniqueSessionDates = Array.from(
     new Set(sessions.map(s => s.test_date).filter(Boolean))
-  ).sort();
+  ).sort((a, b) => b.localeCompare(a));
 
   const uniqueSessionTimes = Array.from(
     new Set(sessions.map(s => s.start_time ? s.start_time.substring(0, 5) : "").filter(Boolean))
-  ).sort();
+  ).sort((a, b) => b.localeCompare(a));
 
-  const filteredLeftSessions = sessions.filter(s => leftDateFilter === "all" || s.test_date === leftDateFilter);
+  const filteredLeftSessions = sessions
+    .filter(s => leftDateFilter === "all" || s.test_date === leftDateFilter)
+    .sort((a, b) => {
+        const dtA = new Date(`${a.test_date}T${a.start_time || '00:00:00'}`).getTime();
+        const dtB = new Date(`${b.test_date}T${b.start_time || '00:00:00'}`).getTime();
+        if (!isNaN(dtA) && !isNaN(dtB) && dtA !== dtB) return dtB - dtA;
+        return b.title.localeCompare(a.title);
+    });
+
+  useEffect(() => {
+    setCheckedStudents([]);
+    setIsAllChecked(false);
+  }, [rightCurrentPage, gradeFilter, dateFilter, searchKeyword, selectedSessionId]);
+
+  useEffect(() => {
+    setLeftCurrentPage(1);
+  }, [leftDateFilter]);
+
+  useEffect(() => {
+    setRightCurrentPage(1);
+  }, [gradeFilter, dateFilter, searchKeyword, selectedSessionId]);
 
   useEffect(() => {
     const pos = localStorage.getItem("logica_instructor_position") || "";
@@ -180,17 +208,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
   useEffect(() => {
     loadWaitingStudents();
-    setGradeFilter("all");
-    setDateFilter("all"); 
-    setSearchKeyword("");
-    setCheckedStudents([]);
-    setIsAllChecked(false);
   }, [selectedSessionId]);
-
-  useEffect(() => {
-    setCheckedStudents([]);
-    setIsAllChecked(false);
-  }, [gradeFilter, dateFilter, searchKeyword]);
 
   const loadExams = async () => {
     try {
@@ -231,20 +249,20 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
       const { data, error } = await supabase
         .from("admission_session")
         .select("*, exam_master(title, sub_title)")
-        .eq("tenant_id", currentTenantId); // 🌟 지점 격리 적용
+        .eq("tenant_id", currentTenantId); 
 
       if (error) throw error;
       
       const sortedSessions = (data || []).sort((a, b) => {
          const dtA = new Date(`${a.test_date}T${a.start_time || '00:00:00'}`).getTime();
          const dtB = new Date(`${b.test_date}T${b.start_time || '00:00:00'}`).getTime();
-         if (!isNaN(dtA) && !isNaN(dtB) && dtA !== dtB) return dtA - dtB;
+         if (!isNaN(dtA) && !isNaN(dtB) && dtA !== dtB) return dtB - dtA; 
          const matchA = a.title.match(/LT(\d{2})/);
          const matchB = b.title.match(/LT(\d{2})/);
          const numA = matchA ? parseInt(matchA[1], 10) : 9999;
          const numB = matchB ? parseInt(matchB[1], 10) : 9999;
          if (numA !== numB) return numA - numB;
-         return a.title.localeCompare(b.title);
+         return b.title.localeCompare(a.title); 
       });
 
       setSessions(sortedSessions);
@@ -317,7 +335,6 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
         })
         .filter((item: any) => !['검토중', '합격', '불합격'].includes(item.displayResult));
       
-      // 🌟 [수정됨] temp_admission_applicants는 전 지점 공통 풀이므로 특정 tenant_id 조건 없이 노출하되, 배정 시점에서 현재 tenant_id를 부여합니다.
       const { data: tempStus, error: sError } = await supabase
         .from("temp_admission_applicants")
         .select("*")
@@ -332,7 +349,6 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
         source: 'temp'
       }));
 
-      // 🌟 [수정됨] 정식 학생 목록은 현재 지점 학생만 노출
       const { data: formalStus, error: fError } = await supabase
         .from("student")
         .select("student_id, name, grade, school, created_at, parent(phone)")
@@ -432,7 +448,6 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
         }]);
         if (exErr) console.warn("섀도 방 생성 실패 (무시 가능):", exErr);
 
-        // 🌟 방 생성 시 tenant_id 주입
         const { error } = await supabase.from("admission_session").insert([{
           title: previewName, 
           test_date: testDate, 
@@ -511,17 +526,23 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
   const toggleCheckAll = (isChecked: boolean) => {
     setIsAllChecked(isChecked);
-    const availableIds = filteredStudents.filter(s => !s.isAssigned).map(s => s.id);
     
-    if (isChecked) setCheckedStudents(availableIds);
-    else setCheckedStudents([]);
+    const availableIds = currentRightItems.filter(s => !s.isAssigned).map(s => s.id);
+    
+    if (isChecked) {
+        const newIds = new Set([...checkedStudents, ...availableIds]);
+        setCheckedStudents(Array.from(newIds));
+    } else {
+        setCheckedStudents(checkedStudents.filter(id => !availableIds.includes(id)));
+    }
   };
 
   const toggleStudentCheck = (studentId: string) => {
     setCheckedStudents(prev => {
       const newChecked = prev.includes(studentId) ? prev.filter(id => id !== studentId) : [...prev, studentId];
-      const availableCount = filteredStudents.filter(s => !s.isAssigned).length;
-      setIsAllChecked(newChecked.length === availableCount && availableCount > 0);
+      const availableCurrentItems = currentRightItems.filter(s => !s.isAssigned);
+      const isAllCurrentChecked = availableCurrentItems.length > 0 && availableCurrentItems.every(s => newChecked.includes(s.id));
+      setIsAllChecked(isAllCurrentChecked);
       return newChecked;
     });
   };
@@ -563,7 +584,6 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
             }
           }
 
-          // 🌟 학생 테이블에 넣을 때 지점 ID 필수 주입
           const { data: newStudent, error: sErr } = await supabase.from("student").insert({
             name: temp.student_name,
             grade: temp.grade || "미입력",
@@ -628,6 +648,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
       alert(`🎉 총 ${successCount}명의 지원자가 성공적으로 예약 배정되었습니다!`);
       loadWaitingStudents();
+      setCheckedStudents([]); 
       onSuccess();
     } catch (e: any) { alert(`❌ 오류: ${e.message}`); } finally { setIsLoading(false); }
   };
@@ -662,6 +683,30 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
       loadWaitingStudents();
       onSuccess();
     } catch (e: any) { alert(`❌ 취소 오류: ${e.message}`); }
+  };
+
+  const leftTotalPages = Math.ceil(filteredLeftSessions.length / leftItemsPerPage);
+  const currentLeftItems = filteredLeftSessions.slice((leftCurrentPage - 1) * leftItemsPerPage, leftCurrentPage * leftItemsPerPage);
+
+  const getLeftPageNumbers = () => {
+    const pages = [];
+    let start = Math.max(1, leftCurrentPage - 2);
+    let end = start + 4;
+    if (end > leftTotalPages) { end = leftTotalPages; start = Math.max(1, end - 4); }
+    for (let i = start; i <= end; i++) pages.push(i);
+    return pages;
+  };
+
+  const rightTotalPages = Math.ceil(filteredStudents.length / rightItemsPerPage);
+  const currentRightItems = filteredStudents.slice((rightCurrentPage - 1) * rightItemsPerPage, rightCurrentPage * rightItemsPerPage);
+
+  const getRightPageNumbers = () => {
+    const pages = [];
+    let start = Math.max(1, rightCurrentPage - 2);
+    let end = start + 4;
+    if (end > rightTotalPages) { end = rightTotalPages; start = Math.max(1, end - 4); }
+    for (let i = start; i <= end; i++) pages.push(i);
+    return pages;
   };
 
   return (
@@ -780,7 +825,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
               {filteredLeftSessions.length === 0 ? (
                  <div className="p-10 text-center text-slate-400 font-bold text-sm">해당 날짜에 개설된 일정이 없습니다.</div>
               ) : (
-                filteredLeftSessions.map(s => {
+                currentLeftItems.map(s => {
                   const examTitle = s.exam_master ? `${s.exam_master.title} ${s.exam_master.sub_title ? `[${s.exam_master.sub_title}]` : ''}` : '시험지 미지정';
                   const isSelected = String(selectedSessionId) === String(s.admission_session_id);
                   const sessionDt = `${formatKoreanDate(s.test_date)} ${s.start_time?.substring(0, 5) || ''}`.trim();
@@ -807,6 +852,30 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                 })
               )}
             </div>
+
+            {leftTotalPages > 1 && (
+              <div className="border-t border-slate-200 bg-white p-2.5 flex justify-center items-center shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
+                <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                  <button 
+                    onClick={() => setLeftCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={leftCurrentPage === 1}
+                    className="px-2 py-1 text-slate-500 font-bold text-xs rounded hover:bg-white hover:text-slate-800 disabled:opacity-30 transition-colors"
+                  >◀</button>
+                  {getLeftPageNumbers().map(num => (
+                    <button 
+                      key={num} 
+                      onClick={() => setLeftCurrentPage(num)}
+                      className={`px-2.5 py-1 font-bold text-xs rounded transition-colors ${leftCurrentPage === num ? 'bg-[#002864] text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-[#002864]'}`}
+                    >{num}</button>
+                  ))}
+                  <button 
+                    onClick={() => setLeftCurrentPage(prev => Math.min(prev + 1, leftTotalPages))}
+                    disabled={leftCurrentPage === leftTotalPages}
+                    className="px-2 py-1 text-slate-500 font-bold text-xs rounded hover:bg-white hover:text-slate-800 disabled:opacity-30 transition-colors"
+                  >▶</button>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* ==================================================== */}
@@ -943,14 +1012,14 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
               
               <label className="flex items-center space-x-1 cursor-pointer text-[10px] text-slate-600 font-bold bg-slate-100 border border-slate-200 px-2 py-1 rounded hover:bg-slate-200 transition-colors shadow-sm whitespace-nowrap ml-1">
                 <input type="checkbox" checked={isAllChecked} onChange={(e) => toggleCheckAll(e.target.checked)} className="w-3 h-3 accent-emerald-600" />
-                <span>전체선택</span>
+                <span>현재 페이지 전체선택</span>
               </label>
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 custom-scroll space-y-2 bg-slate-50">
               {!selectedSessionId ? <div className="text-center text-slate-400 py-10 text-xs font-medium">일정을 선택하면 명단이 나타납니다.</div> :
                filteredStudents.length === 0 ? <div className="text-center text-slate-400 py-10 text-xs font-medium">조건에 맞는 대기생이 없습니다.</div> :
-               filteredStudents.map(std => {
+               currentRightItems.map(std => {
                  const stdId = std.id; 
                  const isAssigned = std.isAssigned;
                  const korGradeName = formatKoreanGrade(std.grade);
@@ -1015,6 +1084,30 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                })
               }
             </div>
+            
+            {rightTotalPages > 1 && (
+              <div className="border-t border-slate-200 bg-white p-2.5 flex justify-center items-center shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
+                <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
+                  <button 
+                    onClick={() => setRightCurrentPage(prev => Math.max(prev - 1, 1))}
+                    disabled={rightCurrentPage === 1}
+                    className="px-2 py-1 text-slate-500 font-bold text-xs rounded hover:bg-white hover:text-slate-800 disabled:opacity-30 transition-colors"
+                  >◀</button>
+                  {getRightPageNumbers().map(num => (
+                    <button 
+                      key={num} 
+                      onClick={() => setRightCurrentPage(num)}
+                      className={`px-2.5 py-1 font-bold text-xs rounded transition-colors ${rightCurrentPage === num ? 'bg-[#002864] text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-[#002864]'}`}
+                    >{num}</button>
+                  ))}
+                  <button 
+                    onClick={() => setRightCurrentPage(prev => Math.min(prev + 1, rightTotalPages))}
+                    disabled={rightCurrentPage === rightTotalPages}
+                    className="px-2 py-1 text-slate-500 font-bold text-xs rounded hover:bg-white hover:text-slate-800 disabled:opacity-30 transition-colors"
+                  >▶</button>
+                </div>
+              </div>
+            )}
 
             <div className="p-3 bg-white border-t border-slate-200 shrink-0">
               <button onClick={assignStudents} disabled={isLoading || !selectedSessionId} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded text-xs shadow-md transition-colors disabled:opacity-50">
