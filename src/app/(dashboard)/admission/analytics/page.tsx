@@ -12,15 +12,24 @@ interface ExamOption {
   sub_title: string;
 }
 
+interface TenantOption {
+  tenant_id: string;
+  name: string;
+}
+
 export default function AdmissionAnalyticsPage() {
   const router = useRouter();
   
   const [isLoading, setIsLoading] = useState(true);
+  
+  // 🌟 [신규] 지점 필터 상태
+  const [tenantList, setTenantList] = useState<TenantOption[]>([]);
+  const [selectedTenantId, setSelectedTenantId] = useState<string>("all");
+
   const [examList, setExamList] = useState<ExamOption[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>("");
   const [excludeTest, setExcludeTest] = useState<boolean>(true);
   
-  // 🌟 [수정] 날짜 및 시간 필터 상태
   const [selectedDate, setSelectedDate] = useState<string>("all");
   const [selectedTime, setSelectedTime] = useState<string>("all"); 
   
@@ -76,17 +85,33 @@ export default function AdmissionAnalyticsPage() {
     return t; 
   };
 
+  // 🌟 지점 목록 불러오기
+  useEffect(() => {
+    const fetchTenants = async () => {
+      const { data } = await supabase.from('academy_tenant').select('tenant_id, name').eq('status', 'ACTIVE');
+      if (data) setTenantList(data);
+    };
+    fetchTenants();
+  }, []);
+
+  // 🌟 지점 선택 변경에 따른 기본 데이터(시험지 목록) 불러오기
   useEffect(() => {
     const fetchBaseData = async () => {
       try {
-        const { data, error } = await supabase
+        let query = supabase
           .from('exam_assignment')
           .select('assignment_id, total_score, exam_id, student(name), exam_master!inner(title, sub_title, exam_type)')
           .eq('status', '채점완료')
           .eq('exam_master.exam_type', '입학테스트')
           .limit(10000);
 
+        if (selectedTenantId !== "all") {
+          query = query.eq('tenant_id', selectedTenantId);
+        }
+
+        const { data, error } = await query;
         if (error) throw error;
+        
         setExamAssignments(data || []);
 
         const uniqueMap = new Map<string, ExamOption>();
@@ -103,48 +128,65 @@ export default function AdmissionAnalyticsPage() {
 
         const arr = Array.from(uniqueMap.values()).sort((a, b) => a.sub_title.localeCompare(b.sub_title));
         setExamList(arr);
-        if (arr.length > 0) setSelectedExamId(arr[0].exam_id);
+        
+        // 지점을 바꿨을 때 선택한 시험지가 새 지점에도 있으면 유지, 없으면 첫 번째 시험지 자동 선택
+        setSelectedExamId(prev => {
+          if (arr.length === 0) return "";
+          if (arr.find(e => e.exam_id === prev)) return prev;
+          return arr[0].exam_id;
+        });
+
       } catch (err) {
         console.error("데이터 로드 실패:", err);
       }
     };
     fetchBaseData();
-  }, []);
+  }, [selectedTenantId]);
 
+  // 🌟 특정 지점 및 시험지에 대한 Raw 통계 데이터 불러오기
   useEffect(() => {
     const fetchRawStats = async () => {
-      if (!selectedExamId) return;
+      if (!selectedExamId) {
+        setRawExamData(null);
+        setIsLoading(false);
+        return;
+      }
       setIsLoading(true);
       
-      // 시험지가 변경되면 필터 상태 완전 초기화
       setSelectedDate("all");
       setSelectedTime("all");
 
       try {
-        // 🌟 [핵심 변경] 기 등록된 시험 세션(admission_session, exam_session) 정보를 조인하여 가져옴
-        const { data: assigns, error: aErr } = await supabase
+        let query = supabase
           .from('exam_assignment')
           .select('assignment_id, total_score, student!inner(name, grade), admission_session(test_date, start_time), exam_session(test_date)')
           .eq('exam_id', selectedExamId)
           .eq('status', '채점완료')
           .limit(10000);
           
+        if (selectedTenantId !== "all") {
+          query = query.eq('tenant_id', selectedTenantId);
+        }
+
+        const { data: assigns, error: aErr } = await query;
         if (aErr) throw aErr;
         const rawAssigns = assigns || [];
         const assignIds = rawAssigns.map(a => a.assignment_id);
 
         let allAnswers: any[] = [];
-        const chunkSize = 50; 
-        for (let i = 0; i < assignIds.length; i += chunkSize) {
-          const chunk = assignIds.slice(i, i + chunkSize);
-          const { data: ansChunk, error: ansErr } = await supabase
-            .from('student_answer')
-            .select('exam_assignment_id, question_id, is_correct, earned_score, grading_code')
-            .in('exam_assignment_id', chunk)
-            .limit(10000);
-          
-          if (ansErr) console.error("답안 로드 오류:", ansErr);
-          if (ansChunk) allAnswers.push(...ansChunk);
+        if (assignIds.length > 0) {
+          const chunkSize = 50; 
+          for (let i = 0; i < assignIds.length; i += chunkSize) {
+            const chunk = assignIds.slice(i, i + chunkSize);
+            const { data: ansChunk, error: ansErr } = await supabase
+              .from('student_answer')
+              .select('exam_assignment_id, question_id, is_correct, earned_score, grading_code')
+              .in('exam_assignment_id', chunk)
+              .limit(10000);
+            
+            if (ansErr) console.error("답안 로드 오류:", ansErr);
+            if (ansChunk) allAnswers.push(...ansChunk);
+          }
         }
 
         const { data: items, error: iErr } = await supabase
@@ -207,9 +249,8 @@ export default function AdmissionAnalyticsPage() {
     };
 
     fetchRawStats();
-  }, [selectedExamId]);
+  }, [selectedExamId, selectedTenantId]);
 
-  // 🌟 세션의 날짜/시간 파싱 헬퍼 함수
   const extractDateTime = (a: any) => {
     let dStr = '';
     let tStr = '';
@@ -242,12 +283,10 @@ export default function AdmissionAnalyticsPage() {
       });
     }
 
-    // 🌟 가용 날짜 추출
     const availableDates = Array.from(
       new Set(filteredAssigns.map((a: any) => extractDateTime(a).dStr))
     ).filter(Boolean).sort((a: any, b: any) => b.localeCompare(a)); 
 
-    // 🌟 가용 시간 추출 (선택된 날짜가 있다면 해당 날짜의 시간만 추출)
     const availableTimes = Array.from(
       new Set(
         filteredAssigns
@@ -256,7 +295,6 @@ export default function AdmissionAnalyticsPage() {
       )
     ).filter(Boolean).sort();
 
-    // 🌟 날짜 및 시간 필터 적용
     if (selectedDate !== "all") {
       filteredAssigns = filteredAssigns.filter((a: any) => extractDateTime(a).dStr === selectedDate);
     }
@@ -356,7 +394,7 @@ export default function AdmissionAnalyticsPage() {
     const studentStatsList = filteredAssigns.map((a: any) => {
       const st = Array.isArray(a.student) ? a.student[0] : a.student;
       const myAnswers = answers.filter((ans: any) => ans.exam_assignment_id === a.assignment_id);
-      const { dStr, tStr } = extractDateTime(a); // 🌟 기 등록된 시험 방의 날짜와 시간 적용
+      const { dStr, tStr } = extractDateTime(a);
 
       return {
         assignmentId: a.assignment_id,
@@ -464,8 +502,8 @@ export default function AdmissionAnalyticsPage() {
               <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-sm mb-3 transition-colors bg-blue-900/40 px-3 py-1.5 rounded-lg border border-blue-800/50 w-fit shadow-sm">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
               </button>
-              <h1 className="text-2xl font-bold tracking-tight">📊 입학 진단평가 종합 대시보드</h1>
-              <p className="text-blue-200 text-sm mt-1">기 등록된 시험 방의 날짜 및 시간을 기준으로 성취도를 분석합니다.</p>
+              <h1 className="text-2xl font-bold tracking-tight">📊 입학 진단평가 본사 대시보드</h1>
+              <p className="text-blue-200 text-sm mt-1">지점 및 시험지별 합산 성취도를 분석합니다.</p>
             </div>
             
             <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -479,7 +517,21 @@ export default function AdmissionAnalyticsPage() {
                 <span className="text-sm font-bold text-blue-100">테스트 계정 제외</span>
               </label>
 
-              {/* 🌟 [신규] 날짜 및 시간 듀얼 필터 */}
+              {/* 🌟 [신규] 지점 선택 필터 */}
+              <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
+                <span className="pl-1 text-sm font-bold text-blue-200">조회 지점</span>
+                <select 
+                  value={selectedTenantId} 
+                  onChange={(e) => setSelectedTenantId(e.target.value)}
+                  className="bg-white text-slate-800 font-extrabold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="all">🏢 전체 지점 합산</option>
+                  {tenantList.map(t => (
+                    <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>
+                  ))}
+                </select>
+              </div>
+
               <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
                 <span className="pl-1 text-sm font-bold text-blue-200">응시 일시</span>
                 <select 
@@ -511,7 +563,7 @@ export default function AdmissionAnalyticsPage() {
                   onChange={(e) => setSelectedExamId(e.target.value)}
                   className="bg-white text-slate-800 font-extrabold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-48 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
-                  {examList.length === 0 ? <option value="">분석 가능한 시험지가 없습니다.</option> : null}
+                  {examList.length === 0 ? <option value="">조건에 맞는 시험지가 없습니다.</option> : null}
                   {examList.map(exam => (
                     <option key={exam.exam_id} value={exam.exam_id}>
                       {exam.title} {exam.sub_title ? `[${exam.sub_title}]` : ''}
@@ -553,7 +605,7 @@ export default function AdmissionAnalyticsPage() {
               {/* 2. 차트 영역 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
                 <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex items-center justify-between">
-                  <h3 className="font-extrabold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (누적)</h3>
+                  <h3 className="font-extrabold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (선택된 지점 기준)</h3>
                   <span className="text-[10px] text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">현재 선택: 초록색</span>
                 </div>
                 <div className="w-full h-52 p-4 relative">
@@ -630,7 +682,7 @@ export default function AdmissionAnalyticsPage() {
             {/* 우측 랭킹 영역 */}
             <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[calc(100vh-140px)] sticky top-6">
               <div className="bg-emerald-700 p-5 shrink-0 flex justify-between items-center shadow-sm z-10">
-                <h3 className="font-bold text-white text-lg">🏆 전체 학생 랭킹</h3>
+                <h3 className="font-bold text-white text-lg">🏆 {selectedTenantId === "all" ? "전체 통합" : "해당 지점"} 랭킹</h3>
                 <span className="bg-emerald-800 text-emerald-100 text-[11px] font-bold px-2.5 py-1 rounded-md border border-emerald-600 shadow-inner">고득점순</span>
               </div>
               
@@ -717,7 +769,7 @@ export default function AdmissionAnalyticsPage() {
                     return (
                       <div 
                         key={idx} 
-                        onClick={() => setModalQ(q)} // 🌟 클릭 시 문제 보기 모달 띄움
+                        onClick={() => setModalQ(q)}
                         className={`border rounded-xl p-3 flex flex-col items-center justify-center shadow-sm cursor-pointer transition-all hover:shadow-md hover:-translate-y-0.5 ${bgClass}`}
                         title={`클릭하여 문항 ${q.logicalNumber} 내용 보기`}
                       >

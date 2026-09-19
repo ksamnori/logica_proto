@@ -78,6 +78,7 @@ export default function AdmissionPage() {
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   const [hasReportAuth, setHasReportAuth] = useState(false);
+  const [tenantId, setTenantId] = useState<string>(""); // 🌟 [신규] 지점 ID 상태 추가
 
   const [sessions, setSessions] = useState<any[]>([]);
   const [selectedSession, setSelectedSession] = useState<any | null>(null);
@@ -116,6 +117,13 @@ export default function AdmissionPage() {
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
+      if (!tId) {
+         alert("지점 정보(tenant_id)가 없습니다.");
+         router.replace("/home");
+         return;
+      }
+      setTenantId(tId); // 🌟 상태에 tenantId 저장
+      
       const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
                         pos.includes('최고관리자') || pos.includes('원장');
       
@@ -125,7 +133,7 @@ export default function AdmissionPage() {
         return;
       }
 
-      if (!tId || !role) {
+      if (!role) {
          alert("권한 정보가 없습니다.");
          router.replace("/home");
          return;
@@ -200,11 +208,13 @@ export default function AdmissionPage() {
     return isNaN(num) ? 99 : num;
   };
 
-  const fetchSessions = async () => {
+  // 🌟 [수정] 해당 지점(tenantId)의 일정만 가져오도록 쿼리 수정
+  const fetchSessions = async (currentTenantId: string) => {
     setIsLoadingSessions(true);
     const { data, error } = await supabase
       .from('admission_session')
       .select('*, exam_master(title, sub_title, major_grade), admission_application(application_id)')
+      .eq('tenant_id', currentTenantId) 
       .order('test_date', { ascending: false }); 
       
     if (error) console.error("일정 로드 오류:", error);
@@ -254,7 +264,11 @@ export default function AdmissionPage() {
       
       if (studentIds.length > 0) {
         const fetchAssignments = async () => {
-          const { data: assignments, error: assignErr } = await supabase.from('exam_assignment').select('*').in('student_id', studentIds);
+          // 🌟 exam_assignment에서도 해당 지점 학생들의 정보만 가져옴
+          const { data: assignments, error: assignErr } = await supabase
+            .from('exam_assignment')
+            .select('*')
+            .in('student_id', studentIds);
           if (assignErr) throw assignErr;
           
           const map: any = {};
@@ -273,7 +287,8 @@ export default function AdmissionPage() {
           if (unassignedStudents.length > 0) {
             await Promise.all(
               unassignedStudents.map(async (app: any) => {
-                const res = await forceAssignExamAction(app.student_id, sessionId, examId);
+                // 🌟 [수정] 서버 액션 호출 시 tenantId도 함께 전달
+                const res = await forceAssignExamAction(app.student_id, sessionId, examId, tenantId);
                 if (!res.success) console.error("자동 연결 실패:", res.message);
               })
             );
@@ -292,13 +307,13 @@ export default function AdmissionPage() {
   };
 
   useEffect(() => {
-    if (isAuthorized) {
-      fetchSessions();
+    if (isAuthorized && tenantId) {
+      fetchSessions(tenantId);
     }
-  }, [refreshTrigger, isAuthorized]);
+  }, [refreshTrigger, isAuthorized, tenantId]);
 
   useEffect(() => {
-    if (isAuthorized) {
+    if (isAuthorized && tenantId) {
       if (selectedSession?.admission_session_id) {
         fetchApplications(selectedSession.admission_session_id, selectedSession.exam_id);
       } else {
@@ -306,7 +321,7 @@ export default function AdmissionPage() {
         setShadowMap({});
       }
     }
-  }, [selectedSession?.admission_session_id, selectedSession?.exam_id, refreshTrigger, isAuthorized]);
+  }, [selectedSession?.admission_session_id, selectedSession?.exam_id, refreshTrigger, isAuthorized, tenantId]);
 
   useEffect(() => {
     if (!isLoadingApps && appsScrollRef.current) {
@@ -324,7 +339,8 @@ export default function AdmissionPage() {
   };
 
   const forceAssignExam = async (studentId: string, sessionId: string, examId: string) => {
-    const res = await forceAssignExamAction(studentId, sessionId, examId);
+    // 🌟 [수정] 서버 액션 호출 시 tenantId 전달
+    const res = await forceAssignExamAction(studentId, sessionId, examId, tenantId);
     if(res.success) setRefreshTrigger(prev => prev + 1);
     else alert("시험지 연결 실패: " + res.message);
   };
@@ -393,7 +409,7 @@ export default function AdmissionPage() {
     setFilterDateTime("ALL");
     setFilterGrade("ALL");
     setSearchKeyword("");
-    setCurrentPage(1); // 초기화 시 1페이지로
+    setCurrentPage(1); 
     sessionStorage.removeItem('logica_adm_filter_dt');
     sessionStorage.removeItem('logica_adm_filter_gr');
     sessionStorage.removeItem('logica_adm_filter_kw');
@@ -499,14 +515,12 @@ export default function AdmissionPage() {
     }
   };
 
-  // 🌟 [신규] 현재 페이지에 해당하는 데이터만 잘라내기
   const totalPages = Math.ceil(filteredSessions.length / ITEMS_PER_PAGE);
   const currentSessions = filteredSessions.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
-  // 페이지네이션 버튼 번호 계산 로직
   const getPageNumbers = () => {
     const pages = [];
-    const maxButtons = 5; // 한 번에 보여줄 페이지 버튼 개수
+    const maxButtons = 5; 
     let start = Math.max(1, currentPage - Math.floor(maxButtons / 2));
     let end = start + maxButtons - 1;
 
@@ -534,7 +548,6 @@ export default function AdmissionPage() {
       
       <div className="flex justify-between items-end shrink-0">
         <div>
-          {/* 🌟 타이틀 변경 적용 */}
           <h2 className="text-xl font-bold text-slate-800">진단평가 관리 및 채점 대시보드</h2>
           <p className="text-sm font-bold text-slate-400 mt-1">개설된 입학테스트 일정과 배정된 대기생을 관리합니다.</p>
         </div>
@@ -634,7 +647,6 @@ export default function AdmissionPage() {
                 <span className="text-slate-400 font-bold">조건에 맞는 일정이 없습니다.</span>
               </div>
             ) : (
-              // 🌟 잘라낸 현재 페이지 데이터만 렌더링
               currentSessions.map(s => {
                 const fullExamName = s.exam_master ? `${s.exam_master.title} ${s.exam_master.sub_title ? `[${s.exam_master.sub_title}]` : ''}` : '시험지 미지정';
                 const isSelected = String(selectedSession?.admission_session_id) === String(s.admission_session_id);
@@ -650,13 +662,10 @@ export default function AdmissionPage() {
                   >
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center gap-2 min-w-0">
-                        {/* 일자 및 시간 */}
                         <div className="text-[14px] font-black text-slate-800 tracking-tight shrink-0">
                           🗓️ {formatDateTimeDisplay(sessionDt)}
                         </div>
-                        {/* 테스트 이름(방 이름) 나란히 배치 */}
                         <h4 className="font-bold text-[13px] text-blue-800 truncate">{s.title}</h4>
-                        {/* 학년 배지 */}
                         {s._extractedGrade && s._extractedGrade !== '기타' && (
                           <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1 py-0.5 rounded text-[9px] font-bold shrink-0 hidden lg:inline-block">
                             {s._extractedGrade}
@@ -664,11 +673,9 @@ export default function AdmissionPage() {
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        {/* 배정 인원 */}
                         <span className="bg-blue-100 text-blue-700 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
                           {s.admission_application?.length || 0}명
                         </span>
-                        {/* 배정 버튼 (작게) */}
                         <button onClick={(e) => { 
                           e.stopPropagation(); 
                           setSelectedSession(s); 
@@ -700,7 +707,6 @@ export default function AdmissionPage() {
             )}
           </div>
           
-          {/* 🌟 [신규] 하단 페이지네이션 컴포넌트 */}
           {totalPages > 1 && (
             <div className="border-t border-slate-200 bg-white p-2.5 flex justify-center items-center shrink-0 shadow-[0_-4px_6px_-1px_rgba(0,0,0,0.05)] z-10">
               <div className="flex items-center gap-1 bg-slate-50 p-1 rounded-lg border border-slate-200">
@@ -777,7 +783,6 @@ export default function AdmissionPage() {
                             <button onClick={() => router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`)} className={`text-[11px] px-2.5 py-1.5 rounded font-bold shadow-sm border transition-colors flex items-center gap-1 shrink-0 ${isDone ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-[#002864] text-white border-[#002864] hover:bg-blue-900'}`}>
                               {isDone ? '채점/리뷰' : '채점하기'}
                             </button>
-                            {/* 🌟 [권한 연동] 리포트 열람 권한이 있을 때만 버튼 노출 */}
                             {isDone && hasReportAuth && (
                               <button onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')} className="text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0">
                                 📊 리포트
@@ -832,6 +837,7 @@ export default function AdmissionPage() {
         </div>
       </div>
 
+      {/* 🌟 [신규] 자식 모달 컴포넌트에 tenantId 전달 */}
       {isAssignModalOpen && (
         <AssignModal 
           isOpen={isAssignModalOpen} 
@@ -840,6 +846,7 @@ export default function AdmissionPage() {
           onSuccess={() => setRefreshTrigger(prev => prev + 1)} 
           formatGrade={formatGrade} 
           getGradeOrder={getStudentGradeOrder} 
+          tenantId={tenantId}
         />
       )}
       
@@ -855,6 +862,7 @@ export default function AdmissionPage() {
         <LevelTestModal 
           onClose={() => setIsLevelTestModalOpen(false)}
           onSuccess={() => setRefreshTrigger(prev => prev + 1)}
+          tenantId={tenantId}
         />
       )}
     </div>

@@ -14,6 +14,7 @@ function PrintReportContent() {
   const [errorMsg, setErrorMsg] = useState("");
   const [reportData, setReportData] = useState<any>(null);
 
+  // 차트 렌더링용 Refs
   const catChartRef = useRef<HTMLCanvasElement>(null);
   const diffChartRef = useRef<HTMLCanvasElement>(null);
   const cogLeftChartRef = useRef<HTMLCanvasElement>(null);
@@ -34,6 +35,8 @@ function PrintReportContent() {
   useEffect(() => {
     if (reportData && !isLoading) {
       renderCharts();
+      // 데이터를 불러오고 차트가 그려진 후 0.5초 뒤에 자동으로 인쇄창을 띄우고 싶다면 아래 주석을 해제하세요.
+      // setTimeout(() => window.print(), 500);
     }
     return () => {
       Object.values(chartInstances.current).forEach(chart => chart?.destroy());
@@ -60,16 +63,16 @@ function PrintReportContent() {
         throw new Error("저장된 분석 리포트가 없습니다. 이전 화면에서 [진단 리포트 생성하기]를 먼저 진행해주세요.");
       }
 
-      // 🌟 [수정] 5개의 커트라인 경계값 동적 적용 (기본값 세팅)
-      let tBounds = [20, 40, 60, 80, 95];
+      // 지점별 반 배정 기준 커트라인 동적 적용 (기본값: 20, 40, 60, 80)
+      let tBounds = [20, 40, 60, 80];
       if (tenantId) {
         const { data: thresholdData } = await supabase.from('class_thresholds')
-          .select('horizon, titan, apex, master, ultimate') // ultimate 추가
+          .select('horizon, titan, apex, master')
           .eq('tenant_id', tenantId)
-          .maybeSingle(); 
+          .maybeSingle(); // 데이터가 없을 경우 에러 방지
           
         if (thresholdData) {
-          tBounds = [thresholdData.horizon, thresholdData.titan, thresholdData.apex, thresholdData.master, thresholdData.ultimate || 95];
+          tBounds = [thresholdData.horizon, thresholdData.titan, thresholdData.apex, thresholdData.master];
         }
       }
 
@@ -269,15 +272,13 @@ function PrintReportContent() {
       const difficultyAdjustment = Math.max(-10, Math.min(10, (50 - avgPct) * 0.5));
       const adjustedPct = Math.round(Math.min(100, Math.max(0, totalPct + difficultyAdjustment)));
 
-      // 🌟 [수정] 6개 구간(Pre-Course ~ Ultimate) 완벽 적용 로직
+      // DB에서 가져온 지점별 커트라인 적용
       const getUmathClass = (pct: number) => {
-        if (pct >= tBounds[4]) return `Ultimate<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(최상위 영재반)</span>`;
-        if (pct >= tBounds[3]) return `Master<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(심화 사고력반)</span>`;
-        if (pct >= tBounds[2]) return `Apex<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(응용 심화반)</span>`;
-        if (pct >= tBounds[1]) return `Titan<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(개념 응용반)</span>`;
-        if (pct >= tBounds[0]) return `Horizon<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(기초 탄탄반)</span>`;
-        
-        // ✨ horizon 기준점 미만이면 모두 Pre-Course!
+        if (pct >= tBounds[3]) return `Ultimate<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(최상위 영재반)</span>`;
+        if (pct >= tBounds[2]) return `Master<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(심화 사고력반)</span>`;
+        if (pct >= tBounds[1]) return `Apex<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(응용 심화반)</span>`;
+        if (pct >= tBounds[0]) return `Titan<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(개념 응용반)</span>`;
+        if (pct > 0) return `Horizon<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(기초 탄탄반)</span>`;
         return `Pre-Course<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(기초 집중 / 입학 대기)</span>`;
       };
 

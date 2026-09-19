@@ -80,9 +80,10 @@ const getKSTDateStr = (isoString?: string) => {
 interface LevelTestModalProps {
   onClose: () => void;
   onSuccess: () => void;
+  tenantId?: string; // 🌟 프롭스로 tenantId 받기
 }
 
-export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalProps) {
+export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTestModalProps) {
   const [editSessionId, setEditSessionId] = useState<number | null>(null);
   const [sGradeSem, setSGradeSem] = useState("11");
   const [sCode, setSCode] = useState("A");
@@ -124,6 +125,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const [userPosition, setUserPosition] = useState("");
   const [userRole, setUserRole] = useState("");
   const [hasAdminPermission, setHasAdminPermission] = useState(false);
+  const currentTenantId = tenantId || localStorage.getItem("logica_tenant_id");
 
   const todayKst = getKSTDateStr(new Date().toISOString());
 
@@ -173,8 +175,8 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     setHasAdminPermission(isAdmin);
 
     loadExams();
-    loadSessions();
-  }, []);
+    if (currentTenantId) loadSessions();
+  }, [currentTenantId]);
 
   useEffect(() => {
     loadWaitingStudents();
@@ -228,7 +230,9 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
     try {
       const { data, error } = await supabase
         .from("admission_session")
-        .select("*, exam_master(title, sub_title)");
+        .select("*, exam_master(title, sub_title)")
+        .eq("tenant_id", currentTenantId); // 🌟 지점 격리 적용
+
       if (error) throw error;
       
       const sortedSessions = (data || []).sort((a, b) => {
@@ -254,7 +258,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
       return;
     }
     try {
-      // 🌟 [변경점] 전체 배정 현황을 가져와서 다른 방에 배정되었는지(타 일정 중복) 확인합니다.
       const { data: allApps } = await supabase.from("admission_application").select("student_id, admission_session_id");
       const otherAppsMap: Record<string, boolean> = {};
       allApps?.forEach(a => {
@@ -263,7 +266,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         }
       });
 
-      // 🌟 에러 수정 1: 존재하지 않는 school_name을 제외하고 select
       const { data: apps, error: aError } = await supabase
         .from("admission_application")
         .select("*, student(name, grade, school, parent(phone))") 
@@ -315,6 +317,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         })
         .filter((item: any) => !['검토중', '합격', '불합격'].includes(item.displayResult));
       
+      // 🌟 [수정됨] temp_admission_applicants는 전 지점 공통 풀이므로 특정 tenant_id 조건 없이 노출하되, 배정 시점에서 현재 tenant_id를 부여합니다.
       const { data: tempStus, error: sError } = await supabase
         .from("temp_admission_applicants")
         .select("*")
@@ -325,20 +328,19 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
       const waitingTempList = (tempStus || []).map((s: any) => ({
         ...s,
         isAssigned: false,
-        isAssignedOther: false, // 임시생은 아직 다른 곳에 배정될 수 없으므로 무조건 false
+        isAssignedOther: false,
         source: 'temp'
       }));
 
-      // 🌟 에러 수정 2: 존재하지 않는 school_name을 제외하고 select
+      // 🌟 [수정됨] 정식 학생 목록은 현재 지점 학생만 노출
       const { data: formalStus, error: fError } = await supabase
         .from("student")
         .select("student_id, name, grade, school, created_at, parent(phone)")
-        .eq("status", "입학테스트");
+        .eq("tenant_id", currentTenantId)
+        .or("status.eq.대기,status.eq.입학테스트");
 
       if (fError) throw fError;
 
-      // 🌟 [핵심 변경점] 기존에는 allAssignedIds 에 있으면 명단에서 아예 지워버렸지만, 
-      // 이제는 '현재 방(studentIdsInSession)'에 없는 학생이면 무조건 띄워줍니다!
       const waitingFormalList = (formalStus || [])
         .filter((s: any) => !studentIdsInSession.includes(s.student_id)) 
         .map((s: any) => ({
@@ -351,7 +353,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           test_date: s.created_at,
           created_at: s.created_at, 
           isAssigned: false,
-          isAssignedOther: !!otherAppsMap[s.student_id], // 🌟 타 일정 중복 여부 확인
+          isAssignedOther: !!otherAppsMap[s.student_id],
           source: 'student'
         }));
 
@@ -401,9 +403,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const saveSession = async () => {
     if (!hasAdminPermission) return alert("저장 권한이 없습니다."); 
     if (!testDate || !testHour || !testMinute || !examId) return alert("시험지, 날짜, 시작 시간은 필수입니다!");
-    
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
+    if (!currentTenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
 
     setIsLoading(true);
     const finalTime = `${testHour}:${testMinute}`;
@@ -432,6 +432,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
         }]);
         if (exErr) console.warn("섀도 방 생성 실패 (무시 가능):", exErr);
 
+        // 🌟 방 생성 시 tenant_id 주입
         const { error } = await supabase.from("admission_session").insert([{
           title: previewName, 
           test_date: testDate, 
@@ -439,7 +440,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
           exam_id: examId, 
           session_comment: comment || null, 
           status: "모집중",
-          tenant_id: myTenantId
+          tenant_id: currentTenantId 
         }]);
         if (error) throw error;
 
@@ -528,6 +529,7 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
   const assignStudents = async () => {
     if (!selectedSessionId) return alert("배정할 테스트 일정을 먼저 선택해주세요!");
     if (checkedStudents.length === 0) return alert("배정할 대기생을 1명 이상 선택해주세요!");
+    if (!currentTenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
 
     setIsLoading(true);
     try {
@@ -547,9 +549,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
 
         if (tempErr || !tempStudents) throw new Error("대기생 정보를 불러올 수 없습니다.");
 
-        const myTenantId = localStorage.getItem("logica_tenant_id");
-        if (!myTenantId) throw new Error("소속 지점 정보가 없습니다.");
-
         for (const temp of tempStudents) {
           const rawPhone = temp.contact ? temp.contact.replace(/[^0-9]/g, "") : null;
           let parentId = null;
@@ -564,13 +563,14 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             }
           }
 
+          // 🌟 학생 테이블에 넣을 때 지점 ID 필수 주입
           const { data: newStudent, error: sErr } = await supabase.from("student").insert({
             name: temp.student_name,
             grade: temp.grade || "미입력",
             school: temp.school_name, 
             parent_id: parentId,
             status: "입학테스트",
-            tenant_id: myTenantId 
+            tenant_id: currentTenantId
           }).select().single();
 
           if (sErr) throw new Error(`[${temp.student_name}] 등록 실패: ${sErr.message}`);
@@ -587,7 +587,11 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             const { data: exSession } = await supabase.from("exam_session").select("session_id").eq("name", admSession.title).limit(1).maybeSingle();
             if (exSession && admSession.exam_id) {
               await supabase.from("exam_assignment").insert({ 
-                student_id: newStudentId, session_id: exSession.session_id, exam_paper_id: admSession.exam_id, status: "응시전" 
+                student_id: newStudentId, 
+                session_id: exSession.session_id, 
+                exam_paper_id: admSession.exam_id, 
+                status: "응시전",
+                tenant_id: currentTenantId 
               });
             }
           } catch (e) {}
@@ -609,7 +613,11 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
             const { data: exSession } = await supabase.from("exam_session").select("session_id").eq("name", admSession.title).limit(1).maybeSingle();
             if (exSession && admSession.exam_id) {
               await supabase.from("exam_assignment").insert({ 
-                student_id: studentId, session_id: exSession.session_id, exam_paper_id: admSession.exam_id, status: "응시전" 
+                student_id: studentId, 
+                session_id: exSession.session_id, 
+                exam_paper_id: admSession.exam_id, 
+                status: "응시전",
+                tenant_id: currentTenantId 
               });
             }
           } catch (e) {}
@@ -989,7 +997,6 @@ export default function LevelTestModal({ onClose, onSuccess }: LevelTestModalPro
                              <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
                              <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              {sourceBadge}
-                             {/* 🌟 앗! 이 학생은 다른 방에 들어가 있는 학생이네요! (중복 배정 가능) */}
                              {std.isAssignedOther && <span className="text-[9px] bg-amber-100 text-amber-700 border border-amber-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔄 타 일정 중복</span>}
                              {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
                            </div>

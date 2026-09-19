@@ -12,7 +12,6 @@ const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGci
 
 const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { persistSession: false } });
 
-// 🌟 [정석 타입 정의]
 interface TenantRecord {
   tenant_id: string;
   name: string;
@@ -22,7 +21,6 @@ interface StudentPhoneRecord {
   phone: string;
 }
 
-// 🌟 추가됨: 시험지 타입 (에러 해결용)
 interface ExamMasterRecord {
   exam_id: string;
 }
@@ -40,7 +38,6 @@ interface InstructorRecord {
   academy_tenant?: { tenant_type: string; name: string };
 }
 
-// 🌟 학생 정보 타입 정의
 interface StudentRecord {
   student_id: string;
   name: string;
@@ -64,6 +61,9 @@ export default function AdminDashboardPage() {
 
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
 
+  const [studentListTenantFilter, setStudentListTenantFilter] = useState<string>("all");
+  const [instructorListTenantFilter, setInstructorListTenantFilter] = useState<string>("all");
+
   // 학생 등록 상태
   const [sTenantId, setSTenantId] = useState("");
   const [sName, setSName] = useState("");
@@ -71,7 +71,7 @@ export default function AdminDashboardPage() {
   const [sContact, setSContact] = useState("");
   const [pContact, setPContact] = useState("");
   const [sSchool, setSSchool] = useState("");
-  const [sGrade, setSGrade] = useState("1");
+  const [sGrade, setSGrade] = useState("초1"); 
   const [sStatus, setSStatus] = useState("입학테스트");
   const [isStudentSubmitting, setIsStudentSubmitting] = useState(false);
 
@@ -162,7 +162,7 @@ export default function AdminDashboardPage() {
   useEffect(() => {
     if (activeTab === "instructor-manage") loadInstructors();
     if (activeTab === "student-manage") loadStudents();
-  }, [activeTab]);
+  }, [activeTab, studentListTenantFilter, instructorListTenantFilter]);
 
   const handlePhoneChange = (setter: (val: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value.replace(/[^0-9]/g, '');
@@ -182,8 +182,15 @@ export default function AdminDashboardPage() {
   // --- 학생 로직 --- //
   const registerStudent = async () => {
     if (!sTenantId) return alert("소속 지점을 선택해주세요!");
-    if (!sName || !sContact || !sPw) return alert("이름, 학생 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
-    if (sContact.length < 12) return alert("올바른 연락처 형식을 입력해주세요. (예: 010-1234-5678)");
+    
+    // 🌟 [수정] 학생 연락처는 필수에서 제외, 학부모 연락처는 필수
+    if (!sName || !pContact || !sPw) {
+      return alert("이름, 학부모 연락처, 초기 비밀번호는 필수 입력 항목입니다!");
+    }
+    
+    // 🌟 연락처 형식 검증
+    if (sContact && sContact.length < 12) return alert("학생 연락처 형식을 확인해주세요. (예: 010-1234-5678)");
+    if (pContact.length < 12) return alert("학부모 연락처 형식을 확인해주세요. (예: 010-1234-5678)");
 
     setIsStudentSubmitting(true);
     try {
@@ -193,21 +200,24 @@ export default function AdminDashboardPage() {
         if (existingParent) {
           finalParentId = existingParent.parent_id;
         } else {
-          const { data: newParent, error: insertParentError } = await supabase.from('parent').insert([{ phone: pContact }]).select('parent_id').single();
+          const { data: newParent, error: insertParentError } = await supabase.from('parent').insert([{ phone: pContact, name: `${sName} 학부모` }]).select('parent_id').single();
           if (insertParentError) throw insertParentError;
           finalParentId = newParent.parent_id;
         }
       }
 
-      let finalContact = sContact;
-      const { data: existingContacts } = await supabase.from('student').select('phone').like('phone', `${sContact}%`);
+      // 🌟 [수정] 학생 연락처가 비어있으면 학부모 연락처를 ID로 사용
+      let baseContact = sContact.trim() === "" ? pContact : sContact;
+      let finalContact = baseContact;
+      
+      const { data: existingContacts } = await supabase.from('student').select('phone').like('phone', `${baseContact}%`);
       if (existingContacts && existingContacts.length > 0) {
         let maxSuffix = 0;
         let hasExactMatch = false;
         existingContacts.forEach((s: StudentPhoneRecord) => {
-          if (s.phone === sContact) hasExactMatch = true;
+          if (s.phone === baseContact) hasExactMatch = true;
           else {
-            const suffixStr = s.phone.replace(sContact + '-', '');
+            const suffixStr = s.phone.replace(baseContact + '-', '');
             if (!isNaN(Number(suffixStr))) {
               const num = parseInt(suffixStr);
               if (num > maxSuffix) maxSuffix = num;
@@ -215,13 +225,13 @@ export default function AdminDashboardPage() {
           }
         });
         if (hasExactMatch || maxSuffix > 0) {
-          finalContact = `${sContact}-${maxSuffix + 1}`;
-          alert(`ℹ️ 알림: 동일한 학생 연락처가 존재하여, 형제/자매 구분을 위해 학생 ID를 [ ${finalContact} ](으)로 변경하여 등록합니다.`);
+          finalContact = `${baseContact}-${maxSuffix + 1}`;
+          alert(`ℹ️ 알림: 동일한 학생(또는 학부모) 연락처가 존재하여, 형제/자매 구분을 위해 학생 ID를 [ ${finalContact} ](으)로 변경하여 등록합니다.`);
         }
       }
 
       const { error: studentError } = await supabase.from('student').insert([{
-          name: sName, grade: String(sGrade), school: sSchool, phone: finalContact,
+          name: sName, grade: sGrade, school: sSchool, phone: finalContact,
           password_hash: sPw ? await hashPin(sPw) : null, status: sStatus, parent_id: finalParentId, tenant_id: sTenantId
       }]);
       if (studentError) throw studentError;
@@ -235,10 +245,16 @@ export default function AdminDashboardPage() {
   const loadStudents = async () => {
     setIsLoadingStudents(true);
     try {
-      const { data, error } = await supabase
+      let query = supabase
         .from('student')
         .select('*, parent(phone), academy_tenant(name)')
         .order('created_at', { ascending: false });
+
+      if (studentListTenantFilter !== "all") {
+        query = query.eq('tenant_id', studentListTenantFilter);
+      }
+
+      const { data, error } = await query;
 
       if (error) throw error;
       setStudentsList((data as unknown as StudentRecord[]) || []);
@@ -346,7 +362,13 @@ export default function AdminDashboardPage() {
   const loadInstructors = async () => {
     setIsLoadingInstructors(true);
     try {
-      const { data, error } = await supabase.from('instructor').select('*, academy_tenant(tenant_type, name)').order('created_at', { ascending: false });
+      let query = supabase.from('instructor').select('*, academy_tenant(tenant_type, name)').order('created_at', { ascending: false });
+
+      if (instructorListTenantFilter !== "all") {
+        query = query.eq('tenant_id', instructorListTenantFilter);
+      }
+
+      const { data, error } = await query;
       if (error) throw error;
 
       const filteredData = (data as InstructorRecord[] || []).filter((inst) => {
@@ -490,13 +512,14 @@ export default function AdminDashboardPage() {
                     <label className="block text-sm font-bold text-slate-700 mb-1">초기 비밀번호 <span className="text-red-500">*</span></label>
                     <input type="password" value={sPw} onChange={(e) => setSPw(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="비밀번호 입력" />
                   </div>
+                  {/* 🌟 학부모 연락처 및 학생 연락처 위치/순서 조정 */}
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">학생 연락처 (ID 역할) <span className="text-red-500">*</span></label>
-                    <input type="text" value={sContact} onChange={handlePhoneChange(setSContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="010-0000-0000" />
+                    <label className="block text-sm font-bold text-slate-700 mb-1">학부모 연락처 (기본 ID 역할) <span className="text-red-500">*</span></label>
+                    <input type="text" value={pContact} onChange={handlePhoneChange(setPContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="010-0000-0000" />
                   </div>
                   <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-1">학부모 연락처</label>
-                    <input type="text" value={pContact} onChange={handlePhoneChange(setPContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="010-0000-0000" />
+                    <label className="block text-sm font-bold text-slate-700 mb-1">학생 연락처 (선택)</label>
+                    <input type="text" value={sContact} onChange={handlePhoneChange(setSContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="010-0000-0000" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">학교</label>
@@ -505,9 +528,10 @@ export default function AdminDashboardPage() {
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">학년 <span className="text-red-500">*</span></label>
                     <select value={sGrade} onChange={(e) => setSGrade(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]">
-                      {[1,2,3,4,5,6].map(g => <option key={g} value={g}>초등학교 {g}학년</option>)}
-                      {[1,2,3].map(g => <option key={g+6} value={g+6}>중학교 {g}학년</option>)}
-                      {[1,2,3].map(g => <option key={g+9} value={g+9}>고등학교 {g}학년</option>)}
+                      <option value="7세 반">7세 반</option>
+                      {[1,2,3,4,5,6].map(g => <option key={g} value={`초${g}`}>초등학교 {g}학년</option>)}
+                      {[1,2,3].map(g => <option key={g+6} value={`중${g}`}>중학교 {g}학년</option>)}
+                      {[1,2,3].map(g => <option key={g+9} value={`고${g}`}>고등학교 {g}학년</option>)}
                     </select>
                   </div>
                   <div className="col-span-2">
@@ -532,7 +556,18 @@ export default function AdminDashboardPage() {
             <div className="space-y-6 max-w-6xl mx-auto block">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
                 <div className="flex justify-between items-center mb-4 shrink-0">
-                  <h2 className="text-xl font-bold text-slate-800">등록된 전체 학생 목록 (슈퍼어드민)</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-bold text-slate-800">등록된 전체 학생 목록 (슈퍼어드민)</h2>
+                    {/* 🌟 학생 목록 지점 필터 드롭다운 */}
+                    <select 
+                      value={studentListTenantFilter} 
+                      onChange={(e) => setStudentListTenantFilter(e.target.value)}
+                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
+                    >
+                      <option value="all">🏢 전체 지점</option>
+                      {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                    </select>
+                  </div>
                   <button onClick={loadStudents} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors">새로고침 ↻</button>
                 </div>
                 <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg">
@@ -552,7 +587,7 @@ export default function AdminDashboardPage() {
                       {isLoadingStudents ? (
                         <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">데이터를 불러오는 중입니다...</td></tr>
                       ) : studentsList.length === 0 ? (
-                        <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">등록된 학생이 없습니다.</td></tr>
+                        <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">조건에 맞는 학생이 없습니다.</td></tr>
                       ) : (
                         studentsList.map(stu => (
                           <tr key={stu.student_id} className={stu.status === '퇴원' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-blue-50/50 transition-colors'}>
@@ -628,7 +663,18 @@ export default function AdminDashboardPage() {
             <div className="space-y-6 max-w-6xl mx-auto block">
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
                 <div className="flex justify-between items-center mb-4 shrink-0">
-                  <h2 className="text-xl font-bold text-slate-800">등록된 관리자 전체 목록 (슈퍼어드민)</h2>
+                  <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-bold text-slate-800">등록된 관리자 전체 목록 (슈퍼어드민)</h2>
+                    {/* 🌟 강사 목록 지점 필터 드롭다운 */}
+                    <select 
+                      value={instructorListTenantFilter} 
+                      onChange={(e) => setInstructorListTenantFilter(e.target.value)}
+                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
+                    >
+                      <option value="all">🏢 전체 지점</option>
+                      {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                    </select>
+                  </div>
                   <button onClick={loadInstructors} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors">새로고침 ↻</button>
                 </div>
                 <div className="flex-1 overflow-y-auto border border-slate-200 rounded-lg">
@@ -648,7 +694,7 @@ export default function AdminDashboardPage() {
                       {isLoadingInstructors ? (
                         <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">데이터를 불러오는 중입니다...</td></tr>
                       ) : instructors.length === 0 ? (
-                        <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">등록된 선생님이 없습니다.</td></tr>
+                        <tr><td colSpan={7} className="py-10 text-center text-slate-400 font-bold">조건에 맞는 선생님이 없습니다.</td></tr>
                       ) : (
                         instructors.map(inst => (
                           <tr key={inst.instructor_id} className={inst.status === '퇴사' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-blue-50/50 transition-colors'}>
@@ -686,7 +732,7 @@ export default function AdminDashboardPage() {
         </div>
       </div>
 
-      {/* 🌟 [추가] 학생 수정 모달 */}
+      {/* 학생 수정 모달 */}
       {isStudentEditModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -712,10 +758,12 @@ export default function AdminDashboardPage() {
                 <div><label className="block text-xs font-bold text-slate-500 mb-1">학교</label><input type="text" value={editStudent.school || ''} onChange={(e) => setEditStudent({...editStudent, school: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">학년</label>
+                  {/* 🌟 수정 모달에도 학년 value 단축형 동일 적용 */}
                   <select value={editStudent.grade || ''} onChange={(e) => setEditStudent({...editStudent, grade: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
-                    {[1,2,3,4,5,6].map(g => <option key={g} value={String(g)}>초 {g}</option>)}
-                    {[1,2,3].map(g => <option key={g+6} value={String(g+6)}>중 {g}</option>)}
-                    {[1,2,3].map(g => <option key={g+9} value={String(g+9)}>고 {g}</option>)}
+                    <option value="7세 반">7세 반</option>
+                    {[1,2,3,4,5,6].map(g => <option key={g} value={`초${g}`}>초 {g}</option>)}
+                    {[1,2,3].map(g => <option key={g+6} value={`중${g}`}>중 {g}</option>)}
+                    {[1,2,3].map(g => <option key={g+9} value={`고${g}`}>고 {g}</option>)}
                   </select>
                 </div>
                 <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">학생 연락처</label><input type="text" value={editStudent.phone || ''} onChange={handlePhoneChange((val: string) => setEditStudent({...editStudent, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>

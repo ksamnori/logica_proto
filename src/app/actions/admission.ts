@@ -17,8 +17,9 @@ async function getTenantId() {
   return cookieStore.get("logica_tenant_id")?.value;
 }
 
-export async function assignStudents(sessionId: string, examId: string | null, studentIds: string[]) {
-  const tenantId = await getTenantId();
+// 🌟 프론트엔드에서 명시적으로 tenantId를 넘겨줄 수 있도록 파라미터(clientTenantId) 추가
+export async function assignStudents(sessionId: string, examId: string | null, studentIds: string[], clientTenantId?: string) {
+  const tenantId = clientTenantId || await getTenantId();
   if (!tenantId) return { success: false, message: "소속 지점 정보(쿠키)가 없습니다. 다시 로그인해주세요." };
 
   try {
@@ -37,7 +38,14 @@ export async function assignStudents(sessionId: string, examId: string | null, s
     if (appError) throw new Error(`[입학 배정 에러] ${appError.message}`);
 
     if (examId && examId !== 'null' && examId !== '') {
-      const shadowData = studentIds.map(id => ({ student_id: id, admission_session_id: sessionId, exam_id: examId, status: '미응시' }));
+      // 💡 [중요] exam_assignment에 tenant_id 값을 필수로 포함하여 Insert
+      const shadowData = studentIds.map(id => ({ 
+        student_id: id, 
+        admission_session_id: sessionId, 
+        exam_id: examId, 
+        status: '미응시',
+        tenant_id: tenantId 
+      }));
       const { error: shadowError } = await supabaseAdmin.from('exam_assignment').insert(shadowData);
       if (shadowError) throw new Error(`[시험지 연결 에러] ${shadowError.message}`);
     }
@@ -96,8 +104,9 @@ export async function updateCounselingResult(appId: string, studentId: string, r
   }
 }
 
-export async function forceAssignExamAction(studentId: string, sessionId: string, examId: string) {
-  const tenantId = await getTenantId();
+// 🌟 프론트엔드에서 넘겨준 파라미터(clientTenantId)를 처리
+export async function forceAssignExamAction(studentId: string, sessionId: string, examId: string, clientTenantId?: string) {
+  const tenantId = clientTenantId || await getTenantId();
   if (!tenantId) return { success: false, message: "권한이 없습니다. 다시 로그인해주세요." };
 
   try {
@@ -111,7 +120,14 @@ export async function forceAssignExamAction(studentId: string, sessionId: string
       const { error: upErr } = await supabaseAdmin.from('exam_assignment').update({ admission_session_id: sessionId }).eq('assignment_id', existing[0].assignment_id);
       if (upErr) throw new Error(upErr.message);
     } else {
-      const { error: insErr } = await supabaseAdmin.from('exam_assignment').insert([{ student_id: studentId, admission_session_id: sessionId, exam_id: examId, status: '미응시' }]);
+      // 💡 [중요] 새로 시험지를 매핑(Insert)할 때 tenant_id 필수 추가
+      const { error: insErr } = await supabaseAdmin.from('exam_assignment').insert([{ 
+        student_id: studentId, 
+        admission_session_id: sessionId, 
+        exam_id: examId, 
+        status: '미응시',
+        tenant_id: tenantId 
+      }]);
       if (insErr) throw new Error(insErr.message);
     }
     return { success: true };

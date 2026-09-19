@@ -11,6 +11,7 @@ interface AssignModalProps {
   onSuccess: () => void;
   formatGrade: (grade: any) => string;
   getGradeOrder: (g: any) => number;
+  tenantId?: string; // 🌟 프롭스로 tenantId 받기
 }
 
 const formatDateTime = (isoString: string) => {
@@ -44,7 +45,7 @@ const formatKoreanGrade = (grade: any) => {
   return String(grade);
 };
 
-export default function AssignModal({ isOpen, onClose, session, onSuccess, getGradeOrder }: AssignModalProps) {
+export default function AssignModal({ isOpen, onClose, session, onSuccess, getGradeOrder, tenantId }: AssignModalProps) {
   const [waitingStudents, setWaitingStudents] = useState<any[]>([]);
   const [selectedWaitingIds, setSelectedWaitingIds] = useState<string[]>([]);
   
@@ -53,6 +54,8 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
   const [searchKeyword, setSearchKeyword] = useState("");
   
   const [isSubmitting, setIsSubmitting] = useState(false);
+  
+  const currentTenantId = tenantId || localStorage.getItem("logica_tenant_id");
 
   useEffect(() => {
     if (isOpen && session) {
@@ -87,8 +90,9 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
       
       const { data: formalStus } = await supabase
         .from('student')
-        .select('student_id, name, grade, school, created_at, test_date, parent(phone)')
-        .eq('status', '입학테스트')
+        .select('student_id, name, grade, school, created_at, parent(phone)')
+        .eq('tenant_id', currentTenantId) // 🌟 내 지점 학생만 가져오기
+        .or('status.eq.대기,status.eq.입학테스트')
         .order('created_at', { ascending: true });
         
       const waitingFormalList = (formalStus || [])
@@ -99,7 +103,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           grade: s.grade || "미입력",
           school_name: s.school || "",
           contact: Array.isArray(s.parent) ? s.parent[0]?.phone : (s.parent?.phone || "번호없음"),
-          test_date: s.test_date, 
+          test_date: s.created_at,
           created_at: s.created_at,
           source: 'student'
         }));
@@ -146,10 +150,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
 
   const submitAssign = async () => {
     if (selectedWaitingIds.length === 0) return alert("배정할 학생을 최소 1명 선택해주세요.");
-    
-    // 🌟 [추가됨] 배정 전 내 지점 꼬리표 챙기기
-    const myTenantId = localStorage.getItem("logica_tenant_id");
-    if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
+    if (!currentTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
 
     setIsSubmitting(true);
     
@@ -179,14 +180,14 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
             }
           }
 
-          // 🌟 [추가됨] 임시 학생을 정식 학생 DB에 넣을 때 꼬리표 부착!
+          // 🌟 학생 테이블에 넣을 때 지점 ID 필수 주입
           const { data: newStudent, error: sErr } = await supabase.from("student").insert({
             name: temp.student_name,
             grade: temp.grade || "미입력",
             school: temp.school_name,
             parent_id: parentId,
             status: "입학테스트",
-            tenant_id: myTenantId // 👈 꼬리표 부착
+            tenant_id: currentTenantId
           }).select().single();
 
           if (sErr) throw new Error(`[${temp.student_name}] 등록 실패: ${sErr.message}`);
@@ -198,7 +199,10 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           try {
             const { data: exSession } = await supabase.from("exam_session").select("session_id").eq("name", session.title).limit(1).maybeSingle();
             if (exSession && examId) {
-              await supabase.from("exam_assignment").insert({ student_id: newStudentId, session_id: exSession.session_id, exam_paper_id: examId, status: "응시전" });
+              // 🌟 시험지 할당 시 tenant_id 주입
+              await supabase.from("exam_assignment").insert({ 
+                student_id: newStudentId, session_id: exSession.session_id, exam_paper_id: examId, status: "응시전", tenant_id: currentTenantId 
+              });
             }
           } catch (e) {}
 
@@ -214,7 +218,10 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           try {
             const { data: exSession } = await supabase.from("exam_session").select("session_id").eq("name", session.title).limit(1).maybeSingle();
             if (exSession && examId) {
-              await supabase.from("exam_assignment").insert({ student_id: studentId, session_id: exSession.session_id, exam_paper_id: examId, status: "응시전" });
+              // 🌟 시험지 할당 시 tenant_id 주입
+              await supabase.from("exam_assignment").insert({ 
+                student_id: studentId, session_id: exSession.session_id, exam_paper_id: examId, status: "응시전", tenant_id: currentTenantId 
+              });
             }
           } catch (e) {}
           successCount++;

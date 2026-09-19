@@ -1,7 +1,7 @@
 // src/app/(dashboard)/permission/page.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -106,7 +106,6 @@ const PERMISSION_GROUPS = [
       { id: "action_edit_question", label: "↳ [권한] 문항 & 해설 & 이미지 수정", isAction: true },
       { id: "action_generate_twins", label: "↳ [권한] 팩토리 전용 쌍둥이/유사 문제 생성", isAction: true },
       
-      // 🌟 [추가됨] 쌍둥이 문제 팩토리 (수동 배정) 메뉴 및 기능 권한
       { id: "/twin-manager", label: "쌍둥이 문제 팩토리 (수동 배정)" },
       { id: "action_twin_generate", label: "↳ [권한] AI 쌍둥이/유사 자동 생성", isAction: true },
       { id: "action_twin_edit", label: "↳ [권한] 개별 문항 상세 편집", isAction: true },
@@ -167,6 +166,59 @@ export default function PermissionPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
 
+  // 🌟 핸들 5개 상태 (Pre-Course부터 Ultimate까지 조절)
+  const [thresholdBounds, setThresholdBounds] = useState<number[]>([20, 40, 60, 80, 95]);
+  const [isSavingThreshold, setIsSavingThreshold] = useState(false);
+  const thresholdTrackRef = useRef<HTMLDivElement>(null);
+  const draggingThresholdRef = useRef<number | null>(null);
+
+  // 🌟 [핵심 변경] 기차처럼 밀어내는(Push) 방식의 슬라이더 로직으로 교착(데드락) 방지
+  useEffect(() => {
+    const handleMove = (e: MouseEvent | TouchEvent) => {
+      if (draggingThresholdRef.current === null || !thresholdTrackRef.current) return;
+
+      const rect = thresholdTrackRef.current.getBoundingClientRect();
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      let pct = Math.round(((clientX - rect.left) / rect.width) * 100);
+      
+      // 화면 밖으로 나가지 않도록 0~100 사이 고정
+      pct = Math.max(0, Math.min(100, pct));
+      
+      const idx = draggingThresholdRef.current;
+      
+      setThresholdBounds((prev: number[]) => {
+        const next = [...prev];
+        next[idx] = pct;
+        
+        // 💡 충돌 시 아래쪽(왼쪽) 핸들 밀어내기
+        for (let i = idx - 1; i >= 0; i--) {
+          if (next[i] > next[i + 1]) next[i] = next[i + 1];
+        }
+        
+        // 💡 충돌 시 위쪽(오른쪽) 핸들 밀어내기
+        for (let i = idx + 1; i <= 4; i++) {
+          if (next[i] < next[i - 1]) next[i] = next[i - 1];
+        }
+        
+        return next;
+      });
+    };
+
+    const handleUp = () => { draggingThresholdRef.current = null; };
+
+    document.addEventListener("mousemove", handleMove);
+    document.addEventListener("touchmove", handleMove, { passive: true });
+    document.addEventListener("mouseup", handleUp);
+    document.addEventListener("touchend", handleUp);
+
+    return () => {
+      document.removeEventListener("mousemove", handleMove);
+      document.removeEventListener("touchmove", handleMove);
+      document.removeEventListener("mouseup", handleUp);
+      document.removeEventListener("touchend", handleUp);
+    };
+  }, []);
+
   useEffect(() => {
     const role = localStorage.getItem("logica_instructor_role") || "";
     const pos = localStorage.getItem("logica_instructor_position") || "";
@@ -190,6 +242,7 @@ export default function PermissionPage() {
     setIsAuthorized(true);
     setTenantId(tId);
     loadPermissions(tId);
+    loadThresholds(tId);
   }, [router]);
 
   const loadPermissions = async (tId: string) => {
@@ -210,6 +263,25 @@ export default function PermissionPage() {
       setRolePermissions(perms);
     }
     setIsLoading(false);
+  };
+
+  const loadThresholds = async (tId: string) => {
+    const { data, error } = await supabase
+      .from('class_thresholds')
+      .select('horizon, titan, apex, master, ultimate') // 🌟 ultimate 컬럼 포함
+      .eq('tenant_id', tId)
+      .maybeSingle();
+
+    if (!error && data) {
+      // 💡 DB 값이 혹시나 꼬여있을 때를 대비해 로드 시 강제 정렬
+      const h = data.horizon ?? 20;
+      const t = Math.max(h, data.titan ?? 40);
+      const a = Math.max(t, data.apex ?? 60);
+      const m = Math.max(a, data.master ?? 80);
+      const u = Math.max(m, data.ultimate ?? 95);
+      
+      setThresholdBounds([h, t, a, m, u]);
+    }
   };
 
   const currentPermissions = rolePermissions[activeRole.id] || ["/home"];
@@ -234,9 +306,7 @@ export default function PermissionPage() {
     setRolePermissions(prev => {
       const current = prev[activeRole.id] || [];
       const itemIds = toggleableItems.map(item => item.id);
-      
       const isAllChecked = itemIds.every(id => current.includes(id));
-      
       let updated = [...current];
 
       if (isAllChecked) {
@@ -257,7 +327,6 @@ export default function PermissionPage() {
     
     try {
       const finalPermissions = Array.from(new Set([...currentPermissions, "/home"]));
-
       const { error } = await supabase
         .from('tenant_role_permissions')
         .upsert({
@@ -268,7 +337,7 @@ export default function PermissionPage() {
         }, { onConflict: 'tenant_id, role_name' });
 
       if (error) throw error;
-      alert(`✅ [${activeRole.name}]의 권한이 성공적으로 업데이트되었습니다!`);
+      alert(`✅ [${activeRole.name}]의 메뉴 접근 권한이 성공적으로 업데이트되었습니다!`);
     } catch (e: any) {
       alert("권한 저장 중 오류가 발생했습니다: " + e.message);
     } finally {
@@ -276,17 +345,58 @@ export default function PermissionPage() {
     }
   };
 
-  if (isAuthorized === null) {
-    return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
-  }
-  
-  if (isAuthorized === false) {
-    return null; 
-  }
+  const handleSaveThresholds = async () => {
+    if (!tenantId) return;
+    setIsSavingThreshold(true);
+    
+    try {
+      const { data: existing } = await supabase
+        .from('class_thresholds')
+        .select('tenant_id')
+        .eq('tenant_id', tenantId)
+        .maybeSingle();
 
-  if (isLoading) {
-    return <div className="p-8 font-bold text-slate-500">권한 정보를 불러오는 중입니다...</div>;
-  }
+      let opError = null;
+
+      if (existing) {
+        const { error } = await supabase
+          .from('class_thresholds')
+          .update({
+            horizon: thresholdBounds[0],
+            titan: thresholdBounds[1],
+            apex: thresholdBounds[2],
+            master: thresholdBounds[3],
+            ultimate: thresholdBounds[4], 
+            updated_at: new Date().toISOString()
+          })
+          .eq('tenant_id', tenantId);
+        opError = error;
+      } else {
+        const { error } = await supabase
+          .from('class_thresholds')
+          .insert({
+            tenant_id: tenantId,
+            horizon: thresholdBounds[0],
+            titan: thresholdBounds[1],
+            apex: thresholdBounds[2],
+            master: thresholdBounds[3],
+            ultimate: thresholdBounds[4]
+          });
+        opError = error;
+      }
+
+      if (opError) throw opError;
+      alert("✅ 클래스 반 배정 기준값이 성공적으로 저장되었습니다!");
+    } catch (e: any) {
+      alert("기준값 저장 중 오류가 발생했습니다: " + e.message);
+    } finally {
+      setIsSavingThreshold(false);
+    }
+  };
+
+  if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
+  if (isAuthorized === false) return null; 
+  if (isLoading) return <div className="p-8 font-bold text-slate-500">권한 정보를 불러오는 중입니다...</div>;
 
   return (
     <div className="h-full flex flex-col font-pretendard bg-slate-50 p-4 sm:p-8 overflow-hidden">
@@ -302,10 +412,13 @@ export default function PermissionPage() {
       </div>
 
       <div className="flex-1 flex flex-col lg:flex-row gap-6 overflow-hidden min-h-0">
+        
+        {/* === 좌측 패널 === */}
         <div className="w-full lg:w-72 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col shrink-0 overflow-hidden h-full">
           <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center shrink-0">
             <span className="font-black text-sm text-slate-700">관리 대상 직급</span>
           </div>
+          
           <div className="flex-1 overflow-y-auto custom-scroll p-2">
             {ROLES.map(role => (
               <button 
@@ -321,8 +434,73 @@ export default function PermissionPage() {
               </button>
             ))}
           </div>
+
+          {/* === 클래스 배정 기준 설정 슬라이더 === */}
+          <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-col shrink-0">
+            <div className="flex justify-between items-center mb-7">
+              <span className="font-black text-[13px] text-slate-800 flex items-center gap-1.5">🎯 반 배정 기준 설정</span>
+              <button 
+                onClick={handleSaveThresholds}
+                disabled={isSavingThreshold}
+                className="text-[10px] bg-[#002864] text-white px-2.5 py-1.5 rounded-md font-bold hover:bg-blue-900 disabled:opacity-50 transition-colors shadow-sm"
+              >
+                {isSavingThreshold ? "저장 중..." : "저장"}
+              </button>
+            </div>
+            
+            {/* 🌟 트랙 6개 분할 렌더링 */}
+            <div className="relative w-full h-6 bg-slate-100 rounded-md flex select-none mb-6 shadow-inner" ref={thresholdTrackRef}>
+              <div className="bg-slate-300 rounded-l-md transition-all duration-100" style={{ width: `${thresholdBounds[0]}%` }}></div>
+              <div className="bg-emerald-300 transition-all duration-100" style={{ width: `${thresholdBounds[1]-thresholdBounds[0]}%` }}></div>
+              <div className="bg-sky-300 transition-all duration-100" style={{ width: `${thresholdBounds[2]-thresholdBounds[1]}%` }}></div>
+              <div className="bg-blue-500 transition-all duration-100" style={{ width: `${thresholdBounds[3]-thresholdBounds[2]}%` }}></div>
+              <div className="bg-indigo-500 transition-all duration-100" style={{ width: `${thresholdBounds[4]-thresholdBounds[3]}%` }}></div>
+              <div className="bg-rose-400 rounded-r-md transition-all duration-100" style={{ width: `${100-thresholdBounds[4]}%` }}></div>
+              
+              {/* 🌟 드래그 핸들 5개 렌더링 */}
+              {[0, 1, 2, 3, 4].map((idx) => (
+                <div key={idx} onMouseDown={() => { draggingThresholdRef.current = idx; }} onTouchStart={() => { draggingThresholdRef.current = idx; }} 
+                     className="absolute top-1/2 -translate-y-1/2 -ml-[6px] w-[12px] h-[20px] bg-white border-2 border-[#002864] rounded cursor-ew-resize flex items-center justify-center gap-[1px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
+                     style={{ left: `${thresholdBounds[idx]}%` }}>
+                  <div className="absolute -top-7 text-[10px] font-bold bg-slate-700 text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                    {thresholdBounds[idx]}점
+                  </div>
+                  <div className="w-[1.5px] h-[8px] bg-slate-300"></div><div className="w-[1.5px] h-[8px] bg-slate-300"></div>
+                </div>
+              ))}
+            </div>
+            
+            {/* 🌟 범례 (Legend) 6개 표시 */}
+            <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[10px] font-bold">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-slate-300 border border-slate-400 shadow-sm shrink-0"></span>
+                <span className="text-slate-600 truncate">Pre-Course <span className="font-medium text-[9px]">(~{thresholdBounds[0]})</span></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-300 border border-emerald-400 shadow-sm shrink-0"></span>
+                <span className="text-emerald-700 truncate">Horizon <span className="font-medium text-[9px]">({thresholdBounds[0]}~{thresholdBounds[1]})</span></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-sky-300 shadow-sm shrink-0"></span>
+                <span className="text-sky-700 truncate">Titan <span className="font-medium text-[9px]">({thresholdBounds[1]}~{thresholdBounds[2]})</span></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 shadow-sm shrink-0"></span>
+                <span className="text-blue-700 truncate">Apex <span className="font-medium text-[9px]">({thresholdBounds[2]}~{thresholdBounds[3]})</span></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 shadow-sm shrink-0"></span>
+                <span className="text-indigo-700 truncate">Master <span className="font-medium text-[9px]">({thresholdBounds[3]}~{thresholdBounds[4]})</span></span>
+              </div>
+              <div className="flex items-center gap-1.5">
+                <span className="w-2.5 h-2.5 rounded-sm bg-rose-400 shadow-sm shrink-0"></span>
+                <span className="text-rose-600 truncate">Ultimate <span className="font-medium text-[9px]">({thresholdBounds[4]}~)</span></span>
+              </div>
+            </div>
+          </div>
         </div>
 
+        {/* === 우측 패널 (권한 설정 영역) === */}
         <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-full relative">
           <div className="p-5 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center shrink-0 z-10">
             <div>
@@ -333,42 +511,30 @@ export default function PermissionPage() {
               <p className="text-[11px] text-slate-500 font-medium mt-1">체크박스를 선택하여 해당 직급의 선생님이 좌측 메뉴에 접근할 수 있도록 허용합니다.</p>
             </div>
             <button onClick={handleSave} disabled={isSaving} className="bg-[#002864] hover:bg-blue-900 disabled:opacity-50 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5">
-              <span>💾</span> {isSaving ? "저장 중..." : "설정 저장하기"}
+              <span>💾</span> {isSaving ? "저장 중..." : "권한 설정 저장"}
             </button>
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scroll p-6 lg:p-8 bg-slate-50/30">
             <div className="max-w-4xl mx-auto flex flex-col gap-5 pb-10">
               {PERMISSION_GROUPS.map((group, gIdx) => {
-                
                 const toggleableItems = group.items.filter((i: any) => !i.isRequired);
                 const hasToggleable = toggleableItems.length > 0;
-                
                 const isGroupAllChecked = hasToggleable && toggleableItems.every(item => currentPermissions.includes(item.id));
                 const isGroupPartiallyChecked = !isGroupAllChecked && toggleableItems.some(item => currentPermissions.includes(item.id));
 
                 return (
                   <div key={gIdx} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                    
                     <div className="bg-slate-100/80 px-5 py-3 flex justify-between items-center border-b border-slate-200">
                       <div className="flex items-center gap-2">
                         <span className="text-[13px] font-black text-slate-700">{group.category}</span>
                         {group.desc && <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-200">{group.desc}</span>}
                       </div>
-                      
                       <div className="flex items-center gap-2">
                         {hasToggleable && (
                           <>
                             <span className="text-[11px] font-bold text-slate-500 cursor-pointer" onClick={() => toggleGroupAll(group.items)}>전체 선택</span>
-                            <input 
-                              type="checkbox" 
-                              checked={isGroupAllChecked}
-                              ref={input => {
-                                if (input) input.indeterminate = isGroupPartiallyChecked;
-                              }}
-                              onChange={() => toggleGroupAll(group.items)}
-                              className="w-5 h-5 rounded transition-transform active:scale-90 accent-indigo-600 cursor-pointer" 
-                            />
+                            <input type="checkbox" checked={isGroupAllChecked} ref={input => { if (input) input.indeterminate = isGroupPartiallyChecked; }} onChange={() => toggleGroupAll(group.items)} className="w-5 h-5 rounded transition-transform active:scale-90 accent-indigo-600 cursor-pointer" />
                           </>
                         )}
                       </div>
@@ -378,32 +544,19 @@ export default function PermissionPage() {
                       {group.items.map((item: any) => {
                         const isChecked = item.isRequired ? true : currentPermissions.includes(item.id);
                         const isDisabled = item.isRequired;
-
                         return (
-                          <label 
-                            key={item.id} 
-                            className={`flex justify-between items-center py-2.5 transition-colors group ${isDisabled ? 'cursor-not-allowed bg-slate-50/50 px-5' : (item.isAction ? 'cursor-pointer hover:bg-rose-50/50 bg-slate-50/30 pl-10 pr-5' : 'cursor-pointer hover:bg-indigo-50/30 px-5')}`}
-                          >
+                          <label key={item.id} className={`flex justify-between items-center py-2.5 transition-colors group ${isDisabled ? 'cursor-not-allowed bg-slate-50/50 px-5' : (item.isAction ? 'cursor-pointer hover:bg-rose-50/50 bg-slate-50/30 pl-10 pr-5' : 'cursor-pointer hover:bg-indigo-50/30 px-5')}`}>
                             <div className="flex flex-col">
-                              <span className={`text-[12px] font-bold transition-colors ${isDisabled ? 'text-slate-400' : (item.isAction ? 'text-rose-600' : 'text-slate-700 group-hover:text-indigo-800')}`}>
-                                {item.label}
-                              </span>
+                              <span className={`text-[12px] font-bold transition-colors ${isDisabled ? 'text-slate-400' : (item.isAction ? 'text-rose-600' : 'text-slate-700 group-hover:text-indigo-800')}`}>{item.label}</span>
                               {!item.isAction && <span className="text-[9px] text-slate-400 font-mono mt-0.5">{item.id}</span>}
                             </div>
                             <div className="flex items-center">
-                              <input 
-                                type="checkbox" 
-                                checked={isChecked}
-                                onChange={() => togglePermission(item.id, isDisabled)}
-                                disabled={isDisabled}
-                                className={`w-4 h-4 rounded transition-transform active:scale-90 ${isDisabled ? 'accent-slate-300 cursor-not-allowed opacity-50' : (item.isAction ? 'accent-rose-500 cursor-pointer' : 'accent-[#002864] cursor-pointer')}`} 
-                              />
+                              <input type="checkbox" checked={isChecked} onChange={() => togglePermission(item.id, isDisabled)} disabled={isDisabled} className={`w-4 h-4 rounded transition-transform active:scale-90 ${isDisabled ? 'accent-slate-300 cursor-not-allowed opacity-50' : (item.isAction ? 'accent-rose-500 cursor-pointer' : 'accent-[#002864] cursor-pointer')}`} />
                             </div>
                           </label>
                         );
                       })}
                     </div>
-
                   </div>
                 );
               })}
