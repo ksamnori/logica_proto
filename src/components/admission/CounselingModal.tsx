@@ -19,7 +19,8 @@ export default function CounselingModal({ counselData, onClose, onSuccess }: Cou
   const saveCounseling = async () => {
     if (!data) return;
     
-    if (data.result === '합격' && !confirm("해당 지원자가 '합격' 처리되었습니다.\n학생 상태를 정규 '재원'으로 자동 승급하시겠습니까?")) {
+    // 🌟 '합격' 대신 '수강 등록' 시 자동 승급 로직 작동
+    if (data.result === '수강 등록' && !confirm("해당 지원자가 '수강 등록'으로 확정되었습니다.\n학생 상태를 정규 '재원'생으로 자동 승급하시겠습니까?")) {
       return; 
     }
 
@@ -48,13 +49,14 @@ export default function CounselingModal({ counselData, onClose, onSuccess }: Cou
         <div className="p-6 space-y-5 overflow-y-auto">
           <div><label className="block text-sm font-bold text-slate-700 mb-1">지원자 이름</label><div className="font-extrabold text-xl text-[#002864]">{data.name}</div></div>
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-1">입학테스트 결과 판정</label>
+            <label className="block text-sm font-bold text-slate-700 mb-1">진단평가 진행 상태</label>
+            {/* 🌟 5단계 파이프라인으로 UI 셀렉트 옵션 변경 */}
             <select value={data.result} onChange={e => setData({ ...data, result: e.target.value })} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] font-bold text-slate-700 focus:outline-none">
-              <option value="대기">⏳ 대기 (결과 미정)</option>
-              {/* 💡 검토중 옵션 추가 */}
-              <option value="검토중">🔍 검토중 (채점 완료)</option>
-              <option value="합격">🎉 합격 (입학 승인)</option>
-              <option value="불합격">❌ 불합격</option>
+              <option value="대기">⏳ 대기 (시험 전/채점 대기)</option>
+              <option value="검토중">🔍 검토중 (채점 완료, 통보 대기)</option>
+              <option value="결과 통보">📞 결과 통보 (상담 완료, 결정 대기)</option>
+              <option value="수강 등록">🎉 수강 등록 (입학 확정)</option>
+              <option value="등록 보류">⏸️ 등록 보류 (점수 미달/보류)</option>
             </select>
           </div>
           <div>

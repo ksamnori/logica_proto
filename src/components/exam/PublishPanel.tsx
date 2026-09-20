@@ -33,22 +33,15 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
   const [addedClassTabs, setAddedClassTabs] = useState<{class_id: string, class_name: string}[]>([]);
   const [classStudentsMap, setClassStudentsMap] = useState<Record<string, any[]>>({});
 
-  // === 주간테스트 학년 배정 상태 (주차 선택은 시험지 메타 수정 쪽으로 옮겨졌다) ===
   const [weeklyTargetGrade, setWeeklyTargetGrade] = useState("");
   const [gradeOptions, setGradeOptions] = useState<string[]>([]);
 
-  // 기존에 저장된 시험지를 다시 열었을 때 학년 배정 값을 복원한다.
-  // 부모(exam/viewer)가 examId를 먼저 세팅한 뒤 비동기로 wGrade를 불러오므로, 이 값은 마운트
-  // 이후에 뒤늦게 도착할 수 있다 — 아직 사용자가 직접 고르지 않은 상태에서만 반영한다.
   useEffect(() => {
     if (initialTargetGrade && !weeklyTargetGrade) setWeeklyTargetGrade(initialTargetGrade);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialTargetGrade]);
 
-  // 부모(exam_master 저장용)에 현재 학년 값을 알려준다.
   useEffect(() => {
     onWeeklyMetaChange?.(weeklyTargetGrade);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weeklyTargetGrade]);
 
   useEffect(() => {
@@ -72,8 +65,6 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
     loadAssignedStudents();
   }, [loadAssignedStudents]);
 
-  // 반(class) 기준으로 묶어서 "현재 배포된 학생 현황"에 표시 — class_id가 없는 배정 건(과거 데이터 등)은
-  // "반 미지정"으로 따로 묶는다.
   const groupedAssigned = useMemo(() => {
     const groups = new Map<string, any[]>();
     assignedStudents.forEach(a => {
@@ -153,8 +144,6 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
     } catch (e) { console.error("학생 목록 불러오기 실패:", e); }
   };
 
-  // 학년을 클릭하면 그 학년(또는 전체 학년)에 속한 반을 전부 한 번에 탭으로 추가한다 — 반을
-  // 하나씩 체크하는 중간 단계 없이, 클릭 한 번으로 그 학년 전체가 원래 있던 "선택" 개념처럼 뜬다.
   const addGradeClasses = async (grade: string) => {
     setIsGradeModalOpen(false);
     setWeeklyTargetGrade(grade);
@@ -186,19 +175,31 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
     if (!examId) return alert("시험지가 저장되지 않았습니다.");
     if (selectedPublishStudents.size === 0) return;
     if (!confirm(`${selectedPublishStudents.size}명에게 출제할까요?`)) return;
+    
+    // 🌟 tenant_id 확보
+    const tenantId = localStorage.getItem("logica_tenant_id");
+    if (!tenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
+
     try {
-      // 배포 현황을 반별로 묶어 보여줄 수 있도록, 학생이 어느 탭(반)에서 체크됐는지로 class_id를 채운다.
-      // 한 학생이 여러 탭에 걸쳐 있으면 먼저 발견된 탭을 대표 반으로 삼는다.
       const studentClassMap = new Map<string, string>();
       Object.entries(classStudentsMap).forEach(([classId, list]) => {
         list.forEach((s: any) => { if (!studentClassMap.has(s.student_id)) studentClassMap.set(s.student_id, classId); });
       });
 
-      const inserts = Array.from(selectedPublishStudents).filter(id => !assignedStudents.some(a => a.student_id === id)).map(id => ({ exam_id: examId, student_id: id, class_id: studentClassMap.get(id) || null, status: '미응시' }));
+      // 🌟 tenant_id 주입
+      const inserts = Array.from(selectedPublishStudents).filter(id => !assignedStudents.some(a => a.student_id === id)).map(id => ({ 
+        exam_id: examId, 
+        student_id: id, 
+        class_id: studentClassMap.get(id) || null, 
+        status: '미응시',
+        tenant_id: tenantId 
+      }));
+      
       if (inserts.length > 0) {
         const { error: assignErr } = await supabase.from('exam_assignment').insert(inserts);
         if (assignErr) throw new Error(assignErr.message);
       }
+      
       alert("출제 완료!");
       setSelectedPublishStudents(new Set());
       await loadAssignedStudents();

@@ -20,7 +20,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
 
   const [publishTab, setPublishTab] = useState("grade");
   const [publishSearch, setPublishSearch] = useState("");
-  const [alwaysOpen, setAlwaysOpen] = useState(false); // 🌟 기본값 OFF 로 변경
+  const [alwaysOpen, setAlwaysOpen] = useState(false); 
   
   const [selectedStudents, setSelectedStudents] = useState<any[]>([]);
   
@@ -54,7 +54,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       
       const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장');
 
-      // 🌟 강사 이름(instructor)도 함께 불러오도록 쿼리 수정
       let classQuery = supabase.from('class').select('*, instructor(name)');
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
@@ -190,6 +189,10 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     if (selectedStudents.length === 0 || !examId) return;
     if (!confirm(`선택한 ${selectedStudents.length}건의 출제를 진행하시겠습니까?`)) return;
 
+    // 🌟 tenant_id 확보
+    const tenantId = localStorage.getItem("logica_tenant_id");
+    if (!tenantId) return alert("소속 지점 정보가 없습니다. 새로고침 후 다시 시도해주세요.");
+
     try {
       const { data: exMaster } = await supabase.from('exam_master').select('exam_type').eq('exam_id', examId).single();
       if (exMaster?.exam_type === '과제프린트') {
@@ -198,6 +201,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
 
       const { data: existing } = await supabase.from('exam_assignment').select('student_id, class_id').eq('exam_id', examId);
       
+      // 🌟 tenant_id 주입
       const inserts = selectedStudents.filter(sel => {
         const isDuplicate = existing?.some(e => e.student_id === sel.student_id && e.class_id === sel.class_id);
         return !isDuplicate;
@@ -205,7 +209,8 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
         exam_id: examId,
         student_id: sel.student_id,
         class_id: sel.class_id,
-        status: '미응시'
+        status: '미응시',
+        tenant_id: tenantId
       }));
 
       if (inserts.length === 0) { 
@@ -258,7 +263,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
           <div className="w-1/2 flex flex-col border border-slate-200 rounded-md overflow-hidden bg-white">
             <div className="p-2 border-b border-slate-200 bg-white relative">
               <svg className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-              {/* 🌟 선택된 탭에 따라 placeholder 동적 변경 */}
               <input type="text" value={publishSearch} onChange={e => setPublishSearch(e.target.value)} placeholder={publishTab === 'class' ? "수강반 이름 검색" : "학생 이름 검색"} className="w-full pl-8 pr-8 py-1.5 text-sm font-bold border-none focus:outline-none focus:ring-0" />
               <button onClick={() => setPublishSearch("")} className="absolute right-3 top-1/2 transform -translate-y-1/2 text-slate-300 hover:text-slate-500">✕</button>
             </div>
@@ -294,7 +298,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                             return (
                               <div key={s.student_id} className="px-4 py-2 bg-white flex justify-between items-center hover:bg-blue-50 border-t border-slate-50 transition-colors">
                                 <span className="text-sm font-bold text-slate-600 ml-6">{s.name} <span className="text-[11px] text-slate-400 font-medium">({formatGrade(s.grade)} | {defaultClassName})</span></span>
-                                <button onClick={() => toggleStudentSelect(s, defaultClassId, defaultClassName)} className="text-blue-500 hover:text-blue-700 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd"></path></svg></button>
+                                <button onClick={() => toggleStudentSelect(s, defaultClassId, defaultClassName)} className="text-blue-500 hover:text-blue-700 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 100-2h-2V7z" clipRule="evenodd"></path></svg></button>
                               </div>
                             );
                           })}
@@ -310,7 +314,6 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                 allClasses.map(c => {
                     if (c.students.length === 0) return null;
                     
-                    // 🌟 수강반 이름으로 검색 필터 적용
                     const matchesClassSearch = publishSearch === '' || c.name.toLowerCase().includes(publishSearch.toLowerCase());
                     if (!matchesClassSearch) return null;
 
@@ -337,7 +340,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                             {studentsInClass.map((s: any) => (
                               <div key={s.student_id} className="px-4 py-2 bg-white flex justify-between items-center hover:bg-blue-50 border-t border-slate-50 transition-colors">
                                 <span className="text-sm font-bold text-slate-600 ml-6">{s.name} <span className="text-[11px] text-slate-400 font-medium">({formatGrade(s.grade)})</span></span>
-                                <button onClick={() => toggleStudentSelect(s, c.class_id, c.name)} className="text-blue-500 hover:text-blue-700 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd"></path></svg></button>
+                                <button onClick={() => toggleStudentSelect(s, c.class_id, c.name)} className="text-blue-500 hover:text-blue-700 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 100-2h-2V7z" clipRule="evenodd"></path></svg></button>
                               </div>
                             ))}
                             {studentsInClass.length === 0 && c.students.length > 0 && (
