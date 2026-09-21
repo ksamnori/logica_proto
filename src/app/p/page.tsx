@@ -106,7 +106,6 @@ export default function ParentPortalPage() {
       const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
       try {
-        // 🌟 phone_2 컬럼으로도 카카오톡 번호를 매칭할 수 있도록 수정
         const { data } = await supabase
           .from("parent")
           .select("parent_id")
@@ -164,7 +163,9 @@ export default function ParentPortalPage() {
   };
 
   const setupParent = async () => {
-    if (!setupName.trim() || !setupPw.trim() || !parentId) return alert("모두 입력해주세요.");
+    // 🌟 성함(setupName)은 선택 사항이므로 필수가 아니도록 수정
+    if (!setupPw.trim() || !parentId) return alert("사용할 비밀번호를 입력해주세요.");
+    
     const result = await setupParentAction(parentId, setupName, setupPw);
     if (result.success) {
       sessionStorage.setItem("logica_parent_id", parentId);
@@ -204,13 +205,11 @@ export default function ParentPortalPage() {
     setParentId(pid);
     setAuthState("dashboard");
     try {
-      // 🌟 phone_2 컬럼을 포함하여 데이터를 가져오도록 수정
       const { data: pData } = await supabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
       setInfoName(pData?.name || "");
 
       if (!pData?.phone && !pData?.phone_2) return;
 
-      // 🌟 다중 연락처 형제자매 묶음 처리 로직 보강
       const orConditions: string[] = [];
       [pData?.phone, pData?.phone_2].forEach(p => {
         if (!p) return;
@@ -466,8 +465,9 @@ export default function ParentPortalPage() {
           {authState === "setup" && (
             <div className="animate-[fadeIn_0.3s_ease-out]">
               <div className="bg-blue-50 text-blue-600 font-bold text-xs p-3 rounded-lg mb-4 text-center">처음 오셨군요! 사용할 비밀번호를 설정해주세요.</div>
-              <input type="text" value={setupName} onChange={e => setSetupName(e.target.value)} className="w-full px-4 py-2.5 mb-3 rounded-lg border border-slate-300 font-bold text-center" placeholder="학부모님 성함 (예: 홍길동)" />
-              <input type="password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className="w-full px-4 py-2.5 mb-5 rounded-lg border border-slate-300 font-bold text-center" placeholder="사용할 비밀번호 설정" />
+              {/* 🌟 학부모 성함 선택 입력 안내 추가 */}
+              <input type="text" value={setupName} onChange={e => setSetupName(e.target.value)} className="w-full px-4 py-2.5 mb-3 rounded-lg border border-slate-300 font-bold text-center placeholder:text-slate-400" placeholder="학부모님 성함 (선택사항, 비워둬도 무방합니다)" />
+              <input type="password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className="w-full px-4 py-2.5 mb-5 rounded-lg border border-slate-300 font-bold text-center" placeholder="사용할 비밀번호 설정 (필수)" />
               <button onClick={setupParent} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl">비밀번호 설정 완료</button>
             </div>
           )}
