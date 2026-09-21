@@ -11,7 +11,6 @@ const ensureArray = (obj: any) => {
   return Array.isArray(obj) ? obj : [obj];
 };
 
-// 🌟 학년 정렬용 헬퍼 함수
 const getGradeOrder = (grade: any) => {
   if (!grade) return 999;
   if (typeof grade === 'string' && grade.includes('세')) return 0;
@@ -83,7 +82,6 @@ export default function StudentPage() {
       const { data: instData } = await instQuery;
       if (instData) setInstructors(instData);
 
-      // 🌟 [수정] exam_assignment 테이블에 존재하지 않는 updated_at 대신 created_at을 요청하여 500 에러 해결
       let stuQuery = supabase
         .from("student")
         .select("*, parent(phone), enrollment(class(name, level_name, instructor_id, status, instructor(name))), exam_assignment(status, created_at, admission_session_id)")
@@ -180,6 +178,37 @@ export default function StudentPage() {
     setInstructorId("all");
   };
 
+  // 🌟 [핵심 로직 추가] 대기생 클릭 시 해당 학생이 배정된 가장 최신 일정을 찾아 즉시 열어주는 라우팅 함수
+  const handleWaitingStudentClick = async (studentId: string) => {
+    try {
+      const { data } = await supabase
+        .from('admission_application')
+        .select('admission_session_id')
+        .eq('student_id', studentId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (data && data.admission_session_id) {
+        // 학생이 소속된 일정(Session) ID를 스토리지에 저장하여 진단평가 페이지가 켜질 때 즉시 타겟팅
+        sessionStorage.setItem('logica_adm_selected_session_id', String(data.admission_session_id));
+        
+        // 기존에 잘못 섞여 있을 수 있는 방해 필터들을 강제 초기화 (모든 일정 리스트를 띄우기 위해)
+        sessionStorage.removeItem('logica_adm_filter_kw');
+        sessionStorage.removeItem('logica_adm_filter_dt');
+        sessionStorage.removeItem('logica_adm_filter_gr');
+        
+        router.push('/admission');
+      } else {
+        // 만약 진단평가 일정을 아직 잡지 않은 쌩 대기생이라면, 기존 학생 상세 프로필 탭으로 이동
+        router.push(`/student/${studentId}`);
+      }
+    } catch (err) {
+      console.error(err);
+      router.push(`/student/${studentId}`);
+    }
+  };
+
   const totalWaitingPages = Math.max(1, Math.ceil(waitingStudents.length / waitingLimit));
   const currentWaitingData = waitingStudents.slice((waitingCurrentPage - 1) * waitingLimit, waitingCurrentPage * waitingLimit);
 
@@ -273,7 +302,6 @@ export default function StudentPage() {
                     if (s.displayStatus === "휴원") statusClass = "bg-amber-100 text-amber-700 border border-amber-200";
                     if (s.displayStatus === "대기") statusClass = "bg-indigo-100 text-indigo-700 border border-indigo-200";
 
-                    // 🌟 [수정] 대기 상태인 학생도 NEW 뱃지가 표시되도록 조건 수정!
                     const isNew = (s.displayStatus === "재원" || s.displayStatus === "대기") && isNewStudent(s.created_at);
                     
                     const classNames: string[] = s.classes.map((c: any) => c.name).filter(Boolean);
@@ -328,7 +356,7 @@ export default function StudentPage() {
             </table>
           </div>
 
-          <div className="bg-slate-50 border-t border-slate-200 p-3 flex justify-center items-center shrink-0 rounded-b-xl">
+          <div className="bg-slate-50 border-t border-slate-200 p-3 flex justify-center items-center shrink-0 rounded-b-xl select-none">
             <div className="flex items-center gap-3">
               <button onClick={() => setCurrentPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">이전</button>
               <span className="text-xs font-bold text-slate-600">페이지 {currentPage} / {totalFormalPages}</span>
@@ -381,7 +409,6 @@ export default function StudentPage() {
               ) : (
                 currentWaitingData.map(s => {
                   const assignments = ensureArray(s.exam_assignment);
-                  // 🌟 [수정] 시험에 응시했는지 여부를 created_at 으로 표시
                   const testAssignment = assignments.find((a: any) => a.admission_session_id && a.status !== '응시전');
                   let testDateBadge = null;
                   
@@ -396,9 +423,13 @@ export default function StudentPage() {
                   }
 
                   return (
-                    <div key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-indigo-50/50 cursor-pointer transition-colors shadow-sm flex justify-between items-center bg-white gap-2">
+                    <div 
+                      key={s.student_id} 
+                      onClick={() => handleWaitingStudentClick(s.student_id)} 
+                      className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-indigo-50/50 cursor-pointer transition-colors shadow-sm flex justify-between items-center bg-white gap-2"
+                    >
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-extrabold text-[#002864] text-[13px] whitespace-nowrap">{s.name}</span>
+                        <span className="font-extrabold text-[#002864] text-[13px] whitespace-nowrap hover:underline">{s.name}</span>
                         <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap shrink-0">{s.grade || '-'}</span>
                         <span className="text-[11px] text-slate-500 font-medium truncate">📞 {unwrap(s.parent)?.phone || "-"}</span>
                       </div>
@@ -413,15 +444,13 @@ export default function StudentPage() {
             </div>
           </div>
 
-          {totalWaitingPages > 1 && (
-            <div className="bg-slate-50 border-t border-slate-200 p-2.5 flex justify-center items-center shrink-0 rounded-b-xl">
-              <div className="flex items-center gap-2">
-                <button onClick={() => setWaitingCurrentPage(p => Math.max(1, p - 1))} disabled={waitingCurrentPage === 1} className="px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">◀</button>
-                <span className="text-[11px] font-bold text-slate-500">{waitingCurrentPage} / {totalWaitingPages}</span>
-                <button onClick={() => setWaitingCurrentPage(p => Math.min(totalWaitingPages, p + 1))} disabled={waitingCurrentPage === totalWaitingPages} className="px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">▶</button>
-              </div>
+          <div className="bg-slate-50 border-t border-slate-200 p-2.5 flex justify-center items-center shrink-0 rounded-b-xl select-none">
+            <div className="flex items-center gap-2">
+              <button onClick={() => setWaitingCurrentPage(p => Math.max(1, p - 1))} disabled={waitingCurrentPage === 1} className="px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">◀</button>
+              <span className="text-[11px] font-bold text-slate-500">{waitingCurrentPage} / {totalWaitingPages}</span>
+              <button onClick={() => setWaitingCurrentPage(p => Math.min(totalWaitingPages, p + 1))} disabled={waitingCurrentPage === totalWaitingPages} className="px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">▶</button>
             </div>
-          )}
+          </div>
         </div>
 
       </div>
