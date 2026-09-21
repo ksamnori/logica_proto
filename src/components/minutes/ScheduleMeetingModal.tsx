@@ -80,7 +80,10 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
     setMeetingResult(prev => { const topSpace = (!prev || prev.trim() === '') ? '<p><br></p>' : ''; return prev + topSpace + htmlToInsert; });
   };
 
+  // 🌟 토큰을 담아서 구글 캘린더 연동 API 호출
   const syncToGoogleCalendarBackend = async (meetingsArray: any[]) => {
+    const { data: { session } } = await supabase.auth.getSession();
+
     const events = meetingsArray.map(m => {
       const startTime = new Date(m.meeting_date);
       const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); 
@@ -95,7 +98,10 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
 
     const res = await fetch('/api/calendar', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`
+      },
       body: JSON.stringify({ events })
     });
     if (!res.ok) throw new Error("API Route 에러");
@@ -161,7 +167,6 @@ export default function ScheduleMeetingModal({ agendas, instructors, currentUser
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
-      {/* 🌟 크롬 내장 캘린더 렌더링 깨짐을 강제로 방지하는 스타일 블록 주입 */}
       <style dangerouslySetInnerHTML={{
         __html: `
           .chrome-datepicker-fix {

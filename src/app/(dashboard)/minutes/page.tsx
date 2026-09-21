@@ -163,9 +163,17 @@ export default function MinutesPage() {
     }
   };
 
+  // 🌟 토큰 담아서 API 호출하도록 변경
   const fetchGoogleEvents = async () => {
     try {
-      const res = await fetch('/api/calendar', { cache: 'no-store' });
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      const res = await fetch('/api/calendar', { 
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`
+        }
+      });
       const data = await res.json();
       if (data.success && data.events) {
         const external = data.events
@@ -176,7 +184,6 @@ export default function MinutesPage() {
             let isMultiDay = false;
             let timeString = "";
 
-            // 🌟 [핵심 추가] 구글 캘린더의 시작~종료 시간 추출 포맷팅
             if (ev.start?.dateTime && ev.end?.dateTime) {
               const s = new Date(ev.start.dateTime);
               const e = new Date(ev.end.dateTime);
@@ -450,6 +457,7 @@ export default function MinutesPage() {
     }
   };
 
+  // 🌟 토큰 담아서 캘린더 삭제 API 호출하도록 변경
   const deleteAgenda = async (note: any, e: React.MouseEvent) => {
     e.stopPropagation();
     if (note.isExternal) return alert("구글 캘린더에서 직접 생성된 외부 일정은 로지카에서 삭제할 수 없습니다.\n구글 캘린더에서 직접 삭제해주세요.");
@@ -464,7 +472,14 @@ export default function MinutesPage() {
     if (!confirm("이 기록을 완전히 삭제하시겠습니까?")) return;
     try {
       if (note.source === 'Meeting' && !note.isExternal && !note.is_secret) {
-        await fetch(`/api/calendar?title=${encodeURIComponent('[Logica] ' + note.title)}`, { method: 'DELETE' }).catch(console.error);
+        const { data: { session } } = await supabase.auth.getSession();
+        
+        await fetch(`/api/calendar?title=${encodeURIComponent('[Logica] ' + note.title)}`, { 
+          method: 'DELETE',
+          headers: {
+            'Authorization': `Bearer ${session?.access_token}`
+          }
+        }).catch(console.error);
       }
 
       if (note.source === 'Meeting' && note.source_id) {

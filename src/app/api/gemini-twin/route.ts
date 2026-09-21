@@ -1,20 +1,39 @@
 // src/app/api/gemini-twin/route.ts
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from '@supabase/supabase-js';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    // 🔒 1. 보안 자물쇠: 토큰 검증
+    let token = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) token = req.cookies.get("sb-access-token")?.value;
+    if (!token) {
+      const allCookies = req.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
+    }
+
+    if (!token) return NextResponse.json({ success: false, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
+
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) return NextResponse.json({ success: false, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+
+    // ----------------------------------------------------
+    // 2. 본문 로직
+    // ----------------------------------------------------
     const { originalQuestion, originalAnswer, taxonomyStr } = await req.json();
 
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      // 프론트엔드가 실제 원인을 볼 수 있도록 status 우회
       return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." });
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // 사용자가 명시한 최신 모델 유지 (3.5 사용 시 gemini-3.5-flash로 변경)
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
       generationConfig: {
@@ -64,15 +83,12 @@ export async function POST(req: Request) {
 
     const result = await model.generateContent(prompt);
     let responseText = result.response.text();
-    
-    // 🛡️ 1차 방어: 마크다운 코드 블록(```json) 찌꺼기 완벽 제거
     responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
     let parsedData;
     try {
       parsedData = JSON.parse(responseText);
     } catch (parseError) {
-      // 🛡️ 2차 방어: 수식(\frac 등)의 백슬래시가 JSON 파싱을 터뜨리는 경우 이스케이프 강제 처리
       const escapedText = responseText.replace(/\\/g, '\\\\');
       parsedData = JSON.parse(escapedText);
     }
@@ -81,7 +97,6 @@ export async function POST(req: Request) {
 
   } catch (error: any) {
     console.error("Twin Generator Error:", error);
-    // 💡 핵심: 프론트엔드의 !res.ok 블록을 우회하여 화면에 '진짜 에러 내용'을 팝업으로 띄움
     return NextResponse.json({ success: false, error: `AI 생성 실패: ${error.message}` });
   }
 }

@@ -1,7 +1,7 @@
-
 // src/app/api/stt-diarization/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import speech from '@google-cloud/speech';
+import { createClient } from '@supabase/supabase-js';
 
 const client = new speech.SpeechClient({
   credentials: {
@@ -10,8 +10,29 @@ const client = new speech.SpeechClient({
   }
 });
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    // 🔒 1. 보안 자물쇠: 토큰 검증
+    let token = request.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) token = request.cookies.get("sb-access-token")?.value;
+    if (!token) {
+      const allCookies = request.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
+    }
+
+    if (!token) return NextResponse.json({ success: false, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
+
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) return NextResponse.json({ success: false, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+
+    // ----------------------------------------------------
+    // 2. 본문 로직
+    // ----------------------------------------------------
     const formData = await request.formData();
     const audioFile = formData.get('audio') as Blob;
     
@@ -29,7 +50,6 @@ export async function POST(request: Request) {
         sampleRateHertz: 48000, 
         languageCode: 'ko-KR',
         enableWordTimeOffsets: true, 
-        // 🚨 [변경됨] 최신 모델을 버리고 콜센터(전화망) 모델로 강제 변경!
         model: 'telephony', 
         diarizationConfig: {
           enableSpeakerDiarization: true,
@@ -41,13 +61,11 @@ export async function POST(request: Request) {
 
     const [response] = await client.recognize(requestObj);
     
-    // 🕵️‍♂️ [디버깅 엑스레이] 터미널에서 speakerTag가 어떻게 찍히는지 확인용
     console.log("\n====== 🚨 [구글 STT Telephony 모델 응답 데이터] 🚨 ======");
     console.log(JSON.stringify(response.results, null, 2));
     console.log("================================================\n");
 
     let allWords: any[] = [];
-    
     const lastResult = response.results?.[response.results.length - 1];
     
     if (lastResult?.alternatives?.[0]?.words) {
@@ -65,10 +83,7 @@ export async function POST(request: Request) {
         
         if (speakerTag !== currentSpeaker) {
           if (currentSentence) {
-            diarizationResult.push({ 
-              speaker: `참석자 ${currentSpeaker}`, 
-              text: currentSentence.trim() 
-            });
+            diarizationResult.push({ speaker: `참석자 ${currentSpeaker}`, text: currentSentence.trim() });
           }
           currentSpeaker = speakerTag;
           currentSentence = wordInfo.word as string;
@@ -78,10 +93,7 @@ export async function POST(request: Request) {
       });
       
       if (currentSentence) {
-        diarizationResult.push({ 
-          speaker: `참석자 ${currentSpeaker}`, 
-          text: currentSentence.trim() 
-        });
+        diarizationResult.push({ speaker: `참석자 ${currentSpeaker}`, text: currentSentence.trim() });
       }
     } else {
       const fullText = response.results?.map(r => r.alternatives?.[0]?.transcript).join('\n') || "";

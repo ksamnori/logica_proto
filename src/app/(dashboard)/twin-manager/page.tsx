@@ -1,3 +1,4 @@
+// src/app/(dashboard)/twin-manager/page.tsx (또는 해당 경로의 page.tsx)
 "use client";
 
 import React, { useState, useEffect, useRef } from "react";
@@ -100,7 +101,6 @@ export default function TwinManagerPage() {
   const [selectedQIds, setSelectedQIds] = useState<string[]>([]);
   const [editingQ, setEditingQ] = useState<any | null>(null);
 
-  // 🌟 업데이트: AI 모달용 상태 관리 추가
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
   const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
@@ -219,7 +219,6 @@ export default function TwinManagerPage() {
     }
   };
 
-  // 1. TwinManagerPage 컴포넌트 내부에 함수 추가 (fetchColumnData 아래쯤에 배치)
   const handleRenameColumnBook = async (colIndex: number, currentName: string) => {
     if (!currentName) return alert("이름을 변경할 교재가 없습니다.");
     
@@ -229,14 +228,12 @@ export default function TwinManagerPage() {
 
     setIsLoading(true);
     try {
-      // 1) question_db 업데이트
       const { error: qErr } = await supabase.from('question_db')
         .update({ source_book_name: newName.trim(), book_name: newName.trim() })
         .or(`source_book_name.eq.${currentName},book_name.eq.${currentName}`);
       
       if (qErr) throw qErr;
 
-      // 2) textbook 테이블 업데이트 (본교재로 등록된 경우)
       const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', currentName).maybeSingle();
       if (tb) {
         await supabase.from('textbook').update({ title: newName.trim() }).eq('book_id', tb.book_id);
@@ -244,7 +241,6 @@ export default function TwinManagerPage() {
 
       alert(`✅ '${newName.trim()}'(으)로 이름이 통째로 변경되었습니다!`);
 
-      // 3) 상태 및 화면 업데이트
       setColumns(prev => {
         const newCols = [...prev];
         newCols[colIndex].bookName = newName.trim();
@@ -256,7 +252,7 @@ export default function TwinManagerPage() {
         return newCols;
       });
       
-      loadWorkbooks(); // 콤보박스 자동완성 리스트 갱신
+      loadWorkbooks(); 
 
     } catch (err: any) {
       alert("이름 변경 실패: " + err.message);
@@ -306,6 +302,9 @@ export default function TwinManagerPage() {
     let errorCount = 0;
 
     try {
+      // 🌟 열쇠(토큰) 준비
+      const { data: { session } } = await supabase.auth.getSession();
+
       for (const qId of selectedQIds) {
         const q = allQuestionsMap.get(qId);
         if (!q) continue;
@@ -314,7 +313,10 @@ export default function TwinManagerPage() {
 
         const res = await fetch('/api/gemini-twin', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+          },
           body: JSON.stringify({ 
             originalQuestion: q.question, 
             originalAnswer: q.answer, 
@@ -332,7 +334,7 @@ export default function TwinManagerPage() {
 
         const cleanedTwins = data.data.map((twin: any, idx: number) => ({
           ...twin,
-          parent_q: q, // 저장을 위해 부모 정보를 메타데이터로 남김
+          parent_q: q,
           question: twin.question?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
           answer: twin.answer?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
           step_1_concept: twin.step_1_concept?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
@@ -366,7 +368,6 @@ export default function TwinManagerPage() {
     }
   };
 
-  // 모달 안에서 선택된 애들만 최종적으로 DB에 Insert 하는 로직 (순차 번호계산 포함)
   const saveTwinsToDB = async () => {
     const selectedTwinsToSave = generatedTwins.filter(t => t.isSelected !== false);
     if (selectedTwinsToSave.length === 0) return alert("저장할 문항을 하나 이상 체크박스에서 선택해주세요.");
@@ -375,7 +376,6 @@ export default function TwinManagerPage() {
     let successCount = 0;
 
     try {
-      // 부모 단위로 묶어서 DB의 기존 번호표를 확인
       const groupedByParent = selectedTwinsToSave.reduce((acc: any, twin) => {
         const pid = twin.parent_q.question_id;
         if (!acc[pid]) acc[pid] = [];
@@ -447,7 +447,6 @@ export default function TwinManagerPage() {
       
       setIsTwinModalOpen(false);
       
-      // 새로고침 반영
       const twinBookName = columns[3].bookName;
       const simBookName = columns[4].bookName;
       if (twinBookName) await fetchColumnData(3, twinBookName);
@@ -945,7 +944,6 @@ export default function TwinManagerPage() {
             <div className={`p-3 border-b border-slate-200 shrink-0 bg-white`}>
               <div className={`text-xs font-black mb-1.5 text-${col.theme}-700 flex justify-between items-center`}>
                 <span>{col.title}</span>
-                {/* 🌟 이름 일괄 변경 버튼 추가 */}
                 {col.bookName && col.questions.length > 0 && (
                   <button 
                     onClick={() => handleRenameColumnBook(idx, col.bookName)}
@@ -983,7 +981,6 @@ export default function TwinManagerPage() {
             </div>
 
             <div className="flex-1 overflow-y-auto p-3 custom-scroll relative pointer-events-auto">
-              {/* 드래그 시 마우스 이벤트가 막히지 않도록 빈 공간에 덮어씌움 (Drop 튕김 방지) */}
               <div className="absolute inset-0 z-0 bg-transparent" />
               
               <div className="relative z-10 h-full">

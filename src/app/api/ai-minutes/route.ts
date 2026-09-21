@@ -1,6 +1,7 @@
 // src/app/api/ai-minutes/route.ts
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
+import { createClient } from '@supabase/supabase-js';
 
 const openai = new OpenAI();
 
@@ -33,9 +34,29 @@ const BASE_SYSTEM_PROMPT = `너는 학원(Academy) 운영 및 학습 관리 시�
   ]
 }`;
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
-    // 💡 프론트엔드에서 attendees(참석자) 정보도 함께 받아옵니다.
+    // 🔒 보안 자물쇠: 토큰 검증
+    let token = request.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) token = request.cookies.get("sb-access-token")?.value;
+    if (!token) {
+      const allCookies = request.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
+    }
+
+    if (!token) return NextResponse.json({ success: false, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
+
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) return NextResponse.json({ success: false, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+
+    // ----------------------------------------------------
+    // 본문 로직
+    // ----------------------------------------------------
     const { transcript, attendees } = await request.json();
 
     if (!transcript) {
@@ -45,7 +66,6 @@ export async function POST(request: Request) {
       );
     }
 
-    // 💡 동적 프롬프트 생성: AI에게 실제 참석자 이름을 알려주고 매핑을 지시합니다.
     const dynamicPrompt = `이 회의의 실제 참석자는 [ ${attendees || '미정'} ] 입니다. 대화의 문맥과 화자들의 호칭을 파악하여, 화자 A, 화자 B 등의 식별자를 이 참석자들의 실제 이름으로 자동 매핑해서 요약해 주세요.\n\n${BASE_SYSTEM_PROMPT}`;
 
     const completion = await openai.chat.completions.create({

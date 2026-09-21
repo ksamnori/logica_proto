@@ -10,7 +10,7 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const CLINIC_ROOM = "logica-clinic-room";
 
-export const formatSeat = formatSeatLabel;
+export const formatSeat = (seat: string | number) => String(seat);
 
 const SEAT_POLL_INTERVAL_MS = 3000;
 const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];

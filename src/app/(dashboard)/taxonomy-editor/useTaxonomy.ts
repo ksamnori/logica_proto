@@ -57,7 +57,6 @@ export function useTaxonomy() {
   const [twinTargetBook, setTwinTargetBook] = useState<string>('');
   const [similarTargetBook, setSimilarTargetBook] = useState<string>('');
 
-  // 🌟 추가됨: AI 복구 상태
   const [isFixingLatex, setIsFixingLatex] = useState(false);
 
   useEffect(() => {
@@ -495,6 +494,7 @@ export function useTaxonomy() {
     } catch (err: any) { alert("수정 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
+  // 🌟 API 라우트에 세션 토큰(열쇠)을 포함시켜 전송하도록 수정
   const handleGenerateTwins = async () => {
     if (!selectedQuestion) return alert("원본 문항을 먼저 왼쪽 리스트에서 선택해주세요.");
     
@@ -512,9 +512,15 @@ export function useTaxonomy() {
     setIsTwinModalOpen(true);
 
     try {
+      // 🌟 열쇠(토큰) 준비
+      const { data: { session } } = await supabase.auth.getSession();
+
       const res = await fetch('/api/gemini-twin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+        },
         body: JSON.stringify({ 
           originalQuestion: selectedQuestion.question, 
           originalAnswer: selectedQuestion.answer, 
@@ -548,7 +554,7 @@ export function useTaxonomy() {
     } catch (e: any) { alert("쌍둥이 생성 중 오류 발생: " + e.message); setIsTwinModalOpen(false); } finally { setIsGeneratingTwins(false); }
   };
 
-  // 🌟 추가됨: AI 수식 자동 복구 실행 로직
+  // 🌟 API 라우트에 세션 토큰(열쇠)을 포함시켜 전송하도록 수정
   const handleFixLatex = async () => {
     if (!selectedQuestion) return alert("원본 문항을 먼저 선택해주세요.");
     if (!confirm("AI를 사용하여 깨진 수식을 완벽한 LaTeX 형태로 자동 교정하시겠습니까?\n\n수정된 내용은 즉시 저장됩니다.")) return;
@@ -564,9 +570,15 @@ export function useTaxonomy() {
         step_4_conclusion: selectedQuestion.step_4_conclusion || ""
       };
 
+      // 🌟 열쇠(토큰) 준비
+      const { data: { session } } = await supabase.auth.getSession();
+
       const res = await fetch('/api/gemini-fix-latex', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+        },
         body: JSON.stringify(payload)
       });
 
@@ -574,7 +586,6 @@ export function useTaxonomy() {
       const data = await res.json();
       if (!data.success) throw new Error(data.error);
 
-      // 교정된 데이터로 상태 및 폼 업데이트
       const updatedQuestion = { ...selectedQuestion, ...data.data };
       
       setEditForm(prev => ({
@@ -590,7 +601,6 @@ export function useTaxonomy() {
       setSelectedQuestion(updatedQuestion);
       setQuestions(prev => prev.map(q => q.question_id === updatedQuestion.question_id ? updatedQuestion : q));
 
-      // DB에 직접 변경사항 저장
       const { error: dbError } = await supabase.from('question_db').update({
         question: data.data.question,
         answer: data.data.answer,
@@ -741,13 +751,13 @@ export function useTaxonomy() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,
-    twinTargetBook, similarTargetBook, isFixingLatex, // 🌟 추가됨
+    twinTargetBook, similarTargetBook, isFixingLatex,
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
     normalRoots, trueOrphans, getDescendants,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
     setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
-    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex // 🌟 추가됨
+    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex
   };
 }

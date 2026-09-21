@@ -474,16 +474,34 @@ export default function ClinicViewer() {
     setTimeout(() => { if ((window as any).MathJax) (window as any).MathJax.typesetPromise(); }, 100);
   };
 
+  // 🌟 토큰 담아서 채점 API 호출
   const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string): Promise<any> => {
-    const res = await fetch('/api/clinic-grade', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ imageDataUrl: dataUrl, correct, questionText: qText }) });
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const res = await fetch('/api/clinic-grade', { 
+      method: 'POST', 
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`
+      }, 
+      body: JSON.stringify({ imageDataUrl: dataUrl, correct, questionText: qText }) 
+    });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'API 오류');
     return data;
   };
 
+  // 🌟 토큰 담아서 힌트 생성 API 호출
   const generateAiHint = async (qText: string): Promise<string> => {
     try {
-      const res = await fetch('/api/clinic-hint', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ questionText: qText }) });
+      const { data: { session } } = await supabaseClient.auth.getSession();
+      const res = await fetch('/api/clinic-hint', { 
+        method: 'POST', 
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        }, 
+        body: JSON.stringify({ questionText: qText }) 
+      });
       if (!res.ok) throw new Error('API 오류');
       const data = await res.json();
       return (data.hint || '').trim() || '문제의 조건을 다시 한번 꼼꼼히 읽고 식을 세워보세요.';
@@ -649,11 +667,7 @@ export default function ClinicViewer() {
 
   const appendToExistingIncorrectPrint = async (qItem: any) => {
     if (!qItem.question_id) return;
-    
-    // 🌟 핵심 픽스: 이미 오답 클리닉을 풀고 있는 중이라면, 자기 자신에게 또 오답을 추가하는 무한 증식(우로보로스)을 막습니다.
-    if (sourceTypeRef.current === '오답프린트' || sourceTypeRef.current === '오답') {
-        return;
-    }
+    if (sourceTypeRef.current === '오답프린트' || sourceTypeRef.current === '오답') return;
 
     try {
       const { data: assignments } = await supabaseClient.from('exam_assignment')

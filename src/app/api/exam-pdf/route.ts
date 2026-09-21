@@ -7,6 +7,7 @@ import chromium from "@sparticuz/chromium-min";
 import { PDFDocument } from "pdf-lib";
 import fs from "fs";
 import os from "os";
+import { createClient } from "@supabase/supabase-js";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -154,10 +155,34 @@ export async function GET(req: NextRequest) {
     if (v) extraParams[key] = v;
   });
 
-  const authToken = req.cookies.get("sb-access-token")?.value || null;
+  // 🔒 1. 보안 자물쇠: 쿠키를 직접 확인하고 Supabase API를 통해 진짜인지 검증
+  let authToken = req.cookies.get("sb-access-token")?.value;
+  
+  if (!authToken) {
+    const allCookies = req.cookies.getAll();
+    const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+    if (authCookie) {
+      try { authToken = JSON.parse(authCookie.value)[0]; } catch(e) {}
+    }
+  }
+
   if (!authToken) {
     return NextResponse.json(
       { error: "로그인 세션이 만료되었습니다. 다시 로그인 후 PDF를 생성해주세요." },
+      { status: 401 }
+    );
+  }
+
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  );
+
+  const { data: { user }, error: authError } = await supabase.auth.getUser(authToken);
+
+  if (authError || !user) {
+    return NextResponse.json(
+      { error: "유효하지 않은 로그인 세션입니다. 다시 로그인 후 PDF를 생성해주세요." },
       { status: 401 }
     );
   }

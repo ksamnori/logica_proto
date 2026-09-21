@@ -121,7 +121,10 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
     setMeetingResult(prev => { const topSpace = (!prev || prev.trim() === '') ? '<p><br></p>' : ''; return prev + topSpace + htmlToInsert; });
   };
 
+  // 🌟 토큰을 첨부하여 구글 캘린더 생성 호출
   const syncToGoogleCalendarBackend = async (meetingsArray: any[]) => {
+    const { data: { session } } = await supabase.auth.getSession();
+
     const events = meetingsArray.map(m => {
       const startTime = new Date(m.meeting_date);
       const endTime = new Date(startTime.getTime() + 60 * 60 * 1000); 
@@ -136,7 +139,10 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
 
     const res = await fetch('/api/calendar', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session?.access_token}`
+      },
       body: JSON.stringify({ events })
     });
     if (!res.ok) throw new Error("API Route 에러");
@@ -152,7 +158,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
     const participantNames = selectedInstIds.map(id => instructors.find(i => i.instructor_id === id)?.name).join(', ');
     const meetingDateTime = new Date(`${meetingDateStr}T${meetingTimeStr}:00`).toISOString();
 
-    // 🌟 [추가됨] 병합 회의록 생성 전 꼬리표 챙기기
     const myTenantId = localStorage.getItem("logica_tenant_id");
     if (!myTenantId) return alert("소속 지점 정보가 없습니다. 다시 로그인 해주세요.");
 
@@ -173,7 +178,7 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
           attendees: participantNames,
           meeting_date: meetingDateTime,
           is_secret: isSecret,
-          tenant_id: myTenantId // 🌟 [추가됨] 병합 회의록에도 꼬리표 부착!
+          tenant_id: myTenantId
         };
 
         if (isSyncGcal && !isSecret) { 
@@ -189,7 +194,12 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         
         if (!targetMeeting.is_secret && isSecret) {
           try {
-            await fetch(`/api/calendar?title=${encodeURIComponent('[Logica] ' + targetMeeting.title)}`, { method: 'DELETE' });
+            // 🌟 캘린더 삭제 요청에 토큰 추가
+            const { data: { session } } = await supabase.auth.getSession();
+            await fetch(`/api/calendar?title=${encodeURIComponent('[Logica] ' + targetMeeting.title)}`, { 
+              method: 'DELETE',
+              headers: { 'Authorization': `Bearer ${session?.access_token}` }
+            });
           } catch (e) {
             console.error('구글 캘린더 연동 해제(삭제) 실패:', e);
           }
@@ -204,7 +214,6 @@ export default function BindMeetingModal({ selectedIds, agendas, instructors, cu
         const mergedIds = Array.from(new Set([...existingLinkedIds, ...localSelectedIds])).filter(Boolean);
         const hiddenLinkData = mergedIds.length > 0 ? `<div data-linked-ids="${mergedIds.join(',')}" style="display:none;"></div>` : '';
 
-        // 수정 시에는 이미 tenant_id가 있으므로 추가 불필요
         const { error } = await supabase.from("agenda").update({
           title: meetingTitle,
           content: meetingResult + hiddenLinkData, 

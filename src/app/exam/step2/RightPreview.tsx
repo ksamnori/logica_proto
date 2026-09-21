@@ -19,30 +19,25 @@ export default function RightPreview({ examData }: { examData: any }) {
 
   const [hideSubNumber, setHideSubNumber] = useState(false);
 
-  // AI 유사생성 및 교체 모달 관련 상태
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
   const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [aiTargetInfo, setAiTargetInfo] = useState<{ idx: number, subIdx: number, q: any } | null>(null);
   const [isSavingTwin, setIsSavingTwin] = useState(false);
 
-  // 🌟 [추가됨] AI 기능 접근 권한 상태
   const [hasTwinPerm, setHasTwinPerm] = useState(false);
 
-  // 🌟 [추가됨] 초기 렌더링 시 권한을 검사합니다.
   useEffect(() => {
     const checkTwinPermission = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
       
-      // 원장, 부원장, 최고관리자 직급은 기본으로 무조건 패스!
       if (role === 'SUPER_ADMIN' || role === 'ADMIN' || role === 'VICE_ADMIN' || ["최고관리자", "대장", "원장", "부원장"].some(p => pos.includes(p))) {
         setHasTwinPerm(true);
         return;
       }
 
-      // 일반 강사는 권한 테이블을 조회하여 action_generate_twins_exam 권한이 있는지 확인
       if (tId && role) {
         const { data } = await supabase.from('tenant_role_permissions').select('allowed_menus').eq('tenant_id', tId).eq('role_name', role).single();
         if (data?.allowed_menus?.includes("action_generate_twins_exam")) {
@@ -171,9 +166,15 @@ export default function RightPreview({ examData }: { examData: any }) {
     try {
       const taxStr = getDepth6Name(aiTargetInfo.q, depth6Map) || '분류 정보 없음';
       
+      // 🌟 열쇠(토큰) 준비
+      const { data: { session } } = await supabase.auth.getSession();
+      
       const res = await fetch('/api/gemini-twin', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+        },
         body: JSON.stringify({ 
           originalQuestion: aiTargetInfo.q.question, 
           originalAnswer: aiTargetInfo.q.answer, 

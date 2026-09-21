@@ -37,7 +37,6 @@ const safeParseIds = (raw: any): number[] => {
   return [];
 };
 
-// 🌟 [추가] 프론트엔드 전용 꼬리표(_added_...)를 떼고 순수 DB ID만 추출하는 함수
 const getRealId = (id: string) => String(id).replace(/_added_\d+$/, '');
 
 export default function ExamViewerPage() {
@@ -216,7 +215,6 @@ export default function ExamViewerPage() {
 
       for (const item of bulkItems) {
         if (item.type === 'hw') {
-          // 🌟 꼬리표 떼고 DB 검색용 ID 추출
           item.examQuestions.forEach((id: string) => allQids.add(getRealId(id)));
         } else if (item.exam_id) {
           const { data: examItems } = await supabase.from('exam_item').select('question_id').eq('exam_id', item.exam_id);
@@ -583,14 +581,11 @@ export default function ExamViewerPage() {
             }
         }
 
-        // 🌟 [핵심 수술 부위] 세션 데이터 파싱 및 DB 조회 로직 수정
         const parsedData = JSON.parse(sessionStorage.getItem('examQuestions') || "[]");
         const flatQIds = parsedData.reduce((acc: string[], val: any) => acc.concat(Array.isArray(val) ? val.map(String) : [String(val)]), []);
 
-        // 🚨 새로 추가된 문제의 _added_ 꼬리표를 떼어내고 진짜 DB ID만 모읍니다.
         const realQIds = flatQIds.map((id: string) => getRealId(id));
 
-        // 진짜 ID들로만 DB에서 조회합니다.
         const { data: questions } = await supabase.from('question_db').select('*').in('question_id', realQIds);
         
         let userMergedTextQuestions: any[][] = [];
@@ -609,7 +604,6 @@ export default function ExamViewerPage() {
             const items = qids.map((qid: string) => {
                 const realId = getRealId(qid);
                 const dbQ = questions?.find(qu => String(qu.question_id) === realId);
-                // 🚨 찾은 데이터에 화면용 가짜 ID(_added_)를 다시 덮어씌워 React 렌더링 충돌 방지
                 return dbQ ? { ...dbQ, question_id: qid } : null; 
             }).filter(Boolean);
 
@@ -1235,7 +1229,6 @@ export default function ExamViewerPage() {
       if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다.");
       if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
 
-      // 🌟 [핵심 변경 2] 저장 시에도 _added_ 꼬리표 떼어내고 진짜 ID만 DB에 반영
       const flatQIds = examStateRef.current?.groups.reduce((acc: string[], g: any) => acc.concat(g.questions.map((q: any) => getRealId(q.question_id))), []) || [];
       
       let userMergedTextQuestions: string[][] = [];
@@ -1315,8 +1308,6 @@ export default function ExamViewerPage() {
         const items: any[] = []; let fIdx = 1;
         examStateRef.current?.groups.forEach((g: any, gIdx: number) => {
           const score = layoutType === '입학테스트' ? [2,3,4,5][(gIdx < 4 ? 0 : gIdx < 13 ? 1 : gIdx < 20 ? 2 : gIdx === 20 ? 3 : gIdx < 23 ? 0 : gIdx < 25 ? 1 : gIdx < 28 ? 2 : 3)] : null;
-          
-          // 🌟 꼬리표 뗀 진짜 ID로 exam_item에 Insert
           g.questions.forEach((q: any) => items.push({ 
              exam_id: examId, 
              question_id: getRealId(q.question_id), 
@@ -1369,7 +1360,6 @@ export default function ExamViewerPage() {
               }
               const tasks: any[] = [];
               
-              // 🌟 꼬리표 뗀 ID로 태스크 배정
               flatQIds.forEach((qId: string) => {
                   tasks.push({ student_id: stuId, task_type: '유형오답클리닉', question_id: qId, status: '대기' });
               });
@@ -1415,6 +1405,7 @@ export default function ExamViewerPage() {
     window.print();
   };
 
+  // 🌟 토큰을 탑재한 PDF 생성 라우트 연동 (수정된 핵심 로직)
   const downloadPdfViaServer = async () => {
     setIsGeneratingPdf(true);
     try {
@@ -1426,18 +1417,32 @@ export default function ExamViewerPage() {
       const examId = currentExamIdRef.current;
       if (!examId) throw new Error('저장된 시험지 ID를 찾을 수 없습니다.');
 
-      const res = await fetch(`/api/exam-pdf?exam_id=${examId}`, { cache: 'no-store' });
+      // 🌟 열쇠(토큰) 준비
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const res = await fetch(`/api/exam-pdf?exam_id=${examId}`, { 
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+        }
+      });
+      
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.error || '서버 응답 오류');
       }
+      
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url; a.download = `${examTitle || '시험지'}.pdf`;
       document.body.appendChild(a); a.click(); a.remove();
       URL.revokeObjectURL(url);
-    } catch (e: any) { alert('PDF 생성 실패: ' + e.message); } finally { setIsGeneratingPdf(false); }
+    } catch (e: any) { 
+      alert('PDF 생성 실패: ' + e.message); 
+    } finally { 
+      setIsGeneratingPdf(false); 
+    }
   };
 
   const attemptLeave = (fn: () => void) => {

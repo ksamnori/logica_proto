@@ -1,20 +1,37 @@
 // src/app/api/gemini-parse/route.ts
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from '@supabase/supabase-js';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const { imageBase64 } = await req.json();
-
-    // 환경 변수에 등록된 API 키를 사용합니다.
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." }, { status: 500 });
+    // 🔒 1. 보안 자물쇠: 토큰 검증
+    let token = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) token = req.cookies.get("sb-access-token")?.value;
+    if (!token) {
+      const allCookies = req.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
     }
 
+    if (!token) return NextResponse.json({ success: false, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
+
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) return NextResponse.json({ success: false, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+
+    // ----------------------------------------------------
+    // 2. 본문 로직
+    // ----------------------------------------------------
+    const { imageBase64 } = await req.json();
+
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." }, { status: 500 });
+
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // 원장님의 Python 코드와 동일한 2.5-flash 모델 및 스키마 적용
     const model = genAI.getGenerativeModel({
       model: "gemini-2.5-flash",
       generationConfig: {
@@ -56,7 +73,7 @@ export async function POST(req: Request) {
 
     const imagePart = {
       inlineData: {
-        data: imageBase64.split(",")[1], // base64 헤더 제거
+        data: imageBase64.split(",")[1],
         mimeType: "image/jpeg"
       }
     };

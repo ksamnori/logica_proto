@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface AiRecordModalProps {
-  targetMeeting?: any; // 💡 넘어온 회의록 데이터
+  targetMeeting?: any; 
   onClose: () => void;
   onSuccess: () => void;
 }
@@ -18,7 +18,6 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
   const [isRequestingMic, setIsRequestingMic] = useState(false);
   const [uiError, setUiError] = useState("");
   
-  // 💡 파형 애니메이션 데이터
   const [waveData, setWaveData] = useState<number[]>(Array(20).fill(10));
 
   const [sttTranscript, setSttTranscript] = useState<any[]>([]); 
@@ -30,12 +29,10 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
   const isRecordingRef = useRef(false); 
   const contentEndRef = useRef<HTMLDivElement>(null);
 
-  // 1. 오토 스크롤
   useEffect(() => {
     contentEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [sttTranscript]);
 
-  // 2. 타이머 & 파형 애니메이션 관리
   useEffect(() => {
     let waveInterval: NodeJS.Timeout;
     if (isRecording) {
@@ -119,14 +116,23 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
     setIsRecording(false);
   };
 
+  // 🌟 토큰 담아서 음성 변환 및 AI 요약 호출
   const processAudio = async (audioBlob: Blob) => {
     setIsAnalyzing(true);
     setUiError("");
     try {
+      const { data: { session } } = await supabase.auth.getSession();
+
       const formData = new FormData();
       formData.append("media", audioBlob, "meeting_record.webm");
 
-      const sttRes = await fetch('/api/clova-speech', { method: 'POST', body: formData });
+      const sttRes = await fetch('/api/clova-speech', { 
+        method: 'POST', 
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`
+        },
+        body: formData 
+      });
       const sttData = await sttRes.json();
       if (!sttData.success) throw new Error(sttData.error || "STT 변환 실패");
       
@@ -140,13 +146,15 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
         setIsAnalyzing(false); return;
       }
       
-      // 💡 AI에게 실제 참석자 정보를 함께 넘깁니다!
       const aiRes = await fetch('/api/ai-minutes', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session?.access_token}`
+        },
         body: JSON.stringify({ 
           transcript: textForAi,
-          attendees: targetMeeting?.attendees || "" // 기존 참석자 정보 전달
+          attendees: targetMeeting?.attendees || ""
         })
       });
       
@@ -162,11 +170,9 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
     }
   };
 
-  // 💡 완성된 회의록을 DB 원본 내용에 덧붙여 저장하는 함수
   const appendToMeeting = async () => {
     if (!targetMeeting || !aiResult) return;
     try {
-      // 1. AI 요약 본문 생성
       const summaryHtml = `
         <div style="margin-top: 25px; border-top: 2px solid #e2e8f0; padding-top: 15px;">
           <h3 style="color: #002864; font-size: 14px; font-weight: bold; margin-bottom: 10px;">🎙️ 실시간 AI 회의 분석 결과</h3>
@@ -239,7 +245,6 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
                     <span className="text-rose-500 font-black text-lg tracking-widest">{formatTime(recordingTime)}</span>
                   </div>
                   
-                  {/* 💡 예쁜 CSS 파형 애니메이션 영역 */}
                   <div className="flex items-end justify-center gap-1.5 h-16 w-full mb-2">
                     {waveData.map((h, i) => (
                       <div key={i} className="w-2 bg-rose-500 rounded-full transition-all duration-150 ease-in-out" style={{ height: `${h}px` }} />

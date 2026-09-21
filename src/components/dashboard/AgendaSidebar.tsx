@@ -41,7 +41,11 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
   }, [currentUser.instId, tenantId]);
 
   const fetchAgendas = async () => {
-    const { data } = await supabase.from('agenda').select('*').order('created_at', { ascending: false });
+    let query = supabase.from('agenda').select('*').order('created_at', { ascending: false });
+    if (tenantId) {
+      query = query.eq('tenant_id', tenantId);
+    }
+    const { data } = await query;
     if (data) {
       const safeData = data.filter((a: any) => {
         if (!a.is_secret) return true; 
@@ -54,9 +58,17 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
     }
   };
 
+  // 🌟 세션 토큰을 담아서 구글 캘린더 API 호출
   const fetchGoogleEvents = async () => {
     try {
-      const res = await fetch('/api/calendar', { cache: 'no-store' });
+      const { data: { session } } = await supabase.auth.getSession();
+
+      const res = await fetch('/api/calendar', { 
+        cache: 'no-store',
+        headers: {
+          'Authorization': `Bearer ${session?.access_token}`
+        }
+      });
       const data = await res.json();
       if (data.success && data.events) {
         const external = data.events
@@ -274,7 +286,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
             }
 
             return displayItems.map(item => {
-              // 🌟 1. 오늘 날짜 여부 판별 로직 추가
               const today = new Date();
               let isTodayItem = false;
 
@@ -314,7 +325,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                 dateDisplay = `${itemDate.getMonth()+1}/${itemDate.getDate()} ~ ${eDate.getMonth()+1}/${eDate.getDate()}`;
               }
               
-              // 🌟 2. 텍스트 강조 (오늘인 경우 '오늘'로 변경)
               if (isTodayItem && !item.isMultiDay) {
                 dateDisplay = `오늘 ${itemDate.getHours()}:${String(itemDate.getMinutes()).padStart(2,'0')}`;
               }
@@ -328,7 +338,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                       else alert('권한이 없습니다.');
                     }
                   }}
-                  // 🌟 3. 테두리 강조 스타일 추가
                   className={`bg-white p-3 rounded-xl border shadow-sm flex flex-col gap-1.5 transition-colors ${
                     isTodayItem ? 'border-[#002864] ring-1 ring-[#002864]/20' : 'border-slate-200'
                   } ${
@@ -353,7 +362,6 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                     <span className={`px-1.5 py-0.5 text-[8px] font-black rounded border ${badgeStyle}`}>
                       {badgeText}
                     </span>
-                    {/* 🌟 4. 오늘인 경우 색상 강조 */}
                     <span className={`text-[9px] font-bold ${isTodayItem ? 'text-rose-500' : 'text-slate-400'}`}>
                       {dateDisplay}
                     </span>

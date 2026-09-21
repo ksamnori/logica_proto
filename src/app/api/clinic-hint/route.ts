@@ -1,13 +1,43 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    // 🔒 1. 보안 자물쇠
+    let token = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) token = req.cookies.get("sb-access-token")?.value;
+    
+    if (!token) {
+      const allCookies = req.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
+    }
+
+    if (!token) {
+      return NextResponse.json({ hint: null, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
+    }
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json({ hint: null, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+    }
+
+    // ----------------------------------------------------
+    // 2. 기존 Gemini 힌트 로직
+    // ----------------------------------------------------
     const { questionText } = await req.json();
     
     const apiKey = process.env.GEMINI_API_KEY;
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
-    // API 키가 없으면 그냥 빈 값을 반환하여 클라이언트에서 기본 문구를 띄우게 함
     if (!apiKey) {
       return NextResponse.json({ hint: null });
     }

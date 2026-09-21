@@ -1,6 +1,7 @@
 // src/app/api/gemini-fix-latex/route.ts
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from '@supabase/supabase-js';
 
 const circleMap: Record<string, string> = {
   'ㄱ':'㉠', 'ㄴ':'㉡', 'ㄷ':'㉢', 'ㄹ':'㉣', 'ㅁ':'㉤', 'ㅂ':'㉥', 'ㅅ':'㉦', 'ㅇ':'㉧', 'ㅈ':'㉨', 'ㅊ':'㉩', 'ㅋ':'㉪', 'ㅌ':'㉫', 'ㅍ':'㉬', 'ㅎ':'㉭',
@@ -8,29 +9,44 @@ const circleMap: Record<string, string> = {
   'a':'ⓐ', 'b':'ⓑ', 'c':'ⓒ', 'd':'ⓓ', 'e':'ⓔ'
 };
 
-// 🌟 괄호 유무, 띄어쓰기, \text 중첩 등 모든 파편화된 원문자를 완벽하게 ㉠으로 치환
 function forceCleanSymbols(text: string) {
   if (!text) return text;
   let res = text;
-  
   res = res.replace(/\\(?:text)?circled\s*(?:\{\s*\\text\s*\{\s*([가-힣a-zA-Z0-9]+)\s*\}\s*\}|\{\s*([가-힣a-zA-Z0-9]+)\s*\}|([가-힣a-zA-Z0-9]))/g, (m, p1, p2, p3) => {
     const key = p1 || p2 || p3;
     return circleMap[key] || m;
   });
-  
   return res;
 }
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    // 🔒 1. 보안 자물쇠: 토큰 검증
+    let token = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!token) token = req.cookies.get("sb-access-token")?.value;
+    if (!token) {
+      const allCookies = req.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
+    }
+
+    if (!token) return NextResponse.json({ success: false, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
+
+    const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!);
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) return NextResponse.json({ success: false, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+
+    // ----------------------------------------------------
+    // 2. 본문 로직
+    // ----------------------------------------------------
     const rawPayload = await req.json();
     const apiKey = process.env.GEMINI_API_KEY;
 
-    if (!apiKey) {
-      return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." });
-    }
+    if (!apiKey) return NextResponse.json({ success: false, error: "서버에 API 키가 설정되지 않았습니다." });
 
-    // 🛡️ 1차 방어: 깨진 기호 완벽 치환
     const payload = {
       question: forceCleanSymbols(rawPayload.question),
       answer: forceCleanSymbols(rawPayload.answer),
@@ -41,8 +57,6 @@ export async function POST(req: Request) {
     };
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    
-    // 🌟 최신 3.5 모델 적용
     const model = genAI.getGenerativeModel({
       model: "gemini-3.5-flash",
       generationConfig: {
@@ -77,7 +91,6 @@ export async function POST(req: Request) {
 
     const result = await model.generateContent(prompt);
     let responseText = result.response.text();
-    
     responseText = responseText.replace(/```json/gi, '').replace(/```/g, '').trim();
 
     let parsedData;
@@ -88,7 +101,6 @@ export async function POST(req: Request) {
       parsedData = JSON.parse(escapedText);
     }
 
-    // 🛡️ 2차 방어
     parsedData.question = forceCleanSymbols(parsedData.question);
     parsedData.answer = forceCleanSymbols(parsedData.answer);
     parsedData.step_1_concept = forceCleanSymbols(parsedData.step_1_concept);

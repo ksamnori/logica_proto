@@ -1,10 +1,43 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
+    // 🔒 1. 보안 자물쇠: 패키지 설치 없이 바닐라 클라이언트로 직접 토큰 검증
+    let token = req.headers.get("authorization")?.replace("Bearer ", "");
+    
+    // Authorization 헤더에 없으면 쿠키에서 탐색
+    if (!token) token = req.cookies.get("sb-access-token")?.value;
+    
+    // Supabase 기본 쿠키 형태 백업 탐색
+    if (!token) {
+      const allCookies = req.cookies.getAll();
+      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
+      if (authCookie) {
+        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
+      }
+    }
+
+    if (!token) {
+      return NextResponse.json({ error: "Unauthorized: 토큰이 없습니다." }, { status: 401 });
+    }
+
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+    );
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
+
+    if (authError || !user) {
+      return NextResponse.json({ error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
+    }
+
+    // ----------------------------------------------------
+    // 2. 기존 Gemini 채점 로직
+    // ----------------------------------------------------
     const { imageDataUrl, correct, questionText } = await req.json();
     
-    // 서버 환경변수에서만 API 키를 가져옵니다. (브라우저 노출 X)
     const apiKey = process.env.GEMINI_API_KEY;
     const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 

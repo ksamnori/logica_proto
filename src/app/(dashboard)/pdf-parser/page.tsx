@@ -21,7 +21,6 @@ const applySafeCleaner = (text: string) => {
   cleaned = cleaned.replace(/∠/g, '\\angle ').replace(/°/g, '^{\\circ}');
   cleaned = cleaned.replace(/\\?degree\b/g, '^{\\circ}');
   
-  // 🌟 핵심 필터: AI의 과도한 더블 역슬래시(\\frac)를 싱글(\frac)로 강제 교정
   cleaned = cleaned.replace(/\\\\(?=[a-zA-Z])/g, '\\');
   
   return cleaned.trim();
@@ -60,7 +59,6 @@ export default function PdfParserPage() {
   const [aiProgress, setAiProgress] = useState({ current: 0, total: 0 });
 
   useEffect(() => {
-    // 🌟 [수정] 하드코딩된 권한 체크를 지우고, DB(tenant_role_permissions) 연동으로 교체
     const checkAccess = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
@@ -186,6 +184,9 @@ export default function PdfParserPage() {
     let autoIncQNum = currentQNum;
 
     try {
+      // 🌟 열쇠(토큰) 준비
+      const { data: { session } } = await supabase.auth.getSession();
+
       for (let i = aiStartPage; i <= aiEndPage; i++) {
         setPageNum(i); 
         setAiProgress(p => ({ ...p, current: i - aiStartPage + 1 }));
@@ -202,7 +203,10 @@ export default function PdfParserPage() {
 
         const res = await fetch('/api/gemini-parse', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+          },
           body: JSON.stringify({ imageBase64: base64Image })
         });
 
