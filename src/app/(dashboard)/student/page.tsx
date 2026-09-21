@@ -27,21 +27,18 @@ export default function StudentPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false); 
 
-  // 🌟 정규 재원생용 필터 상태
   const [keyword, setKeyword] = useState("");
   const [level, setLevel] = useState("all");
   const [grade, setGrade] = useState("all");
   const [status, setStatus] = useState("all"); 
   const [instructorId, setInstructorId] = useState("all");
 
-  // 🌟 [추가] 진단평가 대기생 전용 필터 상태
   const [waitingKeyword, setWaitingKeyword] = useState("");
   const [waitingGrade, setWaitingGrade] = useState("all");
 
   const [currentPage, setCurrentPage] = useState(1);
   const [waitingCurrentPage, setWaitingCurrentPage] = useState(1); 
   
-  // 🌟 [수정] 대기생 한 페이지 출력 인원 16명으로 변경
   const formalLimit = 15;
   const waitingLimit = 16;
 
@@ -67,7 +64,6 @@ export default function StudentPage() {
     };
   }, []);
 
-  // 필터 변경 시 첫 페이지로 이동
   useEffect(() => {
     setCurrentPage(1);
   }, [keyword, level, grade, status, instructorId]);
@@ -87,9 +83,10 @@ export default function StudentPage() {
       const { data: instData } = await instQuery;
       if (instData) setInstructors(instData);
 
+      // 🌟 [수정] exam_assignment 테이블에 존재하지 않는 updated_at 대신 created_at을 요청하여 500 에러 해결
       let stuQuery = supabase
         .from("student")
-        .select("*, parent(phone), enrollment(class(name, level_name, instructor_id, status, instructor(name)))")
+        .select("*, parent(phone), enrollment(class(name, level_name, instructor_id, status, instructor(name))), exam_assignment(status, created_at, admission_session_id)")
         .order("created_at", { ascending: false })
         .limit(2000); 
       
@@ -97,7 +94,9 @@ export default function StudentPage() {
 
       const { data: allStuData, error } = await stuQuery;
       
-      if (error) console.error("데이터베이스 쿼리 에러:", error);
+      if (error) {
+        console.error("데이터베이스 쿼리 에러:", error);
+      }
 
       if (allStuData) {
         if (isSuper) {
@@ -129,7 +128,6 @@ export default function StudentPage() {
     return diffDays <= 30;
   };
 
-  // 🌟 [수정] 대기생 전용 필터 로직 적용
   const waitingStudents = useMemo(() => {
     return students.filter(s => s.status === '입학테스트').filter((s) => {
       const phone = s.phone || "";
@@ -142,7 +140,7 @@ export default function StudentPage() {
   }, [students, waitingKeyword, waitingGrade]);
 
   const formalStudents = useMemo(() => {
-    return students.filter(s => s.status !== '입학테스트').filter((s) => {
+    return students.filter(s => s.status !== '입학테스트').map(s => {
       const enrolls = ensureArray(s.enrollment);
       const activeEnrollments = enrolls.filter((e: any) => {
         const cls = unwrap(e.class);
@@ -150,10 +148,20 @@ export default function StudentPage() {
       });
       const classes = activeEnrollments.map((e: any) => unwrap(e.class));
       
-      const matchLevel = level === "all" || classes.some((c: any) => c?.level_name === level);
+      const displayStatus = (activeEnrollments.length === 0 && s.status === '재원') ? '대기' : s.status;
+
+      return { ...s, activeEnrollments, classes, displayStatus };
+    }).filter((s) => {
+      const isUMATH = (name: string) => ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon'].some(l => name.includes(l));
+
+      const matchLevel = level === "all" || 
+        (level === "기타" 
+          ? s.classes.some((c: any) => c?.level_name && !isUMATH(c.level_name))
+          : s.classes.some((c: any) => c?.level_name?.includes(level)));
+
       const matchGrade = grade === "all" || s.grade?.toString() === grade;
-      const matchStatus = status === "all" || s.status === status;
-      const matchInst = instructorId === "all" || classes.some((c: any) => c?.instructor_id?.toString() === instructorId);
+      const matchStatus = status === "all" || s.displayStatus === status; 
+      const matchInst = instructorId === "all" || s.classes.some((c: any) => c?.instructor_id?.toString() === instructorId);
       
       const phone = s.phone || "";
       const matchKeyword = keyword === "" || s.name.includes(keyword) || phone.includes(keyword);
@@ -162,7 +170,6 @@ export default function StudentPage() {
     });
   }, [students, keyword, level, grade, status, instructorId]);
 
-  // 대기생 학년 드롭다운용 유니크 학년 추출
   const uniqueWaitingGrades = Array.from(new Set(students.filter(s => s.status === '입학테스트').map(s => s.grade))).filter(Boolean).sort((a, b) => getGradeOrder(a) - getGradeOrder(b));
 
   const resetFormalFilters = () => {
@@ -211,7 +218,6 @@ export default function StudentPage() {
               )}
             </div>
 
-            {/* 재원생 필터바 */}
             <div className="flex items-center gap-2 flex-wrap">
               <input type="text" value={keyword} onChange={(e) => setKeyword(e.target.value)} placeholder="이름/연락처 검색" className="border border-emerald-200 text-emerald-800 bg-white text-xs font-bold rounded-md px-2.5 py-1.5 focus:outline-none focus:border-emerald-500 w-32 shadow-sm" />
               <select value={level} onChange={(e) => setLevel(e.target.value)} className="border border-emerald-200 text-emerald-800 bg-white text-xs font-bold rounded-md px-2 py-1.5 focus:outline-none focus:border-emerald-500 shadow-sm">
@@ -221,12 +227,14 @@ export default function StudentPage() {
                 <option value="Apex">Apex</option>
                 <option value="Titan">Titan</option>
                 <option value="Horizon">Horizon</option>
+                <option value="기타">기타 (특강 등)</option>
               </select>
               <select value={status} onChange={(e) => setStatus(e.target.value)} className="border border-emerald-200 text-emerald-800 bg-white text-xs font-bold rounded-md px-2 py-1.5 focus:outline-none focus:border-emerald-500 shadow-sm">
                 <option value="all">상태 전체</option>
                 <option value="재원">재원</option>
-                <option value="퇴원">퇴원</option>
+                <option value="대기">대기</option>
                 <option value="휴원">휴원</option>
+                <option value="퇴원">퇴원</option>
               </select>
               {isSuperAdmin && (
                 <select value={instructorId} onChange={(e) => setInstructorId(e.target.value)} className="border border-emerald-200 text-emerald-800 bg-white text-xs font-bold rounded-md px-2 py-1.5 focus:outline-none focus:border-emerald-500 shadow-sm">
@@ -260,31 +268,25 @@ export default function StudentPage() {
                 ) : (
                   currentFormalData.map((s) => {
                     let statusClass = "bg-slate-100 text-slate-600";
-                    if (s.status === "재원") statusClass = "bg-emerald-100 text-emerald-700 border border-emerald-200";
-                    if (s.status === "퇴원") statusClass = "bg-rose-100 text-rose-700 border border-rose-200";
-                    if (s.status === "휴원") statusClass = "bg-amber-100 text-amber-700 border border-amber-200";
+                    if (s.displayStatus === "재원") statusClass = "bg-emerald-100 text-emerald-700 border border-emerald-200";
+                    if (s.displayStatus === "퇴원") statusClass = "bg-rose-100 text-rose-700 border border-rose-200";
+                    if (s.displayStatus === "휴원") statusClass = "bg-amber-100 text-amber-700 border border-amber-200";
+                    if (s.displayStatus === "대기") statusClass = "bg-indigo-100 text-indigo-700 border border-indigo-200";
 
-                    const isNew = s.status === "재원" && isNewStudent(s.created_at);
-
-                    const enrolls = ensureArray(s.enrollment);
-                    const activeEnrollments = enrolls.filter((e: any) => {
-                      const cls = unwrap(e.class);
-                      return cls && cls.status !== '예정';
-                    });
-
-                    const classNames: string[] = activeEnrollments.map((e: any) => unwrap(e.class)?.name).filter(Boolean);
-                    const instNames: string[] = Array.from(new Set(activeEnrollments.map((e: any) => {
-                      const cls = unwrap(e.class);
-                      const inst = unwrap(cls?.instructor);
-                      return inst?.name;
-                    }).filter(Boolean)));
+                    // 🌟 [수정] 대기 상태인 학생도 NEW 뱃지가 표시되도록 조건 수정!
+                    const isNew = (s.displayStatus === "재원" || s.displayStatus === "대기") && isNewStudent(s.created_at);
                     
+                    const classNames: string[] = s.classes.map((c: any) => c.name).filter(Boolean);
+                    const instNames: string[] = Array.from(new Set(s.classes.map((c: any) => c.instructor?.name).filter(Boolean))) as string[];
                     const parentPhone = unwrap(s.parent)?.phone || "-";
 
                     return (
-                      <tr key={s.student_id} className={`transition-colors ${s.status === '퇴원' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-emerald-50/40'}`}>
-                        <td className="py-3 pl-6 pr-4 border-b border-slate-100 font-extrabold text-[#002864] cursor-pointer hover:text-emerald-600 hover:underline">
-                          <div className="flex items-center gap-1.5">
+                      <tr key={s.student_id} className={`transition-colors ${s.displayStatus === '퇴원' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-emerald-50/40'}`}>
+                        <td className="py-3 pl-6 pr-4 border-b border-slate-100 font-extrabold text-[#002864]">
+                          <div 
+                            onClick={() => router.push(`/student/${s.student_id}`)} 
+                            className="flex items-center gap-1.5 cursor-pointer hover:text-emerald-600 hover:underline w-fit"
+                          >
                             {s.name}
                             {isNew && <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[9px] font-black rounded shadow-sm animate-pulse">🔥 NEW</span>}
                           </div>
@@ -307,7 +309,7 @@ export default function StudentPage() {
                         </td>
                         <td className="py-3 px-4 border-b border-slate-100 text-slate-600 font-bold text-xs text-center">{parentPhone}</td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center">
-                          <span className={`${statusClass} px-2 py-1.5 rounded text-[11px] font-bold whitespace-nowrap`}>{s.status || "-"}</span>
+                          <span className={`${statusClass} px-2 py-1.5 rounded text-[11px] font-bold whitespace-nowrap`}>{s.displayStatus || "-"}</span>
                         </td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center">
                           <div className="flex flex-wrap justify-center gap-1 w-full max-w-[120px] mx-auto">
@@ -346,7 +348,6 @@ export default function StudentPage() {
               </h3>
             </div>
             
-            {/* 🌟 [추가] 대기생 전용 필터바 */}
             <div className="flex items-center gap-2 flex-wrap">
               <input 
                 type="text" 
@@ -378,16 +379,36 @@ export default function StudentPage() {
               ) : currentWaitingData.length === 0 ? (
                 <div className="py-10 text-center text-slate-400 font-bold text-sm">입학 대기생이 없습니다.</div>
               ) : (
-                currentWaitingData.map(s => (
-                  <div key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-indigo-50/50 cursor-pointer transition-colors shadow-sm flex justify-between items-center bg-white gap-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="font-extrabold text-[#002864] text-[13px] whitespace-nowrap">{s.name}</span>
-                      <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap shrink-0">{s.grade || '-'}</span>
-                      <span className="text-[11px] text-slate-500 font-medium truncate">📞 {unwrap(s.parent)?.phone || "-"}</span>
+                currentWaitingData.map(s => {
+                  const assignments = ensureArray(s.exam_assignment);
+                  // 🌟 [수정] 시험에 응시했는지 여부를 created_at 으로 표시
+                  const testAssignment = assignments.find((a: any) => a.admission_session_id && a.status !== '응시전');
+                  let testDateBadge = null;
+                  
+                  if (testAssignment && testAssignment.created_at) {
+                    const d = new Date(testAssignment.created_at);
+                    const formattedDate = `${d.getMonth() + 1}/${d.getDate()}`;
+                    testDateBadge = (
+                      <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold border border-emerald-200 whitespace-nowrap shrink-0">
+                        ✅ {formattedDate} 응시기록
+                      </span>
+                    );
+                  }
+
+                  return (
+                    <div key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-indigo-50/50 cursor-pointer transition-colors shadow-sm flex justify-between items-center bg-white gap-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="font-extrabold text-[#002864] text-[13px] whitespace-nowrap">{s.name}</span>
+                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap shrink-0">{s.grade || '-'}</span>
+                        <span className="text-[11px] text-slate-500 font-medium truncate">📞 {unwrap(s.parent)?.phone || "-"}</span>
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {testDateBadge}
+                        <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap shrink-0">입학 대기</span>
+                      </div>
                     </div>
-                    <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap shrink-0">입학 대기</span>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </div>

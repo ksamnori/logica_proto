@@ -251,7 +251,6 @@ export default function TeacherDashboardPage() {
         const dateObj = new Date(m.schedule_date);
         const timeStr = formatTimeAsKST(m.schedule_date);
         
-        // 🌟 TS 에러 완벽 해결 (Array 우회)
         const stuData: any = m.student;
         const stuName = Array.isArray(stuData) ? stuData[0]?.name : stuData?.name;
         
@@ -314,8 +313,8 @@ export default function TeacherDashboardPage() {
     setStudents((classStudents || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
     const activeStudentIds = (classStudents || []).map((s: any) => s.student_id);
 
+    // 1. 최근 2주 시험 평균 성취도 계산 로직
     const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 3600000).toISOString();
-    
     const { data: exams } = await supabase.from('exam_assignment')
       .select('total_score')
       .eq('class_id', classId)
@@ -326,35 +325,70 @@ export default function TeacherDashboardPage() {
       ? Math.round(exams.reduce((acc, curr) => acc + (curr.total_score || 0), 0) / exams.length) 
       : 0;
 
-    const oneMonthAgo = new Date(Date.now() - 30 * 24 * 3600000).toISOString();
-    
-    const { data: hws } = await supabase.from('homework_assignment')
-      .select('target_student_id, student_homework_result(student_id, status)')
-      .eq('class_id', classId)
-      .gte('created_at', oneMonthAgo)
-      .not('homework_title', 'eq', '[시스템] 수업 진도 완료 기록');
+    // 🌟 [핵심 변경] 2. 과제 제출률을 전체 출제 기록 대신 '워크북 진도 현황'에서 가져오도록 전면 개편
+    let hwRate = 0;
+    const { data: workbookData } = await supabase.from("class_textbook")
+      .select("book_id, textbook(*)")
+      .eq("class_id", classId)
+      .eq("textbook.book_type", "워크북");
+      
+    const activeWorkbooks = (workbookData || []).filter((w: any) => w.textbook !== null);
 
-    let expectedHwCount = 0;
-    let submittedHwCount = 0;
+    if (activeWorkbooks.length > 0 && activeStudentIds.length > 0) {
+      let totalAssignedPages = 0;
+      let totalCompletedPages = 0;
 
-    if (hws && hws.length > 0 && activeStudentIds.length > 0) {
-      hws.forEach(hw => {
-        const targetIds = hw.target_student_id ? [hw.target_student_id] : activeStudentIds;
-        const validTargets = targetIds.filter((id: string) => activeStudentIds.includes(id));
+      for (const wb of activeWorkbooks) {
+        const wbId = wb.book_id;
         
-        expectedHwCount += validTargets.length;
-
-        hw.student_homework_result?.forEach((res: any) => {
-          if (validTargets.includes(res.student_id)) {
-            if (res.status && ['제출완료', '채점완료', '완료'].includes(res.status)) {
-              submittedHwCount++;
-            }
-          }
+        // 해당 워크북의 전체 문항을 페이지 단위로 그룹화
+        const { data: qData } = await supabase.from("textbook_question").select("tq_id, page_number").eq("book_id", wbId);
+        if (!qData || qData.length === 0) continue;
+        
+        const pageTqMap: Record<number, number[]> = {};
+        qData.forEach(q => {
+          if (!pageTqMap[q.page_number]) pageTqMap[q.page_number] = [];
+          pageTqMap[q.page_number].push(q.tq_id);
         });
-      });
-    }
-    const hwRate = expectedHwCount > 0 ? Math.round((submittedHwCount / expectedHwCount) * 100) : 0;
+        const totalPages = Object.keys(pageTqMap).map(Number);
+        
+        // 해당 클래스, 워크북의 과제/진도 기록 모두 불러오기
+        const { data: hwsForProg } = await supabase.from("homework_assignment")
+          .select("student_homework_result(student_id, completed_tq_ids)")
+          .eq("class_id", classId)
+          .eq("book_id", wbId);
+        
+        const studentDoneTqs: Record<string, Set<number>> = {};
+        activeStudentIds.forEach((id: string) => studentDoneTqs[id] = new Set());
 
+        hwsForProg?.forEach(hw => {
+           hw.student_homework_result?.forEach((res: any) => {
+              const sId = res.student_id;
+              if (studentDoneTqs[sId]) {
+                 const completedQs = safeParseIds(res.completed_tq_ids);
+                 completedQs.forEach(tqId => studentDoneTqs[sId].add(tqId));
+              }
+           });
+        });
+
+        // 각 학생별로, 각 페이지의 문항이 모두 완료되었는지 체크
+        totalPages.forEach(p => {
+           const tqsOnPage = pageTqMap[p];
+           if(tqsOnPage.length === 0) return;
+           
+           activeStudentIds.forEach((sId: string) => {
+              totalAssignedPages++; // 분모: 전체 인원 * 전체 페이지
+              
+              const isPageDone = tqsOnPage.every(tqId => studentDoneTqs[sId].has(tqId));
+              if (isPageDone) totalCompletedPages++; // 분자: 해당 페이지를 완벽히 푼 학생 수
+           });
+        });
+      }
+
+      hwRate = totalAssignedPages > 0 ? Math.min(100, Math.round((totalCompletedPages / totalAssignedPages) * 100)) : 0;
+    }
+
+    // 3. 주교재 진도율 계산 로직
     const { data: cbData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId).eq("textbook.book_type", "주교재");
     const bookName = cbData && cbData.length > 0 ? cbData[0].textbook?.title : "주교재 미배정";
     const bookId = cbData && cbData.length > 0 ? cbData[0].book_id : null;
@@ -806,7 +840,7 @@ export default function TeacherDashboardPage() {
               
               <div onClick={() => router.push(`/class-report?class_id=${selectedClassId}&tab=HW`)} className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex-1 flex flex-col justify-between hover:border-amber-300 transition-colors cursor-pointer group">
                 <div className="flex flex-col">
-                  <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-amber-100">최근 1달</span>
+                  <span className="text-[9px] font-black text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded w-fit mb-1 border border-amber-100">워크북</span>
                   <span className="text-[11px] font-bold text-slate-600 group-hover:text-amber-600 transition-colors">과제 제출률 🔍</span>
                 </div>
                 <div className="text-right mt-1 flex items-end justify-end gap-0.5">
@@ -847,7 +881,6 @@ export default function TeacherDashboardPage() {
               </div>
               
               <div onClick={() => hasAccess('/makeup') ? router.push('/makeup') : alert("접근 권한이 없습니다.")} className={`flex flex-col justify-center bg-emerald-50 p-3 rounded-xl border border-emerald-100 transition-colors h-[68px] ${hasAccess('/makeup') ? 'cursor-pointer hover:bg-emerald-100' : 'cursor-not-allowed opacity-70'}`}>
-                {/* 🌟 💡 아이콘으로 수정 완료 */}
                 <span className="text-[10px] font-bold text-emerald-500 mb-1">💡 임박한 보강/클리닉</span>
                 {upcomingMakeup ? (
                    <div className="flex items-center gap-2">
