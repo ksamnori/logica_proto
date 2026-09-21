@@ -1,6 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // 🌟 개발 환경에서 127.0.0.1, 0.0.0.0 로컬 HMR 차단 해제 (Puppeteer PDF 생성용)
+  allowedDevOrigins: [
+    "127.0.0.1",
+    "127.0.0.1:3000",
+    "0.0.0.0",
+    "0.0.0.0:3000",
+    "localhost",
+    "localhost:3000"
+  ],
+
   // 🌟 1. Server Actions 용량 제한 해제 (experimental 안쪽으로 원상 복구)
   experimental: {
     serverActions: {

@@ -155,8 +155,15 @@ export async function GET(req: NextRequest) {
     if (v) extraParams[key] = v;
   });
 
-  // 🔒 1. 보안 자물쇠: 쿠키를 직접 확인하고 Supabase API를 통해 진짜인지 검증
-  let authToken = req.cookies.get("sb-access-token")?.value;
+  // 🌟 Puppeteer 봇이 길을 잃지 않도록 0.0.0.0 주소를 127.0.0.1(localhost)로 세탁합니다.
+  let safeOrigin = req.nextUrl.origin;
+  if (safeOrigin.includes("0.0.0.0")) {
+    safeOrigin = safeOrigin.replace("0.0.0.0", "127.0.0.1");
+  }
+
+  let authToken = req.headers.get("authorization")?.replace("Bearer ", "");
+  
+  if (!authToken) authToken = req.cookies.get("sb-access-token")?.value;
   
   if (!authToken) {
     const allCookies = req.cookies.getAll();
@@ -189,7 +196,9 @@ export async function GET(req: NextRequest) {
 
   try {
     console.log(`[PDF 생성 시작] exam_id=${examId}`, extraParams);
-    const pdfBytes = await generateTrimmedPdf(req.nextUrl.origin, examId, extraParams, authToken);
+    
+    // 🌟 안전하게 세탁된 주소(safeOrigin)를 Puppeteer에 전달합니다.
+    const pdfBytes = await generateTrimmedPdf(safeOrigin, examId, extraParams, authToken);
     console.log(`[PDF 생성 완료] exam_id=${examId}, ${pdfBytes.length} bytes`);
 
     return new NextResponse(Buffer.from(pdfBytes), {
