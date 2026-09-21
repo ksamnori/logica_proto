@@ -474,15 +474,11 @@ export default function ClinicViewer() {
     setTimeout(() => { if ((window as any).MathJax) (window as any).MathJax.typesetPromise(); }, 100);
   };
 
-  // 🌟 토큰 담아서 채점 API 호출
+  // 🌟 [수정] 401 권한 버그 해결: 학생용 API는 토큰을 검증하지 않으므로 헤더에서 제거합니다.
   const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string): Promise<any> => {
-    const { data: { session } } = await supabaseClient.auth.getSession();
     const res = await fetch('/api/clinic-grade', { 
       method: 'POST', 
-      headers: { 
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session?.access_token}`
-      }, 
+      headers: { 'Content-Type': 'application/json' }, 
       body: JSON.stringify({ imageDataUrl: dataUrl, correct, questionText: qText }) 
     });
     const data = await res.json();
@@ -490,16 +486,12 @@ export default function ClinicViewer() {
     return data;
   };
 
-  // 🌟 토큰 담아서 힌트 생성 API 호출
+  // 🌟 [수정] 학생용 API 헤더 복구
   const generateAiHint = async (qText: string): Promise<string> => {
     try {
-      const { data: { session } } = await supabaseClient.auth.getSession();
       const res = await fetch('/api/clinic-hint', { 
         method: 'POST', 
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}`
-        }, 
+        headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ questionText: qText }) 
       });
       if (!res.ok) throw new Error('API 오류');
@@ -738,7 +730,9 @@ export default function ClinicViewer() {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
       if (qItem.record_id) { await bumpIncorrectRecord(qItem.record_id, gotTaHint ? 'TX' : 'X', false); await appendToExistingIncorrectPrint(qItem); }
       if (!isTimedRound) {
-        const assignId = params.assignmentId;
+        // 🌟 [핵심 버그 수정 1] 개별 문제의 소속(qItem.examAssignmentId)을 먼저 찾습니다!
+        const assignId = qItem.examAssignmentId || params.assignmentId;
+        
         if (assignId) {
             const gradingCode = gotTaHint ? 'TX' : 'X';
             const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id, earned_score').eq('exam_assignment_id', assignId).eq('student_id', studentInfo.id).eq('question_id', qItem.question_id).maybeSingle();
@@ -834,7 +828,9 @@ export default function ClinicViewer() {
     }
 
     if (!isTimedRound) {
-        const assignId = params.assignmentId;
+        // 🌟 [핵심 버그 수정 2] 개별 문제의 소속(qItem.examAssignmentId)을 먼저 찾습니다!
+        const assignId = qItem.examAssignmentId || params.assignmentId;
+        
         if (assignId) {
             const gradingCode = helped ? 'TO' : (params.retry || wasWrongBefore ? 'RO' : 'O');
             const { data: existingAns } = await supabaseClient.from('student_answer').select('answer_id, earned_score').eq('exam_assignment_id', assignId).eq('student_id', studentInfo.id).eq('question_id', qItem.question_id).maybeSingle();

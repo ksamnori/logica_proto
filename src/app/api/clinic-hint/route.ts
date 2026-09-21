@@ -1,38 +1,8 @@
-import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { NextResponse } from 'next/server';
 
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    // 🔒 1. 보안 자물쇠
-    let token = req.headers.get("authorization")?.replace("Bearer ", "");
-    if (!token) token = req.cookies.get("sb-access-token")?.value;
-    
-    if (!token) {
-      const allCookies = req.cookies.getAll();
-      const authCookie = allCookies.find(c => c.name.startsWith('sb-') && c.name.endsWith('-auth-token'));
-      if (authCookie) {
-        try { token = JSON.parse(authCookie.value)[0]; } catch(e) {}
-      }
-    }
-
-    if (!token) {
-      return NextResponse.json({ hint: null, error: "Unauthorized: 접근 권한이 없습니다." }, { status: 401 });
-    }
-
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-    );
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser(token);
-
-    if (authError || !user) {
-      return NextResponse.json({ hint: null, error: "Unauthorized: 유효하지 않은 세션입니다." }, { status: 401 });
-    }
-
-    // ----------------------------------------------------
-    // 2. 기존 Gemini 힌트 로직
-    // ----------------------------------------------------
+    // 🌟 학생용 API이므로 서버 토큰 검증(자물쇠)을 해제합니다.
     const { questionText } = await req.json();
     
     const apiKey = process.env.GEMINI_API_KEY;
