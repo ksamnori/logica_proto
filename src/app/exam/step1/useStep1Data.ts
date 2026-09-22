@@ -15,7 +15,6 @@ export const TEST_DATA = {
   }
 };
 
-// 🌟 테스트 전용 탭 목록 정의
 export const TEST_GROUPS = ["주간테스트", "중간테스트", "분기테스트", "단원테스트", "입학테스트"];
 
 export function useStep1Data() {
@@ -40,7 +39,6 @@ export function useStep1Data() {
   const [types, setTypes] = useState({ obj: true, subj: true, essay: true });
   const [isSettingsDisabled, setIsSettingsDisabled] = useState(false);
 
-  // 🌟 [추가] 교재명 및 페이지 필터 상태 선언
   const [bookName1, setBookName1] = useState("");
   const [bookName2, setBookName2] = useState("");
   const [pageStart, setPageStart] = useState("");
@@ -74,7 +72,8 @@ export function useStep1Data() {
         itemData.forEach((item: any) => {
           const parent = catMap[item.category_id];
           if (parent) {
-            let leaf = item.depth8 || "기본 유형";
+            // 🌟 [수정됨] depth8부터 depth6까지 차례로 탐색하여 올바른 세부 주제명을 할당합니다.
+            let leaf = item.depth8 || item.depth7 || item.depth6 || "기본 유형";
             if (!parent.children) parent.children = {};
             parent.children[leaf] = { itemId: item.item_id };
           }
@@ -133,10 +132,11 @@ export function useStep1Data() {
       setIsSettingsDisabled(false);
       const d1Keys = Object.keys(mData).sort();
       if (d1Keys.length > 0) {
-        const d1 = d1Keys.includes("중학교") ? "중학교" : d1Keys[0];
+        // 🌟 [수정됨] 탭 진입 시 "초등학교", "2학년 1학기"를 우선적으로 엽니다.
+        const d1 = d1Keys.includes("초등학교") ? "초등학교" : d1Keys[0];
         setCurrentD1(d1);
         const d2Keys = Object.keys(mData[d1] || {}).sort();
-        if (d2Keys.length > 0) setCurrentD2(d2Keys.includes("1학년 1학기") ? "1학년 1학기" : d2Keys[0]);
+        if (d2Keys.length > 0) setCurrentD2(d2Keys.includes("2학년 1학기") ? "2학년 1학기" : d2Keys[0]);
       }
     } else if (mode === "thinking") {
       setIsSettingsDisabled(false);
@@ -157,10 +157,11 @@ export function useStep1Data() {
       if (['주간테스트', '중간테스트', '분기테스트'].includes(group)) {
         const d1Keys = Object.keys(mData).sort();
         if (d1Keys.length > 0) {
-          const d1 = d1Keys.includes("중학교") ? "중학교" : d1Keys[0];
+          // 🌟 [수정됨] 테스트 탭에서도 "초등학교", "2학년 1학기"를 우선적으로 엽니다.
+          const d1 = d1Keys.includes("초등학교") ? "초등학교" : d1Keys[0];
           setCurrentD1(d1);
           const d2Keys = Object.keys(mData[d1] || {}).sort();
-          if (d2Keys.length > 0) setCurrentD2(d2Keys.includes("1학년 1학기") ? "1학년 1학기" : d2Keys[0]);
+          if (d2Keys.length > 0) setCurrentD2(d2Keys.includes("2학년 1학기") ? "2학년 1학기" : d2Keys[0]);
         }
       }
     }
@@ -195,7 +196,6 @@ export function useStep1Data() {
   const generateExam = () => {
     if (selectedItemIds.size === 0) return alert("출제할 단원(유형)이나 테스트를 최소 1개 이상 왼쪽 트리에서 선택해주세요!");
 
-    // 🌟 [캐시 완벽 초기화] 이전 시험지나 클리닉 모드에서 남은 찌꺼기 데이터를 모두 비웁니다.
     sessionStorage.removeItem("isClinicMode");
     sessionStorage.removeItem("examTitle");
     sessionStorage.removeItem("examSubTitle");
@@ -211,7 +211,6 @@ export function useStep1Data() {
     
     sessionStorage.setItem("examMode", currentMode);
     
-    // (이하 기존 로직 동일)
     if (currentMode === 'test') {
       sessionStorage.setItem("testCategory", currentTestGroup);
       if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
@@ -230,7 +229,6 @@ export function useStep1Data() {
     sessionStorage.setItem("problemTypes", JSON.stringify(finalTypes));
     sessionStorage.setItem("correctRateRange", JSON.stringify(finalRateRange));
 
-    // 신규 필터 상태 저장
     sessionStorage.setItem("bookName1", bookName1.trim());
     sessionStorage.setItem("bookName2", bookName2.trim());
     sessionStorage.setItem("pageStart", pageStart.trim());
@@ -249,7 +247,6 @@ export function useStep1Data() {
     rateMax, setRateMax, rateMin, setRateMin,
     types, setTypes, isSettingsDisabled,
     
-    // 🌟 [추가] 신규 필터 객체 반환 (RightPanel.tsx 연동)
     bookName1, setBookName1,
     bookName2, setBookName2,
     pageStart, setPageStart,

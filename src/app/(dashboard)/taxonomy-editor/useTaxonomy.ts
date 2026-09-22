@@ -247,8 +247,12 @@ export function useTaxonomy() {
     const matchedItem = items.find(i => i.item_id === taxId);
     if (matchedItem) {
       const cat = categories.find(c => c.category_id === matchedItem.category_id);
-      if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7, matchedItem.depth8].filter(Boolean).join(' > ');
-      return matchedItem.depth8;
+      
+      // 🌟 [수정됨] depth8이 없으면 depth6, 그것도 없으면 기본 유형 출력
+      const leafName = matchedItem.depth8 || matchedItem.depth7 || matchedItem.depth6 || '기본 유형';
+      
+      if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7, leafName].filter(Boolean).join(' > ');
+      return leafName;
     }
     const cat = categories.find(c => c.category_id === taxId);
     if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7].filter(Boolean).join(' > ');
@@ -287,7 +291,10 @@ export function useTaxonomy() {
 
   const d8Options = useMemo(() => {
     if (!currentMatchedCat) return [];
-    return items.filter(item => item.category_id === currentMatchedCat.category_id).sort((a,b) => taxSort(a.depth8 || '', b.depth8 || ''));
+    // 🌟 [수정됨] 정렬할 때도 depth8, 7, 6 순으로 유효한 값을 찾아서 비교합니다.
+    return items.filter(item => item.category_id === currentMatchedCat.category_id).sort((a,b) => 
+      taxSort(a.depth8 || a.depth7 || a.depth6 || '', b.depth8 || b.depth7 || b.depth6 || '')
+    );
   }, [items, currentMatchedCat]);
 
   const finalCalculatedTaxId = selD8 || currentMatchedCat?.category_id;
@@ -494,7 +501,6 @@ export function useTaxonomy() {
     } catch (err: any) { alert("수정 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
-  // 🌟 API 라우트에 세션 토큰(열쇠)을 포함시켜 전송하도록 수정
   const handleGenerateTwins = async () => {
     if (!selectedQuestion) return alert("원본 문항을 먼저 왼쪽 리스트에서 선택해주세요.");
     
@@ -512,14 +518,13 @@ export function useTaxonomy() {
     setIsTwinModalOpen(true);
 
     try {
-      // 🌟 열쇠(토큰) 준비
       const { data: { session } } = await supabase.auth.getSession();
 
       const res = await fetch('/api/gemini-twin', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+          'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({ 
           originalQuestion: selectedQuestion.question, 
@@ -554,7 +559,6 @@ export function useTaxonomy() {
     } catch (e: any) { alert("쌍둥이 생성 중 오류 발생: " + e.message); setIsTwinModalOpen(false); } finally { setIsGeneratingTwins(false); }
   };
 
-  // 🌟 API 라우트에 세션 토큰(열쇠)을 포함시켜 전송하도록 수정
   const handleFixLatex = async () => {
     if (!selectedQuestion) return alert("원본 문항을 먼저 선택해주세요.");
     if (!confirm("AI를 사용하여 깨진 수식을 완벽한 LaTeX 형태로 자동 교정하시겠습니까?\n\n수정된 내용은 즉시 저장됩니다.")) return;
@@ -570,14 +574,13 @@ export function useTaxonomy() {
         step_4_conclusion: selectedQuestion.step_4_conclusion || ""
       };
 
-      // 🌟 열쇠(토큰) 준비
       const { data: { session } } = await supabase.auth.getSession();
 
       const res = await fetch('/api/gemini-fix-latex', {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+          'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify(payload)
       });

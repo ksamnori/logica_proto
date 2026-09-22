@@ -82,10 +82,27 @@ const sortD1 = (a: string, b: string) => {
 const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem, toggleFolder }: any) => {
   const [isOpen, setIsOpen] = useState(depth <= 4);
 
-  // 상위에서 데이터 트리를 제대로 구성해 주므로 명시적인 node.children만 체크하면 됩니다.
-  if (node.children) {
+  // 🌟 [수정 포인트] node.children이 명시적으로 없더라도, 내부에 하위 객체가 있다면 폴더로 취급합니다.
+  const childrenKeys = node.children 
+    ? Object.keys(node.children) 
+    : Object.keys(node).filter(k => k !== 'itemId' && k !== 'categoryId' && typeof node[k] === 'object');
+    
+  const isFolder = childrenKeys.length > 0;
+  const childrenObj = node.children || node;
+
+  if (isFolder) {
     const ids: string[] = [];
-    const traverse = (n: any) => { if (n.itemId) ids.push(n.itemId); if (n.children) Object.values(n.children).forEach(traverse); };
+    const traverse = (n: any) => {
+      if (!n) return;
+      if (n.itemId) ids.push(n.itemId);
+      if (n.children) {
+        Object.values(n.children).forEach(traverse);
+      } else {
+        for (const k in n) {
+          if (k !== 'itemId' && k !== 'categoryId' && typeof n[k] === 'object') traverse(n[k]);
+        }
+      }
+    };
     traverse(node);
     
     const checkedCount = ids.filter((id: string) => selectedItemIds.has(id)).length;
@@ -101,15 +118,15 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
         </summary>
         {isOpen && (
           <div className="ml-4 mt-1 space-y-1 border-l border-slate-100 pl-2">
-            {Object.keys(node.children).sort((a, b) => compareNodes(a, node.children[a], b, node.children[b])).map(k => (
-              <TreeNode key={k} nodeKey={k} node={node.children[k]} depth={depth + 1} selectedItemIds={selectedItemIds} toggleItem={toggleItem} toggleFolder={toggleFolder} />
+            {/* 🌟 childrenObj에서 하위 노드를 가져오도록 수정됨 */}
+            {childrenKeys.sort((a, b) => compareNodes(a, childrenObj[a], b, childrenObj[b])).map(k => (
+              <TreeNode key={k} nodeKey={k} node={childrenObj[k]} depth={depth + 1} selectedItemIds={selectedItemIds} toggleItem={toggleItem} toggleFolder={toggleFolder} />
             ))}
           </div>
         )}
       </details>
     );
   } else {
-    // 가장 마지막 리프 노드 (항상 데이터 원본의 올바른 이름(nodeKey)이 출력됩니다)
     return (
       <label className="flex items-center space-x-3 p-1.5 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer">
         <input type="checkbox" checked={selectedItemIds.has(node.itemId)} onChange={e => toggleItem(node.itemId, e.target.checked)} className="w-4 h-4 text-emerald-600 rounded border-slate-300 accent-emerald-600 cursor-pointer" />
@@ -127,8 +144,19 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
     switchMainTab, toggleItem, toggleFolder
   } = step1Data;
 
+  // 🌟 [추가 포인트] 처음 진입할 때 초등학교 2학년 1학기로 기본 타겟팅
+  const [isInitialized, setIsInitialized] = useState(false);
+  React.useEffect(() => {
+    if (!isLoading && !isInitialized && masterData && masterData['초등학교']) {
+      setCurrentD1('초등학교');
+      setCurrentD2('2학년 1학기');
+      setIsInitialized(true);
+    }
+  }, [isLoading, masterData, isInitialized, setCurrentD1, setCurrentD2]);
+
   const memoizedTree = useMemo(() => {
     if (isLoading) return <div className="flex-1 flex items-center justify-center font-bold text-slate-400">단원 트리를 불러오는 중...</div>;
+  // ... (이하 기존 코드 유지) ...
     
     let targetData: any = {};
     if (currentMode === "regular") {
@@ -136,6 +164,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
     } else if (currentMode === "thinking") {
       targetData = thinkingData[currentD1];
     } else if (currentMode === "test") {
+      // 🌟 주간/중간/분기 테스트는 정규 교과(masterData)의 트리를 그대로 차용합니다!
       if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
          targetData = masterData[currentD1]?.[currentD2];
       } else {
@@ -183,7 +212,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
 
       {searchKeyword.trim() !== "" ? (
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/50">
-          <div className="text-sm font-extrabold text-[#002864] mb-3 px-1">검 결과 {searchKeyword.trim().length >= 2 && `(${searchResults.length}건)`}</div>
+          <div className="text-sm font-extrabold text-[#002864] mb-3 px-1">검색 결과 {searchKeyword.trim().length >= 2 && `(${searchResults.length}건)`}</div>
           {searchKeyword.trim().length < 2 ? (
             <div className="text-center py-10 text-slate-400 font-bold">✌️ 원활한 검색을 위해 2글자 이상 입력해 주세요.</div>
           ) : searchResults.length === 0 ? (
@@ -216,6 +245,8 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
       ) : (
         <>
           <div className="shrink-0 border-b border-slate-200 bg-white">
+            
+            {/* 메인 그룹 선택 (Depth 1) */}
             <div className="flex px-4 pt-4 space-x-5 border-b border-slate-100 overflow-x-auto whitespace-nowrap no-scrollbar">
               {currentMode === 'regular' && Object.keys(masterData).sort(sortD1).map(d1 => (
                 <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
@@ -228,6 +259,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
               ))}
             </div>
 
+            {/* 정규 교과의 학년/학기 (Depth 2) */}
             {currentMode === 'regular' && (
               <div className="flex px-4 py-3 gap-2 flex-wrap">
                 {Object.keys(masterData[currentD1] || {}).sort(sortNumeric).map(d2 => (
@@ -236,6 +268,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
               </div>
             )}
 
+            {/* 🌟 테스트 전용 모드일 때 추가되는 2중 네비게이션 바 */}
             {currentMode === 'test' && ['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup) && (
               <div className="flex flex-col bg-slate-50 border-b border-slate-100">
                  <div className="flex px-4 py-2.5 gap-3 overflow-x-auto no-scrollbar border-b border-slate-100">

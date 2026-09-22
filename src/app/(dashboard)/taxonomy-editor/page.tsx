@@ -1,4 +1,4 @@
-// src/app/(dashboard)/taxonomy-editor/page.tsx
+// src/app/(dashboard)/taxonomy-editor/page - te.tsx
 "use client";
 
 import React from "react";
@@ -11,14 +11,14 @@ export default function TaxonomyEditorPage() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm, twinTargetBook, similarTargetBook,
-    isFixingLatex, // 🌟 추가됨
+    isFixingLatex,
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
     normalRoots, trueOrphans, getDescendants,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
     setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
-    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex // 🌟 추가됨
+    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex
   } = useTaxonomy();
 
   const renderImageBox = (label: string, fieldKey: string, colorTheme: 'indigo' | 'emerald') => {
@@ -728,8 +728,12 @@ export default function TaxonomyEditorPage() {
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-rose-500">Depth 8 (문항유형 - 아이템)</label>
                       <select value={selD8} onChange={e => setSelD8(e.target.value)} disabled={d8Options.length === 0} className="p-2 text-xs font-bold border border-rose-300 rounded-lg outline-none focus:ring-2 focus:ring-rose-500 shadow-sm disabled:bg-slate-100 bg-rose-50 text-rose-900">
-                        <option value="">{d8Options.length === 0 ? '8뎁스 없음' : '선택'}</option>
-                        {d8Options.map((o: any) => <option key={o.item_id} value={o.item_id}>{o.depth8}</option>)}
+                        <option value="">{d8Options.length === 0 ? '마지막 뎁스 없음' : '선택'}</option>
+                        {d8Options.map((o: any) => {
+                          // 🌟 [수정됨] 6뎁스를 우선 적용하여 실제 이름을 렌더링
+                          const leafName = o.depth8 || o.depth7 || o.depth6 || '기본 유형';
+                          return <option key={o.item_id} value={o.item_id}>{leafName}</option>;
+                        })}
                       </select>
                     </div>
                   </div>
