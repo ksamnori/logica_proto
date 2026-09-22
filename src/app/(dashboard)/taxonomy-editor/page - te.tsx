@@ -1,4 +1,4 @@
-// src/app/(dashboard)/taxonomy-editor/page.tsx
+// src/app/(dashboard)/taxonomy-editor/page - te.tsx
 "use client";
 
 import React from "react";
@@ -28,35 +28,6 @@ export default function TaxonomyEditorPage() {
     const lowerKw = bookFilter.toLowerCase().replace(/\s+/g, '');
     return workbooks.filter(b => b.toLowerCase().replace(/\s+/g, '').includes(lowerKw));
   }, [workbooks, bookFilter]);
-
-  const renderGroups = React.useMemo(() => {
-    if (!selectedBook) return [];
-
-    const groups: any[] = [];
-    const allRoots = [...normalRoots, ...trueOrphans];
-
-    for (const root of allRoots) {
-      const descendants = getDescendants(String(root.question_id).trim().toLowerCase());
-      const family = [root, ...descendants];
-      
-      const currentBookItems = family.filter(item => item.source_book_name === selectedBook);
-
-      if (currentBookItems.length > 0) {
-        const sortedCurrent = [...currentBookItems].sort((a, b) => {
-           return questions.indexOf(a) - questions.indexOf(b);
-        });
-
-        groups.push({
-          root,
-          descendants,
-          repIndex: questions.indexOf(sortedCurrent[0])
-        });
-      }
-    }
-
-    groups.sort((a, b) => a.repIndex - b.repIndex);
-    return groups;
-  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions]);
 
   const renderImageBox = (label: string, fieldKey: string, colorTheme: 'indigo' | 'emerald') => {
     const rawValue = editForm[fieldKey as keyof typeof editForm] as string;
@@ -137,7 +108,7 @@ export default function TaxonomyEditorPage() {
                   placeholder="새로운 교재 이름 입력..."
                 />
                 <datalist id="workbook-options">
-                  {workbooks.map((b: string) => <option key={b} value={b} />)}
+                  {workbooks.map(b => <option key={b} value={b} />)}
                 </datalist>
               </div>
               
@@ -238,7 +209,7 @@ export default function TaxonomyEditorPage() {
                 </div>
               ) : generatedTwins.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  {generatedTwins.map((twin: any, idx: number) => (
+                  {generatedTwins.map((twin, idx) => (
                     <div key={idx} className={`bg-white border rounded-2xl p-5 shadow-sm transition-all flex flex-col gap-3 ${twin.isSelected === false ? 'border-slate-200 opacity-60 grayscale-[50%]' : 'border-indigo-300 hover:shadow-md'}`}>
                       <div className="flex justify-between items-center border-b border-slate-100 pb-2">
                         
@@ -352,7 +323,7 @@ export default function TaxonomyEditorPage() {
                 disabled={isGeneratingTwins || generatedTwins.length === 0 || isLoading}
                 className="px-8 py-3 bg-[#002864] hover:bg-blue-900 disabled:bg-slate-300 text-white font-black rounded-xl shadow-lg transition-colors flex items-center gap-2"
               >
-                {isLoading ? "저장 중..." : `💾 선택된 ${generatedTwins.filter((t: any) => t.isSelected !== false).length}개 문항 저장`}
+                {isLoading ? "저장 중..." : `💾 선택된 ${generatedTwins.filter(t => t.isSelected !== false).length}개 문항 저장`}
               </button>
             </div>
           </div>
@@ -390,7 +361,7 @@ export default function TaxonomyEditorPage() {
 
             <select value={selectedBook} onChange={(e) => setSelectedBook(e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg font-bold text-[#002864] bg-slate-50 text-sm shadow-sm outline-none focus:ring-2 focus:ring-[#002864] cursor-pointer">
               <option value="">교재를 선택하세요... ({filteredWorkbooks.length}건)</option>
-              {filteredWorkbooks.map((b: string) => <option key={b} value={b}>{b}</option>)}
+              {filteredWorkbooks.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
             
             <button onClick={handleRenameBook} disabled={!selectedBook || isLoading} className="whitespace-nowrap shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-lg shadow-sm border border-slate-300 transition-colors disabled:opacity-50" title="선택한 문제지 덩어리의 이름을 통째로 변경합니다.">
@@ -405,7 +376,7 @@ export default function TaxonomyEditorPage() {
 
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
         
-        {/* 좌측: 문제 리스트 (모든 문항을 하나의 균일한 열(Column)로 정렬) */}
+        {/* 좌측: 문제 리스트 */}
         <div className="w-[400px] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
           <div className="p-3 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-slate-800 text-sm">📋 전체 문항 리스트 ({questions.length}개)</h2>
@@ -417,155 +388,121 @@ export default function TaxonomyEditorPage() {
             {questions.length === 0 ? (
               <div className="h-full flex items-center justify-center text-slate-400 font-bold text-sm">교재를 조회해주세요.</div>
             ) : (
-              <div className="flex flex-col gap-3">
-                {renderGroups.map((group: any, gIdx: number) => {
-                  const { root, descendants } = group;
-                  const isRootCurrent = root.source_book_name === selectedBook;
+              <>
+                {normalRoots.map(q => {
+                  const isSelected = selectedQuestion?.question_id === q.question_id;
+                  const hasTaxonomy = q.taxonomy_id && q.taxonomy_id !== '미분류';
+                  const myTwins = getDescendants(String(q.question_id).trim().toLowerCase());
+                  
+                  // 🌟 [수정 포인트] 부모 노드: 현재 선택된 교재인지 판별하여 스타일을 구분합니다.
+                  const isCurrentBook = q.source_book_name === selectedBook;
+                  const pageStr = q.final_printed_page || q.detected_page_num || '?';
 
                   return (
-                    <div key={`group-${root.question_id}-${gIdx}`} className="flex flex-col relative">
-                      
-                      {/* ROOT 렌더링 */}
-                      <div 
-                        id={`q-list-${root.question_id}`} 
-                        onClick={() => handleQuestionClick(root)} 
-                        className={`transition-all cursor-pointer shadow-sm relative flex flex-col p-2.5 z-10
-                          ${selectedQuestion?.question_id === root.question_id 
-                              ? (isRootCurrent ? 'ring-2 ring-[#002864] bg-blue-50/50' : 'ring-2 ring-slate-400 bg-slate-100') 
-                              : (isRootCurrent ? 'hover:border-blue-300 hover:shadow-md bg-white' : 'hover:border-slate-400 bg-slate-50')
-                          }
-                          ${isRootCurrent 
-                            ? 'ml-6 rounded-xl border-2 border-slate-200' 
-                            : 'ml-0 rounded-lg border border-slate-300 border-dashed opacity-90' 
-                          }
+                    <React.Fragment key={q.question_id}>
+                      <div id={`q-list-${q.question_id}`} onClick={() => handleQuestionClick(q)} 
+                        className={`transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-2 mt-2 
+                          ${isSelected ? 'border-[#002864] bg-blue-50/50' : 'hover:border-blue-300 hover:shadow-md'} 
+                          ${isCurrentBook ? 'p-3 rounded-xl border-2' : 'p-2 rounded-lg border border-dashed opacity-90'}
+                          ${!isSelected && isCurrentBook ? 'border-slate-200 bg-white' : ''}
+                          ${!isSelected && !isCurrentBook ? 'border-slate-300 bg-slate-50' : ''}
                         `}
                       >
-                        {isRootCurrent ? (
-                          // 🌟 MAIN ITEM (현재 교재) UI
-                          <>
-                            {selectedQuestion?.question_id === root.question_id && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864] rounded-l-xl"></div>}
-                            <div className="flex justify-between items-start gap-2">
-                              <div className="flex items-center gap-2 flex-1 flex-wrap leading-tight">
-                                {root.derivation_type === '유사' ? (
-                                  <span className="font-black px-1.5 py-0.5 rounded shadow-sm border text-[10px] text-amber-700 bg-amber-100 border-amber-200 whitespace-nowrap">💡 유사</span>
-                                ) : root.derivation_type === 'TWIN' || root.derivation_type === '쌍둥이' ? (
-                                  <span className="font-black px-1.5 py-0.5 rounded shadow-sm border text-[10px] text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200 whitespace-nowrap">👯 쌍둥이</span>
-                                ) : (
-                                  <span className="font-bold px-1.5 py-0.5 rounded shadow-sm border text-[10px] text-slate-400 bg-slate-100 border-slate-200 whitespace-nowrap">미배정</span>
-                                )}
-                                <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">p.{root.final_printed_page || root.detected_page_num || '?'}</span>
-                                <span className="font-black text-sm text-slate-800 whitespace-nowrap">{formatQNum(root.question_number, root.sub_num)}</span>
-                              </div>
-                              <div className="shrink-0 pt-0.5">
-                                 {(root.taxonomy_id && root.taxonomy_id !== '미분류') ? (
-                                    <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">분류됨</span>
-                                 ) : (
-                                    <span className="text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded animate-pulse">수정필요</span>
-                                 )}
-                              </div>
-                            </div>
-                            <div className="font-medium text-xs text-slate-700 line-clamp-2 leading-relaxed whitespace-pre-wrap mt-1">
-                              {root.question}
-                            </div>
-                          </>
-                        ) : (
-                          // 🌟 EXTERNAL PARENT (타 교재 부모) UI
-                          <>
-                            {selectedQuestion?.question_id === root.question_id && <div className="absolute left-0 top-0 w-1 h-full bg-slate-400 rounded-l-lg"></div>}
-                            <div className="flex justify-between items-start opacity-80 hover:opacity-100 transition-opacity gap-2">
-                              <div className="flex items-center gap-1.5 flex-wrap flex-1 leading-tight">
-                                <span className="font-black text-xs text-slate-500 whitespace-nowrap">{formatQNum(root.question_number, root.sub_num)}</span>
-                                <span className="text-[10px] font-bold text-slate-400 break-all">[{root.source_book_name} p.{root.final_printed_page || root.detected_page_num || '?'}] 부모</span>
-                              </div>
-                              <div className="shrink-0">
-                                 {(root.taxonomy_id && root.taxonomy_id !== '미분류') ? (
-                                    <span className="text-[8px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1 rounded">분류됨</span>
-                                 ) : (
-                                    <span className="text-[8px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1 rounded">수정필요</span>
-                                 )}
-                              </div>
-                            </div>
-                            <div className="font-medium text-[10px] text-slate-400 line-clamp-1 truncate mt-1">
-                              {root.question}
-                            </div>
-                          </>
-                        )}
+                        {isSelected && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864]"></div>}
+                        <div className="flex justify-between items-start">
+                          <div className="flex items-center gap-1.5 flex-wrap flex-1 pr-2 leading-tight">
+                            {isCurrentBook ? (
+                              <>
+                                <span className="font-black text-white bg-slate-600 px-2 py-0.5 rounded shadow-sm text-[10px]">
+                                  {pageStr}p
+                                </span>
+                                <span className="font-black text-sm text-slate-800">
+                                  {formatQNum(q.question_number, q.sub_num)}
+                                </span>
+                              </>
+                            ) : (
+                              <>
+                                <span className="font-black text-xs text-slate-500">
+                                  {formatQNum(q.question_number, q.sub_num)}
+                                </span>
+                                {/* 🌟 외부 교재는 잘림(truncate) 없이 전체 이름과 페이지 표시 */}
+                                <span className="text-[10px] font-bold text-slate-400 ml-1 break-all">
+                                  [{q.source_book_name} p.{pageStr}] 부모
+                                </span>
+                              </>
+                            )}
+                          </div>
+                          <div className="shrink-0 pt-0.5">
+                            {hasTaxonomy ? (
+                              <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">분류됨</span>
+                            ) : (
+                              <span className="text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded animate-pulse">수정필요</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className={`font-medium line-clamp-2 leading-relaxed whitespace-pre-wrap ${isCurrentBook ? 'text-xs text-slate-700' : 'text-[11px] text-slate-500'}`}>
+                          {q.question}
+                        </div>
                       </div>
 
-                      {/* DESCENDANTS 렌더링 */}
-                      {descendants.length > 0 && (
-                        <div className="flex flex-col gap-1.5 relative mt-1.5">
-                          {/* 🌟 부모가 외부 교재(ml-0)일 때만 자식(ml-6)과 잇는 꺾쇠 선 표시 */}
-                          {!isRootCurrent && (
-                            <div className="absolute top-[-10px] left-[11px] w-[18px] border-l-2 border-b-2 border-slate-200 rounded-bl-lg h-[24px] z-0"></div>
-                          )}
+                      {myTwins.length > 0 && (
+                        <div className="pl-5 ml-3 my-1 border-l-2 border-indigo-200 flex flex-col gap-1.5 relative">
+                          <div className="absolute top-0 left-0 w-3 border-t-2 border-indigo-200 mt-4"></div>
                           
-                          {descendants.map((desc: any) => {
-                            const isDescCurrent = desc.source_book_name === selectedBook;
+                          {myTwins.map(twin => {
+                            const isTwinSelected = selectedQuestion?.question_id === twin.question_id;
+                            const isSimilar = twin.derivation_type === '유사';
+                            const badgeLabel = twin.derivation_type === 'TWIN' || twin.derivation_type === '쌍둥이' ? '쌍둥이' : '유사';
+                            
+                            // 🌟 [수정 포인트] 자식 노드: 현재 선택된 교재인지 판별
+                            const isTwinCurrentBook = twin.source_book_name === selectedBook;
+                            const twinPageStr = twin.final_printed_page || twin.detected_page_num || '?';
+
                             return (
-                              <div 
-                                id={`q-list-${desc.question_id}`} 
-                                key={desc.question_id}
-                                onClick={() => handleQuestionClick(desc)} 
-                                className={`transition-all cursor-pointer shadow-sm relative flex flex-col p-2.5 z-10
-                                  ${selectedQuestion?.question_id === desc.question_id 
-                                      ? (isDescCurrent ? 'ring-2 ring-[#002864] bg-blue-50/50' : 'ring-2 ring-slate-400 bg-slate-100') 
-                                      : (isDescCurrent ? 'hover:border-blue-300 hover:shadow-md bg-white' : 'hover:border-slate-400 bg-slate-50')
-                                  }
-                                  ${isDescCurrent 
-                                    ? 'ml-6 rounded-xl border-2 border-slate-200' 
-                                    : 'ml-12 rounded-lg border border-slate-300 border-dashed opacity-90' 
-                                  }
+                              <div id={`q-list-${twin.question_id}`} key={twin.question_id} onClick={() => handleQuestionClick(twin)} 
+                                className={`transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-1.5 
+                                  ${isTwinSelected ? 'border-indigo-500 bg-indigo-50/50 ring-1 ring-indigo-500' : 'hover:border-indigo-300'}
+                                  ${isTwinCurrentBook ? 'p-3 rounded-xl border-2 mt-1' : 'p-2.5 rounded-lg border'}
+                                  ${!isTwinSelected && isTwinCurrentBook ? 'border-slate-200 bg-white' : ''}
+                                  ${!isTwinSelected && !isTwinCurrentBook ? 'border-slate-200 bg-white' : ''}
                                 `}
                               >
-                                {isDescCurrent ? (
-                                  // 🌟 MAIN ITEM (현재 교재) UI
-                                  <>
-                                    {selectedQuestion?.question_id === desc.question_id && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864] rounded-l-xl"></div>}
-                                    <div className="flex justify-between items-start gap-2">
-                                      <div className="flex items-center gap-2 flex-1 flex-wrap leading-tight">
-                                        {desc.derivation_type === '유사' ? (
-                                          <span className="font-black px-1.5 py-0.5 rounded shadow-sm border text-[10px] text-amber-700 bg-amber-100 border-amber-200 whitespace-nowrap">💡 유사</span>
-                                        ) : desc.derivation_type === 'TWIN' || desc.derivation_type === '쌍둥이' ? (
-                                          <span className="font-black px-1.5 py-0.5 rounded shadow-sm border text-[10px] text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200 whitespace-nowrap">👯 쌍둥이</span>
-                                        ) : (
-                                          <span className="font-bold px-1.5 py-0.5 rounded shadow-sm border text-[10px] text-slate-400 bg-slate-100 border-slate-200 whitespace-nowrap">미배정</span>
-                                        )}
-                                        <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">p.{desc.final_printed_page || desc.detected_page_num || '?'}</span>
-                                        <span className="font-black text-sm text-slate-800 whitespace-nowrap">{formatQNum(desc.question_number, desc.sub_num)}</span>
-                                      </div>
-                                      <div className="shrink-0 pt-0.5">
-                                         {(desc.taxonomy_id && desc.taxonomy_id !== '미분류') ? (
-                                            <span className="text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">분류됨</span>
-                                         ) : (
-                                            <span className="text-[9px] font-bold text-rose-600 bg-rose-50 border border-rose-200 px-1.5 py-0.5 rounded animate-pulse">수정필요</span>
-                                         )}
-                                      </div>
-                                    </div>
-                                    <div className="font-medium text-xs text-slate-700 line-clamp-2 leading-relaxed whitespace-pre-wrap mt-1">
-                                      {desc.question}
-                                    </div>
-                                  </>
-                                ) : (
-                                  // 🌟 EXTERNAL PARENT UI (타 교재로 뻗어나간 형제/자식 처리용)
-                                  <>
-                                    <div className="flex justify-between items-start opacity-80 hover:opacity-100 transition-opacity gap-2">
-                                      <div className="flex items-center gap-1.5 flex-wrap flex-1 leading-tight">
-                                        <span className="font-black text-xs text-slate-500 whitespace-nowrap">{formatQNum(desc.question_number, desc.sub_num)}</span>
-                                        <span className="text-[10px] font-bold text-slate-400 break-all">[{desc.source_book_name} p.{desc.final_printed_page || desc.detected_page_num || '?'}] 연결됨</span>
-                                      </div>
-                                    </div>
-                                    <div className="font-medium text-[10px] text-slate-400 line-clamp-1 truncate mt-1">
-                                      {desc.question}
-                                    </div>
-                                  </>
-                                )}
+                                <div className="flex justify-between items-start">
+                                  <div className="flex items-center gap-1.5 flex-wrap flex-1 pr-2 leading-tight">
+                                    <span className={`font-black px-1.5 py-0.5 rounded shadow-sm border ${isSimilar ? 'text-amber-700 bg-amber-100 border-amber-200' : 'text-fuchsia-700 bg-fuchsia-100 border-fuchsia-200'} ${isTwinCurrentBook ? 'text-[10px]' : 'text-[9px]'}`}>
+                                      {isSimilar ? '💡 유사' : `👯 ${badgeLabel}`}
+                                    </span>
+                                    
+                                    {isTwinCurrentBook ? (
+                                      <>
+                                        {/* 🌟 현재 교재인 경우 [쌍둥이] 옆에 페이지 표시 */}
+                                        <span className="text-[11px] font-bold text-slate-500">p.{twinPageStr}</span>
+                                        <span className="font-black text-sm text-slate-800">
+                                          {formatQNum(twin.question_number, twin.sub_num)}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span className="font-black text-[11px] text-slate-700">
+                                          {formatQNum(twin.question_number, twin.sub_num)}
+                                        </span>
+                                        {/* 🌟 다른 교재의 쌍둥이인 경우 잘림 없이 전체 이름 출력 */}
+                                        <span className="text-[10px] font-bold text-slate-400 ml-1 break-all">
+                                          [{twin.source_book_name} p.{twinPageStr}]
+                                        </span>
+                                      </>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className={`font-medium whitespace-pre-wrap ${isTwinCurrentBook ? 'text-xs text-slate-700 line-clamp-3' : 'text-[11px] text-slate-600 line-clamp-1 truncate'}`}>
+                                  {twin.question}
+                                </div>
                               </div>
                             );
                           })}
                         </div>
                       )}
-                    </div>
+                    </React.Fragment>
                   );
                 })}
 
@@ -574,7 +511,7 @@ export default function TaxonomyEditorPage() {
                   <div className="pt-4 mt-4 border-t border-slate-200">
                     <div className="text-[10px] font-bold text-rose-500 mb-2 px-2 bg-rose-50 py-1 rounded-md border border-rose-100 inline-block">⚠️ 원본이 완전히 유실된 문항</div>
                     <div className="flex flex-col gap-2">
-                      {trueOrphans.map((q: any) => {
+                      {trueOrphans.map(q => {
                         const isSelected = selectedQuestion?.question_id === q.question_id;
                         const isSimilar = q.derivation_type === '유사';
                         const myTwins = getDescendants(String(q.question_id).trim().toLowerCase());
@@ -586,7 +523,7 @@ export default function TaxonomyEditorPage() {
                             <div id={`q-list-${q.question_id}`} onClick={() => handleQuestionClick(q)} 
                               className={`transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-1.5 
                                 ${isSelected ? 'border-rose-500 bg-rose-50/50 ring-1 ring-rose-500' : 'hover:border-rose-300'}
-                                ${isCurrentBook ? 'p-3 rounded-xl border-2 mt-1 ml-6' : 'p-2.5 rounded-lg border border-dashed opacity-90 ml-0'}
+                                ${isCurrentBook ? 'p-3 rounded-xl border-2 mt-1' : 'p-2.5 rounded-lg border border-dashed opacity-90'}
                                 ${!isSelected && isCurrentBook ? 'border-slate-200 bg-white' : ''}
                                 ${!isSelected && !isCurrentBook ? 'border-slate-300 bg-slate-50' : ''}
                               `}
@@ -624,7 +561,7 @@ export default function TaxonomyEditorPage() {
                             {myTwins.length > 0 && (
                               <div className="pl-5 ml-3 my-1 border-l-2 border-indigo-200 flex flex-col gap-1.5 relative">
                                 <div className="absolute top-0 left-0 w-3 border-t-2 border-indigo-200 mt-4"></div>
-                                {myTwins.map((twin: any) => {
+                                {myTwins.map(twin => {
                                   const isTwinSelected = selectedQuestion?.question_id === twin.question_id;
                                   const isTwinCurrentBook = twin.source_book_name === selectedBook;
                                   const twinPageStr = twin.final_printed_page || twin.detected_page_num || '?';
@@ -633,7 +570,7 @@ export default function TaxonomyEditorPage() {
                                     <div id={`q-list-${twin.question_id}`} key={twin.question_id} onClick={() => handleQuestionClick(twin)} 
                                       className={`transition-all cursor-pointer shadow-sm relative overflow-hidden flex flex-col gap-1.5 
                                         ${isTwinSelected ? 'border-indigo-500 bg-indigo-50/50 ring-1 ring-indigo-500' : 'hover:border-indigo-300'}
-                                        ${isTwinCurrentBook ? 'p-3 rounded-xl border-2 mt-1 ml-6' : 'p-2.5 rounded-lg border ml-12'}
+                                        ${isTwinCurrentBook ? 'p-3 rounded-xl border-2 mt-1' : 'p-2.5 rounded-lg border'}
                                         ${!isTwinSelected && isTwinCurrentBook ? 'border-slate-200 bg-white' : ''}
                                         ${!isTwinSelected && !isTwinCurrentBook ? 'border-slate-200 bg-white' : ''}
                                       `}
@@ -677,7 +614,7 @@ export default function TaxonomyEditorPage() {
                     </div>
                   </div>
                 )}
-              </div>
+              </>
             )}
           </div>
         </div>
@@ -725,7 +662,7 @@ export default function TaxonomyEditorPage() {
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
                       {/* 🌟 1. AI 유사생성 */}
-                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
+                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생 권한이 없습니다." : "")}>
                         <span>👯</span> <span>AI 유사생성</span>
                       </button>
 
@@ -747,7 +684,7 @@ export default function TaxonomyEditorPage() {
                         <span>📋</span> 타 교재로 복제
                       </button>
 
-                      {/* 🌟 3. AI 수식 자동 복구 */}
+                      {/* 🌟 3. AI 수식 자동 복구 (신규 추가) */}
                       <button 
                         onClick={handleFixLatex} 
                         disabled={!perms.edit || isFixingLatex} 
