@@ -768,14 +768,23 @@ export default function AdmissionPage() {
                       const isDone = shadowAssign ? ['채점완료', '완료'].includes(shadowAssign.status) : false;
 
                       let displayResult = app.test_result || app.status || '대기';
-                      if (isDone && !['합격', '불합격'].includes(displayResult)) {
+
+                      // 🌟 '결과 통보', '수강 등록', '등록 보류' 도 정상적인 처리 상태이므로 덮어쓰지 않도록 조건에 추가
+                      if (isDone && !['합격', '불합격', '결과 통보', '수강 등록', '등록 보류'].includes(displayResult)) {
                         displayResult = '검토중';
                       }
 
+                      // 🌟 새로운 상태값들에 맞춰 뱃지 색상(스타일)도 추가
                       let badgeStyle = 'bg-slate-100 text-slate-600 border border-slate-200';
-                      if (displayResult === '합격') badgeStyle = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
-                      else if (displayResult === '불합격') badgeStyle = 'bg-rose-100 text-rose-700 border border-rose-200';
-                      else if (displayResult === '검토중') badgeStyle = 'bg-amber-100 text-amber-700 border border-amber-200';
+                      if (displayResult === '합격' || displayResult === '수강 등록') {
+                        badgeStyle = 'bg-emerald-100 text-emerald-700 border border-emerald-200';
+                      } else if (displayResult === '불합격' || displayResult === '등록 보류') {
+                        badgeStyle = 'bg-rose-100 text-rose-700 border border-rose-200';
+                      } else if (displayResult === '결과 통보') {
+                        badgeStyle = 'bg-blue-100 text-blue-700 border border-blue-200'; // 파란색 뱃지
+                      } else if (displayResult === '검토중') {
+                        badgeStyle = 'bg-amber-100 text-amber-700 border border-amber-200';
+                      }
 
                       if (shadowAssign) {
                         gradeBtnHtml = (

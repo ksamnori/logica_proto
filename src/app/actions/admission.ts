@@ -3,6 +3,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache"; // 🌟 [추가] Next.js 캐시 초기화를 위한 함수 임포트
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -83,21 +84,39 @@ export async function unassignStudentAction(studentId: string, sessionId: string
   }
 }
 
+// 🌟 상담 결과 업데이트 로직 (검증 로직 추가 및 자동 승급 조건 변경)
 export async function updateCounselingResult(appId: string, studentId: string, result: string, memo: string) {
   const tenantId = await getTenantId();
   if (!tenantId) return { success: false, message: "권한이 없습니다. 다시 로그인해주세요." };
 
   try {
-    const { error: upAppErr } = await supabaseAdmin.from('admission_application').update({ test_result: result, counseling_memo: memo }).eq('application_id', appId);
+    // 💡 .select()를 추가하여 실제 업데이트가 성공적으로 발생했는지 확인합니다.
+    const { data: updatedData, error: upAppErr } = await supabaseAdmin
+      .from('admission_application')
+      .update({ test_result: result, counseling_memo: memo })
+      .eq('application_id', appId)
+      .select();
+      
     if (upAppErr) throw new Error(upAppErr.message);
 
-    if (result === '합격') {
+    // 💡 업데이트된 행이 없다면 appId가 잘못되었거나 매칭되는 데이터가 없는 것입니다.
+    if (!updatedData || updatedData.length === 0) {
+      throw new Error("업데이트할 대상을 찾지 못했습니다. 올바른 데이터를 선택했는지 확인해주세요.");
+    }
+
+    // 💡 '합격' -> '수강 등록'으로 프론트엔드 파이프라인과 일치시켰습니다.
+    if (result === '수강 등록') {
       const { data: stuData } = await supabaseAdmin.from('student').select('tenant_id').eq('student_id', studentId).single();
       if (stuData && stuData.tenant_id === tenantId) {
         const { error: upStErr } = await supabaseAdmin.from('student').update({ status: '재원' }).eq('student_id', studentId);
         if (upStErr) throw new Error(upStErr.message);
       }
     }
+    
+    // 🌟 [핵심 해결책] DB 업데이트가 성공한 직후, 라우터 캐시를 날려버립니다.
+    // 이렇게 하면 프론트엔드가 아까 받아둔 과거 데이터를 버리고 최신 상태('결과 통보', '수강 등록' 등)를 서버에서 다시 그려옵니다.
+    revalidatePath('/', 'layout');
+
     return { success: true };
   } catch (error: any) {
     return { success: false, message: error.message };
