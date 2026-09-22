@@ -98,7 +98,8 @@ export async function resolvePendingHomeworkQuestions(
   (qDbRes.data || []).forEach((q: any) => {
     rows.push({
       ...q,
-      tq_id: q.question_id, // 시스템 호환성을 위해 tq_id 필드에 매핑
+      tq_id: null, // 🌟 핵심 픽스: UUID를 tq_id에 강제로 쑤셔넣어 발생하던 Postgres 에러 원천 차단!
+      question_id: q.question_id, 
       homeworkId: metaMap[String(q.question_id)]?.homework_id ?? null,
       homeworkTitle: metaMap[String(q.question_id)]?.homework_title ?? null,
       bookType: '기타',

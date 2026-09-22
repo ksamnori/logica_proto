@@ -119,7 +119,7 @@ function ReviewContent() {
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [resultData, modalQ, modalWrongLog]); 
+  }, [resultData, modalQ, modalWrongLog, pendingUpdates]); // 👈 pendingUpdates 추가 
 
   useEffect(() => {
     if (isHomeworkMode) {

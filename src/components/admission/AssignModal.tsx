@@ -70,7 +70,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
   const loadWaitings = async () => {
     try {
       const { data: apps } = await supabase.from('admission_application').select('student_id').eq('admission_session_id', session.admission_session_id);
-      const assignedIds = apps ? apps.map(a => a.student_id) : [];
+      const assignedIds = apps ? apps.map((a: { student_id: string }) => a.student_id) : [];
       
       const { data: tempStus } = await supabase
         .from("temp_admission_applicants")
