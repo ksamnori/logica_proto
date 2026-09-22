@@ -18,8 +18,16 @@ export default function TaxonomyEditorPage() {
     setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
+    handleCropExisting,
     saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex
   } = useTaxonomy();
+
+  const [bookFilter, setBookFilter] = React.useState("");
+  const filteredWorkbooks = React.useMemo(() => {
+    if (!bookFilter.trim()) return workbooks;
+    const lowerKw = bookFilter.toLowerCase().replace(/\s+/g, '');
+    return workbooks.filter(b => b.toLowerCase().replace(/\s+/g, '').includes(lowerKw));
+  }, [workbooks, bookFilter]);
 
   const renderImageBox = (label: string, fieldKey: string, colorTheme: 'indigo' | 'emerald') => {
     const rawValue = editForm[fieldKey as keyof typeof editForm] as string;
@@ -33,6 +41,8 @@ export default function TaxonomyEditorPage() {
           {rawValue && (
             <div className="flex items-center gap-2">
               <a href={displayUrl} target="_blank" className="text-blue-500 hover:text-blue-700 underline tracking-tighter" rel="noreferrer">원본 보기 ↗</a>
+              <span className="text-slate-200">|</span>
+              <button type="button" onClick={() => handleCropExisting(rawValue, fieldKey)} className="text-emerald-500 hover:text-emerald-700 underline tracking-tighter">자르기 ✂️</button>
               <span className="text-slate-200">|</span>
               <button type="button" onClick={() => setEditForm({ ...editForm, [fieldKey]: '' })} className="text-rose-500 hover:text-rose-700 underline tracking-tighter">삭제 🗑️</button>
             </div>
@@ -51,6 +61,18 @@ export default function TaxonomyEditorPage() {
       </div>
     );
   };
+
+  // 🌟 [수정 포인트] 마우스가 이미지 영역 밖으로 나가도 끊기지 않도록 전역 이벤트로 처리합니다.
+  React.useEffect(() => {
+    if (cropImageSrc) {
+      window.addEventListener('mousemove', handleCropMouseMove as any);
+      window.addEventListener('mouseup', handleCropMouseUp);
+      return () => {
+        window.removeEventListener('mousemove', handleCropMouseMove as any);
+        window.removeEventListener('mouseup', handleCropMouseUp);
+      };
+    }
+  }, [cropImageSrc, handleCropMouseMove, handleCropMouseUp]);
 
   if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">권한 확인 중...</div>;
   if (isAuthorized === false) return null;
@@ -141,22 +163,23 @@ export default function TaxonomyEditorPage() {
       {/* 크롭퍼 모달 */}
       {cropImageSrc && (
         <div className="fixed inset-0 z-[100] bg-slate-900/90 flex flex-col items-center justify-center p-10 animate-in fade-in">
-          <div className="text-center mb-6">
+          <div className="text-center mb-6 pointer-events-none">
             <h3 className="text-2xl font-black text-white">✂️ 영역을 드래그해서 자르세요</h3>
             <p className="text-slate-400 font-medium mt-2">필요한 수식이나 그림 영역만 마우스로 덮으세요.</p>
           </div>
-          <div className="relative max-w-full max-h-[65vh] overflow-hidden select-none bg-slate-800 rounded-xl shadow-2xl border border-slate-700">
+          <div className="relative max-w-full max-h-[65vh] select-none bg-slate-800 rounded-xl shadow-2xl border border-slate-700" style={{ touchAction: 'none' }}>
             <img 
               ref={imgRef} src={cropImageSrc} alt="Crop target" 
               className="max-w-full max-h-[65vh] object-contain select-none cursor-crosshair" draggable={false}
-              onMouseDown={handleCropMouseDown} onMouseMove={handleCropMouseMove} onMouseUp={handleCropMouseUp} onMouseLeave={handleCropMouseUp}
+              onMouseDown={handleCropMouseDown} 
+              // 🌟 [수정 포인트] 마우스가 나가면 끊기던 이벤트를 지우고 window로 위임했습니다.
             />
             <div ref={selectionBoxRef} style={{ display: 'none', position: 'absolute', border: '2px dashed #0ea5e9', backgroundColor: 'rgba(14, 165, 233, 0.2)', pointerEvents: 'none' }} />
           </div>
-          <div className="flex gap-4 mt-8">
-            <button onClick={() => { setCropImageSrc(null); setHasCropArea(false); }} className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-colors">취소</button>
-            <button onClick={() => handleCropUpload(true)} className="px-6 py-3 bg-slate-600 hover:bg-slate-500 text-slate-300 font-bold rounded-xl transition-colors">자르지 않고 원본 통째로 업로드</button>
-            <button onClick={() => handleCropUpload(false)} disabled={!hasCropArea || isLoading} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:text-blue-400 text-white font-black rounded-xl transition-colors shadow-lg">
+          <div className="flex gap-4 mt-8 relative z-50">
+            <button onClick={() => { setCropImageSrc(null); setHasCropArea(false); }} className="px-6 py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl transition-colors cursor-pointer">취소</button>
+            <button onClick={() => handleCropUpload(true)} className="px-6 py-3 bg-slate-600 hover:bg-slate-500 text-slate-300 font-bold rounded-xl transition-colors cursor-pointer">자르지 않고 원본 통째로 업로드</button>
+            <button onClick={() => handleCropUpload(false)} disabled={!hasCropArea || isLoading} className="px-8 py-3 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-800 disabled:text-blue-400 text-white font-black rounded-xl transition-colors shadow-lg cursor-pointer">
               {isLoading ? '업로드 중...' : '✂️ 선택 영역 자르기 및 업로드'}
             </button>
           </div>
@@ -320,13 +343,29 @@ export default function TaxonomyEditorPage() {
       </div>
 
       <div className="bg-white px-6 py-4 border border-slate-200 rounded-xl flex items-end gap-4 mb-4 shrink-0 shadow-sm">
-        <div className="flex flex-col gap-1.5 flex-1 max-w-md">
-          <span className="text-xs font-bold text-slate-500">마스터 DB 전체 교재 검색:</span>
+        <div className="flex flex-col gap-1.5 flex-1 max-w-2xl">
+          <span className="text-xs font-bold text-slate-500">마스터 DB 전체 교재 검색 및 선택:</span>
           <div className="flex items-center gap-2">
-            <select value={selectedBook} onChange={(e) => setSelectedBook(e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg font-bold text-[#002864] bg-slate-50 text-sm shadow-sm outline-none focus:ring-2 focus:ring-[#002864]">
-              <option value="">교재를 선택하세요...</option>
-              {workbooks.map(b => <option key={b} value={b}>{b}</option>)}
+            
+            <div className="relative w-56 shrink-0">
+              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔍</span>
+              <input
+                type="text"
+                placeholder="학년/학기/키워드 (ex: 중1)"
+                value={bookFilter}
+                onChange={(e) => setBookFilter(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm font-bold outline-none focus:ring-2 focus:ring-[#002864] transition-all bg-white shadow-sm"
+              />
+              {bookFilter && (
+                <button onClick={() => setBookFilter("")} className="absolute inset-y-0 right-0 flex items-center pr-2 text-slate-400 hover:text-rose-500">✕</button>
+              )}
+            </div>
+
+            <select value={selectedBook} onChange={(e) => setSelectedBook(e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg font-bold text-[#002864] bg-slate-50 text-sm shadow-sm outline-none focus:ring-2 focus:ring-[#002864] cursor-pointer">
+              <option value="">교재를 선택하세요... ({filteredWorkbooks.length}건)</option>
+              {filteredWorkbooks.map(b => <option key={b} value={b}>{b}</option>)}
             </select>
+            
             <button onClick={handleRenameBook} disabled={!selectedBook || isLoading} className="whitespace-nowrap shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold rounded-lg shadow-sm border border-slate-300 transition-colors disabled:opacity-50" title="선택한 문제지 덩어리의 이름을 통째로 변경합니다.">
               ✏️ 이름 일괄 변경
             </button>
@@ -502,7 +541,7 @@ export default function TaxonomyEditorPage() {
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
                       {/* 🌟 1. AI 유사생성 */}
-                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
+                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생 권한이 없습니다." : "")}>
                         <span>👯</span> <span>AI 유사생성</span>
                       </button>
 
@@ -730,7 +769,6 @@ export default function TaxonomyEditorPage() {
                       <select value={selD8} onChange={e => setSelD8(e.target.value)} disabled={d8Options.length === 0} className="p-2 text-xs font-bold border border-rose-300 rounded-lg outline-none focus:ring-2 focus:ring-rose-500 shadow-sm disabled:bg-slate-100 bg-rose-50 text-rose-900">
                         <option value="">{d8Options.length === 0 ? '마지막 뎁스 없음' : '선택'}</option>
                         {d8Options.map((o: any) => {
-                          // 🌟 [수정됨] 6뎁스를 우선 적용하여 실제 이름을 렌더링
                           const leafName = o.depth8 || o.depth7 || o.depth6 || '기본 유형';
                           return <option key={o.item_id} value={o.item_id}>{leafName}</option>;
                         })}

@@ -1,8 +1,8 @@
 // src/app/(dashboard)/taxonomy-editor/useTaxonomy.ts
-import { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { taxSort, generateUUID, sortQuestionsList, fetchAllRows } from "./taxonomyUtils";
+import { taxSort, generateUUID, sortQuestionsList, fetchAllRows, getCleanUrl } from "./taxonomyUtils";
 
 export function useTaxonomy() {
   const router = useRouter();
@@ -247,10 +247,7 @@ export function useTaxonomy() {
     const matchedItem = items.find(i => i.item_id === taxId);
     if (matchedItem) {
       const cat = categories.find(c => c.category_id === matchedItem.category_id);
-      
-      // 🌟 [수정됨] depth8이 없으면 depth6, 그것도 없으면 기본 유형 출력
       const leafName = matchedItem.depth8 || matchedItem.depth7 || matchedItem.depth6 || '기본 유형';
-      
       if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7, leafName].filter(Boolean).join(' > ');
       return leafName;
     }
@@ -291,7 +288,6 @@ export function useTaxonomy() {
 
   const d8Options = useMemo(() => {
     if (!currentMatchedCat) return [];
-    // 🌟 [수정됨] 정렬할 때도 depth8, 7, 6 순으로 유효한 값을 찾아서 비교합니다.
     return items.filter(item => item.category_id === currentMatchedCat.category_id).sort((a,b) => 
       taxSort(a.depth8 || a.depth7 || a.depth6 || '', b.depth8 || b.depth7 || b.depth6 || '')
     );
@@ -423,26 +419,82 @@ export function useTaxonomy() {
   };
 
   const handleDrop = (e: React.DragEvent, fieldKey: string) => {
-    e.preventDefault(); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) handleImageInput(e.dataTransfer.files[0], fieldKey);
+    e.preventDefault(); 
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleImageInput(e.dataTransfer.files[0], fieldKey);
+    }
   };
 
+  const handleCropExisting = async (existingUrl: string, fieldKey: string) => {
+    if (!existingUrl) return;
+    setIsLoading(true);
+    try {
+      const cleanUrl = getCleanUrl(existingUrl);
+      const response = await fetch(cleanUrl);
+      const blob = await response.blob();
+      const localUrl = URL.createObjectURL(blob);
+      
+      setCropImageSrc(localUrl);
+      setCropTargetField(fieldKey);
+      setHasCropArea(false);
+      if (selectionBoxRef.current) selectionBoxRef.current.style.display = 'none';
+    } catch (e: any) {
+      alert("이미지를 불러오는데 실패했습니다: " + e.message);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // 🌟 [수정 포인트] 화면 전체(clientX, clientY)를 기준으로 렌더링된 이미지의 실제 위치와 비율을 완벽하게 계산합니다.
   const handleCropMouseDown = (e: React.MouseEvent<HTMLImageElement>) => {
-    e.preventDefault(); isCroppingRef.current = true;
-    cropStartRef.current = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY };
-    cropRectRef.current = { x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY, w: 0, h: 0 };
-    setHasCropArea(false); if (selectionBoxRef.current) selectionBoxRef.current.style.display = 'none';
+    e.preventDefault(); 
+    if (!imgRef.current) return;
+    isCroppingRef.current = true;
+    
+    const rect = imgRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    cropStartRef.current = { x, y };
+    cropRectRef.current = { x, y, w: 0, h: 0 };
+    setHasCropArea(false); 
+    if (selectionBoxRef.current) selectionBoxRef.current.style.display = 'none';
   };
 
-  const handleCropMouseMove = (e: React.MouseEvent<HTMLImageElement>) => {
-    if (!isCroppingRef.current || !cropStartRef.current) return;
-    const currentX = e.nativeEvent.offsetX; const currentY = e.nativeEvent.offsetY;
-    const newRect = { x: Math.min(cropStartRef.current.x, currentX), y: Math.min(cropStartRef.current.y, currentY), w: Math.abs(currentX - cropStartRef.current.x), h: Math.abs(currentY - cropStartRef.current.y) };
+  const handleCropMouseMove = (e: MouseEvent | React.MouseEvent) => {
+    if (!isCroppingRef.current || !cropStartRef.current || !imgRef.current) return;
+    
+    const rect = imgRef.current.getBoundingClientRect();
+    let currentX = e.clientX - rect.left;
+    let currentY = e.clientY - rect.top;
+    
+    // 마우스가 이미지 영역 밖으로 나가도 경계선에 찰싹 달라붙도록 고정(Clamp)
+    currentX = Math.max(0, Math.min(currentX, rect.width));
+    currentY = Math.max(0, Math.min(currentY, rect.height));
+
+    const newRect = { 
+      x: Math.min(cropStartRef.current.x, currentX), 
+      y: Math.min(cropStartRef.current.y, currentY), 
+      w: Math.abs(currentX - cropStartRef.current.x), 
+      h: Math.abs(currentY - cropStartRef.current.y) 
+    };
+    
     cropRectRef.current = newRect;
-    if (selectionBoxRef.current) { selectionBoxRef.current.style.display = 'block'; selectionBoxRef.current.style.left = `${newRect.x}px`; selectionBoxRef.current.style.top = `${newRect.y}px`; selectionBoxRef.current.style.width = `${newRect.w}px`; selectionBoxRef.current.style.height = `${newRect.h}px`; }
+    if (selectionBoxRef.current) { 
+      selectionBoxRef.current.style.display = 'block'; 
+      selectionBoxRef.current.style.left = `${newRect.x}px`; 
+      selectionBoxRef.current.style.top = `${newRect.y}px`; 
+      selectionBoxRef.current.style.width = `${newRect.w}px`; 
+      selectionBoxRef.current.style.height = `${newRect.h}px`; 
+    }
   };
 
-  const handleCropMouseUp = () => { isCroppingRef.current = false; if (cropRectRef.current && cropRectRef.current.w > 0) setHasCropArea(true); };
+  const handleCropMouseUp = () => { 
+    isCroppingRef.current = false; 
+    if (cropRectRef.current && cropRectRef.current.w > 0) setHasCropArea(true); 
+  };
 
+  // 🌟 [수정 포인트] Canvas 오프셋 문제 해결 및 DB 즉시 업서트
   const handleCropUpload = async (useOriginal: boolean) => {
     if (!imgRef.current || !cropImageSrc || !cropTargetField) return;
     setIsLoading(true);
@@ -452,12 +504,41 @@ export function useTaxonomy() {
         const response = await fetch(cropImageSrc); blobToUpload = await response.blob();
       } else {
         const canvas = document.createElement('canvas');
-        const scaleX = imgRef.current.naturalWidth / imgRef.current.width; const scaleY = imgRef.current.naturalHeight / imgRef.current.height;
-        canvas.width = cropRectRef.current.w * scaleX; canvas.height = cropRectRef.current.h * scaleY;
-        const ctx = canvas.getContext('2d'); if (!ctx) throw new Error("Canvas 생성 실패");
-        ctx.drawImage(imgRef.current, cropRectRef.current.x * scaleX, cropRectRef.current.y * scaleY, cropRectRef.current.w * scaleX, cropRectRef.current.h * scaleY, 0, 0, canvas.width, canvas.height);
+        const img = imgRef.current;
+        const rect = img.getBoundingClientRect();
+        
+        // object-contain으로 인해 생기는 상하좌우 여백(레터박스)을 계산
+        const renderRatio = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
+        const renderWidth = img.naturalWidth * renderRatio;
+        const renderHeight = img.naturalHeight * renderRatio;
+        const offsetX = (rect.width - renderWidth) / 2;
+        const offsetY = (rect.height - renderHeight) / 2;
+
+        // 드래그 영역을 렌더링된 실제 이미지 안으로 제한
+        const safeCropX = Math.max(0, cropRectRef.current.x - offsetX);
+        const safeCropY = Math.max(0, cropRectRef.current.y - offsetY);
+        const safeCropEndX = Math.min(renderWidth, cropRectRef.current.x + cropRectRef.current.w - offsetX);
+        const safeCropEndY = Math.min(renderHeight, cropRectRef.current.y + cropRectRef.current.h - offsetY);
+        const safeCropW = safeCropEndX - safeCropX;
+        const safeCropH = safeCropEndY - safeCropY;
+
+        if (safeCropW <= 0 || safeCropH <= 0) throw new Error("이미지 영역을 정확히 드래그해주세요.");
+
+        // 원본 이미지 해상도에 맞춰 자르기 비율 스케일업
+        const sourceX = safeCropX / renderRatio;
+        const sourceY = safeCropY / renderRatio;
+        const sourceW = safeCropW / renderRatio;
+        const sourceH = safeCropH / renderRatio;
+
+        canvas.width = sourceW;
+        canvas.height = sourceH;
+        const ctx = canvas.getContext('2d'); 
+        if (!ctx) throw new Error("Canvas 생성 실패");
+        
+        ctx.drawImage(img, sourceX, sourceY, sourceW, sourceH, 0, 0, sourceW, sourceH);
         blobToUpload = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/png'));
       }
+      
       if (!blobToUpload) throw new Error("이미지 변환 실패");
       
       const fileName = `crop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.png`;
@@ -467,9 +548,19 @@ export function useTaxonomy() {
       const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbwornivkrvoeqdh.supabase.co";
       const finalUploadUrl = `${baseUrl}/storage/v1/object/public/question_images/${fileName}`;
       
-      setEditForm(prev => ({ ...prev, [cropTargetField]: finalUploadUrl })); 
+      setEditForm(prev => ({ ...prev, [cropTargetField as string]: finalUploadUrl })); 
+
+      // 🌟 [핵심 변경] 저장하기 버튼을 누르지 않아도, DB에 즉시 업서트(저장)하여 분실을 방지합니다.
+      if (selectedQuestion) {
+        await supabase.from('question_db').update({ [cropTargetField]: finalUploadUrl }).eq('question_id', selectedQuestion.question_id);
+        
+        const updatedQuestion = { ...selectedQuestion, [cropTargetField]: finalUploadUrl };
+        setSelectedQuestion(updatedQuestion);
+        setQuestions(prev => prev.map(q => q.question_id === selectedQuestion.question_id ? updatedQuestion : q));
+      }
+      
       setCropImageSrc(null); setCropTargetField(null); 
-      alert("✅ 이미지가 업로드 되었습니다!");
+      alert("✅ 이미지가 성공적으로 잘라내어 저장(업서트)되었습니다!");
     } catch (err: any) { alert("이미지 업로드 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
@@ -761,6 +852,7 @@ export function useTaxonomy() {
     setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
+    handleCropExisting,
     saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex
   };
 }
