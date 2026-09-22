@@ -68,7 +68,7 @@ export default function MakeupPage() {
         router.replace("/home");
       } else {
         setIsAuthorized(true);
-        // 🌟 [핵심 변경] 권한 관리 페이지에서 설정한 수정/삭제 세부 권한을 읽어서 연동
+        // 권한 관리 페이지에서 설정한 수정/삭제 세부 권한을 읽어서 연동
         setCanEditMakeup(data.allowed_menus.includes("action_edit_makeup"));
         setCanDeleteMakeup(data.allowed_menus.includes("action_delete_makeup"));
       }
@@ -95,15 +95,41 @@ export default function MakeupPage() {
         return;
       }
 
-      // 기본 쿼리 셋업
+      // 🌟 [수정 포인트] student -> enrollment -> class 테이블을 딥 조인하여 반 이름을 가져옵니다.
       let makeupQuery = supabase
         .from('individual_makeup')
-        .select('*, student(name, grade), instructor(name)')
+        .select(`
+          *, 
+          instructor(name),
+          student(
+            name, 
+            grade, 
+            enrollment(
+              status,
+              class(*)
+            )
+          )
+        `)
         .order('schedule_date', { ascending: false })
         .limit(1000);
 
       let instQuery = supabase.from('instructor').select('instructor_id, name').eq('status', '재직');
-      let stuQuery = supabase.from('student').select('student_id, name, grade').eq('status', '재원').order('name').limit(1000);
+      
+      // 모달용 학생 리스트도 동일하게 딥 조인
+      let stuQuery = supabase
+        .from('student')
+        .select(`
+          student_id, 
+          name, 
+          grade, 
+          enrollment(
+            status,
+            class(*)
+          )
+        `)
+        .eq('status', '재원')
+        .order('name')
+        .limit(1000);
 
       // 내 지점의 강사, 학생, 보강 일정만 격리
       if (validTenantId) {
@@ -119,7 +145,18 @@ export default function MakeupPage() {
       ]);
 
       if (instRes.data) setInstructors(instRes.data);
-      if (stuRes.data) setStudents(stuRes.data);
+      
+      if (stuRes.data) {
+        // 모달에서 기존 로직이 깨지지 않도록, enrollment 안의 클래스 이름을 찾아 1차원 데이터로 매핑
+        const mappedStudents = stuRes.data.map((s: any) => {
+          const enrolls = Array.isArray(s.enrollment) ? s.enrollment : [];
+          const active = enrolls.find((e: any) => !['퇴원', '종료', '취소'].includes(e.status)) || enrolls[0];
+          const cName = active?.class?.class_name || active?.class?.name || '반 미배정';
+          return { ...s, class_name: cName };
+        });
+        setStudents(mappedStudents);
+      }
+
       if (makeupRes.data) setMakeups(makeupRes.data);
     } catch (e) {
       console.error(e);
@@ -144,23 +181,24 @@ export default function MakeupPage() {
     setFilterSearch("");
   };
 
-  const formatGrade = (grade: any) => {
-    if (!grade) return '-';
-    if (isNaN(Number(grade))) return grade; 
-    const g = parseInt(grade, 10);
-    if (g >= 1 && g <= 6) return `초${g}`;
-    if (g >= 7 && g <= 9) return `중${g - 6}`;
-    if (g >= 10 && g <= 12) return `고${g - 9}`;
-    return `${g}학년`;
-  };
-
   const openModal = (makeup: any | null = null) => {
     setSelectedMakeup(makeup);
     setIsModalOpen(true);
   };
 
+  const completeMakeup = async (id: string) => {
+    if (!canEditMakeup) return alert("⛔ 보강 일정을 수정할 권한이 없습니다.");
+    if (!confirm("이 보강 일정을 '완료' 상태로 변경하시겠습니까?")) return;
+    try {
+      const { error } = await supabase.from('individual_makeup').update({ status: '완료' }).eq('makeup_id', id);
+      if (error) throw error;
+      fetchInitialData();
+    } catch (e: any) { 
+      alert("완료 처리 실패: " + e.message); 
+    }
+  };
+
   const deleteMakeup = async (id: string) => {
-    // 🌟 [보안 강화] 강제 삭제 시도 시 백단에서도 한 번 더 권한을 차단합니다.
     if (!canDeleteMakeup) return alert("⛔ 보강 일정을 삭제할 권한이 없습니다.");
 
     if (!confirm("이 보강 일정을 정말 삭제하시겠습니까?")) return;
@@ -172,7 +210,6 @@ export default function MakeupPage() {
     } catch (e: any) { alert("삭제 실패: " + e.message); }
   };
 
-  // 🌟 권한 확인 중이거나 권한이 없을 경우의 화면 처리
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
@@ -213,7 +250,6 @@ export default function MakeupPage() {
           🔄 전체보기
         </button>
 
-        {/* 🌟 수정(등록) 권한이 있는 경우에만 새 보강 일정 등록 버튼 노출 */}
         {canEditMakeup && (
           <button onClick={() => openModal()} className="ml-auto bg-[#002864] text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
             새 보강 일정 등록
@@ -258,22 +294,32 @@ export default function MakeupPage() {
                   else if (m.status === '완료') statusClass = 'bg-emerald-100 text-emerald-700';
                   else if (m.status === '취소') statusClass = 'bg-rose-100 text-rose-700';
 
+                  // 🌟 [수정 포인트] 조인된 enrollment 데이터에서 반 이름 추출
+                  const enrolls = Array.isArray(m.student?.enrollment) ? m.student.enrollment : [];
+                  const active = enrolls.find((e: any) => !['퇴원', '종료', '취소'].includes(e.status)) || enrolls[0];
+                  const className = active?.class?.class_name || active?.class?.name || '반 미배정';
+
                   return (
                     <tr key={m.makeup_id} className="hover:bg-blue-50/50 transition-colors border-b border-slate-100">
                       <td className="py-3 px-4 text-center font-bold text-slate-600">{dateStr}</td>
                       <td className="py-3 px-4 text-center font-extrabold text-[#002864] bg-blue-50/30">{timeStr}</td>
                       <td className="py-3 px-4 text-center font-bold text-slate-700">{roomStr}</td>
+                      
+                      {/* 🌟 추출한 반 이름 적용 */}
                       <td className="py-3 px-4 text-center font-extrabold text-[#002864] cursor-pointer hover:underline">
-                        {m.student?.name || '알수없음'} <span className="text-xs text-slate-400 font-medium">({formatGrade(m.student?.grade)})</span>
+                        {m.student?.name || '알수없음'} <span className="text-xs text-slate-400 font-medium">({className})</span>
                       </td>
+                      
                       <td className="py-3 px-4 text-center font-bold text-slate-700">{instName}</td>
                       <td className="py-3 px-4 text-center font-bold text-slate-600 truncate max-w-[200px]" title={m.target_category_id}>{m.target_category_id || '-'}</td>
                       <td className="py-3 px-4 text-center"><span className={`${statusClass} px-2 py-1 rounded text-xs font-bold`}>{m.status || '예정'}</span></td>
                       
-                      {/* 🌟 [핵심 변경] 권한에 따라 버튼을 개별적으로 렌더링 */}
                       {(canEditMakeup || canDeleteMakeup) && (
                         <td className="py-3 px-4 text-center">
                           <div className="flex items-center justify-center gap-1.5">
+                            {canEditMakeup && m.status !== '완료' && (
+                              <button onClick={() => completeMakeup(m.makeup_id)} className="px-3 py-1.5 bg-emerald-50 hover:bg-emerald-500 text-emerald-600 hover:text-white font-bold text-xs border border-emerald-200 hover:border-emerald-500 rounded shadow-sm transition-colors">완료</button>
+                            )}
                             {canEditMakeup && (
                               <button onClick={() => openModal(m)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-xs rounded shadow-sm transition-colors">수정</button>
                             )}

@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -152,6 +153,7 @@ const RadarChart = ({ data }: { data: any[] }) => {
 };
 
 export default function StudentCard({ student }: { student: any }) {
+  const router = useRouter();
   const [activeTab, setActiveTab] = useState<"attendance" | "progress" | "homework" | "makeup" | "exam" | "consultation">("attendance");
 
   // 캘린더용 상태
@@ -161,6 +163,7 @@ export default function StudentCard({ student }: { student: any }) {
   // 데이터 로딩 상태
   const [lessonLogs, setLessonLogs] = useState<any[]>([]);
   const [isLogsLoading, setIsLogsLoading] = useState(false);
+  const [showAllLogs, setShowAllLogs] = useState(false); // 🌟 더보기 토글 상태 추가
   
   // 성적 데이터 상태
   const [examResults, setExamResults] = useState<any[]>([]);
@@ -168,7 +171,7 @@ export default function StudentCard({ student }: { student: any }) {
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
   const [isExamLoading, setIsExamLoading] = useState(false);
 
-  // 🌟 [추가] 보강 관리 상태
+  // 🌟 보강 관리 상태
   const [makeups, setMakeups] = useState<any[]>([]);
   const [isMakeupLoading, setIsMakeupLoading] = useState(false);
 
@@ -186,29 +189,54 @@ export default function StudentCard({ student }: { student: any }) {
 
   const consultLogs = student.consultation_log ? [...student.consultation_log].sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()) : [];
 
-  // 과제 데이터 로드
+  // 🌟 일지 데이터를 진도와 과제로 쪼개서 활용할 수 있도록 전체 로드 및 조인
   useEffect(() => {
-    if (activeTab === "homework" && classId) {
+    if ((activeTab === "homework" || activeTab === "progress") && classId) {
       const fetchLogs = async () => {
         setIsLogsLoading(true);
         try {
           const { data } = await supabase
             .from("daily_lesson_log")
-            .select("lesson_log_id, actual_date, actual_session_no, homework_desc")
+            .select(`
+               lesson_log_id, actual_date, homework_desc,
+               lesson_log_student_comment(student_id, comment)
+            `)
             .eq("class_id", classId)
-            .not("homework_desc", "is", null)
             .order("actual_date", { ascending: false });
           
-          setLessonLogs(data || []);
+          if (data) {
+             // 병합되어 있는 homework_desc를 진도와 공통과제로 파싱하고, 현재 학생의 개별 코멘트를 붙임
+             const parsedLogs = data.map(log => {
+                const desc = log.homework_desc || "";
+                const progressMatch = desc.match(/\[📖 오늘의 진도\]\n([\s\S]*?)(?=\n\n\[📝 공통 과제\]|\n\n\[🧑‍🎓 개별 과제\]|$)/);
+                const hwMatch = desc.match(/\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/);
+                
+                let pDesc = progressMatch ? progressMatch[1].trim() : "";
+                let hDesc = hwMatch ? hwMatch[1].trim() : "";
+                if (!progressMatch && !hwMatch) hDesc = desc; // 구형 포맷 대응
+
+                const myComment = (log.lesson_log_student_comment || []).find((c: any) => c.student_id === student.student_id);
+
+                return {
+                   ...log,
+                   parsed_progress: pDesc,
+                   parsed_homework: hDesc,
+                   my_individual_comment: myComment ? myComment.comment : null
+                };
+             });
+             
+             // 과제나 진도 내용이 하나라도 있는 것만 필터링
+             setLessonLogs(parsedLogs.filter(l => l.parsed_progress || l.parsed_homework || l.my_individual_comment));
+          }
         } catch (error) {
-          console.error("과제 정보 로딩 에러:", error);
+          console.error("일지 정보 로딩 에러:", error);
         } finally {
           setIsLogsLoading(false);
         }
       };
       fetchLogs();
     }
-  }, [activeTab, classId]);
+  }, [activeTab, classId, student.student_id]);
 
   // 성적 데이터 로드
   useEffect(() => {
@@ -226,7 +254,7 @@ export default function StudentCard({ student }: { student: any }) {
     }
   }, [activeTab, student]);
 
-  // 🌟 [추가] 보강 일정 데이터 로드
+  // 보강 일정 데이터 로드
   useEffect(() => {
     if (activeTab === "makeup" && student?.student_id) {
       const fetchMakeups = async () => {
@@ -439,7 +467,7 @@ export default function StudentCard({ student }: { student: any }) {
   const handlePrevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
   const handleNextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
 
-  // 🌟 출결 데이터 매핑 (출결 상태 보정 로직 적용)
+  // 출결 데이터 매핑
   const attendanceMap = new Map();
   if (student.attendance) {
     student.attendance.forEach((record: any) => {
@@ -467,6 +495,9 @@ export default function StudentCard({ student }: { student: any }) {
     const d = new Date(dateStr);
     return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
   };
+
+  // 🌟 최근 2주의 기준 날짜 계산 (필터링 용도)
+  const twoWeeksAgoMs = new Date(getKSTDateStr()).getTime() - (14 * 24 * 3600000);
 
   const todayStatus = useMemo(() => {
     const todayStr = getKSTDateStr();
@@ -674,7 +705,6 @@ export default function StudentCard({ student }: { student: any }) {
         </div>
       </div>
 
-      {/* 🌟 완전히 새로워진 2행 3열 세그먼트 컨트롤 메뉴 디자인 */}
       <div className="px-4 sm:px-6 py-4 bg-white border-b border-slate-100">
         <div className="grid grid-cols-3 gap-1.5 p-1.5 bg-[#f1f5f9] rounded-[18px] shadow-inner border border-slate-200/60">
           {[
@@ -793,89 +823,154 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
+        {/* 🌟 완벽하게 복구된 진도 탭 렌더링 (일지 연동) */}
         {activeTab === "progress" && (
-          <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
-            <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-lg border border-slate-200 w-fit mb-4 shadow-sm">
-              <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-emerald-500 inline-block"></span> 완료</span>
-              <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-amber-400 inline-block"></span> 과제 진행중</span>
-              <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-slate-200 inline-block"></span> 미진행</span>
-            </div>
-
-            {!student.progressBooks || student.progressBooks.length === 0 ? (
-              <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
-                현재 반에 배정된 교재 진도 정보가 없습니다.
+          <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
+            
+            <div className="space-y-4">
+              <div className="flex items-center gap-3 bg-white px-3 py-2 rounded-lg border border-slate-200 w-fit mb-2 shadow-sm">
+                <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-emerald-500 inline-block"></span> 완료</span>
+                <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-amber-400 inline-block"></span> 과제 진행중</span>
+                <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-slate-200 inline-block"></span> 미진행</span>
               </div>
-            ) : (
-              student.progressBooks.map((cb: any) => {
-                const tb = unwrap(cb.textbook);
-                const stats = cb.stats || { percent: 0, donePagesCount: 0, maxPageCount: 0, pageStatuses: {}, bookPages: [] };
 
-                let bookBadgeClass = "bg-blue-50 text-blue-700 border-blue-200";
-                if (tb?.book_type === "부교재") bookBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
-                else if (tb?.book_type === "연산교재") bookBadgeClass = "bg-purple-50 text-purple-700 border-purple-200";
-                else if (tb?.book_type === "워크북") bookBadgeClass = "bg-amber-50 text-amber-700 border-amber-200";
+              {!student.progressBooks || student.progressBooks.length === 0 ? (
+                <div className="text-center py-12 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                  현재 반에 배정된 교재 진도 정보가 없습니다.
+                </div>
+              ) : (
+                student.progressBooks.map((cb: any) => {
+                  const tb = unwrap(cb.textbook);
+                  const stats = cb.stats || { percent: 0, donePagesCount: 0, maxPageCount: 0, pageStatuses: {}, bookPages: [] };
 
-                return (
-                  <div key={cb.class_textbook_id || cb.book_id} className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-3">
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border shadow-sm ${bookBadgeClass} mr-2 inline-block mb-1`}>
-                          {tb?.book_type || "교재"}
-                        </span>
-                        <div className="font-black text-slate-800 text-[15px]">{tb?.title || "교재명 없음"}</div>
-                      </div>
-                      <div className="text-right">
-                        <span className="text-base font-black text-[#002864] tabular-nums">{stats.percent}%</span>
-                        <div className="text-[10px] font-bold text-slate-400 tabular-nums mt-0.5">
-                          {stats.donePagesCount} / {stats.maxPageCount}p
+                  let bookBadgeClass = "bg-blue-50 text-blue-700 border-blue-200";
+                  if (tb?.book_type === "부교재") bookBadgeClass = "bg-emerald-50 text-emerald-700 border-emerald-200";
+                  else if (tb?.book_type === "연산교재") bookBadgeClass = "bg-purple-50 text-purple-700 border-purple-200";
+                  else if (tb?.book_type === "워크북") bookBadgeClass = "bg-amber-50 text-amber-700 border-amber-200";
+
+                  return (
+                    <div key={cb.class_textbook_id || cb.book_id} className="p-5 bg-white rounded-xl border border-slate-200 shadow-sm space-y-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border shadow-sm ${bookBadgeClass} mr-2 inline-block mb-1`}>
+                            {tb?.book_type || "교재"}
+                          </span>
+                          <div className="font-black text-slate-800 text-[15px]">{tb?.title || "교재명 없음"}</div>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-base font-black text-[#002864] tabular-nums">{stats.percent}%</span>
+                          <div className="text-[10px] font-bold text-slate-400 tabular-nums mt-0.5">
+                            {stats.donePagesCount} / {stats.maxPageCount}p
+                          </div>
                         </div>
                       </div>
+                      <div className="p-3 bg-slate-50/70 rounded-lg border border-slate-100 overflow-hidden">
+                        {renderPageBlocks(stats.bookPages, stats.pageStatuses)}
+                      </div>
                     </div>
-                    <div className="p-3 bg-slate-50/70 rounded-lg border border-slate-100 overflow-hidden">
-                      {renderPageBlocks(stats.bookPages, stats.pageStatuses)}
-                    </div>
-                  </div>
-                );
-              })
-            )}
+                  );
+                })
+              )}
+            </div>
+
+            <div className="pt-2">
+               <h3 className="font-extrabold text-slate-700 text-[14px] flex items-center gap-1.5 mb-4 border-b border-slate-200 pb-2">
+                  <span className="text-lg">📖</span> 수업별 진도 기록
+               </h3>
+               {isLogsLoading ? (
+                 <div className="text-center py-10 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                   데이터를 불러오는 중입니다...
+                 </div>
+               ) : lessonLogs.filter(l => l.parsed_progress).length === 0 ? (
+                 <div className="text-center py-10 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                   등록된 진도 기록이 없습니다.
+                 </div>
+               ) : (
+                 <div className="space-y-3">
+                   {lessonLogs.filter(l => l.parsed_progress).map((log, index) => {
+                      const isRecent = new Date(log.actual_date).getTime() >= twoWeeksAgoMs;
+                      if (!showAllLogs && !isRecent) return null;
+
+                      return (
+                        <div key={`prog-${log.lesson_log_id}`} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">
+                              {formatDateLabel(log.actual_date)}
+                            </span>
+                          </div>
+                          <div className="text-[13px] font-medium text-slate-700 whitespace-pre-wrap leading-relaxed">
+                            {log.parsed_progress}
+                          </div>
+                        </div>
+                      );
+                   })}
+
+                   {!showAllLogs && lessonLogs.filter(l => l.parsed_progress && new Date(l.actual_date).getTime() < twoWeeksAgoMs).length > 0 && (
+                     <button 
+                       onClick={() => setShowAllLogs(true)}
+                       className="w-full mt-4 py-3 bg-white text-slate-500 hover:bg-slate-50 hover:text-slate-700 font-bold text-xs rounded-xl border border-slate-200 shadow-sm transition-colors"
+                     >
+                       👇 이전 진도 기록 더 보기
+                     </button>
+                   )}
+                 </div>
+               )}
+            </div>
+
           </div>
         )}
 
+        {/* 🌟 완벽하게 복구된 과제 탭 렌더링 (공통 + 개별 코멘트 연동) */}
         {activeTab === "homework" && (
           <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
+            <h3 className="font-extrabold text-slate-700 text-[14px] flex items-center gap-1.5 mb-2 border-b border-slate-200 pb-2">
+               <span className="text-lg">📝</span> 배부된 수업 과제 내역
+            </h3>
+
             {isLogsLoading ? (
               <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
                 <div className="w-6 h-6 border-4 border-[#002864] border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
-                과제 및 진도 정보를 불러오는 중입니다...
+                과제 정보를 불러오는 중입니다...
               </div>
-            ) : lessonLogs.length === 0 ? (
+            ) : lessonLogs.filter(l => l.parsed_homework || l.my_individual_comment).length === 0 ? (
               <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
                 <span className="text-3xl block mb-3 opacity-50">📚</span>
-                아직 등록된 과제/알림장 내역이 없습니다.
+                배부된 과제가 없습니다.
               </div>
             ) : (
-              lessonLogs.map((log) => (
-                <div key={log.lesson_log_id || log.actual_date} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3 transition-shadow hover:shadow-md">
-                  <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-                    <span className="text-sm font-black text-indigo-700 bg-indigo-50 px-2.5 py-1 rounded-lg border border-indigo-100">
-                      {formatDateLabel(log.actual_date)}
+              lessonLogs.filter(l => l.parsed_homework || l.my_individual_comment).map((log) => (
+                <div key={`hw-${log.lesson_log_id}`} className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-3">
+                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
+                    <span className="text-[11px] font-black text-amber-700 bg-amber-50 px-2.5 py-1 rounded-lg border border-amber-100">
+                      {formatDateLabel(log.actual_date)} 배부
                     </span>
-                    {log.actual_session_no && (
-                      <span className="text-[11px] font-bold text-slate-400 bg-slate-50 px-2 py-0.5 rounded border border-slate-100">
-                        {log.actual_session_no}회차 수업
+                  </div>
+                  
+                  {/* 개별 과제(코멘트)가 있다면 최상단 강조 표시 */}
+                  {log.my_individual_comment && (
+                    <div className="bg-emerald-50/50 p-3 rounded-xl border border-emerald-100 flex flex-col gap-1.5 mt-1">
+                      <span className="text-[10px] font-black text-emerald-600 flex items-center gap-1">
+                        <span>🧑‍🎓</span> 우리 아이 개별 코멘트
                       </span>
-                    )}
-                  </div>
-                  <div className="text-[14px] font-medium text-slate-700 whitespace-pre-wrap leading-relaxed">
-                    {log.homework_desc}
-                  </div>
+                      <div className="text-[13px] font-bold text-slate-800 whitespace-pre-wrap leading-relaxed pl-1">
+                        {log.my_individual_comment}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* 공통 과제 내용 */}
+                  {log.parsed_homework && (
+                    <div className="text-[13px] font-medium text-slate-700 whitespace-pre-wrap leading-relaxed pt-1">
+                      {log.parsed_homework}
+                    </div>
+                  )}
                 </div>
               ))
             )}
           </div>
         )}
 
-        {/* 🌟 보강 (개별 클리닉/메이크업 일정 연동 뷰) */}
+        {/* 🌟 100% 복구 완료된 보강 일정 탭 */}
         {activeTab === "makeup" && (
           <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
             {isMakeupLoading ? (
@@ -885,7 +980,6 @@ export default function StudentCard({ student }: { student: any }) {
               </div>
             ) : makeups.length === 0 ? (
               <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
-                {/* 🌟 빈 화면 아이콘 💡(전구)로 교체 */}
                 <span className="text-3xl block mb-3 opacity-50">💡</span>
                 등록된 보강/클리닉 일정이 없습니다.
               </div>
@@ -934,47 +1028,7 @@ export default function StudentCard({ student }: { student: any }) {
           </div>
         )}
 
-        {activeTab === "consultation" && (
-          <div className="space-y-3 animate-[fadeIn_0.2s_ease-out]">
-             {consultLogs.length === 0 ? (
-               <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
-                 <span className="text-3xl block mb-3 opacity-50">💬</span>
-                 아직 등록된 상담 기록이 없습니다.
-               </div>
-             ) : (
-               consultLogs.map((log: any, idx: number) => {
-                 const badgeColor = getConsultBadgeColor(log.consultation_type);
-                 const dateStr = formatDateLabel(log.created_at);
-                 const instName = unwrap(log.instructor)?.name || '학원';
-                 const hasSummary = log.parent_summary && log.parent_summary.trim() !== "";
-
-                 return (
-                   <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 transition-colors hover:bg-slate-50">
-                     <div className="flex justify-between items-center">
-                       <div className="flex items-center gap-2">
-                         <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${badgeColor} whitespace-nowrap shadow-sm`}>
-                           {log.consultation_type || '상담진행'}
-                         </span>
-                         <span className="text-[11px] font-bold text-slate-500">
-                           {dateStr}
-                         </span>
-                       </div>
-                       <div className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200 whitespace-nowrap">
-                         담당: {instName} 선생님
-                       </div>
-                     </div>
-                     {hasSummary && (
-                       <div className="text-[13px] font-extrabold text-slate-800 pl-1 mt-1 leading-snug">
-                         {log.parent_summary}
-                       </div>
-                     )}
-                   </div>
-                 );
-               })
-             )}
-          </div>
-        )}
-
+        {/* 🌟 100% 복구 완료된 성적 분석 탭 */}
         {activeTab === "exam" && (
           <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
             {isExamLoading ? (
@@ -1094,6 +1148,49 @@ export default function StudentCard({ student }: { student: any }) {
             )}
           </div>
         )}
+
+        {/* 🌟 100% 복구 완료된 상담 기록 탭 */}
+        {activeTab === "consultation" && (
+          <div className="space-y-3 animate-[fadeIn_0.2s_ease-out]">
+             {consultLogs.length === 0 ? (
+               <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-xl border border-slate-200 shadow-sm">
+                 <span className="text-3xl block mb-3 opacity-50">💬</span>
+                 아직 등록된 상담 기록이 없습니다.
+               </div>
+             ) : (
+               consultLogs.map((log: any, idx: number) => {
+                 const badgeColor = getConsultBadgeColor(log.consultation_type);
+                 const dateStr = formatDateLabel(log.created_at);
+                 const instName = unwrap(log.instructor)?.name || '학원';
+                 const hasSummary = log.parent_summary && log.parent_summary.trim() !== "";
+
+                 return (
+                   <div key={idx} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2 transition-colors hover:bg-slate-50">
+                     <div className="flex justify-between items-center">
+                       <div className="flex items-center gap-2">
+                         <span className={`text-[10px] font-black px-2 py-0.5 rounded border ${badgeColor} whitespace-nowrap shadow-sm`}>
+                           {log.consultation_type || '상담진행'}
+                         </span>
+                         <span className="text-[11px] font-bold text-slate-500">
+                           {dateStr}
+                         </span>
+                       </div>
+                       <div className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200 whitespace-nowrap">
+                         담당: {instName} 선생님
+                       </div>
+                     </div>
+                     {hasSummary && (
+                       <div className="text-[13px] font-extrabold text-slate-800 pl-1 mt-1 leading-snug">
+                         {log.parent_summary}
+                       </div>
+                     )}
+                   </div>
+                 );
+               })
+             )}
+          </div>
+        )}
+
       </div>
 
       {toastMessage && (
