@@ -116,7 +116,7 @@ export default function ParentPortalPage() {
           .maybeSingle();
         
         if (data) {
-          // 🌟 추가됨: 카카오 인증 후 자체 JWT 토큰으로 Supabase 세션 설정
+          // 🌟 카카오 인증 후 자체 JWT 토큰으로 Supabase 세션 설정
           const token = await getParentAuthToken(data.parent_id);
           await supabase.auth.setSession({
             access_token: token,
@@ -170,7 +170,7 @@ export default function ParentPortalPage() {
   const loginParent = async () => {
     const result = await loginParentAction(phoneInput, pwInput);
     if (result.success && result.parentId) {
-      // 🌟 추가됨: 일반 로그인 후 JWT 토큰 적용
+      // 🌟 일반 로그인 후 JWT 토큰 적용
       const token = await getParentAuthToken(result.parentId);
       await supabase.auth.setSession({
         access_token: token,
@@ -190,7 +190,7 @@ export default function ParentPortalPage() {
     
     const result = await setupParentAction(parentId, setupName, setupPw);
     if (result.success) {
-      // 🌟 추가됨: 신규 설정 완료 후 즉시 JWT 토큰 적용
+      // 🌟 신규 설정 완료 후 즉시 JWT 토큰 적용
       const token = await getParentAuthToken(parentId);
       await supabase.auth.setSession({
         access_token: token,
@@ -236,6 +236,17 @@ export default function ParentPortalPage() {
     setIsDashboardLoading(true);
     
     try {
+      // 🌟 [핵심 추가] 새로고침이나 자동 로그인 시에도 토큰을 잃어버리지 않도록 항상 재발급 및 세션 설정
+      try {
+        const token = await getParentAuthToken(pid);
+        await supabase.auth.setSession({
+          access_token: token,
+          refresh_token: token
+        });
+      } catch (tokenErr) {
+        console.error("토큰 갱신 실패:", tokenErr);
+      }
+
       const { data: pData } = await supabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
       setInfoName(pData?.name || "");
 
