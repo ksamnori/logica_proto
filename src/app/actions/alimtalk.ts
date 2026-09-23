@@ -397,6 +397,9 @@ export async function sendQueuedMessages(tenantId: string) {
     }
 
     let sent = 0, failed = 0;
+    
+    // 🌟 환경 변수에서 기본 도메인을 가져오고, 없으면 기본 Vercel 앱 주소를 세팅합니다.
+    const portalBaseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://www.logicaclass.com";
 
     for (const msg of toSend) {
       await supabaseAdmin
@@ -422,8 +425,8 @@ export async function sendQueuedMessages(tenantId: string) {
         } else if (msg.template_id === "KA01TP26092103514300371OMrxorSxG") {
           res = await sendClassChangeAlimtalk(payload as any);
         } else if (msg.template_id === "GENERAL_SMS") {
-          // 🌟 일반 문자인 경우 상단에 [로지카대치본원학원] 헤더 적용
-          const textContent = `[로지카대치본원학원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
+          // 🌟 텍스트 기반 버튼 스타일 렌더링 (학부모 페이지 링크 삽입)
+          const textContent = `[로지카대치본원학원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
           res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
         } else {
           res = { success: false, message: `알 수 없는 템플릿: ${msg.template_id}` };
