@@ -119,7 +119,9 @@ export default function AdminDashboardPage() {
   const router = useRouter();
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자" });
+  
+  // 🌟 현재 접속자가 최고관리자인지 여부를 상태에 포함
+  const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자", isSuperAdmin: false });
   const [tenantId, setTenantId] = useState("hq");
   const [tenantName, setTenantName] = useState("로딩중...");
   
@@ -159,7 +161,6 @@ export default function AdminDashboardPage() {
   const [bulkType, setBulkType] = useState('schedule');
   const [bulkTarget, setBulkTarget] = useState('all');
   
-  // 🌟 과제 전용 필드 (homeworkTitle, dueDate) 추가
   const [bulkForm, setBulkForm] = useState({ 
     scheduleName: '', applyDate: '', 
     oldDate: '', newDate: '', 
@@ -193,7 +194,7 @@ export default function AdminDashboardPage() {
     const raw = data || [];
     const uniqueMap = new Map();
     raw.forEach((item: any) => {
-        const key = item.template_id === 'KA01TP260826014520504X1Fplf8R0FH' ? `${item.student_id}_${item.parent_phone}_ATT` : item.queue_id;
+        const key = item.template_id === 'KA01TP260921034958500GAtQOl600yJ' ? `${item.student_id}_${item.parent_phone}_ATT` : item.queue_id;
         if (!uniqueMap.has(key)) uniqueMap.set(key, item);
     });
     setQueuedMessages(Array.from(uniqueMap.values()));
@@ -255,7 +256,12 @@ export default function AdminDashboardPage() {
       const name = localStorage.getItem('logica_instructor_name') || "관리자";
       const tId = localStorage.getItem("logica_tenant_id") || "hq"; 
       
-      setCurrentUser({ instId, name });
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
+
+      // 🌟 최고관리자 권한 상태 반영
+      setCurrentUser({ instId, name, isSuperAdmin: isGodMode });
       setTenantId(tId);
 
       const getTenantName = async () => {
@@ -514,6 +520,37 @@ export default function AdminDashboardPage() {
     setLiveFeeds(data || []);
   };
 
+  // 🌟 건별 피드 삭제 기능 (최고관리자 전용)
+  const deleteNotificationLog = async (logId: string) => {
+    if (!confirm("이 발송 기록을 삭제하시겠습니까?")) return;
+    try {
+      const { error } = await supabase.from('notification_log').delete().eq('noti_log_id', logId);
+      if (error) {
+        alert("삭제에 실패했습니다.");
+        return;
+      }
+      fetchLiveFeeds();
+    } catch (e) {
+      alert("삭제 실패");
+    }
+  };
+
+  // 🌟 전체 피드 비우기 기능 (최고관리자 전용)
+  const clearNotificationLogs = async () => {
+    if (!confirm("최근 발송 내역을 모두 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다.)")) return;
+    try {
+      const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+      const { error } = await supabase.from('notification_log').delete().eq('tenant_id', validTenantId);
+      if (error) {
+        alert("전체 삭제에 실패했습니다.");
+        return;
+      }
+      fetchLiveFeeds();
+    } catch (e) {
+      alert("전체 삭제 실패");
+    }
+  };
+
   const fetchInstructorStats = async () => {
     const tId = localStorage.getItem("logica_tenant_id");
     const hqTenantId = 'd59395b0-8c9c-4dd3-9e25-ff569da98abc'; 
@@ -663,7 +700,6 @@ export default function AdminDashboardPage() {
   };
 
   const handleAddBulkToQueue = async () => {
-    // 🌟 과제 안내 유효성 검사 추가
     if (bulkType === 'schedule' && (!bulkForm.scheduleName || !bulkForm.applyDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'makeup' && (!bulkForm.oldDate || !bulkForm.newDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'homework' && (!bulkForm.homeworkTitle || !bulkForm.dueDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
@@ -691,22 +727,22 @@ export default function AdminDashboardPage() {
       const pushTarget = (phone: string, name: string, rel: string) => {
         if (!phone || phone.includes('unassigned')) return;
         const relStr = rel || '학부모';
-        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `학부모(${relStr})`;
+        
+        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `${student.name}(${relStr})`;
 
         if (bulkType === 'schedule') {
           newMessages.push({
             tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
-            template_id: 'KA01TP260826015150733a1AW4dFE1qM', schedule_name: bulkForm.scheduleName, apply_date: bulkForm.applyDate, details: bulkForm.details,
+            template_id: 'KA01TP260921035109788D7zIQYMgqvp', schedule_name: bulkForm.scheduleName, apply_date: bulkForm.applyDate, details: bulkForm.details,
             preview_title: `[일정] ${bulkForm.scheduleName}`, preview_desc: `${student.name} ${finalName}`, time_string: currentTimeStr, status: '대기'
           });
         } else if (bulkType === 'makeup') {
           newMessages.push({
             tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
-            template_id: 'KA01TP260831032803585c1Me7WbxjUe', old_date: bulkForm.oldDate, new_date: bulkForm.newDate, details: bulkForm.details,
+            template_id: 'KA01TP26092103514300371OMrxorSxG', old_date: bulkForm.oldDate, new_date: bulkForm.newDate, details: bulkForm.details,
             preview_title: `[보강] ${student.name}`, preview_desc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`, time_string: currentTimeStr, status: '대기'
           });
         } else if (bulkType === 'homework') {
-          // 🌟 과제 안내는 일반 SMS/LMS 형태로 변환하여 큐에 등록
           const fullDetails = `[과제명]: ${bulkForm.homeworkTitle}\n[제출기한]: ${bulkForm.dueDate}\n\n${bulkForm.details}`;
           newMessages.push({
             tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
@@ -763,7 +799,7 @@ export default function AdminDashboardPage() {
     if (title.includes('결석')) return 'bg-rose-50 text-rose-500 border-rose-100';
     if (title.includes('일정')) return 'bg-indigo-50 text-indigo-600 border-indigo-100';
     if (title.includes('보강')) return 'bg-purple-50 text-purple-600 border-purple-100';
-    if (title.includes('과제')) return 'bg-cyan-50 text-cyan-600 border-cyan-200'; // 🌟 과제 배지 색상 추가
+    if (title.includes('과제')) return 'bg-cyan-50 text-cyan-600 border-cyan-200'; 
     if (title.includes('일반문자')) return 'bg-slate-100 text-slate-600 border-slate-300';
     return 'bg-slate-100 text-slate-600 border-slate-200';
   };
@@ -922,7 +958,6 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-5 flex flex-col gap-3">
                 
-                {/* 🌟 과제 안내 옵션 추가 */}
                 <select value={bulkType} onChange={e => { setBulkType(e.target.value); setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', homeworkTitle: '', dueDate: '', details: '' }); }} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
                   <option value="schedule">📅 학사일정 (개강/휴원) 안내</option>
                   <option value="makeup">⏰ 시간표 변경 및 보강 안내</option>
@@ -1006,7 +1041,7 @@ export default function AdminDashboardPage() {
                           }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-1.5 top-1.5">×</button>
                         </div>
                         
-                        {msg.template_id !== "KA01TP260826014520504X1Fplf8R0FH" && msg.details && (
+                        {msg.template_id !== "KA01TP260921034958500GAtQOl600yJ" && msg.details && (
                           <div className="mt-0.5 bg-slate-50 px-2 py-1 rounded text-[9px] text-slate-600 border border-slate-100 line-clamp-1 leading-snug" title={msg.details}>
                             {msg.details}
                           </div>
@@ -1027,6 +1062,12 @@ export default function AdminDashboardPage() {
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[520px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
+                {/* 🌟 최고관리자용 전체 비우기 버튼 추가 */}
+                {currentUser.isSuperAdmin && liveFeeds.length > 0 && (
+                  <button onClick={clearNotificationLogs} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">
+                    전체 비우기
+                  </button>
+                )}
               </div>
               
               <div className="flex-1 overflow-y-auto custom-scroll bg-white relative">
@@ -1053,7 +1094,7 @@ export default function AdminDashboardPage() {
                         }
                       }
 
-                      const fullMsg = feed.message_content || feed.content || ''; // 수정. 260917
+                      const fullMsg = feed.message_content || feed.content || ''; 
                       const match = fullMsg.match(/^\[(.*?)\]/);
                       const categoryName = match ? match[1] : '알림';
                       const descText = match ? fullMsg.replace(/^\[.*?\]\s*/, '') : fullMsg;
@@ -1067,7 +1108,7 @@ export default function AdminDashboardPage() {
                                <span className="text-[10px] font-extrabold text-slate-500">📅 {displayDateStr}</span>
                             </div>
                           )}
-                          <div className="px-3 py-1.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-[11px] w-full">
+                          <div className="px-3 py-1.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-[11px] w-full group relative">
                             <span className={`text-xs font-black shrink-0 ${isSuccess ? 'text-emerald-500' : 'text-rose-500'}`} title={isSuccess ? '성공' : '실패'}>
                               {isSuccess ? '✓' : '✗'}
                             </span>
@@ -1078,8 +1119,19 @@ export default function AdminDashboardPage() {
                               <span className="font-extrabold text-slate-700 truncate" title={feed.target_name || feed.student_name || '학부모'}>{feed.target_name || feed.student_name || '학부모'}</span>
                               <span className="text-[9px] text-slate-400 font-medium truncate">{feed.target_phone || feed.phone || ''}</span>
                             </div>
-                            <span className="text-[10px] text-slate-600 truncate flex-1" title={descText}>{descText}</span>
+                            <span className="text-[10px] text-slate-600 truncate flex-1 pr-6" title={descText}>{descText}</span>
                             <span className="text-[9px] font-bold text-slate-400 shrink-0 ml-1 whitespace-nowrap">{rightSideDateTime}</span>
+
+                            {/* 🌟 관리자 전용: 건별 삭제 (x 버튼) */}
+                            {currentUser.isSuperAdmin && (
+                              <button
+                                onClick={() => deleteNotificationLog(feed.noti_log_id)}
+                                className="absolute right-2 bg-white text-slate-300 hover:bg-rose-100 hover:text-rose-500 font-black rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-sm border border-slate-200 hover:border-rose-300"
+                                title="기록 삭제"
+                              >
+                                ×
+                              </button>
+                            )}
                           </div>
                         </React.Fragment>
                       );
@@ -1111,7 +1163,9 @@ export default function AdminDashboardPage() {
                       const pushAttTarget = (phone: string, name: string, rel: string) => {
                         if (!phone || phone.includes('unassigned')) return;
                         const relStr = rel || '학부모';
-                        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `학부모(${relStr})`;
+                        
+                        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `${stuData.name}(${relStr})`;
+
                         expandedMsgs.push({
                           ...m,
                           id: `${m.id}_${phone}`,
@@ -1127,7 +1181,7 @@ export default function AdminDashboardPage() {
                     }
                   });
 
-                  const attMsgs = expandedMsgs.filter((m: any) => m.templateId === 'KA01TP260826014520504X1Fplf8R0FH');
+                  const attMsgs = expandedMsgs.filter((m: any) => m.templateId === 'KA01TP260921034958500GAtQOl600yJ');
                   const replaceIds = attMsgs.length > 0
                     ? [...new Set(attMsgs.map((m: any) => m.id.split('_')[0]))] as string[]
                     : [];
@@ -1211,7 +1265,6 @@ export default function AdminDashboardPage() {
                 <h2 className="font-black text-lg ml-1">실시간 유선 문의 대장</h2>
               </div>
               <div className="flex items-center gap-3 md:gap-5">
-                {/* 🌟 새 창에서 로그인할 수 있는 탈주 버튼 추가 */}
                 <a 
                   href="https://docs.google.com/spreadsheets/d/1rD65o05on4Noavir4c1nqITAjeJnjSK_k7lj5hywAbI/edit?usp=sharing" 
                   target="_blank" 

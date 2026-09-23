@@ -19,7 +19,7 @@ const formatTimeAsKST = (isoStr: string) => {
   const d = new Date(isoStr);
   if (isNaN(d.getTime())) return "";
   const kst = new Date(d.getTime() + (9 * 3600000));
-  return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getUTCMinutes()).padStart(2, '0')}`;
+  return `${String(kst.getUTCHours()).padStart(2, '0')}:${String(kst.getMinutes()).padStart(2, '0')}`;
 };
 
 const formatDateAndDayKST = (isoStr?: string) => {
@@ -50,7 +50,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
   const [hideTestStudents, setHideTestStudents] = useState<boolean>(true);
   
-  // 🌟 실시간 이름 검색 상태 추가
   const [searchQuery, setSearchQuery] = useState<string>("");
 
   const fetchTimeoutRef = useRef<any>(null);
@@ -207,6 +206,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     }
   }, [selectedAttClassId]);
 
+  // 🌟 [핵심 수정] 실시간 화면 새로고침 센서에서 대기열을 덮어쓰는 불필요한 알림톡 전송 코드를 완전히 제거했습니다.
   useEffect(() => {
     const attChannel = supabase
       .channel('global_attendance_realtime')
@@ -226,9 +226,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       supabase.removeChannel(attChannel); 
       supabase.removeChannel(clinicChannel); 
     };
-  }, [selectedAttClassId, todayIso]);
+  }, [selectedAttClassId]);
 
-  // 🌟 테스트 필터 및 실시간 이름 검색 동시 적용
   const baseStudents = useMemo(() => {
     let filtered = attStudents;
     if (hideTestStudents) {
@@ -348,7 +347,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
               statusLabel: statusLabel,
               previewTitle: `[출결] ${statusLabel}`,
               previewDesc: `${student.parentPhone} • ${timeString}`,
-              templateId: "KA01TP260826014520504X1Fplf8R0FH"
+              templateId: "KA01TP260921034958500GAtQOl600yJ"
             });
         }
     }
@@ -394,7 +393,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         statusLabel: '등원',
         previewTitle: `[출결] 등원`,
         previewDesc: `${s.parentPhone} • ${timeString}`,
-        templateId: "KA01TP260826014520504X1Fplf8R0FH"
+        templateId: "KA01TP260921034958500GAtQOl600yJ"
     }));
 
     if (newMessages.length > 0) onQueueMessage(newMessages); 
@@ -439,7 +438,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
         statusLabel: '하원',
         previewTitle: `[출결] 하원`,
         previewDesc: `${s.parentPhone} • ${timeString}`,
-        templateId: "KA01TP260826014520504X1Fplf8R0FH"
+        templateId: "KA01TP260921034958500GAtQOl600yJ"
     }));
 
     if (newMessages.length > 0) onQueueMessage(newMessages); 
@@ -487,7 +486,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           statusLabel: status,
           previewTitle: `[출결] ${status}`,
           previewDesc: `${manualModalData.parentPhone} • ${timeString}`,
-          templateId: "KA01TP260826014520504X1Fplf8R0FH"
+          templateId: "KA01TP260921034958500GAtQOl600yJ"
         });
     }
 
@@ -521,7 +520,6 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
             <span>📡</span> 실시간 동선
             
-            {/* 🌟 실시간 이름 검색 도구 추가 */}
             <div className="relative ml-2 font-normal">
               <span className="absolute inset-y-0 left-0 flex items-center pl-2.5 text-slate-400 text-xs">
                 🔍

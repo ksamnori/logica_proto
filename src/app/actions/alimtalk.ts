@@ -9,10 +9,8 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 );
 
-const ATTENDANCE_TEMPLATE_ID = "KA01TP260826014520504X1Fplf8R0FH";
+const ATTENDANCE_TEMPLATE_ID = "KA01TP260921034958500GAtQOl600yJ";
 
-// 솔라피 응답을 해석해 실제 성공 여부를 판정합니다.
-// 주의: 여기서의 "성공"은 접수 성공이며, 최종 도착 여부는 아닙니다.
 function interpretSolapiResult(response: any): {
   success: boolean; pending: boolean; reason: string;
 } {
@@ -41,12 +39,11 @@ function interpretSolapiResult(response: any): {
     }
   }
 
-  // 판단 근거가 없으면 보수적으로 '대기'로 봅니다.
   return { success: true, pending: true, reason: "결과 확인 불가" };
 }
 
 // ------------------------------------------------------------------
-// 1. [기존] 출결 안내 알림톡
+// 1. 출결 안내 알림톡
 // ------------------------------------------------------------------
 export async function sendAttendanceAlimtalk({
   parentPhone, parentName, studentName, timeString, statusLabel, templateId
@@ -85,7 +82,7 @@ export async function sendAttendanceAlimtalk({
 }
 
 // ------------------------------------------------------------------
-// 2. [신규] 학습(테스트) 결과 안내 알림톡
+// 2. 학습(테스트) 결과 안내 알림톡
 // ------------------------------------------------------------------
 export async function sendTestResultAlimtalk({
   parentPhone, parentName, studentName, testName, studentScore, classAverage, comment, templateId
@@ -122,7 +119,7 @@ export async function sendTestResultAlimtalk({
 }
 
 // ------------------------------------------------------------------
-// 3. [신규] 학사일정(휴원/개강) 안내 알림톡
+// 3. 학사일정(휴원/개강) 안내 알림톡
 // ------------------------------------------------------------------
 export async function sendScheduleNoticeAlimtalk({
   parentPhone, parentName, scheduleName, applyDate, details, templateId
@@ -157,7 +154,7 @@ export async function sendScheduleNoticeAlimtalk({
 }
 
 // ------------------------------------------------------------------
-// 4. [신규] 시간표 변경 및 보강 안내 알림톡
+// 4. 시간표 변경 및 보강 안내 알림톡
 // ------------------------------------------------------------------
 export async function sendClassChangeAlimtalk({
   parentPhone, parentName, oldDate, newDate, details, templateId
@@ -192,7 +189,7 @@ export async function sendClassChangeAlimtalk({
 }
 
 // ------------------------------------------------------------------
-// 5. [신규] 자유 내용 일반 문자(SMS/LMS) 전용 발송
+// 5. 자유 내용 일반 문자(SMS/LMS) 전용 발송
 // ------------------------------------------------------------------
 export async function sendGeneralMessage({
   parentPhone, textContent
@@ -207,7 +204,7 @@ export async function sendGeneralMessage({
     const response = await messageService.send([{
       to: String(parentPhone).replace(/[^0-9]/g, ""), 
       from: String(senderPhone).replace(/[^0-9]/g, ""),
-      text: String(textContent) // 카카오 옵션 없이 텍스트만 넣으면 일반 문자로 전송됨
+      text: String(textContent) 
     }]);
     const r = interpretSolapiResult(response);
     return { success: r.success, pending: r.pending, message: r.reason, data: response };
@@ -217,10 +214,7 @@ export async function sendGeneralMessage({
 }
 
 // ------------------------------------------------------------------
-// 6. [신규] 출결 알림톡 대기열 적재 (키오스크 전용)
-//    - service_role로 동작하므로 alimtalk_queue에 RLS를 켜도 통과합니다.
-//    - tenant_id / 학생명 / 학부모 연락처를 클라이언트에서 받지 않고
-//      서버가 DB에서 직접 읽습니다. (키오스크는 비로그인 단말이라 중요)
+// 6. 출결 알림톡 대기열 적재 (키오스크 전용)
 // ------------------------------------------------------------------
 export async function queueAttendanceAlimtalk({
   studentId, statusLabel, timeString
@@ -246,9 +240,12 @@ export async function queueAttendanceAlimtalk({
     const pushTarget = (phone?: string | null, name?: string | null, rel?: string | null) => {
       if (!phone || String(phone).includes("unassigned")) return;
       const relStr = rel || "학부모";
-      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `학부모(${relStr})`;
+      
+      // 🌟 [핵심 교정] 이름이 비어있으면 무조건 학생이름으로 교체
+      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${student.name}(${relStr})`;
+
       rows.push({
-        tenant_id: student.tenant_id,          // 🌟 DB에서 읽은 값 — 단말이 조작 불가
+        tenant_id: student.tenant_id,          
         student_id: student.student_id,
         student_name: student.name,
         parent_name: finalName,
@@ -269,7 +266,6 @@ export async function queueAttendanceAlimtalk({
       return { success: true, queued: 0, message: "발송 가능한 연락처가 없습니다." };
     }
 
-    // 기존 등/하원 대기 건 제거 후 갱신 (기존 로직 유지)
     const { error: dErr } = await supabaseAdmin
       .from("alimtalk_queue")
       .delete()
@@ -330,7 +326,10 @@ export async function queueAttendanceNotice({
     const pushTarget = (phone?: string | null, name?: string | null, rel?: string | null) => {
       if (!phone || String(phone).includes("unassigned")) return;
       const relStr = rel || "학부모";
-      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `학부모(${relStr})`;
+
+      // 🌟 [핵심 교정] 이름이 비어있으면 무조건 학생이름으로 교체
+      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${stu.name}(${relStr})`;
+
       rows.push({
         tenant_id: stu.tenant_id,
         student_id: stu.student_id,
@@ -383,8 +382,6 @@ export async function queueAttendanceNoticeBulk(
 
 // ------------------------------------------------------------------
 // 8. 대기열 일괄 발송 (운영 대시보드 "발송" 버튼)
-//    - 큐 조회 / 상태 변경 / 실제 발송 / 로그 기록 / 큐 삭제를 서버에서 처리
-//    - 건별로 처리하므로 중간에 실패해도 나머지가 계속 진행됩니다.
 // ------------------------------------------------------------------
 export async function sendQueuedMessages(tenantId: string) {
   if (!tenantId) return { success: false, sent: 0, failed: 0, message: "tenantId 누락" };
@@ -404,7 +401,6 @@ export async function sendQueuedMessages(tenantId: string) {
     let sent = 0, failed = 0;
 
     for (const msg of toSend) {
-      // 이 건만 '발송중'으로 표시 (전체 일괄 변경하지 않음)
       await supabaseAdmin
         .from("alimtalk_queue")
         .update({ status: "발송중" })
@@ -421,11 +417,11 @@ export async function sendQueuedMessages(tenantId: string) {
 
       let res: any;
       try {
-        if (msg.template_id === "KA01TP260826014520504X1Fplf8R0FH") {
+        if (msg.template_id === "KA01TP260921034958500GAtQOl600yJ") {
           res = await sendAttendanceAlimtalk(payload as any);
-        } else if (msg.template_id === "KA01TP260826015150733a1AW4dFE1qM") {
+        } else if (msg.template_id === "KA01TP260921035109788D7zIQYMgqvp") {
           res = await sendScheduleNoticeAlimtalk(payload as any);
-        } else if (msg.template_id === "KA01TP260831032803585c1Me7WbxjUe") {
+        } else if (msg.template_id === "KA01TP26092103514300371OMrxorSxG") {
           res = await sendClassChangeAlimtalk(payload as any);
         } else if (msg.template_id === "GENERAL_SMS") {
           const textContent = `[로지카 학원 대치본원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
@@ -437,10 +433,9 @@ export async function sendQueuedMessages(tenantId: string) {
         res = { success: false, message: e?.message || String(e) };
       }
 
-            const logMessage =
+      const logMessage =
         msg.template_id === "GENERAL_SMS" ? `${msg.preview_title} 발송` : msg.preview_title;
 
-      // 🌟 성공 / 대기 / 실패 3단계로 기록
       const logStatus = !res?.success ? "실패" : (res?.pending ? "대기" : "성공");
 
       await supabaseAdmin.from("notification_log").insert({
@@ -506,8 +501,7 @@ export async function deleteQueueItem(queueId: string) {
 }
 
 // ------------------------------------------------------------------
-// 10. 대기열에 메시지 추가 (일괄 폼 / 출결 패널 공용)
-//     replaceAttendance: true면 같은 학생의 기존 출결 메시지를 먼저 지웁니다.
+// 10. 대기열에 메시지 추가
 // ------------------------------------------------------------------
 export async function addToQueue(
   rows: any[],
@@ -540,9 +534,7 @@ export async function addToQueue(
 }
 
 // ------------------------------------------------------------------
-// 11. 키오스크 출결 처리 (등원 / 하원 / 재등원)
-//     - attendance를 service_role로 처리하므로 RLS를 켜도 통과합니다.
-//     - 쿨다운 판정도 서버에서 하여 단말 시계 조작을 막습니다.
+// 11. 키오스크 출결 처리
 // ------------------------------------------------------------------
 const CHECKOUT_COOLDOWN_MIN = 3;
 
@@ -558,7 +550,6 @@ export async function kioskAttendance(studentId: string) {
       `${String(kstTime.getUTCHours()).padStart(2, "0")}:` +
       `${String(kstTime.getUTCMinutes()).padStart(2, "0")}`;
 
-    // 학생 + 반 정보를 서버에서 조회
     const { data: stu, error: sErr } = await supabaseAdmin
       .from("student")
       .select("student_id, name, tenant_id, enrollment(enrollment_id, class(class_id))")
@@ -572,7 +563,6 @@ export async function kioskAttendance(studentId: string) {
     const enrollmentId = enr?.enrollment_id ?? null;
     const classId = enr?.class?.class_id ?? null;
 
-    // 오늘 기록 조회
     const { data: rawRecords, error: fErr } = await supabaseAdmin
       .from("attendance")
       .select("*")
@@ -632,7 +622,6 @@ export async function kioskAttendance(studentId: string) {
       statusLabel = "등원";
     }
 
-    // 알림톡 대기열 적재 (기존 함수 재사용)
     const q = await queueAttendanceAlimtalk({
       studentId: stu.student_id,
       statusLabel,
