@@ -7,6 +7,9 @@ import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
 import { queueAttendanceNotice, queueAttendanceNoticeBulk } from "@/app/actions/alimtalk";
 
+// 🌟 분리된 모달 컴포넌트 임포트
+import LessonLogModal from "@/components/dashboard/LessonLogModal";
+
 const getKSTDateStr = (offsetDays = 0) => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -66,16 +69,8 @@ export default function TeacherDashboardPage() {
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
   const [memoData, setMemoData] = useState({ type: "일반공지", content: "" });
 
-  // 🌟 [수정 포인트] 일지 작성 폼 상태를 학습 결과 페이지와 동일하게 개편
+  // 🌟 [수정] 복잡한 폼 상태 제거하고, 모달 열기/닫기 상태만 관리
   const [isLessonLogModalOpen, setIsLessonLogModalOpen] = useState(false);
-  const [lessonForm, setLessonForm] = useState({
-    lesson_log_id: null as number | null,
-    actual_date: getKSTDateStr(),
-    progress_desc: "",
-    homework_desc: "", 
-    individual_comments: [] as { student_id: string; comment: string }[],
-    instructor_note: "" 
-  });
 
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
   const isBulkProcessing = useRef<boolean>(false);
@@ -720,65 +715,6 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
-  // 🌟 [수정 포인트] 일지 작성 폼 초기화 로직 (날짜 선택 및 개별 코멘트 배열 포함)
-  const openLessonLogModal = () => {
-    setIsLessonLogModalOpen(true);
-    setLessonForm({
-      lesson_log_id: null,
-      actual_date: getKSTDateStr(),
-      progress_desc: "",
-      homework_desc: "",
-      individual_comments: [],
-      instructor_note: ""
-    });
-  };
-
-  // 🌟 [수정 포인트] DB 분리 및 병합 저장 처리 로직 연동
-  const handleLessonLogSubmit = async () => {
-    if (!lessonForm.progress_desc.trim() && !lessonForm.homework_desc.trim()) {
-      alert("진도 또는 공통 과제 내용 중 하나는 필수로 입력해주세요.");
-      return;
-    }
-
-    let finalDesc = "";
-    if (lessonForm.progress_desc.trim()) finalDesc += `[📖 오늘의 진도]\n${lessonForm.progress_desc.trim()}\n\n`;
-    if (lessonForm.homework_desc.trim()) finalDesc += `[📝 공통 과제]\n${lessonForm.homework_desc.trim()}`;
-    finalDesc = finalDesc.trim();
-
-    try {
-      // 1. 일지 본문 저장 및 ID 획득
-      const { data: newLog, error: logErr } = await supabase.from("daily_lesson_log").insert({
-        class_id: selectedClassId,
-        actual_date: lessonForm.actual_date || getKSTDateStr(),
-        actual_session_no: null,
-        homework_desc: finalDesc, 
-        instructor_note: lessonForm.instructor_note 
-      }).select('lesson_log_id').single();
-
-      if (logErr) throw logErr;
-
-      const currentLogId = newLog.lesson_log_id;
-
-      // 2. 개별 코멘트가 있다면 신규 테이블(lesson_log_student_comment)에 인서트
-      const validComments = lessonForm.individual_comments.filter(c => c.student_id && c.comment.trim());
-      if (validComments.length > 0) {
-        const inserts = validComments.map(c => ({
-          lesson_log_id: currentLogId,
-          student_id: c.student_id,
-          comment: c.comment.trim()
-        }));
-        await supabase.from('lesson_log_student_comment').insert(inserts);
-      }
-
-      alert("✅ 수업 일지가 성공적으로 등록되었습니다!");
-      setIsLessonLogModalOpen(false);
-      fetchClassDetails(selectedClassId); 
-    } catch (e: any) {
-      console.error(e);
-      alert("등록 중 오류가 발생했습니다: " + e.message);
-    }
-  };
-
   if (isAuthorized === null) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
@@ -970,7 +906,7 @@ export default function TeacherDashboardPage() {
               
               <div className="flex items-center gap-4 ml-auto mr-4">
                 <button 
-                  onClick={openLessonLogModal} 
+                  onClick={() => setIsLessonLogModalOpen(true)} 
                   className="relative px-6 py-2 bg-gradient-to-r from-indigo-600 to-blue-700 text-white text-sm font-black rounded-xl hover:from-indigo-500 hover:to-blue-600 transition-all shadow-md hover:shadow-lg flex items-center gap-2 group hover:-translate-y-0.5"
                 >
                   <span className="absolute -top-1.5 -right-1.5 flex h-3.5 w-3.5">
@@ -1240,135 +1176,17 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
-      {/* 🌟 확장된 수업 일지 작성/수정 모달 */}
-      {isLessonLogModalOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="bg-gradient-to-r from-indigo-700 to-blue-800 p-5 text-white flex justify-between items-center shrink-0">
-              <h3 className="text-lg font-black flex items-center gap-2">📝 새 수업 일지 작성</h3>
-              <button onClick={() => setIsLessonLogModalOpen(false)} className="text-white hover:text-rose-400 text-2xl font-bold leading-none transition-colors">&times;</button>
-            </div>
-            
-            <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] bg-slate-50/50 custom-scroll">
-              
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-black text-slate-700 flex items-center gap-1.5">
-                  📅 수업 일자 <span className="text-xs text-slate-400 font-normal">(소급 작성 시 변경 가능)</span>
-                </label>
-                <input 
-                  type="date" 
-                  value={lessonForm.actual_date} 
-                  onChange={e => setLessonForm({...lessonForm, actual_date: e.target.value})} 
-                  className="border border-slate-300 p-3 w-1/3 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
-                    <span>📖 오늘의 진도</span> <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea 
-                    value={lessonForm.progress_desc} 
-                    onChange={e => setLessonForm({...lessonForm, progress_desc: e.target.value})} 
-                    rows={4}
-                    className="border border-indigo-200 p-4 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm resize-none placeholder-slate-300"
-                    placeholder="예) 이차방정식의 근과 계수 개념 학습 및 대표 유형 문제 풀이 (p.45 ~ p.50)" 
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
-                    <span>📝 공통 과제</span> <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea 
-                    value={lessonForm.homework_desc} 
-                    onChange={e => setLessonForm({...lessonForm, homework_desc: e.target.value})} 
-                    rows={4}
-                    className="border border-indigo-200 p-4 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm resize-none placeholder-slate-300"
-                    placeholder="예) 워크북 p.20 ~ p.25 홀수번 풀이 및 채점해오기" 
-                  />
-                </div>
-              </div>
-
-              {/* 🌟 개별 코멘트 배열 관리 UI */}
-              <div className="flex flex-col gap-2 pt-2">
-                <label className="text-sm font-black text-emerald-700 flex items-center gap-1.5">
-                  <span>🧑‍🎓 개별 특이 과제 / 코멘트</span>
-                  <span className="text-[11px] text-emerald-600/70 font-bold bg-emerald-50 px-2 py-0.5 rounded">(선택)</span>
-                </label>
-                <div className="flex flex-col gap-2">
-                  {lessonForm.individual_comments.map((ic, idx) => (
-                    <div key={idx} className="flex items-start gap-2 bg-emerald-50/30 p-2.5 rounded-xl border border-emerald-100">
-                      <select 
-                        value={ic.student_id} 
-                        onChange={(e) => {
-                          const newComments = [...lessonForm.individual_comments];
-                          newComments[idx].student_id = e.target.value;
-                          setLessonForm({ ...lessonForm, individual_comments: newComments });
-                        }}
-                        className="border border-slate-300 p-2.5 w-[120px] rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:border-emerald-500 shrink-0 shadow-sm"
-                      >
-                        <option value="">학생 선택</option>
-                        {students.map((s: any) => <option key={s.student_id} value={s.student_id}>{s.name}</option>)}
-                      </select>
-                      <textarea 
-                        value={ic.comment} 
-                        onChange={(e) => {
-                          const newComments = [...lessonForm.individual_comments];
-                          newComments[idx].comment = e.target.value;
-                          setLessonForm({ ...lessonForm, individual_comments: newComments });
-                        }}
-                        rows={2}
-                        className="border border-slate-300 p-2.5 flex-1 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:border-emerald-500 resize-none placeholder-slate-400 shadow-sm"
-                        placeholder="특정 학생의 개별 과제나 코멘트를 입력하세요."
-                      />
-                      <button 
-                        onClick={() => {
-                          const newComments = lessonForm.individual_comments.filter((_, i) => i !== idx);
-                          setLessonForm({ ...lessonForm, individual_comments: newComments });
-                        }}
-                        className="mt-0.5 p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="이 코멘트 지우기"
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button 
-                  onClick={() => setLessonForm(prev => ({ ...prev, individual_comments: [...prev.individual_comments, { student_id: "", comment: "" }] }))}
-                  className="w-full py-2.5 bg-white text-emerald-600 hover:bg-emerald-50 font-bold text-xs rounded-xl border-2 border-emerald-200 border-dashed transition-colors flex items-center justify-center gap-1.5 mt-1 shadow-sm"
-                >
-                  <span className="text-base leading-none">➕</span> 학생 특정 코멘트 추가하기
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-1.5 pt-4 border-t border-slate-200">
-                <label className="text-sm font-black text-slate-500 flex items-center gap-1.5">
-                  <span>🔒 강사 특이사항 메모</span>
-                  <span className="text-[11px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded">(학부모 미노출)</span>
-                </label>
-                <textarea 
-                  value={lessonForm.instructor_note} 
-                  onChange={e => setLessonForm({...lessonForm, instructor_note: e.target.value})} 
-                  rows={2}
-                  className="border border-slate-300 p-3 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 bg-white shadow-sm resize-none placeholder-slate-300"
-                  placeholder="강사들끼리만 공유할 태도 불량, 특별 케이스 등의 내용을 적어주세요." 
-                />
-              </div>
-
-            </div>
-            
-            <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
-              <button onClick={() => setIsLessonLogModalOpen(false)} className="px-6 py-3 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-xl text-sm transition-colors shadow-sm">취소</button>
-              <button onClick={handleLessonLogSubmit} className="px-6 py-3 bg-[#002864] hover:bg-blue-900 text-white font-black rounded-xl text-sm shadow-md transition-colors flex items-center gap-2">
-                ✅ 새 일지 등록 완료
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 🌟 렌더링 추가: 분리된 LessonLogModal 삽입 */}
+      <LessonLogModal 
+        isOpen={isLessonLogModalOpen} 
+        onClose={() => setIsLessonLogModalOpen(false)} 
+        onSuccess={() => {
+           // 모달에서 저장 완료 후 데이터를 다시 불러오기
+           fetchClassDetails(selectedClassId);
+        }} 
+        classId={selectedClassId} 
+        students={students} 
+      />
 
     </div>
   );

@@ -5,6 +5,9 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 
+// 🌟 [추가 포인트] 분리한 모달 컴포넌트 임포트
+import LessonLogModal from "@/components/dashboard/LessonLogModal";
+
 type ReportTabType = 'LOG' | 'ALL' | 'EXAM' | 'HW' | 'OVERDUE' | 'PRINT' | 'SIMILAR';
 
 interface ClassInfo {
@@ -64,13 +67,6 @@ const safeParseIds = (raw: any): number[] => {
   return [];
 };
 
-const getKSTDateStr = (offsetDays = 0) => {
-  const now = new Date();
-  const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
-  const kst = new Date(utc + (9 * 3600000) + (offsetDays * 86400000));
-  return kst.toISOString().split('T')[0];
-};
-
 export default function ClassReportPage() {
   const router = useRouter(); 
   
@@ -96,16 +92,9 @@ export default function ClassReportPage() {
   const [modalQuestion, setModalQuestion] = useState<MatrixCol | null>(null);
   const mathJaxRef = useRef(false);
 
-  // 🌟 [수정 포인트] 개별 학생 코멘트를 배열로 관리하는 폼 구조로 개선
+  // 🌟 [수정 포인트] 복잡한 폼 상태 제거하고, 모달 표시 여부와 편집할 데이터만 관리
   const [isLessonLogModalOpen, setIsLessonLogModalOpen] = useState(false);
-  const [lessonForm, setLessonForm] = useState({
-    lesson_log_id: null as number | null,
-    actual_date: getKSTDateStr(),
-    progress_desc: "",
-    homework_desc: "", 
-    individual_comments: [] as { student_id: string; comment: string }[],
-    instructor_note: "" 
-  });
+  const [editingLogData, setEditingLogData] = useState<any | null>(null);
 
   const classListRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
@@ -279,12 +268,12 @@ export default function ClassReportPage() {
     if (!selectedClassId) return;
     setIsLoading(true);
     try {
-      // 🌟 [수정 포인트] 신규 테이블(lesson_log_student_comment) 조인 추가
       const { data: logData } = await supabase
         .from('daily_lesson_log')
         .select(`
           lesson_log_id, 
           actual_date, 
+          created_at,
           instructor_note, 
           homework_desc,
           lesson_log_student_comment(student_id, comment, student(name))
@@ -293,6 +282,12 @@ export default function ClassReportPage() {
         .order('actual_date', { ascending: false });
       
       setLessonLogs(logData || []);
+
+      setSelectedLog((prev: any) => {
+         if (!prev) return null;
+         const updated = (logData || []).find((l: any) => l.lesson_log_id === prev.lesson_log_id);
+         return updated || prev;
+      });
 
       let list: AnalyzedItem[] = [];
 
@@ -375,7 +370,7 @@ export default function ClassReportPage() {
 
       list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setAssignments(list);
-      setSelectedItem(null);
+      setSelectedItem(null); 
       setMatrixCols([]);
       setMatrixRows([]);
     } catch (err) {
@@ -620,18 +615,34 @@ export default function ClassReportPage() {
 
   const getCellUI = (cell: MatrixCell) => {
     if (!cell || cell.isBlocked) {
-      return <div className="w-full h-full min-h-[50px] bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABAD2OQQ/9rX+aQAAAABJRU5ErkJggg==')] opacity-15 pointer-events-none" title="배부되지 않은 문항"></div>;
+      return (
+        <div className="w-full h-full flex items-center justify-center opacity-30">
+          <div className="w-[38px] h-[38px] bg-slate-100 rounded-[10px]" title="배부되지 않은 문항"></div>
+        </div>
+      );
     }
+    
     const code = cell.code;
-    if (!code) return <span className="text-slate-200">-</span>;
-    if (code === 'O') return <span className="text-emerald-500 font-black text-[14px]">O</span>;
-    if (code === 'TO') return <span className="text-teal-500 font-black text-[14px]">TO</span>;
-    if (code === 'RO') return <span className="text-blue-500 font-black text-[14px]">RO</span>;
-    if (code === 'X') return <span className="text-rose-500 font-black text-[14px]">X</span>;
-    if (code === 'TX') return <span className="text-orange-500 font-black text-[14px]">TX</span>;
-    if (code === '☆') return <span className="text-orange-500 font-black text-[14px]">☆</span>;
-    if (code === 'B') return <span className="text-slate-400 font-black text-[14px]">B</span>;
-    return <span className="text-slate-600 font-black text-[14px]">{code}</span>;
+    let bgClass = "bg-slate-50 border border-slate-100 shadow-sm";
+    let textClass = "text-slate-300";
+    let displayText = "-";
+
+    if (code) {
+      displayText = code;
+      if (code === 'O') { bgClass = "bg-emerald-100 border border-emerald-200 shadow-sm"; textClass = "text-emerald-600"; }
+      else if (code === 'TO') { bgClass = "bg-teal-100 border border-teal-200 shadow-sm"; textClass = "text-teal-600"; }
+      else if (code === 'RO') { bgClass = "bg-blue-100 border border-blue-200 shadow-sm"; textClass = "text-blue-600"; }
+      else if (code === 'X') { bgClass = "bg-rose-100 border border-rose-200 shadow-sm"; textClass = "text-rose-500"; }
+      else if (code === 'TX') { bgClass = "bg-orange-100 border border-orange-200 shadow-sm"; textClass = "text-orange-500"; }
+      else if (code === '☆') { bgClass = "bg-amber-100 border border-amber-200 shadow-sm"; textClass = "text-amber-500"; }
+      else if (code === 'B') { bgClass = "bg-slate-100 border border-slate-200 shadow-sm"; textClass = "text-slate-400"; }
+    }
+
+    return (
+      <div className={`w-[38px] h-[38px] mx-auto rounded-[10px] flex items-center justify-center font-black text-[13px] transition-all ${bgClass} ${textClass}`}>
+        {displayText}
+      </div>
+    );
   };
 
   const getTypeBadge = (type: ReportTabType) => {
@@ -645,101 +656,15 @@ export default function ClassReportPage() {
     }
   };
 
+  // 🌟 [추가 포인트] 모달을 열 때 초기 데이터 주입 함수
   const openLessonLogModal = () => {
+    setEditingLogData(null);
     setIsLessonLogModalOpen(true);
-    setLessonForm({
-      lesson_log_id: null,
-      actual_date: getKSTDateStr(),
-      progress_desc: "",
-      homework_desc: "",
-      individual_comments: [],
-      instructor_note: ""
-    });
   };
 
   const openEditLessonLogModal = (log: any) => {
-    const desc = log.homework_desc || "";
-    const progressMatch = desc.match(/\[📖 오늘의 진도\]\n([\s\S]*?)(?=\n\n\[📝 공통 과제\]|$)/);
-    const hwMatch = desc.match(/\[📝 공통 과제\]\n([\s\S]*?)$/);
-
-    let p = progressMatch ? progressMatch[1].trim() : "";
-    let h = hwMatch ? hwMatch[1].trim() : "";
-    if (!progressMatch && !hwMatch) h = desc;
-
-    const mappedComments = (log.lesson_log_student_comment || []).map((c: any) => ({
-      student_id: c.student_id,
-      comment: c.comment
-    }));
-
-    setLessonForm({
-      lesson_log_id: log.lesson_log_id,
-      actual_date: log.actual_date,
-      progress_desc: p,
-      homework_desc: h,
-      individual_comments: mappedComments,
-      instructor_note: log.instructor_note || ""
-    });
+    setEditingLogData(log);
     setIsLessonLogModalOpen(true);
-  };
-
-  const handleLessonLogSubmit = async () => {
-    if (!lessonForm.progress_desc.trim() && !lessonForm.homework_desc.trim()) {
-      alert("진도 또는 공통 과제 내용 중 하나는 필수로 입력해주세요.");
-      return;
-    }
-
-    let finalDesc = "";
-    if (lessonForm.progress_desc.trim()) finalDesc += `[📖 오늘의 진도]\n${lessonForm.progress_desc.trim()}\n\n`;
-    if (lessonForm.homework_desc.trim()) finalDesc += `[📝 공통 과제]\n${lessonForm.homework_desc.trim()}`;
-    finalDesc = finalDesc.trim();
-
-    setIsLoading(true);
-    try {
-      let currentLogId = lessonForm.lesson_log_id;
-
-      if (currentLogId) {
-        const { error: logErr } = await supabase.from("daily_lesson_log").update({
-          actual_date: lessonForm.actual_date || getKSTDateStr(),
-          homework_desc: finalDesc,
-          instructor_note: lessonForm.instructor_note
-        }).eq('lesson_log_id', currentLogId);
-        
-        if (logErr) throw logErr;
-      } else {
-        const { data: newLog, error: logErr } = await supabase.from("daily_lesson_log").insert({
-          class_id: selectedClassId,
-          actual_date: lessonForm.actual_date || getKSTDateStr(),
-          homework_desc: finalDesc, 
-          instructor_note: lessonForm.instructor_note 
-        }).select('lesson_log_id').single();
-        
-        if (logErr) throw logErr;
-        currentLogId = newLog.lesson_log_id;
-      }
-
-      if (currentLogId) {
-         await supabase.from('lesson_log_student_comment').delete().eq('lesson_log_id', currentLogId);
-         const validComments = lessonForm.individual_comments.filter(c => c.student_id && c.comment.trim());
-         
-         if (validComments.length > 0) {
-           const inserts = validComments.map(c => ({
-             lesson_log_id: currentLogId,
-             student_id: c.student_id,
-             comment: c.comment.trim()
-           }));
-           await supabase.from('lesson_log_student_comment').insert(inserts);
-         }
-      }
-
-      alert(`✅ 수업 일지가 성공적으로 ${lessonForm.lesson_log_id ? '수정' : '등록'}되었습니다!`);
-      setIsLessonLogModalOpen(false);
-      fetchAssignmentsAndLogs(); 
-    } catch (e: any) {
-      console.error(e);
-      alert("처리 중 오류가 발생했습니다: " + e.message);
-    } finally {
-      setIsLoading(false);
-    }
   };
 
   const renderLogView = () => {
@@ -752,14 +677,19 @@ export default function ClassReportPage() {
       );
     }
 
+    const [y, m, d] = selectedLog.actual_date.split('T')[0].split('-');
+    const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+    const dayStr = ['일', '월', '화', '수', '목', '금', '토'][dateObj.getDay()];
+    const fullDateWithDay = `${y}년 ${m}월 ${d}일 (${dayStr})`;
+
     return (
       <div className="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50/50 relative">
         <div className="max-w-4xl mx-auto space-y-6">
           <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between md:items-center gap-4">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <span className="text-sm font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-lg shadow-sm border border-indigo-200">
-                  {formatDateLabel(selectedLog.actual_date)}
+                <span className="text-sm font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-lg shadow-sm border border-indigo-200 tracking-tight flex items-center gap-1.5">
+                  <span className="text-lg">🗓️</span> {fullDateWithDay} 수업
                 </span>
               </div>
               <h2 className="text-2xl font-black text-slate-800">수업 일지 기록</h2>
@@ -797,7 +727,6 @@ export default function ClassReportPage() {
               </div>
             )}
 
-            {/* 🌟 개별 특이 과제 및 코멘트 렌더링 영역 */}
             {selectedLog.lesson_log_student_comment && selectedLog.lesson_log_student_comment.length > 0 && (
               <div className="mt-5 pt-5 border-t border-slate-100">
                 <h4 className="text-sm font-black text-slate-700 mb-3 flex items-center gap-1.5">
@@ -890,23 +819,23 @@ export default function ClassReportPage() {
           </div>
         </div>
 
-        <div className="flex-1 overflow-auto custom-scroll relative bg-slate-50/30">
+        <div className="flex-1 overflow-auto custom-scroll relative bg-white">
           <table className="w-max border-collapse">
             <thead className="sticky top-0 z-20 shadow-sm">
               <tr>
-                <th className="sticky left-0 z-30 bg-slate-100 p-3 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)]">
-                  <span className="text-xs font-extrabold text-slate-700">학생명</span>
+                <th className="sticky left-0 z-30 bg-[#f8fafc] p-2 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.03)] h-[48px]">
+                  <span className="text-[13px] font-extrabold text-slate-700">학생명</span>
                 </th>
-                <th className="bg-slate-50 p-3 min-w-[80px] w-[80px] max-w-[80px] border-r border-b border-slate-200 text-center align-middle shadow-sm">
-                  <span className="text-xs font-extrabold text-slate-700">정답 수</span>
+                <th className="bg-[#f8fafc] p-2 min-w-[90px] w-[90px] max-w-[90px] border-r border-b border-slate-200 text-center align-middle shadow-sm h-[48px]">
+                  <span className="text-[13px] font-extrabold text-slate-700">정답 수</span>
                 </th>
                 
                 {matrixCols.map(col => (
-                  <th key={col.qId} className="bg-blue-50 p-1 min-w-[50px] w-[50px] max-w-[50px] border-r border-b border-slate-200 text-center align-middle">
+                  <th key={col.qId} className="bg-[#f8fafc] p-0 min-w-[48px] w-[48px] max-w-[48px] border-r border-b border-slate-200 text-center align-middle h-[48px]">
                     <div className="flex flex-col items-center justify-center gap-0.5">
                       <div className="flex items-center gap-0.5">
                         <span className="text-[13px] font-black text-[#002864] leading-none">{col.displayNum}</span>
-                        <button onClick={() => setModalQuestion(col)} className="text-[10px] text-blue-400 hover:text-blue-700 transition-colors leading-none" title="문제 상세 보기">🔍</button>
+                        <button onClick={() => setModalQuestion(col)} className="text-[10px] text-blue-400 hover:text-blue-600 transition-colors leading-none" title="문제 상세 보기">🔍</button>
                       </div>
                       {(col.page || col.number) && (
                         <span className="text-[8px] font-bold text-blue-500 leading-none tracking-tighter truncate w-full px-0.5" title={`${col.page ? `p.${col.page}` : ''}${col.page && col.number ? '-' : ''}${col.number ? `${col.number}번` : ''}`}>
@@ -925,31 +854,34 @@ export default function ClassReportPage() {
                 matrixCols.forEach(col => { if (row.cells[col.qId] && !row.cells[col.qId].isBlocked) assignedCount++; });
 
                 return (
-                  <tr key={row.studentId} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
-                    <td className="sticky left-0 z-10 bg-white p-2 border-r border-b border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center font-extrabold text-[13px] text-slate-800 min-w-[150px] w-[150px] max-w-[150px] group-hover:bg-blue-50/50 h-[50px]">
-                      <div className="flex flex-col items-center justify-center gap-1 w-full h-full">
+                  <tr key={row.studentId} className={`hover:bg-slate-50/60 transition-colors border-b border-slate-100`}>
+                    
+                    <td className="sticky left-0 z-10 bg-white p-0 border-r border-slate-200 shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle text-center min-w-[150px] w-[150px] max-w-[150px] h-[48px]">
+                      <div className="flex flex-col items-center justify-center w-full h-full gap-0.5">
                         <span 
                           onClick={() => router.push(`/student/${row.studentId}`)}
-                          className="truncate w-full text-center cursor-pointer hover:underline hover:text-blue-600 transition-colors"
+                          className="truncate w-full text-center cursor-pointer font-extrabold text-[13px] text-slate-800 hover:underline hover:text-blue-600 transition-colors leading-tight"
                           title="학생 상세 기록 보기"
                         >
                           {row.studentName}
                         </span>
-                        <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md ${isCompleted ? 'text-slate-400 bg-slate-100' : 'text-rose-500 bg-rose-50 border border-rose-100'}`}>
+                        <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full leading-none ${isCompleted ? 'text-slate-400 bg-slate-100 border border-slate-200/50' : 'text-rose-500 bg-rose-50 border border-rose-100/50'}`}>
                           {row.status || '미제출'}
                         </span>
                       </div>
                     </td>
-                    <td className="p-2 border-r border-b border-slate-200 text-center align-middle min-w-[80px] w-[80px] max-w-[80px] h-[50px]">
-                      <span className="text-xs font-black text-[#002864] bg-blue-50 px-2 py-1 rounded border border-blue-100 whitespace-nowrap">
-                        {row.totalCorrect} / {assignedCount}
-                      </span>
+                    
+                    <td className="p-0 border-r border-slate-200 text-center align-middle min-w-[90px] w-[90px] max-w-[90px] h-[48px]">
+                      <div className="bg-blue-50/50 text-[#002864] font-black text-[12px] px-1.5 py-1 rounded-lg border border-blue-100 shadow-sm inline-flex items-center justify-center gap-1 w-full max-w-[64px]">
+                        <span>{row.totalCorrect}</span>
+                        <span className="text-blue-200 text-[9px] font-bold">/</span>
+                        <span className="text-slate-500 font-bold">{assignedCount}</span>
+                      </div>
                     </td>
+
                     {matrixCols.map(col => (
-                      <td key={col.qId} className={`p-0 border-r border-b border-slate-200 text-center align-middle text-[13px] min-w-[50px] w-[50px] max-w-[50px] h-[50px] ${row.cells[col.qId]?.isBlocked ? 'bg-slate-100/50' : ''}`}>
-                        <div className="flex items-center justify-center w-full h-full">
-                          {getCellUI(row.cells[col.qId])}
-                        </div>
+                      <td key={col.qId} className={`p-0 border-r border-slate-200 text-center align-middle min-w-[48px] w-[48px] max-w-[48px] h-[48px]`}>
+                        {getCellUI(row.cells[col.qId])}
                       </td>
                     ))}
                   </tr>
@@ -958,8 +890,8 @@ export default function ClassReportPage() {
             </tbody>
             <tfoot className="sticky bottom-0 z-20 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
               <tr>
-                <th colSpan={2} className="sticky left-0 z-30 bg-slate-100 p-2 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.05)] h-[40px]">
-                  <span className="text-xs font-black text-slate-700">문항별 정답률</span>
+                <th colSpan={2} className="sticky left-0 z-30 bg-[#f8fafc] p-1 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.03)] h-[36px]">
+                  <span className="text-[11px] font-extrabold text-slate-700">문항별 정답률</span>
                 </th>
                 {matrixCols.map(col => {
                   const rate = questionRates[col.qId] || 0;
@@ -968,8 +900,8 @@ export default function ClassReportPage() {
                   else if (rate >= 80) rateColor = "text-emerald-600"; 
 
                   return (
-                    <th key={col.qId} className="bg-slate-50 p-1 border-r border-t border-slate-200 text-center align-middle min-w-[50px] w-[50px] max-w-[50px] h-[40px]">
-                      <span className={`text-[12px] font-black ${rateColor}`}>{rate}%</span>
+                    <th key={col.qId} className="bg-[#f8fafc] p-1 border-r border-t border-slate-200 text-center align-middle min-w-[48px] w-[48px] max-w-[48px] h-[36px]">
+                      <span className={`text-[11px] font-black ${rateColor}`}>{rate}%</span>
                     </th>
                   );
                 })}
@@ -981,7 +913,6 @@ export default function ClassReportPage() {
     );
   };
 
-  // 반 학생 목록 조회 (모달에 띄울 용도)
   const [classStudents, setClassStudents] = useState<any[]>([]);
   useEffect(() => {
     if (selectedClassId) {
@@ -998,7 +929,6 @@ export default function ClassReportPage() {
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-4 overflow-hidden relative font-pretendard">
       
-      {/* 상단 헤더 및 반 선택 가로 스크롤 영역 */}
       <div className="flex flex-col gap-4 shrink-0">
         <div>
           <h2 className="text-2xl font-black text-[#002864] tracking-tight flex items-center gap-2">
@@ -1035,10 +965,8 @@ export default function ClassReportPage() {
         </div>
       </div>
 
-      {/* 메인 레이아웃 */}
       <div className="flex flex-1 gap-4 overflow-hidden">
         
-        {/* 좌측 패널 (필터 버튼 영역) */}
         <div className="w-[320px] 2xl:w-[350px] flex flex-col bg-white border border-slate-200 rounded-2xl shadow-sm shrink-0 overflow-hidden">
           
           <div className="p-3 border-b border-slate-200 bg-slate-50 flex items-stretch gap-2 shrink-0">
@@ -1087,33 +1015,48 @@ export default function ClassReportPage() {
               lessonLogs.length === 0 ? (
                 <div className="py-10 text-center text-sm font-bold text-slate-400">작성된 수업 일지가 없습니다.</div>
               ) : (
-                lessonLogs.map((log) => (
-                  <div 
-                    key={log.lesson_log_id} 
-                    onClick={() => setSelectedLog(log)}
-                    className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'bg-indigo-50 border-indigo-300 shadow-md transform scale-[1.02] ml-1' : 'bg-white border-slate-200 hover:border-slate-400 hover:bg-slate-50 shadow-sm'}`}
-                  >
-                    <div className="flex items-center gap-2 mb-1.5 justify-between">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-indigo-200">일지</span>
-                        <span className={`text-[10px] font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>{formatDateLabel(log.actual_date)}</span>
+                lessonLogs.map((log) => {
+                  const [y, m, d] = log.actual_date.split('T')[0].split('-');
+                  const dateObj = new Date(Number(y), Number(m) - 1, Number(d));
+                  const dayStr = ['일', '월', '화', '수', '목', '금', '토'][dateObj.getDay()];
+                  const shortDateStr = `${Number(m)}.${Number(d)}(${dayStr})`;
+
+                  return (
+                    <div 
+                      key={log.lesson_log_id} 
+                      onClick={() => setSelectedLog(log)}
+                      className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'bg-indigo-50 border-indigo-300 shadow-md transform scale-[1.02] ml-1' : 'bg-white border-slate-200 hover:border-slate-400 hover:bg-slate-50 shadow-sm'}`}
+                    >
+                      <div className="flex items-center gap-2 mb-1.5 justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-indigo-200">일지</span>
+                          <span className={`text-[10px] font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>
+                            {formatDateLabel(log.created_at)} 작성
+                          </span>
+                        </div>
+                        
+                        {currentUser.isAdmin && (
+                          <button 
+                            onClick={(e) => handleDeleteLog(e, log.lesson_log_id)}
+                            className="text-slate-300 hover:text-rose-500 transition-colors p-1 rounded-md hover:bg-rose-50"
+                            title="이 일지 삭제하기"
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                          </button>
+                        )}
                       </div>
                       
-                      {currentUser.isAdmin && (
-                        <button 
-                          onClick={(e) => handleDeleteLog(e, log.lesson_log_id)}
-                          className="text-slate-300 hover:text-rose-500 transition-colors p-1 rounded-md hover:bg-rose-50"
-                          title="이 일지 삭제하기"
-                        >
-                          <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                        </button>
-                      )}
+                      <div className="flex justify-between items-center mt-0.5">
+                        <div className={`font-extrabold text-[13px] leading-snug line-clamp-1 ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-900' : 'text-slate-800'}`}>
+                          수업 일지 기록
+                        </div>
+                        <div className={`text-[11px] font-black shrink-0 px-2 py-0.5 rounded border ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                          {shortDateStr} 수업
+                        </div>
+                      </div>
                     </div>
-                    <div className={`font-extrabold text-[13px] leading-snug line-clamp-2 ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-900' : 'text-slate-800'}`}>
-                      수업 일지 기록
-                    </div>
-                  </div>
-                ))
+                  );
+                })
               )
             ) : filteredAssignments.length === 0 ? (
               <div className="py-10 text-center text-sm font-bold text-slate-400">출제된 항목이 없습니다.</div>
@@ -1180,135 +1123,15 @@ export default function ClassReportPage() {
         </div>
       )}
 
-      {/* 🌟 수정된 수업 일지 작성 모달 */}
-      {isLessonLogModalOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
-          <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="bg-gradient-to-r from-indigo-700 to-blue-800 p-5 text-white flex justify-between items-center shrink-0">
-              <h3 className="text-lg font-black flex items-center gap-2">📝 {lessonForm.lesson_log_id ? "수업 일지 내용 수정" : "새 수업 일지 작성"}</h3>
-              <button onClick={() => setIsLessonLogModalOpen(false)} className="text-white hover:text-rose-400 text-2xl font-bold leading-none transition-colors">&times;</button>
-            </div>
-            
-            <div className="p-6 space-y-6 overflow-y-auto max-h-[75vh] bg-slate-50/50 custom-scroll">
-              
-              <div className="flex flex-col gap-1.5">
-                <label className="text-sm font-black text-slate-700 flex items-center gap-1.5">
-                  📅 수업 일자 <span className="text-xs text-slate-400 font-normal">(소급 작성 시 변경 가능)</span>
-                </label>
-                <input 
-                  type="date" 
-                  value={lessonForm.actual_date} 
-                  onChange={e => setLessonForm({...lessonForm, actual_date: e.target.value})} 
-                  className="border border-slate-300 p-3 w-1/3 rounded-xl text-sm font-bold text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm"
-                />
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
-                    <span>📖 오늘의 진도</span> <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea 
-                    value={lessonForm.progress_desc} 
-                    onChange={e => setLessonForm({...lessonForm, progress_desc: e.target.value})} 
-                    rows={4}
-                    className="border border-indigo-200 p-4 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm resize-none placeholder-slate-300"
-                    placeholder="예) 이차방정식의 근과 계수 개념 학습 및 대표 유형 문제 풀이 (p.45 ~ p.50)" 
-                  />
-                </div>
-
-                <div className="flex flex-col gap-1.5">
-                  <label className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
-                    <span>📝 공통 과제</span> <span className="text-rose-500">*</span>
-                  </label>
-                  <textarea 
-                    value={lessonForm.homework_desc} 
-                    onChange={e => setLessonForm({...lessonForm, homework_desc: e.target.value})} 
-                    rows={4}
-                    className="border border-indigo-200 p-4 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm resize-none placeholder-slate-300"
-                    placeholder="예) 워크북 p.20 ~ p.25 홀수번 풀이 및 채점해오기" 
-                  />
-                </div>
-              </div>
-
-              {/* 🌟 개별 코멘트 배열 관리 UI */}
-              <div className="flex flex-col gap-2 pt-2">
-                <label className="text-sm font-black text-emerald-700 flex items-center gap-1.5">
-                  <span>🧑‍🎓 개별 특이 과제 / 코멘트</span>
-                  <span className="text-[11px] text-emerald-600/70 font-bold bg-emerald-50 px-2 py-0.5 rounded">(선택)</span>
-                </label>
-                <div className="flex flex-col gap-2">
-                  {lessonForm.individual_comments.map((ic, idx) => (
-                    <div key={idx} className="flex items-start gap-2 bg-emerald-50/30 p-2.5 rounded-xl border border-emerald-100">
-                      <select 
-                        value={ic.student_id} 
-                        onChange={(e) => {
-                          const newComments = [...lessonForm.individual_comments];
-                          newComments[idx].student_id = e.target.value;
-                          setLessonForm({ ...lessonForm, individual_comments: newComments });
-                        }}
-                        className="border border-slate-300 p-2.5 w-[120px] rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:border-emerald-500 shrink-0 shadow-sm"
-                      >
-                        <option value="">학생 선택</option>
-                        {classStudents.map((s: any) => <option key={s.student_id} value={s.student_id}>{s.name}</option>)}
-                      </select>
-                      <textarea 
-                        value={ic.comment} 
-                        onChange={(e) => {
-                          const newComments = [...lessonForm.individual_comments];
-                          newComments[idx].comment = e.target.value;
-                          setLessonForm({ ...lessonForm, individual_comments: newComments });
-                        }}
-                        rows={2}
-                        className="border border-slate-300 p-2.5 flex-1 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:border-emerald-500 resize-none placeholder-slate-400 shadow-sm"
-                        placeholder="특정 학생의 개별 과제나 코멘트를 입력하세요."
-                      />
-                      <button 
-                        onClick={() => {
-                          const newComments = lessonForm.individual_comments.filter((_, i) => i !== idx);
-                          setLessonForm({ ...lessonForm, individual_comments: newComments });
-                        }}
-                        className="mt-0.5 p-2 text-rose-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors"
-                        title="이 코멘트 지우기"
-                      >
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                <button 
-                  onClick={() => setLessonForm(prev => ({ ...prev, individual_comments: [...prev.individual_comments, { student_id: "", comment: "" }] }))}
-                  className="w-full py-2.5 bg-white text-emerald-600 hover:bg-emerald-50 font-bold text-xs rounded-xl border-2 border-emerald-200 border-dashed transition-colors flex items-center justify-center gap-1.5 mt-1 shadow-sm"
-                >
-                  <span className="text-base leading-none">➕</span> 학생 특정 코멘트 추가하기
-                </button>
-              </div>
-
-              <div className="flex flex-col gap-1.5 pt-4 border-t border-slate-200">
-                <label className="text-sm font-black text-slate-500 flex items-center gap-1.5">
-                  <span>🔒 강사 특이사항 메모</span>
-                  <span className="text-[11px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded">(학부모 미노출)</span>
-                </label>
-                <textarea 
-                  value={lessonForm.instructor_note} 
-                  onChange={e => setLessonForm({...lessonForm, instructor_note: e.target.value})} 
-                  rows={2}
-                  className="border border-slate-300 p-3 w-full rounded-xl text-sm font-medium text-slate-800 focus:outline-none focus:border-slate-500 focus:ring-1 focus:ring-slate-500 bg-white shadow-sm resize-none placeholder-slate-300"
-                  placeholder="강사들끼리만 공유할 태도 불량, 특별 케이스 등의 내용을 적어주세요." 
-                />
-              </div>
-
-            </div>
-            
-            <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
-              <button onClick={() => setIsLessonLogModalOpen(false)} className="px-6 py-3 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-xl text-sm transition-colors shadow-sm">취소</button>
-              <button onClick={handleLessonLogSubmit} className="px-6 py-3 bg-[#002864] hover:bg-blue-900 text-white font-black rounded-xl text-sm shadow-md transition-colors flex items-center gap-2">
-                ✅ {lessonForm.lesson_log_id ? "수정 내용 저장" : "새 일지 등록 완료"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* 🌟 분리된 모달 컴포넌트 렌더링 */}
+      <LessonLogModal 
+        isOpen={isLessonLogModalOpen} 
+        onClose={() => setIsLessonLogModalOpen(false)} 
+        onSuccess={fetchAssignmentsAndLogs} 
+        classId={selectedClassId} 
+        students={classStudents} 
+        initialData={editingLogData} 
+      />
 
     </div>
   );

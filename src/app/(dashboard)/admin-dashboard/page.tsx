@@ -120,7 +120,6 @@ export default function AdminDashboardPage() {
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
   
-  // 🌟 현재 접속자가 최고관리자인지 여부를 상태에 포함
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자", isSuperAdmin: false });
   const [tenantId, setTenantId] = useState("hq");
   const [tenantName, setTenantName] = useState("로딩중...");
@@ -260,7 +259,6 @@ export default function AdminDashboardPage() {
       const pos = localStorage.getItem("logica_instructor_position") || "";
       const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('대장') || pos.includes('원장');
 
-      // 🌟 최고관리자 권한 상태 반영
       setCurrentUser({ instId, name, isSuperAdmin: isGodMode });
       setTenantId(tId);
 
@@ -520,7 +518,6 @@ export default function AdminDashboardPage() {
     setLiveFeeds(data || []);
   };
 
-  // 🌟 건별 피드 삭제 기능 (최고관리자 전용)
   const deleteNotificationLog = async (logId: string) => {
     if (!confirm("이 발송 기록을 삭제하시겠습니까?")) return;
     try {
@@ -535,7 +532,6 @@ export default function AdminDashboardPage() {
     }
   };
 
-  // 🌟 전체 피드 비우기 기능 (최고관리자 전용)
   const clearNotificationLogs = async () => {
     if (!confirm("최근 발송 내역을 모두 삭제하시겠습니까? (이 작업은 되돌릴 수 없습니다.)")) return;
     try {
@@ -699,6 +695,65 @@ export default function AdminDashboardPage() {
     fetchMemos();
   };
 
+  const loadRecentLessonLogForBulk = async () => {
+    if (!bulkTarget || bulkTarget === 'all') {
+      alert("⚠️ 먼저 일지를 불러올 대상을 '특정 반'으로 선택해주세요.");
+      return;
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('daily_lesson_log')
+        .select('homework_desc')
+        .eq('class_id', bulkTarget)
+        .order('actual_date', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (error) throw error;
+      if (!data || !data.homework_desc) {
+        alert("해당 반의 최근 작성된 수업 일지나 과제 내역이 없습니다.");
+        return;
+      }
+
+      const desc = data.homework_desc;
+      const hwMatch = desc.match(/\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/);
+      let hRaw = hwMatch ? hwMatch[1].trim() : "";
+      
+      let t = "";
+      let d = "";
+      let h = hRaw;
+
+      if (!hwMatch) h = desc;
+
+      const titleMatch = h.match(/^🏷️ 과제명: (.*?)(\n|$)/);
+      if (titleMatch) {
+        t = titleMatch[1].trim();
+        h = h.replace(titleMatch[0], "");
+      }
+      
+      const dueMatch = h.match(/^⏰ 기한: (.*?)(\n|$)/);
+      if (dueMatch) {
+        d = dueMatch[1].trim();
+        h = h.replace(dueMatch[0], "");
+      }
+
+      setBulkForm(prev => ({
+        ...prev,
+        homeworkTitle: t || prev.homeworkTitle,
+        dueDate: d || prev.dueDate,
+        details: h.trim() || prev.details
+      }));
+
+      setBulkType('homework');
+      alert("✅ 성공적으로 최근 과제 일지 내역을 불러왔습니다!");
+
+    } catch (err) {
+      console.error(err);
+      alert("일지를 불러오는 중 오류가 발생했습니다.");
+    }
+  };
+
   const handleAddBulkToQueue = async () => {
     if (bulkType === 'schedule' && (!bulkForm.scheduleName || !bulkForm.applyDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
     if (bulkType === 'makeup' && (!bulkForm.oldDate || !bulkForm.newDate || !bulkForm.details)) return alert('모든 항목을 입력해주세요.');
@@ -743,16 +798,19 @@ export default function AdminDashboardPage() {
             preview_title: `[보강] ${student.name}`, preview_desc: `${bulkForm.oldDate} ➡️ ${bulkForm.newDate}`, time_string: currentTimeStr, status: '대기'
           });
         } else if (bulkType === 'homework') {
-          const fullDetails = `[과제명]: ${bulkForm.homeworkTitle}\n[제출기한]: ${bulkForm.dueDate}\n\n${bulkForm.details}`;
+          // 🌟 일반 문자의 경우, 상단에 [로지카대치본원학원] 태그 추가
+          const fullDetails = `[로지카대치본원학원]\n[과제명]: ${bulkForm.homeworkTitle}\n[제출기한]: ${bulkForm.dueDate}\n\n${bulkForm.details}`;
           newMessages.push({
             tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
             template_id: 'GENERAL_SMS', details: fullDetails,
             preview_title: `[과제] ${bulkForm.homeworkTitle}`, preview_desc: `${student.name} ${finalName}`, time_string: currentTimeStr, status: '대기'
           });
         } else {
+          // 🌟 일반 문자의 경우, 상단에 [로지카대치본원학원] 태그 추가
+          const fullDetails = `[로지카대치본원학원]\n\n${bulkForm.details}`;
           newMessages.push({
             tenant_id: validTenantId, student_id: student.student_id, student_name: student.name, parent_name: finalName, parent_phone: phone,
-            template_id: 'GENERAL_SMS', details: bulkForm.details,
+            template_id: 'GENERAL_SMS', details: fullDetails,
             preview_title: `[일반문자]`, preview_desc: `${student.name} ${finalName}`, time_string: currentTimeStr, status: '대기'
           });
         }
@@ -918,7 +976,7 @@ export default function AdminDashboardPage() {
             </div>
 
             <div className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-purple-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
-              <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
+              <div className="flex justify-between items-center mb-2 shrink-0 relative z-10">
                 <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
                 <button onClick={(e) => { e.stopPropagation(); setIsMemoModalOpen(true); }} className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1.5 rounded font-bold transition-colors border border-blue-200 shadow-sm">+ 작성</button>
               </div>
@@ -955,19 +1013,27 @@ export default function AdminDashboardPage() {
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[520px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">📝 단체 알림톡 / 문자 작성</h3>
+                {bulkType === 'homework' && (
+                  <button 
+                    onClick={loadRecentLessonLogForBulk}
+                    className="text-[10px] font-black text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1"
+                  >
+                    <span>📚</span> 최근 일지 불러오기
+                  </button>
+                )}
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-5 flex flex-col gap-3">
                 
+                <select value={bulkTarget} onChange={e => setBulkTarget(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-slate-50/50 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
+                  <option value="all">전체 재원생 대상</option>
+                  {classStats.map((c: any) => <option key={c.class_id} value={c.class_id}>[특정 반] {c.name}</option>)}
+                </select>
+
                 <select value={bulkType} onChange={e => { setBulkType(e.target.value); setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', homeworkTitle: '', dueDate: '', details: '' }); }} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
                   <option value="schedule">📅 학사일정 (개강/휴원) 안내</option>
                   <option value="makeup">⏰ 시간표 변경 및 보강 안내</option>
                   <option value="homework">📚 과제 및 학습 안내 (일반 문자)</option>
                   <option value="general">💬 자유 내용 (일반 SMS/LMS 발송)</option>
-                </select>
-
-                <select value={bulkTarget} onChange={e => setBulkTarget(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
-                  <option value="all">전체 재원생 대상</option>
-                  {classStats.map((c: any) => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
                 </select>
 
                 <div className="flex-1 flex flex-col gap-2 mt-2 h-full">
@@ -1062,7 +1128,6 @@ export default function AdminDashboardPage() {
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[520px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
                 <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
-                {/* 🌟 최고관리자용 전체 비우기 버튼 추가 */}
                 {currentUser.isSuperAdmin && liveFeeds.length > 0 && (
                   <button onClick={clearNotificationLogs} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">
                     전체 비우기
@@ -1122,7 +1187,6 @@ export default function AdminDashboardPage() {
                             <span className="text-[10px] text-slate-600 truncate flex-1 pr-6" title={descText}>{descText}</span>
                             <span className="text-[9px] font-bold text-slate-400 shrink-0 ml-1 whitespace-nowrap">{rightSideDateTime}</span>
 
-                            {/* 🌟 관리자 전용: 건별 삭제 (x 버튼) */}
                             {currentUser.isSuperAdmin && (
                               <button
                                 onClick={() => deleteNotificationLog(feed.noti_log_id)}
@@ -1255,7 +1319,6 @@ export default function AdminDashboardPage() {
 
       <ClassDetailModal isOpen={isClassModalOpen} onClose={() => setIsClassModalOpen(false)} classModalData={classModalData} classSchedules={classSchedules} classStudents={classStudents} />
       
-      {/* 🚨 유선 문의 대장 오버레이 모달 (단축키 Alt+C) */}
       {isInquiryOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-6 sm:p-10">
           <div className="bg-white w-full max-w-7xl h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl animate-[fadeIn_0.2s_ease-out]">

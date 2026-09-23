@@ -241,7 +241,6 @@ export async function queueAttendanceAlimtalk({
       if (!phone || String(phone).includes("unassigned")) return;
       const relStr = rel || "학부모";
       
-      // 🌟 [핵심 교정] 이름이 비어있으면 무조건 학생이름으로 교체
       const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${student.name}(${relStr})`;
 
       rows.push({
@@ -327,7 +326,6 @@ export async function queueAttendanceNotice({
       if (!phone || String(phone).includes("unassigned")) return;
       const relStr = rel || "학부모";
 
-      // 🌟 [핵심 교정] 이름이 비어있으면 무조건 학생이름으로 교체
       const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${stu.name}(${relStr})`;
 
       rows.push({
@@ -424,7 +422,8 @@ export async function sendQueuedMessages(tenantId: string) {
         } else if (msg.template_id === "KA01TP26092103514300371OMrxorSxG") {
           res = await sendClassChangeAlimtalk(payload as any);
         } else if (msg.template_id === "GENERAL_SMS") {
-          const textContent = `[로지카 학원 대치본원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
+          // 🌟 일반 문자인 경우 상단에 [로지카대치본원학원] 헤더 적용
+          const textContent = `[로지카대치본원학원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n문의: 02-555-8875`;
           res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
         } else {
           res = { success: false, message: `알 수 없는 템플릿: ${msg.template_id}` };
