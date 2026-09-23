@@ -3,12 +3,12 @@
 
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
 
 // bcrypt 해시는 항상 $2a$ / $2b$ / $2y$ 로 시작합니다.
 function isHashed(value: string | null | undefined) {
   return !!value && /^\$2[aby]\$/.test(value);
 }
-
 
 // 환경변수 에러 방지 처리
 const supabaseAdmin = createClient(
@@ -82,4 +82,23 @@ export async function setupParentAction(parentId: string, name: string, pwInput:
   } catch (err) {
     return { success: false, message: "설정에 실패했습니다." };
   }
+}
+
+// 🌟 추가됨: 커스텀 JWT 발급 함수 (Supabase DB가 인식할 수 있는 신분증)
+export async function getParentAuthToken(parentId: string) {
+  if (!process.env.SUPABASE_JWT_SECRET) {
+    throw new Error("Missing SUPABASE_JWT_SECRET environment variable");
+  }
+  
+  const token = jwt.sign(
+    {
+      aud: "authenticated",
+      exp: Math.floor(Date.now() / 1000) + (60 * 60 * 24 * 7), // 7일 유지
+      sub: parentId, // RLS 정책의 auth.uid() 와 매칭됨
+      role: "authenticated"
+    },
+    process.env.SUPABASE_JWT_SECRET
+  );
+  
+  return token;
 }

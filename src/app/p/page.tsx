@@ -5,7 +5,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import ChatWidget from "@/components/parent/ChatWidget";
 import StudentCard from "@/components/parent/StudentCard";
-import { verifyParentPhone, loginParentAction, setupParentAction } from "@/app/actions/parentAuth";
+// 🌟 getParentAuthToken 추가됨
+import { verifyParentPhone, loginParentAction, setupParentAction, getParentAuthToken } from "@/app/actions/parentAuth";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
@@ -30,21 +31,17 @@ const safeParseIds = (raw: any): number[] => {
 export default function ParentPortalPage() {
   const [authState, setAuthState] = useState<"check_phone" | "login" | "setup" | "dashboard">("check_phone");
   const [isKakaoLoading, setIsKakaoLoading] = useState(false);
-  
-  // 🌟 추가됨: 대시보드 데이터 로딩 상태 관리
   const [isDashboardLoading, setIsDashboardLoading] = useState(false);
   
   const [phoneInput, setPhoneInput] = useState("");
   const [pwInput, setPwInput] = useState("");
   const [setupName, setSetupName] = useState("");
   const [setupPw, setSetupPw] = useState("");
-  
   const [isAgreed, setIsAgreed] = useState(false); 
   
   const [parentId, setParentId] = useState<string | null>(null);
   const [infoName, setInfoName] = useState("");
   const [studentsData, setStudentsData] = useState<any[]>([]);
-  
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -119,6 +116,13 @@ export default function ParentPortalPage() {
           .maybeSingle();
         
         if (data) {
+          // 🌟 추가됨: 카카오 인증 후 자체 JWT 토큰으로 Supabase 세션 설정
+          const token = await getParentAuthToken(data.parent_id);
+          await supabase.auth.setSession({
+            access_token: token,
+            refresh_token: token
+          });
+
           sessionStorage.setItem("logica_parent_id", data.parent_id);
           window.history.replaceState(null, "", window.location.pathname);
           setIsKakaoLoading(false);
@@ -166,6 +170,13 @@ export default function ParentPortalPage() {
   const loginParent = async () => {
     const result = await loginParentAction(phoneInput, pwInput);
     if (result.success && result.parentId) {
+      // 🌟 추가됨: 일반 로그인 후 JWT 토큰 적용
+      const token = await getParentAuthToken(result.parentId);
+      await supabase.auth.setSession({
+        access_token: token,
+        refresh_token: token
+      });
+
       sessionStorage.setItem("logica_parent_id", result.parentId);
       loadDashboard(result.parentId);
     } else {
@@ -179,6 +190,13 @@ export default function ParentPortalPage() {
     
     const result = await setupParentAction(parentId, setupName, setupPw);
     if (result.success) {
+      // 🌟 추가됨: 신규 설정 완료 후 즉시 JWT 토큰 적용
+      const token = await getParentAuthToken(parentId);
+      await supabase.auth.setSession({
+        access_token: token,
+        refresh_token: token
+      });
+
       sessionStorage.setItem("logica_parent_id", parentId);
       loadDashboard(parentId);
     } else {
@@ -215,7 +233,7 @@ export default function ParentPortalPage() {
   const loadDashboard = async (pid: string) => {
     setParentId(pid);
     setAuthState("dashboard");
-    setIsDashboardLoading(true); // 🌟 로딩 시작
+    setIsDashboardLoading(true);
     
     try {
       const { data: pData } = await supabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
@@ -423,7 +441,7 @@ export default function ParentPortalPage() {
     } catch (err) { 
       console.error("대시보드 로드 에러", err); 
     } finally {
-      setIsDashboardLoading(false); // 🌟 로딩 완료
+      setIsDashboardLoading(false); 
     }
   };
 
@@ -482,11 +500,9 @@ export default function ParentPortalPage() {
           {authState === "setup" && (
             <div className="animate-[fadeIn_0.3s_ease-out]">
               <div className="bg-blue-50 text-blue-600 font-bold text-xs p-3 rounded-lg mb-4 text-center">처음 오셨군요! 사용할 비밀번호를 설정해주세요.</div>
-              {/* 🌟 학부모 성함 선택 입력 안내 추가 */}
               <input type="text" value={setupName} onChange={e => setSetupName(e.target.value)} className="w-full px-4 py-2.5 mb-3 rounded-lg border border-slate-300 font-bold text-center placeholder:text-slate-400" placeholder="학부모님 성함 (선택사항, 비워둬도 무방합니다)" />
               <input type="password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className="w-full px-4 py-2.5 mb-4 rounded-lg border border-slate-300 font-bold text-center" placeholder="사용할 비밀번호 설정 (필수)" />
               
-              {/* 🌟 추가됨: 법정대리인 동의 체크박스 */}
               <label className="flex items-start gap-2 mb-5 cursor-pointer text-left px-1">
                 <input 
                   type="checkbox" 
@@ -533,7 +549,6 @@ export default function ParentPortalPage() {
             </button>
           </header>
 
-          {/* 🌟 로딩 스피너 렌더링 영역 */}
           {isDashboardLoading ? (
             <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 z-50">
               <div className="relative flex justify-center items-center">
