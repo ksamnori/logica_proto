@@ -1,8 +1,9 @@
 // src/components/parent/ChatWidget.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js"; // ★ 추가됨
 
 const getProfileImageUrl = (path: string | null | undefined) => {
   if (!path || path.trim() === "") return null;
@@ -19,7 +20,33 @@ const formatPosition = (pos: string | null | undefined) => {
   return "선생님";
 };
 
-export default function ChatWidget({ parentId }: { parentId: string }) {
+// 🌟 authToken 프롭스 추가
+export default function ChatWidget({ parentId, authToken }: { parentId: string, authToken: string | null }) {
+  
+  // 🌟 핵심: 대시보드에서 썼던 것과 동일하게 신분증(토큰)을 장착한 전용 클라이언트를 만듭니다.
+  const authSupabase = useMemo(() => {
+    if (!authToken) return supabase; // 토큰이 없으면 기본 클라이언트 사용
+    const client = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${authToken}`
+          }
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false
+        }
+      }
+    );
+    // ★ 실시간 채팅(웹소켓) 기능에서도 RLS 보안관을 통과하도록 신분증 세팅!
+    client.realtime.setAuth(authToken);
+    return client;
+  }, [authToken]);
+
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [activeChatView, setActiveChatView] = useState<"list" | "room">("list");
   const [staffList, setStaffList] = useState<any[]>([]);
@@ -46,7 +73,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const isChatOpenRef = useRef(isChatOpen);
   useEffect(() => { isChatOpenRef.current = isChatOpen; }, [isChatOpen]);
 
-  // 💡 억지로 스크롤을 조작하던 모든 꼼수 제거. 메시지가 올 때만 얌전하게 최하단 이동
   const scrollToBottom = () => {
     setTimeout(() => {
       messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
@@ -58,7 +84,8 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   useEffect(() => {
     const handleFocus = async () => {
       if (isChatOpenRef.current && activeRoomIdRef.current) {
-        await supabase.from("chat_message").update({ is_read: true })
+        // 🌟 수정됨: authSupabase 사용
+        await authSupabase.from("chat_message").update({ is_read: true })
           .eq("room_id", activeRoomIdRef.current)
           .eq("sender_type", "instructor")
           .eq("is_read", false);
@@ -67,23 +94,24 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     };
     window.addEventListener("focus", handleFocus);
     return () => window.removeEventListener("focus", handleFocus);
-  }, []);
+  }, [authSupabase]); // 의존성 추가
 
   useEffect(() => {
-    if (parentId) {
+    if (parentId && authToken) {
       loadAvailableStaff();
       loadChatRooms();
       initRealtimeSystem();
     }
     return () => {
-      if (globalChannelRef.current) { supabase.removeChannel(globalChannelRef.current); globalChannelRef.current = null; }
-      if (activeChannelRef.current) { supabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
+      if (globalChannelRef.current) { authSupabase.removeChannel(globalChannelRef.current); globalChannelRef.current = null; }
+      if (activeChannelRef.current) { authSupabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
     };
-  }, [parentId]);
+  }, [parentId, authToken, authSupabase]); // 의존성 추가
 
   const loadAvailableStaff = async () => {
     try {
-      const { data: sData } = await supabase.from("student").select("tenant_id, enrollment(class(instructor_id))").eq("parent_id", parentId);
+      // 🌟 수정됨: authSupabase 사용
+      const { data: sData } = await authSupabase.from("student").select("tenant_id, enrollment(class(instructor_id))").eq("parent_id", parentId);
       
       let instructorIds = new Set<string>();
       let tenantIds = new Set<string>(); 
@@ -100,7 +128,8 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       let orQuery = "position.ilike.%실장%";
       if (instructorIds.size > 0) orQuery += `,instructor_id.in.(${Array.from(instructorIds).join(",")})`;
       
-      const { data } = await supabase
+      // 🌟 수정됨: authSupabase 사용
+      const { data } = await authSupabase
         .from("instructor")
         .select("*")
         .eq("status", "재직")
@@ -122,7 +151,8 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   const loadChatRooms = async () => {
     try {
-      const { data } = await supabase.from("chat_room")
+      // 🌟 수정됨: authSupabase 사용
+      const { data } = await authSupabase.from("chat_room")
         .select("room_id, instructor_id, instructor(name, position, profile_image_url), chat_message(message_id, content, created_at, sender_type, is_read)")
         .eq("parent_id", parentId).order("created_at", { ascending: false });
       setChatRooms(data || []);
@@ -136,10 +166,11 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   const createOrOpenRoom = async (instructorId: string, staffTitle: string, avatarUrl: string | null) => {
     try {
-      const { data: existing } = await supabase.from("chat_room").select("room_id").eq("instructor_id", instructorId).eq("parent_id", parentId).maybeSingle();
+      // 🌟 수정됨: authSupabase 사용
+      const { data: existing } = await authSupabase.from("chat_room").select("room_id").eq("instructor_id", instructorId).eq("parent_id", parentId).maybeSingle();
       let roomId = existing?.room_id;
       if (!roomId) {
-        const { data: newRoom } = await supabase.from("chat_room").insert({ instructor_id: instructorId, parent_id: parentId }).select().single();
+        const { data: newRoom } = await authSupabase.from("chat_room").insert({ instructor_id: instructorId, parent_id: parentId }).select().single();
         roomId = newRoom?.room_id;
       }
       openChatRoom(roomId, staffTitle, avatarUrl);
@@ -153,12 +184,13 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     setActiveChatView("room"); 
     setChatMessages([]);
 
-    if (activeChannelRef.current) { supabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
+    if (activeChannelRef.current) { authSupabase.removeChannel(activeChannelRef.current); activeChannelRef.current = null; }
     
     const roomChannelName = `room_${roomId}`;
-    supabase.getChannels().forEach((ch) => { if (ch.topic.includes(roomChannelName)) supabase.removeChannel(ch); });
+    authSupabase.getChannels().forEach((ch) => { if (ch.topic.includes(roomChannelName)) authSupabase.removeChannel(ch); });
     
-    activeChannelRef.current = supabase.channel(roomChannelName, { config: { broadcast: { self: false } } })
+    // 🌟 수정됨: authSupabase.channel 사용
+    activeChannelRef.current = authSupabase.channel(roomChannelName, { config: { broadcast: { self: false } } })
       .on("broadcast", { event: "typing" }, (payload: any) => {
         if (payload.payload?.sender_type === "instructor") {
           setIsTyping(true); 
@@ -168,8 +200,8 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       }).subscribe();
 
     try {
-      await supabase.from("chat_message").update({ is_read: true }).eq("room_id", roomId).eq("sender_type", "instructor").eq("is_read", false);
-      const { data } = await supabase.from("chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
+      await authSupabase.from("chat_message").update({ is_read: true }).eq("room_id", roomId).eq("sender_type", "instructor").eq("is_read", false);
+      const { data } = await authSupabase.from("chat_message").select("*").eq("room_id", roomId).order("created_at", { ascending: true });
       setChatMessages(data || []);
       loadChatRooms(); 
     } catch (e) { console.error(e); }
@@ -177,9 +209,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
 
   const deleteChatRoom = async (e: React.MouseEvent, roomId: string) => {
     e.stopPropagation();
-    if (!confirm("해당 상담 대화방과 대화 내역을 모두 삭제하시겠습니까?\n삭제된 내용은 복구할 수 없습니다.")) return;
+    if (!confirm("해당 상담 대화방과 대화 내역을 모두 삭제하시겠습니까?\n삭제된 내용은 복구할 수 복구할 수 없습니다.")) return;
     try {
-      await supabase.from("chat_room").delete().eq("room_id", roomId);
+      await authSupabase.from("chat_room").delete().eq("room_id", roomId);
       loadChatRooms();
     } catch (e) {
       alert("대화방 삭제 중 오류가 발생했습니다.");
@@ -191,7 +223,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
     if (!text || !activeRoomId) return;
     setChatInput("");
     try {
-      const { data: roomData } = await supabase.from("chat_room").select("instructor(chat_allow_start, chat_allow_end, auto_reply_message, auto_reply_active)").eq("room_id", activeRoomId).single();
+      const { data: roomData } = await authSupabase.from("chat_room").select("instructor(chat_allow_start, chat_allow_end, auto_reply_message, auto_reply_active)").eq("room_id", activeRoomId).single();
       let isDND = false; let autoReplyMsg = "선생님께 메시지가 전달되었습니다. 내일 확인하여 답변드리겠습니다.";
 
       if (roomData?.instructor) {
@@ -205,9 +237,9 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
           else { if (currentM < startTotal && currentM >= endTotal) isDND = true; }
         }
       }
-      const { data: newMsg } = await supabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "parent", content: text, is_read: false }).select().single();
+      const { data: newMsg } = await authSupabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "parent", content: text, is_read: false }).select().single();
       if (newMsg) setChatMessages(prev => [...prev, newMsg]);
-      if (isDND) { setTimeout(async () => { await supabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "instructor", content: `[자동응답] ${autoReplyMsg}`, is_read: false }); }, 500); }
+      if (isDND) { setTimeout(async () => { await authSupabase.from("chat_message").insert({ room_id: activeRoomId, sender_type: "instructor", content: `[자동응답] ${autoReplyMsg}`, is_read: false }); }, 500); }
     } catch (e) { alert("메시지 전송 실패"); }
   };
 
@@ -222,18 +254,19 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
       const fileName = `chat_${Date.now()}_${Math.random().toString(36).substring(7)}.${fileExt}`;
       const filePath = `chat_images/${parentId}/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
+      // 🌟 파일 업로드도 authSupabase로 진행 (Storage 정책 통과용)
+      const { error: uploadError } = await authSupabase.storage
         .from('system_images')
         .upload(filePath, file);
 
       if (uploadError) throw uploadError;
 
-      const { data } = supabase.storage.from('system_images').getPublicUrl(filePath);
+      const { data } = authSupabase.storage.from('system_images').getPublicUrl(filePath);
       const publicUrl = data.publicUrl;
 
       const contentString = isImage ? `[IMAGE]${publicUrl}` : `[FILE]${publicUrl}`;
 
-      const { data: newMsg } = await supabase.from("chat_message").insert({ 
+      const { data: newMsg } = await authSupabase.from("chat_message").insert({ 
         room_id: activeRoomId, 
         sender_type: "parent", 
         content: contentString, 
@@ -254,9 +287,10 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
   const initRealtimeSystem = () => {
     if (globalChannelRef.current) return;
     const channelName = "parent_chat_" + parentId;
-    supabase.getChannels().forEach((ch) => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
+    authSupabase.getChannels().forEach((ch) => { if (ch.topic.includes(channelName)) authSupabase.removeChannel(ch); });
 
-    globalChannelRef.current = supabase.channel(channelName)
+    // 🌟 수정됨: authSupabase.channel 사용 (실시간 수신도 인증 토큰으로 통과)
+    globalChannelRef.current = authSupabase.channel(channelName)
       .on("postgres_changes", { event: "INSERT", schema: "public", table: "chat_message" }, async (payload) => {
         const msg = payload.new; setIsTyping(false);
         const isRoomActive = document.hasFocus() && isChatOpenRef.current && String(activeRoomIdRef.current) === String(msg.room_id);
@@ -265,7 +299,7 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
           if (msg.sender_type === "instructor") {
             setChatMessages(prev => prev.find(m => m.message_id === msg.message_id) ? prev : [...prev, msg]);
             if (isRoomActive) {
-              await supabase.from("chat_message").update({ is_read: true }).eq("message_id", msg.message_id);
+              await authSupabase.from("chat_message").update({ is_read: true }).eq("message_id", msg.message_id);
             }
           }
         }
@@ -289,10 +323,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
         {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
-      {/* 🔥 [모든 꼼수 폐기 - 완전 순정 선언]
-          1. JS 크기 조절 삭제. 순수 CSS 클래스 (max-sm:inset-0)만 사용합니다. 
-          2. 크롬/삼성브라우저는 키보드가 올라오면 inset-0의 바닥(bottom)을 알아서 밀어올립니다.
-          3. overscroll-none: 챗 안에서 스크롤 끝까지 가도 뒷배경이 같이 딸려오지 않게 합니다. */}
       <div 
         className={`fixed bg-white flex flex-col z-[9998] transition-opacity duration-200 overscroll-none
           ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}
@@ -437,7 +467,6 @@ export default function ChatWidget({ parentId }: { parentId: string }) {
                 )}
               </button>
               
-              {/* 🔥 JS onFocus 꼼수 전면 삭제. 브라우저 네이티브 포커싱에 온전히 맡깁니다. */}
               <textarea 
                 rows={1} 
                 value={chatInput} 

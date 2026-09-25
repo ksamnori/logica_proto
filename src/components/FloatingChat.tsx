@@ -121,7 +121,6 @@ function DraggableMemo({
 }) {
   const [content, setContent] = useState(memo.content || "");
   
-  // 🟢 1. 초기값 설정 시 소수점 방지 (Math.round 적용)
   const [pos, setPos] = useState({ 
     x: Math.round(memo.pos_x || 100), 
     y: Math.round(memo.pos_y || 100) 
@@ -159,7 +158,6 @@ function DraggableMemo({
       nextY = Math.max(0, Math.min(nextY, maxY));
     }
 
-    // 🟢 2. 드래그 중 상태 업데이트 시에도 소수점 방지
     setPos({ x: Math.round(nextX), y: Math.round(nextY) });
   };
 
@@ -168,7 +166,6 @@ function DraggableMemo({
     dragInfo.current.isDragging = false;
     e.currentTarget.releasePointerCapture(e.pointerId);
     
-    // 🟢 3. DB 업데이트(onUpdate) 호출 시 소수점 절대 차단
     onUpdate(memo.memo_id, { 
       pos_x: Math.round(pos.x), 
       pos_y: Math.round(pos.y) 
@@ -423,10 +420,22 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
       if (target && target.closest('.memo-btn') && canUseMemo) {
         createMemo();
       } else if (target && target.closest('.chat-btn') && canUseChat) {
-        if (isChatOpen) { 
-          setActiveRoomId(null); setActiveChatView("list"); setActiveStaffRoomId(null); setStaffChatView("list"); 
-        } else {
-          stopFlashing(); 
+        
+        // 🌟 해결: 최소화 복구 시 즉시 읽음 처리 및 기존 방 상태 유지!
+        if (!isChatOpen) {
+          stopFlashing();
+          if (activeTab === "parent" && activeRoomIdRef.current) {
+            supabase.from("chat_message").update({ is_read: true })
+              .eq("room_id", activeRoomIdRef.current)
+              .eq("sender_type", "parent")
+              .eq("is_read", false)
+              .then(() => loadChatRooms());
+          } else if (activeTab === "staff" && activeStaffRoomIdRef.current) {
+            supabase.from("internal_chat_member").update({ last_read_at: new Date().toISOString() })
+              .eq("room_id", activeStaffRoomIdRef.current)
+              .eq("instructor_id", instId)
+              .then(() => loadStaffRooms());
+          }
         }
         setIsChatOpen(!isChatOpen);
       } else if (target && target.closest('.mic-btn')) {
@@ -1300,7 +1309,8 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
             <div className="px-5 py-3.5 flex justify-between items-center">
               <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> Logica 메신저</h3>
               <div className="flex gap-1.5 items-center z-10 relative">
-                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveStaffRoomId(null); }} className="text-blue-200 hover:text-white transition-colors p-1.5 relative">
+                {/* 🌟 1. 우측 상단 X 버튼: 채팅방 상태(ID)를 지우지 않고 숨기기(Minimize)만 하도록 수정 */}
+                <button onPointerDown={(e) => e.stopPropagation()} onClick={() => { setIsChatOpen(false); }} className="text-blue-200 hover:text-white transition-colors p-1.5 relative">
                   <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                 </button>
               </div>

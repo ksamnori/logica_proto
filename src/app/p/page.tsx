@@ -3,9 +3,9 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { supabase } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js"; // ★ 추가됨
 import ChatWidget from "@/components/parent/ChatWidget";
 import StudentCard from "@/components/parent/StudentCard";
-// 🌟 getParentAuthToken 추가됨
 import { verifyParentPhone, loginParentAction, setupParentAction, getParentAuthToken } from "@/app/actions/parentAuth";
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
@@ -43,6 +43,7 @@ export default function ParentPortalPage() {
   const [infoName, setInfoName] = useState("");
   const [studentsData, setStudentsData] = useState<any[]>([]);
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(null);
 
   useEffect(() => {
     if (window.history.state?.app_state === "trap") {
@@ -105,30 +106,18 @@ export default function ParentPortalPage() {
       }
       
       const rawPhone = kakaoPhone.replace(/[^0-9]/g, ""); 
-      const formattedPhone = rawPhone.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
 
       try {
-        const { data } = await supabase
-          .from("parent")
-          .select("parent_id")
-          .or(`phone.eq.${rawPhone},phone.eq.${formattedPhone},phone_2.eq.${rawPhone},phone_2.eq.${formattedPhone}`)
-          .limit(1)
-          .maybeSingle();
+        const { data: foundParentId, error } = await supabase.rpc('get_parent_by_phone', { phone_req: rawPhone });
         
-        if (data) {
-          // 🌟 카카오 인증 후 자체 JWT 토큰으로 Supabase 세션 설정
-          const token = await getParentAuthToken(data.parent_id);
-          await supabase.auth.setSession({
-            access_token: token,
-            refresh_token: token
-          });
-
-          sessionStorage.setItem("logica_parent_id", data.parent_id);
+        if (foundParentId) {
+          const token = await getParentAuthToken(foundParentId);
+          sessionStorage.setItem("logica_parent_id", foundParentId);
           window.history.replaceState(null, "", window.location.pathname);
           setIsKakaoLoading(false);
-          loadDashboard(data.parent_id);
+          loadDashboard(foundParentId, token);
         } else {
-          alert(`등록된 학원 연락처(${formattedPhone})와 일치하는 학부모 정보가 없습니다.`);
+          alert("등록된 학원 연락처와 일치하는 학부모 정보가 없습니다.");
           await supabase.auth.signOut();
           setIsKakaoLoading(false); 
         }
@@ -140,8 +129,18 @@ export default function ParentPortalPage() {
 
     const initAuth = async () => {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session) await handleKakaoSession(session);
-      else if (savedParentId && !hash.includes("access_token")) loadDashboard(savedParentId);
+      const isKakao = session?.user?.app_metadata?.provider === 'kakao';
+
+      if (session && isKakao) {
+        await handleKakaoSession(session);
+      } else if (savedParentId && !hash.includes("access_token")) {
+        getParentAuthToken(savedParentId).then(token => {
+          loadDashboard(savedParentId, token);
+        }).catch(err => {
+          console.error("저장된 세션 토큰 발급 실패:", err);
+          setAuthState("check_phone");
+        });
+      }
     };
     initAuth();
   }, []);
@@ -170,15 +169,9 @@ export default function ParentPortalPage() {
   const loginParent = async () => {
     const result = await loginParentAction(phoneInput, pwInput);
     if (result.success && result.parentId) {
-      // 🌟 일반 로그인 후 JWT 토큰 적용
       const token = await getParentAuthToken(result.parentId);
-      await supabase.auth.setSession({
-        access_token: token,
-        refresh_token: token
-      });
-
       sessionStorage.setItem("logica_parent_id", result.parentId);
-      loadDashboard(result.parentId);
+      loadDashboard(result.parentId, token);
     } else {
       alert(result.message);
     }
@@ -190,15 +183,9 @@ export default function ParentPortalPage() {
     
     const result = await setupParentAction(parentId, setupName, setupPw);
     if (result.success) {
-      // 🌟 신규 설정 완료 후 즉시 JWT 토큰 적용
       const token = await getParentAuthToken(parentId);
-      await supabase.auth.setSession({
-        access_token: token,
-        refresh_token: token
-      });
-
       sessionStorage.setItem("logica_parent_id", parentId);
-      loadDashboard(parentId);
+      loadDashboard(parentId, token);
     } else {
       alert(result.message);
     }
@@ -224,30 +211,45 @@ export default function ParentPortalPage() {
       sessionStorage.clear();
       setAuthState("check_phone");
       setParentId(null);
+      setAuthToken(null);
       setStudentsData([]);
       window.history.replaceState(null, "", window.location.pathname);
       window.location.reload();
     }
   };
 
-  const loadDashboard = async (pid: string) => {
+  const loadDashboard = async (pid: string, providedToken?: string) => {
     setParentId(pid);
     setAuthState("dashboard");
     setIsDashboardLoading(true);
     
     try {
-      // 🌟 [핵심 추가] 새로고침이나 자동 로그인 시에도 토큰을 잃어버리지 않도록 항상 재발급 및 세션 설정
-      try {
-        const token = await getParentAuthToken(pid);
-        await supabase.auth.setSession({
-          access_token: token,
-          refresh_token: token
-        });
-      } catch (tokenErr) {
-        console.error("토큰 갱신 실패:", tokenErr);
+      let token = providedToken;
+      if (!token) {
+        token = await getParentAuthToken(pid);
       }
+      setAuthToken(token);
 
-      const { data: pData } = await supabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
+      // ★★★ 가장 완벽한 방법: 공식 API 옵션(accessToken)을 통해 매번 헤더에 토큰을 꽂아 넣습니다. ★★★
+      const authSupabase = createClient(
+        process.env.NEXT_PUBLIC_SUPABASE_URL!,
+        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+        {
+          global: {
+            headers: {
+              Authorization: `Bearer ${token}`
+            }
+          },
+          auth: {
+            persistSession: false,
+            autoRefreshToken: false,
+            detectSessionInUrl: false
+          }
+        }
+      );
+
+      const { data: pData, error: pError } = await authSupabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
+      
       setInfoName(pData?.name || "");
 
       if (!pData?.phone && !pData?.phone_2) return;
@@ -260,17 +262,22 @@ export default function ParentPortalPage() {
         orConditions.push(`phone.eq.${raw},phone.eq.${fmt},phone_2.eq.${raw},phone_2.eq.${fmt}`);
       });
 
-      const { data: allParents } = await supabase
+      const { data: allParents } = await authSupabase
         .from("parent")
         .select("parent_id")
         .or(orConditions.join(","));
 
       const pids = allParents?.map(p => p.parent_id) || [pid];
 
-      const { data: sData, error } = await supabase
+      const { data: sData, error } = await authSupabase
         .from("student")
         .select("*, enrollment(start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time, end_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_title, target_questions, due_date, created_at, book_id, textbook(title))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))")
         .in("parent_id", pids);
+
+      // 에러가 났을 때 무시하지 않고 콘솔에 출력하도록 안전장치 추가
+      if (error) {
+        console.error("데이터 조회 에러:", error);
+      }
 
       if (!error && sData && sData.length > 0) {
         const sorted = sData.sort((a, b) => (parseInt(b.grade) || 0) - (parseInt(a.grade) || 0));
@@ -280,7 +287,7 @@ export default function ParentPortalPage() {
           const classId = activeEnrollment ? unwrap(activeEnrollment.class)?.class_id : null;
           
           if (classId) {
-            const { data: ctData } = await supabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId);
+            const { data: ctData } = await authSupabase.from("class_textbook").select("*, textbook(*)").eq("class_id", classId);
             if (ctData && ctData.length > 0) {
               const bIds = ctData.map(cb => cb.book_id);
               
@@ -288,7 +295,7 @@ export default function ParentPortalPage() {
               for (const bId of bIds) {
                  let from = 0;
                  while (true) {
-                   const { data: qChunk } = await supabase.from("textbook_question").select("tq_id, book_id, page_number, question_id").eq("book_id", bId).range(from, from + 999);
+                   const { data: qChunk } = await authSupabase.from("textbook_question").select("tq_id, book_id, page_number, question_id").eq("book_id", bId).range(from, from + 999);
                    if (!qChunk || qChunk.length === 0) break;
                    qData.push(...qChunk);
                    if (qChunk.length < 1000) break;
@@ -311,7 +318,7 @@ export default function ParentPortalPage() {
                 bookPageTqsMap[q.book_id][pNum].push(q.tq_id);
               });
 
-              const { data: hwAssignments } = await supabase.from("homework_assignment")
+              const { data: hwAssignments } = await authSupabase.from("homework_assignment")
                 .select("book_id, target_questions, target_student_id, student_homework_result(student_id, completed_tq_ids, status)")
                 .eq("class_id", classId)
                 .in("book_id", bIds);
@@ -337,7 +344,7 @@ export default function ParentPortalPage() {
               let exAssigns: any[] = [];
               let fromEA = 0;
               while(true) {
-                  const { data: chunk } = await supabase.from('exam_assignment')
+                  const { data: chunk } = await authSupabase.from('exam_assignment')
                       .select('assignment_id, status, exam_id')
                       .eq('student_id', stu.student_id)
                       .range(fromEA, fromEA + 999);
@@ -353,7 +360,7 @@ export default function ParentPortalPage() {
                       const chunkIds = eIds.slice(i, i + 100);
                       let fromEI = 0;
                       while(true) {
-                          const { data: chunk } = await supabase.from('exam_item')
+                          const { data: chunk } = await authSupabase.from('exam_item')
                              .select('exam_id, question_id')
                              .in('exam_id', chunkIds)
                              .range(fromEI, fromEI + 999);
@@ -388,7 +395,7 @@ export default function ParentPortalPage() {
               let hwAns: any[] = [];
               let fromHw = 0;
               while(true) {
-                 const { data: chunk } = await supabase.from('student_homework_answer').select('tq_id, is_correct, grading_code').eq('student_id', stu.student_id).range(fromHw, fromHw + 999);
+                 const { data: chunk } = await authSupabase.from('student_homework_answer').select('tq_id, is_correct, grading_code').eq('student_id', stu.student_id).range(fromHw, fromHw + 999);
                  if (!chunk || chunk.length === 0) break;
                  hwAns.push(...chunk);
                  if (chunk.length < 1000) break;
@@ -401,7 +408,7 @@ export default function ParentPortalPage() {
               let exAns: any[] = [];
               let fromEx = 0;
               while(true) {
-                 const { data: chunk } = await supabase.from('student_answer').select('question_id, is_correct, grading_code').eq('student_id', stu.student_id).range(fromEx, fromEx + 999);
+                 const { data: chunk } = await authSupabase.from('student_answer').select('question_id, is_correct, grading_code').eq('student_id', stu.student_id).range(fromEx, fromEx + 999);
                  if (!chunk || chunk.length === 0) break;
                  exAns.push(...chunk);
                  if (chunk.length < 1000) break;
@@ -601,7 +608,7 @@ export default function ParentPortalPage() {
                 </div>
               </main>
 
-              {parentId && <ChatWidget parentId={parentId} />}
+              {parentId && <ChatWidget parentId={parentId} authToken={authToken} />}
             </>
           )}
         </div>
