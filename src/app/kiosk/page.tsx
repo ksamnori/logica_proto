@@ -4,6 +4,8 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { queueAttendanceAlimtalk, kioskAttendance} from "@/app/actions/alimtalk";
 import { supabase } from "@/lib/supabase";
+// 🌟 방금 만든 마스터키 검색 액션 임포트
+import { searchStudentsByLast4 } from "@/app/actions/kioskAction";
 
 const CHECKOUT_COOLDOWN_MIN = 3;
 
@@ -125,80 +127,17 @@ export default function KioskPage() {
     try {
       const kioskTenantId = process.env.NEXT_PUBLIC_KIOSK_TENANT_ID || '';
 
-      // 🌟 DB 쿼리에 phone_2, name_2 추가
-      let studentQuery = supabase
-        .from('student')
-        .select('student_id, name, grade, phone, parent(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
-        .eq('status', '재원')
-        .like('phone', `%${code}%`);
-      if (kioskTenantId) studentQuery = studentQuery.eq('tenant_id', kioskTenantId);
-      const { data: studentMatch, error: err1 } = await studentQuery;
-
-      // 학부모 1번 연락처 검색
-      let parentQuery = supabase
-        .from('student')
-        .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
-        .eq('status', '재원')
-        .like('parent.phone', `%${code}%`);
-      if (kioskTenantId) parentQuery = parentQuery.eq('tenant_id', kioskTenantId);
-      const { data: parentMatch, error: err2 } = await parentQuery;
-
-      // 🌟 학부모 2번 연락처 검색 추가
-      let parentQuery2 = supabase
-        .from('student')
-        .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
-        .eq('status', '재원')
-        .like('parent.phone_2', `%${code}%`);
-      if (kioskTenantId) parentQuery2 = parentQuery2.eq('tenant_id', kioskTenantId);
-      const { data: parentMatch2, error: err3 } = await parentQuery2;
-
-      if (err1) console.error("학생조회 에러:", err1);
-      if (err2) console.error("학부모조회 에러:", err2);
-      if (err3) console.error("학부모조회(추가번호) 에러:", err3);
-
-      let merged: any[] = [...(studentMatch || []), ...(parentMatch || []), ...(parentMatch2 || [])];
-      let uniqueMap = new Map();
-
-      merged.forEach((item: any) => {
-        const extractCleanDigits = (phoneStr: string) => {
-          if (!phoneStr) return "";
-          const withoutSuffix = phoneStr.replace(/-\d{1,2}$/, "");
-          return withoutSuffix.replace(/[^0-9]/g, "");
-        };
-
-        const sPhoneCleaned = extractCleanDigits(item.phone);
-        let rawPPhone = "";
-        let rawPPhone2 = "";
-        
-        const parentObj = item.parent as any; 
-        if (parentObj && !Array.isArray(parentObj)) {
-          rawPPhone = parentObj.phone || "";
-          rawPPhone2 = parentObj.phone_2 || "";
-        } else if (Array.isArray(parentObj)) {
-          rawPPhone = parentObj[0]?.phone || "";
-          rawPPhone2 = parentObj[0]?.phone_2 || "";
-        }
-        
-        const pPhoneCleaned = extractCleanDigits(rawPPhone);
-        const pPhone2Cleaned = extractCleanDigits(rawPPhone2);
-
-        const isStudentMatch = sPhoneCleaned.endsWith(code);
-        const isParentMatch = pPhoneCleaned.endsWith(code) || pPhone2Cleaned.endsWith(code);
-
-        if (isStudentMatch || isParentMatch) {
-          uniqueMap.set(item.student_id, item);
-        }
-      });
-
-      let matches = Array.from(uniqueMap.values());
-
-      if (matches.length === 0) {
+      // 🌟 RLS 통과를 위해 방금 만든 서버 마스터키 액션으로 조회
+      const res = await searchStudentsByLast4(code, kioskTenantId);
+      
+      if (!res.success || !res.data || res.data.length === 0) {
         alert('일치하는 번호가 없습니다.');
         resetState();
         return;
       }
 
-      matches.sort((a, b) => (GRADE_ORDER[a.grade] || 99) - (GRADE_ORDER[b.grade] || 99));
+      let matches = res.data;
+      matches.sort((a: any, b: any) => (GRADE_ORDER[a.grade] || 99) - (GRADE_ORDER[b.grade] || 99));
 
       if (matches.length === 1) {
         setConfirmStudent(matches[0]);
