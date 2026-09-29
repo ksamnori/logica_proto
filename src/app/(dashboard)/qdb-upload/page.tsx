@@ -9,17 +9,14 @@ export default function QuestionDBUploadPage() {
   const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
 
-  // JSON 데이터 상태
   const [fileData, setFileData] = useState<any[] | null>(null);
   const [fileName, setFileName] = useState("");
   const [bookTitle, setBookTitle] = useState("");
   
-  // 🌟 다중 이미지 업로드 상태 추가
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [isImageDragOver, setIsImageDragOver] = useState(false);
   const [imageUploadProgress, setImageUploadProgress] = useState(0);
 
-  // 업로드 진행 상태
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
@@ -63,7 +60,6 @@ export default function QuestionDBUploadPage() {
     setUploadLogs(prev => [...prev, msg]);
   };
 
-  // JSON 파일 처리
   const processFile = (file: File) => {
     setFileName(file.name);
     setUploadLogs([]);
@@ -108,7 +104,6 @@ export default function QuestionDBUploadPage() {
     }
   };
 
-  // 🌟 다중 이미지 핸들러 추가
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) setImageFiles(Array.from(e.target.files));
   };
@@ -145,7 +140,6 @@ export default function QuestionDBUploadPage() {
     setImageUploadProgress(0);
 
     try {
-      // 🌟 1. 이미지 업로드 (Upsert 처리)
       if (imageFiles.length > 0) {
         addLog(`🚀 [1단계] 이미지 파일 ${imageFiles.length}개 업로드 시작...`);
         let imgSuccess = 0;
@@ -153,9 +147,9 @@ export default function QuestionDBUploadPage() {
         for (let i = 0; i < imageFiles.length; i++) {
           const file = imageFiles[i];
           const { error: imgErr } = await supabase.storage
-            .from('question_images') // 기존 문제 이미지 버킷
+            .from('question_images') 
             .upload(file.name, file, { 
-              upsert: true, // 🌟 이름 중복 시 덮어쓰기 옵션 
+              upsert: true, 
               cacheControl: '3600' 
             });
           
@@ -169,18 +163,24 @@ export default function QuestionDBUploadPage() {
         addLog(`✅ 이미지 업로드 완료 (성공: ${imgSuccess} / 전체: ${imageFiles.length})`);
       }
 
-      // 🌟 2. 마스터 DB (JSON) 업로드
       addLog(`🚀 [2단계] 마스터 DB(question_db) 스마트 일괄 동기화 시작...`);
       const incomingIds = fileData.map(q => q.question_id).filter(Boolean);
       
-      const { data: existingQs, error: fetchErr } = await supabase
-        .from('question_db')
-        .select('question_id')
-        .in('question_id', incomingIds);
+      // 🌟 [수정 포인트] 조회를 150개씩 쪼개서(Chunk) 통신 에러 방지
+      const existingIdSet = new Set<string>();
+      const fetchChunkSize = 150;
+      
+      for (let i = 0; i < incomingIds.length; i += fetchChunkSize) {
+        const chunkIds = incomingIds.slice(i, i + fetchChunkSize);
+        const { data: existingQs, error: fetchErr } = await supabase
+          .from('question_db')
+          .select('question_id')
+          .in('question_id', chunkIds);
+          
+        if (fetchErr) throw new Error(`기존 DB 조회 중 오류 발생 (Row ${i}): ${fetchErr.message}`);
         
-      if (fetchErr) throw new Error("기존 DB 데이터 확인 중 오류 발생");
-
-      const existingIdSet = new Set(existingQs?.map(q => q.question_id) || []);
+        existingQs?.forEach(q => existingIdSet.add(q.question_id));
+      }
       
       let updateCount = 0;
       let insertCount = 0;
@@ -189,33 +189,53 @@ export default function QuestionDBUploadPage() {
         if (existingIdSet.has(q.question_id)) updateCount++;
         else insertCount++;
 
+        const safeJsonb = (val: any) => {
+            if (!val) return null;
+            if (typeof val === 'string') {
+                try { return JSON.parse(val); } catch(e) { return null; }
+            }
+            return typeof val === 'object' ? val : null;
+        };
+
+        const safeBoolean = (val: any, defaultVal: boolean) => {
+            if (val === true || val === 'true') return true;
+            if (val === false || val === 'false') return false;
+            return defaultVal;
+        };
+
+        const safeInteger = (val: any, defaultVal: number | null = null) => {
+            const parsed = parseInt(val, 10);
+            return isNaN(parsed) ? defaultVal : parsed;
+        };
+
         return {
           question_id: q.question_id,
           item_id: q.item_id || null,
           parent_question_id: q.parent_question_id || null,
           pdf_source: q.pdf_source || null,
-          detected_page_num: typeof q.detected_page_num === 'number' ? q.detected_page_num : null,
+          detected_page_num: safeInteger(q.detected_page_num),
           final_printed_page: q.final_printed_page ? String(q.final_printed_page) : null,
           question_number: q.question_number ? String(q.question_number) : null,
-          sub_num: typeof q.sub_num === 'number' ? q.sub_num : 0,
+          sub_num: safeInteger(q.sub_num, 0),
+          sub_sub_num: safeInteger(q.sub_sub_num, 0),
           problem_type: q.problem_type || null,
           difficulty: mapDifficulty(q.difficulty), 
-          solving_probability: typeof q.solving_probability === 'number' ? q.solving_probability : null,
+          solving_probability: safeInteger(q.solving_probability),
           question: q.question || "",
-          options: q.options || null,
+          options: safeJsonb(q.options),
           answer: q.answer || null,
           step_1_concept: q.step_1_concept || null,
           step_2_approach: q.step_2_approach || null,
           step_3_process: q.step_3_process || null,
           step_4_conclusion: q.step_4_conclusion || null,
-          image_box: q.image_box || null,
+          image_box: safeJsonb(q.image_box),
           image_url: q.image_url || null,
           image_type: q.image_type || null,
-          is_new_trend: q.is_new_trend || false,
+          is_new_trend: safeBoolean(q.is_new_trend, false),
           ai_status: q.ai_status || '대기',
           exposure_tier: q.exposure_tier || 'PUBLIC',
           curriculum_type: q.curriculum_type || 'COMMON',
-          related_question_ids: q.related_question_ids || null,
+          related_question_ids: safeJsonb(q.related_question_ids),
           classification_status: q.classification_status || 'PENDING',
           engine_ver: q.engine_ver || null,
           derivation_type: q.derivation_type || null,
@@ -224,20 +244,22 @@ export default function QuestionDBUploadPage() {
           taxonomy_name: q.taxonomy_name || null,
           cognitive_level: q.cognitive_level || null,
           verification_status: q.verification_status || 'PENDING',
-          is_human_verified: q.human_verified === true || q.is_human_verified === true,
-          answer_image_box: q.answer_image_box || null,
+          is_human_verified: safeBoolean(q.human_verified, false) || safeBoolean(q.is_human_verified, false),
+          answer_image_box: safeJsonb(q.answer_image_box),
           answer_image_url: q.answer_image_url || null,
           answer_image_type: q.answer_image_type || null,
           thk_taxonomy_id: q.thk_taxonomy_id || null,
           thk_taxonomy_name: q.thk_taxonomy_name || null,
-          is_hidden: q.is_hidden || false,
-          parent_relations: q.parent_relations || null,
-          raw_source_tags: q.raw_source_tags || q.source_tag || null,
+          is_hidden: safeBoolean(q.is_hidden, false),
+          parent_relations: safeJsonb(q.parent_relations),
+          raw_source_tags: safeJsonb(q.raw_source_tags) || safeJsonb(q.source_tag),
           explanation: q.explanation || null,
           solution: q.solution || null,
-          image_2_box: q.image_2_box || null,
+          image_2_box: typeof q.image_2_box === 'string' ? q.image_2_box : (q.image_2_box ? JSON.stringify(q.image_2_box) : null),
           image_2_url: q.image_2_url || null,
           image_2_type: q.image_2_type || null,
+          answer_image_2_url: q.answer_image_2_url || null,
+          ai_gradable: safeBoolean(q.ai_gradable, true),
           
           book_name: finalBookName || q.book_name || null,
           source_book_name: finalBookName || q.source_book_name || q.book_name || null,
@@ -315,7 +337,6 @@ export default function QuestionDBUploadPage() {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {/* 1. JSON 업로드 영역 */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">1. JSON 데이터 파일</label>
               <div 
@@ -336,7 +357,6 @@ export default function QuestionDBUploadPage() {
               </div>
             </div>
 
-            {/* 🌟 2. 다중 이미지 업로드 영역 추가 */}
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-2">2. 문제/정답 이미지 파일 (선택)</label>
               <div 
@@ -348,7 +368,6 @@ export default function QuestionDBUploadPage() {
                   isImageDragOver ? 'border-emerald-500 bg-emerald-50 scale-[1.02]' : 'border-slate-300 bg-slate-50 hover:bg-slate-100 hover:border-slate-400'
                 }`}
               >
-                {/* multiple 속성을 추가하여 다중 파일 선택 허용 */}
                 <input id="imageFileInput" type="file" multiple accept="image/*" onChange={handleImageSelect} className="hidden" />
                 <div className="text-3xl mb-2">{isImageDragOver ? '🖼️' : '📸'}</div>
                 <p className="text-slate-600 font-bold text-xs mb-1">이미지 다중 선택 & 드래그</p>
