@@ -21,12 +21,15 @@ export function useTaxonomy() {
   const [isLoading, setIsLoading] = useState(false);
 
   const [isEditingContent, setIsEditingContent] = useState(false);
+  
+  // 🌟 [핵심 변경] 폼 상태에 박스(배율) 속성들을 기본값으로 추가합니다.
   const [editForm, setEditForm] = useState({ 
     page_number: '', question_number: '', sub_num: '',
     difficulty: '미지정', solving_probability: '',
     question: '', answer: '', 
     image_url: '', image_2_url: '', 
     answer_image_url: '', answer_image_2_url: '',
+    image_box: '', image_2_box: '', answer_image_box: '',
     step_1_concept: '', step_2_approach: '', step_3_process: '', step_4_conclusion: ''
   });
 
@@ -303,14 +306,19 @@ export function useTaxonomy() {
   const handleD6Change = (val: string) => { setSelD6(val); setSelD7(""); setSelD8(""); };
   const handleD7Change = (val: string) => { setSelD7(val); setSelD8(""); };
 
+  // 🌟 [핵심 변경] 문항 클릭 시, DB에서 박스(비율) 설정들을 찾아 문자열 포맷(JSON)으로 폼에 올립니다.
   const handleQuestionClick = (q: any) => {
     setSelectedQuestion(q); setIsEditingContent(false); 
     setEditForm({ 
       page_number: String(q.final_printed_page || q.detected_page_num || ''), question_number: String(q.question_number || ''),
       sub_num: String(q.sub_num || ''), difficulty: q.difficulty || '미지정',
       solving_probability: q.solving_probability !== null && q.solving_probability !== undefined ? String(q.solving_probability) : '',
-      question: q.question || '', answer: q.answer || '', image_url: q.image_url || '', image_2_url: q.image_2_url || '',
+      question: q.question || '', answer: q.answer || '', 
+      image_url: q.image_url || '', image_2_url: q.image_2_url || '',
       answer_image_url: q.answer_image_url || '', answer_image_2_url: q.answer_image_2_url || '',
+      image_box: typeof q.image_box === 'object' && q.image_box !== null ? JSON.stringify(q.image_box) : (q.image_box || ''),
+      image_2_box: typeof q.image_2_box === 'object' && q.image_2_box !== null ? JSON.stringify(q.image_2_box) : (q.image_2_box || ''),
+      answer_image_box: typeof q.answer_image_box === 'object' && q.answer_image_box !== null ? JSON.stringify(q.answer_image_box) : (q.answer_image_box || ''),
       step_1_concept: q.step_1_concept || '', step_2_approach: q.step_2_approach || '',
       step_3_process: q.step_3_process || '', step_4_conclusion: q.step_4_conclusion || ''
     });
@@ -353,7 +361,12 @@ export function useTaxonomy() {
       }
       
       setQuestions(prev => sortQuestionsList([...prev, newQ])); setSelectedQuestion(newQ);
-      setEditForm({ page_number: '999', question_number: 'NEW', sub_num: '0', difficulty: '미지정', solving_probability: '', question: newQ.question, answer: '', image_url: '', image_2_url: '', answer_image_url: '', answer_image_2_url: '', step_1_concept: '', step_2_approach: '', step_3_process: '', step_4_conclusion: '' });
+      setEditForm({ 
+        page_number: '999', question_number: 'NEW', sub_num: '0', difficulty: '미지정', solving_probability: '', question: newQ.question, answer: '', 
+        image_url: '', image_2_url: '', answer_image_url: '', answer_image_2_url: '', 
+        image_box: '', image_2_box: '', answer_image_box: '',
+        step_1_concept: '', step_2_approach: '', step_3_process: '', step_4_conclusion: '' 
+      });
       setIsEditingContent(true);
       setTimeout(() => { const el = document.getElementById(`q-list-${newQ.question_id}`); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' }); }, 100);
     } catch (e: any) { alert("추가 실패: " + e.message); } finally { setIsLoading(false); }
@@ -445,7 +458,6 @@ export function useTaxonomy() {
     }
   };
 
-  // 🌟 [수정 포인트] 화면 전체(clientX, clientY)를 기준으로 렌더링된 이미지의 실제 위치와 비율을 완벽하게 계산합니다.
   const handleCropMouseDown = (e: React.MouseEvent<HTMLImageElement>) => {
     e.preventDefault(); 
     if (!imgRef.current) return;
@@ -468,7 +480,6 @@ export function useTaxonomy() {
     let currentX = e.clientX - rect.left;
     let currentY = e.clientY - rect.top;
     
-    // 마우스가 이미지 영역 밖으로 나가도 경계선에 찰싹 달라붙도록 고정(Clamp)
     currentX = Math.max(0, Math.min(currentX, rect.width));
     currentY = Math.max(0, Math.min(currentY, rect.height));
 
@@ -494,7 +505,6 @@ export function useTaxonomy() {
     if (cropRectRef.current && cropRectRef.current.w > 0) setHasCropArea(true); 
   };
 
-  // 🌟 [수정 포인트] Canvas 오프셋 문제 해결 및 DB 즉시 업서트
   const handleCropUpload = async (useOriginal: boolean) => {
     if (!imgRef.current || !cropImageSrc || !cropTargetField) return;
     setIsLoading(true);
@@ -507,14 +517,12 @@ export function useTaxonomy() {
         const img = imgRef.current;
         const rect = img.getBoundingClientRect();
         
-        // object-contain으로 인해 생기는 상하좌우 여백(레터박스)을 계산
         const renderRatio = Math.min(rect.width / img.naturalWidth, rect.height / img.naturalHeight);
         const renderWidth = img.naturalWidth * renderRatio;
         const renderHeight = img.naturalHeight * renderRatio;
         const offsetX = (rect.width - renderWidth) / 2;
         const offsetY = (rect.height - renderHeight) / 2;
 
-        // 드래그 영역을 렌더링된 실제 이미지 안으로 제한
         const safeCropX = Math.max(0, cropRectRef.current.x - offsetX);
         const safeCropY = Math.max(0, cropRectRef.current.y - offsetY);
         const safeCropEndX = Math.min(renderWidth, cropRectRef.current.x + cropRectRef.current.w - offsetX);
@@ -524,7 +532,6 @@ export function useTaxonomy() {
 
         if (safeCropW <= 0 || safeCropH <= 0) throw new Error("이미지 영역을 정확히 드래그해주세요.");
 
-        // 원본 이미지 해상도에 맞춰 자르기 비율 스케일업
         const sourceX = safeCropX / renderRatio;
         const sourceY = safeCropY / renderRatio;
         const sourceW = safeCropW / renderRatio;
@@ -550,7 +557,6 @@ export function useTaxonomy() {
       
       setEditForm(prev => ({ ...prev, [cropTargetField as string]: finalUploadUrl })); 
 
-      // 🌟 [핵심 변경] 저장하기 버튼을 누르지 않아도, DB에 즉시 업서트(저장)하여 분실을 방지합니다.
       if (selectedQuestion) {
         await supabase.from('question_db').update({ [cropTargetField]: finalUploadUrl }).eq('question_id', selectedQuestion.question_id);
         
@@ -564,6 +570,7 @@ export function useTaxonomy() {
     } catch (err: any) { alert("이미지 업로드 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
+  // 🌟 [핵심 변경] 저장 버튼 클릭 시, 폼에 들고 있는 문자열 박스(비율)들을 객체로 파싱해서 DB에 정확하게 저장!
   const saveQuestionContent = async () => {
     if (!selectedQuestion) return;
     setIsLoading(true);
@@ -572,11 +579,26 @@ export function useTaxonomy() {
       const parsedSubNum = parseInt(editForm.sub_num) || 0;
       const parsedProbability = editForm.solving_probability.trim() === '' ? null : parseFloat(editForm.solving_probability);
 
+      let parsedImgBox = null, parsedImg2Box = null, parsedAnsImgBox = null;
+      try { parsedImgBox = editForm.image_box ? JSON.parse(editForm.image_box) : null; } catch(e){}
+      try { parsedImg2Box = editForm.image_2_box ? JSON.parse(editForm.image_2_box) : null; } catch(e){}
+      try { parsedAnsImgBox = editForm.answer_image_box ? JSON.parse(editForm.answer_image_box) : null; } catch(e){}
+
       const updateData = {
         final_printed_page: parsedPage, question_number: editForm.question_number, sub_num: parsedSubNum,
         difficulty: editForm.difficulty === '미지정' ? null : editForm.difficulty, solving_probability: parsedProbability,
         question: editForm.question, answer: editForm.answer,
-        image_url: editForm.image_url, image_2_url: editForm.image_2_url, answer_image_url: editForm.answer_image_url, answer_image_2_url: editForm.answer_image_2_url,
+        
+        image_url: editForm.image_url, 
+        image_2_url: editForm.image_2_url, 
+        answer_image_url: editForm.answer_image_url, 
+        answer_image_2_url: editForm.answer_image_2_url,
+        
+        // 🌟 박스(배율) JSON 데이터 저장 (DB 스키마에 맞춰 image_2_box는 강제 String 변환)
+        image_box: parsedImgBox, 
+        image_2_box: parsedImg2Box ? JSON.stringify(parsedImg2Box) : null, 
+        answer_image_box: parsedAnsImgBox,
+
         step_1_concept: editForm.step_1_concept, step_2_approach: editForm.step_2_approach, step_3_process: editForm.step_3_process, step_4_conclusion: editForm.step_4_conclusion
       };
 
@@ -588,7 +610,8 @@ export function useTaxonomy() {
       const updatedQuestion = { ...selectedQuestion, ...updateData };
       setQuestions(prev => sortQuestionsList(prev.map(q => q.question_id === selectedQuestion.question_id ? updatedQuestion : q)));
       setSelectedQuestion(updatedQuestion); setIsEditingContent(false);
-      alert("✅ 수정되었습니다!");
+      
+      alert("✅ 모든 정보(이미지 2개 배율 포함)가 성공적으로 저장되었습니다!");
     } catch (err: any) { alert("수정 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
@@ -765,6 +788,12 @@ export function useTaxonomy() {
           difficulty: selectedQuestion.difficulty || '중', 
           is_human_verified: true,
           derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
+          
+          // 🌟 배율 박스 속성 복제
+          image_box: selectedQuestion.image_box,
+          image_2_box: selectedQuestion.image_2_box,
+          answer_image_box: selectedQuestion.answer_image_box,
+
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
         };

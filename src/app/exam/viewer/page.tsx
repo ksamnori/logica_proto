@@ -39,6 +39,23 @@ const safeParseIds = (raw: any): number[] => {
 
 const getRealId = (id: string) => String(id).replace(/_added_\d+$/, '');
 
+// 🌟 [핵심 변경] 이중/삼중으로 꼬인 JSON 문자열도 끝까지 파고들어 width(%)를 기필코 찾아내는 초강력 파서
+const getBoxWidth = (box: any) => {
+  if (!box || box === 'null' || box === 'undefined') return 'auto';
+  let parsed = box;
+  for (let i = 0; i < 3; i++) {
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch(e) { break; }
+    } else {
+      break;
+    }
+  }
+  if (parsed && typeof parsed === 'object' && parsed.width) {
+    return `${parsed.width}%`;
+  }
+  return 'auto';
+};
+
 export default function ExamViewerPage() {
   const router = useRouter();
 
@@ -700,7 +717,18 @@ export default function ExamViewerPage() {
 
         g.questions.forEach((q: any, sIdx: number) => {
             let safeImgUrl = String(q.image_url || '').trim();
-            let imgHtml = safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null' ? `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>` : '';
+            let safeImg2Url = String(q.image_2_url || '').trim();
+            let imgHtml = '';
+            
+            // 🌟 [핵심 변경] 거인증 완벽 해결 (auto 및 파서 적용), 높이 250px 제한
+            if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
+                const w = getBoxWidth(q.image_box);
+                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
+            }
+            if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
+                const w = getBoxWidth(q.image_2_box);
+                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
+            }
             
             const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
@@ -777,9 +805,17 @@ export default function ExamViewerPage() {
         const finalScore = g.questions[0].assigned_score;
         g.questions.forEach((q: any, sIdx: number) => {
             let safeImgUrl = String(q.image_url || '').trim();
+            let safeImg2Url = String(q.image_2_url || '').trim();
             let imgHtml = '';
+            
+            // 🌟 [핵심 변경] 거인증 완벽 해결 (auto 및 파서 적용), 높이 250px 제한
             if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-                imgHtml = `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+                const w = getBoxWidth(q.image_box);
+                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
+            }
+            if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
+                const w = getBoxWidth(q.image_2_box);
+                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
             }
             
             const prefix = ''; 
@@ -976,10 +1012,19 @@ export default function ExamViewerPage() {
                 const finalScore = g.questions[0].assigned_score;
                 g.questions.forEach((q: any, sIdx: number) => {
                     let safeImgUrl = String(q.image_url || '').trim();
+                    let safeImg2Url = String(q.image_2_url || '').trim();
                     let imgHtml = '';
+                    
+                    // 🌟 [핵심 변경] 거인증 완벽 해결 (auto 및 파서 적용), 높이 250px 제한
                     if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-                        imgHtml = `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+                        const w = getBoxWidth(q.image_box);
+                        imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
                     }
+                    if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
+                        const w = getBoxWidth(q.image_2_box);
+                        imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
+                    }
+                    
                     const prefix = ''; 
                     const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
                     
@@ -1405,7 +1450,6 @@ export default function ExamViewerPage() {
     window.print();
   };
 
-  // 🌟 토큰을 탑재한 PDF 생성 라우트 연동 (수정된 핵심 로직)
   const downloadPdfViaServer = async () => {
     setIsGeneratingPdf(true);
     try {
@@ -1417,13 +1461,12 @@ export default function ExamViewerPage() {
       const examId = currentExamIdRef.current;
       if (!examId) throw new Error('저장된 시험지 ID를 찾을 수 없습니다.');
 
-      // 🌟 열쇠(토큰) 준비
       const { data: { session } } = await supabase.auth.getSession();
 
       const res = await fetch(`/api/exam-pdf?exam_id=${examId}`, { 
         cache: 'no-store',
         headers: {
-          'Authorization': `Bearer ${session?.access_token}` // 🌟 열쇠 삽입!
+          'Authorization': `Bearer ${session?.access_token}`
         }
       });
       

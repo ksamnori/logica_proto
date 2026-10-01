@@ -4,6 +4,24 @@
 import React from "react";
 import { useTaxonomy } from "./useTaxonomy";
 import { formatQNum, getCleanUrl } from "./taxonomyUtils";
+import { supabase } from "@/lib/supabase"; 
+
+// 🌟 [핵심] 이 함수가 누락되어 에러가 났습니다. 여기에 안전하게 선언해둡니다!
+const getBoxWidth = (box: any) => {
+  if (!box || box === 'null' || box === 'undefined') return 'auto';
+  let parsed = box;
+  for (let i = 0; i < 3; i++) {
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch(e) { break; }
+    } else {
+      break;
+    }
+  }
+  if (parsed && typeof parsed === 'object' && parsed.width) {
+    return `${parsed.width}%`;
+  }
+  return 'auto';
+};
 
 export default function TaxonomyEditorPage() {
   const {
@@ -19,14 +37,14 @@ export default function TaxonomyEditorPage() {
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
     handleCropExisting,
-    saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex
-  } = useTaxonomy();
+    handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex, saveQuestionContent
+  } = useTaxonomy() as any; 
 
   const [bookFilter, setBookFilter] = React.useState("");
   const filteredWorkbooks = React.useMemo(() => {
     if (!bookFilter.trim()) return workbooks;
     const lowerKw = bookFilter.toLowerCase().replace(/\s+/g, '');
-    return workbooks.filter(b => b.toLowerCase().replace(/\s+/g, '').includes(lowerKw));
+    return workbooks.filter((b: string) => b.toLowerCase().replace(/\s+/g, '').includes(lowerKw));
   }, [workbooks, bookFilter]);
 
   const renderGroups = React.useMemo(() => {
@@ -39,7 +57,7 @@ export default function TaxonomyEditorPage() {
       const descendants = getDescendants(String(root.question_id).trim().toLowerCase());
       const family = [root, ...descendants];
       
-      const currentBookItems = family.filter(item => item.source_book_name === selectedBook);
+      const currentBookItems = family.filter((item: any) => item.source_book_name === selectedBook);
 
       if (currentBookItems.length > 0) {
         const sortedCurrent = [...currentBookItems].sort((a, b) => {
@@ -58,11 +76,26 @@ export default function TaxonomyEditorPage() {
     return groups;
   }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions]);
 
-  const renderImageBox = (label: string, fieldKey: string, colorTheme: 'indigo' | 'emerald') => {
+  const renderImageBox = (label: string, fieldKey: string, boxFieldKey: string | null, colorTheme: 'indigo' | 'emerald') => {
     const rawValue = editForm[fieldKey as keyof typeof editForm] as string;
     const displayUrl = getCleanUrl(rawValue); 
     const colorClasses = colorTheme === 'indigo' ? "border-indigo-300 bg-indigo-50/30 hover:bg-indigo-50 focus:ring-indigo-500 text-indigo-800" : "border-emerald-300 bg-emerald-50/30 hover:bg-emerald-50 focus:ring-emerald-500 text-emerald-800";
-    
+    const sliderColor = colorTheme === 'indigo' ? "accent-indigo-600" : "accent-emerald-600";
+
+    let boxData = { width: 100 };
+    if (boxFieldKey) {
+      try {
+        const parsed = JSON.parse(editForm[boxFieldKey as keyof typeof editForm] as string);
+        if (parsed && typeof parsed.width !== 'undefined') boxData.width = parsed.width;
+      } catch (e) {}
+    }
+
+    const handleWidthChange = (w: number) => {
+      if (!boxFieldKey) return;
+      const newData = JSON.stringify({ ...boxData, width: w });
+      setEditForm({ ...editForm, [boxFieldKey]: newData });
+    };
+
     return (
       <div className="flex flex-col gap-1.5 bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative">
         <label className="text-xs font-bold text-slate-500 flex justify-between items-center mb-1">
@@ -73,20 +106,36 @@ export default function TaxonomyEditorPage() {
               <span className="text-slate-200">|</span>
               <button type="button" onClick={() => handleCropExisting(rawValue, fieldKey)} className="text-emerald-500 hover:text-emerald-700 underline tracking-tighter">자르기 ✂️</button>
               <span className="text-slate-200">|</span>
-              <button type="button" onClick={() => setEditForm({ ...editForm, [fieldKey]: '' })} className="text-rose-500 hover:text-rose-700 underline tracking-tighter">삭제 🗑️</button>
+              <button type="button" onClick={() => setEditForm({ ...editForm, [fieldKey]: '' })} className="text-rose-500 hover:text-rose-700 underline tracking-tighter">삭제 🗑️️</button>
             </div>
           )}
         </label>
         <div 
           onDrop={(e) => handleDrop(e, fieldKey)} onDragOver={(e) => e.preventDefault()} onPaste={(e) => handlePaste(e, fieldKey)} tabIndex={0}
-          className={`w-full h-28 border-2 border-dashed rounded-lg text-center cursor-pointer focus:ring-2 outline-none transition-all flex flex-col items-center justify-center relative group overflow-hidden ${colorClasses}`}
-          onClick={() => { setCropTargetField(fieldKey); document.getElementById('globalFileInput')?.click(); }}
+          className={`w-full border-2 border-dashed rounded-lg text-center cursor-pointer focus:ring-2 outline-none transition-all flex flex-col items-center justify-center relative group overflow-hidden ${colorClasses}`}
+          style={{ height: boxFieldKey && rawValue ? '140px' : '112px' }}
+          onClick={(e) => { 
+            if ((e.target as HTMLElement).tagName === 'INPUT') return; 
+            setCropTargetField(fieldKey); document.getElementById('globalFileInput')?.click(); 
+          }}
         >
           {rawValue && <img src={displayUrl} className="absolute inset-0 w-full h-full object-contain opacity-30 group-hover:opacity-10 transition-opacity" alt="" />}
           <span className="text-2xl mb-1 relative z-10 group-hover:scale-110 transition-transform">📸</span>
           <span className="text-[10px] font-bold relative z-10">클릭, 드래그 또는 붙여넣기(Ctrl+V)</span>
         </div>
         <input type="text" value={rawValue} onChange={e => setEditForm({ ...editForm, [fieldKey]: e.target.value })} className="w-full p-2 border border-slate-200 rounded-lg focus:border-blue-400 outline-none text-[10px] text-slate-500 bg-slate-50 mt-1" placeholder="직접 URL 입력..." />
+        
+        {/* 🌟 크기 조절 슬라이더 UI */}
+        {boxFieldKey && rawValue && (
+          <div className="mt-2 flex items-center gap-3 bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+            <span className={`text-[11px] font-black w-14 ${colorTheme === 'indigo' ? 'text-indigo-600' : 'text-emerald-600'}`}>너비 {boxData.width}%</span>
+            <input 
+              type="range" min="20" max="100" step="5" value={boxData.width} 
+              onChange={e => handleWidthChange(parseInt(e.target.value))} 
+              className={`flex-1 h-1.5 bg-slate-300 rounded-lg appearance-none cursor-pointer ${sliderColor}`} 
+            />
+          </div>
+        )}
       </div>
     );
   };
@@ -132,7 +181,7 @@ export default function TaxonomyEditorPage() {
                   type="text" 
                   list="workbook-options"
                   value={cloneForm.targetBookName} 
-                  onChange={(e) => setCloneForm(prev => ({...prev, targetBookName: e.target.value}))} 
+                  onChange={(e) => setCloneForm((prev: any) => ({...prev, targetBookName: e.target.value}))} 
                   className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
                   placeholder="새로운 교재 이름 입력..."
                 />
@@ -147,7 +196,7 @@ export default function TaxonomyEditorPage() {
                   <input 
                     type="number" 
                     value={cloneForm.pageNumber} 
-                    onChange={(e) => setCloneForm(prev => ({...prev, pageNumber: e.target.value}))} 
+                    onChange={(e) => setCloneForm((prev: any) => ({...prev, pageNumber: e.target.value}))} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
                     placeholder="ex) 12"
                   />
@@ -157,7 +206,7 @@ export default function TaxonomyEditorPage() {
                   <input 
                     type="text" 
                     value={cloneForm.questionNumber} 
-                    onChange={(e) => setCloneForm(prev => ({...prev, questionNumber: e.target.value}))} 
+                    onChange={(e) => setCloneForm((prev: any) => ({...prev, questionNumber: e.target.value}))} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
                     placeholder="ex) 15"
                   />
@@ -167,7 +216,7 @@ export default function TaxonomyEditorPage() {
                   <input 
                     type="number" 
                     value={cloneForm.subNumber} 
-                    onChange={(e) => setCloneForm(prev => ({...prev, subNumber: e.target.value}))} 
+                    onChange={(e) => setCloneForm((prev: any) => ({...prev, subNumber: e.target.value}))} 
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-bold focus:ring-2 focus:ring-emerald-500 outline-none shadow-sm bg-white" 
                     placeholder="ex) 0"
                   />
@@ -405,7 +454,7 @@ export default function TaxonomyEditorPage() {
 
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
         
-        {/* 좌측: 문제 리스트 (모든 문항을 하나의 균일한 열(Column)로 정렬) */}
+        {/* 좌측: 문제 리스트 */}
         <div className="w-[400px] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
           <div className="p-3 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center shrink-0">
             <h2 className="font-extrabold text-slate-800 text-sm">📋 전체 문항 리스트 ({questions.length}개)</h2>
@@ -441,7 +490,6 @@ export default function TaxonomyEditorPage() {
                         `}
                       >
                         {isRootCurrent ? (
-                          // 🌟 MAIN ITEM (현재 교재) UI
                           <>
                             {selectedQuestion?.question_id === root.question_id && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864] rounded-l-xl"></div>}
                             <div className="flex justify-between items-start gap-2">
@@ -469,7 +517,6 @@ export default function TaxonomyEditorPage() {
                             </div>
                           </>
                         ) : (
-                          // 🌟 EXTERNAL PARENT (타 교재 부모) UI
                           <>
                             {selectedQuestion?.question_id === root.question_id && <div className="absolute left-0 top-0 w-1 h-full bg-slate-400 rounded-l-lg"></div>}
                             <div className="flex justify-between items-start opacity-80 hover:opacity-100 transition-opacity gap-2">
@@ -495,7 +542,6 @@ export default function TaxonomyEditorPage() {
                       {/* DESCENDANTS 렌더링 */}
                       {descendants.length > 0 && (
                         <div className="flex flex-col gap-1.5 relative mt-1.5">
-                          {/* 🌟 부모가 외부 교재(ml-0)일 때만 자식(ml-6)과 잇는 꺾쇠 선 표시 */}
                           {!isRootCurrent && (
                             <div className="absolute top-[-10px] left-[11px] w-[18px] border-l-2 border-b-2 border-slate-200 rounded-bl-lg h-[24px] z-0"></div>
                           )}
@@ -519,7 +565,6 @@ export default function TaxonomyEditorPage() {
                                 `}
                               >
                                 {isDescCurrent ? (
-                                  // 🌟 MAIN ITEM (현재 교재) UI
                                   <>
                                     {selectedQuestion?.question_id === desc.question_id && <div className="absolute left-0 top-0 w-1.5 h-full bg-[#002864] rounded-l-xl"></div>}
                                     <div className="flex justify-between items-start gap-2">
@@ -547,7 +592,6 @@ export default function TaxonomyEditorPage() {
                                     </div>
                                   </>
                                 ) : (
-                                  // 🌟 EXTERNAL PARENT UI (타 교재로 뻗어나간 형제/자식 처리용)
                                   <>
                                     <div className="flex justify-between items-start opacity-80 hover:opacity-100 transition-opacity gap-2">
                                       <div className="flex items-center gap-1.5 flex-wrap flex-1 leading-tight">
@@ -569,7 +613,6 @@ export default function TaxonomyEditorPage() {
                   );
                 })}
 
-                {/* 완전 고아(True Orphans) 노드에도 동일한 뷰어 로직을 적용합니다. */}
                 {trueOrphans.length > 0 && (
                   <div className="pt-4 mt-4 border-t border-slate-200">
                     <div className="text-[10px] font-bold text-rose-500 mb-2 px-2 bg-rose-50 py-1 rounded-md border border-rose-100 inline-block">⚠️ 원본이 완전히 유실된 문항</div>
@@ -724,12 +767,10 @@ export default function TaxonomyEditorPage() {
                   
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
-                      {/* 🌟 1. AI 유사생성 */}
                       <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-black text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
                         <span>👯</span> <span>AI 유사생성</span>
                       </button>
 
-                      {/* 🌟 2. 타 교재로 복제 */}
                       <button 
                         onClick={() => {
                           setCloneForm({ 
@@ -747,7 +788,6 @@ export default function TaxonomyEditorPage() {
                         <span>📋</span> 타 교재로 복제
                       </button>
 
-                      {/* 🌟 3. AI 수식 자동 복구 */}
                       <button 
                         onClick={handleFixLatex} 
                         disabled={!perms.edit || isFixingLatex} 
@@ -757,12 +797,10 @@ export default function TaxonomyEditorPage() {
                         {isFixingLatex ? <><span>🪄</span> 복구 중...</> : <><span>🪄</span> AI 수식 자동 복구</>}
                       </button>
                       
-                      {/* 🌟 4. 문항 수정 */}
                       <button onClick={() => setIsEditingContent(true)} disabled={!perms.edit} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.edit ? 'bg-slate-100 hover:bg-slate-200 text-slate-700 border-slate-300' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.edit ? "수정 권한이 없습니다." : ""}>
                         <span>✏️</span> 문항 수정
                       </button>
 
-                      {/* 🌟 5. 삭제 */}
                       <button onClick={deleteQuestion} disabled={!perms.delete} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors border shadow-sm flex items-center gap-1.5 ${perms.delete ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 border-rose-200' : 'bg-slate-50 text-slate-300 border-slate-100 cursor-not-allowed'}`} title={!perms.delete ? "삭제 권한이 없습니다." : ""}>
                         <span>🗑️</span> 삭제
                       </button>
@@ -785,10 +823,23 @@ export default function TaxonomyEditorPage() {
                       {selectedQuestion.question}
                     </div>
                     
+                    {/* 🌟 원본 이미지 1, 2 모두 출력 및 너비 비율(width %) 적용 */}
                     {(selectedQuestion.image_url || selectedQuestion.image_2_url) && (
-                      <div className="mt-4 grid grid-cols-2 gap-4">
-                        {selectedQuestion.image_url && <img src={getCleanUrl(selectedQuestion.image_url)} alt="문제 이미지 1" className="max-w-full rounded-lg border border-slate-200 shadow-sm" />}
-                        {selectedQuestion.image_2_url && <img src={getCleanUrl(selectedQuestion.image_2_url)} alt="문제 이미지 2" className="max-w-full rounded-lg border border-slate-200 shadow-sm" />}
+                      <div className="mt-4 flex flex-col gap-4">
+                        {selectedQuestion.image_url && (
+                          <div className="w-full flex justify-center">
+                             <img src={getCleanUrl(selectedQuestion.image_url)} alt="문제 이미지 1" 
+                                  className="rounded-lg border border-slate-200 shadow-sm mix-blend-multiply" 
+                                  style={{ width: getBoxWidth(selectedQuestion.image_box), maxHeight: '400px', objectFit: 'contain' }} />
+                          </div>
+                        )}
+                        {selectedQuestion.image_2_url && (
+                           <div className="w-full flex justify-center">
+                             <img src={getCleanUrl(selectedQuestion.image_2_url)} alt="문제 이미지 2" 
+                                  className="rounded-lg border border-slate-200 shadow-sm mix-blend-multiply" 
+                                  style={{ width: getBoxWidth(selectedQuestion.image_2_box), maxHeight: '400px', objectFit: 'contain' }} />
+                           </div>
+                        )}
                       </div>
                     )}
 
@@ -808,10 +859,24 @@ export default function TaxonomyEditorPage() {
                       </div>
                     )}
 
+                    {/* 🌟 정답 이미지 출력 및 너비 비율(width %) 적용 */}
                     {(selectedQuestion.answer_image_url || selectedQuestion.answer_image_2_url) && (
-                      <div className="mt-4 grid grid-cols-2 gap-4">
-                        {selectedQuestion.answer_image_url && <img src={getCleanUrl(selectedQuestion.answer_image_url)} alt="정답 이미지 1" className="max-w-full rounded-lg border border-emerald-200 shadow-sm" />}
-                        {selectedQuestion.answer_image_2_url && <img src={getCleanUrl(selectedQuestion.answer_image_2_url)} alt="정답 이미지 2" className="max-w-full rounded-lg border border-emerald-200 shadow-sm" />}
+                      <div className="mt-4 flex flex-col gap-4 w-full">
+                        {selectedQuestion.answer_image_url && (
+                           <div className="w-full flex justify-center">
+                             <img src={getCleanUrl(selectedQuestion.answer_image_url)} alt="정답 이미지 1" 
+                                  className="rounded-lg border border-emerald-200 shadow-sm mix-blend-multiply object-contain" 
+                                  style={{ width: getBoxWidth(selectedQuestion.answer_image_box), maxHeight: '400px' }} draggable="false" />
+                           </div>
+                        )}
+                        {selectedQuestion.answer_image_2_url && (
+                           <div className="w-full flex justify-center">
+                             {/* answer_image_2_box는 DB에 없으므로 기본 너비 100% 적용 */}
+                             <img src={getCleanUrl(selectedQuestion.answer_image_2_url)} alt="정답 이미지 2" 
+                                  className="rounded-lg border border-emerald-200 shadow-sm mix-blend-multiply object-contain" 
+                                  style={{ width: '100%', maxHeight: '400px' }} draggable="false" />
+                           </div>
+                        )}
                       </div>
                     )}
                   </div>
@@ -856,8 +921,9 @@ export default function TaxonomyEditorPage() {
                     </div>
                     
                     <div className="grid grid-cols-2 gap-4 mt-2">
-                      {renderImageBox("문제 이미지 1", "image_url", "indigo")}
-                      {renderImageBox("문제 이미지 2", "image_2_url", "indigo")}
+                      {/* 🌟 슬라이더가 추가된 renderImageBox 호출 부분 */}
+                      {renderImageBox("문제 이미지 1", "image_url", "image_box", "indigo")}
+                      {renderImageBox("문제 이미지 2", "image_2_url", "image_2_box", "indigo")}
                     </div>
                     
                     <div className="flex flex-col gap-1.5 mt-4">
@@ -888,8 +954,8 @@ export default function TaxonomyEditorPage() {
                     </div>
 
                     <div className="grid grid-cols-2 gap-4 mt-2 mb-4">
-                      {renderImageBox("정답 이미지 1", "answer_image_url", "emerald")}
-                      {renderImageBox("정답 이미지 2", "answer_image_2_url", "emerald")}
+                      {renderImageBox("정답 이미지 1", "answer_image_url", "answer_image_box", "emerald")}
+                      {renderImageBox("정답 이미지 2", "answer_image_2_url", null, "emerald")}
                     </div>
 
                   </div>
@@ -909,43 +975,43 @@ export default function TaxonomyEditorPage() {
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 1 (학교)</label>
                       <select value={selD1} onChange={e => handleD1Change(e.target.value)} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#002864] shadow-sm bg-white">
-                        <option value="">선택</option>{d1Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">선택</option>{d1Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 2 (학년/학기)</label>
                       <select value={selD2} onChange={e => handleD2Change(e.target.value)} disabled={!selD1 || d2Options.length === 0} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#002864] shadow-sm disabled:bg-slate-100 bg-white">
-                        <option value="">{d2Options.length === 0 && selD1 ? '옵션 없음' : '선택'}</option>{d2Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">{d2Options.length === 0 && selD1 ? '옵션 없음' : '선택'}</option>{d2Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 3 (대단원)</label>
                       <select value={selD3} onChange={e => handleD3Change(e.target.value)} disabled={!selD2 || d3Options.length === 0} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#002864] shadow-sm disabled:bg-slate-100 bg-white">
-                        <option value="">{d3Options.length === 0 && selD2 ? '옵션 없음' : '선택'}</option>{d3Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">{d3Options.length === 0 && selD2 ? '옵션 없음' : '선택'}</option>{d3Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 4 (중단원)</label>
                       <select value={selD4} onChange={e => handleD4Change(e.target.value)} disabled={!selD3 || d4Options.length === 0} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#002864] shadow-sm disabled:bg-slate-100 bg-white">
-                        <option value="">{d4Options.length === 0 && selD3 ? '옵션 없음' : '선택'}</option>{d4Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">{d4Options.length === 0 && selD3 ? '옵션 없음' : '선택'}</option>{d4Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 5 (소단원)</label>
                       <select value={selD5} onChange={e => handleD5Change(e.target.value)} disabled={!selD4 || d5Options.length === 0} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#002864] shadow-sm disabled:bg-slate-100 bg-white">
-                        <option value="">{d5Options.length === 0 && selD4 ? '옵션 없음' : '선택'}</option>{d5Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">{d5Options.length === 0 && selD4 ? '옵션 없음' : '선택'}</option>{d5Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 6 (유형)</label>
                       <select value={selD6} onChange={e => handleD6Change(e.target.value)} disabled={!selD5 || d6Options.length === 0} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-[#002864] shadow-sm disabled:bg-slate-100 bg-white">
-                        <option value="">{d6Options.length === 0 && selD5 ? '옵션 없음' : '선택'}</option>{d6Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">{d6Options.length === 0 && selD5 ? '옵션 없음' : '선택'}</option>{d6Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
                       <label className="text-[10px] font-bold text-slate-500">Depth 7 (개념)</label>
                       <select value={selD7} onChange={e => handleD7Change(e.target.value)} disabled={!selD6 && (!selD5 || d6Options.length > 0)} className="p-2 text-xs font-bold border border-slate-300 rounded-lg outline-none focus:ring-2 focus:ring-emerald-500 shadow-sm disabled:bg-slate-100 bg-emerald-50 text-emerald-900">
-                        <option value="">{d7Options.length === 0 && (selD6 || (selD5 && d6Options.length===0)) ? '옵션 없음' : '선택'}</option>{d7Options.map(o => <option key={o} value={o}>{o}</option>)}
+                        <option value="">{d7Options.length === 0 && (selD6 || (selD5 && d6Options.length===0)) ? '옵션 없음' : '선택'}</option>{d7Options.map((o: string) => <option key={o} value={o}>{o}</option>)}
                       </select>
                     </div>
                     <div className="flex flex-col gap-1">
