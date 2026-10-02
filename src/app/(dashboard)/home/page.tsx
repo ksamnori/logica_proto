@@ -70,11 +70,10 @@ export default function TeacherDashboardPage() {
 
   const [isLessonLogModalOpen, setIsLessonLogModalOpen] = useState(false);
   
-  // 🌟 문자 발송 및 강사 대기열 관련 상태
   const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
   const [pastLogs, setPastLogs] = useState<any[]>([]);
   const [msgForm, setMsgForm] = useState({ type: 'homework', title: '', dueDate: '', details: '' });
-  const [msgStudents, setMsgStudents] = useState<any[]>([]); // 개별 과제 맵핑용
+  const [msgStudents, setMsgStudents] = useState<any[]>([]); 
   
   const [myQueue, setMyQueue] = useState<any[]>([]);
   const [isSendingMyQueue, setIsSendingMyQueue] = useState(false);
@@ -123,6 +122,13 @@ export default function TeacherDashboardPage() {
     return () => { document.removeEventListener("mousedown", closeMenu); };
   }, []);
 
+  // 🌟 선택된 반이 변경될 때마다 로컬 스토리지에 저장하여 학생 페이지 방문 후 뒤로가기 시 복구되도록 설정
+  useEffect(() => {
+    if (selectedClassId && selectedClassId !== "all") {
+      localStorage.setItem("logica_last_selected_class", selectedClassId);
+    }
+  }, [selectedClassId]);
+
   useEffect(() => {
     if (myClasses.length > 0 && selectedClassId !== "all") {
       fetchClassDetails(selectedClassId);
@@ -136,7 +142,6 @@ export default function TeacherDashboardPage() {
     }
   }, [selectedClassId, myClasses.length]);
 
-  // 🌟 강사 대기열(내 학생들 대상) 실시간 조회
   const fetchMyQueue = async () => {
     if (myClasses.length === 0) return;
     const classIds = myClasses.map(c => c.class_id);
@@ -251,8 +256,17 @@ export default function TeacherDashboardPage() {
     });
 
     setMyClasses(sortedClasses);
+    
     if (sortedClasses.length > 0) {
-      setSelectedClassId(sortedClasses[0].class_id);
+      // 🌟 이전에 선택했던 반 상태를 localStorage에서 불러와 최우선 적용
+      const savedClassId = localStorage.getItem("logica_last_selected_class");
+      const existsInList = sortedClasses.some((c: any) => c.class_id === savedClassId);
+      
+      if (savedClassId && existsInList) {
+        setSelectedClassId(savedClassId);
+      } else {
+        setSelectedClassId(sortedClasses[0].class_id);
+      }
     }
 
     const { data: classIds } = await supabase.from("class").select("class_id, status").eq("instructor_id", instId);
@@ -535,7 +549,6 @@ export default function TeacherDashboardPage() {
     setAttStudents(mappedAtt.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
   };
 
-  // 🌟 과거 일지 로딩 및 문자 발송 기능 추가 (학생별 개별 설정 포함)
   const loadPastLogs = async (classId: string) => {
     try {
       const { data, error } = await supabase
@@ -556,13 +569,12 @@ export default function TeacherDashboardPage() {
     await loadPastLogs(selectedClassId);
     setMsgForm({ type: 'homework', title: '', dueDate: '', details: '' });
 
-    // 모달을 열 때 현재 반 학생들의 리스트를 초기화 (부모 전체 정보 포함)
     const initMsgStudents = students.map(s => {
        const pInfo = Array.isArray(s.parent) ? s.parent[0] : s.parent;
        return {
           id: s.student_id,
           name: s.name,
-          pInfo: pInfo, // 부모 전체 정보 객체 유지 (phone, phone_2, phone_3 확인용)
+          pInfo: pInfo, 
           primaryParentName: pInfo?.name || pInfo?.name_2 || pInfo?.name_3 || "학부모",
           primaryRel: pInfo?.relationship || pInfo?.relationship_2 || pInfo?.relationship_3 || "학부모",
           checked: true,
@@ -576,7 +588,6 @@ export default function TeacherDashboardPage() {
   const applyLogToForm = async (log: any) => {
     const desc = log.homework_desc || "";
     
-    // 1. 공통 과제 파싱 (기존 텍스트에 [🧑‍🎓 개별 과제]가 섞여있다면 제거하고 순수 공통부분만 발췌)
     let hRaw = desc;
     const hwMatch = desc.match(/\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/);
     if (hwMatch) {
@@ -606,7 +617,6 @@ export default function TeacherDashboardPage() {
       h = h.replace(dueMatch[0], "");
     }
 
-    // 🔥 수정된 부분: prev에 의존하지 않고 완전히 새로운 값으로 즉각 덮어씌움 (1번 클릭만으로 입력 보장)
     setMsgForm({
       type: 'homework',
       title: t,
@@ -614,7 +624,6 @@ export default function TeacherDashboardPage() {
       details: h.trim()
     });
 
-    // 2. DB에서 개별 코멘트 테이블 직접 쿼리
     let commentsMap: Record<string, string> = {};
     try {
       const { data: commentsData, error } = await supabase
@@ -633,7 +642,6 @@ export default function TeacherDashboardPage() {
       console.error("개별 코멘트 불러오기 실패:", err);
     }
 
-    // 3. 쿼리한 코멘트를 현재 학생 목록(msgStudents)에 즉시 매핑
     setMsgStudents(prevStudents => prevStudents.map(st => ({
        ...st,
        individualMemo: commentsMap[st.id] || "" 
@@ -663,7 +671,6 @@ export default function TeacherDashboardPage() {
         let previewTitle = "";
 
         if (msgForm.type === 'homework') {
-          // 🌟 백엔드 인사말 바로 뒤에 자연스럽게 이어지도록 "과제 안내드립니다." 추가
           fullDetails = `과제 안내드립니다.\n\n[과제명]: ${msgForm.title}\n[제출기한]: ${msgForm.dueDate}\n\n[공통 안내]\n${msgForm.details}`;
           if (st.individualMemo) {
             fullDetails += `\n\n[개별 과제 및 안내]\n${st.individualMemo}`;
@@ -708,7 +715,7 @@ export default function TeacherDashboardPage() {
     }
     alert(`성공적으로 ${res.inserted}건이 강사님의 발송 대기열에 등록되었습니다!`);
     setIsMessageModalOpen(false);
-    fetchMyQueue(); // 강사 대기열 즉시 갱신
+    fetchMyQueue(); 
   };
 
   const handleSendMyQueue = async () => {
@@ -718,9 +725,6 @@ export default function TeacherDashboardPage() {
     setIsSendingMyQueue(true);
     const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
     
-    // server action 에 배열 형태로 큐 ID를 넘겨서 해당 건만 처리하도록 하거나, 
-    // 기존 sendQueuedMessages가 텐넌트 전체를 쏜다면 일단 전체 발송되도록 둡니다.
-    // (보통 sendQueuedMessages가 텐넌트 단위로 동작함)
     const res = await sendQueuedMessages(validTenantId);
 
     setIsSendingMyQueue(false);
@@ -955,7 +959,6 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
-  // 배지 컬러 유틸리티 (대기열용)
   const getBadgeColor = (title: string) => {
     if (!title) return 'bg-transparent text-transparent border-transparent';
     if (title.includes('출석') || title.includes('등원') || title.includes('원내체류')) return 'bg-blue-50 text-blue-700 border-blue-200';
@@ -1347,7 +1350,6 @@ export default function TeacherDashboardPage() {
 
         </section>
 
-        {/* 🌟 신규: 강사의 발송 대기열 패널 추가 */}
         <section className="mt-4 grid grid-cols-1 gap-4 overflow-hidden min-h-[300px]">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-full">
             <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
@@ -1408,7 +1410,6 @@ export default function TeacherDashboardPage() {
 
       <AgendaSidebar currentUser={currentUser} tenantId={tenantId} hasAccess={hasAccess} />
 
-      {/* 수동 상태 모달 */}
       {manualModalData && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">
@@ -1451,7 +1452,6 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
-      {/* 메모/업무 모달 */}
       {isMemoModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -1493,7 +1493,6 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
-      {/* 🌟 3단 구조로 확장된 문자 발송 모달 */}
       {isMessageModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-6xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
@@ -1505,7 +1504,6 @@ export default function TeacherDashboardPage() {
 
             <div className="flex-1 flex overflow-hidden">
               
-              {/* 1단: 과거 일지 목록 패널 */}
               <div className="w-1/4 bg-slate-50 border-r border-slate-200 flex flex-col h-full">
                 <div className="p-4 bg-white border-b border-slate-200 shrink-0">
                   <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">📚 1. 최근 일지 불러오기</h3>
@@ -1527,7 +1525,6 @@ export default function TeacherDashboardPage() {
                 </div>
               </div>
 
-              {/* 2단: 공통 내용 작성 폼 */}
               <div className="w-1/3 flex flex-col h-full border-r border-slate-200 bg-white">
                 <div className="p-4 bg-slate-50 border-b border-slate-200 shrink-0">
                   <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">📢 2. 공통 발송 내용</h3>
@@ -1561,7 +1558,6 @@ export default function TeacherDashboardPage() {
                 </div>
               </div>
 
-              {/* 3단: 학생별 개별 설정 리스트 */}
               <div className="flex-1 flex flex-col h-full bg-slate-50/50">
                 <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0">
                   <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">🧑‍🎓 3. 학생별 개별 설정</h3>
@@ -1584,7 +1580,7 @@ export default function TeacherDashboardPage() {
                         />
                         <div className="flex items-baseline gap-1.5 flex-1">
                           <span className="text-[13px] font-extrabold text-slate-800">{st.name}</span>
-                          <span className="text-[10px] font-bold text-slate-500">{st.parentName}({st.rel})</span>
+                          <span className="text-[10px] font-bold text-slate-500">{st.primaryParentName}({st.primaryRel})</span>
                         </div>
                       </div>
                       <div className="pl-7">
@@ -1618,7 +1614,6 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
-      {/* 수업 일지 작성 완료 후 문자 발송 워크플로우 지원 */}
       <LessonLogModal 
         isOpen={isLessonLogModalOpen} 
         onClose={() => setIsLessonLogModalOpen(false)} 
