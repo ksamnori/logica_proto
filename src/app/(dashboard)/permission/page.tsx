@@ -172,7 +172,12 @@ export default function PermissionPage() {
   const thresholdTrackRef = useRef<HTMLDivElement>(null);
   const draggingThresholdRef = useRef<number | null>(null);
 
-  // 🌟 [핵심 변경] 기차처럼 밀어내는(Push) 방식의 슬라이더 로직으로 교착(데드락) 방지
+  // 🌟 [추가됨] 마스터 채점 기준표 상태
+  const [isGradingModalOpen, setIsGradingModalOpen] = useState(false);
+  const [gradingCodes, setGradingCodes] = useState<any[]>([]);
+  const [isSavingGrading, setIsSavingGrading] = useState(false);
+
+  // 기차처럼 밀어내는(Push) 방식의 슬라이더 로직
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if (draggingThresholdRef.current === null || !thresholdTrackRef.current) return;
@@ -181,21 +186,16 @@ export default function PermissionPage() {
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
       let pct = Math.round(((clientX - rect.left) / rect.width) * 100);
       
-      // 화면 밖으로 나가지 않도록 0~100 사이 고정
       pct = Math.max(0, Math.min(100, pct));
-      
       const idx = draggingThresholdRef.current;
       
       setThresholdBounds((prev: number[]) => {
         const next = [...prev];
         next[idx] = pct;
         
-        // 💡 충돌 시 아래쪽(왼쪽) 핸들 밀어내기
         for (let i = idx - 1; i >= 0; i--) {
           if (next[i] > next[i + 1]) next[i] = next[i + 1];
         }
-        
-        // 💡 충돌 시 위쪽(오른쪽) 핸들 밀어내기
         for (let i = idx + 1; i <= 4; i++) {
           if (next[i] < next[i - 1]) next[i] = next[i - 1];
         }
@@ -268,12 +268,11 @@ export default function PermissionPage() {
   const loadThresholds = async (tId: string) => {
     const { data, error } = await supabase
       .from('class_thresholds')
-      .select('horizon, titan, apex, master, ultimate') // 🌟 ultimate 컬럼 포함
+      .select('horizon, titan, apex, master, ultimate') 
       .eq('tenant_id', tId)
       .maybeSingle();
 
     if (!error && data) {
-      // 💡 DB 값이 혹시나 꼬여있을 때를 대비해 로드 시 강제 정렬
       const h = data.horizon ?? 20;
       const t = Math.max(h, data.titan ?? 40);
       const a = Math.max(t, data.apex ?? 60);
@@ -281,6 +280,21 @@ export default function PermissionPage() {
       const u = Math.max(m, data.ultimate ?? 95);
       
       setThresholdBounds([h, t, a, m, u]);
+    }
+  };
+
+  // 🌟 [추가됨] 마스터 채점 코드 로드 함수
+  const loadGradingCodes = async () => {
+    const { data, error } = await supabase
+      .from('master_grading_code')
+      .select('*')
+      .order('code');
+      
+    if (!error && data) {
+      setGradingCodes(data);
+      setIsGradingModalOpen(true);
+    } else {
+      alert("데이터베이스에서 채점 기준을 불러오지 못했습니다.");
     }
   };
 
@@ -394,6 +408,25 @@ export default function PermissionPage() {
     }
   };
 
+  // 🌟 [추가됨] 마스터 채점 코드 저장 함수
+  const handleSaveGradingCodes = async () => {
+    setIsSavingGrading(true);
+    try {
+      // 배열 형태로 upsert (기본키인 code를 기준으로 업데이트 수행)
+      const { error } = await supabase
+        .from('master_grading_code')
+        .upsert(gradingCodes);
+        
+      if (error) throw error;
+      alert("✅ 학원 전체 마스터 채점 기준(가중치)이 성공적으로 반영되었습니다!");
+      setIsGradingModalOpen(false);
+    } catch (e: any) {
+      alert("채점 기준 저장 중 오류가 발생했습니다: " + e.message);
+    } finally {
+      setIsSavingGrading(false);
+    }
+  };
+
   if (isAuthorized === null) return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   if (isAuthorized === false) return null; 
   if (isLoading) return <div className="p-8 font-bold text-slate-500">권한 정보를 불러오는 중입니다...</div>;
@@ -448,7 +481,6 @@ export default function PermissionPage() {
               </button>
             </div>
             
-            {/* 🌟 트랙 6개 분할 렌더링 */}
             <div className="relative w-full h-6 bg-slate-100 rounded-md flex select-none mb-6 shadow-inner" ref={thresholdTrackRef}>
               <div className="bg-slate-300 rounded-l-md transition-all duration-100" style={{ width: `${thresholdBounds[0]}%` }}></div>
               <div className="bg-emerald-300 transition-all duration-100" style={{ width: `${thresholdBounds[1]-thresholdBounds[0]}%` }}></div>
@@ -457,7 +489,6 @@ export default function PermissionPage() {
               <div className="bg-indigo-500 transition-all duration-100" style={{ width: `${thresholdBounds[4]-thresholdBounds[3]}%` }}></div>
               <div className="bg-rose-400 rounded-r-md transition-all duration-100" style={{ width: `${100-thresholdBounds[4]}%` }}></div>
               
-              {/* 🌟 드래그 핸들 5개 렌더링 */}
               {[0, 1, 2, 3, 4].map((idx) => (
                 <div key={idx} onMouseDown={() => { draggingThresholdRef.current = idx; }} onTouchStart={() => { draggingThresholdRef.current = idx; }} 
                      className="absolute top-1/2 -translate-y-1/2 -ml-[6px] w-[12px] h-[20px] bg-white border-2 border-[#002864] rounded cursor-ew-resize flex items-center justify-center gap-[1px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
@@ -470,7 +501,6 @@ export default function PermissionPage() {
               ))}
             </div>
             
-            {/* 🌟 범례 (Legend) 6개 표시 */}
             <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[10px] font-bold">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-slate-300 border border-slate-400 shadow-sm shrink-0"></span>
@@ -498,6 +528,21 @@ export default function PermissionPage() {
               </div>
             </div>
           </div>
+
+          {/* 🌟 [추가됨] 마스터 채점 기준 관리 버튼 */}
+          <div className="p-4 border-t border-slate-200 bg-white flex flex-col shrink-0">
+            <div className="flex justify-between items-center mb-1.5">
+              <span className="font-black text-[13px] text-slate-800 flex items-center gap-1.5">⚖️ 마스터 채점 기준</span>
+            </div>
+            <p className="text-[10px] text-slate-500 mb-3 font-medium">학원 전체의 공통 채점 가중치를 설정합니다.</p>
+            <button 
+              onClick={loadGradingCodes}
+              className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[12px] py-2.5 rounded-lg border border-slate-300 transition-colors shadow-sm flex justify-center items-center gap-2"
+            >
+              채점 기준표 수정하기
+            </button>
+          </div>
+
         </div>
 
         {/* === 우측 패널 (권한 설정 영역) === */}
@@ -564,6 +609,96 @@ export default function PermissionPage() {
           </div>
         </div>
       </div>
+
+      {/* 🌟 [추가됨] 마스터 채점 기준표 수정 모달 */}
+      {isGradingModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
+            
+            <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
+              <div>
+                <h2 className="text-lg font-black text-[#002864]">⚖️ 마스터 채점 가중치 관리</h2>
+                <p className="text-[11px] text-slate-500 font-bold mt-1">
+                  이 수치를 변경하면 학원 내 모든 내신 성적 통계와 입학 진단평가 결과에 즉시 반영됩니다.
+                </p>
+              </div>
+              <button 
+                onClick={() => setIsGradingModalOpen(false)} 
+                className="text-slate-400 hover:text-slate-700 bg-white border border-slate-200 rounded p-1.5 transition-colors"
+              >
+                ✕
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-0 bg-white custom-scroll">
+              <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
+                <thead className="bg-slate-100 sticky top-0 shadow-sm z-10 border-b border-slate-200">
+                  <tr>
+                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] w-16 text-center">기호</th>
+                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px]">상태 설명</th>
+                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] text-center w-24">정답 유무</th>
+                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] w-28 text-center">내신 가중치</th>
+                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] w-28 text-center">입학 가중치</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {gradingCodes.map((code, idx) => (
+                    <tr key={code.code} className="hover:bg-blue-50/40 transition-colors">
+                      <td className="py-2.5 px-5 font-black text-[#002864] text-lg text-center bg-slate-50/50">{code.code}</td>
+                      <td className="py-2.5 px-5 font-bold text-slate-700 text-[13px]">{code.description}</td>
+                      <td className="py-2.5 px-5 text-center">
+                        {code.is_correct ? 
+                          <span className="bg-emerald-100 border border-emerald-300 text-emerald-700 px-2.5 py-0.5 rounded text-[11px] font-black shadow-sm">정답</span> : 
+                          <span className="bg-rose-100 border border-rose-300 text-rose-700 px-2.5 py-0.5 rounded text-[11px] font-black shadow-sm">오답</span>}
+                      </td>
+                      <td className="py-2.5 px-5">
+                        <input 
+                          type="number" step="0.01" min="0" max="1"
+                          value={code.score_ratio} 
+                          onChange={(e) => {
+                            const next = [...gradingCodes];
+                            next[idx].score_ratio = e.target.value;
+                            setGradingCodes(next);
+                          }}
+                          className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] transition-all bg-white shadow-inner"
+                        />
+                      </td>
+                      <td className="py-2.5 px-5">
+                        <input 
+                          type="number" step="0.01" min="0" max="1"
+                          value={code.admission_ratio} 
+                          onChange={(e) => {
+                            const next = [...gradingCodes];
+                            next[idx].admission_ratio = e.target.value;
+                            setGradingCodes(next);
+                          }}
+                          className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] transition-all bg-white shadow-inner"
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            
+            <div className="p-4 border-t border-slate-200 bg-slate-50 flex justify-end gap-2 shrink-0 z-10">
+              <button 
+                onClick={() => setIsGradingModalOpen(false)} 
+                className="px-5 py-2 bg-white border border-slate-300 rounded-lg text-slate-600 font-bold text-sm hover:bg-slate-100 transition-colors shadow-sm"
+              >
+                닫기
+              </button>
+              <button 
+                onClick={handleSaveGradingCodes} 
+                disabled={isSavingGrading} 
+                className="px-6 py-2 bg-[#002864] text-white rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+              >
+                {isSavingGrading ? "저장 중..." : "변경사항 저장"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -102,6 +102,7 @@ export default function MakeupPage() {
           *, 
           instructor(name),
           student(
+            student_id,
             name, 
             grade, 
             enrollment(
@@ -210,6 +211,12 @@ export default function MakeupPage() {
     } catch (e: any) { alert("삭제 실패: " + e.message); }
   };
 
+  // 🌟 클릭 시 학생 상세 페이지의 보강 탭으로 이동
+  const handleStudentClick = (studentId: string) => {
+    if (!studentId) return;
+    router.push(`/student/${studentId}?tab=makeup`);
+  };
+
   if (isAuthorized === null) {
     return <div className="p-10 text-center font-bold text-slate-400">보안 권한 확인 중...</div>;
   }
@@ -294,7 +301,6 @@ export default function MakeupPage() {
                   else if (m.status === '완료') statusClass = 'bg-emerald-100 text-emerald-700';
                   else if (m.status === '취소') statusClass = 'bg-rose-100 text-rose-700';
 
-                  // 🌟 [수정 포인트] 조인된 enrollment 데이터에서 반 이름 추출
                   const enrolls = Array.isArray(m.student?.enrollment) ? m.student.enrollment : [];
                   const active = enrolls.find((e: any) => !['퇴원', '종료', '취소'].includes(e.status)) || enrolls[0];
                   const className = active?.class?.class_name || active?.class?.name || '반 미배정';
@@ -305,8 +311,11 @@ export default function MakeupPage() {
                       <td className="py-3 px-4 text-center font-extrabold text-[#002864] bg-blue-50/30">{timeStr}</td>
                       <td className="py-3 px-4 text-center font-bold text-slate-700">{roomStr}</td>
                       
-                      {/* 🌟 추출한 반 이름 적용 */}
-                      <td className="py-3 px-4 text-center font-extrabold text-[#002864] cursor-pointer hover:underline">
+                      {/* 🌟 1. onClick 이벤트 연결 2. 파란색 글씨 명확히 적용 */}
+                      <td 
+                        onClick={() => handleStudentClick(m.student?.student_id)}
+                        className="py-3 px-4 text-center font-extrabold text-blue-600 cursor-pointer hover:underline"
+                      >
                         {m.student?.name || '알수없음'} <span className="text-xs text-slate-400 font-medium">({className})</span>
                       </td>
                       

@@ -51,14 +51,33 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
       const instId = localStorage.getItem('logica_instructor_id');
       const role = localStorage.getItem('logica_instructor_role') || '';
       const pos = localStorage.getItem('logica_instructor_position') || '';
+      const tenantId = localStorage.getItem('logica_tenant_id');
       
-      const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장');
+      // 🌟 [수정됨] 권한 범위 확장: 원장급 뿐만 아니라 강사(TEACHER)도 전체 반 열람 가능
+      const isTeacherOrAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL', 'TEACHER'].includes(role.toUpperCase()) || 
+                               pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장') || pos.includes('강사');
 
+      // 반 목록 쿼리 세팅 (지점 전체 반 불러오기 vs 본인 반만 불러오기)
       let classQuery = supabase.from('class').select('*, instructor(name)');
-      if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
+      
+      if (isTeacherOrAdmin) {
+        // 강사 이상: 지점 전체 반 허용 (단, 지점이 세팅되어 있으면 지점으로 한정)
+        if (tenantId && tenantId !== 'hq') {
+          classQuery = classQuery.eq('tenant_id', tenantId);
+        }
+      } else {
+        // 조교 등 제한된 권한: 본인 반만
+        classQuery = classQuery.eq('instructor_id', instId);
+      }
+
+      // 학생 목록도 지점에 맞게 필터링
+      let studentQuery = supabase.from('student').select('*').eq('status', '재원');
+      if (tenantId && tenantId !== 'hq') {
+        studentQuery = studentQuery.eq('tenant_id', tenantId);
+      }
 
       const [ { data: studentsData }, { data: classesData }, { data: enrollsData } ] = await Promise.all([
-        supabase.from('student').select('*').eq('status', '재원'),
+        studentQuery,
         classQuery,
         supabase.from('enrollment').select('*')
       ]);

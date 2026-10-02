@@ -5,6 +5,7 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import ClassEditModal from "@/components/class/ClassEditModal";
+import InstructorHistoryModal from "@/components/class/InstructorHistoryModal";
 
 const DAYS = ['월', '화', '수', '목', '금', '토'];
 
@@ -68,6 +69,11 @@ export default function ClassPage() {
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [selectedClass, setSelectedClass] = useState<any>(null);
+
+  // 강사 배정 이력 모달 관련 상태
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [historyClassId, setHistoryClassId] = useState("");
+  const [historyClassName, setHistoryClassName] = useState("");
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const dragState = useRef({ isDown: false, startX: 0, startY: 0, scrollLeft: 0, scrollTop: 0 });
@@ -134,7 +140,6 @@ export default function ClassPage() {
     const tenantId = localStorage.getItem("logica_tenant_id");
     if (!tenantId) { setClasses([]); setIsLoading(false); return; }
     
-    // 🌟 student(name, status) 로 상태값을 추가로 불러옵니다.
     const { data, error } = await supabase
       .from("class")
       .select("*, instructor(name, position), enrollment(student_id, status, student(name, status)), class_schedule(*)")
@@ -163,19 +168,13 @@ export default function ClassPage() {
       if (ttFilter === 'REGULAR' && !isRegular) return;
       if (ttFilter === 'SPECIAL' && isRegular) return;
 
-      // 🌟 신규 로직: 수강종료 및 학생 상태가 휴원/퇴원인 경우 시간표에서 제외
       let filteredEnrollment = (c.enrollment || []).filter((e: any) => {
         const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
-        
-        // 수강종료 이력이거나, 학생 본인의 상태가 휴원/퇴원인 경우 제외
         if (e.status === '수강종료' || sStatus === '휴원' || sStatus === '퇴원') return false;
-
-        // 이름에 '테스트'가 들어간 학생 제외 처리
         if (hideTest) {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
           if (sName && sName.includes('테스트')) return false;
         }
-        
         return true;
       });
 
@@ -203,15 +202,10 @@ export default function ClassPage() {
   }, [classes, ttFilter, showPlanned, showEnded, hideTest]);
 
   const { wdStartHour, wdRowCount, wdHours, satStartHour, satRowCount, satHours } = useMemo(() => {
-    let wdMin = 14;
-    let wdMax = 22;
-    let satMin = 9;
-    let satMax = 18; 
-
+    let wdMin = 14; let wdMax = 22; let satMin = 9; let satMax = 18; 
     timetableBlocks.forEach(b => {
       const sHour = Math.floor(parseTime(b.start));
       const eHour = Math.ceil(parseTime(b.end));
-
       if (b.day === '토') {
         if (sHour < satMin) satMin = sHour;
         if (eHour > satMax) satMax = eHour;
@@ -220,13 +214,10 @@ export default function ClassPage() {
         if (eHour > wdMax) wdMax = eHour;
       }
     });
-
     const wRowCount = Math.max(1, wdMax - wdMin);
     const wHours = Array.from({ length: wRowCount }, (_, i) => wdMin + i);
-
     const sRowCount = Math.max(1, satMax - satMin);
     const sHours = Array.from({ length: sRowCount }, (_, i) => satMin + i);
-
     return {
       wdStartHour: wdMin, wdRowCount: wRowCount, wdHours: wHours,
       satStartHour: satMin, satRowCount: sRowCount, satHours: sHours
@@ -270,12 +261,10 @@ export default function ClassPage() {
       return matchLevel && matchGrade && matchInst;
     });
 
-    // 🌟 리스트의 배정인원에서도 휴원/퇴원 및 수강종료 필터링 적용
     result = result.map(c => {
       const filteredEnrollment = (c.enrollment || []).filter((e: any) => {
         const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
         if (e.status === '수강종료' || sStatus === '휴원' || sStatus === '퇴원') return false;
-
         if (hideTest) {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
           if (sName && sName.includes('테스트')) return false;
@@ -294,6 +283,11 @@ export default function ClassPage() {
 
   const openEditModal = (classItem: any) => { setSelectedClass(classItem); setIsEditModalOpen(true); };
   const closeEditModal = () => { setIsEditModalOpen(false); setSelectedClass(null); };
+
+  const openHistoryModal = (cId: string, cName: string, e?: React.MouseEvent) => {
+    if (e) { e.preventDefault(); e.stopPropagation(); }
+    setHistoryClassId(cId); setHistoryClassName(cName); setIsHistoryModalOpen(true);
+  };
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (!scrollRef.current) return;
@@ -336,71 +330,23 @@ export default function ClassPage() {
         :root { --hour-height: 100px; } 
         @media print {
           @page { size: A4 landscape; margin: 5mm; }
-          
-          body { 
-            visibility: hidden !important; 
-            background: white !important; 
-            -webkit-print-color-adjust: exact !important; 
-            print-color-adjust: exact !important; 
-          }
-          
-          #printable-timetable, #printable-timetable * { 
-            visibility: visible !important; 
-          }
-          
-          html, body, #__next, [data-reactroot] { 
-            overflow: visible !important; position: static !important; height: auto !important; 
-          }
-
-          #printable-timetable {
-             position: absolute !important; 
-             top: 15mm !important; 
-             left: 0 !important;
-             width: 100vw !important; height: auto !important;
-             border: none !important; box-shadow: none !important; border-radius: 0 !important; 
-             background: white !important; z-index: 9999 !important; margin: 0 !important; padding: 0 !important;
-          }
-          
+          body { visibility: hidden !important; background: white !important; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
+          #printable-timetable, #printable-timetable * { visibility: visible !important; }
+          html, body, #__next, [data-reactroot] { overflow: visible !important; position: static !important; height: auto !important; }
+          #printable-timetable { position: absolute !important; top: 15mm !important; left: 0 !important; width: 100vw !important; height: auto !important; border: none !important; box-shadow: none !important; border-radius: 0 !important; background: white !important; z-index: 9999 !important; margin: 0 !important; padding: 0 !important; }
           .no-print, .print-hide, .print-hide * { display: none !important; visibility: hidden !important; }
-          
           :root { --hour-height: 65px; } 
-          
           #printable-timetable .flex-1.flex { display: flex !important; width: 100% !important; }
           #printable-timetable .overflow-auto { overflow: visible !important; height: auto !important; display: block !important; }
-          
-          .print-time-col { 
-            min-width: 46px !important; width: 46px !important; flex: 0 0 46px !important; 
-            border-right: 1px solid #94a3b8 !important; 
-          }
-          .print-day-col { 
-            min-width: 0 !important; 
-            border-right: 1px solid #94a3b8 !important; 
-          }
-          
+          .print-time-col { min-width: 46px !important; width: 46px !important; flex: 0 0 46px !important; border-right: 1px solid #94a3b8 !important; }
+          .print-day-col { min-width: 0 !important; border-right: 1px solid #94a3b8 !important; }
           .custom-scroll::-webkit-scrollbar { display: none; }
-          
-          .print-text {
-             white-space: nowrap !important;
-             overflow: hidden !important;
-             text-overflow: clip !important;
-             letter-spacing: -1.2px !important;
-             width: 100% !important;
-          }
-          
+          .print-text { white-space: nowrap !important; overflow: hidden !important; text-overflow: clip !important; letter-spacing: -1.2px !important; width: 100% !important; }
           .print-box { padding: 2px 1px !important; }
-          
           .print-block-title { font-size: 11px !important; font-weight: 900 !important; margin-bottom: 1px !important; line-height: 1.1 !important; }
           .print-block-inst { font-size: 8px !important; font-weight: 700 !important; margin-bottom: 2px !important; line-height: 1.1 !important; }
-          
           .print-block-student { gap: 1px !important; } 
-          .print-block-student .print-text { 
-             font-size: 7.5px !important; 
-             font-weight: 600 !important; 
-             letter-spacing: -0.8px !important; 
-             line-height: 1.15 !important; 
-             margin-bottom: 0px !important;
-          }
-          
+          .print-block-student .print-text { font-size: 7.5px !important; font-weight: 600 !important; letter-spacing: -0.8px !important; line-height: 1.15 !important; margin-bottom: 0px !important; }
           .print-block-time { display: none !important; }
         }
       `}} />
@@ -454,11 +400,9 @@ export default function ClassPage() {
               <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📅 시간표</button>
               <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all bg-white text-[#002864] shadow-sm">📋 리스트</button>
             </div>
-            
             <button onClick={() => window.print()} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[12px] rounded-lg transition-colors border border-slate-300 flex items-center gap-1.5 shadow-sm">
               🖨️ 시간표 인쇄
             </button>
-            
             <div className="w-px h-6 bg-slate-200 mx-1"></div>
             <button onClick={() => window.open('/launch-special', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-indigo-600 text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-indigo-700 transition-colors text-center">특강/메이크업</button>
             <button onClick={() => window.open('/launch-class', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-[#002864] text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors text-center">정규반 개설</button>
@@ -494,11 +438,9 @@ export default function ClassPage() {
               <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all bg-white text-[#002864] shadow-sm">📅 시간표</button>
               <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📋 리스트</button>
             </div>
-            
             <button onClick={() => window.print()} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[12px] rounded-lg transition-colors border border-slate-300 flex items-center gap-1.5 shadow-sm">
               🖨️ 시간표 인쇄
             </button>
-
             <div className="w-px h-6 bg-slate-200 mx-1"></div>
             <button onClick={() => window.open('/launch-special', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-indigo-600 text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-indigo-700 transition-colors text-center">특강/메이크업</button>
             <button onClick={() => window.open('/launch-class', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-[#002864] text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors text-center">정규반 개설</button>
@@ -562,7 +504,18 @@ export default function ClassPage() {
                             <span className="text-slate-400">-</span>
                           )}
                         </td>
-                        <td className="py-3 px-4 border-b border-slate-100 font-bold">{c.instructor?.name ? c.instructor.name : '미정'}</td>
+                        <td className="py-3 px-4 border-b border-slate-100 font-bold text-slate-700">
+                          <div className="flex items-center gap-1.5">
+                            {c.instructor?.name ? c.instructor.name : '미정'}
+                            <button 
+                              onClick={(e) => openHistoryModal(c.class_id, c.name, e)} 
+                              className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-extrabold transition-colors"
+                              title="과거 강사 이력 보기"
+                            >
+                              이력
+                            </button>
+                          </div>
+                        </td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center">{statusHtml}</td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center" onClick={(e) => e.stopPropagation()}>
                           <button onClick={() => openEditModal(c)} className="px-3 py-1.5 bg-white hover:bg-slate-50 text-slate-600 border border-slate-300 font-bold text-xs rounded shadow-sm transition-colors">상세 보기</button>
@@ -803,18 +756,35 @@ export default function ClassPage() {
 
                                 <div className="print-block-time print-text text-[9px] font-semibold opacity-60 mt-auto w-full tracking-tighter">{b.start.slice(0,5)} ~ {b.end.slice(0,5)}</div>
                                 
-                                <div className={`print-hide absolute hidden group-hover:flex flex-col top-full mt-2 p-2.5 bg-slate-800 text-white text-xs rounded-lg shadow-2xl z-[100] w-48 pointer-events-none text-left items-start ${dayIndex >= 4 ? 'right-0' : 'left-0'}`}>
-                                   <div className="font-extrabold text-blue-200 text-[13px] mb-1.5 leading-tight">{b.classObj.name}</div>
-                                   <div className="text-slate-200 mb-0.5 flex justify-between w-full"><span>강사</span> <span className="font-bold text-white">{instName}</span></div>
-                                   <div className="text-slate-200 mb-0.5 flex justify-between w-full"><span>대상</span> <span className="font-bold text-white">{b.classObj.target_grade || '-'}</span></div>
-                                   <div className="text-slate-200 mb-0.5 flex justify-between w-full"><span>인원</span> <span className="font-bold text-white">{studentCount}명</span></div>
-                                   <div className="text-slate-200 mb-1.5 flex justify-between w-full border-b border-slate-600 pb-1.5"><span>상태</span> <span className={`font-bold ${b.classObj.status === '진행중' ? 'text-emerald-300' : 'text-amber-300'}`}>{b.classObj.status || '-'}</span></div>
-                                   
-                                   {students.length > 0 && (
-                                     <div className="text-[10px] leading-relaxed text-slate-300 break-words mt-1 w-full text-left">
-                                       {studentNamesStr}
+                                {/* 🌟 툴팁 다리(Bridge) 개선 및 클릭 충돌 방지 적용 */}
+                                <div className={`print-hide absolute hidden group-hover:flex flex-col top-full pt-2.5 z-[100] w-52 ${dayIndex >= 4 ? 'right-0' : 'left-0'}`}>
+                                   <div 
+                                     className="p-3 bg-slate-800 text-white text-xs rounded-xl shadow-2xl pointer-events-auto flex flex-col w-full text-left cursor-default border border-slate-700"
+                                     onClick={(e) => e.stopPropagation()} 
+                                   >
+                                     <div className="font-extrabold text-blue-200 text-[13px] mb-2.5 leading-tight tracking-tight">{b.classObj.name}</div>
+                                     <div className="text-slate-300 mb-1.5 flex justify-between w-full items-center">
+                                       <span>강사</span> 
+                                       <div className="flex items-center gap-2">
+                                         <span className="font-bold text-white text-[13px]">{instName}</span>
+                                         <button 
+                                           onClick={(e) => openHistoryModal(b.classObj.class_id, b.classObj.name, e)} 
+                                           className="text-[10px] bg-slate-600 hover:bg-slate-500 text-slate-100 px-2 py-1 rounded border border-slate-500 transition-colors shadow-sm cursor-pointer"
+                                         >
+                                           이력
+                                         </button>
+                                       </div>
                                      </div>
-                                   )}
+                                     <div className="text-slate-300 mb-1.5 flex justify-between w-full"><span>대상</span> <span className="font-bold text-white">{b.classObj.target_grade || '-'}</span></div>
+                                     <div className="text-slate-300 mb-1.5 flex justify-between w-full"><span>인원</span> <span className="font-bold text-white">{studentCount}명</span></div>
+                                     <div className="text-slate-300 mb-2 flex justify-between w-full border-b border-slate-600 pb-2.5"><span>상태</span> <span className={`font-bold ${b.classObj.status === '진행중' ? 'text-emerald-400' : 'text-amber-400'}`}>{b.classObj.status || '-'}</span></div>
+                                     
+                                     {students.length > 0 && (
+                                       <div className="text-[11px] leading-relaxed text-slate-300 break-words mt-1 w-full text-left">
+                                         {studentNamesStr}
+                                       </div>
+                                     )}
+                                   </div>
                                 </div>
                               </div>
                             )
@@ -829,6 +799,13 @@ export default function ClassPage() {
           </div>
         </div>
       )}
+
+      <InstructorHistoryModal 
+        isOpen={isHistoryModalOpen} 
+        onClose={() => setIsHistoryModalOpen(false)} 
+        classId={historyClassId} 
+        className={historyClassName} 
+      />
 
       <div className="print-hide no-print">
         <ClassEditModal isOpen={isEditModalOpen} classItem={selectedClass} instructors={instructors} currentUser={currentUser} onClose={closeEditModal} onSuccess={fetchClasses} />

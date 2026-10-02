@@ -21,10 +21,10 @@ const GradeButton = memo(({ code, ansId, currentCode, qId, tqId, title, onClick 
   
   if (['O', 'TO'].includes(code)) checkedClass += " bg-[#10b981]";
   else if (['X', 'TX'].includes(code)) checkedClass += " bg-[#ef4444]";
-  else if (code === 'RO') checkedClass += " bg-[#3b82f6]"; // 🌟 RO 컬러 (블루) 매핑 추가
+  else if (code === 'RO') checkedClass += " bg-[#3b82f6]"; 
   else if (code === '☆') checkedClass += " bg-[#f59e0b]";
   else if (code === 'B') checkedClass += " bg-[#64748b]";
-  else checkedClass += " bg-[#0ea5e9]"; // a, b, c, x, y, z, p 등
+  else checkedClass += " bg-[#0ea5e9]"; 
 
   const isChecked = currentCode === code;
 
@@ -156,7 +156,6 @@ function ReviewContent() {
       ratio = parseFloat(meta.score_ratio) || 0; if (ratio > 1) ratio = ratio / 100;
       isCorrectEq = meta.is_correct === true || String(meta.is_correct).toLowerCase() === 'true';
     } else {
-      // 🌟 RO 정답 처리 속성 추가
       if (['O', 'RO', 'a', 'b', 'c'].includes(code)) { ratio = 1.0; isCorrectEq = true; }
       else if (code === 'TO') { ratio = 0.8; isCorrectEq = true; }
       else { ratio = 0.0; isCorrectEq = false; }
@@ -517,7 +516,8 @@ function ReviewContent() {
         
         await supabase.from('student_homework_result').update({ status: '채점완료' }).eq('homework_id', parseInt(homeworkId as string)).eq('student_id', contextIds.studentId);
 
-        const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, tq_id').eq('student_id', contextIds.studentId);
+        // 🌟 [수정 완료]: 과제 오답노트 저장 시 기존 retry_count를 가져와서 +1 증가시킵니다.
+        const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, tq_id, retry_count').eq('student_id', contextIds.studentId);
         const incInserts: any[] = [];
         const incUpdates: any[] = [];
 
@@ -530,8 +530,13 @@ function ReviewContent() {
           if (data.tq_id) {
             const match = exInc?.find(e => String(e.tq_id) === String(data.tq_id));
             const p = { student_id: contextIds.studentId, tq_id: data.tq_id, question_id: data.question_id || null, source_type: dynamicSourceType, status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
-            if (match) incUpdates.push({ record_id: match.record_id, ...p });
-            else incInserts.push(p);
+            
+            if (match) {
+              const newRetryCount = isFullyCorrect ? match.retry_count : (match.retry_count || 0) + 1;
+              incUpdates.push({ record_id: match.record_id, ...p, retry_count: newRetryCount });
+            } else {
+              incInserts.push(p);
+            }
           }
         });
 
@@ -541,7 +546,7 @@ function ReviewContent() {
         }
         if (incUpdates.length > 0) {
           const upPromises = incUpdates.map(u => 
-            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id)
+            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type, retry_count: u.retry_count }).eq('record_id', u.record_id)
           );
           const results = await Promise.all(upPromises);
           const errs = results.filter(r => r.error);
@@ -603,7 +608,8 @@ function ReviewContent() {
         let { error: uErr } = await supabase.from('exam_assignment').update({ total_score: finalScore, status: '채점완료' }).eq('assignment_id', parseInt(assignmentId as string));
         if (uErr) throw new Error("시험지 총점 업데이트 실패: " + uErr.message);
 
-        const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, question_id').eq('student_id', contextIds.studentId);
+        // 🌟 [수정 완료]: 시험 오답노트 저장 시 기존 retry_count를 가져와서 +1 증가시킵니다.
+        const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, question_id, retry_count').eq('student_id', contextIds.studentId);
         const incInserts: any[] = [];
         const incUpdates: any[] = [];
 
@@ -615,8 +621,13 @@ function ReviewContent() {
           if (data.question_id) {
             const match = exInc?.find(e => String(e.question_id) === String(data.question_id));
             const p = { student_id: contextIds.studentId, question_id: data.question_id, source_type: dynamicSourceType, status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
-            if (match) incUpdates.push({ record_id: match.record_id, ...p });
-            else incInserts.push(p);
+            
+            if (match) {
+              const newRetryCount = isFullyCorrect ? match.retry_count : (match.retry_count || 0) + 1;
+              incUpdates.push({ record_id: match.record_id, ...p, retry_count: newRetryCount });
+            } else {
+              incInserts.push(p);
+            }
           }
         });
 
@@ -626,7 +637,7 @@ function ReviewContent() {
         }
         if (incUpdates.length > 0) {
           const upPromises = incUpdates.map(u => 
-            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id)
+            supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type, retry_count: u.retry_count }).eq('record_id', u.record_id)
           );
           const results = await Promise.all(upPromises);
           const errs = results.filter(r => r.error);
@@ -811,7 +822,6 @@ function ReviewContent() {
                       
                       let markHtml = <span className="text-slate-300 font-bold">-</span>;
                       if (currentCode) {
-                        // 🌟 RO 정답 HTML 표시 추가
                         if (['O', 'TO', 'RO'].includes(currentCode)) markHtml = <span className="text-emerald-500 font-extrabold text-xl">{currentCode}</span>;
                         else if (['X', 'TX'].includes(currentCode)) markHtml = <span className="text-red-500 font-extrabold text-xl">{currentCode}</span>;
                         else if (currentCode === '☆') markHtml = <span className="text-amber-500 font-extrabold text-xl">☆</span>;
@@ -819,7 +829,6 @@ function ReviewContent() {
                         else if (['a','b','c','x','y','z','p'].includes(currentCode)) markHtml = <span className="text-sky-500 font-extrabold text-lg">{currentCode}</span>;
                       }
 
-                      // 🌟 RO 정답 시 초록색 배경(rowBg) 추가
                       const rowBg = ['O', 'TO', 'RO', 'a', 'b', 'c'].includes(currentCode) ? 'bg-emerald-50/30' : (['X', 'TX', 'x', 'y', 'z', 'p', '☆', 'B'].includes(currentCode) ? 'bg-red-50/30' : 'bg-white');
                       const qPrefix = g.items.length > 1 ? `<span class="text-blue-600 font-bold mr-1">(${subIdx + 1})</span> ` : '';
                       const qAnswer = formatMathTextForWeb(q.answer || "정보 없음");
@@ -857,7 +866,6 @@ function ReviewContent() {
                           <td className="p-3 text-center">{markHtml}</td>
                           <td className="p-3 text-left pl-4">
                             <div className="flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
-                              {/* 🌟 윗줄: 기존 6칸 + RO 추가 = 7칸으로 변경 */}
                               <div className="grid grid-cols-7 gap-1.5">
                                 <GradeButton code="O" title="정답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="X" title="오답" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
@@ -867,7 +875,6 @@ function ReviewContent() {
                                 <GradeButton code="☆" title="별표 (질문)" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                                 <GradeButton code="B" title="빈칸 (미응시)" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />
                               </div>
-                              {/* 🌟 아랫줄: q 제거하여 7칸으로 맞춤 (총 14버튼 대칭) */}
                               <div className="grid grid-cols-7 gap-1 border-t border-slate-200 pt-1.5 mt-0.5">
                                 {['a','b','c','x','y','z','p'].map(cd => (
                                     <GradeButton key={cd} code={cd} title="세부 채점 옵션" currentCode={currentCode} ansId={a.answer_id} qId={row.question_id} tqId={row.tq_id} onClick={handleGradeClick} />

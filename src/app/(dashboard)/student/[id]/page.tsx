@@ -69,6 +69,7 @@ export default function StudentDetailPage() {
   const [examResults, setExamResults] = useState<any[]>([]);
   const [hwList, setHwList] = useState<any[]>([]);
   const [clinicList, setClinicList] = useState<any[]>([]);
+  const [makeupList, setMakeupList] = useState<any[]>([]); // 🌟 보강 데이터 상태 추가
   const [billingList, setBillingList] = useState<any[]>([]);
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
   const [categoryAnalysis, setCategoryAnalysis] = useState<any[]>([]);
@@ -121,6 +122,7 @@ export default function StudentDetailPage() {
     if (activeTab === "exam") { loadExamResults(); loadSchoolExams(); loadCategoryAnalysis(); }
     if (activeTab === "hw") loadHwList();
     if (activeTab === "clinic") loadClinicList();
+    if (activeTab === "makeup") loadMakeupList(); // 🌟 보강 데이터 로드 함수 호출
   }, [activeTab]);
 
   useEffect(() => {
@@ -128,11 +130,9 @@ export default function StudentDetailPage() {
       const record = attendances.find(a => a.attendance_date === selectedDate);
       if (record) {
         let st = record.status;
-        // 조퇴/결석/지각이 아닐 때 등원시간(check_in_time)이 있거나 '등원' 상태면 무조건 '출석'
         if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || record.check_in_time)) {
           st = '출석';
         }
-        
         setAttendForm({ 
           id: record.attendance_id, 
           status: st || "출석", 
@@ -514,6 +514,16 @@ export default function StudentDetailPage() {
     setClinicList(data || []);
   };
 
+  // 🌟 보강(Makeup) 데이터를 불러오는 함수 추가
+  const loadMakeupList = async () => {
+    const { data } = await supabase
+      .from("individual_makeup")
+      .select("*, instructor(name)")
+      .eq("student_id", studentId)
+      .order("schedule_date", { ascending: false });
+    setMakeupList(data || []);
+  };
+
   const loadBillings = async () => {
     const { data } = await supabase.from("academy_billing").select("*, class(name)").eq("student_id", studentId).order("billing_month", { ascending: false }).limit(200);
     setBillingList(data || []);
@@ -622,7 +632,6 @@ export default function StudentDetailPage() {
     let attendMap: any = {}; 
     attendances.forEach(a => {
       let st = a.status;
-      // 상태 보정: 등원 시간이 있거나 등원 상태면 무조건 '출석' 렌더링
       if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || a.check_in_time)) {
         st = '출석';
       }
@@ -659,7 +668,6 @@ export default function StudentDetailPage() {
 
     attendances.forEach(a => {
       let st = a.status;
-      // 상태 보정: 등원 시간이 있거나 등원 상태면 무조건 '출석' 카운트
       if (!['조퇴', '결석', '지각'].includes(st) && (st === '등원' || a.check_in_time)) {
         st = '출석';
       }
@@ -707,6 +715,7 @@ export default function StudentDetailPage() {
 
   if (!student) return <div className="p-10 text-center font-bold text-slate-500">데이터를 불러오는 중입니다...</div>;
 
+  // 🌟 [수정 포인트] 탭 구성에 '보강 이력' 탭 추가
   const TABS = [
     { id: 'info', name: '상세 정보 및 수강반' },
     ...(allowedActions.includes('action_view_consult') ? [{ id: 'consult', name: '상담 기록' }] : []),
@@ -715,6 +724,7 @@ export default function StudentDetailPage() {
     ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '주간테스트 성적' }] : []),
     { id: 'hw', name: '과제 현황' },
     ...(allowedActions.includes('action_view_clinic') ? [{ id: 'clinic', name: '오답 클리닉' }] : []),
+    { id: 'makeup', name: '보강 이력' }, // 🌟 새로 추가된 부분
     { id: 'billing', name: '수납/청구' }
   ];
 
@@ -760,7 +770,6 @@ export default function StudentDetailPage() {
           </div>
 
           <div className="p-6 bg-white flex-1 relative overflow-hidden">
-            
             {activeTab === "info" && <InfoTab student={student} enrollments={enrollments} consultLogs={consultLogs} setActiveTab={setActiveTab} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "consult" && <ConsultTab consultLogs={consultLogs} setSelectedConsultLog={setSelectedConsultLog} setIsConsultModalOpen={setIsConsultModalOpen} deleteConsultLog={deleteConsultLog} calendarBlock={renderCalendarBlock()} />}
             {activeTab === "attend" && <AttendTab calMonth={calMonth} attSummary={attSummary} selectedDate={selectedDate} attendForm={attendForm} setAttendForm={setAttendForm} allowedActions={allowedActions} deleteAttendance={deleteAttendance} saveAttendance={saveAttendance} calendarBlock={renderCalendarBlock()} />}
@@ -768,8 +777,8 @@ export default function StudentDetailPage() {
             {activeTab === "exam" && <ExamTab examResults={examResults} schoolExams={schoolExams} categoryAnalysis={categoryAnalysis} setIsSchoolExamModalOpen={setIsSchoolExamModalOpen} deleteSchoolExam={deleteSchoolExam} />}
             {activeTab === "hw" && <HwTab hwList={hwList} />}
             {activeTab === "clinic" && <ClinicTab clinicList={clinicList} />}
+            {activeTab === "makeup" && <MakeupTab makeupList={makeupList} />} {/* 🌟 보강 이력 탭 컨텐츠 연결 */}
             {activeTab === "billing" && <BillingTab billingList={billingList} setIsBillingModalOpen={setIsBillingModalOpen} setPayFormInit={setPayFormInit} setIsPaymentModalOpen={setIsPaymentModalOpen} />}
-
           </div>
         </div>
         
@@ -859,7 +868,7 @@ export default function StudentDetailPage() {
 }
 
 // ---------------------------------------------------------
-// 4. 분리된 서브 탭 컴포넌트 모음 (추후 개별 파일로 분리 가능)
+// 4. 분리된 서브 탭 컴포넌트 모음
 // ---------------------------------------------------------
 
 function InfoTab({ student, enrollments, consultLogs, setActiveTab, calendarBlock }: any) {
@@ -919,7 +928,7 @@ function InfoTab({ student, enrollments, consultLogs, setActiveTab, calendarBloc
         <div className="bg-slate-50 rounded-xl p-4 border border-slate-100 shadow-sm flex-1 overflow-hidden flex flex-col">
           <div className="flex justify-between items-center mb-2 shrink-0">
             <h3 className="text-[11px] font-black text-slate-700">최근 상담 요약</h3>
-            <button onClick={() => setActiveTab('consult')} className="text-[9px] text-blue-500 hover:underline font-bold">전체보기</button>
+            <button onClick={() => setActiveTab('consult')} className="text-[9px] text-blue-50 hover:underline font-bold">전체보기</button>
           </div>
           <div className="flex-1 overflow-y-auto custom-scroll space-y-2 pr-1">
              {consultLogs.slice(0, 3).map((log: any, i: number) => (
@@ -1117,41 +1126,22 @@ function ProgressTab({ progressBooks }: any) {
   );
 }
 
-// 🌟 방사 차트용 스마트 텍스트 줄바꿈 함수 (10글자 기준)
+// 방사 차트용 스마트 텍스트 줄바꿈 함수 (10글자 기준)
 const splitLabel = (label: string) => {
   if (!label) return [];
-  
-  // 전체 길이가 10글자 이하면 줄바꿈 없이 한 줄로 바로 출력
-  if (label.length <= 10) {
-    return [label];
-  }
-
+  if (label.length <= 10) return [label];
   const words = label.split(' ');
-  
   if (words.length === 1) {
-    // 띄어쓰기가 없는데 12글자를 초과하는 경우 절반으로 강제 분리
     const mid = Math.ceil(label.length / 2);
     return [label.substring(0, mid), label.substring(mid)];
   }
-  
-  // 12글자가 넘고 띄어쓰기가 있는 경우, 중간에 가장 가까운 띄어쓰기를 찾아 균형있게 2줄로 분리
-  let midIdx = 0;
-  let minDiff = Infinity;
-  let currentLen = 0;
-  
+  let midIdx = 0, minDiff = Infinity, currentLen = 0;
   for (let i = 0; i < words.length - 1; i++) {
     currentLen += words[i].length + (i > 0 ? 1 : 0);
     const diff = Math.abs(currentLen - (label.length / 2));
-    if (diff < minDiff) {
-      minDiff = diff;
-      midIdx = i;
-    }
+    if (diff < minDiff) { minDiff = diff; midIdx = i; }
   }
-  
-  return [
-    words.slice(0, midIdx + 1).join(' '),
-    words.slice(midIdx + 1).join(' ')
-  ];
+  return [words.slice(0, midIdx + 1).join(' '), words.slice(midIdx + 1).join(' ')];
 };
 
 const RadarChart = ({ data }: { data: any[] }) => {
@@ -1206,14 +1196,10 @@ const RadarChart = ({ data }: { data: any[] }) => {
     <svg width="100%" height={size} viewBox={`0 0 ${size} ${size}`}>
       {bgPolygons}
       {axes}
-      
       <polygon points={polyFinStr} fill="rgba(147, 197, 253, 0.4)" stroke="#93c5fd" strokeWidth="2" strokeLinejoin="round" />
       {pointsFin.map((p, i) => <circle key={`fin-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#3b82f6" />)}
-
       <polygon points={polyInitStr} fill="rgba(0, 40, 100, 0.5)" stroke="#002864" strokeWidth="2" strokeLinejoin="round" />
       {pointsInit.map((p, i) => <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#002864" />)}
-
-      {/* 🌟 분리된 텍스트 배열을 tspan을 이용해 상/하 두 줄로 출력 */}
       {labelPoints.map((p, i) => {
         const lines = splitLabel(p.label);
         return (
@@ -1255,93 +1241,50 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
 
     return (
       <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm w-full shrink-0 flex flex-col">
-        {/* 헤더 및 범례 영역 */}
         <div className="flex flex-col md:flex-row justify-between items-start mb-6 w-full gap-4">
           <div>
              <h3 className="text-[13px] font-black text-[#002864] mb-1.5">최근 주간테스트 성장 그래프 (나 vs 반 평균)</h3>
              <p className="text-[10px] font-bold text-slate-400 leading-relaxed whitespace-pre-wrap">
-               최초 정답(O)과 오답 정정(RO, TO) 후의 최종 점수 및{"\n"}
-               같은 시험지의 반 평균 변화입니다.
+               최초 정답(O)과 오답 정정(RO, TO) 후의 최종 점수 및{"\n"}같은 시험지의 반 평균 변화입니다.
              </p>
           </div>
-          {/* 🌟 2x2 그리드 배열로 범례 줄맞춤 완벽 해결 */}
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 bg-slate-50 p-3 rounded-xl border border-slate-100 shrink-0">
+             <div className="flex items-center gap-2"><div className="w-5 flex justify-center"><div className="w-3 h-3 bg-[#002864] rounded-sm"></div></div><span className="text-[11px] font-bold text-slate-600">최초 점수(나)</span></div>
+             <div className="flex items-center gap-2"><div className="w-5 flex justify-center"><div className="w-3 h-3 bg-[#93c5fd] rounded-sm"></div></div><span className="text-[11px] font-bold text-slate-600">최종 점수(나)</span></div>
              <div className="flex items-center gap-2">
-               <div className="w-5 flex justify-center"><div className="w-3 h-3 bg-[#002864] rounded-sm"></div></div>
-               <span className="text-[11px] font-bold text-slate-600">최초 점수(나)</span>
-             </div>
-             <div className="flex items-center gap-2">
-               <div className="w-5 flex justify-center"><div className="w-3 h-3 bg-[#93c5fd] rounded-sm"></div></div>
-               <span className="text-[11px] font-bold text-slate-600">최종 점수(나)</span>
-             </div>
-             <div className="flex items-center gap-2">
-               <div className="w-5 flex justify-center">
-                 <svg width="20" height="10">
-                   <line x1="0" y1="5" x2="20" y2="5" stroke="#94a3b8" strokeWidth="2" strokeDasharray="3 3" />
-                   <circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2" />
-                 </svg>
-               </div>
+               <div className="w-5 flex justify-center"><svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#94a3b8" strokeWidth="2" strokeDasharray="3 3" /><circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#94a3b8" strokeWidth="2" /></svg></div>
                <span className="text-[11px] font-bold text-slate-600">최초 (반 평균)</span>
              </div>
              <div className="flex items-center gap-2">
-               <div className="w-5 flex justify-center">
-                 <svg width="20" height="10">
-                   <line x1="0" y1="5" x2="20" y2="5" stroke="#10b981" strokeWidth="2" strokeDasharray="3 3" />
-                   <circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#10b981" strokeWidth="2" />
-                 </svg>
-               </div>
+               <div className="w-5 flex justify-center"><svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke="#10b981" strokeWidth="2" strokeDasharray="3 3" /><circle cx="10" cy="5" r="3.5" fill="#ffffff" stroke="#10b981" strokeWidth="2" /></svg></div>
                <span className="text-[11px] font-bold text-slate-600">최종 (반 평균)</span>
              </div>
           </div>
         </div>
-
-        {/* 차트 영역 */}
         <div className="w-full overflow-x-auto overflow-y-hidden custom-scroll pb-2 mt-2">
           <svg viewBox={`0 0 ${dynamicWidth} ${height}`} className="w-full" style={{ minWidth: dynamicWidth, height: height }}>
-            {/* 1. 가로 그리드 선 */}
             {[0, 25, 50, 75, 100].map(score => (
-              <g key={score}>
-                <line x1={paddingX - 10} y1={getY(score)} x2={dynamicWidth - 10} y2={getY(score)} stroke="#f1f5f9" strokeWidth="1.5" />
-                <text x={paddingX - 15} y={getY(score) + 4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="bold">{score}</text>
-              </g>
+              <g key={score}><line x1={paddingX - 10} y1={getY(score)} x2={dynamicWidth - 10} y2={getY(score)} stroke="#f1f5f9" strokeWidth="1.5" /><text x={paddingX - 15} y={getY(score) + 4} fontSize="10" fill="#94a3b8" textAnchor="end" fontWeight="bold">{score}</text></g>
             ))}
-            
-            {/* 2. 회색 배경 막대 (트랙) */}
             {chartData.map((r: any, i: number) => {
-               const cx = paddingX + (i * xStep) + 20; 
-               const barWidth = 32;
+               const cx = paddingX + (i * xStep) + 20; const barWidth = 32;
                return <rect key={`bg-${i}`} x={cx - barWidth/2} y={getY(100)} width={barWidth} height={height - paddingY * 2} fill="#f8fafc" rx="6" />;
             })}
-
-            {/* 🌟 3. 내 점수 막대 및 하단 텍스트 (이제 선보다 먼저 그려서 뒤로 보냄) */}
             {chartData.map((r: any, i: number) => {
                const cx = paddingX + (i * xStep) + 20; 
-               const initialScore = r.original_score || 0; 
-               const finalScore = r.final_score || initialScore;
-               
-               const yInitial = getY(initialScore);
-               const yFinal = getY(finalScore);
-               const barWidth = 32;
-               const shortTitle = (r.title || '시험').length > 8 ? (r.title || '시험').substring(0,8)+'..' : (r.title || '시험');
-
+               const initialScore = r.original_score || 0; const finalScore = r.final_score || initialScore;
+               const yInitial = getY(initialScore); const yFinal = getY(finalScore);
+               const barWidth = 32; const shortTitle = (r.title || '시험').length > 8 ? (r.title || '시험').substring(0,8)+'..' : (r.title || '시험');
                return (
                  <g key={`bar-${i}`}>
-                   {finalScore > 0 && (
-                     <rect x={cx - barWidth/2} y={yFinal} width={barWidth} height={height - paddingY - yFinal} fill="#93c5fd" rx="6" className="transition-all duration-500 hover:opacity-90" />
-                   )}
-                   {initialScore > 0 && (
-                     <rect x={cx - barWidth/2} y={yInitial} width={barWidth} height={height - paddingY - yInitial} fill="#002864" rx="6" className="transition-all duration-500 hover:opacity-90" />
-                   )}
+                   {finalScore > 0 && <rect x={cx - barWidth/2} y={yFinal} width={barWidth} height={height - paddingY - yFinal} fill="#93c5fd" rx="6" className="transition-all duration-500 hover:opacity-90" />}
+                   {initialScore > 0 && <rect x={cx - barWidth/2} y={yInitial} width={barWidth} height={height - paddingY - yInitial} fill="#002864" rx="6" className="transition-all duration-500 hover:opacity-90" />}
                    <text x={cx} y={height - 15} fontSize="10" fill="#64748b" textAnchor="middle" fontWeight="bold">{shortTitle}</text>
                  </g>
                );
             })}
-
-            {/* 🌟 4. 평균 점수 꺾은선 (점선) (이제 막대보다 나중에 그려서 맨 앞으로 나옴) */}
             <polyline points={pointsInitAvg} fill="none" stroke="#94a3b8" strokeWidth="2.5" strokeDasharray="4 4" />
             <polyline points={pointsFinAvg} fill="none" stroke="#10b981" strokeWidth="2.5" strokeDasharray="4 4" />
-            
-            {/* 🌟 5. 평균 점수 마커 (동그라미) (선 위에) */}
             {chartData.map((r: any, i: number) => {
                const cx = paddingX + (i * xStep) + 20; 
                return (
@@ -1351,25 +1294,9 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
                  </g>
                );
             })}
-
-            {/* 🌟 6. 내 점수 텍스트 (허공 최상단 고정 배치) */}
             {chartData.map((r: any, i: number) => {
-               const cx = paddingX + (i * xStep) + 20; 
-               const finalScore = r.final_score || (r.original_score || 0);
-
-               return finalScore > 0 ? (
-                 <text 
-                   key={`text-${i}`} 
-                   x={cx} 
-                   y={getY(100) - 12} // 100점 라인 바로 위로 모두 통일
-                   fontSize="13" 
-                   fill="#1e3a8a" 
-                   textAnchor="middle" 
-                   fontWeight="900"
-                 >
-                   {finalScore}
-                 </text>
-               ) : null;
+               const cx = paddingX + (i * xStep) + 20; const finalScore = r.final_score || (r.original_score || 0);
+               return finalScore > 0 ? <text key={`text-${i}`} x={cx} y={getY(100) - 12} fontSize="13" fill="#1e3a8a" textAnchor="middle" fontWeight="900">{finalScore}</text> : null;
             })}
           </svg>
         </div>
@@ -1380,52 +1307,23 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
   return (
     <div className="space-y-6 animate-[fadeIn_0.2s_ease-out]">
       <div className="flex flex-col lg:flex-row gap-6">
-        
         <div className="flex-[3] flex flex-col gap-6 min-w-0">
           {renderGrowthChart()}
-          
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex-1">
-            <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5 mb-4 border-b border-slate-100 pb-2">
-              <span className="w-1 h-3 bg-emerald-500 rounded-full"></span>주간테스트 상세 기록
-            </h3>
+            <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5 mb-4 border-b border-slate-100 pb-2"><span className="w-1 h-3 bg-emerald-500 rounded-full"></span>주간테스트 상세 기록</h3>
             <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               {examResults.length === 0 ? <div className="col-span-full text-[11px] text-slate-400 text-center py-4 bg-slate-50 rounded-xl">테스트 기록이 없습니다.</div> :
                  examResults.map((ex: any, i: number) => {
-                   const initial = ex.original_score || 0;
-                   const final = ex.final_score || 0;
-                   
+                   const initial = ex.original_score || 0; const final = ex.final_score || 0;
                    return (
-                     <div 
-                       key={i} 
-                       onClick={() => router.push(`/homework/review?assignment_id=${ex.assignment_id}&student_id=${studentId}&is_exam_hw=true`)}
-                       className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group gap-3"
-                     >
+                     <div key={i} onClick={() => router.push(`/homework/review?assignment_id=${ex.assignment_id}&student_id=${studentId}&is_exam_hw=true`)} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group gap-3">
                        <div className="flex justify-between items-start">
-                          {/* 좌측: 타이틀 & 날짜 */}
-                          <div className="flex flex-col gap-1.5 overflow-hidden pr-2 pt-1">
-                             <div className="text-[13px] font-black text-slate-700 truncate group-hover:text-blue-600 transition-colors" title={ex.title}>{ex.title}</div>
-                             <div className="text-[10px] text-slate-400 font-bold">
-                               {ex.created_at ? new Date(ex.created_at).toLocaleDateString() : '-'}
-                             </div>
-                          </div>
-                          
-                          {/* 우측: 점수표 (고정 너비로 화살표 상하 정렬) */}
+                          <div className="flex flex-col gap-1.5 overflow-hidden pr-2 pt-1"><div className="text-[13px] font-black text-slate-700 truncate group-hover:text-blue-600 transition-colors" title={ex.title}>{ex.title}</div><div className="text-[10px] text-slate-400 font-bold">{ex.created_at ? new Date(ex.created_at).toLocaleDateString() : '-'}</div></div>
                           <div className="flex flex-col gap-0.5 shrink-0">
-                             <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors">
-                                <span className="text-[10px] font-bold text-slate-500 w-10 text-left">내 점수</span>
-                                <span className="text-[13px] font-black text-[#002864] w-9 text-right">{initial}점</span>
-                                <span className="text-slate-300 text-[10px] w-6 text-center">➔</span>
-                                <span className="text-[13px] font-black text-blue-600 w-9 text-right">{final}점</span>
-                             </div>
-                             <div className="flex items-center px-2 py-0.5">
-                                <span className="text-[10px] font-bold text-slate-500 w-10 text-left">반 평균</span>
-                                <span className="text-[11px] font-black text-slate-600 w-9 text-right">{ex.class_init_avg}점</span>
-                                <span className="text-slate-300 text-[10px] w-6 text-center">➔</span>
-                                <span className="text-[11px] font-black text-emerald-600 w-9 text-right">{ex.class_fin_avg}점</span>
-                             </div>
+                             <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors"><span className="text-[10px] font-bold text-slate-500 w-10 text-left">내 점수</span><span className="text-[13px] font-black text-[#002864] w-9 text-right">{initial}점</span><span className="text-slate-300 text-[10px] w-6 text-center">➔</span><span className="text-[13px] font-black text-blue-600 w-9 text-right">{final}점</span></div>
+                             <div className="flex items-center px-2 py-0.5"><span className="text-[10px] font-bold text-slate-500 w-10 text-left">반 평균</span><span className="text-[11px] font-black text-slate-600 w-9 text-right">{ex.class_init_avg}점</span><span className="text-slate-300 text-[10px] w-6 text-center">➔</span><span className="text-[11px] font-black text-emerald-600 w-9 text-right">{ex.class_fin_avg}점</span></div>
                           </div>
                        </div>
-
                        <div className="flex flex-wrap gap-1 mt-auto">
                          {ex.oCount > 0 && <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded text-[9px] font-black">O 정답 ({ex.oCount})</span>}
                          {ex.roCount > 0 && <span className="bg-blue-50 text-blue-600 border border-blue-200 px-1.5 py-0.5 rounded text-[9px] font-black">RO 정정 ({ex.roCount})</span>}
@@ -1439,34 +1337,22 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
             </div>
           </div>
         </div>
-
         <div className="flex-[2] flex flex-col gap-6 min-w-0">
           <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col h-full">
             <div className="flex justify-between items-end mb-4 border-b border-slate-100 pb-2 shrink-0">
-              <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5">
-                <span className="w-1 h-3 bg-indigo-500 rounded-full"></span>단원별 성취도 분석
-              </h3>
+              <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-indigo-500 rounded-full"></span>단원별 성취도 분석</h3>
               <div className="flex gap-2">
                  <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1"><div className="w-2 h-2 bg-[#002864] rounded-sm"></div>최초</span>
                  <span className="text-[10px] font-bold text-slate-500 flex items-center gap-1"><div className="w-2 h-2 bg-[#93c5fd] rounded-sm"></div>최종</span>
               </div>
             </div>
-            
             <div className="flex-1 flex flex-col">
-              <div className="flex items-center justify-center py-2 shrink-0">
-                <RadarChart data={categoryAnalysis} />
-              </div>
-              
+              <div className="flex items-center justify-center py-2 shrink-0"><RadarChart data={categoryAnalysis} /></div>
               <div className="mt-6 space-y-3 flex-1 overflow-y-auto custom-scroll pr-1">
-                {categoryAnalysis.length === 0 && (
-                  <div className="text-center py-10 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">성취도 데이터가 없습니다.</div>
-                )}
+                {categoryAnalysis.length === 0 && <div className="text-center py-10 text-slate-400 text-xs font-bold bg-slate-50 rounded-xl">성취도 데이터가 없습니다.</div>}
                 {categoryAnalysis.map((cat: any, i: number) => (
                   <div key={i} className="flex flex-col gap-1">
-                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-700 mb-1">
-                      <span className="truncate pr-2">{cat.name}</span>
-                      <span className="text-indigo-600 shrink-0">최종 {cat.final_rate}%</span>
-                    </div>
+                    <div className="flex justify-between items-center text-[11px] font-bold text-slate-700 mb-1"><span className="truncate pr-2">{cat.name}</span><span className="text-indigo-600 shrink-0">최종 {cat.final_rate}%</span></div>
                     <div className="w-full bg-slate-100 h-2 rounded-full relative overflow-hidden">
                       <div className="absolute top-0 left-0 h-full bg-[#93c5fd] rounded-full transition-all duration-1000" style={{ width: `${cat.final_rate}%` }}></div>
                       <div className="absolute top-0 left-0 h-full bg-[#002864] rounded-full transition-all duration-1000" style={{ width: `${cat.initial_rate}%` }}></div>
@@ -1478,7 +1364,6 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
           </div>
         </div>
       </div>
-      
       <div>
         <div className="flex justify-between items-center mb-3 border-b border-slate-100 pb-2 mt-2">
           <h3 className="font-extrabold text-slate-700 text-[13px] flex items-center gap-1.5"><span className="w-1 h-3 bg-indigo-500 rounded-full"></span>학교 내신 성적</h3>
@@ -1548,6 +1433,50 @@ function ClinicTab({ clinicList }: any) {
             );
           })
         }
+      </div>
+    </div>
+  );
+}
+
+// 🌟 새로 추가된 보강 이력 탭 컴포넌트
+function MakeupTab({ makeupList }: any) {
+  return (
+    <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
+      <h3 className="font-black text-slate-700 text-[13px] mb-3">개별 보강 이력</h3>
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+        {makeupList.length === 0 ? (
+          <div className="col-span-full text-center py-10 text-slate-400 font-bold text-[11px] bg-slate-50 border border-slate-200 rounded-xl">
+            보강 이력이 없습니다.
+          </div>
+        ) : (
+          makeupList.map((m: any, idx: number) => {
+            const d = new Date(m.schedule_date);
+            const dateStr = `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, '0')}.${String(d.getDate()).padStart(2, '0')}`;
+            const timeStr = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+            
+            let statusCol = 'bg-slate-100 text-slate-600 border border-slate-200';
+            if (m.status === '예정') statusCol = 'bg-blue-50 text-blue-600 border border-blue-200';
+            else if (m.status === '진행중') statusCol = 'bg-amber-50 text-amber-600 border border-amber-200';
+            else if (m.status === '완료') statusCol = 'bg-emerald-50 text-emerald-600 border border-emerald-200';
+            else if (m.status === '취소') statusCol = 'bg-rose-50 text-rose-500 border border-rose-200';
+
+            return (
+              <div key={idx} className="bg-white p-3.5 rounded-xl border border-slate-200 flex flex-col justify-between shadow-sm hover:border-blue-300 transition-colors">
+                <div className="flex justify-between items-start mb-2">
+                  <span className={`text-[9px] font-black px-1.5 py-0.5 rounded ${statusCol}`}>{m.status || '예정'}</span>
+                  <span className="text-[9px] font-bold text-slate-400">{dateStr} {timeStr}</span>
+                </div>
+                <div className="text-[11px] font-black text-slate-700 mb-2 truncate" title={m.target_category_id || '보강 내용 없음'}>
+                  {m.target_category_id || '보강 내용 없음'}
+                </div>
+                <div className="text-[9px] font-bold text-slate-500 mt-auto flex justify-between bg-slate-50 p-1.5 rounded-md border border-slate-100">
+                  <span>담당: <span className="text-slate-700">{unwrap(m.instructor as any)?.name || '미지정'}</span></span>
+                  <span>장소: <span className="text-slate-700">{m.classroom || '-'}</span></span>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </div>
   );

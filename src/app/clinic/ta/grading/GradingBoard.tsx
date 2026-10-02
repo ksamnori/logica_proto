@@ -802,12 +802,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
             resolved_at: isFullyCorrect ? new Date().toISOString() : null 
           };
           
-          if (match) incUpdates.push({ record_id: match.record_id, ...p });
-          else incInserts.push(p);
+          if (match) {
+            const newRetryCount = isFullyCorrect ? match.retry_count : (match.retry_count || 0) + 1;
+            incUpdates.push({ record_id: match.record_id, ...p, retry_count: newRetryCount });
+          } else {
+            incInserts.push(p);
+          }
         });
 
         if (incInserts.length > 0) await supabase.from('student_incorrect_record').insert(incInserts);
-        if (incUpdates.length > 0) await Promise.all(incUpdates.map(u => supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type }).eq('record_id', u.record_id)));
+        if (incUpdates.length > 0) await Promise.all(incUpdates.map(u => supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type, retry_count: u.retry_count }).eq('record_id', u.record_id)));
       }
 
       alert("🎉 완료 상태 갱신 및 오답노트 발급이 처리되었습니다!");
@@ -988,7 +992,6 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
             <tbody>
               {matrixData.rows.map((r, idx) => (
                 <tr key={r.id} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
-                  {/* 🌟 수정된 왼쪽 문항 정보 영역: 컴팩트한 배치 적용 */}
                   <td className="sticky left-0 z-10 bg-white p-1.5 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle min-w-[150px] w-[150px]">
                     <div className="flex justify-between items-center mb-1 border-b border-slate-100 pb-1 px-0.5">
                       <div className="flex items-center gap-1 min-w-0">
@@ -1026,7 +1029,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                     const cell = matrixData.cellMap.get(key);
                     
                     if (!cell || cell.isBlocked) {
-                      return <td key={key} className="border-r border-b bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhYWGMYAEYB8RmROaABAD2OQQ/9rX+aQAAAABJRU5ErkJggg==')] opacity-15 pointer-events-none" />;
+                      return <td key={key} className="border-r border-b bg-slate-200 opacity-20 pointer-events-none" />;
                     }
 
                     const currentCode = pendingUpdates[key]?.grading_code !== undefined ? pendingUpdates[key].grading_code : cell.currentCode;
@@ -1125,7 +1128,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                   String(entry.input).startsWith('data:image') ||
                   /\.(jpeg|jpg|gif|png|svg|webp)$/i.test(String(entry.input)) ||
                   /^[\w-]+\.[\w]+$/.test(String(entry.input)) ||
-                  /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(entry.input))
+                      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(entry.input))
                 );
 
                 return (
