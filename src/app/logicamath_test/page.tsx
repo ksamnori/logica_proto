@@ -465,7 +465,7 @@ export default function NextGenMathPlatform() {
   return (
     <div className="bg-[#F4F7FB] h-screen flex flex-col font-pretendard select-none overflow-hidden relative">
       <style>{`
-        @font-face { font-family: 'TeacherHandwriting'; src: url('/fonts/TeacherHandwriting.woff2') format('woff2'), url('/fonts/TeacherHandwriting.ttf') format('truetype'); font-weight: normal; font-style: normal; }
+        @font-face { font-family: 'TeacherHandwriting'; src: url('/fonts/TeacherHandwriting.ttf') format('truetype'); font-weight: normal; font-style: normal; }
         .font-handwriting { font-family: 'TeacherHandwriting', sans-serif !important; }
         @keyframes drawStroke { to { stroke-dashoffset: 0; } }
         .pen-stroke { stroke-dasharray: 600; stroke-dashoffset: 600; animation: drawStroke 0.4s ease-out forwards; }

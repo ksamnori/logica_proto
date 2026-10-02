@@ -5,9 +5,8 @@ import React, { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import AgendaSidebar from "@/components/dashboard/AgendaSidebar";
-import { queueAttendanceNotice, queueAttendanceNoticeBulk } from "@/app/actions/alimtalk";
+import { queueAttendanceNotice, queueAttendanceNoticeBulk, addToQueue, sendQueuedMessages, deleteQueueItem } from "@/app/actions/alimtalk";
 
-// 🌟 분리된 모달 컴포넌트 임포트
 import LessonLogModal from "@/components/dashboard/LessonLogModal";
 
 const getKSTDateStr = (offsetDays = 0) => {
@@ -69,8 +68,16 @@ export default function TeacherDashboardPage() {
   const [isMemoModalOpen, setIsMemoModalOpen] = useState(false);
   const [memoData, setMemoData] = useState({ type: "일반공지", content: "" });
 
-  // 🌟 [수정] 복잡한 폼 상태 제거하고, 모달 열기/닫기 상태만 관리
   const [isLessonLogModalOpen, setIsLessonLogModalOpen] = useState(false);
+  
+  // 🌟 문자 발송 및 강사 대기열 관련 상태
+  const [isMessageModalOpen, setIsMessageModalOpen] = useState(false);
+  const [pastLogs, setPastLogs] = useState<any[]>([]);
+  const [msgForm, setMsgForm] = useState({ type: 'homework', title: '', dueDate: '', details: '' });
+  const [msgStudents, setMsgStudents] = useState<any[]>([]); // 개별 과제 맵핑용
+  
+  const [myQueue, setMyQueue] = useState<any[]>([]);
+  const [isSendingMyQueue, setIsSendingMyQueue] = useState(false);
 
   const [allowedMenus, setAllowedMenus] = useState<string[]>([]);
   const isBulkProcessing = useRef<boolean>(false);
@@ -129,24 +136,59 @@ export default function TeacherDashboardPage() {
     }
   }, [selectedClassId, myClasses.length]);
 
+  // 🌟 강사 대기열(내 학생들 대상) 실시간 조회
+  const fetchMyQueue = async () => {
+    if (myClasses.length === 0) return;
+    const classIds = myClasses.map(c => c.class_id);
+    const { data: enrolls } = await supabase.from('enrollment').select('student_id').in('class_id', classIds);
+    const sIds = enrolls?.map(e => e.student_id) || [];
+    
+    if (sIds.length === 0) {
+      setMyQueue([]);
+      return;
+    }
+
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+    const { data } = await supabase.from('alimtalk_queue')
+      .select('*')
+      .eq('tenant_id', validTenantId)
+      .eq('status', '대기')
+      .in('student_id', sIds)
+      .order('created_at', { ascending: false });
+    
+    const uniqueMap = new Map();
+    (data || []).forEach((item: any) => {
+        const key = item.template_id === 'KA01TP260921034958500GAtQOl600yJ' ? `${item.student_id}_${item.parent_phone}_ATT` : item.queue_id;
+        if (!uniqueMap.has(key)) uniqueMap.set(key, item);
+    });
+    setMyQueue(Array.from(uniqueMap.values()));
+  };
+
   useEffect(() => {
-    if (!selectedClassId || selectedClassId === "all") return;
+    if (!tenantId || myClasses.length === 0) return;
+    fetchMyQueue();
+
+    const queueChannel = supabase.channel('teacher_queue_realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'alimtalk_queue' }, () => {
+        fetchMyQueue();
+      }).subscribe();
 
     const attendanceChannel = supabase.channel('teacher_attendance_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'attendance' }, () => {
-          requestFetch(selectedClassId);
+          if (selectedClassId !== 'all') requestFetch(selectedClassId);
       }).subscribe();
 
     const clinicChannel = supabase.channel('teacher_clinic_realtime')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_session_state' }, () => {
-          requestFetch(selectedClassId);
+          if (selectedClassId !== 'all') requestFetch(selectedClassId);
       }).subscribe();
 
     return () => {
+      supabase.removeChannel(queueChannel);
       supabase.removeChannel(attendanceChannel);
       supabase.removeChannel(clinicChannel);
     };
-  }, [selectedClassId]);
+  }, [tenantId, myClasses.length, selectedClassId]);
 
   const loadPermissions = async (role: string, tId: string, isGodMode: boolean) => {
     let fetchedMenus: string[] = [];
@@ -493,6 +535,204 @@ export default function TeacherDashboardPage() {
     setAttStudents(mappedAtt.sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
   };
 
+  // 🌟 과거 일지 로딩 및 문자 발송 기능 추가 (학생별 개별 설정 포함)
+  const loadPastLogs = async (classId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('daily_lesson_log')
+        .select('*')
+        .eq('class_id', classId)
+        .order('actual_date', { ascending: false })
+        .limit(10);
+      if (error) throw error;
+      setPastLogs(data || []);
+    } catch (err) {
+      console.error("일지 불러오기 실패:", err);
+    }
+  };
+
+  const openMessageModal = async () => {
+    if (!selectedClassId || selectedClassId === "all") return alert("먼저 반을 선택해주세요.");
+    await loadPastLogs(selectedClassId);
+    setMsgForm({ type: 'homework', title: '', dueDate: '', details: '' });
+
+    // 모달을 열 때 현재 반 학생들의 리스트를 초기화 (부모 전체 정보 포함)
+    const initMsgStudents = students.map(s => {
+       const pInfo = Array.isArray(s.parent) ? s.parent[0] : s.parent;
+       return {
+          id: s.student_id,
+          name: s.name,
+          pInfo: pInfo, // 부모 전체 정보 객체 유지 (phone, phone_2, phone_3 확인용)
+          primaryParentName: pInfo?.name || pInfo?.name_2 || pInfo?.name_3 || "학부모",
+          primaryRel: pInfo?.relationship || pInfo?.relationship_2 || pInfo?.relationship_3 || "학부모",
+          checked: true,
+          individualMemo: ""
+       };
+    });
+    setMsgStudents(initMsgStudents);
+    setIsMessageModalOpen(true);
+  };
+
+  const applyLogToForm = async (log: any) => {
+    const desc = log.homework_desc || "";
+    
+    // 1. 공통 과제 파싱 (기존 텍스트에 [🧑‍🎓 개별 과제]가 섞여있다면 제거하고 순수 공통부분만 발췌)
+    let hRaw = desc;
+    const hwMatch = desc.match(/\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/);
+    if (hwMatch) {
+      hRaw = hwMatch[1].trim();
+    } else {
+      const indivIndex = desc.indexOf('[🧑‍🎓 개별 과제]');
+      if (indivIndex !== -1) {
+        hRaw = desc.substring(0, indivIndex).replace(/\[📝 공통 과제\]\n?/, '').trim();
+      } else {
+        hRaw = desc.replace(/\[📝 공통 과제\]\n?/, '').trim();
+      }
+    }
+
+    let t = "";
+    let d = "";
+    let h = hRaw;
+
+    const titleMatch = h.match(/^🏷️ 과제명: (.*?)(\n|$)/);
+    if (titleMatch) {
+      t = titleMatch[1].trim();
+      h = h.replace(titleMatch[0], "");
+    }
+    
+    const dueMatch = h.match(/^⏰ 기한: (.*?)(\n|$)/);
+    if (dueMatch) {
+      d = dueMatch[1].trim();
+      h = h.replace(dueMatch[0], "");
+    }
+
+    // 🔥 수정된 부분: prev에 의존하지 않고 완전히 새로운 값으로 즉각 덮어씌움 (1번 클릭만으로 입력 보장)
+    setMsgForm({
+      type: 'homework',
+      title: t,
+      dueDate: d,
+      details: h.trim()
+    });
+
+    // 2. DB에서 개별 코멘트 테이블 직접 쿼리
+    let commentsMap: Record<string, string> = {};
+    try {
+      const { data: commentsData, error } = await supabase
+        .from('lesson_log_student_comment')
+        .select('student_id, comment')
+        .eq('lesson_log_id', log.lesson_log_id);
+
+      if (error) throw error;
+      
+      if (commentsData) {
+        commentsData.forEach((c: any) => {
+          commentsMap[c.student_id] = c.comment || "";
+        });
+      }
+    } catch (err) {
+      console.error("개별 코멘트 불러오기 실패:", err);
+    }
+
+    // 3. 쿼리한 코멘트를 현재 학생 목록(msgStudents)에 즉시 매핑
+    setMsgStudents(prevStudents => prevStudents.map(st => ({
+       ...st,
+       individualMemo: commentsMap[st.id] || "" 
+    })));
+  };
+
+  const handleQueueMessage = async () => {
+    if (msgForm.type === 'homework' && (!msgForm.title || !msgForm.dueDate || !msgForm.details)) return alert('공통 항목을 모두 입력해주세요.');
+    if (msgForm.type === 'general' && !msgForm.details) return alert('내용을 입력해주세요.');
+    
+    const selectedStudents = msgStudents.filter(s => s.checked);
+    if (selectedStudents.length === 0) return alert('발송 대상 학생을 선택해주세요.');
+
+    const currentTimeStr = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+
+    const newMessages: any[] = [];
+
+    selectedStudents.forEach((st: any) => {
+      const pushTarget = (phone: string, name: string, rel: string) => {
+        if (!phone || phone.includes('unassigned') || phone.trim() === '') return;
+        
+        const relStr = rel || '학부모';
+        const finalName = `${st.name}(${relStr})`;
+
+        let fullDetails = "";
+        let previewTitle = "";
+
+        if (msgForm.type === 'homework') {
+          // 🌟 백엔드 인사말 바로 뒤에 자연스럽게 이어지도록 "과제 안내드립니다." 추가
+          fullDetails = `과제 안내드립니다.\n\n[과제명]: ${msgForm.title}\n[제출기한]: ${msgForm.dueDate}\n\n[공통 안내]\n${msgForm.details}`;
+          if (st.individualMemo) {
+            fullDetails += `\n\n[개별 과제 및 안내]\n${st.individualMemo}`;
+          }
+          previewTitle = `[과제] ${msgForm.title}`;
+        } else {
+          fullDetails = `${msgForm.details}`;
+          if (st.individualMemo) {
+            fullDetails += `\n\n[개별 추가 내용]\n${st.individualMemo}`;
+          }
+          previewTitle = `[일반문자]`;
+        }
+
+        newMessages.push({
+          tenant_id: validTenantId, 
+          student_id: st.id, 
+          student_name: st.name, 
+          parent_name: finalName, 
+          parent_phone: phone,
+          template_id: 'GENERAL_SMS', 
+          details: fullDetails,
+          preview_title: previewTitle, 
+          preview_desc: `${st.name} ${finalName}`, 
+          time_string: currentTimeStr, 
+          status: '대기'
+        });
+      };
+
+      if (st.pInfo) {
+        pushTarget(st.pInfo.phone, st.pInfo.name, st.pInfo.relationship);
+        pushTarget(st.pInfo.phone_2, st.pInfo.name_2, st.pInfo.relationship_2);
+        pushTarget(st.pInfo.phone_3, st.pInfo.name_3, st.pInfo.relationship_3);
+      }
+    });
+
+    if (newMessages.length === 0) return alert('유효한 발송 연락처가 없습니다.');
+
+    const res = await addToQueue(newMessages);
+    if (!res.success) {
+      alert(`대기열 등록 실패: ${res.message}`);
+      return;
+    }
+    alert(`성공적으로 ${res.inserted}건이 강사님의 발송 대기열에 등록되었습니다!`);
+    setIsMessageModalOpen(false);
+    fetchMyQueue(); // 강사 대기열 즉시 갱신
+  };
+
+  const handleSendMyQueue = async () => {
+    if (myQueue.length === 0) return;
+    if (!confirm(`대기 중인 ${myQueue.length}건의 메시지를 즉시 발송하시겠습니까?\n(발송 내역은 운영 대시보드에 기록됩니다)`)) return;
+
+    setIsSendingMyQueue(true);
+    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+    
+    // server action 에 배열 형태로 큐 ID를 넘겨서 해당 건만 처리하도록 하거나, 
+    // 기존 sendQueuedMessages가 텐넌트 전체를 쏜다면 일단 전체 발송되도록 둡니다.
+    // (보통 sendQueuedMessages가 텐넌트 단위로 동작함)
+    const res = await sendQueuedMessages(validTenantId);
+
+    setIsSendingMyQueue(false);
+    fetchMyQueue();
+
+    if (!res.success) {
+      alert(`발송 중 오류가 발생했습니다.\n${res.message || ""}`);
+      return;
+    }
+    alert(`메시지 전송 완료!\n(성공: ${res.sent}건, 실패: ${res.failed}건)`);
+  };
+
   const attSummary = useMemo(() => {
     let total = 0, present = 0, inClinic = 0, goneHome = 0, absent = 0;
     attStudents.forEach(st => {
@@ -715,6 +955,17 @@ export default function TeacherDashboardPage() {
     return `${g}학년`;
   };
 
+  // 배지 컬러 유틸리티 (대기열용)
+  const getBadgeColor = (title: string) => {
+    if (!title) return 'bg-transparent text-transparent border-transparent';
+    if (title.includes('출석') || title.includes('등원') || title.includes('원내체류')) return 'bg-blue-50 text-blue-700 border-blue-200';
+    if (title.includes('하원') || title.includes('조퇴')) return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (title.includes('지각')) return 'bg-amber-50 text-amber-600 border-amber-100';
+    if (title.includes('결석')) return 'bg-rose-50 text-rose-500 border-rose-100';
+    if (title.includes('과제')) return 'bg-cyan-50 text-cyan-600 border-cyan-200'; 
+    return 'bg-slate-100 text-slate-600 border-slate-200';
+  };
+
   if (isAuthorized === null) {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
@@ -904,7 +1155,13 @@ export default function TeacherDashboardPage() {
             <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
               <h2 className="font-bold text-slate-800 text-sm flex items-center gap-2">👨‍🎓 반 학생 상세 현황</h2>
               
-              <div className="flex items-center gap-4 ml-auto mr-4">
+              <div className="flex items-center gap-3 ml-auto mr-4">
+                <button 
+                  onClick={openMessageModal} 
+                  className="px-5 py-2 bg-[#fef01b] hover:bg-[#f4e500] text-[#3a2929] text-sm font-black rounded-xl transition-all shadow-md hover:shadow-lg flex items-center gap-2 hover:-translate-y-0.5"
+                >
+                  <span className="text-lg leading-none">✉️</span> 알림/과제 전송
+                </button>
                 <button 
                   onClick={() => setIsLessonLogModalOpen(true)} 
                   className="relative px-6 py-2 bg-gradient-to-r from-indigo-600 to-blue-700 text-white text-sm font-black rounded-xl hover:from-indigo-500 hover:to-blue-600 transition-all shadow-md hover:shadow-lg flex items-center gap-2 group hover:-translate-y-0.5"
@@ -1089,10 +1346,69 @@ export default function TeacherDashboardPage() {
           </div>
 
         </section>
+
+        {/* 🌟 신규: 강사의 발송 대기열 패널 추가 */}
+        <section className="mt-4 grid grid-cols-1 gap-4 overflow-hidden min-h-[300px]">
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-full">
+            <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+              <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                📬 나의 발송 대기열 (내 클래스 학생 대상)
+                {myQueue.length > 0 && <span className="text-[10px] font-bold text-[#3a2929] bg-[#fef01b] px-2 py-0.5 rounded-full shadow-sm">{myQueue.length}건 대기중</span>}
+              </h3>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/30">
+              {myQueue.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-80 min-h-[150px]">
+                  <span className="text-5xl mb-3 drop-shadow-sm">📬</span>
+                  <p className="font-bold text-sm">대기 중인 메시지가 없습니다.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                  {myQueue.map((msg: any, idx: number) => (
+                    <div key={msg.queue_id || idx} className="bg-white px-3 py-2 rounded-xl border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-1">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-1.5 mb-1">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[80px] ${getBadgeColor(msg.preview_title)}`}>{msg.preview_title}</span>
+                          <div className="flex items-baseline gap-1">
+                            <span className="text-[12px] font-extrabold text-slate-700">{msg.student_name}</span>
+                            <span className="text-[10px] text-indigo-500 font-bold">{msg.parent_name}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center pr-6">
+                          <span className="text-[9px] font-bold text-slate-400">{msg.time_string || ''}</span>
+                        </div>
+                        <button onClick={async () => {
+                           const res = await deleteQueueItem(msg.queue_id);
+                           if (!res.success) alert(`삭제 실패: ${res.message}`);
+                           fetchMyQueue(); 
+                        }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-2 top-2">×</button>
+                      </div>
+                      
+                      {msg.template_id !== "KA01TP260921034958500GAtQOl600yJ" && msg.details && (
+                        <div className="bg-slate-50 px-2.5 py-2 rounded-lg text-[10px] text-slate-600 border border-slate-100 whitespace-pre-wrap leading-relaxed max-h-[80px] overflow-y-auto custom-scroll">
+                          {msg.details}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
+              <button onClick={handleSendMyQueue} disabled={myQueue.length === 0 || isSendingMyQueue} className="px-6 py-2.5 bg-[#fef01b] hover:bg-[#eade16] disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 text-[#3a2929] text-sm font-black rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">
+                {isSendingMyQueue ? <>발송 중... <span className="animate-spin">⏳</span></> : <>🚀 {myQueue.length}건 전체 발송</>}
+              </button>
+            </div>
+          </div>
+        </section>
+
       </div>
 
       <AgendaSidebar currentUser={currentUser} tenantId={tenantId} hasAccess={hasAccess} />
 
+      {/* 수동 상태 모달 */}
       {manualModalData && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">
@@ -1135,6 +1451,7 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
+      {/* 메모/업무 모달 */}
       {isMemoModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -1176,13 +1493,143 @@ export default function TeacherDashboardPage() {
         </div>
       )}
 
-      {/* 🌟 렌더링 추가: 분리된 LessonLogModal 삽입 */}
+      {/* 🌟 3단 구조로 확장된 문자 발송 모달 */}
+      {isMessageModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-6xl h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
+            
+            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+              <h2 className="font-bold text-sm flex items-center gap-2"><span>✉️</span> 학부모 알림/과제 문자 발송 (개별 설정)</h2>
+              <button onClick={() => setIsMessageModalOpen(false)} className="text-white hover:text-rose-400 text-2xl font-bold leading-none">&times;</button>
+            </div>
+
+            <div className="flex-1 flex overflow-hidden">
+              
+              {/* 1단: 과거 일지 목록 패널 */}
+              <div className="w-1/4 bg-slate-50 border-r border-slate-200 flex flex-col h-full">
+                <div className="p-4 bg-white border-b border-slate-200 shrink-0">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">📚 1. 최근 일지 불러오기</h3>
+                  <p className="text-[10px] text-slate-500 mt-1">클릭하면 공통 내용과 개별 과제가 자동 입력됩니다.</p>
+                </div>
+                <div className="flex-1 overflow-y-auto p-3 space-y-2 custom-scroll">
+                  {pastLogs.length === 0 ? (
+                    <div className="text-center text-xs text-slate-400 py-10 font-bold">작성된 일지가 없습니다.</div>
+                  ) : (
+                    pastLogs.map(log => (
+                      <div key={log.lesson_log_id} onClick={() => applyLogToForm(log)} className="bg-white p-3 rounded-xl border border-slate-200 cursor-pointer hover:border-indigo-400 hover:shadow-md transition-all group">
+                        <div className="flex justify-between items-center mb-1">
+                          <span className="text-[10px] font-black text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100">{log.actual_date}</span>
+                        </div>
+                        <p className="text-[11px] font-medium text-slate-600 line-clamp-3 mt-1.5 leading-snug group-hover:text-slate-800">{log.homework_desc || "내용 없음"}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+
+              {/* 2단: 공통 내용 작성 폼 */}
+              <div className="w-1/3 flex flex-col h-full border-r border-slate-200 bg-white">
+                <div className="p-4 bg-slate-50 border-b border-slate-200 shrink-0">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">📢 2. 공통 발송 내용</h3>
+                </div>
+                <div className="flex-1 p-5 overflow-y-auto custom-scroll flex flex-col gap-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">발송 유형</label>
+                    <select value={msgForm.type} onChange={e => setMsgForm({...msgForm, type: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:border-[#002864]">
+                      <option value="homework">📚 과제 안내</option>
+                      <option value="general">💬 일반 공지</option>
+                    </select>
+                  </div>
+
+                  {msgForm.type === 'homework' && (
+                    <>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1.5">과제명</label>
+                        <input type="text" placeholder="예: 9월 2주차 주간지" value={msgForm.title} onChange={e => setMsgForm({...msgForm, title: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#002864]" />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-500 mb-1.5">제출 기한</label>
+                        <input type="text" placeholder="예: 9/14(수) 22:00까지" value={msgForm.dueDate} onChange={e => setMsgForm({...msgForm, dueDate: e.target.value})} className="w-full border border-slate-300 rounded-lg p-2.5 text-sm font-bold text-slate-700 focus:outline-none focus:border-[#002864]" />
+                      </div>
+                    </>
+                  )}
+
+                  <div className="flex-1 flex flex-col min-h-[150px]">
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">공통 상세 내용</label>
+                    <textarea placeholder="반 전체에 발송할 공통 내용을 입력하세요..." value={msgForm.details} onChange={e => setMsgForm({...msgForm, details: e.target.value})} className="w-full border border-slate-300 rounded-lg p-3 text-sm font-medium text-slate-800 flex-1 resize-none focus:outline-none focus:border-[#002864] leading-relaxed"></textarea>
+                  </div>
+                </div>
+              </div>
+
+              {/* 3단: 학생별 개별 설정 리스트 */}
+              <div className="flex-1 flex flex-col h-full bg-slate-50/50">
+                <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0">
+                  <h3 className="font-bold text-sm text-slate-800 flex items-center gap-1.5">🧑‍🎓 3. 학생별 개별 설정</h3>
+                  <div className="flex items-center gap-3 text-xs">
+                    <button onClick={() => setMsgStudents(msgStudents.map(s => ({...s, checked: true})))} className="text-indigo-600 font-bold hover:underline">전체 선택</button>
+                    <span className="text-slate-300">|</span>
+                    <button onClick={() => setMsgStudents(msgStudents.map(s => ({...s, checked: false})))} className="text-slate-500 font-bold hover:underline">전체 해제</button>
+                  </div>
+                </div>
+                
+                <div className="flex-1 p-4 overflow-y-auto custom-scroll space-y-3">
+                  {msgStudents.map(st => (
+                    <div key={st.id} className={`flex flex-col p-3 rounded-xl border transition-all ${st.checked ? 'bg-white border-indigo-200 shadow-sm' : 'bg-slate-100 border-slate-200 opacity-60'}`}>
+                      <div className="flex items-center gap-3 mb-2">
+                        <input 
+                          type="checkbox" 
+                          checked={st.checked} 
+                          onChange={(e) => setMsgStudents(prev => prev.map(s => s.id === st.id ? {...s, checked: e.target.checked} : s))}
+                          className="w-4 h-4 text-[#002864] rounded focus:ring-[#002864] cursor-pointer"
+                        />
+                        <div className="flex items-baseline gap-1.5 flex-1">
+                          <span className="text-[13px] font-extrabold text-slate-800">{st.name}</span>
+                          <span className="text-[10px] font-bold text-slate-500">{st.parentName}({st.rel})</span>
+                        </div>
+                      </div>
+                      <div className="pl-7">
+                        <input 
+                          type="text" 
+                          placeholder={`${st.name} 학생만을 위한 개별 과제/메시지 추가...`} 
+                          value={st.individualMemo}
+                          onChange={(e) => setMsgStudents(prev => prev.map(s => s.id === st.id ? {...s, individualMemo: e.target.value} : s))}
+                          disabled={!st.checked}
+                          className="w-full border border-slate-200 rounded-lg p-2 text-[11px] font-bold text-slate-700 bg-slate-50 focus:bg-white focus:outline-none focus:border-indigo-400 transition-colors disabled:bg-slate-100 disabled:cursor-not-allowed"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              
+            </div>
+
+            <div className="p-4 bg-slate-100 border-t border-slate-200 flex justify-between items-center shrink-0">
+              <span className="text-xs font-bold text-slate-500 ml-2">
+                총 <span className="text-indigo-600 font-black">{msgStudents.filter(s=>s.checked).length}</span> 명에게 발송
+              </span>
+              <div className="flex gap-2">
+                <button onClick={() => setIsMessageModalOpen(false)} className="px-6 py-2.5 bg-white border border-slate-300 text-slate-600 text-xs font-bold rounded-xl hover:bg-slate-50 transition-colors shadow-sm">취소</button>
+                <button onClick={handleQueueMessage} className="px-6 py-2.5 bg-[#002864] hover:bg-blue-900 text-white text-xs font-bold rounded-xl transition-colors shadow-sm flex items-center gap-1.5">선택한 인원 내 대기열에 담기 ➡️</button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      )}
+
+      {/* 수업 일지 작성 완료 후 문자 발송 워크플로우 지원 */}
       <LessonLogModal 
         isOpen={isLessonLogModalOpen} 
         onClose={() => setIsLessonLogModalOpen(false)} 
         onSuccess={() => {
-           // 모달에서 저장 완료 후 데이터를 다시 불러오기
            fetchClassDetails(selectedClassId);
+           if (confirm("✅ 수업 일지가 성공적으로 작성되었습니다!\n\n방금 작성하신 일지 내용을 바탕으로 학부모님들께 안내/과제 문자를 발송하시겠습니까?")) {
+             setIsLessonLogModalOpen(false);
+             setTimeout(() => openMessageModal(), 300);
+           } else {
+             setIsLessonLogModalOpen(false);
+           }
         }} 
         classId={selectedClassId} 
         students={students} 
