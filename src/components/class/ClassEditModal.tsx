@@ -182,6 +182,23 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
     onSuccess(); 
   };
 
+  // 🌟 예약/수강중 상태 변경 기능
+  const changeEnrollmentStatus = async (studentId: string, newStatus: string) => {
+    if (!confirm(`해당 학생의 상태를 '${newStatus}'(으)로 변경하시겠습니까?`)) return;
+
+    const { error } = await supabase
+      .from("enrollment")
+      .update({ status: newStatus })
+      .match({ student_id: studentId, class_id: modalData.class_id });
+
+    if (error) {
+      return alert("상태 변경 처리 실패: " + error.message);
+    }
+    
+    fetchClassStudents(modalData.class_id);
+    onSuccess();
+  };
+
   const removeStudent = async (studentId: string) => {
     if (!confirm("해당 학생의 수강을 종료하시겠습니까?\n(출결 등 과거 수강 기록은 보존되며, 상태가 '수강종료'로 변경됩니다.)")) return;
     
@@ -447,7 +464,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                   <option value="10">고1</option><option value="11">고2</option><option value="12">고3</option>
                 </select>
                 
-                {/* 🌟 '예약' 검색 옵션 추가 */}
                 <select value={searchStatus} onChange={e => searchAllStudents(searchGrade, e.target.value)} className="px-3 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
                   <option value="">전체 상태</option>
                   <option value="재원">재원</option>
@@ -471,7 +487,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                   })}
                 </datalist>
 
-                {/* 🌟 배정 시 수강 상태 선택 박스 추가 */}
                 <select value={assignStatus} onChange={e => setAssignStatus(e.target.value)} className="px-2 py-1.5 rounded border border-slate-300 text-sm font-bold shadow-sm focus:outline-none">
                   <option value="수강중">수강중</option>
                   <option value="예약">예약</option>
@@ -487,7 +502,6 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                 <tr>
                   <th className="py-2.5 px-4 font-bold text-slate-500">이름</th>
                   <th className="py-2.5 px-4 font-bold text-slate-500">학년</th>
-                  {/* 🌟 수강상태 항목명 추가 */}
                   <th className="py-2.5 px-4 font-bold text-slate-500 text-center">수강상태</th>
                   <th className="py-2.5 px-4 font-bold text-slate-500">수강반</th>
                   <th className="py-2.5 px-4 font-bold text-slate-500 text-right">관리</th>
@@ -499,27 +513,47 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                 ) : (
                   classStudents.map(s => {
                     const uniqueClasses = Array.from(new Set(s.enrollment?.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
+                    const classEnroll = s.enrollment?.find((en: any) => en.class_id === modalData.class_id);
+                    const stat = classEnroll?.status || '수강중';
                     
                     return (
                       <tr key={s.student_id}>
                         <td className="py-2.5 px-4 font-bold text-[#002864]">{s.name}</td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold">{s.grade || "-"}</td>
-                        {/* 🌟 현재 배정된 수강상태를 명확하게 표기 */}
                         <td className="py-2.5 px-4 text-center">
-                          {(() => {
-                            const classEnroll = s.enrollment?.find((en: any) => en.class_id === modalData.class_id);
-                            const stat = classEnroll?.status || '수강중';
-                            return stat === '예약' ? (
-                              <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-[10px] font-black border">예약</span>
-                            ) : (
-                              <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black border">수강중</span>
-                            );
-                          })()}
+                          {stat === '예약' ? (
+                            <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-[10px] font-black border">예약</span>
+                          ) : (
+                            <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black border">수강중</span>
+                          )}
                         </td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold max-w-[150px] truncate">{uniqueClasses}</td>
                         <td className="py-2.5 px-4 text-right">
                           {isEditMode && canEdit && (
-                            <button onClick={() => removeStudent(s.student_id)} className="text-xs bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white border border-rose-200 px-3 py-1.5 rounded transition-colors font-bold shadow-sm">반에서 제외</button>
+                            <div className="flex justify-end gap-1.5">
+                              {/* 🌟 예약 <-> 수강중 상태 전환 버튼 추가 */}
+                              {stat === '예약' ? (
+                                <button 
+                                  onClick={() => changeEnrollmentStatus(s.student_id, '수강중')} 
+                                  className="text-xs bg-indigo-50 text-indigo-600 hover:bg-indigo-600 hover:text-white border border-indigo-200 px-3 py-1.5 rounded transition-colors font-bold shadow-sm shrink-0"
+                                >
+                                  수강 전환
+                                </button>
+                              ) : (
+                                <button 
+                                  onClick={() => changeEnrollmentStatus(s.student_id, '예약')} 
+                                  className="text-xs bg-amber-50 text-amber-600 hover:bg-amber-600 hover:text-white border border-amber-200 px-3 py-1.5 rounded transition-colors font-bold shadow-sm shrink-0"
+                                >
+                                  예약 전환
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => removeStudent(s.student_id)} 
+                                className="text-xs bg-rose-50 text-rose-500 hover:bg-rose-500 hover:text-white border border-rose-200 px-3 py-1.5 rounded transition-colors font-bold shadow-sm shrink-0"
+                              >
+                                반에서 제외
+                              </button>
+                            </div>
                           )}
                         </td>
                       </tr>
