@@ -419,11 +419,23 @@ export default function ParentPortalPage() {
                  if (tqId && (['O', 'TO', 'RO'].includes(ans.grading_code) || ans.is_correct)) globalStatusMap[tqId] = 'done';
               });
 
+              // 🌟 [중간 합류] 이 학생의 교재별 시작 페이지 (조회 실패 시 처음부터 계산)
+              const startPageByBook: Record<string, number> = {};
+              const { data: spRows, error: spErr } = await authSupabase.from('student_textbook_start')
+                .select('book_id, start_page')
+                .eq('class_id', classId)
+                .eq('student_id', stu.student_id);
+              if (spErr) console.warn("시작 페이지 조회 실패(무시하고 진행):", spErr.message);
+              (spRows || []).forEach((r: any) => { startPageByBook[r.book_id] = Number(r.start_page); });
+
               stu.progressBooks = ctData.map(cb => {
                  const bId = cb.book_id;
                  const totalPages = Array.from(bookPagesMap[bId] || []).sort((a,b)=>a-b);
+                 const startPage: number | undefined = startPageByBook[bId];
+                 // 진도율 분모: 시작 페이지 이후 페이지만
+                 const countedPages = startPage !== undefined ? totalPages.filter(p => p >= startPage) : totalPages;
                  let donePagesCount = 0;
-                 const pageStatuses: Record<number, 'done'|'homework'|'none'> = {};
+                 const pageStatuses: Record<number, 'done'|'homework'|'none'|'excluded'> = {};
 
                  totalPages.forEach(p => {
                    const tqs = bookPageTqsMap[bId][p] || [];
@@ -433,9 +445,13 @@ export default function ParentPortalPage() {
                      if (globalStatusMap[tq] === 'done') doneCount++;
                      else if (globalStatusMap[tq] === 'homework') hwCount++;
                    });
+                   const isBeforeStart = startPage !== undefined && p < startPage;
                    if (tqs.length > 0 && doneCount === tqs.length) {
+                     // 합류 이전 페이지를 끝낸 경우 완료로 보여주되 진도율에는 넣지 않음
                      pageStatuses[p] = 'done';
-                     donePagesCount++;
+                     if (!isBeforeStart) donePagesCount++;
+                   } else if (isBeforeStart) {
+                     pageStatuses[p] = 'excluded';
                    } else if (doneCount > 0 || hwCount > 0) {
                      pageStatuses[p] = 'homework';
                    } else {
@@ -443,10 +459,10 @@ export default function ParentPortalPage() {
                    }
                  });
 
-                 const percent = totalPages.length > 0 ? Math.min(100, Math.round((donePagesCount / totalPages.length) * 100)) : 0;
+                 const percent = countedPages.length > 0 ? Math.min(100, Math.round((donePagesCount / countedPages.length) * 100)) : 0;
                  return {
                    ...cb,
-                   stats: { percent, donePagesCount, maxPageCount: totalPages.length, pageStatuses, bookPages: totalPages }
+                   stats: { percent, donePagesCount, maxPageCount: countedPages.length, startPage, pageStatuses, bookPages: totalPages }
                  };
               });
             }

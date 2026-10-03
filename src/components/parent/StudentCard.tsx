@@ -536,7 +536,7 @@ export default function StudentCard({ student }: { student: any }) {
     return { text, color, icon };
   }, [attendanceMap]);
 
-  const renderPageBlocks = (bookPages: number[], pageStatuses: Record<number, 'done' | 'homework' | 'none'>) => {
+  const renderPageBlocks = (bookPages: number[], pageStatuses: Record<number, 'done' | 'homework' | 'none' | 'excluded'>) => {
     if (!bookPages || bookPages.length === 0) {
       return <span className="text-xs font-bold text-slate-400">교재 데이터가 없습니다.</span>;
     }
@@ -548,6 +548,7 @@ export default function StudentCard({ student }: { student: any }) {
           let title = `${p}p (미진행)`;
           if (status === "done") { bgColor = "bg-emerald-500"; title = `${p}p (완료)`; } 
           else if (status === "homework") { bgColor = "bg-amber-400"; title = `${p}p (과제 진행중)`; }
+          else if (status === "excluded") { bgColor = "bg-slate-100 opacity-60"; title = `${p}p (합류 이전 · 진도율 제외)`; }
 
           return (
             <button 
@@ -832,6 +833,9 @@ export default function StudentCard({ student }: { student: any }) {
                 <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-emerald-500 inline-block"></span> 완료</span>
                 <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-amber-400 inline-block"></span> 과제 진행중</span>
                 <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-slate-200 inline-block"></span> 미진행</span>
+                {student.progressBooks?.some((cb: any) => cb.stats?.startPage !== undefined) && (
+                  <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-slate-100 border border-slate-200 opacity-60 inline-block"></span> 합류 이전</span>
+                )}
               </div>
 
               {!student.progressBooks || student.progressBooks.length === 0 ? (
@@ -862,6 +866,9 @@ export default function StudentCard({ student }: { student: any }) {
                           <div className="text-[10px] font-bold text-slate-400 tabular-nums mt-0.5">
                             {stats.donePagesCount} / {stats.maxPageCount}p
                           </div>
+                          {stats.startPage !== undefined && (
+                            <div className="text-[10px] font-bold text-amber-600 mt-0.5">{stats.startPage}p부터 시작</div>
+                          )}
                         </div>
                       </div>
                       <div className="p-3 bg-slate-50/70 rounded-lg border border-slate-100 overflow-hidden">
