@@ -219,7 +219,23 @@ export default function StudentDetailPage() {
     if (!cbData || cbData.length === 0) return;
 
     const bookIds = cbData.map((cb: any) => cb.book_id);
-    const { data: qData } = await supabase.from('textbook_question').select('tq_id, book_id, page_number').in('book_id', bookIds);
+    // 🌟 [버그 픽스] 여러 교재 문항을 함께 조회하므로 1000행 제한 우회
+    const qData: any[] = [];
+    for (let from = 0; ; from += 1000) {
+      const { data } = await supabase.from('textbook_question').select('tq_id, book_id, page_number').in('book_id', bookIds).range(from, from + 999);
+      if (!data || data.length === 0) break;
+      qData.push(...data);
+      if (data.length < 1000) break;
+    }
+
+    // 🌟 [중간 합류] 이 학생의 반·교재별 시작 페이지 (조회 실패 시 처음부터)
+    const startPageMap: Record<string, number> = {};
+    const { data: spRows, error: spErr } = await supabase.from('student_textbook_start')
+      .select('class_id, book_id, start_page')
+      .eq('student_id', studentId)
+      .in('class_id', classIds);
+    if (spErr) console.warn("시작 페이지 조회 실패(무시하고 진행):", spErr.message);
+    (spRows || []).forEach((r: any) => { startPageMap[`${r.class_id}_${r.book_id}`] = Number(r.start_page); });
     const { data: assignments } = await supabase.from('homework_assignment').select('homework_id, book_id, target_questions, target_student_id, class_id').in('book_id', bookIds).in('class_id', classIds);
     const { data: results } = await supabase.from('student_homework_result').select('homework_id, status, completed_tq_ids').eq('student_id', studentId);
 
@@ -246,19 +262,24 @@ export default function StudentDetailPage() {
        const pages = Object.keys(pageMap).map(Number).sort((a,b)=>a-b);
        const pageStatuses: Record<number, string> = {};
        let doneCount = 0;
+       const startPage: number | undefined = startPageMap[`${cb.class_id}_${cb.book_id}`];
+       const countedCount = startPage !== undefined ? pages.filter(p => p >= startPage).length : pages.length;
 
        pages.forEach((p: number) => {
           const tqs = pageMap[p];
+          const isBeforeStart = startPage !== undefined && p < startPage;
           let d=0, h=0;
           tqs.forEach((tq: any) => { if(statusMap[tq]==='done') d++; else if(statusMap[tq]==='homework') h++; });
-          if(d === tqs.length && tqs.length > 0) { pageStatuses[p] = 'done'; doneCount++; }
+          if(d === tqs.length && tqs.length > 0) { pageStatuses[p] = 'done'; if (!isBeforeStart) doneCount++; }
+          else if (isBeforeStart) { pageStatuses[p] = 'excluded'; }
           else if(d > 0 || h > 0) { pageStatuses[p] = 'homework'; }
           else { pageStatuses[p] = 'none'; }
        });
 
        return {
           ...cb, tbTitle: unwrap(cb.textbook)?.title, tbType: unwrap(cb.textbook)?.book_type, className: unwrap(cb.class)?.name,
-          pages, pageStatuses, doneCount, percent: pages.length > 0 ? Math.round((doneCount/pages.length)*100) : 0
+          pages, pageStatuses, doneCount, countedCount, startPage,
+          percent: countedCount > 0 ? Math.min(100, Math.round((doneCount/countedCount)*100)) : 0
        };
     });
     setProgressBooks(books);
@@ -1090,13 +1111,13 @@ function ProgressTab({ progressBooks }: any) {
                      <div className="flex items-center gap-1.5 mb-1"><span className="text-[9px] font-black bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded border">{b.className}</span><span className="text-[9px] font-black bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded border border-blue-100">{b.tbType}</span></div>
                      <h4 className="font-black text-slate-800 text-[13px]">{b.tbTitle}</h4>
                    </div>
-                   <div className="flex flex-col items-end"><span className="text-lg font-black text-[#002864] leading-none">{b.percent}%</span><span className="text-[9px] font-bold text-slate-400 mt-1">{b.doneCount} / {b.pages.length}p</span></div>
+                   <div className="flex flex-col items-end"><span className="text-lg font-black text-[#002864] leading-none">{b.percent}%</span><span className="text-[9px] font-bold text-slate-400 mt-1">{b.doneCount} / {b.countedCount ?? b.pages.length}p</span>{b.startPage !== undefined && <span className="text-[9px] font-bold text-amber-600 mt-0.5">{b.startPage}p부터 시작</span>}</div>
                  </div>
                  <div className="bg-slate-50/80 p-3 rounded-lg border border-slate-100 flex flex-wrap gap-[3px]">
                     {b.pages.length === 0 ? <span className="text-[10px] text-slate-400">페이지 데이터 없음</span> :
                        b.pages.map((p: number) => {
                          const st = b.pageStatuses[p]; let bg = 'bg-slate-200'; let tt = `${p}p 대기`;
-                         if(st === 'done') { bg = 'bg-[#002864]'; tt = `${p}p 완료`; } else if(st === 'homework') { bg = 'bg-amber-400'; tt = `${p}p 과제 진행중`; }
+                         if(st === 'done') { bg = 'bg-[#002864]'; tt = `${p}p 완료`; } else if(st === 'homework') { bg = 'bg-amber-400'; tt = `${p}p 과제 진행중`; } else if(st === 'excluded') { bg = 'bg-slate-100 opacity-60'; tt = `${p}p 합류 이전 (진도율 제외)`; }
                          return <div key={p} title={tt} className={`w-1.5 h-3.5 rounded-[1.5px] ${bg} shadow-sm transition-colors cursor-help`}/>
                        })
                     }
