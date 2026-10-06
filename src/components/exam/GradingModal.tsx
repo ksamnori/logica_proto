@@ -88,7 +88,7 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex justify-center items-center p-4 animate-[fadeIn_0.2s_ease-out]">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden">
         <div className="bg-emerald-600 px-6 py-4 flex justify-between items-center shrink-0">
-          <h2 className="text-white font-black text-lg flex items-center gap-2">
+          <h2 className="text-white font-bold text-lg flex items-center gap-2">
             <span className="text-xl">✅</span> 출제 및 채점 현황
           </h2>
           <button onClick={onClose} className="text-emerald-100 hover:text-white transition-colors">
@@ -97,8 +97,8 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
         </div>
 
         <div className="p-6 bg-emerald-50/50 border-b border-slate-200 shrink-0">
-          <p className="text-sm font-extrabold text-[#002864] mb-1">[{examType}] {title}</p>
-          <p className="text-[11px] font-bold text-slate-500">학생별 출제 내역을 확인하고 채점 또는 회수(삭제)할 수 있습니다.</p>
+          <p className="text-sm font-bold text-brand mb-1">[{examType}] {title}</p>
+          <p className="text-xs font-bold text-slate-500">학생별 출제 내역을 확인하고 채점 또는 회수(삭제)할 수 있습니다.</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scroll">
@@ -119,19 +119,19 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
                   <div key={a.assignment_id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between shadow-sm hover:border-emerald-300 transition-colors">
                     <div>
                       <div className="flex items-center gap-2 mb-1.5">
-                        <span className="bg-[#002864] text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm">{cName || '반 미지정'}</span>
-                        <span className="text-[14px] font-black text-slate-800">{sName || '이름 없음'}</span>
+                        <span className="bg-brand text-white text-xs font-bold px-2 py-0.5 rounded shadow-sm">{cName || '반 미지정'}</span>
+                        <span className="text-[14px] font-bold text-slate-800">{sName || '이름 없음'}</span>
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded border ${isCompleted ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-500 border-rose-200'}`}>
+                        <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${isCompleted ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : 'bg-rose-50 text-rose-500 border-rose-200'}`}>
                           {a.status || '미응시'}
                         </span>
                         {isCompleted && (
-                          <span className="text-[11px] font-black text-[#002864]">
+                          <span className="text-xs font-bold text-brand">
                             {a.total_score}점
                           </span>
                         )}
-                        <span className="text-[10px] text-slate-400 font-bold">
+                        <span className="text-xs text-slate-400 font-bold">
                           {new Date(a.created_at).toLocaleDateString()} 배부
                         </span>
                       </div>
@@ -140,13 +140,13 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
                     <div className="flex items-center gap-2 shrink-0 pl-4 border-l border-slate-100">
                       <button 
                         onClick={() => openGradingPanel(a.assignment_id, a.student_id)} 
-                        className="px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-[11px] font-black transition-colors shadow-sm"
+                        className="px-4 py-2 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
                       >
                         {isCompleted ? '결과 리뷰' : '수동 채점'}
                       </button>
                       <button 
                         onClick={() => handleCancelAssignment(a.assignment_id)} 
-                        className="px-3 py-2 bg-white text-rose-500 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg text-[11px] font-bold transition-colors shadow-sm"
+                        className="px-3 py-2 bg-white text-rose-500 hover:bg-rose-50 border border-slate-200 hover:border-rose-200 rounded-lg text-xs font-bold transition-colors shadow-sm"
                       >
                         출제 취소
                       </button>

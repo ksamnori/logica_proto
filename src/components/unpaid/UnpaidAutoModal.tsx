@@ -64,7 +64,7 @@ export default function UnpaidAutoModal({ isOpen, onClose }: UnpaidAutoModalProp
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[99] flex justify-center items-center p-4">
       <div className="bg-white w-full max-w-3xl rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         <div className="bg-slate-100 p-4 border-b border-slate-200 flex justify-between items-center">
-          <h3 className="text-base font-extrabold text-slate-800">새 예약 등록 <span className="text-xs font-normal text-slate-500 ml-2">미납 안내문자 발송 자동화</span></h3>
+          <h3 className="text-base font-bold text-slate-800">새 예약 등록 <span className="text-xs font-normal text-slate-500 ml-2">미납 안내문자 발송 자동화</span></h3>
           <button onClick={onClose} className="text-slate-400 hover:text-rose-500 text-2xl font-bold">&times;</button>
         </div>
         

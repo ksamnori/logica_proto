@@ -72,14 +72,14 @@ export default function CounselingModal({ counselData, onClose, onSuccess }: Cou
         <div className="p-6 space-y-5 overflow-y-auto">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">지원자 이름</label>
-            <div className="font-extrabold text-xl text-[#002864]">{data.name}</div>
+            <div className="font-bold text-xl text-brand">{data.name}</div>
           </div>
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-1">진단평가 진행 상태</label>
             <select 
               value={data.result} 
               onChange={e => setData({ ...data, result: e.target.value })} 
-              className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] font-bold text-slate-700 focus:outline-none"
+              className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand font-bold text-slate-700 focus:outline-none"
             >
               <option value="대기">⏳ 대기 (시험 전/채점 대기)</option>
               <option value="검토중">🔍 검토중 (채점 완료, 통보 대기)</option>
@@ -110,7 +110,7 @@ export default function CounselingModal({ counselData, onClose, onSuccess }: Cou
         </div>
         <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end space-x-2 shrink-0">
           <button onClick={onClose} className="px-5 py-2.5 rounded-lg font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50">취소</button>
-          <button onClick={saveCounseling} disabled={isSubmitting} className="px-5 py-2.5 rounded-lg font-bold text-white bg-[#002864] hover:bg-blue-900 disabled:opacity-50">기록 저장하기</button>
+          <button onClick={saveCounseling} disabled={isSubmitting} className="px-5 py-2.5 rounded-lg font-bold text-white bg-brand hover:bg-blue-900 disabled:opacity-50">기록 저장하기</button>
         </div>
       </div>
     </div>

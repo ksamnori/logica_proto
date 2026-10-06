@@ -297,8 +297,8 @@ export default function StudentEditModal({
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-50 p-4 font-pretendard">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-[fadeIn_0.2s_ease-out]">
         
-        <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0 rounded-t-2xl">
-          <h3 className="text-lg font-extrabold">학생 정보 수정</h3>
+        <div className="bg-brand p-5 text-white flex justify-between items-center shrink-0 rounded-t-2xl">
+          <h3 className="text-lg font-bold">학생 정보 수정</h3>
           <button onClick={onClose} className="text-white hover:text-rose-400 transition-colors">
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
@@ -314,46 +314,46 @@ export default function StudentEditModal({
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
-                <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+                <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" />
               </div>
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">성별</label>
-                <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]">
+                <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand">
                   <option value="">선택 안 함</option><option value="남학생">남학생</option><option value="여학생">여학생</option>
                 </select>
               </div>
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>
-                <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]">
+                <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand">
                   <option value="재원">재원</option><option value="휴원">휴원</option><option value="퇴원">퇴원</option><option value="입학테스트">입학테스트</option>
                 </select>
               </div>
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">학년</label>
-                <select value={editForm.grade} onChange={e => setEditForm({...editForm, grade: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]">
+                <select value={editForm.grade} onChange={e => setEditForm({...editForm, grade: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand">
                   <option value="초1">초1</option><option value="초2">초2</option><option value="초3">초3</option><option value="초4">초4</option><option value="초5">초5</option><option value="초6">초6</option><option value="중1">중1</option><option value="중2">중2</option><option value="중3">중3</option><option value="고1">고1</option><option value="고2">고2</option><option value="고3">고3</option>
                 </select>
               </div>
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">학교</label>
-                <input type="text" value={editForm.school} onChange={e => setEditForm({...editForm, school: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+                <input type="text" value={editForm.school} onChange={e => setEditForm({...editForm, school: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" />
               </div>
               
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">학생 연락처</label>
-                <input type="text" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: formatPhone(e.target.value)})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+                <input type="text" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: formatPhone(e.target.value)})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
                   비밀번호 (PIN 4자리)
-                  {editForm.hasPin ? <span className="text-[10px] text-blue-500 font-normal">설정됨</span> : <span className="text-[10px] text-amber-500 font-normal">미설정</span>}
+                  {editForm.hasPin ? <span className="text-xs text-blue-500 font-normal">설정됨</span> : <span className="text-xs text-amber-500 font-normal">미설정</span>}
                 </label>
-                <input type="text" maxLength={4} placeholder={editForm.hasPin ? "변경하려면 새 4자리 입력" : "미설정 (0000으로 자동 로그인됨)"} value={editForm.passwordHash} onChange={e => { const onlyNums = e.target.value.replace(/[^0-9]/g, ''); setEditForm({...editForm, passwordHash: onlyNums}); }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864] placeholder:text-slate-300 placeholder:font-normal" />
+                <input type="text" maxLength={4} placeholder={editForm.hasPin ? "변경하려면 새 4자리 입력" : "미설정 (0000으로 자동 로그인됨)"} value={editForm.passwordHash} onChange={e => { const onlyNums = e.target.value.replace(/[^0-9]/g, ''); setEditForm({...editForm, passwordHash: onlyNums}); }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-brand focus:outline-none focus:border-brand placeholder:text-slate-300 placeholder:font-normal" />
               </div>
               
               <div className="col-span-2 bg-blue-50/50 p-4 rounded-lg border border-blue-100 mt-2">
@@ -364,7 +364,7 @@ export default function StudentEditModal({
                   ) : (
                     enrollments.map(e => (
                       <li key={e.enrollment_id} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-                        <span className="text-sm font-bold text-[#002864]">{e.class?.name || '미배정'}</span>
+                        <span className="text-sm font-bold text-brand">{e.class?.name || '미배정'}</span>
                         <button type="button" onClick={() => removeEnrollment(e.enrollment_id)} className="px-2.5 py-1 bg-rose-50 text-rose-500 rounded hover:bg-rose-100 transition-colors text-xs font-bold border border-rose-100">제외(강제삭제)</button>
                       </li>
                     ))
@@ -375,12 +375,12 @@ export default function StudentEditModal({
                 
                 <div className="flex flex-wrap gap-1.5 mb-3">
                   {LEVEL_FILTERS.map(lvl => (
-                    <button key={lvl} type="button" onClick={() => { setLevelFilter(lvl); setEditForm({...editForm, newClassId: ""}); }} className={`px-2.5 py-1 text-[11px] font-bold rounded border transition-colors ${levelFilter === lvl ? 'bg-[#002864] text-white border-[#002864]' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>{lvl}</button>
+                    <button key={lvl} type="button" onClick={() => { setLevelFilter(lvl); setEditForm({...editForm, newClassId: ""}); }} className={`px-2.5 py-1 text-xs font-bold rounded border transition-colors ${levelFilter === lvl ? 'bg-brand text-white border-brand' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>{lvl}</button>
                   ))}
                 </div>
 
                 <div className="flex gap-2">
-                  <select value={editForm.newClassId} onChange={e => setEditForm({...editForm, newClassId: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864]">
+                  <select value={editForm.newClassId} onChange={e => setEditForm({...editForm, newClassId: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-brand focus:outline-none focus:border-brand">
                     <option value="">{filteredClasses.length === 0 ? "해당 레벨의 반이 없습니다" : "반 선택"}</option>
                     {filteredClasses.map(c => {
                       const fullCode = c.code || c.name || '';
@@ -394,7 +394,7 @@ export default function StudentEditModal({
                       );
                     })}
                   </select>
-                  <button type="button" onClick={addEnrollment} className="shrink-0 px-4 py-2 bg-[#002864] text-white font-bold rounded-lg text-xs hover:bg-blue-900 transition-colors">추가</button>
+                  <button type="button" onClick={addEnrollment} className="shrink-0 px-4 py-2 bg-brand text-white font-bold rounded-lg text-xs hover:bg-blue-900 transition-colors">추가</button>
                 </div>
               </div>
 
@@ -410,7 +410,7 @@ export default function StudentEditModal({
                   <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
                   학부모 정보 1 (대표/알림 수신 기준)
                 </h4>
-                <span className="text-[11px] font-semibold text-slate-400">메인 식별 번호</span>
+                <span className="text-xs font-semibold text-slate-400">메인 식별 번호</span>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -419,7 +419,7 @@ export default function StudentEditModal({
                     type="text" 
                     value={editForm.parentName} 
                     onChange={e => setEditForm({...editForm, parentName: e.target.value})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" 
                     placeholder="예: 홍길동"
                   />
                 </div>
@@ -429,7 +429,7 @@ export default function StudentEditModal({
                     type="text" 
                     value={editForm.parentRel} 
                     onChange={e => setEditForm({...editForm, parentRel: e.target.value})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" 
                     placeholder="예: 모, 부"
                   />
                 </div>
@@ -439,7 +439,7 @@ export default function StudentEditModal({
                     type="text" 
                     value={editForm.parentPhone} 
                     onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" 
                     placeholder="010-0000-0000 (비워두면 unassigned로 보존)" 
                   />
                 </div>
@@ -453,7 +453,7 @@ export default function StudentEditModal({
                   <span className="w-2 h-2 rounded-full bg-slate-400"></span>
                   학부모 정보 2 (추가 연락처)
                 </h4>
-                <span className="text-[11px] font-semibold text-slate-400">비상/참조용</span>
+                <span className="text-xs font-semibold text-slate-400">비상/참조용</span>
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -462,7 +462,7 @@ export default function StudentEditModal({
                     type="text" 
                     value={editForm.parentName2} 
                     onChange={e => setEditForm({...editForm, parentName2: e.target.value})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" 
                     placeholder="예: 김영희"
                   />
                 </div>
@@ -472,7 +472,7 @@ export default function StudentEditModal({
                     type="text" 
                     value={editForm.parentRel2} 
                     onChange={e => setEditForm({...editForm, parentRel2: e.target.value})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" 
                     placeholder="예: 부, 모"
                   />
                 </div>
@@ -482,7 +482,7 @@ export default function StudentEditModal({
                     type="text" 
                     value={editForm.parentPhone2} 
                     onChange={e => setEditForm({...editForm, parentPhone2: formatPhone(e.target.value)})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-brand" 
                     placeholder="010-0000-0000" 
                   />
                 </div>
@@ -496,7 +496,7 @@ export default function StudentEditModal({
           {isSuperAdmin ? <button onClick={deleteStudent} disabled={isSaving} className="px-5 py-2 bg-rose-50 text-rose-500 font-bold rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent disabled:opacity-50">학생 영구 삭제</button> : <div></div>}
           <div className="flex gap-3">
             <button onClick={onClose} className="px-5 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={submitEditStudent} disabled={isSaving} className="px-5 py-2 bg-[#002864] text-white font-bold rounded-lg shadow-sm hover:bg-blue-900 transition-colors disabled:opacity-50">저장하기</button>
+            <button onClick={submitEditStudent} disabled={isSaving} className="px-5 py-2 bg-brand text-white font-bold rounded-lg shadow-sm hover:bg-blue-900 transition-colors disabled:opacity-50">저장하기</button>
           </div>
         </div>
 

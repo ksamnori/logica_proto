@@ -71,10 +71,10 @@ export default function HQLoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-900 font-pretendard">
       <div className="bg-white p-10 rounded-2xl shadow-2xl w-full max-w-md relative overflow-hidden">
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#002864] to-blue-500"></div>
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-brand to-blue-500"></div>
         
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-black text-slate-800 tracking-tight">천종현수학연구소 <span className="text-[#002864]">HQ</span></h1>
+          <h1 className="text-3xl font-bold text-slate-800 tracking-tight">천종현수학연구소 <span className="text-brand">HQ</span></h1>
           <p className="text-sm font-bold text-slate-400 mt-2">본사/출판사 임직원 전용 로그인</p>
         </div>
 
@@ -87,7 +87,7 @@ export default function HQLoginPage() {
               value={formData.phone} 
               maxLength={13} 
               onChange={handleChange} 
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold tracking-wider" 
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand font-bold tracking-wider" 
               placeholder="010-1234-5678" 
             />
           </div>
@@ -98,19 +98,19 @@ export default function HQLoginPage() {
               name="password" 
               value={formData.password} 
               onChange={handleChange} 
-              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-[#002864]" 
+              className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-brand" 
               placeholder="••••••••" 
             />
           </div>
 
-          <button type="submit" disabled={isLoading} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-extrabold py-4 rounded-xl shadow-lg transition-colors mt-4 disabled:opacity-50">
+          <button type="submit" disabled={isLoading} className="w-full bg-brand hover:bg-blue-900 text-white font-bold py-4 rounded-xl shadow-lg transition-colors mt-4 disabled:opacity-50">
             {isLoading ? '로그인 중...' : 'HQ 워크스페이스 입장'}
           </button>
         </form>
 
         <div className="mt-8 text-center border-t border-slate-100 pt-6">
           <p className="text-xs text-slate-400 font-bold">
-            계정이 없으신가요? <button type="button" onClick={() => router.push('/hq-signup')} className="text-[#002864] hover:underline ml-1">본사 직원 가입하기</button>
+            계정이 없으신가요? <button type="button" onClick={() => router.push('/hq-signup')} className="text-brand hover:underline ml-1">본사 직원 가입하기</button>
           </p>
         </div>
       </div>

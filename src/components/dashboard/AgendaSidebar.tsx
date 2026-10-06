@@ -141,25 +141,25 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
     <aside className="hidden xl:flex w-[320px] shrink-0 border-l border-slate-200 bg-white flex-col h-full shadow-sm z-20">
       <div className="h-[72px] shrink-0 bg-transparent border-b border-slate-200 w-full flex items-center px-5 relative">
         <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] pointer-events-none"></div>
-        <span className="text-sm font-black text-[#002864] relative z-10 flex items-center gap-2">
-          <span className="bg-[#002864] text-white text-xs px-2 py-0.5 rounded shadow-sm">AI Minutes</span>
+        <span className="text-sm font-bold text-brand relative z-10 flex items-center gap-2">
+          <span className="bg-brand text-white text-xs px-2 py-0.5 rounded shadow-sm">AI Minutes</span>
           일정 모니터링
         </span>
       </div>
 
       <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-white shrink-0">
-        <h2 className="text-sm font-black text-slate-800 tracking-tighter">{calendarMonth.getFullYear()}년 {calendarMonth.getMonth() + 1}월</h2>
+        <h2 className="text-sm font-bold text-slate-800 tracking-tighter">{calendarMonth.getFullYear()}년 {calendarMonth.getMonth() + 1}월</h2>
         <div className="flex items-center gap-1.5">
           <button onClick={fetchGoogleEvents} className="w-6 h-6 flex items-center justify-center bg-blue-50 hover:bg-blue-100 transition-colors rounded text-blue-600 font-bold border border-blue-200" title="구글 캘린더 동기화">🔄</button>
           <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="w-5 h-5 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">◀</button>
-          <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-1.5 py-0.5 border border-slate-300 rounded text-[9px] font-bold text-slate-600 bg-white">오늘</button>
+          <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-1.5 py-0.5 border border-slate-300 rounded text-xs font-bold text-slate-600 bg-white">오늘</button>
           <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="w-5 h-5 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">▶</button>
         </div>
       </div>
 
       <div className="grid grid-cols-7 gap-y-1 bg-white p-3 border-b border-slate-100 shrink-0">
         {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-          <div key={d} className={`text-center text-[10px] font-bold mb-1 ${i === 0 ? 'text-rose-500' : 'text-slate-400'}`}>{d}</div>
+          <div key={d} className={`text-center text-xs font-bold mb-1 ${i === 0 ? 'text-rose-500' : 'text-slate-400'}`}>{d}</div>
         ))}
         {(() => {
           const year = calendarMonth.getFullYear();
@@ -216,7 +216,7 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
             days.push(
               <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1.5 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-lg transition-colors z-0">
                 {multiDayBg}
-                <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
+                <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-bold shadow-md' : (isToday ? 'bg-brand text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
                   {i}
                 </span>
                 {dayTypes.length > 0 && (
@@ -235,13 +235,13 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
 
       <div className="flex-1 flex flex-col min-h-0 bg-slate-50/50 p-4">
         <div className="flex items-center justify-between mb-3 shrink-0">
-          <h3 className="font-black text-[12px] text-slate-700">{selectedDate ? '선택한 날짜의 일정' : '다가오는 전체 일정'}</h3>
+          <h3 className="font-bold text-[12px] text-slate-700">{selectedDate ? '선택한 날짜의 일정' : '다가오는 전체 일정'}</h3>
           <button 
             onClick={() => {
               if (hasAccess('/minutes')) router.push('/minutes');
               else alert('권한이 없습니다.');
             }} 
-            className={`text-[10px] font-bold hover:underline ${hasAccess('/minutes') ? 'text-[#002864] cursor-pointer' : 'text-slate-400 cursor-not-allowed'}`}
+            className={`text-xs font-bold hover:underline ${hasAccess('/minutes') ? 'text-brand cursor-pointer' : 'text-slate-400 cursor-not-allowed'}`}
           >
             상세 보기 ➔
           </button>
@@ -280,7 +280,7 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
             if (displayItems.length === 0) {
               return (
                 <div className="bg-white p-6 rounded-xl border border-slate-200 text-center shadow-sm">
-                  <span className="text-[11px] font-bold text-slate-400">일정이 없습니다.</span>
+                  <span className="text-xs font-bold text-slate-400">일정이 없습니다.</span>
                 </div>
               );
             }
@@ -306,7 +306,7 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
               
               let theme: any; 
               if (isGoogleEvent) theme = { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📆', border: 'border-purple-200' };
-              else if (isMeetingNote) theme = { bg: 'bg-[#002864]', text: 'text-white', icon: '📁', border: 'border-blue-900' };
+              else if (isMeetingNote) theme = { bg: 'bg-brand', text: 'text-white', icon: '📁', border: 'border-blue-900' };
               else theme = getMeetingTypeTheme(item.type);
               
               const itemDate = item.meeting_date ? new Date(item.meeting_date) : new Date(item.created_at);
@@ -339,9 +339,9 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                     }
                   }}
                   className={`bg-white p-3 rounded-xl border shadow-sm flex flex-col gap-1.5 transition-colors ${
-                    isTodayItem ? 'border-[#002864] ring-1 ring-[#002864]/20' : 'border-slate-200'
+                    isTodayItem ? 'border-brand ring-1 ring-brand/20' : 'border-slate-200'
                   } ${
-                    isMeetingNote || isGoogleEvent ? (hasAccess('/minutes') ? 'cursor-pointer hover:border-[#002864] hover:bg-slate-50' : 'cursor-not-allowed') : ''
+                    isMeetingNote || isGoogleEvent ? (hasAccess('/minutes') ? 'cursor-pointer hover:border-brand hover:bg-slate-50' : 'cursor-not-allowed') : ''
                   }`}
                 >
                   <div className="flex items-center gap-2">
@@ -350,19 +350,19 @@ export default function AgendaSidebar({ currentUser, tenantId, hasAccess }: Agen
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1">
-                        {item.is_secret && <span className="text-[9px]">🔒</span>}
-                        <h4 className="text-[12px] font-black text-slate-800 truncate">{item.title}</h4>
+                        {item.is_secret && <span className="text-xs">🔒</span>}
+                        <h4 className="text-[12px] font-bold text-slate-800 truncate">{item.title}</h4>
                       </div>
-                      <p className="text-[10px] font-medium text-slate-500 truncate">
+                      <p className="text-xs font-medium text-slate-500 truncate">
                         {item.is_secret ? "비밀 안건 (보호됨)" : (item.content ? item.content.replace(/<[^>]+>/g, ' ').trim() : '내용 없음')}
                       </p>
                     </div>
                   </div>
                   <div className="flex items-center justify-between pl-9">
-                    <span className={`px-1.5 py-0.5 text-[8px] font-black rounded border ${badgeStyle}`}>
+                    <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded border ${badgeStyle}`}>
                       {badgeText}
                     </span>
-                    <span className={`text-[9px] font-bold ${isTodayItem ? 'text-rose-500' : 'text-slate-400'}`}>
+                    <span className={`text-xs font-bold ${isTodayItem ? 'text-rose-500' : 'text-slate-400'}`}>
                       {dateDisplay}
                     </span>
                   </div>

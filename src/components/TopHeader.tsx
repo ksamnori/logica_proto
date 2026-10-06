@@ -43,7 +43,7 @@ function DigitalClock() {
 
   if (!time) return <div className="w-[120px] h-[48px] shrink-0 mr-4"></div>;
   return (
-    <div className="shrink-0 mr-5 font-mono text-xl md:text-2xl font-black text-slate-800 bg-slate-100/80 px-4 py-1.5 rounded-xl border border-slate-200 shadow-inner flex items-center justify-center tracking-widest">
+    <div className="shrink-0 mr-5 font-mono text-xl md:text-2xl font-bold text-slate-800 bg-slate-100/80 px-4 py-1.5 rounded-xl border border-slate-200 shadow-inner flex items-center justify-center tracking-widest">
       {time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })}
     </div>
   );
@@ -463,7 +463,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
         <div className={`relative shrink-0 transition-all duration-500 ${isHeaderExpanded ? 'ml-2' : 'ml-1'}`}>
           <button onClick={toggleNotiWindow} className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors focus:outline-none">
             🔔 {unreadNotiCount > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full border-2 border-white flex items-center justify-center leading-none">
+              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center leading-none">
                 {unreadNotiCount > 99 ? "99+" : unreadNotiCount}
               </span>
             )}
@@ -480,8 +480,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                   notifications.map((n: NotificationItem, idx: number) => (
                     <div key={idx} onClick={() => { setIsNotiOpen(false); router.push(n.link); }} className="p-3 border bg-slate-50 text-slate-600 border-slate-200 rounded-lg cursor-pointer hover:shadow-md transition-shadow">
                       <div className="flex justify-between items-start mb-1">
-                        <span className="text-[11px] font-extrabold">{n.title}</span>
-                        <span className="text-[9px] font-bold opacity-70">{n.time.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' })}</span>
+                        <span className="text-xs font-bold">{n.title}</span>
+                        <span className="text-xs font-bold opacity-70">{n.time.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric', hour: '2-digit', minute:'2-digit' })}</span>
                       </div>
                       <div className="text-xs font-medium line-clamp-2 leading-snug">{n.content}</div>
                     </div>
@@ -489,7 +489,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 }
               </div>
               <div className="p-2 border-t border-slate-100 bg-slate-50 text-center shrink-0">
-                <button onClick={clearNotifications} className="text-[10px] font-bold text-slate-400 hover:text-rose-500 transition-colors">모두 읽음 처리 및 비우기</button>
+                <button onClick={clearNotifications} className="text-xs font-bold text-slate-400 hover:text-rose-500 transition-colors">모두 읽음 처리 및 비우기</button>
               </div>
             </div>
           )}
@@ -507,11 +507,11 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           </div>
           
           <div className="flex flex-col text-left shrink-0">
-            <p className="font-extrabold text-slate-800 leading-tight truncate">{currentName} 선생님</p>
+            <p className="font-bold text-slate-800 leading-tight truncate">{currentName} 선생님</p>
             <div className="flex items-center gap-2 mt-0.5">
-              <span className="text-[10px] font-bold text-blue-500 cursor-pointer hover:text-blue-700 transition-colors allow-guest-interaction" onClick={handleOpenProfile}>정보수정</span>
+              <span className="text-xs font-bold text-blue-500 cursor-pointer hover:text-blue-700 transition-colors allow-guest-interaction" onClick={handleOpenProfile}>정보수정</span>
               <div className="w-1 h-1 bg-slate-300 rounded-full"></div>
-              <span className="text-[10px] font-bold text-slate-400 cursor-pointer hover:text-rose-500 transition-colors allow-guest-interaction" onClick={onLogout}>로그아웃</span>
+              <span className="text-xs font-bold text-slate-400 cursor-pointer hover:text-rose-500 transition-colors allow-guest-interaction" onClick={onLogout}>로그아웃</span>
             </div>
           </div>
         </div>
@@ -520,7 +520,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
       {isProfileModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-[#002864] shrink-0">
+            <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-brand shrink-0">
               <h2 className="text-lg font-bold text-white">⚙️ 내 정보 수정</h2>
               <button onClick={() => { setIsProfileModalOpen(false); setNewPassword(""); setConfirmPassword(""); }} className="text-blue-200 hover:text-white text-2xl leading-none transition-colors allow-guest-interaction px-2">&times;</button>
             </div>
@@ -528,7 +528,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
             <form onSubmit={handleSaveProfile} autoComplete="off" className="p-6 flex-1 overflow-y-auto custom-scroll space-y-6 allow-guest-interaction">
               
               <div className="flex flex-col items-center border-b border-slate-100 pb-6">
-                <h3 className="text-sm font-black text-slate-800 mb-4 w-full text-left">프로필 사진</h3>
+                <h3 className="text-sm font-bold text-slate-800 mb-4 w-full text-left">프로필 사진</h3>
                 
                 {!imageSrc ? (
                   <div className="flex flex-col items-center">
@@ -555,10 +555,10 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                   </div>
                 ) : (
                   <div className="flex flex-col items-center w-full bg-slate-50 p-4 rounded-xl border border-slate-200 shadow-inner">
-                    <p className="text-[11px] font-bold text-blue-600 mb-3 bg-blue-50 px-3 py-1 rounded-full">👆 마우스나 손가락으로 사진을 끌어 맞추세요</p>
+                    <p className="text-xs font-bold text-blue-600 mb-3 bg-blue-50 px-3 py-1 rounded-full">👆 마우스나 손가락으로 사진을 끌어 맞추세요</p>
                     
                     <div 
-                      className="relative w-[200px] h-[200px] rounded-full overflow-hidden bg-white border-4 border-[#002864] mx-auto cursor-move shadow-md"
+                      className="relative w-[200px] h-[200px] rounded-full overflow-hidden bg-white border-4 border-brand mx-auto cursor-move shadow-md"
                       style={{ touchAction: 'none' }}
                       onMouseDown={(e) => startDrag(e.clientX, e.clientY)}
                       onMouseMove={(e) => onDrag(e.clientX, e.clientY)}
@@ -590,12 +590,12 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                       <input 
                         type="range" min="0.5" max="3" step="0.05" 
                         value={zoom} onChange={(e) => setZoom(Number(e.target.value))} 
-                        className="flex-1 accent-[#002864]" 
+                        className="flex-1 accent-brand" 
                       />
                       <span className="text-xs font-bold text-slate-500 shrink-0">확대</span>
                     </div>
 
-                    <button type="button" onClick={() => { setImageSrc(null); setPosition({x:0, y:0}); setZoom(1); }} className="mt-4 text-[11px] font-bold text-slate-500 hover:text-slate-700 underline underline-offset-2 transition-colors allow-guest-interaction">
+                    <button type="button" onClick={() => { setImageSrc(null); setPosition({x:0, y:0}); setZoom(1); }} className="mt-4 text-xs font-bold text-slate-500 hover:text-slate-700 underline underline-offset-2 transition-colors allow-guest-interaction">
                       취소하고 이전 사진 유지
                     </button>
                   </div>
@@ -604,23 +604,23 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
 
               {/* 🌟 텍스트 필드 게스트 비활성화 처리 */}
               <div className="space-y-4 pb-5 border-b border-slate-100">
-                <h3 className="text-sm font-black text-slate-800">기본 정보</h3>
+                <h3 className="text-sm font-bold text-slate-800">기본 정보</h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
-                  <input type="text" required disabled={isGuest} value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} />
+                  <input type="text" required disabled={isGuest} value={editName} onChange={(e) => setEditName(e.target.value)} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-bold focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">연락처</label>
-                  <input type="text" disabled={isGuest} value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-medium focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} placeholder="010-0000-0000" />
+                  <input type="text" disabled={isGuest} value={editPhone} onChange={(e) => setEditPhone(formatPhone(e.target.value))} maxLength={13} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-medium focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} placeholder="010-0000-0000" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">이메일</label>
-                  <input type="email" disabled={isGuest} value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-medium focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} placeholder="email@example.com" />
+                  <input type="email" disabled={isGuest} value={editEmail} onChange={(e) => setEditEmail(e.target.value)} autoComplete="none" data-lpignore="true" className={`w-full px-3 py-2 rounded-lg border border-slate-300 font-medium focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white text-slate-700'}`} placeholder="email@example.com" />
                 </div>
               </div>
 
               <div className="space-y-4">
-                <h3 className="text-sm font-black text-slate-800">비밀번호 변경 <span className="text-xs font-normal text-slate-400 ml-1">(선택 사항)</span></h3>
+                <h3 className="text-sm font-bold text-slate-800">비밀번호 변경 <span className="text-xs font-normal text-slate-400 ml-1">(선택 사항)</span></h3>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">새 비밀번호</label>
                   <input 
@@ -630,7 +630,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                     onChange={(e) => setNewPassword(e.target.value)} 
                     autoComplete="new-password"
                     data-lpignore="true"
-                    className={`w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'}`} 
+                    className={`w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand ${isGuest ? 'bg-slate-100 text-slate-400 cursor-not-allowed' : 'bg-white'}`} 
                     placeholder="변경할 경우에만 입력 (최소 6자리)" 
                   />
                 </div>
@@ -644,7 +644,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                       onChange={(e) => setConfirmPassword(e.target.value)} 
                       autoComplete="new-password"
                       data-lpignore="true"
-                      className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] bg-white" 
+                      className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand bg-white" 
                       placeholder="다시 한번 입력" 
                     />
                   </div>
@@ -656,7 +656,7 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
                 <button 
                   type="submit" 
                   disabled={isSavingProfile || isGuest} 
-                  className={`w-full font-bold py-3.5 rounded-xl shadow-md transition-colors text-sm ${isGuest ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-[#002864] hover:bg-blue-900 text-white active:scale-[0.98]'}`}
+                  className={`w-full font-bold py-3.5 rounded-xl shadow-md transition-colors text-sm ${isGuest ? 'bg-slate-200 text-slate-500 cursor-not-allowed' : 'bg-brand hover:bg-blue-900 text-white active:scale-[0.98]'}`}
                 >
                   {isGuest ? "🔒 체험용 계정은 수정 불가" : isSavingProfile ? "업로드 및 저장 중... ⏳" : "수정 내용 적용하기"}
                 </button>

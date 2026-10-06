@@ -202,7 +202,7 @@ export default function KioskPage() {
       return (
         <div className="bg-white rounded-[32px] px-16 py-12 flex flex-col items-center shadow-2xl animate-[bounce_0.5s_ease-in-out]">
           <div className="text-[#152B69] mb-5"><IconCheck /></div>
-          <div className="text-3xl font-extrabold text-slate-800 mb-2">{successPopup.name} <span className="font-bold text-2xl text-slate-500">학생</span></div>
+          <div className="text-3xl font-bold text-slate-800 mb-2">{successPopup.name} <span className="font-bold text-2xl text-slate-500">학생</span></div>
           <div className="text-xl text-[#152B69] font-bold">등원 처리가 완료되었습니다 👏</div>
         </div>
       );
@@ -210,7 +210,7 @@ export default function KioskPage() {
       return (
         <div className="bg-white rounded-[32px] px-16 py-12 flex flex-col items-center shadow-2xl animate-[bounce_0.5s_ease-in-out]">
           <div className="text-emerald-500 mb-5"><IconHome /></div>
-          <div className="text-3xl font-extrabold text-slate-800 mb-2">{successPopup.name} <span className="font-bold text-2xl text-slate-500">학생</span></div>
+          <div className="text-3xl font-bold text-slate-800 mb-2">{successPopup.name} <span className="font-bold text-2xl text-slate-500">학생</span></div>
           <div className="text-xl text-emerald-600 font-bold">하원 처리가 완료되었습니다 🏠</div>
         </div>
       );
@@ -218,7 +218,7 @@ export default function KioskPage() {
       return (
         <div className="bg-white rounded-[32px] px-16 py-12 flex flex-col items-center shadow-2xl animate-[bounce_0.5s_ease-in-out]">
           <div className="text-amber-500 mb-5"><IconAlert /></div>
-          <div className="text-3xl font-extrabold text-slate-800 mb-2">{successPopup.name} <span className="font-bold text-2xl text-slate-500">학생</span></div>
+          <div className="text-3xl font-bold text-slate-800 mb-2">{successPopup.name} <span className="font-bold text-2xl text-slate-500">학생</span></div>
           <div className="text-xl text-amber-600 font-bold">재등원 처리가 완료되었습니다 🔁</div>
         </div>
       );
@@ -238,9 +238,9 @@ export default function KioskPage() {
         {confirmStudent && !successPopup && !isProcessing && (
           <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-40 animate-[fadeIn_0.2s_ease-out]">
             <div className="bg-white rounded-3xl p-10 flex flex-col items-center shadow-2xl w-[400px]">
-              <div className="text-[#002864] mb-4"><IconQuestion /></div>
+              <div className="text-brand mb-4"><IconQuestion /></div>
               <div className="text-center mb-8">
-                <div className="text-3xl font-extrabold text-slate-800 mb-2">
+                <div className="text-3xl font-bold text-slate-800 mb-2">
                   {confirmStudent.name} <span className="font-bold text-2xl text-slate-500">학생</span>
                 </div>
                 <div className="text-lg text-slate-600 font-medium">본인이 맞습니까?</div>
@@ -255,7 +255,7 @@ export default function KioskPage() {
                 </button>
                 <button 
                   onClick={() => completeAttendance(confirmStudent)} 
-                  className="flex-1 py-4 bg-[#152B69] hover:bg-[#002864] text-white font-bold rounded-xl text-lg transition-colors shadow-md"
+                  className="flex-1 py-4 bg-[#152B69] hover:bg-brand text-white font-bold rounded-xl text-lg transition-colors shadow-md"
                 >
                   네, 맞습니다
                 </button>
@@ -266,7 +266,7 @@ export default function KioskPage() {
 
         {isProcessing && !successPopup && (
           <div className="absolute inset-0 bg-white/50 backdrop-blur-sm flex items-center justify-center z-40">
-            <div className="text-[#002864] font-bold text-xl animate-pulse">DB 조회 및 처리 중...</div>
+            <div className="text-brand font-bold text-xl animate-pulse">DB 조회 및 처리 중...</div>
           </div>
         )}
 
@@ -287,13 +287,13 @@ export default function KioskPage() {
               <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar">
                 {matchedList.map(student => (
                   <button key={student.student_id} onClick={() => setConfirmStudent(student)}
-                    className="w-full flex items-center p-5 bg-white rounded-2xl border-2 border-slate-200 hover:border-[#002864] hover:bg-blue-50 transition-all text-left group">
-                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mr-4 group-hover:bg-blue-100 group-hover:text-[#002864] text-slate-400 transition-colors">
+                    className="w-full flex items-center p-5 bg-white rounded-2xl border-2 border-slate-200 hover:border-brand hover:bg-blue-50 transition-all text-left group">
+                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mr-4 group-hover:bg-blue-100 group-hover:text-brand text-slate-400 transition-colors">
                       <IconUser />
                     </div>
                     <div>
                       <div className="font-bold text-slate-800 text-lg">
-                        {student.name} <span className="text-base font-extrabold text-[#e11d48] ml-1">[{student.grade}]</span>
+                        {student.name} <span className="text-base font-bold text-[#e11d48] ml-1">[{student.grade}]</span>
                       </div>
                       <div className="text-sm text-slate-500 font-medium">{getClassName(student)}</div>
                     </div>
@@ -304,11 +304,11 @@ export default function KioskPage() {
             </div>
           ) : (
             <div className="flex flex-col items-center">
-              <h2 className="text-[#002864] font-extrabold text-2xl mb-1">휴대폰번호 뒤 4자리를</h2>
+              <h2 className="text-brand font-bold text-2xl mb-1">휴대폰번호 뒤 4자리를</h2>
               <h2 className="text-slate-800 font-bold text-2xl mb-10">입력해주세요</h2>
               <div className="flex gap-4">
                 {[0, 1, 2, 3].map((idx) => (
-                  <div key={idx} className={`w-16 h-20 rounded-2xl flex items-center justify-center text-4xl font-black transition-all border-[3px] ${digits.length > idx ? 'border-[#002864] text-[#002864] bg-white shadow-md' : 'border-slate-200 bg-white text-transparent'}`}>
+                  <div key={idx} className={`w-16 h-20 rounded-2xl flex items-center justify-center text-4xl font-bold transition-all border-[3px] ${digits.length > idx ? 'border-brand text-brand bg-white shadow-md' : 'border-slate-200 bg-white text-transparent'}`}>
                     {digits[idx] ? '●' : ''}
                   </div>
                 ))}
@@ -323,11 +323,11 @@ export default function KioskPage() {
             <div className="text-sm font-bold text-slate-400 mb-2">
               {currentTime.toLocaleDateString('ko-KR', { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' })}
             </div>
-            <div className="text-5xl font-black text-slate-800 tracking-tight">
+            <div className="text-5xl font-bold text-slate-800 tracking-tight">
               {currentTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
-          <div className="h-[65%] bg-[#002864] p-6 flex flex-col justify-center">
+          <div className="h-[65%] bg-brand p-6 flex flex-col justify-center">
             <div className="grid grid-cols-3 gap-3 h-full">
               {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
                 <button key={num} onClick={() => handleDigit(num.toString())} className="bg-[#2A4B9F] hover:bg-[#3B5BBA] active:bg-[#152B69] text-white rounded-2xl text-3xl font-bold transition-colors">

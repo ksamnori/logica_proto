@@ -304,11 +304,11 @@ export default function AdminMappingTool() {
     return (
       <div className="flex h-screen items-center justify-center bg-slate-100 font-pretendard">
         <form onSubmit={handleLogin} className="bg-white p-8 rounded-2xl shadow-xl w-96 flex flex-col gap-4 border border-slate-200">
-          <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-[#002864] mb-2 mx-auto shadow-md"><span className="font-black text-2xl text-white">L</span></div>
-          <h1 className="text-xl font-extrabold text-center text-slate-800 mb-4">관리자 로그인</h1>
+          <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-brand mb-2 mx-auto shadow-md"><span className="font-bold text-2xl text-white">L</span></div>
+          <h1 className="text-xl font-bold text-center text-slate-800 mb-4">관리자 로그인</h1>
           <input type="email" placeholder="이메일" value={email} onChange={(e) => setEmail(e.target.value)} required className="w-full p-3 border border-slate-300 rounded-lg outline-none" />
           <input type="password" placeholder="비밀번호" value={password} onChange={(e) => setPassword(e.target.value)} required className="w-full p-3 border border-slate-300 rounded-lg outline-none" />
-          <button type="submit" className="w-full bg-[#002864] text-white font-bold py-3 rounded-lg mt-2">로그인</button>
+          <button type="submit" className="w-full bg-brand text-white font-bold py-3 rounded-lg mt-2">로그인</button>
         </form>
       </div>
     );
@@ -351,7 +351,7 @@ export default function AdminMappingTool() {
                       }`} 
                       style={{ left: `${field.x_pos}%`, top: `${field.y_pos}%`, width: `${field.width}%`, height: `${field.height}%` }}
                     >
-                      {field.problem_num && !isVideoType && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-white px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap ${isSelected ? 'bg-indigo-600' : isSelectType ? 'bg-emerald-500' : 'bg-blue-600'}`}>문 {field.problem_num}</span>}
+                      {field.problem_num && !isVideoType && <span className={`absolute -top-3 left-1/2 -translate-x-1/2 text-xs text-white px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap ${isSelected ? 'bg-indigo-600' : isSelectType ? 'bg-emerald-500' : 'bg-blue-600'}`}>문 {field.problem_num}</span>}
                       <span>{isVideoType ? '▶️' : isSelectType ? (field.correct_answer === 'O' ? '⭕' : '❌') : field.correct_answer}</span>
                     </div>
                   );
@@ -367,8 +367,8 @@ export default function AdminMappingTool() {
                       if (pos) setAction({ type: 'move', start: pos, initBox: { x: activeForm.x, y: activeForm.y } });
                     }}
                   >
-                    {formData.problem_num && formData.field_type !== 'video' && <span className={`absolute -top-4 left-1/2 -translate-x-1/2 text-[10px] text-white font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap pointer-events-none ${formData.field_type === 'select' ? 'bg-emerald-500' : 'bg-rose-500'}`}>문 {formData.problem_num}</span>}
-                    <span className={`font-extrabold text-lg pointer-events-none select-none ${formData.field_type === 'select' ? 'text-emerald-700 opacity-60' : formData.field_type === 'video' ? 'text-white' : 'text-rose-500 opacity-60'}`}>
+                    {formData.problem_num && formData.field_type !== 'video' && <span className={`absolute -top-4 left-1/2 -translate-x-1/2 text-xs text-white font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap pointer-events-none ${formData.field_type === 'select' ? 'bg-emerald-500' : 'bg-rose-500'}`}>문 {formData.problem_num}</span>}
+                    <span className={`font-bold text-lg pointer-events-none select-none ${formData.field_type === 'select' ? 'text-emerald-700 opacity-60' : formData.field_type === 'video' ? 'text-white' : 'text-rose-500 opacity-60'}`}>
                       {formData.field_type === 'video' ? '▶️' : formData.field_type === 'select' ? (formData.correct_answer === 'O' ? '⭕' : '❌') : formData.correct_answer}
                     </span>
                     <div 
@@ -391,8 +391,8 @@ export default function AdminMappingTool() {
       <div className="flex-[3] bg-white border-l border-slate-200 p-6 flex flex-col shadow-xl z-10 min-w-[380px]">
         <div className="flex justify-between items-center mb-4">
           <div className="flex gap-2">
-            <button onClick={() => setActiveTab('mapping')} className={`px-4 py-2 rounded-lg font-extrabold text-sm transition-all ${activeTab === 'mapping' ? 'bg-[#002864] text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>✏ 매핑</button>
-            <button onClick={() => setActiveTab('concept')} className={`px-4 py-2 rounded-lg font-extrabold text-sm transition-all ${activeTab === 'concept' ? 'bg-amber-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>📺 개념 영상</button>
+            <button onClick={() => setActiveTab('mapping')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'mapping' ? 'bg-brand text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>✏ 매핑</button>
+            <button onClick={() => setActiveTab('concept')} className={`px-4 py-2 rounded-lg font-bold text-sm transition-all ${activeTab === 'concept' ? 'bg-amber-500 text-white shadow-md' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>📺 개념 영상</button>
           </div>
           <button onClick={handleLogout} className="text-xs font-bold text-slate-400 hover:text-rose-500">로그아웃</button>
         </div>
@@ -446,7 +446,7 @@ export default function AdminMappingTool() {
                   <label className="block"><span className="text-sm font-bold text-slate-700">높이(%)</span><input type="number" step="0.1" value={formData.height} onChange={(e) => setFormData({ ...formData, height: Number(e.target.value) })} className="mt-1 block w-full rounded-md border-slate-300 p-2 border outline-none" /></label>
                 </div>
                 <div className="flex gap-2 mt-4">
-                  <button onClick={handleSaveField} className={`flex-[2] text-white font-bold py-2.5 rounded-lg shadow-md ${editingFieldId ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-[#002864] hover:bg-blue-900'}`}>{editingFieldId ? '수정 완료' : '저장'}</button>
+                  <button onClick={handleSaveField} className={`flex-[2] text-white font-bold py-2.5 rounded-lg shadow-md ${editingFieldId ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-brand hover:bg-blue-900'}`}>{editingFieldId ? '수정 완료' : '저장'}</button>
                   <button onClick={cancelEdit} className="flex-1 bg-white border border-slate-300 text-slate-600 font-bold py-2.5 rounded-lg hover:bg-slate-50">취소</button>
                 </div>
               </div>
@@ -464,7 +464,7 @@ export default function AdminMappingTool() {
               {selectedIds.length > 0 && (
                 <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 mb-3 flex flex-col gap-2">
                   <div className="flex justify-between items-center px-1">
-                    <span className="text-xs font-extrabold text-indigo-700">✓ {selectedIds.length}개 선택됨</span>
+                    <span className="text-xs font-bold text-indigo-700">✓ {selectedIds.length}개 선택됨</span>
                     <button onClick={handleBulkDelete} className="text-xs font-bold text-rose-500 hover:underline">선택 일괄 삭제</button>
                   </div>
                   <div className="flex gap-2">
@@ -486,18 +486,18 @@ export default function AdminMappingTool() {
                         <input type="checkbox" checked={selectedIds.includes(f.id)} onChange={(e) => { e.stopPropagation(); e.target.checked ? setSelectedIds([...selectedIds, f.id]) : setSelectedIds(selectedIds.filter(id => id !== f.id))}} className="w-4 h-4 accent-indigo-600" />
                         <div>
                           <div className="text-sm font-bold flex items-center gap-1.5">
-                            {isVideoType ? <span className="text-[10px] bg-amber-500 text-white px-1.5 py-0.5 rounded shadow-sm">▶️ 영상 버튼</span> : isSelectType ? <span className="text-[10px] bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded">선택형</span> : <span className="text-[10px] bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">입력형</span>}
-                            {f.problem_num ? <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">문 {f.problem_num}</span> : <span className="text-[10px] bg-rose-100 text-rose-500 px-1.5 py-0.5 rounded border border-rose-200">번호 없음</span>}
+                            {isVideoType ? <span className="text-xs bg-amber-500 text-white px-1.5 py-0.5 rounded shadow-sm">▶️ 영상 버튼</span> : isSelectType ? <span className="text-xs bg-emerald-100 text-emerald-600 px-1.5 py-0.5 rounded">선택형</span> : <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded">입력형</span>}
+                            {f.problem_num ? <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded">문 {f.problem_num}</span> : <span className="text-xs bg-rose-100 text-rose-500 px-1.5 py-0.5 rounded border border-rose-200">번호 없음</span>}
                           </div>
                           {!isVideoType && <div className="text-sm font-bold text-slate-700 mt-1">정답: {isSelectType ? (f.correct_answer === 'O' ? '⭕ 정답' : '❌ 오답') : f.correct_answer}</div>}
-                          {f.video_url && <div className="text-[10px] text-indigo-500 mt-1 font-bold">🔗 {f.video_url.substring(0, 30)}...</div>}
+                          {f.video_url && <div className="text-xs text-indigo-500 mt-1 font-bold">🔗 {f.video_url.substring(0, 30)}...</div>}
                         </div>
                       </div>
                       <div className="flex flex-col gap-1 items-end">
                         <button onClick={(e) => handleDeleteField(f.id, e)} className="text-slate-400 hover:text-rose-500 p-1">🗑</button>
                         <div className="flex gap-1 bg-slate-100 rounded">
-                          <button onClick={(e) => { e.stopPropagation(); handleReorder(i, 'up'); }} disabled={i===0} className="px-1.5 text-[10px] text-slate-400 hover:text-indigo-600 disabled:opacity-20">▲</button>
-                          <button onClick={(e) => { e.stopPropagation(); handleReorder(i, 'down'); }} disabled={i===currentPageFields.length-1} className="px-1.5 text-[10px] text-slate-400 hover:text-indigo-600 disabled:opacity-20">▼</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleReorder(i, 'up'); }} disabled={i===0} className="px-1.5 text-xs text-slate-400 hover:text-indigo-600 disabled:opacity-20">▲</button>
+                          <button onClick={(e) => { e.stopPropagation(); handleReorder(i, 'down'); }} disabled={i===currentPageFields.length-1} className="px-1.5 text-xs text-slate-400 hover:text-indigo-600 disabled:opacity-20">▼</button>
                         </div>
                       </div>
                     </div>
@@ -509,7 +509,7 @@ export default function AdminMappingTool() {
         ) : (
           <div className="flex-1 flex flex-col">
             <div className="bg-amber-50 border border-amber-200 p-5 rounded-xl mb-6 shadow-sm">
-              <h3 className="font-extrabold text-amber-800 text-sm mb-3">📺 페이지 구간별 개념 영상 등록</h3>
+              <h3 className="font-bold text-amber-800 text-sm mb-3">📺 페이지 구간별 개념 영상 등록</h3>
               <div className="flex items-center gap-2 mb-3">
                 <input type="number" value={conceptForm.start_page} onChange={e => setConceptForm({...conceptForm, start_page: Number(e.target.value)})} className="w-16 p-2 border rounded outline-none text-center font-bold text-slate-700" min="1" />
                 <span className="text-sm text-slate-500 font-bold">쪽 부터</span>
@@ -524,7 +524,7 @@ export default function AdminMappingTool() {
               {conceptVideos.map(v => (
                 <div key={v.id} className="bg-white p-3 border border-slate-200 rounded-lg mb-2 flex justify-between items-center shadow-sm">
                   <div>
-                    <div className="text-xs font-extrabold text-amber-600 mb-1 bg-amber-100 inline-block px-1.5 py-0.5 rounded">{v.start_page}쪽 ~ {v.end_page}쪽</div>
+                    <div className="text-xs font-bold text-amber-600 mb-1 bg-amber-100 inline-block px-1.5 py-0.5 rounded">{v.start_page}쪽 ~ {v.end_page}쪽</div>
                     <div className="text-xs text-slate-500 truncate max-w-[200px]">{v.video_url}</div>
                   </div>
                   <button onClick={() => handleDeleteConceptVideo(v.id)} className="text-slate-400 hover:text-rose-500 p-2 bg-slate-50 rounded-lg hover:bg-rose-50">🗑️</button>

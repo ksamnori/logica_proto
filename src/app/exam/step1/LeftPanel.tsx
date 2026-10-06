@@ -96,7 +96,7 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
       <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 4 ? "mb-2 pl-2 border-l-2 border-slate-100 ml-2" : "mb-1 pl-2 border-l border-slate-100 ml-3"}>
         <summary className="flex items-center space-x-2 p-2 hover:bg-blue-50 rounded-lg transition-colors select-none cursor-pointer group">
           <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
-          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded border-slate-300 accent-[#002864] cursor-pointer" />
+          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer" />
           <span className="text-slate-700 font-bold text-[14px]">{nodeKey}</span>
         </summary>
         {isOpen && (
@@ -157,11 +157,11 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
   return (
     <section className="w-[50%] bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 min-h-0">
       <div className="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
-        <h2 className="font-extrabold text-slate-800 text-lg flex items-center gap-2"><span className="text-xl">📂</span> 문제은행 분류표</h2>
+        <h2 className="font-bold text-slate-800 text-lg flex items-center gap-2"><span className="text-xl">📂</span> 문제은행 분류표</h2>
         <div className="flex bg-slate-200 p-1 rounded-lg">
-          <button onClick={() => switchMainTab('regular')} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${currentMode === 'regular' ? 'bg-white text-[#002864] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>정규 교과</button>
-          <button onClick={() => switchMainTab('thinking')} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${currentMode === 'thinking' ? 'bg-white text-[#002864] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>사고력 교과</button>
-          <button onClick={() => switchMainTab('test')} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${currentMode === 'test' ? 'bg-white text-[#002864] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>테스트 전용</button>
+          <button onClick={() => switchMainTab('regular')} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${currentMode === 'regular' ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>정규 교과</button>
+          <button onClick={() => switchMainTab('thinking')} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${currentMode === 'thinking' ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>사고력 교과</button>
+          <button onClick={() => switchMainTab('test')} className={`px-4 py-1.5 text-sm font-bold rounded-md transition-all ${currentMode === 'test' ? 'bg-white text-brand shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>테스트 전용</button>
         </div>
       </div>
 
@@ -170,7 +170,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
           <input 
             type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} 
             placeholder="단원명, 유형, 키워드를 입력하여 즉시 검색 (2글자 이상)..." 
-            className="w-full bg-slate-50 border border-slate-300 text-sm font-bold rounded-lg pl-10 pr-10 py-2.5 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] transition-colors"
+            className="w-full bg-slate-50 border border-slate-300 text-sm font-bold rounded-lg pl-10 pr-10 py-2.5 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-colors"
           />
           <svg className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 transform -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
           {searchKeyword && (
@@ -183,7 +183,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
 
       {searchKeyword.trim() !== "" ? (
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/50">
-          <div className="text-sm font-extrabold text-[#002864] mb-3 px-1">검 결과 {searchKeyword.trim().length >= 2 && `(${searchResults.length}건)`}</div>
+          <div className="text-sm font-bold text-brand mb-3 px-1">검 결과 {searchKeyword.trim().length >= 2 && `(${searchResults.length}건)`}</div>
           {searchKeyword.trim().length < 2 ? (
             <div className="text-center py-10 text-slate-400 font-bold">✌️ 원활한 검색을 위해 2글자 이상 입력해 주세요.</div>
           ) : searchResults.length === 0 ? (
@@ -204,8 +204,8 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
                       className={`p-3 bg-white border rounded-lg cursor-pointer flex items-start gap-3 transition-colors ${isChecked ? 'border-emerald-400 bg-emerald-50/30' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50'}`}>
                     <input type="checkbox" readOnly checked={isChecked} ref={el => { if(el) el.indeterminate = isIndeterminate; }} className="mt-1 w-4 h-4 rounded border-slate-300 accent-emerald-600 cursor-pointer pointer-events-none shrink-0" />
                     <div className="flex-1 min-w-0">
-                      <div className={`text-[14px] font-extrabold truncate ${isChecked ? 'text-emerald-700' : 'text-slate-700'}`}>{res.title}</div>
-                      <div className="text-[11px] font-bold text-slate-400 mt-1 truncate">{res.path}</div>
+                      <div className={`text-[14px] font-bold truncate ${isChecked ? 'text-emerald-700' : 'text-slate-700'}`}>{res.title}</div>
+                      <div className="text-xs font-bold text-slate-400 mt-1 truncate">{res.path}</div>
                     </div>
                   </li>
                 );
@@ -218,10 +218,10 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
           <div className="shrink-0 border-b border-slate-200 bg-white">
             <div className="flex px-4 pt-4 space-x-5 border-b border-slate-100 overflow-x-auto whitespace-nowrap no-scrollbar">
               {currentMode === 'regular' && Object.keys(masterData).sort(sortD1).map(d1 => (
-                <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
+                <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-brand text-brand' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
               ))}
               {currentMode === 'thinking' && Object.keys(thinkingData).sort(sortD1).map(d1 => (
-                <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
+                <button key={d1} onClick={() => setCurrentD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentD1 === d1 ? 'border-brand text-brand' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
               ))}
               {currentMode === 'test' && TEST_GROUPS.map(grp => (
                 <button key={grp} onClick={() => updateTestGroup(grp)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentTestGroup === grp ? 'border-rose-600 text-rose-600' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{grp}</button>
@@ -240,7 +240,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
               <div className="flex flex-col bg-slate-50 border-b border-slate-100">
                  <div className="flex px-4 py-2.5 gap-3 overflow-x-auto no-scrollbar border-b border-slate-100">
                    {Object.keys(masterData).sort(sortD1).map(d1 => (
-                     <button key={d1} onClick={() => setCurrentD1(d1)} className={`px-4 py-1.5 text-[13px] font-extrabold rounded-full transition-colors ${currentD1 === d1 ? 'bg-rose-500 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}>{d1}</button>
+                     <button key={d1} onClick={() => setCurrentD1(d1)} className={`px-4 py-1.5 text-[13px] font-bold rounded-full transition-colors ${currentD1 === d1 ? 'bg-rose-500 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-100'}`}>{d1}</button>
                    ))}
                  </div>
                  <div className="flex px-4 py-2.5 gap-2 flex-wrap">

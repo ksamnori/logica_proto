@@ -123,7 +123,7 @@ function StudentEnrollContent() {
     <div className="flex items-center justify-center min-h-screen bg-slate-50 p-6 font-pretendard">
       <div className="bg-white w-full max-w-2xl rounded-2xl shadow-xl overflow-hidden flex flex-col">
         
-        <div className="bg-[#002864] text-white p-6 shrink-0">
+        <div className="bg-brand text-white p-6 shrink-0">
           <h1 className="text-2xl font-bold tracking-tight">{headerTitle}</h1>
           <p className="text-blue-200 text-sm mt-1">{headerDesc}</p>
         </div>
@@ -139,7 +139,7 @@ function StudentEnrollContent() {
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all"
                   placeholder="예: 홍길동"
                 />
               </div>
@@ -156,7 +156,7 @@ function StudentEnrollContent() {
                       value="남"
                       checked={formData.gender === "남"}
                       onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                      className="w-5 h-5 text-[#002864] focus:ring-[#002864]"
+                      className="w-5 h-5 text-brand focus:ring-brand"
                     />
                     <span className="text-slate-700 font-medium">남학생</span>
                   </label>
@@ -167,7 +167,7 @@ function StudentEnrollContent() {
                       value="여"
                       checked={formData.gender === "여"}
                       onChange={(e) => setFormData({ ...formData, gender: e.target.value })}
-                      className="w-5 h-5 text-[#002864] focus:ring-[#002864]"
+                      className="w-5 h-5 text-brand focus:ring-brand"
                     />
                     <span className="text-slate-700 font-medium">여학생</span>
                   </label>
@@ -183,7 +183,7 @@ function StudentEnrollContent() {
                   maxLength={13}
                   value={formData.parentContact}
                   onChange={(e) => handlePhoneInput("parentContact", e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all"
                   placeholder="010-0000-0000"
                 />
               </div>
@@ -197,7 +197,7 @@ function StudentEnrollContent() {
                   maxLength={13}
                   value={formData.studentContact}
                   onChange={(e) => handlePhoneInput("studentContact", e.target.value)}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all"
                   placeholder="010-0000-0000"
                 />
               </div>
@@ -208,7 +208,7 @@ function StudentEnrollContent() {
                   type="text"
                   value={formData.school}
                   onChange={(e) => setFormData({ ...formData, school: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all"
                   placeholder="예: 대치중학교"
                 />
               </div>
@@ -220,7 +220,7 @@ function StudentEnrollContent() {
                 <select
                   value={formData.grade}
                   onChange={(e) => setFormData({ ...formData, grade: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all text-slate-700"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all text-slate-700"
                 >
                   <option value="7세 반">미취학 (7세 반)</option>
                   <option value="초1">초등학교 1학년 (초1)</option>
@@ -245,7 +245,7 @@ function StudentEnrollContent() {
                 <select
                   value={formData.registrationPath}
                   onChange={(e) => setFormData({ ...formData, registrationPath: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all text-slate-700"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all text-slate-700"
                 >
                   <option value="">-- 선택 안 함 --</option>
                   <option value="지인 소개">지인 소개</option>
@@ -264,7 +264,7 @@ function StudentEnrollContent() {
                   type="password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand transition-all"
                   placeholder="비밀번호 입력"
                 />
               </div>
@@ -276,7 +276,7 @@ function StudentEnrollContent() {
                 <select
                   value={formData.status}
                   onChange={(e) => setFormData({ ...formData, status: e.target.value })}
-                  className="w-full px-4 py-3 rounded-lg border border-slate-300 font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] transition-all bg-blue-50"
+                  className="w-full px-4 py-3 rounded-lg border border-slate-300 font-bold text-brand focus:outline-none focus:ring-2 focus:ring-brand transition-all bg-blue-50"
                 >
                   <option value="재원">✅ 정규 재원생 (기본)</option>
                   <option value="입학테스트">📝 입학테스트 대기</option>
@@ -292,14 +292,14 @@ function StudentEnrollContent() {
               <button
                 onClick={registerStudent}
                 disabled={isSubmitting}
-                className={`flex-1 text-white font-extrabold text-lg py-4 px-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.01] ${isSubmitting ? "bg-slate-400 cursor-not-allowed" : "bg-[#002864] hover:bg-blue-900"}`}
+                className={`flex-1 text-white font-bold text-lg py-4 px-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.01] ${isSubmitting ? "bg-slate-400 cursor-not-allowed" : "bg-brand hover:bg-blue-900"}`}
               >
                 {isSubmitting ? "등록 처리 중... ⏳" : "DB에 학생 등록하기"}
               </button>
               <button
                 type="button"
                 onClick={() => window.close()}
-                className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-lg rounded-xl shadow-sm transition-all border border-slate-300 whitespace-nowrap"
+                className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-xl shadow-sm transition-all border border-slate-300 whitespace-nowrap"
               >
                 창닫기
               </button>

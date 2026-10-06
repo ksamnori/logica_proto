@@ -397,13 +397,13 @@ export default function StudentKioskLogin() {
 
       {isProcessing && (
         <div className="fixed inset-0 bg-white/60 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="text-[#002864] font-bold text-2xl animate-pulse">데이터를 불러오는 중입니다...</div>
+          <div className="text-brand font-bold text-2xl animate-pulse">데이터를 불러오는 중입니다...</div>
         </div>
       )}
 
       {unregisteredDeviceId && (
         <div className="fixed left-6 top-1/2 -translate-y-1/2 w-72 bg-white border-2 border-amber-400 rounded-2xl shadow-2xl px-5 py-4 z-40">
-          <p className="text-sm font-extrabold text-amber-600 mb-0.5">⚠️ 미등록 패드</p>
+          <p className="text-sm font-bold text-amber-600 mb-0.5">⚠️ 미등록 패드</p>
           <p className="text-xs text-slate-400 font-medium mb-3 break-all">기기ID: {unregisteredDeviceId}</p>
           <p className="text-xs text-slate-600 font-bold mb-2">이 패드가 속할 지점과 좌석번호를 입력하세요</p>
           <select
@@ -450,7 +450,7 @@ export default function StudentKioskLogin() {
 
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mb-6 opacity-80" />
           
-          <h2 className="text-xl font-extrabold text-slate-800 mb-1">
+          <h2 className="text-xl font-bold text-slate-800 mb-1">
             휴대폰번호 뒤 4자리
           </h2>
           <p className="text-xs text-slate-500 font-medium mb-8 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100">
@@ -459,7 +459,7 @@ export default function StudentKioskLogin() {
 
           <div className="flex gap-4 mb-6">
             {[0, 1, 2, 3].map((idx) => (
-              <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-black transition-all border-2 ${digits.length > idx ? 'border-[#002864] text-[#002864] bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
+              <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-bold transition-all border-2 ${digits.length > idx ? 'border-brand text-brand bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
                 {digits[idx] ? '●' : ''}
               </div>
             ))}
@@ -496,7 +496,7 @@ export default function StudentKioskLogin() {
           />
 
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mb-8 inline-block opacity-50" />
-          <h2 className="text-3xl font-extrabold text-slate-800 mb-10">누구로 접속할까요?</h2>
+          <h2 className="text-3xl font-bold text-slate-800 mb-10">누구로 접속할까요?</h2>
           
           <div className="flex flex-wrap justify-center gap-10 mb-12">
             {matchedList.map(student => {
@@ -541,7 +541,7 @@ export default function StudentKioskLogin() {
             <div className={`w-20 h-20 rounded-full ${avatar.color.bg} flex items-center justify-center mb-4 shadow-sm`}>
               <span className="text-4xl">{avatar.animal}</span>
             </div>
-            <h2 className={`text-xl font-extrabold text-slate-800 mb-1 ${avatar.color.text}`}>
+            <h2 className={`text-xl font-bold text-slate-800 mb-1 ${avatar.color.text}`}>
               {selectedStudent.name} <span className="text-base text-slate-500">학생</span>
             </h2>
             <p className="text-xs text-slate-500 font-medium mb-8 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100">
@@ -550,7 +550,7 @@ export default function StudentKioskLogin() {
 
             <div className="flex gap-4 mb-6">
               {[0, 1, 2, 3].map((idx) => (
-                <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-black transition-all border-2 ${passwordInput.length > idx ? 'border-[#002864] text-[#002864] bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
+                <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-bold transition-all border-2 ${passwordInput.length > idx ? 'border-brand text-brand bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
                   {passwordInput[idx] ? '●' : ''}
                 </div>
               ))}
@@ -591,7 +591,7 @@ export default function StudentKioskLogin() {
             <div className={`w-20 h-20 rounded-full ${avatar.color.bg} flex items-center justify-center mb-4 shadow-sm ring-4 ring-emerald-100`}>
               <span className="text-4xl">{avatar.animal}</span>
             </div>
-            <h2 className="text-xl font-extrabold text-emerald-600 mb-1">
+            <h2 className="text-xl font-bold text-emerald-600 mb-1">
               환영합니다, {selectedStudent.name} 학생!
             </h2>
             <p className="text-xs text-slate-500 font-bold mb-8 bg-slate-50 px-3 py-1.5 rounded-md border border-slate-100 text-center">
@@ -600,7 +600,7 @@ export default function StudentKioskLogin() {
 
             <div className="flex gap-4 mb-6">
               {[0, 1, 2, 3].map((idx) => (
-                <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-black transition-all border-2 ${newPinInput.length > idx ? 'border-emerald-500 text-emerald-500 bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
+                <div key={idx} className={`w-12 h-14 rounded-xl flex items-center justify-center text-2xl font-bold transition-all border-2 ${newPinInput.length > idx ? 'border-emerald-500 text-emerald-500 bg-white shadow-sm' : 'border-slate-200 bg-slate-50 text-transparent'}`}>
                   {newPinInput[idx] ? '●' : ''}
                 </div>
               ))}

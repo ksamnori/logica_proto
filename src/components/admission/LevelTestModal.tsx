@@ -743,17 +743,17 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
               </div>
             )}
 
-            <div className={`${editSessionId ? 'bg-amber-700' : 'bg-[#002864]'} text-white p-3 shrink-0`}>
+            <div className={`${editSessionId ? 'bg-amber-700' : 'bg-brand'} text-white p-3 shrink-0`}>
               <h3 className="font-bold text-sm">🗓️ 1. 방 {editSessionId ? "수정" : "개설"}</h3>
             </div>
             
             <div className="p-3 space-y-2 border-b border-slate-100 bg-slate-50 shrink-0">
               
               <div className="flex flex-col gap-1">
-                <label className="block text-[11px] font-bold text-slate-700">테스트 방 코드 설정 <span className="text-red-500">*</span></label>
+                <label className="block text-xs font-bold text-slate-700">테스트 방 코드 설정 <span className="text-red-500">*</span></label>
                 <div className="flex space-x-1">
-                  <span className="px-2 py-1.5 bg-slate-200 rounded border border-slate-300 font-extrabold text-slate-700 text-xs shrink-0 flex items-center">LT</span>
-                  <select value={sGradeSem} onChange={(e) => setSGradeSem(e.target.value)} className="flex-1 px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
+                  <span className="px-2 py-1.5 bg-slate-200 rounded border border-slate-300 font-bold text-slate-700 text-xs shrink-0 flex items-center">LT</span>
+                  <select value={sGradeSem} onChange={(e) => setSGradeSem(e.target.value)} className="flex-1 px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand">
                     <option value="11">초1-1</option><option value="12">초1-2</option>
                     <option value="21">초2-1</option><option value="22">초2-2</option>
                     <option value="31">초3-1</option><option value="32">초3-2</option>
@@ -762,59 +762,59 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                     <option value="61">초6-1</option><option value="62">초6-2</option>
                     <option value="71">중1-1</option><option value="72">중1-2</option>
                   </select>
-                  <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-[40px] px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
+                  <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-[40px] px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand">
                     <option value="A">A</option><option value="B">B</option>
                   </select>
-                  <select value={sYear} onChange={(e) => setSYear(e.target.value)} className="w-[50px] px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
+                  <select value={sYear} onChange={(e) => setSYear(e.target.value)} className="w-[50px] px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand">
                     <option value="26">26년</option><option value="27">27년</option><option value="28">28년</option><option value="29">29년</option><option value="30">30년</option>
                   </select>
-                  <select value={sMonth} onChange={(e) => setSMonth(e.target.value)} className="w-[45px] px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
+                  <select value={sMonth} onChange={(e) => setSMonth(e.target.value)} className="w-[45px] px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand">
                     {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0")).map(m => (
                       <option key={m} value={m}>{m}월</option>
                     ))}
                   </select>
                 </div>
-                <div className="text-[10px] font-bold text-blue-800 text-right">미리보기: {previewName}</div>
+                <div className="text-xs font-bold text-blue-800 text-right">미리보기: {previewName}</div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">시험 날짜 <span className="text-red-500">*</span></label>
-                  <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]" />
+                  <label className="block text-xs font-bold text-slate-700 mb-1">시험 날짜 <span className="text-red-500">*</span></label>
+                  <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand" />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">시작 시간 <span className="text-red-500">*</span></label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">시작 시간 <span className="text-red-500">*</span></label>
                   <div className="flex space-x-1">
-                    <select value={testHour} onChange={(e) => setTestHour(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]"><option value="">시</option>{hours.map(h => <option key={h} value={h}>{h}시</option>)}</select>
-                    <select value={testMinute} onChange={(e) => setTestMinute(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]"><option value="">분</option>{minutes.map(m => <option key={m} value={m}>{m}분</option>)}</select>
+                    <select value={testHour} onChange={(e) => setTestHour(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand"><option value="">시</option>{hours.map(h => <option key={h} value={h}>{h}시</option>)}</select>
+                    <select value={testMinute} onChange={(e) => setTestMinute(e.target.value)} className="w-1/2 px-1 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand"><option value="">분</option>{minutes.map(m => <option key={m} value={m}>{m}분</option>)}</select>
                   </div>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-2">
                 <div className="min-w-0">
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">사용할 시험지 <span className="text-red-500">*</span></label>
-                  <select value={examId} onChange={handleExamChange} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-[11px] outline-none focus:border-[#002864]">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">사용할 시험지 <span className="text-red-500">*</span></label>
+                  <select value={examId} onChange={handleExamChange} className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-xs outline-none focus:border-brand">
                     <option value="">시험지를 선택하세요</option>
                     {exams.map(e => <option key={e.exam_id} value={e.exam_id} className="truncate">{e.title} {e.sub_title ? `[${e.sub_title}]` : ''}</option>)}
                   </select>
                 </div>
                 <div className="min-w-0">
-                  <label className="block text-[11px] font-bold text-slate-700 mb-1">시험 구분 코멘트</label>
-                  <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: [초6/중1] 입학테스트 공통" className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-slate-700 text-[11px] outline-none focus:border-[#002864]" />
+                  <label className="block text-xs font-bold text-slate-700 mb-1">시험 구분 코멘트</label>
+                  <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: [초6/중1] 입학테스트 공통" className="w-full px-2 py-1.5 rounded border border-slate-300 font-bold text-slate-700 text-xs outline-none focus:border-brand" />
                 </div>
               </div>
 
               <div className="flex gap-2 pt-1">
-                <button onClick={saveSession} disabled={isLoading || !hasAdminPermission} className={`flex-1 ${editSessionId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#002864] hover:bg-blue-900'} text-white font-bold py-2 rounded shadow transition-colors text-xs`}>{isLoading ? "저장 중..." : (editSessionId ? "수정하기" : "개설하기")}</button>
+                <button onClick={saveSession} disabled={isLoading || !hasAdminPermission} className={`flex-1 ${editSessionId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-brand hover:bg-blue-900'} text-white font-bold py-2 rounded shadow transition-colors text-xs`}>{isLoading ? "저장 중..." : (editSessionId ? "수정하기" : "개설하기")}</button>
                 {editSessionId && <button onClick={cancelEdit} className="px-4 bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors font-bold rounded text-xs">취소</button>}
               </div>
             </div>
             
             <div className="p-2 border-b border-slate-200 bg-white shrink-0 flex items-center justify-between">
                <div className="flex items-center gap-2 w-full">
-                 <span className="text-[11px] font-bold text-slate-600 shrink-0 pl-1">🗓️ 날짜</span>
-                 <select value={leftDateFilter} onChange={(e) => setLeftDateFilter(e.target.value)} className="flex-1 text-[11px] border border-slate-300 rounded px-2 py-1.5 font-bold text-slate-700 focus:ring-1 focus:ring-[#002864] outline-none">
+                 <span className="text-xs font-bold text-slate-600 shrink-0 pl-1">🗓️ 날짜</span>
+                 <select value={leftDateFilter} onChange={(e) => setLeftDateFilter(e.target.value)} className="flex-1 text-xs border border-slate-300 rounded px-2 py-1.5 font-bold text-slate-700 focus:ring-1 focus:ring-brand outline-none">
                    <option value="all">전체 일정 보기</option>
                    {uniqueSessionDates.map(d => <option key={d as string} value={d as string}>{formatKoreanDate(d as string)}</option>)}
                  </select>
@@ -834,17 +834,17 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                   return (
                     <div key={s.admission_session_id} onClick={() => setSelectedSessionId(s.admission_session_id)} className={`px-4 py-2.5 border-b border-slate-100 cursor-pointer transition-colors ${isSelected ? 'bg-blue-50 border-blue-200 shadow-inner' : 'hover:bg-slate-50'}`}>
                       <div className="flex justify-between items-start mb-0.5">
-                        <div className="text-[12px] font-extrabold text-slate-800 truncate leading-tight flex-1 mr-2">
-                          {sessionDt} <span className="text-[#002864] ml-1">{s.title}</span> {gradeStr && <span className="text-emerald-600 ml-1">{gradeStr}</span>}
+                        <div className="text-[12px] font-bold text-slate-800 truncate leading-tight flex-1 mr-2">
+                          {sessionDt} <span className="text-brand ml-1">{s.title}</span> {gradeStr && <span className="text-emerald-600 ml-1">{gradeStr}</span>}
                         </div>
                         {hasAdminPermission && (
                           <div className="flex gap-1.5 shrink-0 ml-auto">
-                            <button onClick={(e) => { e.stopPropagation(); handleEditClick(s); }} className="text-[10px] text-amber-600 hover:underline">수정</button>
-                            <button onClick={(e) => { e.stopPropagation(); deleteSession(s.admission_session_id, s.title); }} className="text-[10px] text-rose-500 hover:underline">삭제</button>
+                            <button onClick={(e) => { e.stopPropagation(); handleEditClick(s); }} className="text-xs text-amber-600 hover:underline">수정</button>
+                            <button onClick={(e) => { e.stopPropagation(); deleteSession(s.admission_session_id, s.title); }} className="text-xs text-rose-500 hover:underline">삭제</button>
                           </div>
                         )}
                       </div>
-                      <div className="text-[11px] font-medium text-slate-500 truncate leading-tight">
+                      <div className="text-xs font-medium text-slate-500 truncate leading-tight">
                         📝 {examTitle} {s.session_comment && <span className="text-emerald-600 ml-1">💬 {s.session_comment}</span>}
                       </div>
                     </div>
@@ -865,7 +865,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                     <button 
                       key={num} 
                       onClick={() => setLeftCurrentPage(num)}
-                      className={`px-2.5 py-1 font-bold text-xs rounded transition-colors ${leftCurrentPage === num ? 'bg-[#002864] text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-[#002864]'}`}
+                      className={`px-2.5 py-1 font-bold text-xs rounded transition-colors ${leftCurrentPage === num ? 'bg-brand text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-brand'}`}
                     >{num}</button>
                   ))}
                   <button 
@@ -893,7 +893,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                   setSessionDateFilter(e.target.value);
                   setSelectedSessionId(""); 
                 }}
-                className="w-[85px] px-1.5 py-1.5 rounded border border-slate-300 font-bold text-[11px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
+                className="w-[85px] px-1.5 py-1.5 rounded border border-slate-300 font-bold text-xs text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
               >
                 <option value="">🗓️ 날짜</option>
                 {uniqueSessionDates.map(d => (
@@ -907,7 +907,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                   setSessionTimeFilter(e.target.value);
                   setSelectedSessionId(""); 
                 }}
-                className="w-[75px] px-1.5 py-1.5 rounded border border-slate-300 font-bold text-[11px] text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
+                className="w-[75px] px-1.5 py-1.5 rounded border border-slate-300 font-bold text-xs text-slate-600 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all shrink-0"
               >
                 <option value="">⏰ 시간</option>
                 {uniqueSessionTimes.map(t => (
@@ -918,7 +918,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
               <div className="flex gap-1 shrink-0 bg-white border border-slate-300 rounded p-0.5 shadow-sm">
                 <button 
                   onClick={() => setSessionSortOrder(prev => prev === "asc" ? "desc" : "asc")}
-                  className="px-2 py-1 rounded hover:bg-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                  className="px-2 py-1 rounded hover:bg-slate-100 text-xs font-bold text-slate-600 transition-colors"
                   title="시간 오름차순/내림차순"
                 >
                   시간 {sessionSortOrder === "asc" ? "🔼" : "🔽"}
@@ -926,7 +926,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                 <div className="w-px bg-slate-200 my-1"></div>
                 <button 
                   onClick={() => setSessionGradeOrder(prev => prev === "asc" ? "desc" : "asc")}
-                  className="px-2 py-1 rounded hover:bg-slate-100 text-[10px] font-bold text-slate-600 transition-colors"
+                  className="px-2 py-1 rounded hover:bg-slate-100 text-xs font-bold text-slate-600 transition-colors"
                   title="학년 오름차순/내림차순"
                 >
                   학년 {sessionGradeOrder === "asc" ? "🔼" : "🔽"}
@@ -936,7 +936,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
               <select 
                 value={selectedSessionId} 
                 onChange={(e) => setSelectedSessionId(e.target.value)} 
-                className="flex-1 min-w-[120px] px-2 py-1.5 rounded border border-emerald-400 font-bold text-[11px] text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all text-ellipsis"
+                className="flex-1 min-w-[120px] px-2 py-1.5 rounded border border-emerald-400 font-bold text-xs text-emerald-800 focus:outline-none focus:ring-1 focus:ring-emerald-600 shadow-sm transition-all text-ellipsis"
               >
                 <option value="">일정 선택</option>
                 {[...sessions]
@@ -975,12 +975,12 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
 
             <div className="p-3 border-b border-slate-100 flex justify-between items-center bg-white shrink-0">
               <div className="flex flex-wrap items-center gap-1.5">
-                <h3 className="font-bold text-slate-700 text-[11px] whitespace-nowrap mr-1">📝 명단</h3>
+                <h3 className="font-bold text-slate-700 text-xs whitespace-nowrap mr-1">📝 명단</h3>
                 
                 <select 
                   value={gradeFilter} 
                   onChange={(e) => setGradeFilter(e.target.value)} 
-                  className="text-[11px] border border-slate-300 rounded px-1.5 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
+                  className="text-xs border border-slate-300 rounded px-1.5 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
                 >
                   <option value="all">학년</option>
                   {Array.from(new Set(waitingStudents.map(s => s.grade)))
@@ -993,7 +993,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                 <select 
                   value={dateFilter} 
                   onChange={(e) => setDateFilter(e.target.value)} 
-                  className="text-[11px] border border-slate-300 rounded px-1.5 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
+                  className="text-xs border border-slate-300 rounded px-1.5 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm cursor-pointer bg-slate-50"
                 >
                   <option value="all">신청일</option>
                   {uniqueDates.map(d => (
@@ -1006,11 +1006,11 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                   placeholder="이름, 연락처" 
                   value={searchKeyword}
                   onChange={(e) => setSearchKeyword(e.target.value)}
-                  className="text-[11px] border border-slate-300 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm bg-slate-50 w-24 sm:w-28"
+                  className="text-xs border border-slate-300 rounded px-2 py-1 focus:ring-1 focus:ring-emerald-600 font-bold text-slate-600 outline-none shadow-sm bg-slate-50 w-24 sm:w-28"
                 />
               </div>
               
-              <label className="flex items-center space-x-1 cursor-pointer text-[10px] text-slate-600 font-bold bg-slate-100 border border-slate-200 px-2 py-1 rounded hover:bg-slate-200 transition-colors shadow-sm whitespace-nowrap ml-1">
+              <label className="flex items-center space-x-1 cursor-pointer text-xs text-slate-600 font-bold bg-slate-100 border border-slate-200 px-2 py-1 rounded hover:bg-slate-200 transition-colors shadow-sm whitespace-nowrap ml-1">
                 <input type="checkbox" checked={isAllChecked} onChange={(e) => toggleCheckAll(e.target.checked)} className="w-3 h-3 accent-emerald-600" />
                 <span>현재 페이지 전체선택</span>
               </label>
@@ -1025,8 +1025,8 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                  const korGradeName = formatKoreanGrade(std.grade);
 
                  const sourceBadge = std.source === 'temp' 
-                   ? <span className="text-[9px] bg-blue-100 text-blue-700 border border-blue-200 px-1 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
-                   : <span className="text-[9px] bg-purple-100 text-purple-700 border border-purple-200 px-1 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
+                   ? <span className="text-xs bg-blue-100 text-blue-700 border border-blue-200 px-1 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
+                   : <span className="text-xs bg-purple-100 text-purple-700 border border-purple-200 px-1 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
 
                  const isTodayReg = std.created_at ? getKSTDateStr(std.created_at) === todayKst : false;
 
@@ -1034,15 +1034,15 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                    return (
                      <div key={stdId} className="flex items-center justify-between p-2.5 bg-white border-2 border-emerald-400 rounded-lg shadow-sm gap-2">
                        <div className="flex items-center space-x-2.5 min-w-0">
-                         <div className="w-4 h-4 flex items-center justify-center bg-emerald-500 rounded text-white text-[10px] font-bold shrink-0">✓</div>
+                         <div className="w-4 h-4 flex items-center justify-center bg-emerald-500 rounded text-white text-xs font-bold shrink-0">✓</div>
                          <div className="flex flex-col min-w-0 gap-0.5">
                            <div className="flex items-center gap-1">
-                             <span className="font-extrabold text-slate-800 truncate text-[13px]">{std.student_name}</span>
-                             <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
-                             <span className="text-[9px] bg-emerald-100 text-emerald-700 border border-emerald-200 px-1 py-0.5 rounded font-bold shrink-0">✅ 배정됨</span>
-                             {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
+                             <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
+                             <span className="text-xs bg-brand text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
+                             <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-1 py-0.5 rounded font-bold shrink-0">✅ 배정됨</span>
+                             {isTodayReg && <span className="text-xs bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-bold shrink-0">🔥오늘등록</span>}
                            </div>
-                           <div className="text-[10px] text-slate-400 font-medium truncate flex items-center gap-1">
+                           <div className="text-xs text-slate-400 font-medium truncate flex items-center gap-1">
                              <span>🏫 {std.school_name || "미입력"}</span>
                              <span className="text-slate-300">|</span>
                              <span>📞 {formatContact(std.contact)}</span>
@@ -1050,7 +1050,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                          </div>
                        </div>
                        <div className="flex items-center gap-1 shrink-0">
-                         <button onClick={() => unassignStudent(stdId, std.student_name)} className="text-[10px] bg-white hover:bg-red-50 text-red-500 border border-slate-200 hover:border-red-200 px-2 py-1 rounded font-bold transition-colors shadow-sm">
+                         <button onClick={() => unassignStudent(stdId, std.student_name)} className="text-xs bg-white hover:bg-red-50 text-red-500 border border-slate-200 hover:border-red-200 px-2 py-1 rounded font-bold transition-colors shadow-sm">
                            취소
                          </button>
                        </div>
@@ -1064,12 +1064,12 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                          <div className="flex flex-col min-w-0 gap-0.5">
                            <div className="flex items-center gap-1">
                              <span className="font-bold text-slate-800 truncate text-[13px]">{std.student_name}</span>
-                             <span className="text-[9px] bg-[#002864] text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
+                             <span className="text-xs bg-brand text-white px-1 py-0.5 rounded font-bold shrink-0">{korGradeName}</span>
                              {sourceBadge}
-                             {std.isAssignedOther && <span className="text-[9px] bg-amber-100 text-amber-700 border border-amber-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔄 타 일정 중복</span>}
-                             {isTodayReg && <span className="text-[9px] bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-extrabold shrink-0">🔥오늘등록</span>}
+                             {std.isAssignedOther && <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-1 py-0.5 rounded font-bold shrink-0">🔄 타 일정 중복</span>}
+                             {isTodayReg && <span className="text-xs bg-rose-100 text-rose-600 border border-rose-200 px-1 py-0.5 rounded font-bold shrink-0">🔥오늘등록</span>}
                            </div>
-                           <div className="text-[10px] text-slate-500 font-medium truncate flex items-center gap-1">
+                           <div className="text-xs text-slate-500 font-medium truncate flex items-center gap-1">
                              <span>🏫 {std.school_name || "-"}</span>
                              <span className="text-slate-300">|</span>
                              <span>📅 {formatTestDate(std.test_date) || "-"}</span>
@@ -1097,7 +1097,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
                     <button 
                       key={num} 
                       onClick={() => setRightCurrentPage(num)}
-                      className={`px-2.5 py-1 font-bold text-xs rounded transition-colors ${rightCurrentPage === num ? 'bg-[#002864] text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-[#002864]'}`}
+                      className={`px-2.5 py-1 font-bold text-xs rounded transition-colors ${rightCurrentPage === num ? 'bg-brand text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-brand'}`}
                     >{num}</button>
                   ))}
                   <button 
@@ -1110,7 +1110,7 @@ export default function LevelTestModal({ onClose, onSuccess, tenantId }: LevelTe
             )}
 
             <div className="p-3 bg-white border-t border-slate-200 shrink-0">
-              <button onClick={assignStudents} disabled={isLoading || !selectedSessionId} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold rounded text-xs shadow-md transition-colors disabled:opacity-50">
+              <button onClick={assignStudents} disabled={isLoading || !selectedSessionId} className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded text-xs shadow-md transition-colors disabled:opacity-50">
                 선택한 대기생 배정 완료하기 ✅
               </button>
             </div>

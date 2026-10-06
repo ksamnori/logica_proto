@@ -269,14 +269,14 @@ export default function CSBoardPage() {
       >
         <div className="flex justify-between items-start mb-1">
           <div>
-            <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type}</span>
-            {req.is_private && <span className="bg-slate-700 text-white px-1.5 py-0.5 rounded shadow-sm border border-slate-800 ml-1 text-[10px] font-bold">🔒 비공개</span>}
+            <span className={`text-xs font-bold ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{req.request_type}</span>
+            {req.is_private && <span className="bg-slate-700 text-white px-1.5 py-0.5 rounded shadow-sm border border-slate-800 ml-1 text-xs font-bold">🔒 비공개</span>}
           </div>
           {/* 🌟 접힌 상태일 때는 우측 상단에 심플하게 수정일자 표기 */}
-          {isCollapsed && <span className="text-[9px] font-bold text-slate-400">{updatedDateStr}</span>}
+          {isCollapsed && <span className="text-xs font-bold text-slate-400">{updatedDateStr}</span>}
         </div>
         
-        <h4 className="font-extrabold text-sm text-[#002864]">{sName} 학생</h4>
+        <h4 className="font-bold text-sm text-brand">{sName} 학생</h4>
         
         {/* 🌟 [변경] 접힌 상태에서는 1줄(line-clamp-1)만 노출되도록 스타일 분기 */}
         <div className={`text-[13px] font-bold text-slate-700 whitespace-pre-wrap leading-relaxed break-keep ${isCollapsed ? 'line-clamp-1 px-1 text-xs text-slate-500' : 'bg-slate-50 p-2 rounded-lg border border-slate-100 line-clamp-3'}`}>
@@ -289,21 +289,21 @@ export default function CSBoardPage() {
             {cmts.length > 0 && (
               <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
                 {cmts.slice(-2).map((c: any) => (
-                  <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                  <div key={c.id} className="text-xs bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
                     <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
                   </div>
                 ))}
               </div>
             )}
-            <div className="text-[10px] font-bold text-slate-500 mb-1.5 mt-1">
-              담당: <span className={assigneeName === "미지정" ? "text-rose-400" : "text-[#002864]"}>{assigneeName}</span>
+            <div className="text-xs font-bold text-slate-500 mb-1.5 mt-1">
+              담당: <span className={assigneeName === "미지정" ? "text-rose-400" : "text-brand"}>{assigneeName}</span>
             </div>
             <div className="flex flex-col pt-2 border-t border-slate-100 gap-1.5">
-              <div className="flex justify-between items-center text-[10px] font-bold">
+              <div className="flex justify-between items-center text-xs font-bold">
                 <span className="text-slate-500">최종 수정: {updaterName}</span>
                 <span className="text-slate-400">{updatedDateStr}</span>
               </div>
-              <div className="flex justify-between items-center text-[10px] font-bold">
+              <div className="flex justify-between items-center text-xs font-bold">
                 <span className="text-blue-500">작성: {authorName}</span>
                 <span className="text-slate-400">{createdDateStr}</span>
               </div>
@@ -316,7 +316,7 @@ export default function CSBoardPage() {
           <div className={`pt-2 flex justify-center ${isCollapsed ? 'mt-0' : 'border-t border-slate-100 mt-1'}`}>
             <button
               onClick={(e) => toggleCardExpand(e, req.request_id)}
-              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
+              className="text-xs font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
             >
               {isExpanded ? "▲ 요약 보기" : "▼ 상세 보기"}
             </button>
@@ -330,7 +330,7 @@ export default function CSBoardPage() {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
           <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
         </div>
       </div>
@@ -353,7 +353,7 @@ export default function CSBoardPage() {
       <div className="flex-1 flex gap-6 overflow-hidden pb-2">
         <div className="flex-1 min-w-[250px] bg-rose-50/50 border border-rose-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
           <div className="p-4 bg-rose-50 border-b border-rose-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-rose-700">🚨 대기 중 (미처리)</h3>
+            <h3 className="font-bold text-rose-700">🚨 대기 중 (미처리)</h3>
             <span className="bg-rose-200 text-rose-700 text-xs px-2 py-0.5 rounded-full font-bold">{waits.length}</span>
           </div>
           <div 
@@ -366,7 +366,7 @@ export default function CSBoardPage() {
 
         <div className="flex-1 min-w-[250px] bg-amber-50/50 border border-amber-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
           <div className="p-4 bg-amber-50 border-b border-amber-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-amber-700">⏳ 처리 중 (진행)</h3>
+            <h3 className="font-bold text-amber-700">⏳ 처리 중 (진행)</h3>
             <span className="bg-amber-200 text-amber-700 text-xs px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
           </div>
           <div 
@@ -379,7 +379,7 @@ export default function CSBoardPage() {
 
         <div className="flex-1 min-w-[250px] bg-emerald-50/50 border border-emerald-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
           <div className="p-4 bg-emerald-50 border-b border-emerald-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-emerald-700">✅ 처리 완료</h3>
+            <h3 className="font-bold text-emerald-700">✅ 처리 완료</h3>
             <span className="bg-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{dones.length}</span>
           </div>
           <div 
@@ -391,17 +391,17 @@ export default function CSBoardPage() {
         </div>
 
         <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-hidden">
-          <button onClick={() => openModal()} className="w-full bg-rose-500 hover:bg-rose-600 text-white px-5 py-3.5 rounded-xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
+          <button onClick={() => openModal()} className="w-full bg-rose-500 hover:bg-rose-600 text-white px-5 py-3.5 rounded-xl font-bold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
             새 CS 요청 등록하기
           </button>
 
           <div className="flex-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
             <div className="p-4 bg-slate-800 text-white shrink-0 flex justify-between items-center rounded-t-2xl">
-              <h3 className="font-black text-sm">📊 유형별 통계 및 보관함</h3>
+              <h3 className="font-bold text-sm">📊 유형별 통계 및 보관함</h3>
             </div>
             <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
-              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] shadow-sm cursor-pointer" />
+              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-brand shadow-sm cursor-pointer" />
             </div>
             <div className="p-3 border-b border-slate-100 shrink-0">
               <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
@@ -427,11 +427,11 @@ export default function CSBoardPage() {
                   return (
                     <div key={req.request_id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-slate-400 transition-colors" onClick={() => openModal(req)}>
                       <div className="flex justify-between items-start mb-1">
-                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{req.request_type}</span>
-                        <span className="text-[10px] font-bold text-slate-400">{dateStr}</span>
+                        <span className={`text-xs font-bold ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{req.request_type}</span>
+                        <span className="text-xs font-bold text-slate-400">{dateStr}</span>
                       </div>
-                      <h4 className="font-bold text-xs text-[#002864] mb-1">{sName} 학생</h4>
-                      <div className="text-[11px] font-medium text-slate-600 leading-snug line-clamp-2">{req.reason}</div>
+                      <h4 className="font-bold text-xs text-brand mb-1">{sName} 학생</h4>
+                      <div className="text-xs font-medium text-slate-600 leading-snug line-clamp-2">{req.reason}</div>
                     </div>
                   );
                 })

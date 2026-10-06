@@ -304,7 +304,7 @@ export default function SeatLayoutEditorPage() {
                 <div className="bg-white border border-slate-200 rounded-2xl p-8 text-center max-w-lg mx-auto shadow-sm">
                     <h2 className="text-lg font-bold text-slate-800 mb-2">좌석 배치 편집</h2>
                     <p className="text-sm text-slate-500 mb-6">현재 클리닉 접속자가 없습니다. 편집을 시작하면<br />편집이 끝날 때까지 클리닉 화면들이 잠깁니다.</p>
-                    <button onClick={enterEditMode} className="bg-[#002864] text-white font-bold px-6 py-3 rounded-xl">편집 시작</button>
+                    <button onClick={enterEditMode} className="bg-brand text-white font-bold px-6 py-3 rounded-xl">편집 시작</button>
                 </div>
             </div>
         );
@@ -322,7 +322,7 @@ export default function SeatLayoutEditorPage() {
                         <button
                             onClick={() => setSizePanelOpen(p => !p)}
                             title="좌석 설정"
-                            className={`w-9 h-9 flex items-center justify-center rounded-lg border text-base transition-colors ${sizePanelOpen ? 'bg-[#002864] text-white border-[#002864]' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
+                            className={`w-9 h-9 flex items-center justify-center rounded-lg border text-base transition-colors ${sizePanelOpen ? 'bg-brand text-white border-brand' : 'text-slate-500 border-slate-200 hover:bg-slate-50'}`}
                         >⚙️</button>
                         {sizePanelOpen && (
                             <div className="absolute right-0 top-11 z-20 bg-white border border-slate-200 rounded-xl shadow-lg p-4 w-56">
@@ -383,7 +383,7 @@ export default function SeatLayoutEditorPage() {
                         )}
                     </div>
                     <button onClick={exitEditMode} className="text-slate-500 text-sm font-semibold px-4 py-2 rounded-lg border border-slate-200">닫기</button>
-                    <button onClick={handleSave} disabled={saving || !dirty} className="bg-[#002864] text-white text-sm font-bold px-5 py-2 rounded-lg disabled:opacity-30">
+                    <button onClick={handleSave} disabled={saving || !dirty} className="bg-brand text-white text-sm font-bold px-5 py-2 rounded-lg disabled:opacity-30">
                         {saving ? '저장 중...' : '저장'}
                     </button>
                 </div>
@@ -437,7 +437,7 @@ export default function SeatLayoutEditorPage() {
                         <h3 className="font-bold text-slate-800 mb-2">저장하지 않은 변경사항이 있습니다</h3>
                         <p className="text-sm text-slate-500 mb-6">닫기 전에 변경사항을 저장하시겠습니까?</p>
                         <div className="flex flex-col gap-2">
-                            <button onClick={confirmSaveAndClose} disabled={saving} className="bg-[#002864] text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">
+                            <button onClick={confirmSaveAndClose} disabled={saving} className="bg-brand text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">
                                 {saving ? '저장 중...' : '저장하고 닫기'}
                             </button>
                             <button onClick={confirmDiscardAndClose} disabled={saving} className="bg-rose-50 text-rose-600 font-bold text-sm px-5 py-2.5 rounded-lg hover:bg-rose-100 disabled:opacity-50">저장하지 않고 닫기</button>

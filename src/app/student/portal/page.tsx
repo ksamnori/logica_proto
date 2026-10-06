@@ -903,11 +903,11 @@ const renderCard = (typeKey: string, round: number, className: string) => {
     return (
         <div key={cardKey} className={`w-full h-full ${theme.bg} rounded-[2rem] p-8 md:p-10 shadow-xl relative overflow-hidden group flex flex-col transition-all duration-300 ${isLocked ? 'grayscale opacity-60 bg-slate-200' : ''}`}>
             {isLocked && <div className="absolute inset-0 bg-white/40 z-0"></div>}
-            {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 text-slate-800 text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 모두 완료됨</span>}
+            {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 text-slate-800 text-sm md:text-base font-bold px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 모두 완료됨</span>}
             
             <div className="relative z-10 shrink-0">
                 <div className="flex flex-wrap items-center gap-2.5 mb-3 pr-[120px] md:pr-[220px]">
-                    <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/60 text-slate-500 shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
+                    <span className={`text-sm md:text-base font-bold ${isLocked ? 'bg-white/60 text-slate-500 shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                         {isLocked ? '🔒 잠김' : theme.label}
                     </span>
                     {pendingStacks > 1 && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
@@ -940,7 +940,7 @@ const renderCard = (typeKey: string, round: number, className: string) => {
                     )}
                 </div>
                 
-                <h3 className={`text-[26px] md:text-[32px] lg:text-[36px] font-black mb-1.5 leading-tight ${isLocked ? 'text-slate-400' : 'text-slate-800'} pr-[80px] md:pr-[120px]`}>
+                <h3 className={`text-[26px] md:text-[32px] lg:text-[36px] font-bold mb-1.5 leading-tight ${isLocked ? 'text-slate-400' : 'text-slate-800'} pr-[80px] md:pr-[120px]`}>
                     {isSelectedItemWaiting || isSelectedItemFixing ? '' : theme.label.replace(/[^가-힣 ]/g, '').trim() + ' 클리닉'}
                     {isSelectedItemWaiting ? '채점 결과 확인 중' : ''}
                     {isSelectedItemFixing && !isSelectedItem100 ? '시험지 오답 고치기' : ''}
@@ -972,23 +972,23 @@ const renderCard = (typeKey: string, round: number, className: string) => {
                 
                 <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
                     {isBoxDone ? 
-                        <button disabled className={`bg-white/70 text-slate-500 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
+                        <button disabled className={`bg-white/70 text-slate-500 font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
                             학습 전체 완료
                         </button> 
                     : isSelectedItem100 ?
-                        <button disabled className={`bg-white/70 text-slate-500 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
+                        <button disabled className={`bg-white/70 text-slate-500 font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>
                             💯 정답 완료
                         </button>
                     : isSelectedItemWaiting ?
-                        <button disabled className="bg-white/60 text-slate-500 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2">
+                        <button disabled className="bg-white/60 text-slate-500 font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2">
                             <span>🔒</span> 확인 대기
                         </button>
                     : isLocked ?
-                        <button disabled className="bg-white/50 text-slate-400 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2 border border-white">
+                        <button disabled className="bg-white/50 text-slate-400 font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2 border border-white">
                             <span>🔒</span> 잠김
                         </button>
                     : 
-                        <button disabled={isGeneratingPrint} onClick={() => startClinicBlock(className, round, typeKey)} className={`${theme.btnBg} ${theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-md border border-white/50 hover:shadow-lg hover:scale-105 transition-all ${isGeneratingPrint && typeKey === 'print' ? 'opacity-70 animate-pulse' : ''}`}>
+                        <button disabled={isGeneratingPrint} onClick={() => startClinicBlock(className, round, typeKey)} className={`${theme.btnBg} ${theme.btnText} font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-md border border-white/50 hover:shadow-lg hover:scale-105 transition-all ${isGeneratingPrint && typeKey === 'print' ? 'opacity-70 animate-pulse' : ''}`}>
                             {isGeneratingPrint && typeKey === 'print' ? '⏳ 통합 생성 중...' : (isSelectedItemFixing ? '오답 정정 시작하기' : '학습하기')}
                         </button>
                     }
@@ -1034,11 +1034,11 @@ const renderOverdueCard = (className: string) => {
         <div key={cardKey} className={`w-full h-full ${theme.bg} rounded-[2rem] p-8 md:p-10 shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${isLocked ? 'grayscale opacity-60 bg-slate-200' : ''}`}>
             {isLocked && <div className="absolute inset-0 bg-white/40 z-0"></div>}
             
-            {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 text-slate-800 text-sm md:text-base font-black px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
+            {isBoxDone && <span className={`absolute top-6 right-6 bg-white/90 text-slate-800 text-sm md:text-base font-bold px-4 py-2 rounded-full shadow-md z-20 border border-slate-100`}>✅ 밀린 과제 없음</span>}
             
             <div className="relative z-10 shrink-0">
                 <div className="flex flex-wrap items-center gap-2.5 mb-3 pr-[120px] md:pr-[220px]">
-                    <span className={`text-sm md:text-base font-black ${isLocked ? 'bg-white/60 text-slate-500 shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
+                    <span className={`text-sm md:text-base font-bold ${isLocked ? 'bg-white/60 text-slate-500 shadow-sm' : theme.badge} px-4 py-2 rounded-xl shadow-sm flex items-center`}>
                         {isLocked ? '🔒 잠김' : theme.label}
                     </span>
                     {pendingStacks > 1 && !isBoxDone && !isLocked && (
@@ -1066,7 +1066,7 @@ const renderOverdueCard = (className: string) => {
                     )}
                 </div>
                 
-                <h3 className={`text-[26px] md:text-[32px] lg:text-[36px] font-black mb-1.5 leading-tight ${isLocked ? 'text-slate-400' : 'text-slate-800'} pr-[80px] md:pr-[120px]`}>미완료 과제 클리닉</h3>
+                <h3 className={`text-[26px] md:text-[32px] lg:text-[36px] font-bold mb-1.5 leading-tight ${isLocked ? 'text-slate-400' : 'text-slate-800'} pr-[80px] md:pr-[120px]`}>미완료 과제 클리닉</h3>
                 <p className={`text-sm md:text-base font-medium mt-0 mb-1.5 leading-snug ${isLocked ? 'text-slate-400' : theme.textColor} pr-[60px] md:pr-[10px]`}>
                     {isLocked ? '첫 번째 학습을 먼저 제출해주세요.' : theme.desc}
                 </p>
@@ -1092,13 +1092,13 @@ const renderOverdueCard = (className: string) => {
                 
                 <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
                     {isBoxDone ?
-                        <button disabled className={`bg-white/70 text-slate-500 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
+                        <button disabled className={`bg-white/70 text-slate-500 font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm opacity-90 cursor-not-allowed`}>밀린 과제 없음</button>
                     : isLocked ?
-                        <button disabled className="bg-white/50 text-slate-400 font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2 border border-white">
+                        <button disabled className="bg-white/50 text-slate-400 font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2 border border-white">
                             <span>🔒</span> 잠김
                         </button>
                     :
-                        <button onClick={() => startClinicBlock(className, 2, 'overdue')} className={`${theme.btnBg} ${theme.btnText} font-black px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-md border border-white/50 hover:shadow-lg hover:scale-105 transition-all`}>학습하기</button>
+                        <button onClick={() => startClinicBlock(className, 2, 'overdue')} className={`${theme.btnBg} ${theme.btnText} font-bold px-8 py-3.5 md:py-4 text-lg md:text-xl rounded-2xl shadow-md border border-white/50 hover:shadow-lg hover:scale-105 transition-all`}>학습하기</button>
                     }
                 </div>
             </div>
@@ -1123,7 +1123,7 @@ return (
             <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
                 <div className="bg-white rounded-3xl shadow-2xl p-8 text-center max-w-sm">
                     <div className="text-4xl mb-3">🔒</div>
-                    <h3 className="text-lg font-extrabold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
+                    <h3 className="text-lg font-bold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
                     <p className="text-sm text-slate-500">선생님이 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
                 </div>
             </div>
@@ -1146,7 +1146,7 @@ return (
                     <div className={`flex items-center gap-2 border rounded-full px-4 py-2 shadow-sm transition-colors ${isUrgent ? 'bg-rose-100 border-rose-300 animate-pulse' : 'bg-indigo-50 border-indigo-200'}`}>
                         <span className="text-indigo-500 text-base md:text-lg">🕐</span>
                         <span className="text-sm font-bold text-indigo-600 opacity-80">남은 시간</span>
-                        <span className="text-xl md:text-2xl font-black font-lexend text-indigo-600 tracking-wider">{isMounted && remainingMs <= 0 ? '종료' : timeStr}</span>
+                        <span className="text-xl md:text-2xl font-bold font-lexend text-indigo-600 tracking-wider">{isMounted && remainingMs <= 0 ? '종료' : timeStr}</span>
                     </div>
                 )}
                 {isSameDay && (
@@ -1162,23 +1162,23 @@ return (
 
                 <button onClick={() => router.push('/student/shop')} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 py-2.5 cursor-pointer hover:bg-amber-100 transition-colors shadow-sm">
                     <span className="text-sm md:text-base font-bold text-amber-700">나의 포인트</span>
-                    <span className="text-amber-500 text-lg md:text-xl font-black font-lexend">{mockPoints.toLocaleString()} P</span>
+                    <span className="text-amber-500 text-lg md:text-xl font-bold font-lexend">{mockPoints.toLocaleString()} P</span>
                 </button>
                 <div className="w-px h-8 bg-slate-200 mx-2"></div>
                 <div className="flex items-center gap-4">
                     <div className="text-right">
-                        <p className="text-base md:text-lg font-black text-slate-800">{studentInfo.name} 학생</p>
+                        <p className="text-base md:text-lg font-bold text-slate-800">{studentInfo.name} 학생</p>
                         <p className="text-sm font-bold text-emerald-500 mt-0.5">{studentInfo.classes.join(', ')}</p>
                     </div>
                     <div className="w-12 h-12 rounded-full bg-indigo-200 text-indigo-800 flex items-center justify-center text-2xl shadow-sm border border-indigo-300">👦🏻</div>
                     
                     {endRequest.state === 'idle' && (
-                        <button onClick={() => setEndRequestConfirmOpen(true)} className="text-sm md:text-base font-black text-white bg-slate-700 hover:bg-slate-800 border border-slate-600 rounded-full px-6 py-3 transition-colors shadow-md flex items-center gap-2">
+                        <button onClick={() => setEndRequestConfirmOpen(true)} className="text-sm md:text-base font-bold text-white bg-slate-700 hover:bg-slate-800 border border-slate-600 rounded-full px-6 py-3 transition-colors shadow-md flex items-center gap-2">
                             👋 오늘 공부 끝내기
                         </button>
                     )}
                     {endRequest.state === 'pending' && (
-                        <button onClick={endRequest.cancelRequest} className="text-sm md:text-base font-black text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-5 py-3 animate-pulse shadow-sm">
+                        <button onClick={endRequest.cancelRequest} className="text-sm md:text-base font-bold text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-5 py-3 animate-pulse shadow-sm">
                             ⏳ 끝내기 취소
                         </button>
                     )}
@@ -1195,7 +1195,7 @@ return (
             {studentInfo.classes.length > 0 && (
                 <section className="flex flex-col flex-1 min-h-0">
                     <div className="flex items-center gap-5 mb-8 shrink-0">
-                        <h2 className="text-3xl md:text-[40px] font-black text-slate-800 flex items-center gap-4">🚀 오늘의 학습 클리닉</h2>
+                        <h2 className="text-3xl md:text-[40px] font-bold text-slate-800 flex items-center gap-4">🚀 오늘의 학습 클리닉</h2>
                         {studentInfo.classes.length > 1 && studentInfo.classes.map((cls) => {
                             const prog = hwProgress[cls] || {};
                             let totalPending = (prog.examPendingCount || 0) + (prog.hwPendingCount || 0) + (prog.printPendingCount || 0) + (prog.overduePendingCount || 0);
@@ -1205,10 +1205,10 @@ return (
                             }
 
                             return (
-                                <button key={cls} onClick={() => setSelectedClass(cls)} className={`relative text-base md:text-xl font-black px-6 py-2.5 rounded-full shadow-sm transition-colors inline-flex items-center gap-2 ${selectedClass === cls ? 'bg-indigo-400 text-white border-transparent' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+                                <button key={cls} onClick={() => setSelectedClass(cls)} className={`relative text-base md:text-xl font-bold px-6 py-2.5 rounded-full shadow-sm transition-colors inline-flex items-center gap-2 ${selectedClass === cls ? 'bg-indigo-400 text-white border-transparent' : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
                                     <span>🏫</span>{cls}
                                     {totalPending > 0 && (
-                                        <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-rose-400 text-xs font-black text-white shadow-sm ring-2 ring-white">
+                                        <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-rose-400 text-xs font-bold text-white shadow-sm ring-2 ring-white">
                                             {totalPending > 99 ? '99+' : totalPending}
                                         </span>
                                     )}
@@ -1236,7 +1236,7 @@ return (
             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[80]">
                 <div className="bg-white rounded-3xl shadow-2xl p-10 w-full max-w-sm text-center">
                     <div className="text-7xl mb-4">{timeUpModal.icon}</div>
-                    <h3 className="text-2xl font-black text-slate-800 mb-3">{timeUpModal.title}</h3>
+                    <h3 className="text-2xl font-bold text-slate-800 mb-3">{timeUpModal.title}</h3>
                     <p className="text-lg text-slate-500 font-bold mb-6 whitespace-pre-wrap">{timeUpModal.desc}</p>
                     <button onClick={finalizeAndGoToLogin} className="w-full bg-indigo-500 hover:bg-indigo-600 text-white font-bold px-6 py-4 rounded-xl text-xl shadow-sm">확인</button>
                 </div>
@@ -1247,7 +1247,7 @@ return (
             <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[80]">
                 <div className="bg-white rounded-3xl shadow-2xl p-8 w-full max-w-md text-center">
                     <div className="text-6xl mb-5">🚪</div>
-                    <h3 className="text-3xl font-extrabold text-slate-800 mb-4">학습 종료 요청</h3>
+                    <h3 className="text-3xl font-bold text-slate-800 mb-4">학습 종료 요청</h3>
                     <p className="text-lg text-slate-600 mb-8 font-medium">오늘 공부를 모두 마치고 종료하시겠어요?<br/>선생님이 확인 후 승인해 줍니다.</p>
                     <div className="flex gap-4">
                         <button onClick={() => setEndRequestConfirmOpen(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold text-lg py-4 rounded-xl hover:bg-slate-200 transition-colors">취소</button>

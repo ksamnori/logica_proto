@@ -40,7 +40,7 @@ export default function TaTopBar({ taName, isConnected, hasActiveRequest }: { ta
               href={tab.path}
               onClick={active ? undefined : guard}
               aria-disabled={!active && hasActiveRequest}
-              className={`text-[11px] font-bold h-full flex items-center border-b-2 transition-colors ${active ? 'border-[#002864] text-[#002864]' : hasActiveRequest ? 'border-transparent text-slate-300 cursor-not-allowed' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
+              className={`text-xs font-bold h-full flex items-center border-b-2 transition-colors ${active ? 'border-brand text-brand' : hasActiveRequest ? 'border-transparent text-slate-300 cursor-not-allowed' : 'border-transparent text-slate-500 hover:text-slate-700'}`}
             >
               {tab.label}
             </Link>
@@ -50,7 +50,7 @@ export default function TaTopBar({ taName, isConnected, hasActiveRequest }: { ta
 
       <div className="ml-auto flex items-center gap-3">
         {isConnected !== undefined && (
-          <div className="flex items-center gap-1.5 text-[10px] font-semibold text-slate-500 mr-1">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 mr-1">
             <span className={`w-2 h-2 rounded-full inline-block ${isConnected ? 'bg-green-500 animate-[pulse_1.6s_infinite]' : 'bg-rose-500'}`}></span>
             <span>{isConnected ? '연결됨' : '연결 중...'}</span>
           </div>
@@ -59,7 +59,7 @@ export default function TaTopBar({ taName, isConnected, hasActiveRequest }: { ta
         {/* 🌟 조교 이름 표시 통일 (깔끔한 뱃지 스타일 적용) */}
         <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-200 px-2.5 py-1 rounded-md shadow-sm">
           <span className="text-[12px]">👨‍🏫</span>
-          <span className="text-[11px] font-black text-[#002864]">{taName} 조교님</span>
+          <span className="text-xs font-bold text-brand">{taName} 조교님</span>
         </div>
       </div>
     </header>

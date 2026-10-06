@@ -362,28 +362,28 @@ export default function ClassPage() {
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 mb-4 no-print">
           <div className="flex items-center gap-3 flex-wrap flex-1">
             <span className="font-bold text-slate-600 text-sm mr-2">🔍 반 정렬/필터</span>
-            <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+            <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
               <option value="all">모든 레벨</option><option value="Ultimate">Ultimate</option><option value="Master">Master</option>
               <option value="Apex">Apex</option><option value="Titan">Titan</option><option value="Horizon">Horizon</option>
               <option value="특강">특강 (SS, WS)</option><option value="메이크업">메이크업 (MU, LE)</option>
             </select>
-            <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+            <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
               <option value="all">모든 학년</option><option value="초1">초1</option><option value="초2">초2</option><option value="초3">초3</option>
               <option value="초4">초4</option><option value="초5">초5</option><option value="초6">초6</option><option value="중1">중1</option>
               <option value="중2">중2</option><option value="중3">중3</option><option value="특강, 보강">특강, 보강</option>
             </select>
-            <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+            <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
               <option value="all">모든 담당 강사</option>
               {instructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name}</option>)}
             </select>
             
             <div className="flex items-center gap-4 ml-2 border-l border-slate-300 pl-4 h-8">
               <label className="flex items-center gap-1.5 cursor-pointer">
-                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-brand cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">예정 포함</span>
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer">
-                <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-brand cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer">
@@ -397,15 +397,15 @@ export default function ClassPage() {
           
           <div className="flex items-center gap-3 shrink-0 ml-4">
             <div className="flex gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-              <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📅 시간표</button>
-              <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all bg-white text-[#002864] shadow-sm">📋 리스트</button>
+              <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-bold text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📅 시간표</button>
+              <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-bold text-[12px] transition-all bg-white text-brand shadow-sm">📋 리스트</button>
             </div>
-            <button onClick={() => window.print()} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[12px] rounded-lg transition-colors border border-slate-300 flex items-center gap-1.5 shadow-sm">
+            <button onClick={() => window.print()} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[12px] rounded-lg transition-colors border border-slate-300 flex items-center gap-1.5 shadow-sm">
               🖨️ 시간표 인쇄
             </button>
             <div className="w-px h-6 bg-slate-200 mx-1"></div>
             <button onClick={() => window.open('/launch-special', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-indigo-600 text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-indigo-700 transition-colors text-center">특강/메이크업</button>
-            <button onClick={() => window.open('/launch-class', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-[#002864] text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors text-center">정규반 개설</button>
+            <button onClick={() => window.open('/launch-class', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-brand text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors text-center">정규반 개설</button>
           </div>
         </div>
       )}
@@ -413,17 +413,17 @@ export default function ClassPage() {
       {viewMode === 'timetable' && (
         <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm flex items-center justify-between shrink-0 mb-4 no-print">
           <div className="flex gap-2 items-center flex-wrap flex-1">
-            <button onClick={() => setTtFilter('ALL')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${ttFilter === 'ALL' ? 'bg-[#002864] text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>전체 시간표</button>
-            <button onClick={() => setTtFilter('REGULAR')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors flex items-center gap-1.5 ${ttFilter === 'REGULAR' ? 'bg-[#002864] text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}><span className="w-2 h-2 rounded-full bg-blue-500"></span>정규반</button>
-            <button onClick={() => setTtFilter('SPECIAL')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors flex items-center gap-1.5 ${ttFilter === 'SPECIAL' ? 'bg-[#002864] text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}><span className="w-2 h-2 rounded-full bg-amber-500"></span>특강/메이크업반</button>
+            <button onClick={() => setTtFilter('ALL')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors ${ttFilter === 'ALL' ? 'bg-brand text-white shadow-sm' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>전체 시간표</button>
+            <button onClick={() => setTtFilter('REGULAR')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors flex items-center gap-1.5 ${ttFilter === 'REGULAR' ? 'bg-brand text-white shadow-sm' : 'bg-blue-50 text-blue-700 hover:bg-blue-100'}`}><span className="w-2 h-2 rounded-full bg-blue-500"></span>정규반</button>
+            <button onClick={() => setTtFilter('SPECIAL')} className={`px-4 py-2 text-sm font-bold rounded-lg transition-colors flex items-center gap-1.5 ${ttFilter === 'SPECIAL' ? 'bg-brand text-white shadow-sm' : 'bg-amber-50 text-amber-700 hover:bg-amber-100'}`}><span className="w-2 h-2 rounded-full bg-amber-500"></span>특강/메이크업반</button>
             
             <div className="flex items-center gap-4 ml-3 border-l border-slate-300 pl-4 h-8">
               <label className="flex items-center gap-1.5 cursor-pointer">
-                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <input type="checkbox" checked={showPlanned} onChange={e => setShowPlanned(e.target.checked)} className="w-4 h-4 accent-brand cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">예정 포함</span>
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer">
-                <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                <input type="checkbox" checked={showEnded} onChange={e => setShowEnded(e.target.checked)} className="w-4 h-4 accent-brand cursor-pointer" />
                 <span className="text-sm font-bold text-slate-600 hover:text-slate-800 transition-colors">종료/폐강 포함</span>
               </label>
               <label className="flex items-center gap-1.5 cursor-pointer">
@@ -435,15 +435,15 @@ export default function ClassPage() {
           
           <div className="flex items-center gap-3 shrink-0 ml-4">
             <div className="flex gap-1 bg-slate-100 p-1 rounded-lg border border-slate-200">
-              <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all bg-white text-[#002864] shadow-sm">📅 시간표</button>
-              <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-black text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📋 리스트</button>
+              <button onClick={() => setViewMode('timetable')} className="px-4 py-1.5 rounded-md font-bold text-[12px] transition-all bg-white text-brand shadow-sm">📅 시간표</button>
+              <button onClick={() => setViewMode('list')} className="px-4 py-1.5 rounded-md font-bold text-[12px] transition-all text-slate-500 hover:text-slate-700 hover:bg-slate-200/50">📋 리스트</button>
             </div>
-            <button onClick={() => window.print()} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-black text-[12px] rounded-lg transition-colors border border-slate-300 flex items-center gap-1.5 shadow-sm">
+            <button onClick={() => window.print()} className="px-4 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-[12px] rounded-lg transition-colors border border-slate-300 flex items-center gap-1.5 shadow-sm">
               🖨️ 시간표 인쇄
             </button>
             <div className="w-px h-6 bg-slate-200 mx-1"></div>
             <button onClick={() => window.open('/launch-special', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-indigo-600 text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-indigo-700 transition-colors text-center">특강/메이크업</button>
-            <button onClick={() => window.open('/launch-class', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-[#002864] text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors text-center">정규반 개설</button>
+            <button onClick={() => window.open('/launch-class', '_blank', 'width=950,height=850,top=100,left=100')} className="bg-brand text-white w-36 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors text-center">정규반 개설</button>
           </div>
         </div>
       )}
@@ -454,14 +454,14 @@ export default function ClassPage() {
             <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
               <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                 <tr>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">반 코드</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">반 이름 (레벨) 🔍</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">배정 인원</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">대상 학년</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 min-w-[140px]">수업 요일 및 시간</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">담당 강사</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">상태</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">관리</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">반 코드</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">반 이름 (레벨) 🔍</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">배정 인원</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">대상 학년</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 min-w-[140px]">수업 요일 및 시간</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">담당 강사</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">상태</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">관리</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -480,7 +480,7 @@ export default function ClassPage() {
                     return (
                       <tr key={c.class_id} className="hover:bg-blue-50/50 transition-colors">
                         <td className="py-3 px-4 border-b border-slate-100 font-mono text-slate-400 text-xs">{c.code}</td>
-                        <td className="py-3 px-4 border-b border-slate-100 font-extrabold text-[#002864] cursor-pointer hover:text-blue-500 hover:underline" onClick={() => openEditModal(c)}>
+                        <td className="py-3 px-4 border-b border-slate-100 font-bold text-brand cursor-pointer hover:text-blue-500 hover:underline" onClick={() => openEditModal(c)}>
                           {c.name} <span className="text-xs font-medium text-slate-400 ml-1">({c.level_name})</span>
                         </td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center font-bold text-slate-600">{studentCount}명</td>
@@ -494,7 +494,7 @@ export default function ClassPage() {
                                 const colorClass = sc.day_of_week === '토' ? 'text-blue-600' : (sc.day_of_week === '일' ? 'text-red-500' : 'text-slate-700');
                                 return (
                                   <div key={idx} className="flex items-center gap-2 text-[13px]">
-                                    <span className={`font-extrabold ${colorClass} bg-slate-100 px-1.5 py-0.5 rounded shadow-sm border border-slate-200 w-6 text-center`}>{sc.day_of_week}</span>
+                                    <span className={`font-bold ${colorClass} bg-slate-100 px-1.5 py-0.5 rounded shadow-sm border border-slate-200 w-6 text-center`}>{sc.day_of_week}</span>
                                     <span className="text-slate-600 font-semibold">{eTime ? `${sTime} ~ ${eTime}` : sTime}</span>
                                   </div>
                                 );
@@ -509,7 +509,7 @@ export default function ClassPage() {
                             {c.instructor?.name ? c.instructor.name : '미정'}
                             <button 
                               onClick={(e) => openHistoryModal(c.class_id, c.name, e)} 
-                              className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-extrabold transition-colors"
+                              className="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-bold transition-colors"
                               title="과거 강사 이력 보기"
                             >
                               이력
@@ -531,7 +531,7 @@ export default function ClassPage() {
       ) : (
         <div id="printable-timetable" className="flex-1 bg-white border border-slate-200 rounded-xl flex flex-col overflow-hidden shadow-sm relative print:absolute print:inset-0 print:border-none print:shadow-none print:rounded-none">
           
-          <div className="hidden print:block text-[22px] font-black text-center py-4 text-slate-800 border-b border-slate-300 w-full shrink-0">
+          <div className="hidden print:block text-[22px] font-bold text-center py-4 text-slate-800 border-b border-slate-300 w-full shrink-0">
              LOGICA 학원 통합 시간표
           </div>
 
@@ -546,12 +546,12 @@ export default function ClassPage() {
             <div className="flex w-full min-w-max min-h-full">
               
               <div className="w-14 shrink-0 border-r border-slate-300 bg-slate-50 z-30 sticky left-0 pointer-events-none print-time-col">
-                <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-40 flex items-center justify-center font-extrabold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
+                <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-40 flex items-center justify-center font-bold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
                   평일시간
                 </div>
                 <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${wdRowCount})` }}>
                   {wdHours.map(h => (
-                    <div key={h} className="absolute w-full text-[11px] font-black text-slate-400 text-center" style={{ top: `calc(var(--hour-height) * ${h - wdStartHour})`, transform: 'translateY(-50%)' }}>
+                    <div key={h} className="absolute w-full text-[11px] font-bold text-slate-400 text-center" style={{ top: `calc(var(--hour-height) * ${h - wdStartHour})`, transform: 'translateY(-50%)' }}>
                       {h}:00
                     </div>
                   ))}
@@ -678,12 +678,12 @@ export default function ClassPage() {
                     <React.Fragment key={day}>
                       {isSaturday && (
                         <div className="w-14 shrink-0 border-l border-r border-slate-300 bg-slate-50 relative pointer-events-none print-time-col">
-                          <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-20 flex items-center justify-center font-extrabold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
+                          <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-20 flex items-center justify-center font-bold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
                             토요시간
                           </div>
                           <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${satRowCount})` }}>
                             {satHours.map(h => (
-                              <div key={`sat-h-${h}`} className="absolute w-full text-[11px] font-black text-blue-500 text-center" style={{ top: `calc(var(--hour-height) * ${h - satStartHour})`, transform: 'translateY(-50%)' }}>
+                              <div key={`sat-h-${h}`} className="absolute w-full text-[11px] font-bold text-blue-500 text-center" style={{ top: `calc(var(--hour-height) * ${h - satStartHour})`, transform: 'translateY(-50%)' }}>
                                 {h}:00
                               </div>
                             ))}
@@ -692,7 +692,7 @@ export default function ClassPage() {
                       )}
                       
                       <div className="print-day-col border-r border-slate-300 relative shrink-0" style={{ flex: `${totalCols} 1 0%`, maxWidth: `${totalCols * 140}px`, minWidth: `${minWidthFinal}px` }}>
-                        <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-black text-[13px] bg-white sticky top-0 z-20 shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
+                        <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-bold text-[13px] bg-white sticky top-0 z-20 shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
                           {day}요일
                         </div>
                         
@@ -742,7 +742,7 @@ export default function ClassPage() {
                                   transformOrigin: 'top left'
                                 }}
                               >
-                                <div className="print-block-title print-text text-[12px] font-extrabold leading-tight w-full tracking-tighter">{displayClassName}</div>
+                                <div className="print-block-title print-text text-[12px] font-bold leading-tight w-full tracking-tighter">{displayClassName}</div>
                                 
                                 <div className="print-block-inst print-text text-[10px] font-bold opacity-90 w-full tracking-tighter">{instName}</div>
                                 
@@ -762,7 +762,7 @@ export default function ClassPage() {
                                      className="p-3 bg-slate-800 text-white text-xs rounded-xl shadow-2xl pointer-events-auto flex flex-col w-full text-left cursor-default border border-slate-700"
                                      onClick={(e) => e.stopPropagation()} 
                                    >
-                                     <div className="font-extrabold text-blue-200 text-[13px] mb-2.5 leading-tight tracking-tight">{b.classObj.name}</div>
+                                     <div className="font-bold text-blue-200 text-[13px] mb-2.5 leading-tight tracking-tight">{b.classObj.name}</div>
                                      <div className="text-slate-300 mb-1.5 flex justify-between w-full items-center">
                                        <span>강사</span> 
                                        <div className="flex items-center gap-2">

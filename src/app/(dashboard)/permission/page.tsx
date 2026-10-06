@@ -436,7 +436,7 @@ export default function PermissionPage() {
     <div className="h-full flex flex-col font-pretendard bg-slate-50 p-4 sm:p-8 overflow-hidden">
       <div className="shrink-0 flex items-end justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             🔐 지점 권한 관리
           </h1>
           <p className="text-slate-500 font-bold text-[12px] mt-1">
@@ -450,7 +450,7 @@ export default function PermissionPage() {
         {/* === 좌측 패널 === */}
         <div className="w-full lg:w-72 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col shrink-0 overflow-hidden h-full">
           <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center shrink-0">
-            <span className="font-black text-sm text-slate-700">관리 대상 직급</span>
+            <span className="font-bold text-sm text-slate-700">관리 대상 직급</span>
           </div>
           
           <div className="flex-1 overflow-y-auto custom-scroll p-2">
@@ -462,9 +462,9 @@ export default function PermissionPage() {
               >
                 <div className="flex justify-between items-center">
                   <span className={`font-bold text-[13px] ${activeRole.id === role.id ? 'text-indigo-800' : 'text-slate-700'}`}>{role.name}</span>
-                  <span className="text-[9px] font-black text-slate-400 border border-slate-200 bg-white px-1.5 py-0.5 rounded">{role.id}</span>
+                  <span className="text-xs font-bold text-slate-400 border border-slate-200 bg-white px-1.5 py-0.5 rounded">{role.id}</span>
                 </div>
-                <div className={`text-[10px] truncate ${activeRole.id === role.id ? 'text-indigo-500' : 'text-slate-400'}`}>{role.desc}</div>
+                <div className={`text-xs truncate ${activeRole.id === role.id ? 'text-indigo-500' : 'text-slate-400'}`}>{role.desc}</div>
               </button>
             ))}
           </div>
@@ -472,11 +472,11 @@ export default function PermissionPage() {
           {/* === 클래스 배정 기준 설정 슬라이더 === */}
           <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-col shrink-0">
             <div className="flex justify-between items-center mb-7">
-              <span className="font-black text-[13px] text-slate-800 flex items-center gap-1.5">🎯 반 배정 기준 설정</span>
+              <span className="font-bold text-[13px] text-slate-800 flex items-center gap-1.5">🎯 반 배정 기준 설정</span>
               <button 
                 onClick={handleSaveThresholds}
                 disabled={isSavingThreshold}
-                className="text-[10px] bg-[#002864] text-white px-2.5 py-1.5 rounded-md font-bold hover:bg-blue-900 disabled:opacity-50 transition-colors shadow-sm"
+                className="text-xs bg-brand text-white px-2.5 py-1.5 rounded-md font-bold hover:bg-blue-900 disabled:opacity-50 transition-colors shadow-sm"
               >
                 {isSavingThreshold ? "저장 중..." : "저장"}
               </button>
@@ -492,9 +492,9 @@ export default function PermissionPage() {
               
               {[0, 1, 2, 3, 4].map((idx) => (
                 <div key={idx} onMouseDown={() => { draggingThresholdRef.current = idx; }} onTouchStart={() => { draggingThresholdRef.current = idx; }} 
-                     className="absolute top-1/2 -translate-y-1/2 -ml-[6px] w-[12px] h-[20px] bg-white border-2 border-[#002864] rounded cursor-ew-resize flex items-center justify-center gap-[1px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
+                     className="absolute top-1/2 -translate-y-1/2 -ml-[6px] w-[12px] h-[20px] bg-white border-2 border-brand rounded cursor-ew-resize flex items-center justify-center gap-[1px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
                      style={{ left: `${thresholdBounds[idx]}%` }}>
-                  <div className="absolute -top-7 text-[10px] font-bold bg-slate-700 text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap">
+                  <div className="absolute -top-7 text-xs font-bold bg-slate-700 text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap">
                     {thresholdBounds[idx]}점
                   </div>
                   <div className="w-[1.5px] h-[8px] bg-slate-300"></div><div className="w-[1.5px] h-[8px] bg-slate-300"></div>
@@ -502,30 +502,30 @@ export default function PermissionPage() {
               ))}
             </div>
             
-            <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-[10px] font-bold">
+            <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-xs font-bold">
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-slate-300 border border-slate-400 shadow-sm shrink-0"></span>
-                <span className="text-slate-600 truncate">Pre-Course <span className="font-medium text-[9px]">(~{thresholdBounds[0]})</span></span>
+                <span className="text-slate-600 truncate">Pre-Course <span className="font-medium text-xs">(~{thresholdBounds[0]})</span></span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-emerald-300 border border-emerald-400 shadow-sm shrink-0"></span>
-                <span className="text-emerald-700 truncate">Horizon <span className="font-medium text-[9px]">({thresholdBounds[0]}~{thresholdBounds[1]})</span></span>
+                <span className="text-emerald-700 truncate">Horizon <span className="font-medium text-xs">({thresholdBounds[0]}~{thresholdBounds[1]})</span></span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-sky-300 shadow-sm shrink-0"></span>
-                <span className="text-sky-700 truncate">Titan <span className="font-medium text-[9px]">({thresholdBounds[1]}~{thresholdBounds[2]})</span></span>
+                <span className="text-sky-700 truncate">Titan <span className="font-medium text-xs">({thresholdBounds[1]}~{thresholdBounds[2]})</span></span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 shadow-sm shrink-0"></span>
-                <span className="text-blue-700 truncate">Apex <span className="font-medium text-[9px]">({thresholdBounds[2]}~{thresholdBounds[3]})</span></span>
+                <span className="text-blue-700 truncate">Apex <span className="font-medium text-xs">({thresholdBounds[2]}~{thresholdBounds[3]})</span></span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 shadow-sm shrink-0"></span>
-                <span className="text-indigo-700 truncate">Master <span className="font-medium text-[9px]">({thresholdBounds[3]}~{thresholdBounds[4]})</span></span>
+                <span className="text-indigo-700 truncate">Master <span className="font-medium text-xs">({thresholdBounds[3]}~{thresholdBounds[4]})</span></span>
               </div>
               <div className="flex items-center gap-1.5">
                 <span className="w-2.5 h-2.5 rounded-sm bg-rose-400 shadow-sm shrink-0"></span>
-                <span className="text-rose-600 truncate">Ultimate <span className="font-medium text-[9px]">({thresholdBounds[4]}~)</span></span>
+                <span className="text-rose-600 truncate">Ultimate <span className="font-medium text-xs">({thresholdBounds[4]}~)</span></span>
               </div>
             </div>
           </div>
@@ -533,9 +533,9 @@ export default function PermissionPage() {
           {/* 🌟 [추가됨] 마스터 채점 기준 관리 버튼 */}
           <div className="p-4 border-t border-slate-200 bg-white flex flex-col shrink-0">
             <div className="flex justify-between items-center mb-1.5">
-              <span className="font-black text-[13px] text-slate-800 flex items-center gap-1.5">⚖️ 마스터 채점 기준</span>
+              <span className="font-bold text-[13px] text-slate-800 flex items-center gap-1.5">⚖️ 마스터 채점 기준</span>
             </div>
-            <p className="text-[10px] text-slate-500 mb-3 font-medium">학원 전체의 공통 채점 가중치를 설정합니다.</p>
+            <p className="text-xs text-slate-500 mb-3 font-medium">학원 전체의 공통 채점 가중치를 설정합니다.</p>
             <button 
               onClick={loadGradingCodes}
               className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-[12px] py-2.5 rounded-lg border border-slate-300 transition-colors shadow-sm flex justify-center items-center gap-2"
@@ -550,13 +550,13 @@ export default function PermissionPage() {
         <div className="flex-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-full relative">
           <div className="p-5 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center shrink-0 z-10">
             <div>
-              <h2 className="text-base font-black text-indigo-900 flex items-center gap-2">
-                <span className="bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded text-[11px] border border-indigo-200">{activeRole.id}</span> 
+              <h2 className="text-base font-bold text-indigo-900 flex items-center gap-2">
+                <span className="bg-indigo-100 text-indigo-600 px-2 py-0.5 rounded text-xs border border-indigo-200">{activeRole.id}</span> 
                 {activeRole.name} 권한 설정
               </h2>
-              <p className="text-[11px] text-slate-500 font-medium mt-1">체크박스를 선택하여 해당 직급의 선생님이 좌측 메뉴에 접근할 수 있도록 허용합니다.</p>
+              <p className="text-xs text-slate-500 font-medium mt-1">체크박스를 선택하여 해당 직급의 선생님이 좌측 메뉴에 접근할 수 있도록 허용합니다.</p>
             </div>
-            <button onClick={handleSave} disabled={isSaving} className="bg-[#002864] hover:bg-blue-900 disabled:opacity-50 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5">
+            <button onClick={handleSave} disabled={isSaving} className="bg-brand hover:bg-blue-900 disabled:opacity-50 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5">
               <span>💾</span> {isSaving ? "저장 중..." : "권한 설정 저장"}
             </button>
           </div>
@@ -573,13 +573,13 @@ export default function PermissionPage() {
                   <div key={gIdx} className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
                     <div className="bg-slate-100/80 px-5 py-3 flex justify-between items-center border-b border-slate-200">
                       <div className="flex items-center gap-2">
-                        <span className="text-[13px] font-black text-slate-700">{group.category}</span>
-                        {group.desc && <span className="text-[10px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-200">{group.desc}</span>}
+                        <span className="text-[13px] font-bold text-slate-700">{group.category}</span>
+                        {group.desc && <span className="text-xs font-bold text-slate-400 bg-white px-2 py-0.5 rounded border border-slate-200">{group.desc}</span>}
                       </div>
                       <div className="flex items-center gap-2">
                         {hasToggleable && (
                           <>
-                            <span className="text-[11px] font-bold text-slate-500 cursor-pointer" onClick={() => toggleGroupAll(group.items)}>전체 선택</span>
+                            <span className="text-xs font-bold text-slate-500 cursor-pointer" onClick={() => toggleGroupAll(group.items)}>전체 선택</span>
                             <input type="checkbox" checked={isGroupAllChecked} ref={input => { if (input) input.indeterminate = isGroupPartiallyChecked; }} onChange={() => toggleGroupAll(group.items)} className="w-5 h-5 rounded transition-transform active:scale-90 accent-indigo-600 cursor-pointer" />
                           </>
                         )}
@@ -594,10 +594,10 @@ export default function PermissionPage() {
                           <label key={item.id} className={`flex justify-between items-center py-2.5 transition-colors group ${isDisabled ? 'cursor-not-allowed bg-slate-50/50 px-5' : (item.isAction ? 'cursor-pointer hover:bg-rose-50/50 bg-slate-50/30 pl-10 pr-5' : 'cursor-pointer hover:bg-indigo-50/30 px-5')}`}>
                             <div className="flex flex-col">
                               <span className={`text-[12px] font-bold transition-colors ${isDisabled ? 'text-slate-400' : (item.isAction ? 'text-rose-600' : 'text-slate-700 group-hover:text-indigo-800')}`}>{item.label}</span>
-                              {!item.isAction && <span className="text-[9px] text-slate-400 font-mono mt-0.5">{item.id}</span>}
+                              {!item.isAction && <span className="text-xs text-slate-400 font-mono mt-0.5">{item.id}</span>}
                             </div>
                             <div className="flex items-center">
-                              <input type="checkbox" checked={isChecked} onChange={() => togglePermission(item.id, isDisabled)} disabled={isDisabled} className={`w-4 h-4 rounded transition-transform active:scale-90 ${isDisabled ? 'accent-slate-300 cursor-not-allowed opacity-50' : (item.isAction ? 'accent-rose-500 cursor-pointer' : 'accent-[#002864] cursor-pointer')}`} />
+                              <input type="checkbox" checked={isChecked} onChange={() => togglePermission(item.id, isDisabled)} disabled={isDisabled} className={`w-4 h-4 rounded transition-transform active:scale-90 ${isDisabled ? 'accent-slate-300 cursor-not-allowed opacity-50' : (item.isAction ? 'accent-rose-500 cursor-pointer' : 'accent-brand cursor-pointer')}`} />
                             </div>
                           </label>
                         );
@@ -618,8 +618,8 @@ export default function PermissionPage() {
             
             <div className="p-5 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
               <div>
-                <h2 className="text-lg font-black text-[#002864]">⚖️ 마스터 채점 가중치 관리</h2>
-                <p className="text-[11px] text-slate-500 font-bold mt-1">
+                <h2 className="text-lg font-bold text-brand">⚖️ 마스터 채점 가중치 관리</h2>
+                <p className="text-xs text-slate-500 font-bold mt-1">
                   이 수치를 변경하면 학원 내 모든 내신 성적 통계와 입학 진단평가 결과에 즉시 반영됩니다.
                 </p>
               </div>
@@ -635,22 +635,22 @@ export default function PermissionPage() {
               <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
                 <thead className="bg-slate-100 sticky top-0 shadow-sm z-10 border-b border-slate-200">
                   <tr>
-                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] w-16 text-center">기호</th>
-                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px]">상태 설명</th>
-                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] text-center w-24">정답 유무</th>
-                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] w-28 text-center">내신 가중치</th>
-                    <th className="py-3 px-5 font-extrabold text-slate-600 text-[12px] w-28 text-center">입학 가중치</th>
+                    <th className="py-3 px-5 font-bold text-slate-600 text-[12px] w-16 text-center">기호</th>
+                    <th className="py-3 px-5 font-bold text-slate-600 text-[12px]">상태 설명</th>
+                    <th className="py-3 px-5 font-bold text-slate-600 text-[12px] text-center w-24">정답 유무</th>
+                    <th className="py-3 px-5 font-bold text-slate-600 text-[12px] w-28 text-center">내신 가중치</th>
+                    <th className="py-3 px-5 font-bold text-slate-600 text-[12px] w-28 text-center">입학 가중치</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {gradingCodes.map((code, idx) => (
                     <tr key={code.code} className="hover:bg-blue-50/40 transition-colors">
-                      <td className="py-2.5 px-5 font-black text-[#002864] text-lg text-center bg-slate-50/50">{code.code}</td>
+                      <td className="py-2.5 px-5 font-bold text-brand text-lg text-center bg-slate-50/50">{code.code}</td>
                       <td className="py-2.5 px-5 font-bold text-slate-700 text-[13px]">{code.description}</td>
                       <td className="py-2.5 px-5 text-center">
                         {code.is_correct ? 
-                          <span className="bg-emerald-100 border border-emerald-300 text-emerald-700 px-2.5 py-0.5 rounded text-[11px] font-black shadow-sm">정답</span> : 
-                          <span className="bg-rose-100 border border-rose-300 text-rose-700 px-2.5 py-0.5 rounded text-[11px] font-black shadow-sm">오답</span>}
+                          <span className="bg-emerald-100 border border-emerald-300 text-emerald-700 px-2.5 py-0.5 rounded text-xs font-bold shadow-sm">정답</span> : 
+                          <span className="bg-rose-100 border border-rose-300 text-rose-700 px-2.5 py-0.5 rounded text-xs font-bold shadow-sm">오답</span>}
                       </td>
                       <td className="py-2.5 px-5">
                         <input 
@@ -661,7 +661,7 @@ export default function PermissionPage() {
                             next[idx].score_ratio = e.target.value;
                             setGradingCodes(next);
                           }}
-                          className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] transition-all bg-white shadow-inner"
+                          className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all bg-white shadow-inner"
                         />
                       </td>
                       <td className="py-2.5 px-5">
@@ -673,7 +673,7 @@ export default function PermissionPage() {
                             next[idx].admission_ratio = e.target.value;
                             setGradingCodes(next);
                           }}
-                          className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] transition-all bg-white shadow-inner"
+                          className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all bg-white shadow-inner"
                         />
                       </td>
                     </tr>
@@ -692,7 +692,7 @@ export default function PermissionPage() {
               <button 
                 onClick={handleSaveGradingCodes} 
                 disabled={isSavingGrading} 
-                className="px-6 py-2 bg-[#002864] text-white rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 disabled:opacity-50 transition-colors flex items-center gap-1.5"
+                className="px-6 py-2 bg-brand text-white rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 disabled:opacity-50 transition-colors flex items-center gap-1.5"
               >
                 {isSavingGrading ? "저장 중..." : "변경사항 저장"}
               </button>

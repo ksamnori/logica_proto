@@ -17,7 +17,7 @@ export default function MemoCreateModal({ isOpen, onClose, memoData, setMemoData
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center">
       <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
           <h2 className="font-bold text-sm">업무 공유 / 공지사항 작성</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 text-2xl font-bold leading-none">&times;</button>
         </div>
@@ -27,7 +27,7 @@ export default function MemoCreateModal({ isOpen, onClose, memoData, setMemoData
             <select 
               value={memoData.type} 
               onChange={(e) => setMemoData({...memoData, type: e.target.value})} 
-              className="w-full text-sm font-bold text-slate-700 border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-[#002864]"
+              className="w-full text-sm font-bold text-slate-700 border border-slate-300 rounded-lg p-2 focus:outline-none focus:border-brand"
             >
               <option value="긴급공지">🚨 긴급공지</option>
               <option value="일반공지">📢 일반공지</option>
@@ -41,14 +41,14 @@ export default function MemoCreateModal({ isOpen, onClose, memoData, setMemoData
               value={memoData.content} 
               onChange={(e) => setMemoData({...memoData, content: e.target.value})} 
               rows={4} 
-              className="w-full text-sm font-medium text-slate-800 border border-slate-300 rounded-lg p-3 focus:outline-none focus:border-[#002864] resize-none" 
+              className="w-full text-sm font-medium text-slate-800 border border-slate-300 rounded-lg p-3 focus:outline-none focus:border-brand resize-none" 
               placeholder="선생님들께 공유할 내용을 입력하세요..."
             ></textarea>
           </div>
         </div>
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
           <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 text-xs font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm">취소</button>
-          <button onClick={onSave} className="px-4 py-2 bg-[#002864] text-white text-xs font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm">공지 등록</button>
+          <button onClick={onSave} className="px-4 py-2 bg-brand text-white text-xs font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm">공지 등록</button>
         </div>
       </div>
     </div>

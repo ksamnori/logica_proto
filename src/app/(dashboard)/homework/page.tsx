@@ -265,19 +265,19 @@ export default function HomeworkPage() {
     if (isFilterActive && pending === 0) return null;
 
     return (
-      <div key={s.id} onClick={() => handleStudentClick(s.id, s.name, '', cName)} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-[#002864] hover:shadow-md cursor-pointer transition-all hover:-translate-y-1 group relative">
+      <div key={s.id} onClick={() => handleStudentClick(s.id, s.name, '', cName)} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-brand hover:shadow-md cursor-pointer transition-all hover:-translate-y-1 group relative">
         {showClassNameBadge && (
-          <div className="absolute top-0 right-0 bg-slate-100 text-slate-400 text-[9px] font-bold px-1.5 py-0.5 rounded-bl-lg rounded-tr-xl border-b border-l border-slate-200">
+          <div className="absolute top-0 right-0 bg-slate-100 text-slate-400 text-xs font-bold px-1.5 py-0.5 rounded-bl-lg rounded-tr-xl border-b border-l border-slate-200">
             {cName}
           </div>
         )}
         <div className={`flex justify-between items-center mb-3 ${showClassNameBadge ? 'mt-1.5' : ''}`}>
-          <div className="font-extrabold text-base text-slate-800 group-hover:text-[#002864] transition-colors">{s.name}</div>
-          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded transition-colors group-hover:bg-[#002864] group-hover:text-white shadow-sm">상세 ➔</span>
+          <div className="font-bold text-base text-slate-800 group-hover:text-brand transition-colors">{s.name}</div>
+          <span className="text-xs font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded transition-colors group-hover:bg-brand group-hover:text-white shadow-sm">상세 ➔</span>
         </div>
         <div className="space-y-1.5 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">진행/미제출</span><span className="font-black text-rose-500">{pending}건</span></div>
-          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">제출/완료</span><span className="font-black text-emerald-500">{done}건</span></div>
+          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">진행/미제출</span><span className="font-bold text-rose-500">{pending}건</span></div>
+          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">제출/완료</span><span className="font-bold text-emerald-500">{done}건</span></div>
         </div>
       </div>
     );
@@ -288,7 +288,7 @@ export default function HomeworkPage() {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
           <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
         </div>
       </div>
@@ -314,10 +314,10 @@ export default function HomeworkPage() {
         {/* 1. 좌측 사이드바 아코디언 메뉴 */}
         <div className="w-[260px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0 flex justify-between items-center">
-            <h3 className="text-[13px] font-extrabold text-slate-700 flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => {setCurrentView({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}}>
+            <h3 className="text-[13px] font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => {setCurrentView({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}}>
               <span>📂 전체 확인 대상</span>
             </h3>
-            <button onClick={toggleAllAccordions} className="text-[10px] font-bold bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 transition-colors shadow-sm focus:outline-none">
+            <button onClick={toggleAllAccordions} className="text-xs font-bold bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 transition-colors shadow-sm focus:outline-none">
               {isAllExpanded ? "전체 접기" : "전체 펼치기"}
             </button>
           </div>
@@ -331,7 +331,7 @@ export default function HomeworkPage() {
                 return (
                   <div key={lvl} className="border-b border-slate-200">
                     <button onClick={() => handleLevelClick(lvl)} className="w-full flex justify-between items-center px-4 py-3.5 bg-white hover:bg-slate-50 transition-colors">
-                      <span className="font-extrabold text-slate-700 text-xs">{lvl}</span>
+                      <span className="font-bold text-slate-700 text-xs">{lvl}</span>
                       <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isLvlExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
                     {isLvlExpanded && (
@@ -341,7 +341,7 @@ export default function HomeworkPage() {
                           return (
                             <div key={c.class_id} className="border-b border-slate-200/60 last:border-0">
                               <button onClick={() => handleClassClick(c.class_id, c.name)} className="w-full flex justify-between items-center pl-6 pr-4 py-2.5 hover:bg-blue-50/50 transition-colors">
-                                <span className="font-bold text-[#002864] text-[12px] text-left">{c.name}</span>
+                                <span className="font-bold text-brand text-[12px] text-left">{c.name}</span>
                                 <svg className={`w-3 h-3 text-blue-300 transition-transform ${isClassExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                               </button>
                               {isClassExpanded && (
@@ -350,7 +350,7 @@ export default function HomeworkPage() {
                                     <div className="py-3 text-center text-xs text-slate-400 font-bold bg-slate-50/50">등록된 학생이 없습니다.</div>
                                   ) : (
                                     c.students.map(s => (
-                                      <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full text-left pl-10 pr-4 py-2 text-[12px] font-bold text-slate-500 hover:bg-slate-50 hover:text-blue-700 transition-colors border-l-4 ${currentView.studentId === s.id ? 'bg-[#eff6ff] border-[#002864] text-[#002864]' : 'border-transparent'}`}>
+                                      <button key={s.id} onClick={() => handleStudentClick(s.id, s.name, c.class_id, c.name)} className={`w-full text-left pl-10 pr-4 py-2 text-[12px] font-bold text-slate-500 hover:bg-slate-50 hover:text-blue-700 transition-colors border-l-4 ${currentView.studentId === s.id ? 'bg-[#eff6ff] border-brand text-brand' : 'border-transparent'}`}>
                                         {s.name}
                                       </button>
                                     ))
@@ -376,7 +376,7 @@ export default function HomeworkPage() {
           {currentView.type === 'ALL' && (
             <>
               <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
-                <h2 className="text-lg font-extrabold text-slate-800">전체 요약 대시보드</h2>
+                <h2 className="text-lg font-bold text-slate-800">전체 요약 대시보드</h2>
                 <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-xs font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
                   🚨 진행/미제출 학생만 보기
                 </button>
@@ -392,8 +392,8 @@ export default function HomeworkPage() {
                   return visibleClasses.map(c => (
                     <div key={c.class_id} className="mb-10">
                       <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                        <span className="bg-blue-100 text-[#002864] text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider">{lvl}</span>
-                        <h2 className="text-lg font-extrabold text-slate-800">{c.name}</h2>
+                        <span className="bg-blue-100 text-brand text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider">{lvl}</span>
+                        <h2 className="text-lg font-bold text-slate-800">{c.name}</h2>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                         {c.students.map(s => renderStudentCard(s, c.name, true))}
@@ -410,7 +410,7 @@ export default function HomeworkPage() {
             <>
               <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
                 <div>
-                  <h2 className="text-lg font-extrabold text-slate-800"><span className="text-[#002864]">{currentView.className}</span> 반 과제 요약</h2>
+                  <h2 className="text-lg font-bold text-slate-800"><span className="text-brand">{currentView.className}</span> 반 과제 요약</h2>
                 </div>
                 <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-xs font-bold shadow-sm transition-colors ${isFilterActive ? 'border-rose-300 bg-rose-50 text-rose-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
                   🚨 진행/미제출 학생만 보기
@@ -428,13 +428,13 @@ export default function HomeworkPage() {
           {currentView.type === 'STUDENT' && (
             <>
               <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
-                <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-                  <span className="bg-blue-100 text-[#002864] text-xs font-bold px-2 py-0.5 rounded border border-blue-200">{currentView.className}</span>
-                  <span className="text-[#002864]">{currentView.studentName}</span> 학생 과제 현황
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                  <span className="bg-blue-100 text-brand text-xs font-bold px-2 py-0.5 rounded border border-blue-200">{currentView.className}</span>
+                  <span className="text-brand">{currentView.studentName}</span> 학생 과제 현황
                 </h2>
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-6 bg-slate-50/50">
-                <div className="flex items-center gap-2 mb-4"><h3 className="text-lg font-extrabold text-slate-800">📖 배부된 과제목록</h3></div>
+                <div className="flex items-center gap-2 mb-4"><h3 className="text-lg font-bold text-slate-800">📖 배부된 과제목록</h3></div>
                 {isLoading ? (
                   <div className="text-center font-bold text-slate-400 py-10">과제를 불러오는 중입니다...</div>
                 ) : studentHws.length === 0 ? (
@@ -447,19 +447,19 @@ export default function HomeworkPage() {
                         <div key={hw.homework_id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:border-blue-300 flex flex-col justify-between h-full">
                           <div className="flex justify-between items-start mb-3">
                             <div className="flex-1 pr-3">
-                              <span className="text-[11px] font-bold text-slate-400 block mb-1">{hw.textbook?.title || '교재 정보 없음'}</span>
-                              <h4 className="font-extrabold text-slate-700 text-[15px] leading-snug break-keep">{hw.homework_title}</h4>
+                              <span className="text-xs font-bold text-slate-400 block mb-1">{hw.textbook?.title || '교재 정보 없음'}</span>
+                              <h4 className="font-bold text-slate-700 text-[15px] leading-snug break-keep">{hw.homework_title}</h4>
                             </div>
-                            <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0 ${res.status === '미제출' ? 'bg-rose-100 text-rose-700' : res.status === '진행중' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                            <span className={`px-2 py-0.5 rounded-full text-xs font-bold shrink-0 ${res.status === '미제출' ? 'bg-rose-100 text-rose-700' : res.status === '진행중' ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
                               {res.status || '상태 없음'}
                             </span>
                           </div>
                           <div className="mt-4 flex justify-between items-center border-t border-slate-100 pt-3">
                             <div className="flex gap-3">
-                              <button onClick={() => handleEditHomeworkTitle(hw.homework_id, hw.homework_title)} className="text-[11px] font-bold text-slate-500 hover:text-blue-600 transition-colors flex items-center gap-1">✏️ 수정</button>
-                              <button onClick={() => handleDeleteHomework(hw.homework_id, currentView.studentId)} className="text-[11px] font-bold text-slate-500 hover:text-rose-500 transition-colors flex items-center gap-1">🗑️ 삭제</button>
+                              <button onClick={() => handleEditHomeworkTitle(hw.homework_id, hw.homework_title)} className="text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors flex items-center gap-1">✏️ 수정</button>
+                              <button onClick={() => handleDeleteHomework(hw.homework_id, currentView.studentId)} className="text-xs font-bold text-slate-500 hover:text-rose-500 transition-colors flex items-center gap-1">🗑️ 삭제</button>
                             </div>
-                            <button onClick={() => router.push(`/homework/review?id=${hw.homework_id}`)} className="text-[11px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-3 py-1.5 rounded transition-colors shadow-sm">
+                            <button onClick={() => router.push(`/homework/review?id=${hw.homework_id}`)} className="text-xs font-bold text-white bg-brand hover:bg-blue-900 px-3 py-1.5 rounded transition-colors shadow-sm">
                               상세/채점 ➔
                             </button>
                           </div>

@@ -386,50 +386,50 @@ export default function ExamListPage() {
         <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl shadow-inner">
           <button 
             onClick={() => setMainTab('ALL')} 
-            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'ALL' ? 'bg-white text-slate-800 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
+            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'ALL' ? 'bg-white text-slate-800 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
           >
             전체 보기
           </button>
           <div className="w-px h-5 bg-slate-300 mx-0.5"></div>
           <button 
             onClick={() => setMainTab('EXAM')} 
-            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
+            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
           >
             💯 정규 시험
           </button>
           <button 
             onClick={() => setMainTab('HOMEWORK')} 
-            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'HOMEWORK' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'}`}
+            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'HOMEWORK' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'}`}
           >
             📝 문제지 과제
           </button>
           <button 
             onClick={() => setMainTab('INCORRECT')} 
-            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'INCORRECT' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'}`}
+            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'INCORRECT' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'}`}
           >
             ❌ 오답 복습
           </button>
           <button 
             onClick={() => setMainTab('SIMILAR')} 
-            className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap ${mainTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-md' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50'}`}
+            className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-md' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50'}`}
           >
             🔄 쌍둥이/유사
           </button>
         </div>
 
         <div className="flex items-center gap-3">
-          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">학년 전체</option>
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g as string}</option>)}
           </select>
-          <select value={filterCreator} onChange={e => setFilterCreator(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+          <select value={filterCreator} onChange={e => setFilterCreator(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">출제자 전체</option>
             {uniqueCreators.map(c => <option key={c} value={c as string}>{c as string}</option>)}
           </select>
           <button onClick={resetFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-lg transition-colors border border-slate-300 flex items-center gap-1">
             🔄 초기화
           </button>
-          <button onClick={createNewExam} className="ml-2 px-5 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm flex items-center gap-2">
+          <button onClick={createNewExam} className="ml-2 px-5 py-2.5 bg-brand text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
             새 문제지
           </button>
@@ -441,12 +441,12 @@ export default function ExamListPage() {
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-24">학년 범위</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center w-28">유형 속성</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm">시험지 제목 및 범위</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">생성일시</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-center">출제자</th>
-                <th className="py-3 px-5 font-extrabold text-slate-500 text-sm text-right">관리 액션</th>
+                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center w-24">학년 범위</th>
+                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center w-28">유형 속성</th>
+                <th className="py-3 px-5 font-bold text-slate-500 text-sm">시험지 제목 및 범위</th>
+                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center">생성일시</th>
+                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center">출제자</th>
+                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-right">관리 액션</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -486,24 +486,24 @@ export default function ExamListPage() {
 
                   return (
                     <tr key={exam.exam_id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
-                      <td className="py-4 px-5 text-center"><span className="font-extrabold text-slate-600 text-sm">{targetGrade}</span></td>
+                      <td className="py-4 px-5 text-center"><span className="font-bold text-slate-600 text-sm">{targetGrade}</span></td>
                       <td className="py-4 px-5 text-center">
-                        <span className={`px-2.5 py-1 rounded text-xs font-extrabold shadow-sm border ${typeColorClass}`}>{typeStr}</span>
+                        <span className={`px-2.5 py-1 rounded text-xs font-bold shadow-sm border ${typeColorClass}`}>{typeStr}</span>
                       </td>
                       <td className="py-4 px-5">
                         <div className="flex items-center gap-2 mb-1 min-w-0">
                           <button 
                             onClick={() => openAnswerModal(exam.exam_id, exam.title)} 
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-200 px-2 py-0.5 rounded text-[11px] font-extrabold shadow-sm shrink-0 transition-colors" 
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-200 px-2 py-0.5 rounded text-xs font-bold shadow-sm shrink-0 transition-colors" 
                             title="정답지만 모아보기 및 인쇄"
                           >
                             📑 정답
                           </button>
 
-                          <button onClick={() => router.push(`/exam/viewer?exam_id=${exam.exam_id}`)} className="font-extrabold text-slate-800 text-[15px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
+                          <button onClick={() => router.push(`/exam/viewer?exam_id=${exam.exam_id}`)} className="font-bold text-slate-800 text-[15px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
                           
-                          {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded text-[11px] font-extrabold shadow-sm shrink-0">{exam.sub_title}</span>}
-                          {isNew && <span className="text-[10px] font-black text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">NEW</span>}
+                          {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded text-xs font-bold shadow-sm shrink-0">{exam.sub_title}</span>}
+                          {isNew && <span className="text-xs font-bold text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">NEW</span>}
                         </div>
                         <div className="text-[12px] font-bold text-slate-500 tracking-tight flex items-center gap-1.5 pl-[52px]">
                           <span>{exam.total_questions || 0}문제</span><span className="text-slate-300">|</span><span>{diff}</span><span className="text-slate-300">|</span><span className="truncate max-w-[250px]" title={scope}>{scope}</span>
@@ -513,36 +513,36 @@ export default function ExamListPage() {
                       <td className="py-4 px-5 text-center text-slate-600 font-bold text-xs">{creatorName}</td>
                       <td className="py-4 px-5">
                         <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                          <button onClick={() => setPublishModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[64px] h-[30px] flex items-center justify-center shrink-0 bg-[#002864] hover:bg-blue-900 text-white rounded text-[11px] font-bold shadow-sm transition-colors">
+                          <button onClick={() => setPublishModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[64px] h-[30px] flex items-center justify-center shrink-0 bg-brand hover:bg-blue-900 text-white rounded text-xs font-bold shadow-sm transition-colors">
                             출제하기
                           </button>
                           
-                          <button onClick={() => setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[84px] h-[30px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold shadow-sm transition-colors">
+                          <button onClick={() => setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[84px] h-[30px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-bold shadow-sm transition-colors">
                             출제현황({assignCount}명)
                           </button>
                           
                           {isDistributed ? (
                             isSuperAdmin ? (
-                              <button onClick={() => handleForceEdit(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200 gap-0.5" title="최고관리자 전용 강제 수정">
+                              <button onClick={() => handleForceEdit(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-xs font-bold shadow-sm transition-colors border border-rose-200 gap-0.5" title="최고관리자 전용 강제 수정">
                                 🚨 강제수정
                               </button>
                             ) : (
-                              <button disabled className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-slate-50 text-slate-400 rounded text-[11px] font-bold cursor-not-allowed border border-slate-200 gap-0.5" title="이미 출제되어 수정할 수 없습니다">
+                              <button disabled className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-slate-50 text-slate-400 rounded text-xs font-bold cursor-not-allowed border border-slate-200 gap-0.5" title="이미 출제되어 수정할 수 없습니다">
                                 🔒 수정불가
                               </button>
                             )
                           ) : (
-                            <button onClick={() => editExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-slate-50 text-slate-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-slate-300">
+                            <button onClick={() => editExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-slate-50 text-slate-600 rounded text-xs font-bold shadow-sm transition-colors border border-slate-300">
                               수정
                             </button>
                           )}
 
-                          <button onClick={() => duplicateAndEditExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-indigo-50 text-indigo-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-indigo-200">
+                          <button onClick={() => duplicateAndEditExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-indigo-50 text-indigo-600 rounded text-xs font-bold shadow-sm transition-colors border border-indigo-200">
                             복제후수정
                           </button>
                           
                           {canDeleteExam && (
-                            <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
+                            <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-xs font-bold shadow-sm transition-colors border border-rose-200">
                               삭제
                             </button>
                           )}
@@ -577,7 +577,7 @@ export default function ExamListPage() {
       {answerModal.isOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-4xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="font-bold text-lg flex items-center gap-2"><span>📑</span> 정답지 조회: {answerModal.title}</h2>
               <button onClick={() => setAnswerModal({ isOpen: false, examId: '', title: '' })} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
@@ -585,7 +585,7 @@ export default function ExamListPage() {
             <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50" id="print-answer-area">
               {isLoadingAnswers ? (
                 <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                  <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin mb-4"></div>
+                  <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin mb-4"></div>
                   <div className="font-bold">정답을 불러오는 중입니다...</div>
                 </div>
               ) : answerData.length === 0 ? (
@@ -594,7 +594,7 @@ export default function ExamListPage() {
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
                   {answerData.map(item => (
                     <div key={item.num} className="bg-white border border-slate-200 pt-4 pb-2 px-2 rounded-xl shadow-sm flex flex-col items-center justify-center text-center overflow-hidden">
-                      <span className="text-xs font-black text-[#002864] bg-blue-50 px-2.5 py-0.5 rounded-full mb-2 shadow-sm shrink-0">{item.num}번</span>
+                      <span className="text-xs font-bold text-brand bg-blue-50 px-2.5 py-0.5 rounded-full mb-2 shadow-sm shrink-0">{item.num}번</span>
                       {/* 🌟 텍스트 오버플로우 방지용 내부 스크롤 박스 */}
                       <div className="w-full overflow-x-auto custom-scroll pb-1">
                         <div 
@@ -612,7 +612,7 @@ export default function ExamListPage() {
               <button 
                 onClick={handlePrintAnswers} 
                 disabled={isLoadingAnswers || answerData.length === 0}
-                className="px-6 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-extrabold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
+                className="px-6 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold rounded-lg shadow-sm transition-colors flex items-center gap-2 disabled:opacity-50"
               >
                 <span>🖨️</span> 인쇄하기
               </button>

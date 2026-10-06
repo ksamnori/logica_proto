@@ -222,7 +222,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
   if (!examId) {
     return (
       <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm text-center">
-        <h3 className="font-extrabold text-slate-700 text-lg mb-2">학생 배포 패널</h3>
+        <h3 className="font-bold text-slate-700 text-lg mb-2">학생 배포 패널</h3>
         <p className="text-sm font-bold text-slate-400">새로운 시험지입니다.<br/>좌측 하단의 <span className="text-blue-600">[💾 저장]</span> 버튼을 먼저 눌러주세요.</p>
       </div>
     );
@@ -233,25 +233,25 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="font-bold text-slate-700 border-b pb-2 flex items-center justify-between text-[13px]">
           <span className="flex items-center gap-1.5">🎯 출제 및 배포 대상 관리</span>
-          <span className="bg-blue-50 text-[#002864] font-bold text-[11px] px-2 py-1 rounded border border-blue-100">현재 배포 대상: <span className="text-[13px] text-blue-600">{selectedPublishStudents.size}</span>명</span>
+          <span className="bg-blue-50 text-brand font-bold text-xs px-2 py-1 rounded border border-blue-100">현재 배포 대상: <span className="text-[13px] text-blue-600">{selectedPublishStudents.size}</span>명</span>
         </h3>
 
         <div>
             <div className="flex gap-2 overflow-x-auto no-scrollbar pb-2">
                 {isWeeklyTest && (
-                    <button onClick={() => setIsGradeModalOpen(true)} className="bg-white border border-dashed border-[#009966] text-[#009966] hover:bg-[#009966]/10 px-3 py-1.5 rounded text-[11px] font-bold whitespace-nowrap transition-colors flex items-center gap-1 shadow-sm shrink-0">
+                    <button onClick={() => setIsGradeModalOpen(true)} className="bg-white border border-dashed border-[#009966] text-[#009966] hover:bg-[#009966]/10 px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap transition-colors flex items-center gap-1 shadow-sm shrink-0">
                         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
                         학년 추가
                     </button>
                 )}
-                <button onClick={() => { fetchClasses(); setIsClassModalOpen(true); }} className="bg-white border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-[11px] font-bold whitespace-nowrap transition-colors flex items-center gap-1 shadow-sm shrink-0">
+                <button onClick={() => { fetchClasses(); setIsClassModalOpen(true); }} className="bg-white border border-dashed border-blue-300 text-blue-600 hover:bg-blue-50 px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap transition-colors flex items-center gap-1 shadow-sm shrink-0">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
                     클래스 추가
                 </button>
                 {addedClassTabs.map(c => (
-                    <div key={c.class_id} className="border px-3 py-1.5 rounded text-[11px] font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0 bg-white text-slate-600 border-slate-300 shadow-sm">
+                    <div key={c.class_id} className="border px-3 py-1.5 rounded text-xs font-bold whitespace-nowrap flex items-center gap-1.5 shrink-0 bg-white text-slate-600 border-slate-300 shadow-sm">
                         {c.class_name}
-                        <button onClick={(e) => removeClassTab(c.class_id, e)} className="hover:text-rose-400 w-3.5 h-3.5 flex justify-center items-center rounded-full bg-black/10 text-[9px]">✕</button>
+                        <button onClick={(e) => removeClassTab(c.class_id, e)} className="hover:text-rose-400 w-3.5 h-3.5 flex justify-center items-center rounded-full bg-black/10 text-xs">✕</button>
                     </div>
                 ))}
             </div>
@@ -262,7 +262,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                 addedClassTabs.map(c => (
                     <div key={c.class_id}>
                         <div className="flex justify-between items-center mb-2 pb-2 border-b border-slate-200">
-                            <label className="flex items-center gap-1.5 text-[11px] font-bold text-slate-700 cursor-pointer">
+                            <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer">
                                 <input type="checkbox"
                                     checked={(classStudentsMap[c.class_id] || []).length > 0 && (classStudentsMap[c.class_id] || []).every(s => selectedPublishStudents.has(s.student_id))}
                                     onChange={(e) => {
@@ -274,14 +274,14 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                                         });
                                         setSelectedPublishStudents(newSelected);
                                     }}
-                                    className="w-3.5 h-3.5 accent-[#002864] cursor-pointer rounded" />
+                                    className="w-3.5 h-3.5 accent-brand cursor-pointer rounded" />
                                 <span><span className="text-blue-600">{c.class_name}</span> 학생 모두 선택</span>
                             </label>
                         </div>
                         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                             {classStudentsMap[c.class_id]?.length > 0 ? (
                                 classStudentsMap[c.class_id].map(s => (
-                                    <label key={s.student_id} className="flex items-center gap-1.5 text-[11px] cursor-pointer hover:bg-white p-1.5 rounded transition-colors border border-transparent hover:border-slate-200">
+                                    <label key={s.student_id} className="flex items-center gap-1.5 text-xs cursor-pointer hover:bg-white p-1.5 rounded transition-colors border border-transparent hover:border-slate-200">
                                         <input type="checkbox"
                                             checked={selectedPublishStudents.has(s.student_id)}
                                             onChange={(e) => {
@@ -290,24 +290,24 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                                                 else newSelected.delete(s.student_id);
                                                 setSelectedPublishStudents(newSelected);
                                             }}
-                                            className="w-3.5 h-3.5 accent-[#002864] rounded" />
+                                            className="w-3.5 h-3.5 accent-brand rounded" />
                                         <span className={s.status === '재원' ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium line-through'}>{s.name} {s.status !== '재원' ? `(${s.status})` : ''}</span>
                                     </label>
                                 ))
                             ) : (
-                                <div className="col-span-full text-center text-slate-400 font-bold text-[11px] py-4">해당 반에 등록된 학생이 없습니다.</div>
+                                <div className="col-span-full text-center text-slate-400 font-bold text-xs py-4">해당 반에 등록된 학생이 없습니다.</div>
                             )}
                         </div>
                     </div>
                 ))
             ) : (
-                <div className="text-center text-slate-400 font-bold text-[11px] py-6">
+                <div className="text-center text-slate-400 font-bold text-xs py-6">
                     {isWeeklyTest ? "위에서 학년을 선택하거나, [+ 클래스 추가] 버튼을 눌러 반을 추가해주세요." : "상단의 [+ 클래스 추가] 버튼을 눌러 반을 추가하고 학생을 선택해주세요."}
                 </div>
             )}
         </div>
 
-        <button onClick={submitPublish} disabled={selectedPublishStudents.size === 0} className="w-full bg-[#002864] text-white py-2 rounded-lg font-bold text-[12px] hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-1.5">
+        <button onClick={submitPublish} disabled={selectedPublishStudents.size === 0} className="w-full bg-brand text-white py-2 rounded-lg font-bold text-[12px] hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50 flex items-center justify-center gap-1.5">
             🚀 선택한 {selectedPublishStudents.size}명에게 시험지 출제 및 배포하기
         </button>
 
@@ -317,7 +317,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                 <div className="space-y-4 max-h-[400px] overflow-y-auto custom-scrollbar pr-2">
                     {groupedAssigned.map(([className, list]) => (
                         <div key={className}>
-                            <p className="text-[11px] font-extrabold text-[#002864] mb-1.5 flex items-center gap-1">📚 {className} <span className="text-slate-400 font-bold">({list.length}명)</span></p>
+                            <p className="text-xs font-bold text-brand mb-1.5 flex items-center gap-1">📚 {className} <span className="text-slate-400 font-bold">({list.length}명)</span></p>
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
                                 {list.map(a => {
                                     const statusField = a.status || '미응시';
@@ -328,12 +328,12 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                                     return (
                                         <div key={a.assignment_id} className="p-2.5 bg-white border border-slate-200 rounded-lg shadow-sm flex flex-col gap-2">
                                             <div className="flex justify-between items-center border-b border-slate-100 pb-1.5">
-                                                <span className="font-bold text-[#002864] text-[11px]">{a.student?.name} <span className="text-[9px] text-slate-400 font-normal">({a.student?.grade})</span></span>
-                                                <span className={`px-1.5 py-0.5 border rounded text-[10px] font-extrabold ${statusColor}`}>{statusText}</span>
+                                                <span className="font-bold text-brand text-xs">{a.student?.name} <span className="text-xs text-slate-400 font-normal">({a.student?.grade})</span></span>
+                                                <span className={`px-1.5 py-0.5 border rounded text-xs font-bold ${statusColor}`}>{statusText}</span>
                                             </div>
                                             <div className="flex justify-end gap-1.5">
-                                                <button onClick={() => router.push(`/exam/review?assignment_id=${a.assignment_id}`)} className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 rounded text-[10px] font-bold transition-colors">리뷰/채점</button>
-                                                <button onClick={() => cancelAssignment(a.assignment_id)} className="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-300 hover:border-rose-300 text-slate-500 hover:text-rose-500 rounded text-[10px] font-bold transition-colors">출제 취소</button>
+                                                <button onClick={() => router.push(`/exam/review?assignment_id=${a.assignment_id}`)} className="px-2 py-1 bg-emerald-50 hover:bg-emerald-600 text-emerald-700 hover:text-white border border-emerald-200 rounded text-xs font-bold transition-colors">리뷰/채점</button>
+                                                <button onClick={() => cancelAssignment(a.assignment_id)} className="px-2 py-1 bg-white hover:bg-rose-50 border border-slate-300 hover:border-rose-300 text-slate-500 hover:text-rose-500 rounded text-xs font-bold transition-colors">출제 취소</button>
                                             </div>
                                         </div>
                                     );
@@ -350,7 +350,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex justify-center items-center z-[70] no-print">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
                 <div className="bg-slate-50 px-6 py-4 flex justify-between items-center border-b border-slate-200">
-                    <h3 className="text-slate-800 font-extrabold text-[15px]">🏫 배포할 클래스 선택</h3>
+                    <h3 className="text-slate-800 font-bold text-[15px]">🏫 배포할 클래스 선택</h3>
                     <button onClick={() => setIsClassModalOpen(false)} className="text-slate-400 hover:text-slate-700 transition-colors">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
@@ -365,9 +365,9 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                             return (
                                 <div key={c.class_id} onClick={() => addClassToTabs({class_id: c.class_id, class_name: c.name})} className="p-2.5 border border-slate-200 rounded-lg hover:bg-blue-50 cursor-pointer flex justify-between items-center group transition-colors">
                                     <span className="font-bold text-[12px] text-slate-700 group-hover:text-blue-700">
-                                        {c.name} <span className="text-[10px] text-slate-400 font-normal ml-1">({c.studentCount}명)</span>
+                                        {c.name} <span className="text-xs text-slate-400 font-normal ml-1">({c.studentCount}명)</span>
                                     </span>
-                                    <span className="text-[10px] text-blue-500 font-bold bg-white px-2 py-1 rounded shadow-sm border border-blue-100 group-hover:bg-blue-500 group-hover:text-white transition-colors">+ 추가</span>
+                                    <span className="text-xs text-blue-500 font-bold bg-white px-2 py-1 rounded shadow-sm border border-blue-100 group-hover:bg-blue-500 group-hover:text-white transition-colors">+ 추가</span>
                                 </div>
                             );
                         })
@@ -381,16 +381,16 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex justify-center items-center z-[70] no-print">
             <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl overflow-hidden">
                 <div className="bg-slate-50 px-6 py-4 flex justify-between items-center border-b border-slate-200">
-                    <h3 className="text-slate-800 font-extrabold text-[15px]">🎓 배포할 학년 선택</h3>
+                    <h3 className="text-slate-800 font-bold text-[15px]">🎓 배포할 학년 선택</h3>
                     <button onClick={() => setIsGradeModalOpen(false)} className="text-slate-400 hover:text-slate-700 transition-colors">
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
                     </button>
                 </div>
                 <div className="p-4 max-h-[400px] overflow-y-auto custom-scrollbar space-y-2">
-                    <p className="text-[10px] font-bold text-slate-400 mb-1">학년을 고르면 그 학년에 속한 반이 전부 한 번에 배포 대상에 추가됩니다.</p>
+                    <p className="text-xs font-bold text-slate-400 mb-1">학년을 고르면 그 학년에 속한 반이 전부 한 번에 배포 대상에 추가됩니다.</p>
                     <div onClick={() => addGradeClasses(ALL_GRADES)} className="p-2.5 border border-slate-200 rounded-lg hover:bg-[#009966]/10 cursor-pointer flex justify-between items-center group transition-colors">
                         <span className="font-bold text-[12px] text-slate-700 group-hover:text-[#009966]">🏫 {ALL_GRADES}</span>
-                        <span className="text-[10px] text-[#009966] font-bold bg-white px-2 py-1 rounded shadow-sm border border-[#009966]/30 group-hover:bg-[#009966] group-hover:text-white transition-colors">+ 추가</span>
+                        <span className="text-xs text-[#009966] font-bold bg-white px-2 py-1 rounded shadow-sm border border-[#009966]/30 group-hover:bg-[#009966] group-hover:text-white transition-colors">+ 추가</span>
                     </div>
                     {gradeOptions.length === 0 ? (
                         <div className="text-center py-5 text-slate-400 font-bold text-[12px]">불러오는 중이거나 등록된 학년이 없습니다.</div>
@@ -398,7 +398,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                         gradeOptions.map(g => (
                             <div key={g} onClick={() => addGradeClasses(g)} className="p-2.5 border border-slate-200 rounded-lg hover:bg-[#009966]/10 cursor-pointer flex justify-between items-center group transition-colors">
                                 <span className="font-bold text-[12px] text-slate-700 group-hover:text-[#009966]">{g}</span>
-                                <span className="text-[10px] text-[#009966] font-bold bg-white px-2 py-1 rounded shadow-sm border border-[#009966]/30 group-hover:bg-[#009966] group-hover:text-white transition-colors">+ 추가</span>
+                                <span className="text-xs text-[#009966] font-bold bg-white px-2 py-1 rounded shadow-sm border border-[#009966]/30 group-hover:bg-[#009966] group-hover:text-white transition-colors">+ 추가</span>
                             </div>
                         ))
                     )}

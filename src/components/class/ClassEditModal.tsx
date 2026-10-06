@@ -343,7 +343,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-5 text-white flex justify-between items-center shrink-0">
           <h2 className="text-xl font-bold tracking-tight">🏫 반 상세 정보 및 수강생 관리</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
         </div>
@@ -351,7 +351,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
         <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50">
           <div className="flex items-center justify-between border-b border-slate-200 pb-2 mb-3">
             <h3 className="font-bold text-slate-800">📋 기본 정보</h3>
-            {!canEdit && <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">조회 전용 (수정 권한 없음)</span>}
+            {!canEdit && <span className="text-xs font-bold text-rose-500 bg-rose-50 px-2 py-0.5 rounded border border-rose-200">조회 전용 (수정 권한 없음)</span>}
           </div>
           <div className="grid grid-cols-2 gap-4 mb-8 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
             <div>
@@ -395,16 +395,16 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
               <label className="block text-xs font-bold text-slate-500 mb-3">수업 요일 및 시간 설정</label>
               <div className="flex flex-col gap-2">
                 {modalSchedules.map(s => (
-                  <div key={s.day} className={`flex items-center gap-4 bg-white p-2.5 rounded-lg border transition-colors ${s.checked && isEditMode ? 'border-[#002864] ring-1 ring-[#002864]' : 'border-slate-200'}`}>
+                  <div key={s.day} className={`flex items-center gap-4 bg-white p-2.5 rounded-lg border transition-colors ${s.checked && isEditMode ? 'border-brand ring-1 ring-brand' : 'border-slate-200'}`}>
                     <label className="flex items-center gap-2 cursor-pointer w-16 shrink-0">
-                      <input type="checkbox" disabled={!isEditMode} checked={s.checked} onChange={e => handleScheduleChange(s.day, "checked", e.target.checked)} className="w-5 h-5 accent-[#002864]" />
+                      <input type="checkbox" disabled={!isEditMode} checked={s.checked} onChange={e => handleScheduleChange(s.day, "checked", e.target.checked)} className="w-5 h-5 accent-brand" />
                       <span className={`font-bold ${s.day === '토' ? 'text-blue-600' : s.day === '일' ? 'text-red-500' : 'text-slate-700'}`}>{s.day}</span>
                     </label>
                     {s.checked && (
                       <div className="flex-1 flex items-center gap-2">
-                        <input type="time" disabled={!isEditMode} value={s.start_time} onChange={e => handleScheduleChange(s.day, "start_time", e.target.value)} className={`px-3 py-1 rounded border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] text-sm w-full font-bold ${!isEditMode ? 'bg-slate-100' : ''}`} />
+                        <input type="time" disabled={!isEditMode} value={s.start_time} onChange={e => handleScheduleChange(s.day, "start_time", e.target.value)} className={`px-3 py-1 rounded border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand text-sm w-full font-bold ${!isEditMode ? 'bg-slate-100' : ''}`} />
                         <span className="font-bold text-slate-400">~</span>
-                        <input type="time" disabled={!isEditMode} value={s.end_time} onChange={e => handleScheduleChange(s.day, "end_time", e.target.value)} className={`px-3 py-1 rounded border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] text-sm w-full font-bold ${!isEditMode ? 'bg-slate-100' : ''}`} />
+                        <input type="time" disabled={!isEditMode} value={s.end_time} onChange={e => handleScheduleChange(s.day, "end_time", e.target.value)} className={`px-3 py-1 rounded border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand text-sm w-full font-bold ${!isEditMode ? 'bg-slate-100' : ''}`} />
                       </div>
                     )}
                   </div>
@@ -518,13 +518,13 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                     
                     return (
                       <tr key={s.student_id}>
-                        <td className="py-2.5 px-4 font-bold text-[#002864]">{s.name}</td>
+                        <td className="py-2.5 px-4 font-bold text-brand">{s.name}</td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold">{s.grade || "-"}</td>
                         <td className="py-2.5 px-4 text-center">
                           {stat === '예약' ? (
-                            <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-[10px] font-black border">예약</span>
+                            <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-xs font-bold border">예약</span>
                           ) : (
-                            <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black border">수강중</span>
+                            <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-xs font-bold border">수강중</span>
                           )}
                         </td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold max-w-[150px] truncate">{uniqueClasses}</td>
@@ -573,7 +573,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
             <button onClick={onClose} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200 shadow-sm">닫기</button>
             {canEdit && (
               !isEditMode ? (
-                <button onClick={() => setIsEditMode(true)} className="px-5 py-2.5 bg-[#002864] text-white font-bold rounded-lg shadow-sm">반 정보 수정</button>
+                <button onClick={() => setIsEditMode(true)} className="px-5 py-2.5 bg-brand text-white font-bold rounded-lg shadow-sm">반 정보 수정</button>
               ) : (
                 <button onClick={saveEditedClass} disabled={isSaving} className="px-5 py-2.5 bg-emerald-600 text-white font-bold rounded-lg shadow-sm">{isSaving ? "저장 중..." : "변경사항 저장"}</button>
               )

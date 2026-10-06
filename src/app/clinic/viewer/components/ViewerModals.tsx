@@ -44,13 +44,13 @@ export function ViewerModals({
         <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-6 w-[320px] text-center">
             <div className="text-4xl mb-3">💡</div>
-            <h3 className="text-lg font-extrabold text-slate-800 mb-2">포인트 차감 안내</h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-2">포인트 차감 안내</h3>
             <p className="text-sm text-slate-600 mb-6 font-medium leading-relaxed">
               힌트(개념 및 접근법)를 열람하시겠습니까?<br/>보유 포인트에서 <span className="font-bold text-rose-500">{hintModal.cost}P</span>가 차감됩니다.
             </p>
             <div className="flex gap-2">
               <button disabled={hintModal.loading} onClick={() => setHintModal(null)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-40">취소</button>
-              <button disabled={hintModal.loading} onClick={onConfirmHint} className="flex-1 bg-[#002864] text-white font-bold py-3 rounded-lg hover:bg-blue-900 transition-colors disabled:opacity-60">{hintModal.loading ? '힌트 준비 중...' : '열람하기'}</button>
+              <button disabled={hintModal.loading} onClick={onConfirmHint} className="flex-1 bg-brand text-white font-bold py-3 rounded-lg hover:bg-blue-900 transition-colors disabled:opacity-60">{hintModal.loading ? '힌트 준비 중...' : '열람하기'}</button>
             </div>
           </div>
         </div>
@@ -61,7 +61,7 @@ export function ViewerModals({
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-sm text-center transform transition-transform scale-100 animate-[fadeIn_0.2s_ease-out]">
             <div className="text-6xl mb-4">{resultModal.isCorrect ? "🎉" : "💥"}</div>
-            <h3 className={`text-2xl font-black mb-2 ${resultModal.isCorrect ? 'text-emerald-600' : 'text-rose-600'}`}>
+            <h3 className={`text-2xl font-bold mb-2 ${resultModal.isCorrect ? 'text-emerald-600' : 'text-rose-600'}`}>
               {resultModal.isCorrect ? "정답입니다!" : "아쉽게 틀렸습니다"}
             </h3>
             <p className="text-sm text-slate-500 font-bold mb-8 leading-relaxed">
@@ -87,9 +87,9 @@ export function ViewerModals({
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[80] animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-sm text-center">
             <div className="text-6xl mb-4">⏰</div>
-            <h3 className="text-2xl font-black text-slate-800 mb-2">클리닉 시간이 종료되었습니다</h3>
+            <h3 className="text-2xl font-bold text-slate-800 mb-2">클리닉 시간이 종료되었습니다</h3>
             <p className="text-sm text-slate-500 font-bold mb-6">오늘 배정된 클리닉 이용 시간이 모두 지났어요.<br/>수고하셨습니다!</p>
-            <button onClick={() => onLeave(logoutTarget)} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm transition-all">홈으로 돌아가기</button>
+            <button onClick={() => onLeave(logoutTarget)} className="w-full bg-brand hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm transition-all">홈으로 돌아가기</button>
             <p className="text-xs font-bold text-slate-400 mt-4"><span>{autoLeaveSec}</span>초 후 자동으로 나가집니다...</p>
           </div>
         </div>
@@ -100,13 +100,13 @@ export function ViewerModals({
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-sm text-center">
             <div className="text-6xl mb-4">⏰</div>
-            <h3 className="text-2xl font-black text-slate-800 mb-2">시간이 모두 지났습니다!</h3>
+            <h3 className="text-2xl font-bold text-slate-800 mb-2">시간이 모두 지났습니다!</h3>
             <p className="text-sm text-slate-500 font-bold mb-4">20분 제한 시간이 모두 지났어요.<br/>지금까지 입력한 답안이 제출됩니다.</p>
             <div className="bg-slate-50 border border-slate-200 rounded-xl py-3 mb-6">
               <p className="text-xs font-bold text-slate-400 mb-1">정답률</p>
-              <p className="text-2xl font-black text-[#002864]">{correctSolvedCount}/{totalQuestions}</p>
+              <p className="text-2xl font-bold text-brand">{correctSolvedCount}/{totalQuestions}</p>
             </div>
-            <button onClick={() => onLeave('portal')} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm transition-all">홈으로 돌아가기</button>
+            <button onClick={() => onLeave('portal')} className="w-full bg-brand hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm transition-all">홈으로 돌아가기</button>
             <p className="text-xs font-bold text-slate-400 mt-4"><span>{autoLeaveSec}</span>초 후 자동으로 나가집니다...</p>
           </div>
         </div>
@@ -117,11 +117,11 @@ export function ViewerModals({
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-[70] animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm text-center">
             <div className="text-4xl mb-3">📝</div>
-            <h3 className="text-lg font-extrabold text-slate-800 mb-3">테스트/과제 제출</h3>
-            <p className="text-sm text-slate-600 mb-6 font-medium leading-relaxed" dangerouslySetInnerHTML={{ __html: unansweredCount > 0 ? `아직 풀지 않은 문제가 <span class="text-rose-500 font-black">${unansweredCount}개</span> 있어요.<br>그래도 제출하시겠습니까?` : `정말 제출하시겠습니까?<br>제출 후에는 답을 바꿀 수 없어요.` }}></p>
+            <h3 className="text-lg font-bold text-slate-800 mb-3">테스트/과제 제출</h3>
+            <p className="text-sm text-slate-600 mb-6 font-medium leading-relaxed" dangerouslySetInnerHTML={{ __html: unansweredCount > 0 ? `아직 풀지 않은 문제가 <span class="text-rose-500 font-bold">${unansweredCount}개</span> 있어요.<br>그래도 제출하시겠습니까?` : `정말 제출하시겠습니까?<br>제출 후에는 답을 바꿀 수 없어요.` }}></p>
             <div className="flex gap-2">
               <button onClick={() => setSubmitConfirmModal(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg hover:bg-slate-200 transition-colors">취소</button>
-              <button onClick={() => { setSubmitConfirmModal(false); onSubmitConfirm(); }} className="flex-1 bg-[#002864] text-white font-bold py-3 rounded-lg hover:bg-blue-900 transition-colors shadow-sm">제출하기</button>
+              <button onClick={() => { setSubmitConfirmModal(false); onSubmitConfirm(); }} className="flex-1 bg-brand text-white font-bold py-3 rounded-lg hover:bg-blue-900 transition-colors shadow-sm">제출하기</button>
             </div>
           </div>
         </div>
@@ -132,11 +132,11 @@ export function ViewerModals({
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm flex items-center justify-center z-[60] animate-[fadeIn_0.2s_ease-out]">
           <div className={`bg-white rounded-2xl shadow-2xl p-10 w-full text-center ${pendingRecheckReview.length > 0 ? 'max-w-lg' : 'max-w-sm'}`}>
             <div className="text-6xl mb-4">📮</div>
-            <h3 className="text-2xl font-black text-slate-800 mb-2">제출 완료!</h3>
+            <h3 className="text-2xl font-bold text-slate-800 mb-2">제출 완료!</h3>
             <p className="text-sm text-slate-500 font-bold mb-4">답안을 제출했어요. 수고했어요!</p>
             <div className="bg-slate-50 border border-slate-200 rounded-xl py-3 mb-6">
               <p className="text-xs font-bold text-slate-400 mb-1">정답률</p>
-              <p className="text-2xl font-black text-[#002864]">{correctSolvedCount}/{totalQuestions}</p>
+              <p className="text-2xl font-bold text-brand">{correctSolvedCount}/{totalQuestions}</p>
             </div>
             
             {pendingRecheckReview.length > 0 && (
@@ -159,7 +159,7 @@ export function ViewerModals({
               </div>
             )}
             
-            <button onClick={() => onLeave(logoutTarget)} className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm transition-all">홈으로 돌아가기</button>
+            <button onClick={() => onLeave(logoutTarget)} className="w-full bg-brand hover:bg-blue-900 text-white font-bold px-6 py-4 rounded-xl text-lg shadow-sm transition-all">홈으로 돌아가기</button>
             {pendingRecheckReview.length === 0 && <p className="text-xs font-bold text-slate-400 mt-4"><span>{autoLeaveSec}</span>초 후 자동으로 나가집니다...</p>}
           </div>
         </div>

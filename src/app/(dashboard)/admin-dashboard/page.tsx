@@ -48,7 +48,7 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
   return (
     <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-sm flex flex-col hover:border-indigo-300 transition-colors flex-1 min-h-[250px] max-h-[300px]">
       <div className="flex justify-between items-center mb-3 shrink-0">
-        <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">🗣️ 최근 상담</span>
+        <span className="text-sm font-bold text-slate-700 flex items-center gap-1.5">🗣️ 최근 상담</span>
       </div>
       <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-2">
         {recentConsults.length === 0 ? (
@@ -75,23 +75,23 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
               >
                 <div className="flex flex-col gap-1.5 min-w-0 flex-1">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColor} whitespace-nowrap`}>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${badgeColor} whitespace-nowrap`}>
                       {consult.consultation_type || '상담'}
                     </span>
-                    <div className="flex items-baseline gap-1 text-[11px] truncate">
-                       <span className="font-black text-indigo-700">{consult.className}</span>
-                       {consult.className !== '미배정' && <span className="font-bold text-indigo-400 text-[9px]">({consult.classInstructor})</span>}
-                       <span className="font-extrabold text-slate-700 ml-0.5 shrink-0">{consult.studentName} 학생</span>
+                    <div className="flex items-baseline gap-1 text-xs truncate">
+                       <span className="font-bold text-indigo-700">{consult.className}</span>
+                       {consult.className !== '미배정' && <span className="font-bold text-indigo-400 text-xs">({consult.classInstructor})</span>}
+                       <span className="font-bold text-slate-700 ml-0.5 shrink-0">{consult.studentName} 학생</span>
                     </div>
                   </div>
                   
                   {hasSummary ? (
                     <div className="flex items-center gap-1.5 pl-0.5 mt-0.5">
-                      <span className="text-[9px] font-black text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">주제</span>
-                      <span className="text-[11px] font-extrabold text-slate-700 truncate" title={consult.parent_summary}>{consult.parent_summary}</span>
+                      <span className="text-xs font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shrink-0">주제</span>
+                      <span className="text-xs font-bold text-slate-700 truncate" title={consult.parent_summary}>{consult.parent_summary}</span>
                     </div>
                   ) : (
-                    <span className="text-[10px] font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
+                    <span className="text-xs font-medium text-slate-600 line-clamp-2 leading-snug pl-0.5" title={consult.content}>
                       {consult.content}
                     </span>
                   )}
@@ -99,10 +99,10 @@ function RecentConsultPanel({ recentConsults }: { recentConsults: any[] }) {
 
                 <div className="flex flex-col items-end shrink-0 text-right gap-1 border-l border-slate-200 pl-3 py-0.5">
                   <div className="flex flex-col items-end leading-tight">
-                     <span className="text-[10px] font-extrabold text-slate-500">{dateStr}</span>
-                     <span className="text-[9px] font-bold text-slate-400">{timeStr}</span>
+                     <span className="text-xs font-bold text-slate-500">{dateStr}</span>
+                     <span className="text-xs font-bold text-slate-400">{timeStr}</span>
                   </div>
-                  <span className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded mt-0.5 border border-slate-200 whitespace-nowrap">
+                  <span className="text-xs font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded mt-0.5 border border-slate-200 whitespace-nowrap">
                     {consult.consultantName}
                   </span>
                 </div>
@@ -873,7 +873,7 @@ export default function AdminDashboardPage() {
           <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
           <div className="relative z-10 flex justify-between items-center ml-6">
             <div>
-              <h1 className="text-3xl font-black tracking-tight font-lexend flex items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight font-lexend flex items-center gap-3">
                 <span>LOGICA 학원 통합 관리</span>
                 <span className="bg-blue-500/30 text-blue-100 text-[15px] px-3 py-1 rounded-lg font-bold border border-blue-400/30 font-pretendard shadow-sm flex items-center shadow-inner">🏢 {tenantName}</span>
                 <button onClick={() => router.push('/supervisor')} className="shrink-0 ml-3 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white border border-indigo-400/50 px-4 py-1.5 rounded-xl text-sm font-bold shadow-md transition-all flex items-center gap-1.5">
@@ -894,17 +894,17 @@ export default function AdminDashboardPage() {
               
               <div className="flex-1 flex justify-between items-start border-b border-slate-100 pb-2 cursor-pointer group relative z-10" onClick={() => router.push('/student')}>
                  <div className="flex flex-col">
-                   <span className="text-[11px] font-bold text-slate-500 mb-0.5 whitespace-nowrap">전체 재원생</span>
+                   <span className="text-xs font-bold text-slate-500 mb-0.5 whitespace-nowrap">전체 재원생</span>
                    <div className="flex items-baseline gap-1">
-                     <span className="text-2xl sm:text-3xl font-black text-[#002864] group-hover:text-blue-600 transition-colors leading-none tracking-tight">{kpi.totalStu}</span>
-                     <span className="text-[10px] font-bold text-slate-400">명</span>
+                     <span className="text-2xl sm:text-3xl font-bold text-brand group-hover:text-blue-600 transition-colors leading-none tracking-tight">{kpi.totalStu}</span>
+                     <span className="text-xs font-bold text-slate-400">명</span>
                    </div>
                  </div>
                  <div className="flex flex-col gap-1 shrink-0 items-end mt-1">
-                   <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm whitespace-nowrap">
+                   <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm whitespace-nowrap">
                      신규 +{kpi.newStu}
                    </span>
-                   <span className="text-[9px] font-black text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm whitespace-nowrap">
+                   <span className="text-xs font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm whitespace-nowrap">
                      퇴원 {kpi.leftStu > 0 ? `-${kpi.leftStu}` : '0'}
                    </span>
                  </div>
@@ -912,8 +912,8 @@ export default function AdminDashboardPage() {
               
               <div className="flex-1 flex flex-col justify-center border-b border-slate-100 py-2 cursor-pointer group relative z-10" onClick={() => router.push('/billing')}>
                  <div className="flex justify-between items-end mb-1.5">
-                   <span className="text-[11px] font-bold text-slate-500 whitespace-nowrap">{new Date().getMonth() + 1}월 수납률</span>
-                   <span className="text-lg font-black text-sky-600 group-hover:text-sky-400 transition-colors leading-none">{kpi.payRate}%</span>
+                   <span className="text-xs font-bold text-slate-500 whitespace-nowrap">{new Date().getMonth() + 1}월 수납률</span>
+                   <span className="text-lg font-bold text-sky-600 group-hover:text-sky-400 transition-colors leading-none">{kpi.payRate}%</span>
                  </div>
                  <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner">
                    <div className={`h-full rounded-full transition-all ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
@@ -922,15 +922,15 @@ export default function AdminDashboardPage() {
 
               <div className="flex-1 flex justify-between items-end pt-2 cursor-pointer group relative z-10" onClick={() => router.push('/admission')}>
                  <div className="flex flex-col">
-                   <span className="text-[11px] font-bold text-slate-500 mb-0.5 whitespace-nowrap">입학 대기생</span>
+                   <span className="text-xs font-bold text-slate-500 mb-0.5 whitespace-nowrap">입학 대기생</span>
                    <div className="flex items-baseline gap-1">
-                     <span className="text-2xl font-black text-amber-500 group-hover:text-amber-400 transition-colors leading-none tracking-tight">{kpi.waitingStu}</span>
-                     <span className="text-[10px] font-bold text-slate-400">명</span>
+                     <span className="text-2xl font-bold text-amber-500 group-hover:text-amber-400 transition-colors leading-none tracking-tight">{kpi.waitingStu}</span>
+                     <span className="text-xs font-bold text-slate-400">명</span>
                    </div>
                  </div>
                  <div className="flex flex-col items-end shrink-0 mb-0.5">
-                   <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap mb-0.5">이번 달 승인</span>
-                   <span className="text-[10px] font-black text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shadow-sm whitespace-nowrap">
+                   <span className="text-xs font-bold text-slate-400 whitespace-nowrap mb-0.5">이번 달 승인</span>
+                   <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shadow-sm whitespace-nowrap">
                      {kpi.passedStu} 명
                    </span>
                  </div>
@@ -944,8 +944,8 @@ export default function AdminDashboardPage() {
               <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 group-hover:scale-110 group-hover:bg-indigo-50 transition-all border border-slate-100 group-hover:border-indigo-100 shadow-sm">
                  <span className="text-3xl grayscale group-hover:grayscale-0 transition-all duration-300">📞</span>
               </div>
-              <span className="font-extrabold text-[14px] text-slate-700 mb-2">유선 문의 대장</span>
-              <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 group-hover:text-indigo-600 group-hover:bg-indigo-100 transition-colors shadow-sm">단축키: Alt + C</span>
+              <span className="font-bold text-[14px] text-slate-700 mb-2">유선 문의 대장</span>
+              <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 group-hover:text-indigo-600 group-hover:bg-indigo-100 transition-colors shadow-sm">단축키: Alt + C</span>
             </div>
 
             <div className="xl:col-span-6 md:col-span-2 col-span-1 h-64 w-full [&>*]:h-full [&>*]:w-full">
@@ -955,16 +955,16 @@ export default function AdminDashboardPage() {
             <div onClick={() => router.push('/cs')} className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-rose-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
               <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
               <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
-                <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">🚨 학부모 요청</span>
-                <span className="bg-rose-100 text-rose-600 text-[10px] font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">{kpi.csCount}건 미결</span>
+                <span className="text-sm font-bold text-slate-700 flex items-center gap-1">🚨 학부모 요청</span>
+                <span className="bg-rose-100 text-rose-600 text-xs font-bold px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">{kpi.csCount}건 미결</span>
               </div>
               <div className="flex-1 flex flex-col gap-2 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
                 {csRequests.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">미처리 요청이 없습니다. 🎉</div> : 
                   csRequests.map((r: any) => {
                     const isProcessing = r.status === '처리중';
                     return (
-                      <div key={r.request_id} className="shrink-0 flex items-center gap-1.5 text-[11px] font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 shadow-sm">
-                        <span className={`px-1 py-0.5 rounded text-[9px] shrink-0 ${isProcessing ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-200 text-rose-700 border border-rose-300'}`}>
+                      <div key={r.request_id} className="shrink-0 flex items-center gap-1.5 text-xs font-bold text-slate-600 bg-rose-50 p-2 rounded border border-rose-100 shadow-sm">
+                        <span className={`px-1 py-0.5 rounded text-xs shrink-0 ${isProcessing ? 'bg-amber-100 text-amber-700 border border-amber-200' : 'bg-rose-200 text-rose-700 border border-rose-300'}`}>
                           {isProcessing ? '처리중' : '대기'}
                         </span>
                         <span className="truncate flex-1"><span className="text-rose-600 mr-1">{r.student?.name || '알수없음'}:</span>{r.reason}</span>
@@ -977,8 +977,8 @@ export default function AdminDashboardPage() {
 
             <div className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-purple-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
               <div className="flex justify-between items-center mb-2 shrink-0 relative z-10">
-                <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
-                <button onClick={(e) => { e.stopPropagation(); setIsMemoModalOpen(true); }} className="text-[10px] bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1.5 rounded font-bold transition-colors border border-blue-200 shadow-sm">+ 작성</button>
+                <span className="text-sm font-bold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>
+                <button onClick={(e) => { e.stopPropagation(); setIsMemoModalOpen(true); }} className="text-xs bg-blue-50 text-blue-600 hover:bg-blue-100 px-2 py-1.5 rounded font-bold transition-colors border border-blue-200 shadow-sm">+ 작성</button>
               </div>
               <div className="flex-1 flex flex-col gap-2.5 overflow-y-auto custom-scroll pr-1 relative z-10 min-h-0">
                 {memos.length === 0 ? <div className="text-center py-6 text-slate-400 font-bold text-xs mt-4">진행 중인 업무가 없습니다.</div> :
@@ -991,15 +991,15 @@ export default function AdminDashboardPage() {
                       <div key={m.memo_id} className="shrink-0 flex flex-col border-b border-slate-100 pb-2 mb-1 last:border-0 hover:bg-slate-50/50 p-1 rounded transition-colors group">
                         <div className="flex items-center justify-between mb-1">
                           <div className="flex items-center gap-1">
-                            <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border`}>{m.memo_type}</span>
-                            {m.status === '진행중' && <span className="text-[9px] font-bold bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded border border-amber-200">진행중</span>}
+                            <span className={`text-xs font-bold ${typeColor} px-1.5 py-0.5 rounded border`}>{m.memo_type}</span>
+                            {m.status === '진행중' && <span className="text-xs font-bold bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded border border-amber-200">진행중</span>}
                           </div>
                           <div className="flex items-center">
-                            <span className="text-[9px] font-bold text-slate-400">{m.author_name}</span>
+                            <span className="text-xs font-bold text-slate-400">{m.author_name}</span>
                             {String(m.instructor_id) === currentUser.instId && <button onClick={(e) => { e.stopPropagation(); deleteMemo(m.memo_id); }} className="opacity-0 group-hover:opacity-100 text-slate-300 hover:text-rose-500 font-bold ml-2">×</button>}
                           </div>
                         </div>
-                        <span className="text-[11px] font-bold text-slate-700 leading-snug whitespace-pre-wrap">{m.content}</span>
+                        <span className="text-xs font-bold text-slate-700 leading-snug whitespace-pre-wrap">{m.content}</span>
                       </div>
                     );
                   })
@@ -1012,11 +1012,11 @@ export default function AdminDashboardPage() {
             
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[520px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
-                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">📝 단체 알림톡 / 문자 작성</h3>
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">📝 단체 알림톡 / 문자 작성</h3>
                 {bulkType === 'homework' && (
                   <button 
                     onClick={loadRecentLessonLogForBulk}
-                    className="text-[10px] font-black text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1"
+                    className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1"
                   >
                     <span>📚</span> 최근 일지 불러오기
                   </button>
@@ -1065,16 +1065,16 @@ export default function AdminDashboardPage() {
 
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[520px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
-                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                   💬 발송 대기열
-                  {queuedMessages.length > 0 && <span className="text-[10px] font-bold text-[#3a2929] bg-[#fef01b] px-2 py-0.5 rounded-full shadow-sm">{queuedMessages.length}건 대기중</span>}
+                  {queuedMessages.length > 0 && <span className="text-xs font-bold text-[#3a2929] bg-[#fef01b] px-2 py-0.5 rounded-full shadow-sm">{queuedMessages.length}건 대기중</span>}
                 </h3>
                   {queuedMessages.length > 0 && <button onClick={async () => {
                    const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
                    const res = await clearQueue(validTenantId);
                    if (!res.success) alert(`삭제 실패: ${res.message}`);
                    fetchQueue(); 
-                }} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
+                }} className="text-xs text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
               </div>
               
               <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50">
@@ -1082,7 +1082,7 @@ export default function AdminDashboardPage() {
                   <div className="h-full flex flex-col items-center justify-center text-slate-400 opacity-80">
                     <span className="text-5xl mb-3 drop-shadow-sm">📬</span>
                     <p className="font-bold text-sm">대기 중인 메시지가 없습니다.</p>
-                    <p className="text-[10px] mt-1 px-4 text-center leading-relaxed">출결 패널이나 좌측 작성 폼에서<br/>요청을 넘기면 이곳에 담깁니다.</p>
+                    <p className="text-xs mt-1 px-4 text-center leading-relaxed">출결 패널이나 좌측 작성 폼에서<br/>요청을 넘기면 이곳에 담깁니다.</p>
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1.5">
@@ -1090,25 +1090,25 @@ export default function AdminDashboardPage() {
                       <div key={msg.queue_id || idx} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
                         <div className="flex items-center justify-between">
                           <div className="flex items-center gap-1.5">
-                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.preview_title)}`}>{msg.preview_title}</span>
+                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.preview_title)}`}>{msg.preview_title}</span>
                             <div className="flex items-baseline gap-1">
-                              <span className="text-[11px] font-extrabold text-slate-700">{msg.student_name}</span>
-                              <span className="text-[10px] text-indigo-500 font-bold">{msg.parent_name}</span>
-                              <span className="text-[9px] text-slate-400 font-medium">{msg.parent_phone}</span>
+                              <span className="text-xs font-bold text-slate-700">{msg.student_name}</span>
+                              <span className="text-xs text-indigo-500 font-bold">{msg.parent_name}</span>
+                              <span className="text-xs text-slate-400 font-medium">{msg.parent_phone}</span>
                             </div>
                           </div>
                           <div className="flex items-center pr-5">
-                            <span className="text-[9px] font-bold text-slate-400">{msg.time_string || ''}</span>
+                            <span className="text-xs font-bold text-slate-400">{msg.time_string || ''}</span>
                           </div>
                                                     <button onClick={async () => {
                              const res = await deleteQueueItem(msg.queue_id);
                              if (!res.success) alert(`삭제 실패: ${res.message}`);
                              fetchQueue(); 
-                          }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-black shrink-0 absolute right-1.5 top-1.5">×</button>
+                          }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-bold shrink-0 absolute right-1.5 top-1.5">×</button>
                         </div>
                         
                         {msg.template_id !== "KA01TP260921034958500GAtQOl600yJ" && msg.details && (
-                          <div className="mt-0.5 bg-slate-50 px-2 py-1 rounded text-[9px] text-slate-600 border border-slate-100 line-clamp-1 leading-snug" title={msg.details}>
+                          <div className="mt-0.5 bg-slate-50 px-2 py-1 rounded text-xs text-slate-600 border border-slate-100 line-clamp-1 leading-snug" title={msg.details}>
                             {msg.details}
                           </div>
                         )}
@@ -1119,7 +1119,7 @@ export default function AdminDashboardPage() {
               </div>
               
               <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
-                <button onClick={handleSendQueuedMessages} disabled={queuedMessages.length === 0 || isSendingAlimtalk} className="w-full py-2.5 bg-[#fef01b] hover:bg-[#eade16] disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 text-[#3a2929] text-sm font-black rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">
+                <button onClick={handleSendQueuedMessages} disabled={queuedMessages.length === 0 || isSendingAlimtalk} className="w-full py-2.5 bg-[#fef01b] hover:bg-[#eade16] disabled:opacity-50 disabled:bg-slate-100 disabled:text-slate-400 text-[#3a2929] text-sm font-bold rounded-xl shadow-sm transition-colors flex items-center justify-center gap-2">
                   {isSendingAlimtalk ? <>발송 중... <span className="animate-spin">⏳</span></> : <>🚀 {queuedMessages.length}건 전체 발송</>}
                 </button>
               </div>
@@ -1127,9 +1127,9 @@ export default function AdminDashboardPage() {
 
             <div className="lg:col-span-1 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[520px]">
               <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
-                <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
+                <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">🔔 발송 완료 피드 <span className="relative flex h-2 w-2 ml-1"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span><span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span></span></h3>
                 {currentUser.isSuperAdmin && liveFeeds.length > 0 && (
-                  <button onClick={clearNotificationLogs} className="text-[10px] text-slate-400 hover:text-rose-500 font-bold transition-colors">
+                  <button onClick={clearNotificationLogs} className="text-xs text-slate-400 hover:text-rose-500 font-bold transition-colors">
                     전체 비우기
                   </button>
                 )}
@@ -1170,27 +1170,27 @@ export default function AdminDashboardPage() {
                         <React.Fragment key={feed.noti_log_id || idx}>
                           {showSeparator && (
                             <div className="bg-slate-100/50 px-3 py-1.5 border-y border-slate-200 flex items-center gap-1.5 sticky top-0 z-10 backdrop-blur-sm">
-                               <span className="text-[10px] font-extrabold text-slate-500">📅 {displayDateStr}</span>
+                               <span className="text-xs font-bold text-slate-500">📅 {displayDateStr}</span>
                             </div>
                           )}
-                          <div className="px-3 py-1.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-[11px] w-full group relative">
-                            <span className={`text-xs font-black shrink-0 ${isSuccess ? 'text-emerald-500' : 'text-rose-500'}`} title={isSuccess ? '성공' : '실패'}>
+                          <div className="px-3 py-1.5 border-b border-slate-100 last:border-0 hover:bg-slate-50 transition-colors flex items-center gap-1.5 text-xs w-full group relative">
+                            <span className={`text-xs font-bold shrink-0 ${isSuccess ? 'text-emerald-500' : 'text-rose-500'}`} title={isSuccess ? '성공' : '실패'}>
                               {isSuccess ? '✓' : '✗'}
                             </span>
-                            <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${badgeColorClass} shrink-0`}>
+                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${badgeColorClass} shrink-0`}>
                               {categoryName}
                             </span>
                             <div className="flex gap-1.5 items-baseline shrink-0 w-[180px]">
-                              <span className="font-extrabold text-slate-700 truncate" title={feed.target_name || feed.student_name || '학부모'}>{feed.target_name || feed.student_name || '학부모'}</span>
-                              <span className="text-[9px] text-slate-400 font-medium truncate">{feed.target_phone || feed.phone || ''}</span>
+                              <span className="font-bold text-slate-700 truncate" title={feed.target_name || feed.student_name || '학부모'}>{feed.target_name || feed.student_name || '학부모'}</span>
+                              <span className="text-xs text-slate-400 font-medium truncate">{feed.target_phone || feed.phone || ''}</span>
                             </div>
-                            <span className="text-[10px] text-slate-600 truncate flex-1 pr-6" title={descText}>{descText}</span>
-                            <span className="text-[9px] font-bold text-slate-400 shrink-0 ml-1 whitespace-nowrap">{rightSideDateTime}</span>
+                            <span className="text-xs text-slate-600 truncate flex-1 pr-6" title={descText}>{descText}</span>
+                            <span className="text-xs font-bold text-slate-400 shrink-0 ml-1 whitespace-nowrap">{rightSideDateTime}</span>
 
                             {currentUser.isSuperAdmin && (
                               <button
                                 onClick={() => deleteNotificationLog(feed.noti_log_id)}
-                                className="absolute right-2 bg-white text-slate-300 hover:bg-rose-100 hover:text-rose-500 font-black rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-sm border border-slate-200 hover:border-rose-300"
+                                className="absolute right-2 bg-white text-slate-300 hover:bg-rose-100 hover:text-rose-500 font-bold rounded-full w-4 h-4 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-sm border border-slate-200 hover:border-rose-300"
                                 title="기록 삭제"
                               >
                                 ×
@@ -1277,7 +1277,7 @@ export default function AdminDashboardPage() {
 
               <div className="bg-white rounded-2xl p-4 border border-rose-100 shadow-sm flex flex-col hover:border-rose-300 transition-colors flex-1 min-h-[130px] max-h-[150px]">
                 <div className="flex justify-between items-center mb-2 shrink-0">
-                  <span className="text-sm font-extrabold text-rose-600 flex items-center gap-1.5">🚨 이탈 위험군 경고등</span>
+                  <span className="text-sm font-bold text-rose-600 flex items-center gap-1.5">🚨 이탈 위험군 경고등</span>
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scroll pr-1 flex flex-col gap-1.5">
                   {riskStudents.length === 0 ? (
@@ -1287,16 +1287,16 @@ export default function AdminDashboardPage() {
                       <div key={i} className="flex items-center justify-between gap-2 p-2 rounded-xl bg-rose-50 border border-rose-100 hover:bg-rose-100 transition-colors group">
                         <div className="flex items-center gap-2 overflow-hidden">
                           <div className="flex items-baseline gap-1 shrink-0">
-                            <span className="text-[11px] font-extrabold text-slate-800">{st.name}</span>
-                            <span className="text-[9px] text-slate-400 font-medium hidden sm:inline">{st.phone || ''}</span>
+                            <span className="text-xs font-bold text-slate-800">{st.name}</span>
+                            <span className="text-xs text-slate-400 font-medium hidden sm:inline">{st.phone || ''}</span>
                           </div>
                           <div className="flex flex-wrap items-center gap-1 overflow-hidden h-[18px]">
                             {st.reasons.map((r: string, j: number) => (
-                              <span key={j} className="text-[9px] font-black bg-white text-rose-600 border border-rose-200 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap leading-none">{r}</span>
+                              <span key={j} className="text-xs font-bold bg-white text-rose-600 border border-rose-200 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap leading-none">{r}</span>
                             ))}
                           </div>
                         </div>
-                        <button onClick={() => router.push(`/student/${st.id}?tab=consult`)} className="text-[9px] text-rose-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0 bg-white px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">
+                        <button onClick={() => router.push(`/student/${st.id}?tab=consult`)} className="text-xs text-rose-500 font-bold opacity-0 group-hover:opacity-100 transition-opacity shrink-0 bg-white px-1.5 py-0.5 rounded border border-rose-200 shadow-sm">
                           상담기록 ➡️
                         </button>
                       </div>
@@ -1322,17 +1322,17 @@ export default function AdminDashboardPage() {
       {isInquiryOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-6 sm:p-10">
           <div className="bg-white w-full max-w-7xl h-[90vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl animate-[fadeIn_0.2s_ease-out]">
-            <div className="bg-[#002864] p-4 flex justify-between items-center text-white shrink-0">
+            <div className="bg-brand p-4 flex justify-between items-center text-white shrink-0">
               <div className="flex items-center gap-2">
                 <span className="text-2xl">📞</span>
-                <h2 className="font-black text-lg ml-1">실시간 유선 문의 대장</h2>
+                <h2 className="font-bold text-lg ml-1">실시간 유선 문의 대장</h2>
               </div>
               <div className="flex items-center gap-3 md:gap-5">
                 <a 
                   href="https://docs.google.com/spreadsheets/d/1rD65o05on4Noavir4c1nqITAjeJnjSK_k7lj5hywAbI/edit?usp=sharing" 
                   target="_blank" 
                   rel="noopener noreferrer" 
-                  className="text-xs font-bold bg-white text-[#002864] hover:bg-slate-200 px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
+                  className="text-xs font-bold bg-white text-brand hover:bg-slate-200 px-3 py-1.5 rounded-lg shadow-sm transition-colors flex items-center gap-1.5"
                 >
                   <span>🔗</span> 새 창에서 열기 (로그인)
                 </a>

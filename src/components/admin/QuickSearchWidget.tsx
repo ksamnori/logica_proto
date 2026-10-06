@@ -94,9 +94,9 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
       <div className="absolute right-[-10px] bottom-[-20px] text-8xl opacity-[0.03] pointer-events-none group-hover:scale-110 transition-transform duration-500">🔎</div>
       
       <div className="flex justify-between items-center mb-3 shrink-0 relative z-10">
-        <span className="text-sm font-extrabold text-slate-700 flex items-center gap-1.5">
+        <span className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
           <span className="text-base">🔎</span> 통합 원생 검색기
-          <span className="text-[9px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shadow-sm ml-1">Quick Search</span>
+          <span className="text-xs font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 shadow-sm ml-1">Quick Search</span>
         </span>
       </div>
       
@@ -128,17 +128,17 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
           <div className="h-full flex flex-col items-center justify-center text-slate-400 gap-2 opacity-80">
              <span className="text-3xl">⌨️</span>
              <p className="font-bold text-xs">상단의 검색창을 이용해 학생을 찾아보세요.</p>
-             <p className="text-[10px] text-slate-400">이름, 전화번호, 학교 등으로 검색할 수 있습니다.</p>
+             <p className="text-xs text-slate-400">이름, 전화번호, 학교 등으로 검색할 수 있습니다.</p>
           </div>
         ) : (
-          <table className="w-full text-left text-[11px] whitespace-nowrap">
+          <table className="w-full text-left text-xs whitespace-nowrap">
             <thead className="sticky top-0 bg-white border-b border-slate-200 z-10 shadow-sm">
               <tr>
-                <th className="py-2 px-3 font-extrabold text-slate-500 w-[80px]">이름</th>
-                <th className="py-2 px-3 font-extrabold text-slate-500">학교/학년</th>
-                <th className="py-2 px-3 font-extrabold text-slate-500">수강반</th>
-                <th className="py-2 px-3 font-extrabold text-slate-500">학부모 연락처</th>
-                <th className="py-2 px-3 font-extrabold text-slate-500 text-center">상태</th>
+                <th className="py-2 px-3 font-bold text-slate-500 w-[80px]">이름</th>
+                <th className="py-2 px-3 font-bold text-slate-500">학교/학년</th>
+                <th className="py-2 px-3 font-bold text-slate-500">수강반</th>
+                <th className="py-2 px-3 font-bold text-slate-500">학부모 연락처</th>
+                <th className="py-2 px-3 font-bold text-slate-500 text-center">상태</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 font-medium">
@@ -154,7 +154,7 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
 
                   return (
                     <tr key={s.student_id} onClick={() => router.push(`/student/${s.student_id}`)} className="cursor-pointer hover:bg-indigo-50/50 transition-colors group bg-white">
-                      <td className="py-2 px-3 font-bold text-[#002864] group-hover:text-indigo-600 group-hover:underline max-w-[100px] truncate">{s.name}</td>
+                      <td className="py-2 px-3 font-bold text-brand group-hover:text-indigo-600 group-hover:underline max-w-[100px] truncate">{s.name}</td>
                       <td className="py-2 px-3 text-slate-500 max-w-[120px] truncate" title={schoolGradeStr}>{schoolGradeStr}</td>
                       <td className="py-2 px-3 text-slate-600 max-w-[120px] truncate" title={cNames}>{cNames}</td>
                       <td className="py-2 px-3 text-slate-500 align-middle">
@@ -167,7 +167,7 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
                             {s.phone && !showStudentPhone[s.student_id] && (
                               <button 
                                 onClick={(e) => { e.stopPropagation(); setShowStudentPhone(p => ({...p, [s.student_id]: true})); }}
-                                className="text-[9px] bg-white border border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 px-1 py-0.5 rounded font-bold transition-colors shadow-sm flex items-center gap-0.5 leading-none mt-0.5"
+                                className="text-xs bg-white border border-slate-200 text-slate-400 hover:bg-slate-100 hover:text-indigo-600 px-1 py-0.5 rounded font-bold transition-colors shadow-sm flex items-center gap-0.5 leading-none mt-0.5"
                                 title="학생 연락처 보기"
                               >
                                 학생 <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
@@ -176,14 +176,14 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
                           </div>
                           {s.phone && showStudentPhone[s.student_id] && (
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[11px] font-bold text-indigo-600 tabular-nums tracking-tight">{s.phone}</span>
+                              <span className="text-xs font-bold text-indigo-600 tabular-nums tracking-tight">{s.phone}</span>
                               <span className="text-[8px] bg-indigo-50 text-indigo-500 border border-indigo-100 px-1 py-0.5 rounded shadow-sm">학생</span>
                             </div>
                           )}
                         </div>
                       </td>
                       <td className="py-2 px-3 text-center align-middle">
-                        <span className={`px-1.5 py-0.5 rounded text-[9px] font-bold shadow-sm border ${s.status==='재원'?'bg-emerald-50 text-emerald-600 border-emerald-100':s.status==='입학테스트'?'bg-amber-50 text-amber-600 border-amber-100':s.status==='휴원'?'bg-rose-50 text-rose-500 border-rose-100':'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                        <span className={`px-1.5 py-0.5 rounded text-xs font-bold shadow-sm border ${s.status==='재원'?'bg-emerald-50 text-emerald-600 border-emerald-100':s.status==='입학테스트'?'bg-amber-50 text-amber-600 border-amber-100':s.status==='휴원'?'bg-rose-50 text-rose-500 border-rose-100':'bg-slate-100 text-slate-500 border-slate-200'}`}>
                           {s.status === '입학테스트' ? '대기' : s.status}
                         </span>
                       </td>

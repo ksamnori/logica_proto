@@ -514,8 +514,8 @@ export default function NextGenMathPlatform() {
 
       <header className="absolute top-5 left-1/2 -translate-x-1/2 w-[96%] max-w-[1200px] h-16 bg-white/90 backdrop-blur-xl border border-slate-200 shadow-sm rounded-2xl z-30 flex items-center justify-between px-4">
         <div className="flex items-center gap-3">
-          <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-[#002864] to-[#3b82f6] shadow-md shrink-0">
-            <span className="font-black text-lg sm:text-xl text-white tracking-tighter">L</span>
+          <div className="flex items-center justify-center w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-brand to-[#3b82f6] shadow-md shrink-0">
+            <span className="font-bold text-lg sm:text-xl text-white tracking-tighter">L</span>
           </div>
           <div className="flex flex-col">
             <select 
@@ -526,28 +526,28 @@ export default function NextGenMathPlatform() {
               {pdfFiles.length === 0 && <option value="">교재 로딩 중...</option>}
               {pdfFiles.map((file) => <option key={file.id ?? file.name} value={file.name}>{file.name}</option>)}
             </select>
-            <div className="text-[10px] sm:text-[11px] font-bold text-blue-600 mt-0.5 ml-1">이웅행 학생</div>
+            <div className="text-xs sm:text-xs font-bold text-blue-600 mt-0.5 ml-1">이웅행 학생</div>
           </div>
         </div>
         
         <div className="flex-1 flex justify-center pl-2 sm:pl-0">
           {activeConceptVideo && (
-            <button onClick={() => setPlayingVideoUrl(getEmbedUrl(activeConceptVideo.video_url))} className="flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-white font-extrabold rounded-full shadow-md transition-all hover:scale-105 active:scale-95 border border-amber-300">
+            <button onClick={() => setPlayingVideoUrl(getEmbedUrl(activeConceptVideo.video_url))} className="flex items-center gap-1 sm:gap-1.5 px-3 sm:px-4 py-1.5 sm:py-2 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-500 hover:to-amber-600 text-white font-bold rounded-full shadow-md transition-all hover:scale-105 active:scale-95 border border-amber-300">
               <span className="text-sm sm:text-base">📺</span> <span className="text-xs sm:text-sm whitespace-nowrap">기본 이론 강의</span>
             </button>
           )}
         </div>
 
-        <div className="flex items-center gap-2 bg-slate-100/80 p-1.5 px-4 rounded-xl shadow-inner mr-2 hidden sm:block"><div className="text-sm font-extrabold text-slate-700">{currentPage} / {totalPages || '-'}</div></div>
+        <div className="flex items-center gap-2 bg-slate-100/80 p-1.5 px-4 rounded-xl shadow-inner mr-2 hidden sm:block"><div className="text-sm font-bold text-slate-700">{currentPage} / {totalPages || '-'}</div></div>
         <div className="flex items-center gap-1 sm:gap-2 bg-slate-100/80 p-1 rounded-xl shrink-0">
           <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.25))} className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-white shadow-sm text-slate-600 font-bold hover:bg-slate-50">-</button>
-          <div className="text-[10px] sm:text-xs font-bold text-slate-600 px-1 hidden sm:block">{Math.round(zoomLevel * 100)}%</div>
+          <div className="text-xs sm:text-xs font-bold text-slate-600 px-1 hidden sm:block">{Math.round(zoomLevel * 100)}%</div>
           <button onClick={() => setZoomLevel(z => Math.min(3.0, z + 0.25))} className="w-6 h-6 sm:w-8 sm:h-8 rounded-lg bg-white shadow-sm text-slate-600 font-bold hover:bg-slate-50">+</button>
         </div>
       </header>
 
-      <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="fixed left-2 sm:left-6 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-14 sm:h-14 bg-white/80 backdrop-blur-md border border-slate-200 shadow-lg rounded-full flex items-center justify-center text-slate-600 font-black text-xl sm:text-2xl z-40 hover:bg-white hover:scale-105 disabled:opacity-0 transition-all">‹</button>
-      <button onClick={() => setCurrentPage(p => Math.min(totalPages || 1, p + 1))} disabled={currentPage === totalPages || totalPages === null} className="fixed right-2 sm:right-6 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-14 sm:h-14 bg-white/80 backdrop-blur-md border border-slate-200 shadow-lg rounded-full flex items-center justify-center text-slate-600 font-black text-xl sm:text-2xl z-40 hover:bg-white hover:scale-105 disabled:opacity-0 transition-all">›</button>
+      <button onClick={() => setCurrentPage(p => Math.max(1, p - 1))} disabled={currentPage === 1} className="fixed left-2 sm:left-6 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-14 sm:h-14 bg-white/80 backdrop-blur-md border border-slate-200 shadow-lg rounded-full flex items-center justify-center text-slate-600 font-bold text-xl sm:text-2xl z-40 hover:bg-white hover:scale-105 disabled:opacity-0 transition-all">‹</button>
+      <button onClick={() => setCurrentPage(p => Math.min(totalPages || 1, p + 1))} disabled={currentPage === totalPages || totalPages === null} className="fixed right-2 sm:right-6 top-1/2 -translate-y-1/2 w-10 h-10 sm:w-14 sm:h-14 bg-white/80 backdrop-blur-md border border-slate-200 shadow-lg rounded-full flex items-center justify-center text-slate-600 font-bold text-xl sm:text-2xl z-40 hover:bg-white hover:scale-105 disabled:opacity-0 transition-all">›</button>
 
       <main 
         ref={pdfContainerRef} 
@@ -681,8 +681,8 @@ export default function NextGenMathPlatform() {
                       <div className="absolute -top-1.5 left-1/2 -translate-x-1/2 w-3 h-3 bg-slate-800/95 rotate-45 border-t border-l border-slate-700"></div>
                       
                       <div className="flex items-center justify-between w-full px-1 pb-1.5 mb-1.5 border-b border-slate-600/50">
-                        <span className="text-[10px] font-bold text-rose-400">🚨 오답 클리닉</span>
-                        <button onClick={(e) => { e.stopPropagation(); setClosedPopups(prev => new Set(prev).add(groupId)); }} className="text-slate-400 hover:text-white text-[10px] font-black px-1.5 py-0.5 rounded hover:bg-slate-700">✕ 닫기</button>
+                        <span className="text-xs font-bold text-rose-400">🚨 오답 클리닉</span>
+                        <button onClick={(e) => { e.stopPropagation(); setClosedPopups(prev => new Set(prev).add(groupId)); }} className="text-slate-400 hover:text-white text-xs font-bold px-1.5 py-0.5 rounded hover:bg-slate-700">✕ 닫기</button>
                       </div>
 
                       <div className="flex items-center gap-1.5 z-10 relative">
@@ -691,7 +691,7 @@ export default function NextGenMathPlatform() {
                             ▶️ 해설 보기
                           </button>
                         )}
-                        <button onClick={() => alert('taxonomy_id 기반 유사 문제 생성 기능 연결 예정!')} className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 rounded-lg text-xs text-white font-extrabold transition-all hover:scale-105 active:scale-95 shadow-md">
+                        <button onClick={() => alert('taxonomy_id 기반 유사 문제 생성 기능 연결 예정!')} className="flex items-center gap-1 px-3 py-1.5 bg-emerald-500 hover:bg-emerald-600 rounded-lg text-xs text-white font-bold transition-all hover:scale-105 active:scale-95 shadow-md">
                           🔄 연습 하기
                         </button>
                       </div>
@@ -737,13 +737,13 @@ export default function NextGenMathPlatform() {
               onClick={() => setIsScreenDrawingMode(!isScreenDrawingMode)} 
               className={`flex flex-col items-center justify-center w-12 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl border transition-colors shrink-0 shadow-sm ${isScreenDrawingMode ? 'bg-indigo-600 border-indigo-700 text-white animate-pulse' : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'}`}
             >
-              <span className="text-xl sm:text-2xl mb-0.5">🖍️</span><span className="text-[9px] sm:text-[10px] font-bold">{isScreenDrawingMode ? '필기 중' : '화면 필기'}</span>
+              <span className="text-xl sm:text-2xl mb-0.5">🖍️</span><span className="text-xs sm:text-xs font-bold">{isScreenDrawingMode ? '필기 중' : '화면 필기'}</span>
             </button>
             <button onClick={() => setIsScratchpadOpen(!isScratchpadOpen)} className={`flex flex-col items-center justify-center w-12 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl border transition-colors shrink-0 ${isScratchpadOpen ? 'bg-indigo-50 border-indigo-200 text-indigo-600' : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100'}`}>
-              <span className="text-xl sm:text-2xl mb-0.5">✍️</span><span className="text-[9px] sm:text-[10px] font-bold">{isScratchpadOpen ? '닫기' : '연습장'}</span>
+              <span className="text-xl sm:text-2xl mb-0.5">✍️</span><span className="text-xs sm:text-xs font-bold">{isScratchpadOpen ? '닫기' : '연습장'}</span>
             </button>
             <button onClick={handleResetAll} className="flex flex-col items-center justify-center w-12 h-14 sm:w-16 sm:h-16 rounded-xl sm:rounded-2xl border transition-colors shrink-0 bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:text-rose-500 hidden sm:flex">
-              <span className="text-xl sm:text-2xl mb-0.5">🗑️</span><span className="text-[9px] sm:text-[10px] font-bold">초기화</span>
+              <span className="text-xl sm:text-2xl mb-0.5">🗑️</span><span className="text-xs sm:text-xs font-bold">초기화</span>
             </button>
           </div>
           
@@ -751,14 +751,14 @@ export default function NextGenMathPlatform() {
             {['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '⌫'].map((key, i) => (
               <button 
                 key={i} onClick={() => handleKeypadClick(key)} 
-                className={`flex-1 min-w-[24px] max-w-[64px] h-14 sm:h-16 rounded-xl sm:rounded-2xl font-bold text-xl sm:text-3xl shadow-sm border-b-4 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center font-handwriting ${key === '⌫' ? 'bg-slate-100 border-slate-200 text-slate-500 font-sans' : 'bg-white border-slate-200 text-[#002864]'}`}
+                className={`flex-1 min-w-[24px] max-w-[64px] h-14 sm:h-16 rounded-xl sm:rounded-2xl font-bold text-xl sm:text-3xl shadow-sm border-b-4 active:border-b-0 active:translate-y-1 transition-all flex items-center justify-center font-handwriting ${key === '⌫' ? 'bg-slate-100 border-slate-200 text-slate-500 font-sans' : 'bg-white border-slate-200 text-brand'}`}
               >
                 {key}
               </button>
             ))}
           </div>
           
-          <button onClick={handleSubmit} className="w-24 sm:w-32 h-14 sm:h-16 border-b-4 active:border-b-0 active:translate-y-1 text-white font-extrabold text-sm sm:text-xl rounded-xl sm:rounded-2xl shadow-lg transition-all shrink-0 bg-gradient-to-t from-[#002864] to-[#00388c] border-[#001b44] hover:from-[#001b44] hover:to-[#002864]">
+          <button onClick={handleSubmit} className="w-24 sm:w-32 h-14 sm:h-16 border-b-4 active:border-b-0 active:translate-y-1 text-white font-bold text-sm sm:text-xl rounded-xl sm:rounded-2xl shadow-lg transition-all shrink-0 bg-gradient-to-t from-brand to-[#00388c] border-[#001b44] hover:from-[#001b44] hover:to-brand">
             채점하기
           </button>
         </div>

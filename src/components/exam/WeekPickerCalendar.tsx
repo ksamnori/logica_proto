@@ -37,15 +37,15 @@ export default function WeekPickerCalendar({ selectedDate, onSelect }: WeekPicke
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm select-none">
-      <div className="bg-[#002864] text-white px-3 py-2 flex justify-between items-center">
+      <div className="bg-brand text-white px-3 py-2 flex justify-between items-center">
         <button type="button" onClick={prevMonth} className="p-1 hover:bg-white/20 rounded transition-colors">◀</button>
-        <h4 className="font-extrabold text-[12px]">{year}년 {month + 1}월</h4>
+        <h4 className="font-bold text-[12px]">{year}년 {month + 1}월</h4>
         <button type="button" onClick={nextMonth} className="p-1 hover:bg-white/20 rounded transition-colors">▶</button>
       </div>
       <div className="p-2.5">
         <div className="grid grid-cols-7 gap-0.5 text-center mb-1">
           {DAY_LABELS.map((d, i) => (
-            <div key={d} className={`text-[9px] font-black ${i === 6 ? "text-rose-500" : i === 5 ? "text-blue-500" : "text-slate-400"}`}>{d}</div>
+            <div key={d} className={`text-xs font-bold ${i === 6 ? "text-rose-500" : i === 5 ? "text-blue-500" : "text-slate-400"}`}>{d}</div>
           ))}
         </div>
         <div className="grid grid-cols-7 gap-0.5">
@@ -65,7 +65,7 @@ export default function WeekPickerCalendar({ selectedDate, onSelect }: WeekPicke
                 type="button"
                 key={ymd}
                 onClick={() => onSelect(ymd)}
-                className={`h-8 flex items-center justify-center text-[11px] font-bold rounded transition-colors ${cls}`}
+                className={`h-8 flex items-center justify-center text-xs font-bold rounded transition-colors ${cls}`}
               >
                 {day}
               </button>

@@ -102,7 +102,7 @@ export default function SeatGrid({ data }: { data: any }) {
                             return (
                                 <div data-seat={seat} style={outerStyle}>
                                     <div style={innerStyle} className={`w-full h-full rounded-2xl flex items-center justify-center border-2 border-dashed transition-all shadow-sm ${isHighlighted ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300 bg-slate-100 opacity-60 hover:opacity-100'}`}>
-                                        <span className="text-[40px] font-black text-slate-300 pointer-events-none">{seat}</span>
+                                        <span className="text-[40px] font-bold text-slate-300 pointer-events-none">{seat}</span>
                                     </div>
                                 </div>
                             );
@@ -180,7 +180,7 @@ export default function SeatGrid({ data }: { data: any }) {
                 <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] text-center">
                         <div className="text-4xl mb-3">🚪</div>
-                        <h3 className="text-lg font-extrabold text-slate-800 mb-2">강제 퇴실 확인</h3>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">강제 퇴실 확인</h3>
                         <p className="text-sm text-slate-600 mb-6"><span className="font-bold text-rose-600">{activeStudents[forceCheckoutModal.seat!]?.name}</span> 학생을 퇴실시키겠습니까?</p>
                         <div className="flex gap-2">
                             <button onClick={() => setForceCheckoutModal({ isOpen: false, seat: null })} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg">취소</button>
@@ -224,7 +224,7 @@ export default function SeatGrid({ data }: { data: any }) {
                 <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 backdrop-blur-sm">
                     <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] text-center">
                         <div className="text-4xl mb-3">🚪</div>
-                        <h3 className="text-lg font-extrabold text-slate-800 mb-2">클리닉 종료 요청</h3>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">클리닉 종료 요청</h3>
                         <p className="text-sm text-slate-600 mb-6"><span className="font-bold text-rose-600">{activeStudents[endRequestModal.seat!]?.name}</span> 학생이 클리닉 종료를 요청했습니다. 승인하면 지금 이 시점이 이용시간 종료로 기록됩니다.</p>
                         <div className="flex gap-2">
                             <button onClick={() => resolveEndRequest(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg">거부 (5분 쿨타임)</button>
@@ -240,7 +240,7 @@ export default function SeatGrid({ data }: { data: any }) {
                     <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px]">
                         <div className="text-center mb-4">
                             <div className="text-4xl mb-2">🕒</div>
-                            <h3 className="text-lg font-extrabold text-slate-800">예약 시간 입력</h3>
+                            <h3 className="text-lg font-bold text-slate-800">예약 시간 입력</h3>
                             <p className="text-sm text-slate-500 mt-1"><span className="font-bold text-indigo-600">{reservationModal.student?.name}</span> 학생을 [{reservationModal.seat}] 자리에 예약합니다.</p>
                         </div>
                         <div className="flex items-center justify-center gap-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl py-4">
@@ -251,11 +251,11 @@ export default function SeatGrid({ data }: { data: any }) {
                                     onFocus={(e) => e.target.select()}
                                     onChange={(e) => typeHour(e.target.value)}
                                     onWheel={handleHourWheel}
-                                    className="w-14 text-center text-3xl font-black text-slate-800 font-lexend tabular-nums cursor-ns-resize bg-transparent border-none outline-none rounded-lg hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-colors"
+                                    className="w-14 text-center text-3xl font-bold text-slate-800 font-lexend tabular-nums cursor-ns-resize bg-transparent border-none outline-none rounded-lg hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-colors"
                                 />
                                 <button onClick={() => shiftHour(-1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▼</button>
                             </div>
-                            <div className="text-3xl font-black text-slate-300">:</div>
+                            <div className="text-3xl font-bold text-slate-300">:</div>
                             <div className="flex flex-col items-center gap-0.5">
                                 <button onClick={() => shiftMinute(1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▲</button>
                                 <input
@@ -263,7 +263,7 @@ export default function SeatGrid({ data }: { data: any }) {
                                     onFocus={(e) => e.target.select()}
                                     onChange={(e) => typeMinute(e.target.value)}
                                     onWheel={handleMinuteWheel}
-                                    className="w-14 text-center text-3xl font-black text-slate-800 font-lexend tabular-nums cursor-ns-resize bg-transparent border-none outline-none rounded-lg hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-colors"
+                                    className="w-14 text-center text-3xl font-bold text-slate-800 font-lexend tabular-nums cursor-ns-resize bg-transparent border-none outline-none rounded-lg hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-colors"
                                 />
                                 <button onClick={() => shiftMinute(-1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▼</button>
                             </div>

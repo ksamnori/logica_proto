@@ -740,7 +740,7 @@ export default function LessonPage() {
   }, [classes]);
 
   const renderPageBlocks = (bookPages: number[], pageStatuses: Record<number, PageStatus>, type: 'class'|'student') => {
-    if (!bookPages || bookPages.length === 0) return <span className="text-[10px] font-bold text-slate-400">교재 데이터 없음</span>;
+    if (!bookPages || bookPages.length === 0) return <span className="text-xs font-bold text-slate-400">교재 데이터 없음</span>;
     
     return (
       <div className="flex flex-wrap gap-[3px] items-center">
@@ -751,7 +751,7 @@ export default function LessonPage() {
           let title = `${p}p 대기`;
 
           if (status === 'done') {
-             bgColor = type === 'class' ? 'bg-[#002864]' : 'bg-emerald-500';
+             bgColor = type === 'class' ? 'bg-brand' : 'bg-emerald-500';
              title = `${p}p 완료`;
           } else if (status === 'homework') {
              bgColor = 'bg-amber-400';
@@ -812,7 +812,7 @@ export default function LessonPage() {
       
       <div className="flex justify-between items-end shrink-0">
         <div>
-          <h2 className="text-xl font-black text-slate-800 tracking-tight">📚 전체 교재 및 배정 관리</h2>
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">📚 전체 교재 및 배정 관리</h2>
           <p className="text-sm font-bold text-slate-400 mt-1">학원의 마스터 교재를 등록 및 관리하고, 각 수강반에 교재를 배정하여 진도율을 추적합니다.</p>
         </div>
       </div>
@@ -823,23 +823,23 @@ export default function LessonPage() {
         <div className="w-[340px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 relative z-10 shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden transition-all">
           <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0">
             <div className="flex justify-between items-center mb-3">
-              <h3 className="text-[13px] font-extrabold text-[#002864] flex items-center gap-1.5">
+              <h3 className="text-[13px] font-bold text-brand flex items-center gap-1.5">
                 <span>📚</span> 전체 마스터 교재
               </h3>
-              <button onClick={createDummyBook} className="bg-[#002864] hover:bg-blue-900 text-white px-2.5 py-1.5 rounded-md font-bold shadow-sm transition-colors flex items-center gap-1 text-[11px]">
+              <button onClick={createDummyBook} className="bg-brand hover:bg-blue-900 text-white px-2.5 py-1.5 rounded-md font-bold shadow-sm transition-colors flex items-center gap-1 text-xs">
                 <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
                 새 교재 등록
               </button>
             </div>
             <div className="flex gap-2">
-              <select value={filterType} onChange={e => setFilterType(e.target.value)} className="px-2 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-[#002864] bg-white shadow-sm shrink-0 w-24">
+              <select value={filterType} onChange={e => setFilterType(e.target.value)} className="px-2 py-2 border border-slate-300 rounded-lg text-xs font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-brand bg-white shadow-sm shrink-0 w-24">
                 <option value="all">전체 구분</option>
                 <option value="주교재">주교재</option>
                 <option value="부교재">부교재</option>
                 <option value="연산교재">연산교재</option>
                 <option value="워크북">워크북</option>
               </select>
-              <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="교재명 검색..." className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-[#002864] shadow-sm font-medium" />
+              <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="교재명 검색..." className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg text-xs focus:outline-none focus:ring-1 focus:ring-brand shadow-sm font-medium" />
             </div>
           </div>
           
@@ -854,11 +854,11 @@ export default function LessonPage() {
                 else if (b.book_type === "워크북") badgeClass = "bg-amber-100 text-amber-700 border-amber-200";
 
                 return (
-                  <div key={b.book_id} draggable onDragStart={(e) => handleDragStart(e, b.book_id)} className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-grab flex justify-between items-center group relative hover:border-[#002864]">
+                  <div key={b.book_id} draggable onDragStart={(e) => handleDragStart(e, b.book_id)} className="bg-white border border-slate-200 p-3.5 rounded-xl shadow-sm hover:shadow-md transition-shadow cursor-grab flex justify-between items-center group relative hover:border-brand">
                     <div className="flex-1 pr-3 pointer-events-none min-w-0">
-                      <span className={`${badgeClass} px-1.5 py-0.5 border rounded text-[9px] font-extrabold mb-1.5 inline-block shadow-sm`}>{b.book_type}</span>
-                      <div className="font-extrabold text-slate-800 text-[13px] leading-snug truncate">{b.title}</div>
-                      <div className="text-[10px] font-bold text-slate-400 mt-1">{b.target_sessions}회차 분량</div>
+                      <span className={`${badgeClass} px-1.5 py-0.5 border rounded text-xs font-bold mb-1.5 inline-block shadow-sm`}>{b.book_type}</span>
+                      <div className="font-bold text-slate-800 text-[13px] leading-snug truncate">{b.title}</div>
+                      <div className="text-xs font-bold text-slate-400 mt-1">{b.target_sessions}회차 분량</div>
                     </div>
                     <div className="flex flex-col gap-1.5 z-10 shrink-0 w-[44px]">
                       <button onClick={() => {
@@ -867,8 +867,8 @@ export default function LessonPage() {
                         let nextMonth = new Date(); nextMonth.setMonth(nextMonth.getMonth() + 2);
                         setAssignModalData({ book_id: b.book_id, status: "진행중", start_date: today, target_end_date: nextMonth.toISOString().split("T")[0] });
                         setIsAssignModalOpen(true);
-                      }} className="w-full py-1.5 bg-[#002864] text-white rounded text-[10px] font-bold transition-colors shadow-sm text-center hover:bg-blue-900">배정</button>
-                      <button onClick={() => { setEditModalData(b); setIsEditModalOpen(true); }} className="w-full py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-[9px] font-bold transition-colors shadow-sm border border-slate-200">수정</button>
+                      }} className="w-full py-1.5 bg-brand text-white rounded text-xs font-bold transition-colors shadow-sm text-center hover:bg-blue-900">배정</button>
+                      <button onClick={() => { setEditModalData(b); setIsEditModalOpen(true); }} className="w-full py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded text-xs font-bold transition-colors shadow-sm border border-slate-200">수정</button>
                     </div>
                   </div>
                 );
@@ -880,16 +880,16 @@ export default function LessonPage() {
         {/* 2열: 교재 배정 및 진도 현황 (중앙) */}
         <div className="flex-1 flex flex-col min-w-0 bg-white rounded-xl border border-slate-200 shadow-[0_8px_30px_rgba(0,0,0,0.04)] relative overflow-hidden transition-all">
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0 z-10">
-            <h2 className="text-[15px] font-black text-slate-800 flex items-center gap-2">
+            <h2 className="text-[15px] font-bold text-slate-800 flex items-center gap-2">
               {selectedClass ? (
-                <><span className="text-[#002864]">📖</span> <span className="text-[#002864]">{selectedClass.name}</span> 교재 배정 현황</>
+                <><span className="text-brand">📖</span> <span className="text-brand">{selectedClass.name}</span> 교재 배정 현황</>
               ) : (
                 <><span className="text-slate-400">📋</span> 전체 수강반 목록</>
               )}
             </h2>
             <div className="flex items-center h-8">
               {selectedClass && (
-                <button onClick={() => setSelectedClass(null)} className="h-full px-4 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg text-[11px] font-extrabold transition-colors shadow-sm whitespace-nowrap">
+                <button onClick={() => setSelectedClass(null)} className="h-full px-4 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg text-xs font-bold transition-colors shadow-sm whitespace-nowrap">
                   반 목록으로 ↻
                 </button>
               )}
@@ -911,7 +911,7 @@ export default function LessonPage() {
 
                   return (
                     <div key={g}>
-                      <h3 className="text-sm font-extrabold text-slate-800 mb-4 border-b-2 border-slate-200 pb-1.5 flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-slate-800 mb-4 border-b-2 border-slate-200 pb-1.5 flex items-center gap-2">
                         <span className="bg-slate-200 text-slate-700 px-2 py-0.5 rounded shadow-sm">{g}</span>
                       </h3>
                       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
@@ -930,28 +930,28 @@ export default function LessonPage() {
                                   const eTime = sc.end_time?.substring(0, 5) || "";
                                   const colorClass = sc.day_of_week === '토' ? 'text-blue-600' : (sc.day_of_week === '일' ? 'text-red-500' : 'text-slate-700');
                                   return (
-                                    <div key={idx} className="flex items-center gap-1.5 text-[10px]">
-                                      <span className={`font-extrabold ${colorClass} bg-white border border-slate-200 rounded px-1 w-5 text-center shadow-sm leading-none shrink-0`}>{sc.day_of_week}</span> 
-                                      <span className="text-[#002864] font-medium tracking-tighter whitespace-nowrap">{eTime ? `${sTime}~${eTime}` : sTime}</span>
+                                    <div key={idx} className="flex items-center gap-1.5 text-xs">
+                                      <span className={`font-bold ${colorClass} bg-white border border-slate-200 rounded px-1 w-5 text-center shadow-sm leading-none shrink-0`}>{sc.day_of_week}</span> 
+                                      <span className="text-brand font-medium tracking-tighter whitespace-nowrap">{eTime ? `${sTime}~${eTime}` : sTime}</span>
                                     </div>
                                   );
                                 })}
                               </div>
                             );
                           } else if (c.schedule_days) {
-                            scheduleHtml = <span className="font-bold text-slate-700 text-[10px] break-keep leading-tight">{c.schedule_days}</span>;
+                            scheduleHtml = <span className="font-bold text-slate-700 text-xs break-keep leading-tight">{c.schedule_days}</span>;
                           }
 
                           return (
                             <div key={c.class_id} onClick={() => setSelectedClass(c)} className="bg-white border border-slate-200 p-3.5 rounded-2xl shadow-sm hover:shadow-md hover:border-[#0ea5e9] hover:-translate-y-1 cursor-pointer transition-all group flex justify-between items-center gap-2">
                               <div className="flex flex-col h-full justify-center min-w-0 flex-1">
-                                <div className="font-extrabold text-[#002864] text-[14px] group-hover:text-[#0ea5e9] transition-colors truncate mb-1">{c.name}</div>
-                                <div className="text-[11px] font-bold text-slate-500 mb-2">
+                                <div className="font-bold text-brand text-[14px] group-hover:text-[#0ea5e9] transition-colors truncate mb-1">{c.name}</div>
+                                <div className="text-xs font-bold text-slate-500 mb-2">
                                   <div className="truncate">{instructorName} 선생님</div>
                                   <div className="truncate mt-0.5"><span className="text-sky-600">{studentCount}명</span></div>
                                 </div>
                                 <div className="mt-auto pt-1">
-                                  <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-slate-600 text-[10px] font-extrabold inline-block shadow-sm">{c.target_grade || "무학년"}</span>
+                                  <span className="bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 text-slate-600 text-xs font-bold inline-block shadow-sm">{c.target_grade || "무학년"}</span>
                                 </div>
                               </div>
                               <div className="shrink-0 bg-slate-50/70 p-2 rounded-xl border border-slate-100 flex items-center justify-center">
@@ -970,9 +970,9 @@ export default function LessonPage() {
                 
                 {assignedBooks.length > 0 && (
                   <div className="flex items-center gap-3 bg-white px-3 py-1.5 rounded-lg border border-slate-200 shadow-sm w-fit mb-2">
-                    <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-[#002864] inline-block shadow-sm"></span>반 완료</span>
-                    <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-emerald-500 inline-block shadow-sm"></span>개인 완료</span>
-                    <span className="text-[11px] font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-amber-400 inline-block shadow-sm"></span>과제 배부됨</span>
+                    <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-brand inline-block shadow-sm"></span>반 완료</span>
+                    <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-emerald-500 inline-block shadow-sm"></span>개인 완료</span>
+                    <span className="text-xs font-bold text-slate-600 flex items-center gap-1.5"><span className="w-2.5 h-3 rounded-sm bg-amber-400 inline-block shadow-sm"></span>과제 배부됨</span>
                   </div>
                 )}
 
@@ -1009,13 +1009,13 @@ export default function LessonPage() {
                           <div className="flex justify-between items-start mb-3 relative z-10">
                             <div>
                               <div className="flex items-center gap-2 mb-1.5">
-                                <span className={`${badgeClass} px-2 py-0.5 rounded text-[10px] font-extrabold border shadow-sm`}>{cb.status}</span>
-                                <span className={`${bookBadgeClass} px-1.5 py-0.5 rounded text-[10px] font-extrabold border shadow-sm`}>{tb.book_type}</span>
+                                <span className={`${badgeClass} px-2 py-0.5 rounded text-xs font-bold border shadow-sm`}>{cb.status}</span>
+                                <span className={`${bookBadgeClass} px-1.5 py-0.5 rounded text-xs font-bold border shadow-sm`}>{tb.book_type}</span>
                               </div>
-                              <div className="font-black text-slate-800 text-[16px] tracking-tight">{tb.title}</div>
+                              <div className="font-bold text-slate-800 text-[16px] tracking-tight">{tb.title}</div>
                             </div>
                             <div className="text-right">
-                              <div className="text-[11px] font-bold text-slate-500 bg-slate-50 px-2.5 py-1 rounded border border-slate-100 shadow-sm">일정: {sDate} ~ {eDate}</div>
+                              <div className="text-xs font-bold text-slate-500 bg-slate-50 px-2.5 py-1 rounded border border-slate-100 shadow-sm">일정: {sDate} ~ {eDate}</div>
                             </div>
                           </div>
                           
@@ -1026,28 +1026,28 @@ export default function LessonPage() {
                               title="클릭하여 상세 매트릭스 뷰 열기"
                             >
                                {renderPageBlocks(bookPages, classPageStatuses, 'class')}
-                               <span className="absolute -top-6 left-2 text-[10px] font-bold text-blue-500 bg-white border border-blue-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap z-20">매트릭스 뷰 🔍</span>
+                               <span className="absolute -top-6 left-2 text-xs font-bold text-blue-500 bg-white border border-blue-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap z-20">매트릭스 뷰 🔍</span>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <div className="text-[16px] font-black text-[#002864] w-12 text-right tracking-tighter">{percent}%</div>
-                              <div className="text-[11px] font-bold text-slate-400 w-16 text-right tabular-nums">{classDonePagesCount} / {maxPageCount}p</div>
+                              <div className="text-[16px] font-bold text-brand w-12 text-right tracking-tighter">{percent}%</div>
+                              <div className="text-xs font-bold text-slate-400 w-16 text-right tabular-nums">{classDonePagesCount} / {maxPageCount}p</div>
                             </div>
                           </div>
 
                           {individualStats && individualStats.length > 0 && (
                             <div className="mt-5 bg-slate-50 rounded-xl border border-slate-200 overflow-hidden shadow-sm relative z-10">
-                              <div className="text-[11px] font-extrabold text-slate-600 p-2.5 px-3 flex items-center justify-between border-b border-slate-200 bg-white">
+                              <div className="text-xs font-bold text-slate-600 p-2.5 px-3 flex items-center justify-between border-b border-slate-200 bg-white">
                                 <span className="flex items-center gap-1.5"><span>👨‍🎓</span> 학생별 상세 진도율 (전체 보기)</span>
-                                <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">실시간 연동</span>
+                                <span className="text-xs font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200">실시간 연동</span>
                               </div>
                               <div className="p-3 pt-1 flex flex-col gap-2 bg-slate-50/50">
                                 {individualStats.map((stat: IndividualStat) => {
                                   const doneCnt = stat.donePagesCount;
                                   return (
                                     <div key={stat.student_id} className="flex items-center gap-3 bg-white p-2.5 rounded-lg border border-slate-200 shadow-sm hover:border-blue-200 transition-colors">
-                                      <span className="w-14 text-[12px] font-black text-slate-700 truncate" title={stat.startPage !== undefined ? `${stat.startPage}p부터 합류 (이전 페이지는 진도율 제외)` : undefined}>
+                                      <span className="w-14 text-[12px] font-bold text-slate-700 truncate" title={stat.startPage !== undefined ? `${stat.startPage}p부터 합류 (이전 페이지는 진도율 제외)` : undefined}>
                                         {stat.name}
-                                        {stat.startPage !== undefined && <span className="block text-[9px] font-bold text-amber-600 leading-tight">{stat.startPage}p~</span>}
+                                        {stat.startPage !== undefined && <span className="block text-xs font-bold text-amber-600 leading-tight">{stat.startPage}p~</span>}
                                       </span>
                                       <div 
                                         className="flex-1 flex overflow-hidden cursor-pointer hover:opacity-70 transition-opacity" 
@@ -1057,8 +1057,8 @@ export default function LessonPage() {
                                         {renderPageBlocks(bookPages, stat.pageStatuses, 'student')}
                                       </div>
                                       <div className="w-16 flex justify-end items-center gap-1.5 shrink-0">
-                                        <span className="text-[11px] font-black text-slate-700 tabular-nums">{stat.percent}%</span>
-                                        <span className="text-[10px] font-bold text-slate-400 w-8 text-right tabular-nums" title={`완료 ${doneCnt}p / 대상 ${stat.countedPagesCount}p`}>{doneCnt}p</span>
+                                        <span className="text-xs font-bold text-slate-700 tabular-nums">{stat.percent}%</span>
+                                        <span className="text-xs font-bold text-slate-400 w-8 text-right tabular-nums" title={`완료 ${doneCnt}p / 대상 ${stat.countedPagesCount}p`}>{doneCnt}p</span>
                                       </div>
                                     </div>
                                   );
@@ -1068,10 +1068,10 @@ export default function LessonPage() {
                           )}
                           
                           <div className="mt-4 pt-4 border-t border-slate-100 flex gap-3 relative z-10">
-                            <button onClick={() => window.location.href = `/progress?class_id=${selectedClass.class_id}&book_id=${cb.book_id}`} className="px-4 py-2 bg-[#002864] text-white hover:bg-blue-900 rounded-lg font-black text-xs shadow-sm transition-colors border flex items-center gap-1.5">
+                            <button onClick={() => window.location.href = `/progress?class_id=${selectedClass.class_id}&book_id=${cb.book_id}`} className="px-4 py-2 bg-brand text-white hover:bg-blue-900 rounded-lg font-bold text-xs shadow-sm transition-colors border flex items-center gap-1.5">
                               진도/과제 관리로 이동 <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg>
                             </button>
-                            <button onClick={() => deleteClassTextbook(cb.class_textbook_id)} className="ml-auto text-[11px] font-bold text-rose-400 hover:text-rose-600 underline">배정 취소</button>
+                            <button onClick={() => deleteClassTextbook(cb.class_textbook_id)} className="ml-auto text-xs font-bold text-rose-400 hover:text-rose-600 underline">배정 취소</button>
                           </div>
                         </div>
                       );
@@ -1091,37 +1091,37 @@ export default function LessonPage() {
         {selectedClass && (
           <div className="w-[300px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 shadow-[0_8px_30px_rgba(0,0,0,0.04)] overflow-hidden z-10 animate-in fade-in slide-in-from-right-4 duration-300">
              <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0">
-               <h3 className="text-[13px] font-extrabold text-[#002864] flex items-center gap-1.5">
+               <h3 className="text-[13px] font-bold text-brand flex items-center gap-1.5">
                  <span>💡</span> 클래스 인사이트
                </h3>
-               <p className="text-[10px] font-bold text-slate-400 mt-1">선택된 수강반의 핵심 정보를 요약합니다.</p>
+               <p className="text-xs font-bold text-slate-400 mt-1">선택된 수강반의 핵심 정보를 요약합니다.</p>
              </div>
              
              <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-5 bg-slate-50/50">
                
                <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2.5">
                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                   <span className="text-[11px] font-bold text-slate-500">담당 강사</span>
-                   <span className="text-xs font-black text-slate-800">{selectedClass.instructor?.name || '미배정'}</span>
+                   <span className="text-xs font-bold text-slate-500">담당 강사</span>
+                   <span className="text-xs font-bold text-slate-800">{selectedClass.instructor?.name || '미배정'}</span>
                  </div>
                  <div className="flex justify-between items-center border-b border-slate-100 pb-2">
-                   <span className="text-[11px] font-bold text-slate-500">총 수강 인원</span>
-                   <span className="text-xs font-black text-sky-600">{currentClassStudentCount}명</span>
+                   <span className="text-xs font-bold text-slate-500">총 수강 인원</span>
+                   <span className="text-xs font-bold text-sky-600">{currentClassStudentCount}명</span>
                  </div>
                  <div className="flex justify-between items-center">
-                   <span className="text-[11px] font-bold text-slate-500">대상 학년</span>
-                   <span className="text-xs font-black text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">{selectedClass.target_grade || '무학년'}</span>
+                   <span className="text-xs font-bold text-slate-500">대상 학년</span>
+                   <span className="text-xs font-bold text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded">{selectedClass.target_grade || '무학년'}</span>
                  </div>
                </div>
 
                <div className="flex flex-col gap-2">
-                 <span className="text-[11px] font-extrabold text-rose-600 flex items-center gap-1">
+                 <span className="text-xs font-bold text-rose-600 flex items-center gap-1">
                    <span>🚨</span> 요주의 학생 알림
                  </span>
                  <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl flex flex-col gap-2 shadow-sm">
                    <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-rose-100" title="이 반에서 최근 7일 안에 마감된 과제 중 아직 제출(완료)하지 않은 학생 수">
-                     <span className="text-[10px] font-bold text-slate-600">최근 7일 과제 미제출</span>
-                     <span className="text-[11px] font-black text-rose-600">{isHwAlertLoading ? '...' : `${hwMissingAlerts.length}명`}</span>
+                     <span className="text-xs font-bold text-slate-600">최근 7일 과제 미제출</span>
+                     <span className="text-xs font-bold text-rose-600">{isHwAlertLoading ? '...' : `${hwMissingAlerts.length}명`}</span>
                    </div>
                    {!isHwAlertLoading && hwMissingAlerts.slice(0, 5).map(item => (
                      <button
@@ -1130,17 +1130,17 @@ export default function LessonPage() {
                        className="flex justify-between items-center bg-white p-2 rounded-lg border border-rose-100 hover:border-rose-300 transition-colors text-left"
                        title="학생 상세 화면으로 이동"
                      >
-                       <span className="text-[10px] font-bold text-slate-600 truncate">{item.name} 학생</span>
-                       <span className="text-[10px] font-black text-rose-600">미제출 {item.count}건</span>
+                       <span className="text-xs font-bold text-slate-600 truncate">{item.name} 학생</span>
+                       <span className="text-xs font-bold text-rose-600">미제출 {item.count}건</span>
                      </button>
                    ))}
                    {!isHwAlertLoading && hwMissingAlerts.length > 5 && (
-                     <div className="text-[9px] font-bold text-rose-400 text-right">외 {hwMissingAlerts.length - 5}명</div>
+                     <div className="text-xs font-bold text-rose-400 text-right">외 {hwMissingAlerts.length - 5}명</div>
                    )}
                    
                    {attendanceAlerts.length === 0 ? (
                       <div className="flex justify-center items-center bg-white p-2 rounded-lg border border-rose-100">
-                        <span className="text-[10px] font-bold text-slate-400">이번 주 지각/결석 없음</span>
+                        <span className="text-xs font-bold text-slate-400">이번 주 지각/결석 없음</span>
                       </div>
                    ) : (
                      attendanceAlerts.map((alert, idx) => {
@@ -1154,8 +1154,8 @@ export default function LessonPage() {
                        }
                        return (
                          <div key={idx} className="flex justify-between items-center bg-white p-2 rounded-lg border border-rose-100">
-                           <span className="text-[10px] font-bold text-slate-600 truncate">{stuName} 학생</span>
-                           <span className={`text-[10px] font-black ${alert.status === '결석' ? 'text-rose-600' : 'text-amber-600'}`}>{dateStr} {alert.status}</span>
+                           <span className="text-xs font-bold text-slate-600 truncate">{stuName} 학생</span>
+                           <span className={`text-xs font-bold ${alert.status === '결석' ? 'text-rose-600' : 'text-amber-600'}`}>{dateStr} {alert.status}</span>
                          </div>
                        );
                      })
@@ -1164,25 +1164,25 @@ export default function LessonPage() {
                </div>
 
                <div className="flex flex-col gap-2">
-                 <span className="text-[11px] font-extrabold text-slate-700 flex items-center gap-1">
+                 <span className="text-xs font-bold text-slate-700 flex items-center gap-1">
                    <span>⚡</span> 빠른 실행 액션
                  </span>
                  <div className="flex flex-col gap-1.5">
                    <button
                      onClick={() => router.push(`/home?classId=${selectedClass.class_id}&openNotice=1`)}
                      title="홈 화면의 '알림/과제 전송' 창을 이 반으로 엽니다."
-                     className="w-full bg-white border border-slate-200 hover:border-[#fef01b] hover:bg-[#fef01b]/10 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
+                     className="w-full bg-white border border-slate-200 hover:border-[#fef01b] hover:bg-[#fef01b]/10 text-slate-700 p-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm text-left flex items-center justify-between group">
                      <span>💬 학부모 전체 알림톡 발송</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>
                    <button
                      onClick={() => router.push(`/makeup?new=1&classId=${selectedClass.class_id}`)}
                      title="보강 관리에서 이 반 학생의 새 보강 일정을 등록합니다."
-                     className="w-full bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
+                     className="w-full bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-700 p-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm text-left flex items-center justify-between group">
                      <span>🏥 클리닉(보충) 배정</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>
-                   <button className="w-full bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
+                   <button className="w-full bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-700 p-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm text-left flex items-center justify-between group">
                      <span>📊 반 전체 성취도 리포트 인쇄</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>

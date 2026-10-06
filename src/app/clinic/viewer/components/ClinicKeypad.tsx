@@ -53,7 +53,7 @@ export function ClinicKeypad({
     }
     return (
       // 🌟 잘림 현상 방지를 위해 버튼 높이를 h-10 -> h-9 (md:h-11) 로 미세하게 축소
-      <button key={k} onClick={() => pressKeypad(k)} className={`h-9 md:h-11 rounded-lg font-black transition-colors shadow-sm border border-slate-200 ${btnClass}`}>
+      <button key={k} onClick={() => pressKeypad(k)} className={`h-9 md:h-11 rounded-lg font-bold transition-colors shadow-sm border border-slate-200 ${btnClass}`}>
         {label}
       </button>
     );
@@ -66,17 +66,17 @@ export function ClinicKeypad({
 
   return (
     <div className="w-full flex flex-col gap-2 h-full">
-      <div className="w-full min-h-[3.5rem] text-3xl font-extrabold text-right px-4 py-3 border-[3px] border-slate-200 rounded-xl bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
+      <div className="w-full min-h-[3.5rem] text-3xl font-bold text-right px-4 py-3 border-[3px] border-slate-200 rounded-xl bg-slate-50 text-slate-800 flex items-center justify-end overflow-x-auto whitespace-pre cursor-text">
         {kpVal ? (
           <>
             <span onClick={() => moveCursor(0)} className="inline-block w-2 self-stretch" />
             {kpVal.split('').map((ch, i) => (
               <React.Fragment key={i}>
-                {i === kpPos && <span className="inline-block w-[3px] h-6 bg-[#002864] mx-0.5 animate-pulse" />}
+                {i === kpPos && <span className="inline-block w-[3px] h-6 bg-brand mx-0.5 animate-pulse" />}
                 <span onClick={() => moveCursor(i + 1)} className="hover:bg-blue-100 rounded-md px-0.5">{ch}</span>
               </React.Fragment>
             ))}
-            {kpPos === kpVal.length && <span className="inline-block w-[3px] h-6 bg-[#002864] mx-0.5 animate-pulse" />}
+            {kpPos === kpVal.length && <span className="inline-block w-[3px] h-6 bg-brand mx-0.5 animate-pulse" />}
           </>
         ) : <span className="text-slate-300 font-normal">정답을 입력하세요</span>}
       </div>

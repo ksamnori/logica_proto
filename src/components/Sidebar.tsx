@@ -12,6 +12,10 @@ export default function Sidebar() {
 
   const [strictSuperAdmin, setStrictSuperAdmin] = useState(false);
   const [isPrincipal, setIsPrincipal] = useState(false);
+  // 🌟 메뉴 분류 표시용 직급 판정 (메뉴 접근 권한과는 별개)
+  const [isOwner, setIsOwner] = useState(false);       // 최고관리자 또는 원장 (부원장 제외)
+  const [isDeskStaff, setIsDeskStaff] = useState(false); // 최고관리자·원장·부원장·실장
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
 
   const [tenantName, setTenantName] = useState<string>("로딩중...");
   const [displayRole, setDisplayRole] = useState<string>("TEACHER");
@@ -31,6 +35,22 @@ export default function Sidebar() {
 
     setStrictSuperAdmin(isSA);
     setIsPrincipal(isPrin);
+
+    // "부원장"에도 "원장"이 들어 있으므로 원장은 부원장을 빼고 판정
+    const posIsOwner = pos.includes('원장') && !pos.includes('부원장');
+    const owner = isSA || (!isTeacherMode && (role === 'ADMIN' || posIsOwner));
+    const desk = owner || (!isTeacherMode && (['VICE_ADMIN', 'MANAGER'].includes(role) || pos.includes('부원장') || pos.includes('실장')));
+    setIsOwner(owner);
+    setIsDeskStaff(desk);
+
+    // 분류 접힘 상태: 기본값 + 이 컴퓨터에 저장된 선생님 선택
+    const defaults: Record<string, boolean> = {
+      academy: true, lesson: true, comm: false, exam: true,
+      desk: desk, ta: role === 'TA', factory: false, owner: true,
+    };
+    let saved: Record<string, boolean> = {};
+    try { saved = JSON.parse(localStorage.getItem('logica_sidebar_sections') || '{}'); } catch { saved = {}; }
+    setOpenSections({ ...defaults, ...saved });
 
     const fetchData = async () => {
       const tId = localStorage.getItem('logica_tenant_id');
@@ -116,49 +136,49 @@ export default function Sidebar() {
       return (
         <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`} title="접근 권한이 없습니다 (권한 관리 페이지에서 허용 필요)">
           <span className="text-[13px] font-bold truncate w-full text-center">{label}</span>
-          {desc && <span className="text-[10px] font-medium mt-0.5">{desc}</span>}
-          <span className="absolute top-1 right-2 text-[8px] font-black text-slate-300">🔒</span>
+          {desc && <span className="text-xs font-medium mt-0.5">{desc}</span>}
+          <span className="absolute top-1 right-2 text-[8px] font-bold text-slate-300">🔒</span>
         </div>
       );
     }
 
-    let customBg = active ? 'bg-blue-50 border-blue-200 text-[#002864] shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
-    let customLabel = active ? 'font-black' : 'font-bold';
+    let customBg = active ? 'bg-blue-50 border-blue-200 text-brand shadow-[0_2px_8px_rgba(0,40,100,0.08)]' : 'bg-white border-slate-200 hover:bg-slate-50 hover:border-slate-300 text-slate-600 hover:text-slate-800 hover:shadow-sm';
+    let customLabel = active ? 'font-bold' : 'font-bold';
     let customDesc = active ? 'text-blue-500 font-bold' : 'text-slate-400 font-medium';
 
     if (path === '/home') {
-      customBg = active ? 'bg-[#002864] border-[#001f4d] text-white shadow-md' : 'bg-blue-50/50 border-blue-100 text-[#002864] hover:bg-blue-100 hover:border-blue-200 shadow-sm';
-      customLabel = 'font-black';
+      customBg = active ? 'bg-brand border-[#001f4d] text-white shadow-md' : 'bg-blue-50/50 border-blue-100 text-brand hover:bg-blue-100 hover:border-blue-200 shadow-sm';
+      customLabel = 'font-bold';
       customDesc = active ? 'text-blue-200 font-medium' : 'text-blue-400 font-medium';
     } else if (path === '/learning') { 
       customBg = active ? 'bg-emerald-500 border-emerald-600 text-white shadow-md' : 'bg-emerald-50/50 border-emerald-100 text-emerald-700 hover:bg-emerald-100 hover:border-emerald-200 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
       customDesc = active ? 'text-emerald-100 font-medium' : 'text-emerald-500 font-medium';
     } else if (path === '/class-report') {
       customBg = active ? 'bg-teal-500 border-teal-600 text-white shadow-md' : 'bg-teal-50/50 border-teal-100 text-teal-700 hover:bg-teal-100 hover:border-teal-200 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
       customDesc = active ? 'text-teal-100 font-medium' : 'text-teal-500 font-medium';
     } else if (path === '/exam-list') {
       customBg = active ? 'bg-violet-500 border-violet-600 text-white shadow-md' : 'bg-violet-50/50 border-violet-100 text-violet-700 hover:bg-violet-100 hover:border-violet-200 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
       customDesc = active ? 'text-violet-100 font-medium' : 'text-violet-400 font-medium';
     } else if (path === '/minutes') {
       customBg = active ? 'bg-sky-500 border-sky-600 text-white shadow-md' : 'bg-sky-50/50 border-sky-100 text-sky-700 hover:bg-sky-100 hover:border-sky-200 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
       customDesc = active ? 'text-sky-100 font-medium' : 'text-sky-500 font-medium';
     } else if (path === '/admin-dashboard') {
       customBg = active ? 'bg-orange-500 border-orange-600 text-white shadow-md' : 'bg-orange-50/50 border-orange-100 text-orange-700 hover:bg-orange-100 hover:border-orange-200 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
       customDesc = active ? 'text-orange-100 font-medium' : 'text-orange-400 font-medium';
     } else if (path === '/consultation') {
       customBg = active ? 'bg-pink-500 border-pink-600 text-white shadow-md' : 'bg-pink-50/50 border-pink-100 text-pink-700 hover:bg-pink-100 hover:border-pink-200 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
     } else if (path === '/supervisor') {
       customBg = active ? 'bg-blue-600 border-blue-700 text-white shadow-md' : 'bg-blue-50 border-blue-200 text-blue-700 hover:bg-blue-100 hover:border-blue-300 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
     } else if (path === '/academy-info') {
       customBg = active ? 'bg-[#1f2d26] border-[#1f2d26] text-white shadow-md' : 'bg-[#2e4036] border-[#2e4036] text-white hover:bg-[#24332b] hover:border-[#24332b] shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
       customDesc = 'text-emerald-200 font-medium';
     } else if (path === '/permission') {
       customBg = active ? 'bg-rose-100 border-rose-300 text-rose-800 shadow-md' : 'bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100 hover:border-rose-300 hover:text-rose-700 shadow-sm';
@@ -166,28 +186,66 @@ export default function Sidebar() {
       customBg = active
         ? 'bg-amber-50 border-amber-200 text-amber-800 shadow-sm'
         : 'bg-white border-slate-200 text-slate-600 hover:bg-amber-50/50 hover:border-amber-200 hover:text-amber-700 shadow-sm';
-      customLabel = 'font-black';
+      customLabel = 'font-bold';
     }
 
     return (
       <Link href={linkTo || path} className={`${baseClass} ${customBg}`}>
         <span className={`text-[13px] truncate w-full text-center tracking-tight ${customLabel}`}>{label}</span>
-        {desc && <span className={`text-[10px] truncate w-full text-center tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
+        {desc && <span className={`text-xs truncate w-full text-center tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
       </Link>
     );
   };
 
-  const MenuSection = ({ title, icon, children }: { title: string, icon: string, children: React.ReactNode }) => (
-    <div className="mb-6">
-      <div className="px-4 flex items-center gap-1.5 mb-3">
-        <span className="text-[13px]">{icon}</span>
-        <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">{title}</p>
+  // 분류별 메뉴 경로 (지금 보는 화면이 들어 있는 분류는 자동으로 펼침)
+  const SECTION_PATHS: Record<string, string[]> = {
+    academy: ['/home', '/student', '/class'],
+    lesson: ['/lesson', '/progress', '/learning', '/class-report', '/makeup'],
+    comm: ['/minutes', '/task', '/supply', '/cs'],
+    exam: ['/exam-list', '/admission'],
+    desk: ['/admin-dashboard', '/consultation', '/supervisor', '/billing', '/unpaid', '/shop-admin', '/print-center'],
+    ta: ['/clinic/ta'],
+    factory: ['/factory-dashboard', '/pdf-parser', '/taxonomy-editor', '/twin-manager', '/mapper', '/competency-mapper', '/book-upload', '/qdb-upload'],
+    owner: ['/seat-layout-editor', '/clinic-pad-registry', '/permission', '/instructor', '/academy-info'],
+  };
+  const sectionHasCurrent = (id: string) => (SECTION_PATHS[id] || []).some(p => pathname === p || pathname.startsWith(p + "/"));
+
+  const toggleSection = (id: string) => {
+    setOpenSections(prev => {
+      const next = { ...prev, [id]: !isSectionOpen(id, prev) };
+      try {
+        const saved = JSON.parse(localStorage.getItem('logica_sidebar_sections') || '{}');
+        localStorage.setItem('logica_sidebar_sections', JSON.stringify({ ...saved, [id]: next[id] }));
+      } catch { /* 저장 실패는 무시 */ }
+      return next;
+    });
+  };
+  const isSectionOpen = (id: string, state = openSections) => sectionHasCurrent(id) || !!state[id];
+
+  const renderSection = (id: string, title: string, count: number, children: React.ReactNode, tone: "default" | "factory" = "default") => {
+    const open = isSectionOpen(id);
+    const forced = sectionHasCurrent(id);
+    return (
+      <div className={`mb-4 ${tone === "factory" ? "mx-3 rounded-xl bg-amber-50/40 border border-amber-100" : ""}`}>
+        <button
+          type="button"
+          onClick={() => !forced && toggleSection(id)}
+          aria-expanded={open}
+          title={forced ? "지금 보고 있는 화면이 이 분류에 있어서 펼쳐져 있습니다" : open ? "접기" : "펼치기"}
+          className={`w-full flex items-center gap-2 py-2 text-left rounded-lg transition-colors ${tone === "factory" ? "px-3" : "px-4"} ${forced ? "cursor-default" : "hover:bg-slate-50"}`}
+        >
+          <span className="text-xs font-bold text-slate-500 tracking-wide">{title}</span>
+          {!open && <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-1.5 leading-5">{count}</span>}
+          <svg className={`ml-auto w-4 h-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+        </button>
+        {open && (
+          <div className={`grid grid-cols-2 gap-2 mt-1 ${tone === "factory" ? "px-2 pb-2" : "px-3"}`}>
+            {children}
+          </div>
+        )}
       </div>
-      <div className="grid grid-cols-2 gap-2 px-3 relative">
-        {children}
-      </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <aside className="print:hidden w-[280px] bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20 h-full relative">
@@ -196,10 +254,10 @@ export default function Sidebar() {
         <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-9 object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
 
         <div className="flex flex-col border-l-2 border-slate-200 pl-3.5 flex-1 min-w-0 justify-center h-12">
-          <span className="text-[15px] font-black text-slate-800 truncate leading-tight mb-0.5">
+          <span className="text-[15px] font-bold text-slate-800 truncate leading-tight mb-0.5">
             {tenantName}
           </span>
-          <span className="text-[10px] font-bold text-slate-400 uppercase leading-none tracking-wider whitespace-nowrap">
+          <span className="text-xs font-bold text-slate-400 uppercase leading-none tracking-wider whitespace-nowrap">
             {strictSuperAdmin ? "Super Admin" : (displayRole === 'GUEST' ? "테스트(읽기전용)" : displayRole.replace('_', ' '))}
           </span>
         </div>
@@ -207,96 +265,65 @@ export default function Sidebar() {
 
       <nav className="flex-1 py-5 overflow-y-auto custom-scroll">
 
-        <MenuSection title="학원 관리" icon="🏫">
+        {renderSection("academy", "학원 관리", 3, <>
           <MenuItem path="/home" label="홈 (대시보드)" full />
           <MenuItem path="/student" label="학생 관리" />
           <MenuItem path="/class" label="반 관리" />
-        </MenuSection>
+        </>)}
 
-        <MenuSection title="수업 관리" icon="👨‍🏫">
+        {renderSection("lesson", "수업 관리", 5, <>
           <MenuItem path="/lesson" label="교재 관리" />
           <MenuItem path="/progress" label="진도 관리" />
           <MenuItem path="/learning" label="학습 관리" desc="(시험·과제·미완료·오답·유사)" full />
           <MenuItem path="/class-report" label="학습 결과" />
           <MenuItem path="/makeup" label="보강 관리" />
-        </MenuSection>
+        </>)}
 
-        <MenuSection title="소통 및 업무 관리" icon="💬">
+        {renderSection("comm", "소통 및 업무 관리", 4, <>
           <MenuItem path="/minutes" label="AI 회의록" />
           <MenuItem path="/task" label="업무 공유" />
           <MenuItem path="/supply" label="비품 신청" />
           <MenuItem path="/cs" label="학부모 요청/CS" />
-        </MenuSection>
+        </>)}
 
-        <MenuSection title="출제 및 배포" icon="🖨️">
+        {renderSection("exam", "출제 및 배포", 2, <>
           <MenuItem path="/exam-list" label="문제지 관리" />
           <MenuItem path="/admission" label="진단평가 관리" />
-        </MenuSection>
+        </>)}
 
-        <div className="mb-6">
-          <div className="px-4 flex items-center gap-1.5 mb-3">
-            <span className="text-[13px]">🏢</span>
-            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">데스크 전용</p>
-            <span className="text-[9px] bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded-md font-black border border-rose-200 ml-1">원장·실장</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 px-3">
-            <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
-            <MenuItem path="/consultation" label="정기 상담 관리" />
-            <MenuItem path="/supervisor" label="클리닉 관제탑" />
-            <MenuItem path="/billing" label="수납/청구" />
-            <MenuItem path="/unpaid" label="미납 관리" />
-            <MenuItem path="/shop-admin" label="상점 관리" />
-            <MenuItem path="/print-center" label="서류 출력" />
-          </div>
-        </div>
+        {renderSection("desk", "데스크 전용", 7, <>
+          <MenuItem path="/admin-dashboard" label="운영 대시보드" full />
+          <MenuItem path="/consultation" label="정기 상담 관리" />
+          <MenuItem path="/supervisor" label="클리닉 관제탑" />
+          <MenuItem path="/billing" label="수납/청구" />
+          <MenuItem path="/unpaid" label="미납 관리" />
+          <MenuItem path="/shop-admin" label="상점 관리" />
+          <MenuItem path="/print-center" label="서류 출력" />
+        </>)}
 
-        <div className="mb-6">
-          <div className="px-4 flex items-center gap-1.5 mb-3">
-            <span className="text-[13px]">🧑‍🏫</span>
-            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">조교(TA) 전용</p>
-            <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded-md font-black border border-slate-200 ml-1">조교</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 px-3">
-            <MenuItem path="/ta-tools" linkTo="/clinic/ta/pad" label="조교 전용 페이지로 이동" full />
-          </div>
-        </div>
+        {renderSection("ta", "조교(TA) 전용", 1, <>
+          <MenuItem path="/ta-tools" linkTo="/clinic/ta/pad" label="조교 전용 페이지로 이동" full />
+        </>)}
 
-        <div className="mx-3 mb-6 bg-slate-50/80 rounded-xl pt-4 pb-3 border border-slate-200 shadow-sm relative overflow-hidden group">
-          <div className="absolute top-0 left-0 w-full h-1.5 bg-[repeating-linear-gradient(45deg,#fcd34d,#fcd34d_8px,#475569_8px,#475569_16px)] opacity-50"></div>
+        {renderSection("factory", "LOGICA Factory", 8, <>
+          <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
+          <MenuItem path="/pdf-parser" label="PDF 문항 추출기" full />
+          <MenuItem path="/taxonomy-editor" label="문제 교정 및 쌍둥이/유사 생성" full />
+          <MenuItem path="/twin-manager" label="쌍둥이 문제 팩토리 (수동 배정)" full />
+          <MenuItem path="/mapper" label="교재 수동 연결 도구" full />
+          <MenuItem path="/competency-mapper" label="교과 역량 매핑" full />
+          <MenuItem path="/book-upload" label="교재 DB 업로드" />
+          <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
+        </>, "factory")}
 
-          <div className="px-3 flex items-center gap-2 mb-3 mt-1">
-            <span className="text-[14px] grayscale group-hover:grayscale-0 transition-all duration-500">🏭</span>
-            <p className="text-[11px] font-black text-slate-600 uppercase tracking-widest leading-none">LOGICA Factory</p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-1.5 px-2">
-            <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
-            <MenuItem path="/pdf-parser" label="PDF 문항 추출기" full />
-            <MenuItem path="/taxonomy-editor" label="문제 교정 및 쌍둥이/유사 생성" full />
-            
-            <MenuItem path="/twin-manager" label="쌍둥이 문제 팩토리 (수동 배정)" full />
-            <MenuItem path="/mapper" label="교재 수동 연결 도구" full />
-            <MenuItem path="/competency-mapper" label="교과 역량 매핑" full />
-
-            <MenuItem path="/book-upload" label="교재 DB 업로드" />
-            <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <div className="px-4 flex items-center gap-1.5 mb-3">
-            <span className="text-[13px]">👑</span>
-            <p className="text-[11px] font-black text-slate-500 uppercase tracking-widest leading-none">원장·최고관리자 전용</p>
-            <span className="text-[9px] bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-md font-black border border-indigo-200 ml-1">ADMIN</span>
-          </div>
-          <div className="grid grid-cols-2 gap-2 px-3">
-            <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
-            <MenuItem path="/clinic-pad-registry" label="키오스크 패드 등록" full />
-            <MenuItem path="/permission" label="권한 관리" />
-            <MenuItem path="/instructor" label="강사 관리" />
-            <MenuItem path="/academy-info" label="학원 정보 설정" full />
-          </div>
-        </div>
+        {/* 원장·최고관리자 전용: 해당 직급에게만 보임 */}
+        {isOwner && renderSection("owner", "원장·최고관리자 전용", 5, <>
+          <MenuItem path="/seat-layout-editor" label="클리닉 좌석 관리" full />
+          <MenuItem path="/clinic-pad-registry" label="키오스크 패드 등록" full />
+          <MenuItem path="/permission" label="권한 관리" />
+          <MenuItem path="/instructor" label="강사 관리" />
+          <MenuItem path="/academy-info" label="학원 정보 설정" full />
+        </>)}
 
       </nav>
     </aside>

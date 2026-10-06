@@ -231,7 +231,7 @@ export default function TaskModal({
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-2xl h-[95vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         
-        <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-5 text-white flex justify-between items-center shrink-0">
           <h2 className="text-lg font-bold tracking-tight">📌 업무 공유 / 상세 공지</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
         </div>
@@ -245,7 +245,7 @@ export default function TaskModal({
                 <select 
                   value={modalData.memo_type} onChange={(e) => handleModalChange("memo_type", e.target.value)}
                   disabled={isReadonly}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-[#002864] bg-slate-50 disabled:opacity-70"
+                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-brand bg-slate-50 disabled:opacity-70"
                 >
                   <option value="긴급공지">🚨 긴급공지</option>
                   <option value="일반공지">📢 일반공지</option>
@@ -255,7 +255,7 @@ export default function TaskModal({
               </div>
               <div className="col-span-1">
                 <label className="block text-xs font-bold text-slate-500 mb-1">진행 상태</label>
-                <select value={modalData.status} onChange={(e) => handleModalChange("status", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-black text-sm focus:outline-none focus:border-[#002864] bg-white">
+                <select value={modalData.status} onChange={(e) => handleModalChange("status", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-brand bg-white">
                   <option value="할일" className="text-slate-600">할 일 (To-Do)</option>
                   <option value="진행중" className="text-blue-600">진행 중</option>
                   <option value="완료" className="text-emerald-600">완료됨</option>
@@ -268,7 +268,7 @@ export default function TaskModal({
               <textarea 
                 value={modalData.content} onChange={(e) => handleModalChange("content", e.target.value)} 
                 disabled={isReadonly}
-                className="flex-1 w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-sm focus:outline-none focus:border-[#002864] resize-none custom-scroll disabled:opacity-70" placeholder="내용을 입력하세요."
+                className="flex-1 w-full px-3 py-2 rounded-lg border border-slate-300 font-medium text-sm focus:outline-none focus:border-brand resize-none custom-scroll disabled:opacity-70" placeholder="내용을 입력하세요."
               ></textarea>
             </div>
           </div>
@@ -276,7 +276,7 @@ export default function TaskModal({
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-700 text-sm">💬 업무 처리 노트 및 소통 (말꼬리)</h3>
-              <span className="text-[10px] font-bold text-slate-500">모든 작업자가 기록을 남길 수 있습니다.</span>
+              <span className="text-xs font-bold text-slate-500">모든 작업자가 기록을 남길 수 있습니다.</span>
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
@@ -291,13 +291,13 @@ export default function TaskModal({
                     <div key={cmt.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
                       <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
                         {canDelete && (
-                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
+                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-bold text-xs transition-colors p-1" title="댓글 삭제">✕</button>
                         )}
-                        <span className="text-[10px] text-slate-500 font-bold">
+                        <span className="text-xs text-slate-500 font-bold">
                           {cmt.authorName} <span className="font-normal opacity-70 ml-1">{cmt.createdAt}</span>
                         </span>
                       </div>
-                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-blue-100 text-[#002864] border-blue-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
+                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-blue-100 text-brand border-blue-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
                         {cmt.text}
                       </div>
                     </div>
@@ -316,7 +316,7 @@ export default function TaskModal({
                   e.target.style.height = (e.target.scrollHeight) + 'px';
                 }}
                 onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
-                rows={1} className="flex-1 bg-slate-100 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[80px] custom-scroll" placeholder="진행 상황이나 피드백 메모를 남겨주세요."
+                rows={1} className="flex-1 bg-slate-100 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-1 focus:ring-brand resize-none max-h-[80px] custom-scroll" placeholder="진행 상황이나 피드백 메모를 남겨주세요."
               ></textarea>
               <button onClick={handleAddComment} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors shrink-0">기록 남기기</button>
             </div>
@@ -330,7 +330,7 @@ export default function TaskModal({
             )}
             
             {modalData.memo_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
-              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-brand font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정
               </button>
             )}
@@ -338,7 +338,7 @@ export default function TaskModal({
           
           <div className="flex gap-2 justify-end">
             <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={saveTask} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-[#002864] text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">
+            <button onClick={saveTask} disabled={isSaving || isReadonly} className="px-6 py-2.5 bg-brand text-white font-bold text-sm rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">
               {isSaving ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

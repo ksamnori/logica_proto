@@ -19,7 +19,7 @@ export default function ViewerHeader({ isExamDistributed, isNewExam, currentExam
       <div className="flex items-center gap-6">
         <div className="flex items-center gap-3 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => onAttemptLeave(() => router.push('/exam-list'))}>
             <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-8 object-contain" alt="Logica" />
-            <span className="text-xl font-extrabold text-slate-800 ml-2 whitespace-nowrap">시험지 수정 및 배포</span>
+            <span className="text-xl font-bold text-slate-800 ml-2 whitespace-nowrap">시험지 수정 및 배포</span>
         </div>
         
         <div className="w-px h-6 bg-slate-300"></div>
@@ -46,7 +46,7 @@ export default function ViewerHeader({ isExamDistributed, isNewExam, currentExam
         <div className="flex space-x-6 mr-4 hidden md:flex">
             <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold border border-slate-200">1</span><span className="font-bold text-slate-400 hidden xl:inline">조건 및 단원 설정</span></div>
             <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold border border-slate-200">2</span><span className="font-bold text-slate-400 hidden xl:inline">문항 뷰어 & 편집</span></div>
-            <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-[#002864] text-white text-center text-sm font-bold shadow-sm">3</span><span className="font-bold text-[#002864] hidden xl:inline">시험지 배포</span></div>
+            <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-brand text-white text-center text-sm font-bold shadow-sm">3</span><span className="font-bold text-brand hidden xl:inline">시험지 배포</span></div>
         </div>
         <div className="w-px h-6 bg-slate-300 hidden md:block"></div>
         

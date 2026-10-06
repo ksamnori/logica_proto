@@ -550,7 +550,7 @@ export default function LearningPage() {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
           <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
         </div>
       </div>
@@ -564,28 +564,28 @@ export default function LearningPage() {
       <div className="flex justify-between items-center shrink-0">
         
         <div className="flex items-center gap-2 p-1.5 bg-slate-200/60 rounded-xl shadow-inner overflow-x-auto">
-          <button onClick={() => handleMainTabClick('DASHBOARD')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'DASHBOARD' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📈 학생 대시보드</button>
+          <button onClick={() => handleMainTabClick('DASHBOARD')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'DASHBOARD' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📈 학생 대시보드</button>
           <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
           
-          <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 주간/중간테스트</button>
-          <button onClick={() => handleMainTabClick('HOMEWORK')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'HOMEWORK' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📝 과제</button>
-          <button onClick={() => handleMainTabClick('OVERDUE')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'OVERDUE' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>⏰ 미완료과제</button>
-          <button onClick={() => handleMainTabClick('INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'INCORRECT' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>❌ 오답</button>
-          <button onClick={() => handleMainTabClick('SIMILAR')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'SIMILAR' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔄 오답유사</button>
+          <button onClick={() => handleMainTabClick('EXAM')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'EXAM' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>💯 주간/중간테스트</button>
+          <button onClick={() => handleMainTabClick('HOMEWORK')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'HOMEWORK' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📝 과제</button>
+          <button onClick={() => handleMainTabClick('OVERDUE')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'OVERDUE' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>⏰ 미완료과제</button>
+          <button onClick={() => handleMainTabClick('INCORRECT')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'INCORRECT' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>❌ 오답</button>
+          <button onClick={() => handleMainTabClick('SIMILAR')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'SIMILAR' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔄 오답유사</button>
           
           <div className="w-px h-6 bg-slate-300 mx-1 shrink-0"></div>
-          <button onClick={() => handleMainTabClick('QUARTERLY')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'QUARTERLY' ? 'bg-white text-[#002864] shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📅 분기평가</button>
+          <button onClick={() => handleMainTabClick('QUARTERLY')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'QUARTERLY' ? 'bg-white text-brand shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📅 분기평가</button>
           
           <div className="w-px h-6 bg-slate-300 mx-1 shrink-0"></div>
-          <button onClick={() => handleMainTabClick('RAW_INCORRECT')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'RAW_INCORRECT' ? 'bg-rose-800 text-rose-100 shadow-md border border-rose-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔥 누적 원본 오답</button>
-          <button onClick={() => handleMainTabClick('ARCHIVE')} className={`px-5 py-2 rounded-lg font-black text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'ARCHIVE' ? 'bg-slate-800 text-amber-400 shadow-md border border-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📦 해결된 오답</button>
+          <button onClick={() => handleMainTabClick('RAW_INCORRECT')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'RAW_INCORRECT' ? 'bg-rose-800 text-rose-100 shadow-md border border-rose-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>🔥 누적 원본 오답</button>
+          <button onClick={() => handleMainTabClick('ARCHIVE')} className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap shrink-0 ${activeTab === 'ARCHIVE' ? 'bg-slate-800 text-amber-400 shadow-md border border-slate-700' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}>📦 해결된 오답</button>
 
           {currentView.type === 'CLASS' && (
             <>
               <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
               <button 
                 onClick={() => setIsBulkModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-black text-[13px] shadow-sm transition-colors animate-[fadeIn_0.3s_ease-out] shrink-0"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-bold text-[13px] shadow-sm transition-colors animate-[fadeIn_0.3s_ease-out] shrink-0"
               >
                 <span className="text-sm">🖨️</span>
                 <span>[{currentView.className}] 전원 오답유사 생성</span>
@@ -607,11 +607,11 @@ export default function LearningPage() {
           {currentView.type === 'STUDENT' && (
             <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 flex items-center justify-between shrink-0">
                <div className="flex items-center gap-3">
-                  <div className="w-10 h-10 rounded-full bg-[#002864] text-white flex items-center justify-center font-black shadow-sm">
+                  <div className="w-10 h-10 rounded-full bg-brand text-white flex items-center justify-center font-bold shadow-sm">
                      {currentView.studentName.charAt(0)}
                   </div>
                   <div>
-                     <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                     <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                         {currentView.studentName} 학생
                         <span className="text-xs font-bold bg-white text-slate-500 px-2 py-0.5 rounded-full border border-slate-200 shadow-sm">{currentView.className}</span>
                      </h2>
@@ -619,7 +619,7 @@ export default function LearningPage() {
                </div>
                <button 
                   onClick={handleOpenPreview}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-extrabold rounded-xl shadow-sm transition-all"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold rounded-xl shadow-sm transition-all"
                >
                   <span className="text-lg">👀</span> 학생 포털 미리보기
                </button>
@@ -635,10 +635,10 @@ export default function LearningPage() {
               {(activeTab === 'INCORRECT' || activeTab === 'SIMILAR') && currentView.type === 'ALL' && (
                 <div className="bg-indigo-50/80 border border-indigo-200 p-4 m-6 mb-2 rounded-xl flex items-center justify-between shadow-sm shrink-0">
                   <div className="flex flex-col gap-1">
-                     <h3 className="text-indigo-800 font-extrabold text-[13px] flex items-center gap-1.5"><span>💡</span> 오답 및 오답유사 프린트는 어디서 만드나요?</h3>
-                     <p className="text-indigo-600/90 font-bold text-[11px] pl-5 leading-relaxed">
-                        좌측 아코디언 메뉴에서 <strong className="text-indigo-700 font-black">특정 반</strong>을 선택하시면 상단 탭 맨 우측에 <strong className="text-indigo-700 font-black">전원 일괄 생성</strong> 버튼이 나타나며,<br/>
-                        <strong className="text-indigo-700 font-black">특정 학생</strong>을 선택하시면 해당 학생만을 위한 오답 생성 마법사가 열립니다.
+                     <h3 className="text-indigo-800 font-bold text-[13px] flex items-center gap-1.5"><span>💡</span> 오답 및 오답유사 프린트는 어디서 만드나요?</h3>
+                     <p className="text-indigo-600/90 font-bold text-xs pl-5 leading-relaxed">
+                        좌측 아코디언 메뉴에서 <strong className="text-indigo-700 font-bold">특정 반</strong>을 선택하시면 상단 탭 맨 우측에 <strong className="text-indigo-700 font-bold">전원 일괄 생성</strong> 버튼이 나타나며,<br/>
+                        <strong className="text-indigo-700 font-bold">특정 학생</strong>을 선택하시면 해당 학생만을 위한 오답 생성 마법사가 열립니다.
                      </p>
                   </div>
                 </div>
@@ -646,9 +646,9 @@ export default function LearningPage() {
               {activeTab === 'ARCHIVE' && (
                 <div className="bg-amber-50/80 border border-amber-200 p-4 m-6 mb-2 rounded-xl flex items-center justify-between shadow-sm shrink-0">
                   <div className="flex flex-col gap-1">
-                     <h3 className="text-amber-800 font-extrabold text-[13px] flex items-center gap-1.5"><span>📦</span> 영구 보존 오답 아카이브</h3>
-                     <p className="text-amber-700/90 font-bold text-[11px] pl-5 leading-relaxed">
-                        학생이 과거에 틀렸던 문제 중 클리닉을 통해 완벽히 극복(O, RO, TO)하여 <strong className="text-amber-800 font-black">'해결됨'</strong> 처리된 문항들입니다.<br/>
+                     <h3 className="text-amber-800 font-bold text-[13px] flex items-center gap-1.5"><span>📦</span> 영구 보존 오답 아카이브</h3>
+                     <p className="text-amber-700/90 font-bold text-xs pl-5 leading-relaxed">
+                        학생이 과거에 틀렸던 문제 중 클리닉을 통해 완벽히 극복(O, RO, TO)하여 <strong className="text-amber-800 font-bold">'해결됨'</strong> 처리된 문항들입니다.<br/>
                         이곳의 데이터는 더 초과로 오답 클리닉 문제지로 출제되지 않습니다.
                      </p>
                   </div>
@@ -657,16 +657,16 @@ export default function LearningPage() {
               {activeTab === 'RAW_INCORRECT' && (
                 <div className="bg-rose-50/80 border border-rose-200 p-4 m-6 mb-2 rounded-xl flex items-center justify-between shadow-sm shrink-0">
                   <div className="flex flex-col gap-1">
-                     <h3 className="text-rose-800 font-extrabold text-[13px] flex items-center gap-1.5"><span>🔥</span> 누적 원본 오답 리스트</h3>
-                     <p className="text-rose-700/90 font-bold text-[11px] pl-5 leading-relaxed">
-                        월별로 누적된 <strong className="text-rose-800 font-black">'순수 미해결 오답 원본'</strong>들을 모아놓은 목록입니다.<br/>
+                     <h3 className="text-rose-800 font-bold text-[13px] flex items-center gap-1.5"><span>🔥</span> 누적 원본 오답 리스트</h3>
+                     <p className="text-rose-700/90 font-bold text-xs pl-5 leading-relaxed">
+                        월별로 누적된 <strong className="text-rose-800 font-bold">'순수 미해결 오답 원본'</strong>들을 모아놓은 목록입니다.<br/>
                         우측의 프린트(🖨️) 버튼을 누르면 해당 월에 틀린 모든 오답을 즉시 눈으로 확인할 수 있습니다.
                      </p>
                   </div>
                 </div>
               )}
               <div className="w-full flex justify-end px-5 pt-3 pb-1 -mb-1 relative z-20 pointer-events-none">
-                 <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-[#002864] hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
+                 <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-brand hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
                     <span>{showCompleted ? '✅' : '🔒'}</span><span>{showCompleted ? '완료 포함' : '미완료만 보기'}</span>
                  </button>
               </div>
@@ -696,7 +696,7 @@ export default function LearningPage() {
                         🔥 개별 문항 삭제/관리 버튼(✂️)을 눌러 원치 않는 오답을 영구 삭제할 수 있습니다.
                       </span>
                    )}
-                   <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-black transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-[#002864] hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
+                   <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-brand hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
                       <span>{showCompleted ? '✅' : '🔒'}</span><span>{showCompleted ? '완료 포함' : '미완료만 보기'}</span>
                    </button>
                 </div>
@@ -728,9 +728,9 @@ export default function LearningPage() {
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out] p-4">
           <div className="bg-slate-100 w-[950px] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-8 py-5 border-b border-slate-200 bg-white shrink-0">
-              <h2 className="text-xl font-black text-slate-800 flex items-center gap-3">
+              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-3">
                 <span className="text-2xl">👀</span>
-                <span className="text-[#002864]">{previewModal.studentName}</span> 학생의 포털 진입 화면
+                <span className="text-brand">{previewModal.studentName}</span> 학생의 포털 진입 화면
               </h2>
               <button onClick={() => setPreviewModal(null)} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-50 hover:bg-slate-100 p-2 rounded-full">
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -739,17 +739,17 @@ export default function LearningPage() {
             
             <div className="p-8 grid grid-cols-2 grid-rows-2 gap-8 bg-slate-100">
               {/* 1. 주간테스트 (EXAM) */}
-              <div className="w-full h-[220px] bg-gradient-to-br from-[#002864] to-blue-800 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
+              <div className="w-full h-[220px] bg-gradient-to-br from-brand to-blue-800 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
                 <div className="relative z-10 shrink-0">
                   <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-black bg-blue-500 text-white px-4 py-2 rounded-xl shadow-sm flex items-center">📝 주간테스트</span>
+                    <span className="text-sm font-bold bg-blue-500 text-white px-4 py-2 rounded-xl shadow-sm flex items-center">📝 주간테스트</span>
                   </div>
                   <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
                     <span className="text-sm font-bold text-blue-200 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
                       남은 문제: {previewModal.stats.examQCount ?? 0}
                     </span>
                   </div>
-                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">주간테스트 클리닉</h3>
+                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">주간테스트 클리닉</h3>
                   <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-blue-200 pr-[60px]">
                     오늘 배정된 테스트를 응시합니다.
                   </p>
@@ -760,14 +760,14 @@ export default function LearningPage() {
               <div className="w-full h-[220px] bg-gradient-to-br from-amber-600 to-amber-500 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
                 <div className="relative z-10 shrink-0">
                   <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-black bg-amber-400 text-amber-900 px-4 py-2 rounded-xl shadow-sm flex items-center">📚 과제</span>
+                    <span className="text-sm font-bold bg-amber-400 text-amber-900 px-4 py-2 rounded-xl shadow-sm flex items-center">📚 과제</span>
                   </div>
                   <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
                     <span className="text-sm font-bold text-amber-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
                       남은 문제: {previewModal.stats.hwQCount ?? 0}
                     </span>
                   </div>
-                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">과제 클리닉</h3>
+                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">과제 클리닉</h3>
                   <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-amber-100 pr-[60px]">
                     미제출 과제 문항을 학습합니다.
                   </p>
@@ -778,14 +778,14 @@ export default function LearningPage() {
               <div className="w-full h-[220px] bg-gradient-to-br from-rose-700 to-rose-600 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
                 <div className="relative z-10 shrink-0">
                   <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-black bg-rose-400 text-rose-900 px-4 py-2 rounded-xl shadow-sm flex items-center">⏰ 미완료 과제</span>
+                    <span className="text-sm font-bold bg-rose-400 text-rose-900 px-4 py-2 rounded-xl shadow-sm flex items-center">⏰ 미완료 과제</span>
                   </div>
                   <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
                     <span className="text-sm font-bold text-rose-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
                       남은 문제: {previewModal.stats.overdueQCount ?? 0}
                     </span>
                   </div>
-                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">미완료 과제 클리닉</h3>
+                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">미완료 과제 클리닉</h3>
                   <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-rose-100 pr-[60px]">
                     다음 수업 전까지 끝내지 못해 밀린 과제입니다.
                   </p>
@@ -796,14 +796,14 @@ export default function LearningPage() {
               <div className="w-full h-[220px] bg-gradient-to-br from-emerald-700 to-emerald-600 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
                 <div className="relative z-10 shrink-0">
                   <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-black bg-emerald-400 text-emerald-900 px-4 py-2 rounded-xl shadow-sm flex items-center">🖨️ 누적 오답</span>
+                    <span className="text-sm font-bold bg-emerald-400 text-emerald-900 px-4 py-2 rounded-xl shadow-sm flex items-center">🖨️ 누적 오답</span>
                   </div>
                   <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
                     <span className="text-sm font-bold text-emerald-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
                       남은 문제: {previewModal.stats.printQCount ?? 0}
                     </span>
                   </div>
-                  <h3 className="text-[28px] font-black mb-1.5 leading-tight pr-[80px]">통합 오답 클리닉</h3>
+                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">통합 오답 클리닉</h3>
                   <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-emerald-100 pr-[60px]">
                     틀린 문제들만 모아 다시 풉니다.
                   </p>
@@ -823,7 +823,7 @@ export default function LearningPage() {
         <div className="fixed inset-0 z-[110] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out] p-4">
           <div className="bg-white w-[700px] max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-5 border-b border-slate-200 bg-rose-50 shrink-0">
-              <h2 className="text-lg font-black text-rose-800 flex items-center gap-2">
+              <h2 className="text-lg font-bold text-rose-800 flex items-center gap-2">
                 <span className="text-xl">✂️</span>
                 {rawIncManageModal.studentName} 학생 - {rawIncManageModal.month}월 누적 오답 개별 관리
               </h2>
@@ -891,7 +891,7 @@ export default function LearningPage() {
           <div className="fixed inset-0 z-[120] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm p-4 animate-[fadeIn_0.2s_ease-out]">
             <div className="bg-white w-[700px] max-h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
               <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0">
-                <h2 className="text-lg font-black text-slate-800 flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                   <span className="text-xl">👁️</span> 문항 및 정답 미리보기
                 </h2>
                 <button onClick={() => setSingleQuestionPreview(null)} className="text-slate-400 hover:text-rose-600 transition-colors bg-white p-2 rounded-full shadow-sm">
@@ -902,7 +902,7 @@ export default function LearningPage() {
               <div className="p-6 overflow-y-auto bg-slate-100 flex-1 flex flex-col gap-6 custom-scrollbar">
                  {/* 문제 영역 */}
                  <div>
-                    <h3 className="text-sm font-extrabold text-slate-500 mb-2 flex items-center gap-1.5">
+                    <h3 className="text-sm font-bold text-slate-500 mb-2 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-blue-500"></span>문제
                     </h3>
                     {qImg || qImg2 ? (
@@ -921,13 +921,13 @@ export default function LearningPage() {
 
                  {/* 정답 및 해설 영역 */}
                  <div>
-                    <h3 className="text-sm font-extrabold text-slate-500 mb-2 flex items-center gap-1.5">
+                    <h3 className="text-sm font-bold text-slate-500 mb-2 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-500"></span>정답 및 해설
                     </h3>
                     <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-4">
                         {/* 텍스트 정답 */}
                         {aText && (
-                            <div className="text-lg font-black text-[#002864] bg-blue-50 p-3 rounded-lg text-center border border-blue-100">
+                            <div className="text-lg font-bold text-brand bg-blue-50 p-3 rounded-lg text-center border border-blue-100">
                                정답: {aText}
                             </div>
                         )}
@@ -969,7 +969,7 @@ export default function LearningPage() {
         <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-[600px] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-violet-50 shrink-0">
-              <h2 className="text-lg font-black text-violet-800 flex items-center gap-2">
+              <h2 className="text-lg font-bold text-violet-800 flex items-center gap-2">
                 <span className="text-xl">🖨️</span>
                 [{currentView.className}] 전원 맞춤 오답유사 일괄 생성
               </h2>
@@ -982,7 +982,7 @@ export default function LearningPage() {
               {bulkStatus.isRunning ? (
                 <div className="flex flex-col items-center justify-center py-10 gap-4">
                    <div className="text-4xl animate-bounce">🚀</div>
-                   <h3 className="text-xl font-extrabold text-slate-800">일괄 배부 진행 중입니다...</h3>
+                   <h3 className="text-xl font-bold text-slate-800">일괄 배부 진행 중입니다...</h3>
                    <div className="w-full bg-slate-100 rounded-full h-4 mt-2 overflow-hidden shadow-inner">
                       <div className="bg-violet-500 h-full transition-all duration-300" style={{ width: `${(bulkStatus.current / bulkStatus.total) * 100}%` }}></div>
                    </div>
@@ -993,7 +993,7 @@ export default function LearningPage() {
               ) : (
                 <>
                   <div className="flex flex-col gap-2">
-                    <label className="text-sm font-extrabold text-slate-800">1. 오답 추출 기간 설정</label>
+                    <label className="text-sm font-bold text-slate-800">1. 오답 추출 기간 설정</label>
                     <div className="flex items-center gap-3">
                       <input type="date" style={{ colorScheme: 'light' }} value={bulkStartDate} onChange={e => setBulkStartDate(e.target.value)} className="flex-1 px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl font-bold text-slate-700 outline-none focus:border-violet-500" />
                       <span className="text-slate-400 font-bold">~</span>
@@ -1002,7 +1002,7 @@ export default function LearningPage() {
                   </div>
 
                   <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 mt-2">
-                    <label className="text-sm font-extrabold text-slate-800">2. 오답 지정 범위 설정</label>
+                    <label className="text-sm font-bold text-slate-800">2. 오답 지정 범위 설정</label>
                     <div className="flex flex-wrap gap-4 bg-slate-50 border border-slate-200 rounded-xl p-4 shadow-sm">
                       <label className="flex items-center gap-2 cursor-pointer">
                         <input type="checkbox" checked={bulkFilters.exam} onChange={e => setBulkFilters(p => ({...p, exam: e.target.checked}))} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
@@ -1028,16 +1028,16 @@ export default function LearningPage() {
                   </div>
 
                   <div className="flex flex-col gap-2 border-t border-slate-200 pt-4 mt-2">
-                    <label className="text-sm font-extrabold text-slate-800">3. 생성 옵션 설정</label>
+                    <label className="text-sm font-bold text-slate-800">3. 생성 옵션 설정</label>
                     <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 text-[14px] font-bold text-slate-600 leading-loose shadow-sm break-keep">
-                      해당 기간 오답의 <span className="text-violet-500 font-black">쌍둥이</span>
-                      <select value={bulkTwin} onChange={e => setBulkTwin(Number(e.target.value))} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-black shadow-sm">
+                      해당 기간 오답의 <span className="text-violet-500 font-bold">쌍둥이</span>
+                      <select value={bulkTwin} onChange={e => setBulkTwin(Number(e.target.value))} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-bold shadow-sm">
                         {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>개와 <span className="text-violet-500 font-black">유사</span>
-                      <select value={bulkSim} onChange={e => setBulkSim(Number(e.target.value))} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-black shadow-sm">
+                      </select>개와 <span className="text-violet-500 font-bold">유사</span>
+                      <select value={bulkSim} onChange={e => setBulkSim(Number(e.target.value))} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-bold shadow-sm">
                         {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
                       </select>개로 학습지를 만듭니다. 난이도는
-                      <select value={bulkDiff} onChange={e => setBulkDiff(e.target.value)} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-black shadow-sm">
+                      <select value={bulkDiff} onChange={e => setBulkDiff(e.target.value)} className="border border-slate-300 rounded-md mx-2 p-1.5 outline-none text-slate-800 bg-white focus:border-violet-500 font-bold shadow-sm">
                         <option value="그대로">그대로</option><option value="더 쉽게">더 쉽게</option><option value="더 어렵게">더 어렵게</option>
                       </select> 출제합니다.
                       
@@ -1084,7 +1084,7 @@ export default function LearningPage() {
                         onChange={e => setIsBulkTargetDateActive(e.target.checked)} 
                         className="w-4 h-4 rounded border-slate-300 accent-violet-500 cursor-pointer" 
                       />
-                      <span className="text-sm font-extrabold text-slate-800">
+                      <span className="text-sm font-bold text-slate-800">
                         4. 클리닉 수행 목표일 지정 <span className="text-xs text-slate-400 font-medium">(선택)</span>
                       </span>
                     </label>
@@ -1104,8 +1104,8 @@ export default function LearningPage() {
                   </div>
 
                   <div className="flex gap-3 mt-4">
-                    <button onClick={() => setIsBulkModalOpen(false)} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-extrabold rounded-xl transition-colors">취소</button>
-                    <button onClick={handleRunBulkPrint} className="flex-1 py-4 bg-violet-500 hover:bg-violet-600 text-white font-extrabold rounded-xl shadow-md transition-colors">🚀 전원 일괄 배부하기</button>
+                    <button onClick={() => setIsBulkModalOpen(false)} className="flex-1 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors">취소</button>
+                    <button onClick={handleRunBulkPrint} className="flex-1 py-4 bg-violet-500 hover:bg-violet-600 text-white font-bold rounded-xl shadow-md transition-colors">🚀 전원 일괄 배부하기</button>
                   </div>
                 </>
               )}

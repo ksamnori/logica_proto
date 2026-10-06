@@ -465,16 +465,16 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
       </div>
 
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
-        <div className={`text-white px-3 py-2 flex justify-between items-center ${isSpecialOrMakeup ? 'bg-indigo-600' : 'bg-[#002864]'}`}>
+        <div className={`text-white px-3 py-2 flex justify-between items-center ${isSpecialOrMakeup ? 'bg-indigo-600' : 'bg-brand'}`}>
           <button onClick={prevMonth} className="p-1 hover:bg-white/20 rounded transition-colors" type="button">◀</button>
-          <h4 className="font-extrabold text-[13px]">{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</h4>
+          <h4 className="font-bold text-[13px]">{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</h4>
           <button onClick={nextMonth} className="p-1 hover:bg-white/20 rounded transition-colors" type="button">▶</button>
         </div>
 
         <div className="p-3">
           <div className="grid grid-cols-7 gap-1 text-center mb-1.5">
             {DAY_LABELS.map((d, i) => (
-              <div key={d} className={`text-[10px] font-black ${i === 0 ? "text-rose-500" : i === 6 ? "text-blue-500" : "text-slate-400"}`}>{d}</div>
+              <div key={d} className={`text-xs font-bold ${i === 0 ? "text-rose-500" : i === 6 ? "text-blue-500" : "text-slate-400"}`}>{d}</div>
             ))}
           </div>
           <div className="grid grid-cols-7 gap-1">
@@ -486,7 +486,7 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
               const isToday = ymd === todayStr;
 
               let cellCls = "bg-white border-slate-100 hover:border-slate-300 text-slate-700 hover:bg-slate-50";
-              if (isSelected) cellCls = isSpecialOrMakeup ? "bg-indigo-600 border-indigo-600 text-white shadow-md" : "bg-[#002864] border-[#002864] text-white shadow-md";
+              if (isSelected) cellCls = isSpecialOrMakeup ? "bg-indigo-600 border-indigo-600 text-white shadow-md" : "bg-brand border-brand text-white shadow-md";
               else if (meta.isHoliday) cellCls = "bg-slate-200 border-slate-300 text-slate-400";
               else if (!isSpecialOrMakeup && meta.weekTypeAtSession === "odd") cellCls = "bg-emerald-50 border-emerald-200 text-emerald-700";
               else if (!isSpecialOrMakeup && meta.weekTypeAtSession === "even") cellCls = "bg-violet-50 border-violet-200 text-violet-700";
@@ -498,10 +498,10 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
                   onClick={() => { setSelectedDate(isSelected ? null : ymd); if (!pendingHolidayDate) { setReasonDraft(""); setExtraStartTime(""); setExtraEndTime(""); } }}
                   className={`h-12 flex flex-col items-center pt-1 cursor-pointer rounded-lg border transition-all ${cellCls} ${isToday && !isSelected ? "ring-2 ring-inset ring-indigo-300" : ""}`}
                 >
-                  <span className="text-[11px] font-bold">{day}</span>
+                  <span className="text-xs font-bold">{day}</span>
                   <div className="flex gap-0.5 mt-0.5 items-center">
-                    {meta.isHoliday && <span className="text-[9px] leading-none">🚫</span>}
-                    {meta.isExtra && <span className="text-[9px] leading-none">➕</span>}
+                    {meta.isHoliday && <span className="text-xs leading-none">🚫</span>}
+                    {meta.isExtra && <span className="text-xs leading-none">➕</span>}
                     {!meta.isHoliday && meta.isRegularSession && (
                       <span className={`w-1.5 h-1.5 rounded-full shadow-sm ${isSpecialOrMakeup ? 'bg-indigo-500' : meta.weekTypeAtSession === "even" ? "bg-violet-500" : "bg-emerald-500"}`}></span>
                     )}
@@ -511,7 +511,7 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
             })}
           </div>
 
-          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-[10px] font-bold text-slate-400">
+          <div className="flex flex-wrap gap-x-3 gap-y-1 mt-3 text-xs font-bold text-slate-400">
             {isSpecialOrMakeup ? (
               <>
                  <span className="flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-indigo-500"></span>정규 특강일</span>
@@ -530,20 +530,20 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
 
           {pendingHolidayDate && canEdit && (
             <div className={`mt-3 p-2.5 border rounded-lg flex items-center justify-between gap-2 ${isSpecialOrMakeup ? 'bg-slate-100 border-slate-300' : 'bg-amber-50 border-amber-200'}`}>
-              <span className={`text-[11px] font-bold ${isSpecialOrMakeup ? 'text-slate-600' : 'text-amber-700'}`}>
+              <span className={`text-xs font-bold ${isSpecialOrMakeup ? 'text-slate-600' : 'text-amber-700'}`}>
                 🚫 {pendingHolidayDate} {isSpecialOrMakeup ? '일정이 제외(Pass)됨 — 대체일로 쓸 날짜를 눌러주세요' : '휴일 지정됨 — 보강일로 쓸 날짜를 눌러주세요'}
               </span>
-              <button onClick={cancelPendingHoliday} className="text-[11px] font-bold text-slate-400 hover:text-slate-600 shrink-0">대체 없이 종료</button>
+              <button onClick={cancelPendingHoliday} className="text-xs font-bold text-slate-400 hover:text-slate-600 shrink-0">대체 없이 종료</button>
             </div>
           )}
 
           {!isSpecialOrMakeup && forcedWeekTypeDate && (
             <div className="mt-3 p-2.5 bg-sky-50 border border-sky-200 rounded-lg flex items-center justify-between gap-2">
-              <span className="text-[11px] font-bold text-sky-700">
+              <span className="text-xs font-bold text-sky-700">
                 ⏳ {forcedWeekTypeDate}부터 '{forcedWeekType === "odd" ? "주간테스트" : "과제오답유사"}'로 예약 배정됨
               </span>
               {canEdit && (
-                <button disabled={isBusy} onClick={cancelForcedReservation} className="text-[11px] font-bold text-slate-400 hover:text-slate-600 shrink-0 disabled:opacity-50">예약 취소</button>
+                <button disabled={isBusy} onClick={cancelForcedReservation} className="text-xs font-bold text-slate-400 hover:text-slate-600 shrink-0 disabled:opacity-50">예약 취소</button>
               )}
             </div>
           )}
@@ -551,10 +551,10 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
           {selectedDate && selectedMeta && (
             <div className={`mt-3 p-3 border rounded-xl ${isSpecialOrMakeup ? 'bg-indigo-50/50 border-indigo-100' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-center justify-between mb-2">
-                <h5 className="text-[12px] font-extrabold text-slate-800">📅 {selectedDate} ({selectedDayLabel})</h5>
-                <button onClick={() => setSelectedDate(null)} className="text-[11px] font-bold text-slate-400 hover:text-slate-600">닫기</button>
+                <h5 className="text-[12px] font-bold text-slate-800">📅 {selectedDate} ({selectedDayLabel})</h5>
+                <button onClick={() => setSelectedDate(null)} className="text-xs font-bold text-slate-400 hover:text-slate-600">닫기</button>
               </div>
-              <p className="text-[11px] text-slate-500 font-bold mb-2">
+              <p className="text-xs text-slate-500 font-bold mb-2">
                 {selectedMeta.isHoliday ? `제외됨${selectedMeta.holidayReason ? ` — ${selectedMeta.holidayReason}` : ""}`
                   : selectedMeta.isExtra ? (() => {
                       const timeLabel = selectedMeta.extraStartTime ? ` ${selectedMeta.extraStartTime}${selectedMeta.extraEndTime ? `~${selectedMeta.extraEndTime}` : ""}` : "";
@@ -577,7 +577,7 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
                     💾 {isSpecialOrMakeup ? '이 날로 일정 대체 (저장)' : '이 날로 보강 지정 (저장)'}
                   </button>
                   {(selectedMeta.isRegularSession || selectedMeta.isExtra) && (
-                    <p className="text-[10px] font-bold text-rose-500">이미 지정된 날짜라 선택할 수 없습니다. 다른 빈 날짜를 골라주세요.</p>
+                    <p className="text-xs font-bold text-rose-500">이미 지정된 날짜라 선택할 수 없습니다. 다른 빈 날짜를 골라주세요.</p>
                   )}
                 </div>
               )}
@@ -586,11 +586,11 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
                 <div className="flex flex-col gap-2">
                   {isSpecialOrMakeup && (selectedMeta.isRegularSession || selectedMeta.isExtra) && !selectedMeta.isHoliday && (
                      <div className="flex items-center gap-2 mt-1 mb-1 p-2 bg-white rounded-lg border border-indigo-100 shadow-sm">
-                        <span className="text-[10px] font-extrabold text-indigo-800 shrink-0">시간 변경</span>
+                        <span className="text-xs font-bold text-indigo-800 shrink-0">시간 변경</span>
                         <input type="time" value={extraStartTime} onChange={e => setExtraStartTime(e.target.value)} className="w-full px-1.5 py-1 rounded border border-slate-200 text-xs font-bold focus:border-indigo-400 outline-none" />
                         <span className="text-slate-400 text-xs">~</span>
                         <input type="time" value={extraEndTime} onChange={e => setExtraEndTime(e.target.value)} className="w-full px-1.5 py-1 rounded border border-slate-200 text-xs font-bold focus:border-indigo-400 outline-none" />
-                        <button disabled={isBusy} onClick={saveSpecialClassTime} className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] px-2 py-1.5 rounded shadow-sm font-bold transition-colors">저장</button>
+                        <button disabled={isBusy} onClick={saveSpecialClassTime} className="shrink-0 bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-2 py-1.5 rounded shadow-sm font-bold transition-colors">저장</button>
                      </div>
                   )}
 

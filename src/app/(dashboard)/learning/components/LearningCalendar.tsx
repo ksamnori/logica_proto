@@ -67,16 +67,16 @@ export default function LearningCalendar({
   return (
     <div className="flex flex-col h-full bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
       
-      <div className="bg-[#002864] text-white px-4 py-3 flex justify-between items-center shrink-0">
+      <div className="bg-brand text-white px-4 py-3 flex justify-between items-center shrink-0">
         <button onClick={prevMonth} className="p-1 hover:bg-white/20 rounded transition-colors">◀</button>
-        <h3 className="font-extrabold text-[14px]">{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</h3>
+        <h3 className="font-bold text-[14px]">{currentMonth.getFullYear()}년 {currentMonth.getMonth() + 1}월</h3>
         <button onClick={nextMonth} className="p-1 hover:bg-white/20 rounded transition-colors">▶</button>
       </div>
 
       <div className="p-4 flex-1 overflow-y-auto custom-scroll bg-slate-50/30">
         <div className="grid grid-cols-7 gap-1 text-center mb-2">
           {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-            <div key={d} className={`text-[10px] font-black ${i === 0 ? 'text-rose-500' : i === 6 ? 'text-blue-500' : 'text-slate-400'}`}>{d}</div>
+            <div key={d} className={`text-[10px] font-bold ${i === 0 ? 'text-rose-500' : i === 6 ? 'text-blue-500' : 'text-slate-400'}`}>{d}</div>
           ))}
         </div>
 
@@ -94,7 +94,7 @@ export default function LearningCalendar({
                 key={ymd}
                 onClick={() => setSelectedDate(isSelected ? null : ymd)}
                 className={`h-11 flex flex-col items-center pt-1 cursor-pointer rounded-lg border transition-all ${
-                  isSelected ? 'bg-[#002864] border-[#002864] text-white shadow-md' 
+                  isSelected ? 'bg-brand border-brand text-white shadow-md' 
                   : 'bg-white border-slate-100 hover:border-slate-300 text-slate-700 hover:bg-slate-50'
                 }`}
               >
@@ -115,31 +115,31 @@ export default function LearningCalendar({
 
         {selectedDate && (
           <div className="mt-5 p-3.5 bg-rose-50/50 border border-rose-200 rounded-xl shadow-inner animate-fade-in">
-            <h4 className="text-[12px] font-extrabold text-rose-900 mb-2 flex items-center gap-1.5">
+            <h4 className="text-[12px] font-bold text-rose-900 mb-2 flex items-center gap-1.5">
               <span>📅</span> {selectedDate} 미해결 요약
             </h4>
             
             {/* 🌟 5분류 요약 박스로 개편 */}
             <div className="grid grid-cols-2 gap-1.5 bg-white p-1.5 rounded-lg border border-rose-100 shadow-sm">
               <div onClick={() => handleCalendarSummaryClick('EXAM')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-blue-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-blue-100">
-                <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-black">📝 시험</span>
-                <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.exam || 0}건</span>
+                <span className="text-[9px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded font-bold">📝 시험</span>
+                <span className="text-[13px] font-bold text-slate-700">{dotsMap[selectedDate]?.exam || 0}건</span>
               </div>
               <div onClick={() => handleCalendarSummaryClick('HOMEWORK')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-amber-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-amber-100">
-                <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black">📚 과제</span>
-                <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.hw || 0}건</span>
+                <span className="text-[9px] bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold">📚 과제</span>
+                <span className="text-[13px] font-bold text-slate-700">{dotsMap[selectedDate]?.hw || 0}건</span>
               </div>
               <div onClick={() => handleCalendarSummaryClick('OVERDUE')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-rose-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-rose-100 col-span-2">
-                <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-black">⏰ 미완료</span>
-                <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.overdue || 0}건</span>
+                <span className="text-[9px] bg-rose-100 text-rose-700 px-1.5 py-0.5 rounded font-bold">⏰ 미완료</span>
+                <span className="text-[13px] font-bold text-slate-700">{dotsMap[selectedDate]?.overdue || 0}건</span>
               </div>
               <div onClick={() => handleCalendarSummaryClick('INCORRECT')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-emerald-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-emerald-100">
-                <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-black">❌ 오답</span>
-                <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.print || 0}건</span>
+                <span className="text-[9px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold">❌ 오답</span>
+                <span className="text-[13px] font-bold text-slate-700">{dotsMap[selectedDate]?.print || 0}건</span>
               </div>
               <div onClick={() => handleCalendarSummaryClick('SIMILAR')} className="flex flex-col items-center gap-1 cursor-pointer hover:bg-violet-50/80 p-2 rounded-lg transition-colors w-full border border-transparent hover:border-violet-100">
-                <span className="text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-black">🔄 유사</span>
-                <span className="text-[13px] font-black text-slate-700">{dotsMap[selectedDate]?.similar || 0}건</span>
+                <span className="text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-bold">🔄 유사</span>
+                <span className="text-[13px] font-bold text-slate-700">{dotsMap[selectedDate]?.similar || 0}건</span>
               </div>
             </div>
             
@@ -147,7 +147,7 @@ export default function LearningCalendar({
               날짜 선택 해제 (전체 보기) ↺
             </button>
             {currentView.type !== 'ALL' && (
-              <button onClick={handleViewAllStudents} className="mt-1.5 w-full py-1.5 text-[11px] font-bold text-[#002864] bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shadow-sm">
+              <button onClick={handleViewAllStudents} className="mt-1.5 w-full py-1.5 text-[11px] font-bold text-brand bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shadow-sm">
                 학생 선택 해제 (전체 학생 보기) 👥
               </button>
             )}
@@ -156,7 +156,7 @@ export default function LearningCalendar({
 
         {!selectedDate && currentView.type !== 'ALL' && (
           <div className="mt-4 px-1">
-            <button onClick={handleViewAllStudents} className="w-full py-1.5 text-[11px] font-bold text-[#002864] bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shadow-sm">
+            <button onClick={handleViewAllStudents} className="w-full py-1.5 text-[11px] font-bold text-brand bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100 transition-colors shadow-sm">
               학생 선택 해제 (전체 학생 보기) 👥
             </button>
           </div>

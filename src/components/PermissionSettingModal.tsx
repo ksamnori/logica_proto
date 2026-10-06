@@ -52,11 +52,11 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
       <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         
         {/* 🌟 헤더 영역 */}
-        <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
           <div>
             <h2 className="font-bold text-[16px] flex items-center gap-2">
               🛡️ 권한 상세보기
-              <span className="bg-blue-800 text-blue-200 text-[10px] px-2 py-0.5 rounded-full font-black border border-blue-600">임시</span>
+              <span className="bg-blue-800 text-blue-200 text-xs px-2 py-0.5 rounded-full font-bold border border-blue-600">임시</span>
             </h2>
           </div>
           <button onClick={onClose} className="text-white hover:text-rose-400 text-2xl font-bold leading-none transition-colors">
@@ -69,8 +69,8 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
           
           {/* 1. 권한명 설정 영역 */}
           <section className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-            <h3 className="text-sm font-black text-slate-800 mb-1">권한명</h3>
-            <p className="text-[11px] text-slate-500 mb-3 font-medium">학원 운영 및 관리에 대한 권한이 기본 제공됩니다. (변경 불가)</p>
+            <h3 className="text-sm font-bold text-slate-800 mb-1">권한명</h3>
+            <p className="text-xs text-slate-500 mb-3 font-medium">학원 운영 및 관리에 대한 권한이 기본 제공됩니다. (변경 불가)</p>
             <input 
               type="text" 
               value="학원장" 
@@ -82,7 +82,7 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
           {/* 2. 권한 선택 영역 */}
           <section className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
             <div className="p-5 border-b border-slate-200 bg-white">
-              <h3 className="text-sm font-black text-slate-800">권한 선택</h3>
+              <h3 className="text-sm font-bold text-slate-800">권한 선택</h3>
             </div>
 
             {/* 고정 기본 권한 (비활성화) */}
@@ -92,7 +92,7 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
                   학원 관리 권한 
                   <svg className="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
                 </h4>
-                <p className="text-[10px] text-slate-500 mt-0.5">홈 {'>'} My학원에 위치한 학원 관리 메뉴로 기본으로 제공되며 변경이 불가합니다.</p>
+                <p className="text-xs text-slate-500 mt-0.5">홈 {'>'} My학원에 위치한 학원 관리 메뉴로 기본으로 제공되며 변경이 불가합니다.</p>
               </div>
               <input type="checkbox" checked disabled className="w-4 h-4 accent-slate-300 cursor-not-allowed opacity-50" />
             </div>
@@ -102,7 +102,7 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
               <div key={gIdx} className="flex flex-col">
                 {/* 카테고리 헤더 */}
                 <div className="bg-slate-100/80 px-4 py-2 border-y border-slate-200 first:border-t-0">
-                  <span className="text-[12px] font-black text-slate-600">{group.category}</span>
+                  <span className="text-[12px] font-bold text-slate-600">{group.category}</span>
                 </div>
                 {/* 카테고리 내 권한 리스트 */}
                 <div className="flex flex-col divide-y divide-slate-100">
@@ -111,14 +111,14 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
                       key={item.id} 
                       className="flex justify-between items-center px-4 py-3 cursor-pointer hover:bg-blue-50/50 transition-colors group"
                     >
-                      <span className="text-[13px] font-bold text-slate-700 group-hover:text-[#002864] transition-colors">
+                      <span className="text-[13px] font-bold text-slate-700 group-hover:text-brand transition-colors">
                         {item.label}
                       </span>
                       <input 
                         type="checkbox" 
                         checked={selectedPermissions.includes(item.id)}
                         onChange={() => togglePermission(item.id)}
-                        className="w-4 h-4 accent-[#002864] cursor-pointer transition-transform active:scale-90" 
+                        className="w-4 h-4 accent-brand cursor-pointer transition-transform active:scale-90" 
                       />
                     </label>
                   ))}
@@ -143,7 +143,7 @@ export default function PermissionSettingModal({ onClose }: { onClose: () => voi
               alert("권한이 성공적으로 저장되었습니다!");
               onClose();
             }} 
-            className="px-6 py-2.5 bg-[#002864] text-white font-bold text-[13px] rounded-xl hover:bg-blue-900 transition-colors shadow-sm"
+            className="px-6 py-2.5 bg-brand text-white font-bold text-[13px] rounded-xl hover:bg-blue-900 transition-colors shadow-sm"
           >
             저장하기
           </button>

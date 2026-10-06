@@ -630,21 +630,21 @@ export default function VisualMapperPage() {
       {/* 헤더 바 */}
       <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-center mb-4 shrink-0 gap-4">
         <div>
-          <h1 className="text-2xl font-black text-[#002864] flex items-center gap-2"><span>🔗</span> 3단 크로스 교재 매퍼 <span className="text-sm font-bold text-white bg-blue-500 px-2 py-0.5 rounded ml-2 shadow-sm">Cross Mapper</span></h1>
+          <h1 className="text-2xl font-bold text-brand flex items-center gap-2"><span>🔗</span> 3단 크로스 교재 매퍼 <span className="text-sm font-bold text-white bg-blue-500 px-2 py-0.5 rounded ml-2 shadow-sm">Cross Mapper</span></h1>
           <p className="text-sm font-bold text-slate-500 mt-1">본교재 1권에 여러 부교재 문항을 불러와 과제용으로 연결하거나, 완전히 쌍둥이 자식으로 엮어줍니다.</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-sm font-bold text-slate-500 flex flex-col items-end">
             <span>수평 연결(과제용) 문항</span>
-            <span><span className="text-emerald-600 font-black text-xl">{Object.keys(mappings).length}</span> 문항</span>
+            <span><span className="text-emerald-600 font-bold text-xl">{Object.keys(mappings).length}</span> 문항</span>
           </div>
           <div className="w-px h-10 bg-slate-200 mx-1"></div>
           
-          <button onClick={handleAiMatch} disabled={mainQuestions.length === 0 || (wbQuestions1.length === 0 && wbQuestions2.length === 0) || isLoading} className="px-5 py-3 bg-fuchsia-600 text-white font-black rounded-xl shadow-md hover:bg-fuchsia-700 disabled:opacity-50 transition-colors flex items-center gap-2">
+          <button onClick={handleAiMatch} disabled={mainQuestions.length === 0 || (wbQuestions1.length === 0 && wbQuestions2.length === 0) || isLoading} className="px-5 py-3 bg-fuchsia-600 text-white font-bold rounded-xl shadow-md hover:bg-fuchsia-700 disabled:opacity-50 transition-colors flex items-center gap-2">
             <span className="text-lg">🤖</span> AI 3단 동시 매칭
           </button>
           
-          <button onClick={handleSaveToDB} disabled={isLoading} className="px-6 py-3 bg-emerald-600 text-white font-black rounded-xl shadow-md hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-2">
+          <button onClick={handleSaveToDB} disabled={isLoading} className="px-6 py-3 bg-emerald-600 text-white font-bold rounded-xl shadow-md hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center gap-2">
             <span className="text-lg">💾</span> {isLoading ? "저장 중..." : "DB에 수평 연결 저장"}
           </button>
         </div>
@@ -654,7 +654,7 @@ export default function VisualMapperPage() {
         
         {/* 본교재 선택 */}
         <div className="flex flex-col gap-1.5 xl:border-r border-slate-200 xl:pr-4">
-          <span className="text-xs font-black text-indigo-600">📘 [허브] 본교재 선택:</span>
+          <span className="text-xs font-bold text-indigo-600">📘 [허브] 본교재 선택:</span>
           <select value={selectedMainBookId} onChange={(e) => setSelectedMainBookId(e.target.value)} className="px-3 py-1.5 border border-indigo-300 rounded-lg font-bold text-indigo-900 bg-indigo-50 w-full text-sm shadow-sm focus:ring-2 focus:ring-indigo-500 outline-none">
             <option value="">본교재 선택...</option>
             {textbooks.map(b => <option key={b.book_id} value={b.book_id}>{b.title}</option>)}
@@ -663,7 +663,7 @@ export default function VisualMapperPage() {
         
         {/* 부교재 1 선택 */}
         <div className="flex flex-col gap-1.5 xl:border-r border-slate-200 xl:pr-4">
-          <span className="text-xs font-black text-emerald-600">📗 [꼬리] 부교재/쌍둥이 1:</span>
+          <span className="text-xs font-bold text-emerald-600">📗 [꼬리] 부교재/쌍둥이 1:</span>
           <div className="flex items-center gap-2">
             <input type="text" placeholder="검색..." value={wbFilterText1} onChange={(e) => setWbFilterText1(e.target.value)} className="w-24 px-2 py-1.5 border border-emerald-300 rounded-lg text-xs focus:ring-2 focus:ring-emerald-600 bg-white shadow-sm font-medium outline-none" />
             <select value={selectedWbSource1} onChange={(e) => setSelectedWbSource1(e.target.value)} className="flex-1 px-3 py-1.5 border border-emerald-300 rounded-lg font-bold text-emerald-800 bg-emerald-50 truncate text-sm shadow-sm focus:ring-2 focus:ring-emerald-500 outline-none">
@@ -675,7 +675,7 @@ export default function VisualMapperPage() {
 
         {/* 부교재 2 선택 */}
         <div className="flex flex-col gap-1.5">
-          <span className="text-xs font-black text-violet-600">📙 [꼬리] 부교재/쌍둥이 2:</span>
+          <span className="text-xs font-bold text-violet-600">📙 [꼬리] 부교재/쌍둥이 2:</span>
           <div className="flex items-center gap-2">
             <input type="text" placeholder="검색..." value={wbFilterText2} onChange={(e) => setWbFilterText2(e.target.value)} className="w-24 px-2 py-1.5 border border-violet-300 rounded-lg text-xs focus:ring-2 focus:ring-violet-600 bg-white shadow-sm font-medium outline-none" />
             <select value={selectedWbSource2} onChange={(e) => setSelectedWbSource2(e.target.value)} className="flex-1 px-3 py-1.5 border border-violet-300 rounded-lg font-bold text-violet-800 bg-violet-50 truncate text-sm shadow-sm focus:ring-2 focus:ring-violet-500 outline-none">
@@ -692,10 +692,10 @@ export default function VisualMapperPage() {
         {/* ======================= 왼쪽: 본교재 리스트 ======================= */}
         <div className="flex-[1.2] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-indigo-100/80 border-b border-indigo-200 flex justify-between items-center shrink-0">
-            <h2 className="font-extrabold text-indigo-900 text-sm">📘 허브: 본교재 문항</h2>
+            <h2 className="font-bold text-indigo-900 text-sm">📘 허브: 본교재 문항</h2>
             <button 
               onClick={handleToggleSelectAllMain} 
-              className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${isMainAllSelected ? 'bg-indigo-500 text-white border-indigo-500 hover:bg-indigo-600' : 'text-indigo-600 bg-indigo-50 border-indigo-200 hover:bg-indigo-100'}`}
+              className={`text-xs font-bold px-2 py-1 rounded-md border transition-colors ${isMainAllSelected ? 'bg-indigo-500 text-white border-indigo-500 hover:bg-indigo-600' : 'text-indigo-600 bg-indigo-50 border-indigo-200 hover:bg-indigo-100'}`}
             >
               {isMainAllSelected ? '전체해제' : '전체선택'}
             </button>
@@ -727,17 +727,17 @@ export default function VisualMapperPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-[12px] font-black text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">{q.page_number}p</span>
-                          <span className="text-sm font-black text-indigo-900 ml-1">{formatQNum(q.question_number, q.sub_num)}</span>
-                          {taxDepth > 0 && <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm hidden 2xl:inline-block">Depth {taxDepth}</span>}
+                          <span className="text-[12px] font-bold text-white bg-indigo-500 px-2 py-0.5 rounded shadow-sm">{q.page_number}p</span>
+                          <span className="text-sm font-bold text-indigo-900 ml-1">{formatQNum(q.question_number, q.sub_num)}</span>
+                          {taxDepth > 0 && <span className="text-xs font-bold text-fuchsia-600 bg-fuchsia-50 border border-fuchsia-200 px-1.5 py-0.5 rounded shadow-sm hidden 2xl:inline-block">Depth {taxDepth}</span>}
                           
                           {hasTwins && (
                             <button 
                               onClick={(e) => handleFocusFamily(qIdStr, e)}
-                              className="text-[10px] font-extrabold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full shadow-sm ml-1 flex items-center gap-1 hover:bg-rose-100 hover:border-rose-300 transition-colors z-10 relative"
+                              className="text-xs font-bold text-rose-600 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-full shadow-sm ml-1 flex items-center gap-1 hover:bg-rose-100 hover:border-rose-300 transition-colors z-10 relative"
                               title="클릭 시 꼬리 문항으로 스크롤 이동합니다"
                             >
-                              <span>👯</span>쌍둥이 {myTwinsInWb.length}개 <span className="text-[11px] leading-none opacity-70">🔍</span>
+                              <span>👯</span>쌍둥이 {myTwinsInWb.length}개 <span className="text-xs leading-none opacity-70">🔍</span>
                             </button>
                           )}
                         </div>
@@ -745,12 +745,12 @@ export default function VisualMapperPage() {
                           <div className="flex items-center gap-2 z-10 relative">
                             <button 
                               onClick={(e) => handleFocusFamily(qIdStr, e)}
-                              className="text-[10px] font-extrabold text-white bg-blue-500 px-2 py-0.5 rounded-full shadow-sm hover:bg-blue-600 transition-colors flex items-center gap-1"
+                              className="text-xs font-bold text-white bg-blue-500 px-2 py-0.5 rounded-full shadow-sm hover:bg-blue-600 transition-colors flex items-center gap-1"
                               title="클릭 시 꼬리 문항으로 스크롤 이동합니다"
                             >
-                              {mappedWbs.length}개 수평연결됨 <span className="text-[11px] leading-none opacity-80">🔍</span>
+                              {mappedWbs.length}개 수평연결됨 <span className="text-xs leading-none opacity-80">🔍</span>
                             </button>
-                            <button onClick={(e) => handleUnlink(qIdStr, e)} className="text-[10px] font-bold text-slate-400 hover:text-rose-600 underline">초기화</button>
+                            <button onClick={(e) => handleUnlink(qIdStr, e)} className="text-xs font-bold text-slate-400 hover:text-rose-600 underline">초기화</button>
                           </div>
                         )}
                       </div>
@@ -768,36 +768,36 @@ export default function VisualMapperPage() {
           <div className="bg-white p-2 rounded-2xl shadow-md border border-slate-200 flex flex-col gap-2 relative w-full">
             <button onClick={handleLink} disabled={selectedMainIds.length === 0 || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainIds.length > 0 && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-indigo-500 to-blue-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
               <svg className="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
-              <span className="text-[10px] font-black">수평 연결</span>
+              <span className="text-xs font-bold">수평 연결</span>
             </button>
             <div className="text-center mt-0.5 mb-1">
-              <div className="text-[9px] font-black text-indigo-600 leading-tight">유사/과제<br/>(다중 병합)</div>
+              <div className="text-xs font-bold text-indigo-600 leading-tight">유사/과제<br/>(다중 병합)</div>
             </div>
           </div>
 
           <div className="bg-white p-2 rounded-2xl shadow-md border border-rose-200 flex flex-col gap-2 relative w-full">
             <button onClick={handleTwinLink} disabled={selectedMainIds.length !== 1 || selectedWbIds.length === 0} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainIds.length === 1 && selectedWbIds.length > 0 ? 'bg-gradient-to-br from-rose-500 to-fuchsia-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
               <span className="text-lg mb-0.5">👯</span>
-              <span className="text-[10px] font-black">수직 편입</span>
+              <span className="text-xs font-bold">수직 편입</span>
             </button>
             <div className="text-center mt-0.5 mb-1">
-              <div className="text-[9px] font-black text-rose-600 leading-tight">쌍둥이화<br/>(1개만 가능)</div>
+              <div className="text-xs font-bold text-rose-600 leading-tight">쌍둥이화<br/>(1개만 가능)</div>
             </div>
           </div>
 
           <div className="bg-white p-2 rounded-2xl shadow-md border border-amber-200 flex flex-col gap-2 relative w-full">
             <button onClick={handleMultiTwinLink} disabled={selectedMainIds.length === 0 || selectedMainIds.length !== selectedWbIds.length} className={`w-full h-14 rounded-xl flex flex-col items-center justify-center transition-all shadow-sm ${selectedMainIds.length > 0 && selectedMainIds.length === selectedWbIds.length ? 'bg-gradient-to-br from-amber-500 to-orange-500 text-white cursor-pointer hover:scale-105 active:scale-95' : 'bg-slate-100 text-slate-300 cursor-not-allowed'}`}>
               <span className="text-lg mb-0.5">🧬</span>
-              <span className="text-[10px] font-black">1:1 쌍둥이</span>
+              <span className="text-xs font-bold">1:1 쌍둥이</span>
             </button>
             <div className="text-center mt-0.5 mb-1">
-              <div className="text-[9px] font-black text-amber-600 leading-tight">다중 선택<br/>순서 매칭</div>
+              <div className="text-xs font-bold text-amber-600 leading-tight">다중 선택<br/>순서 매칭</div>
             </div>
           </div>
 
           <div className="text-center mt-2">
-            <span className="text-[10px] font-bold text-slate-400">꼬리 선택됨</span>
-            <div className="text-sm font-black text-slate-700">{selectedWbIds.length}개</div>
+            <span className="text-xs font-bold text-slate-400">꼬리 선택됨</span>
+            <div className="text-sm font-bold text-slate-700">{selectedWbIds.length}개</div>
           </div>
 
         </div>
@@ -805,10 +805,10 @@ export default function VisualMapperPage() {
         {/* ======================= 우측 1: 부교재 1 리스트 ======================= */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-emerald-100/80 border-b border-emerald-200 flex justify-between items-center shrink-0">
-            <h2 className="font-extrabold text-emerald-900 text-sm truncate">📗 꼬리 1</h2>
+            <h2 className="font-bold text-emerald-900 text-sm truncate">📗 꼬리 1</h2>
             <button 
               onClick={handleToggleSelectAllWb1} 
-              className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${isWb1AllSelected ? 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
+              className={`text-xs font-bold px-2 py-1 rounded-md border transition-colors ${isWb1AllSelected ? 'bg-emerald-500 text-white border-emerald-500 hover:bg-emerald-600' : 'text-emerald-600 bg-emerald-50 border-emerald-200 hover:bg-emerald-100'}`}
             >
               {isWb1AllSelected ? '전체해제' : '전체선택'}
             </button>
@@ -840,33 +840,33 @@ export default function VisualMapperPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[12px] font-black text-white bg-emerald-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
-                          <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>{formatQNum(q.question_number, q.sub_num)}</span>
+                          <span className="text-[12px] font-bold text-white bg-emerald-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
+                          <span className={`text-sm font-bold ml-0.5 ${isSelected ? 'text-emerald-700' : 'text-slate-800'}`}>{formatQNum(q.question_number, q.sub_num)}</span>
                         </div>
                         
                         <div className="flex items-center gap-1">
                           {isMyTwin && (
                             <div className="flex items-center gap-1 z-10">
-                              <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded border border-fuchsia-200 shrink-0 shadow-sm">내 쌍둥이</span>
-                              <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-[9px] font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
+                              <span className="text-xs font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded border border-fuchsia-200 shrink-0 shadow-sm">내 쌍둥이</span>
+                              <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-xs font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
                             </div>
                           )}
                           {isTwin && !isMyTwin && (
                             <button 
                               onClick={(e) => onFindTwinParent(q.parent_question_id, e)} 
-                              className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              className="text-xs font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
                               title="본교재의 쌍둥이 부모 위치로 이동합니다"
                             >
-                              타문항 쌍둥이 <span className="text-[11px] leading-none">🔍</span>
+                              타문항 쌍둥이 <span className="text-xs leading-none">🔍</span>
                             </button>
                           )}
                           {isMappedToOther && (
                             <button 
                               onClick={(e) => handleFocusFamily(mappedMainIds[0], e)} 
-                              className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              className="text-xs font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
                               title="본교재의 수평 연결 기준 위치로 이동합니다"
                             >
-                              타문항 연결 <span className="text-[11px] leading-none">🔍</span>
+                              타문항 연결 <span className="text-xs leading-none">🔍</span>
                             </button>
                           )}
                         </div>
@@ -882,10 +882,10 @@ export default function VisualMapperPage() {
         {/* ======================= 우측 2: 부교재 2 리스트 ======================= */}
         <div className="flex-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
           <div className="p-3 bg-violet-100/80 border-b border-violet-200 flex justify-between items-center shrink-0">
-            <h2 className="font-extrabold text-violet-900 text-sm truncate">📙 꼬리 2</h2>
+            <h2 className="font-bold text-violet-900 text-sm truncate">📙 꼬리 2</h2>
             <button 
               onClick={handleToggleSelectAllWb2} 
-              className={`text-[10px] font-bold px-2 py-1 rounded-md border transition-colors ${isWb2AllSelected ? 'bg-violet-500 text-white border-violet-500 hover:bg-violet-600' : 'text-violet-600 bg-violet-50 border-violet-200 hover:bg-violet-100'}`}
+              className={`text-xs font-bold px-2 py-1 rounded-md border transition-colors ${isWb2AllSelected ? 'bg-violet-500 text-white border-violet-500 hover:bg-violet-600' : 'text-violet-600 bg-violet-50 border-violet-200 hover:bg-violet-100'}`}
             >
               {isWb2AllSelected ? '전체해제' : '전체선택'}
             </button>
@@ -917,33 +917,33 @@ export default function VisualMapperPage() {
                     <div className="flex-1 min-w-0">
                       <div className="flex justify-between items-start mb-2">
                         <div className="flex items-center gap-1.5 flex-wrap">
-                          <span className="text-[12px] font-black text-white bg-violet-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
-                          <span className={`text-sm font-black ml-0.5 ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{formatQNum(q.question_number, q.sub_num)}</span>
+                          <span className="text-[12px] font-bold text-white bg-violet-500 px-2 py-0.5 rounded shadow-sm">{q.final_printed_page || q.detected_page_num}p</span>
+                          <span className={`text-sm font-bold ml-0.5 ${isSelected ? 'text-violet-700' : 'text-slate-800'}`}>{formatQNum(q.question_number, q.sub_num)}</span>
                         </div>
                         
                         <div className="flex items-center gap-1">
                           {isMyTwin && (
                             <div className="flex items-center gap-1 z-10">
-                              <span className="text-[9px] font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded border border-fuchsia-200 shrink-0 shadow-sm">내 쌍둥이</span>
-                              <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-[9px] font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
+                              <span className="text-xs font-bold text-fuchsia-600 bg-fuchsia-50 px-1.5 py-0.5 rounded border border-fuchsia-200 shrink-0 shadow-sm">내 쌍둥이</span>
+                              <button onClick={(e) => handleUnlinkTwin(qUuid, e)} className="text-xs font-bold text-slate-400 hover:text-rose-600 underline px-1">해제</button>
                             </div>
                           )}
                           {isTwin && !isMyTwin && (
                             <button 
                               onClick={(e) => onFindTwinParent(q.parent_question_id, e)} 
-                              className="text-[9px] font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              className="text-xs font-bold text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
                               title="본교재의 쌍둥이 부모 위치로 이동합니다"
                             >
-                              타문항 쌍둥이 <span className="text-[11px] leading-none">🔍</span>
+                              타문항 쌍둥이 <span className="text-xs leading-none">🔍</span>
                             </button>
                           )}
                           {isMappedToOther && (
                             <button 
                               onClick={(e) => handleFocusFamily(mappedMainIds[0], e)} 
-                              className="text-[9px] font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
+                              className="text-xs font-bold text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-300 hover:bg-indigo-100 hover:text-indigo-700 hover:border-indigo-300 transition-colors shrink-0 shadow-sm flex items-center gap-0.5 z-10"
                               title="본교재의 수평 연결 기준 위치로 이동합니다"
                             >
-                              타문항 연결 <span className="text-[11px] leading-none">🔍</span>
+                              타문항 연결 <span className="text-xs leading-none">🔍</span>
                             </button>
                           )}
                         </div>

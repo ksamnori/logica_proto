@@ -92,10 +92,10 @@ export default function RoleToggleBtn() {
   return (
     <button 
       onClick={toggleRole}
-      className={`fixed bottom-[120px] right-6 sm:bottom-[150px] sm:right-10 z-[99999] px-5 py-3 rounded-full font-black shadow-2xl transition-all duration-300 flex items-center gap-2 border-2 hover:-translate-y-1 pointer-events-auto ${
+      className={`fixed bottom-[120px] right-6 sm:bottom-[150px] sm:right-10 z-[99999] px-5 py-3 rounded-full font-bold shadow-2xl transition-all duration-300 flex items-center gap-2 border-2 hover:-translate-y-1 pointer-events-auto ${
         isTeacherMode 
           ? 'bg-rose-500 hover:bg-rose-600 text-white border-rose-400 animate-pulse' 
-          : 'bg-[#002864] hover:bg-blue-900 text-amber-400 border-blue-800'
+          : 'bg-brand hover:bg-blue-900 text-amber-400 border-blue-800'
       }`}
     >
       {isTeacherMode ? (

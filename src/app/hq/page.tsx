@@ -346,8 +346,8 @@ export default function HQWorkspacePage() {
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 sm:px-5 py-3 flex justify-between items-center shadow-md z-20 shrink-0 gap-2">
         <div className="flex items-center min-w-0">
           <div className="min-w-0">
-            <h1 className="text-[14px] sm:text-[16px] font-black leading-tight truncate">천종현수학연구소 통합 메신저</h1>
-            <p className="text-[10px] sm:text-[11px] text-slate-400 mt-0.5 leading-tight truncate">전사 소통 채널 (B2B / 사내)</p>
+            <h1 className="text-[14px] sm:text-[16px] font-bold leading-tight truncate">천종현수학연구소 통합 메신저</h1>
+            <p className="text-xs sm:text-xs text-slate-400 mt-0.5 leading-tight truncate">전사 소통 채널 (B2B / 사내)</p>
           </div>
         </div>
         <div className="flex items-center gap-2 sm:gap-3 shrink-0">
@@ -358,12 +358,12 @@ export default function HQWorkspacePage() {
           
           <div className="text-right flex flex-col justify-center mx-1">
             <div className="text-[12px] sm:text-[13px] font-bold leading-tight truncate max-w-[65px] sm:max-w-[120px]">{instName}</div>
-            <div className="text-[9px] sm:text-[10px] text-slate-400 font-normal truncate max-w-[65px] sm:max-w-[120px]">{instPosition}</div>
+            <div className="text-xs sm:text-xs text-slate-400 font-normal truncate max-w-[65px] sm:max-w-[120px]">{instPosition}</div>
           </div>
 
           <div className="w-px h-5 bg-slate-600 shrink-0"></div>
           
-          <button onClick={handleLogout} className="whitespace-nowrap text-[11px] font-bold text-rose-300 hover:text-rose-400 bg-rose-500/10 px-2 sm:px-3 py-1.5 rounded-lg transition-colors shrink-0">로그아웃</button>
+          <button onClick={handleLogout} className="whitespace-nowrap text-xs font-bold text-rose-300 hover:text-rose-400 bg-rose-500/10 px-2 sm:px-3 py-1.5 rounded-lg transition-colors shrink-0">로그아웃</button>
         </div>
       </header>
 
@@ -376,7 +376,7 @@ export default function HQWorkspacePage() {
               조직도
             </button>
             <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView !== "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[10px] px-2 py-0.5 rounded-full">{unreadCount}</span>}
+              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-xs px-2 py-0.5 rounded-full">{unreadCount}</span>}
             </button>
           </div>
 
@@ -402,11 +402,11 @@ export default function HQWorkspacePage() {
 
                     return (
                       <div key={tenantName} className="mb-2">
-                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200/80 hover:bg-slate-300/80 text-slate-800 px-4 py-3 rounded-xl font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
+                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200/80 hover:bg-slate-300/80 text-slate-800 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors shadow-sm">
                           <span className="flex items-center">
                             🏢 {tenantName} 
-                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] rounded font-black">내 지점</span>}
-                            <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span>
+                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded font-bold">내 지점</span>}
+                            <span className="text-xs font-normal ml-1">({tenantMembersCount}명)</span>
                           </span>
                           <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                         </button>
@@ -429,8 +429,8 @@ export default function HQWorkspacePage() {
                                   <button onClick={() => toggleDept(deptId)} className="w-full bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[12px] flex justify-between items-center border border-slate-200 transition-colors shadow-sm">
                                     <span className="flex items-center">
                                       📁 {deptName} 
-                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] rounded font-black">내 부서</span>}
-                                      <span className="text-[10px] font-normal ml-1 text-slate-400">({deptMembers.length}명)</span>
+                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded font-bold">내 부서</span>}
+                                      <span className="text-xs font-normal ml-1 text-slate-400">({deptMembers.length}명)</span>
                                     </span>
                                     <svg className={`w-3.5 h-3.5 text-slate-400 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                   </button>
@@ -458,9 +458,9 @@ export default function HQWorkspacePage() {
                                             <div className="flex-1 flex flex-col">
                                               <div className="font-bold text-slate-800 text-sm flex items-center">
                                                 {inst.name}
-                                                {isMe && <span className="ml-1.5 px-1.5 py-0.5 bg-[#002864] text-white text-[9px] rounded font-bold">나</span>}
+                                                {isMe && <span className="ml-1.5 px-1.5 py-0.5 bg-brand text-white text-xs rounded font-bold">나</span>}
                                               </div>
-                                              <div className="text-[11px] text-slate-500 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
+                                              <div className="text-xs text-slate-500 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
                                             </div>
                                           </div>
                                         )
@@ -478,7 +478,7 @@ export default function HQWorkspacePage() {
                 }
               </div>
               <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-20">
-                <button onClick={handleStartGroupChat} disabled={selectedInstIds.length === 0} className={`w-full py-3.5 rounded-xl font-extrabold text-[14px] transition-colors shadow-sm ${selectedInstIds.length > 0 ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                <button onClick={handleStartGroupChat} disabled={selectedInstIds.length === 0} className={`w-full py-3.5 rounded-xl font-bold text-[14px] transition-colors shadow-sm ${selectedInstIds.length > 0 ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
                   {selectedInstIds.length > 0 ? `${selectedInstIds.length}명과 메신저 시작` : '대화 상대를 선택하세요'}
                 </button>
               </div>
@@ -498,16 +498,16 @@ export default function HQWorkspacePage() {
                   return (
                     <div key={idx} onClick={() => openRoom(r.room_id, r.displayTitle)} className={`bg-white p-4 rounded-xl border shadow-sm transition-all flex items-center gap-3 cursor-pointer group ${activeRoomId === r.room_id ? 'border-slate-500 ring-1 ring-slate-500' : 'border-slate-200 hover:border-slate-400'}`}>
                       <div className="relative shrink-0 w-12 h-12">
-                        <div className="relative w-full h-full bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-black overflow-hidden">
+                        <div className="relative w-full h-full bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-bold overflow-hidden">
                           <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
                           {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && <img src={r.displayAvatar} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                         </div>
-                        {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-black rounded-full border-2 border-white flex items-center justify-center z-20 shadow-sm">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
+                        {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center z-20 shadow-sm">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
                       </div>
                       <div className="flex flex-col min-w-0 flex-1">
                         <div className="flex justify-between items-center">
-                          <span className="font-extrabold text-slate-800 text-[14px] truncate">{r.displayTitle}</span>
-                          {r.latestMsg && <span className="text-[10px] font-bold text-slate-400 shrink-0">{new Date(r.latestMsg.created_at).toLocaleDateString('ko-KR', {month:'short', day:'numeric'})}</span>}
+                          <span className="font-bold text-slate-800 text-[14px] truncate">{r.displayTitle}</span>
+                          {r.latestMsg && <span className="text-xs font-bold text-slate-400 shrink-0">{new Date(r.latestMsg.created_at).toLocaleDateString('ko-KR', {month:'short', day:'numeric'})}</span>}
                         </div>
                         <div className="mt-1"><span className={`text-[12px] ${r.unreadCount > 0 ? 'text-slate-800 font-bold' : 'text-slate-500 font-medium'} truncate block`}>{previewText}</span></div>
                       </div>
@@ -535,7 +535,7 @@ export default function HQWorkspacePage() {
                     {rooms.find(r => r.room_id === activeRoomId)?.displayAvatar && <img src={rooms.find(r => r.room_id === activeRoomId)?.displayAvatar} className="absolute w-full h-full object-cover z-10" alt="profile"/>}
                 </div>
                 <div className="flex flex-col flex-1 min-w-0">
-                  <span className="font-extrabold text-slate-800 text-[16px] truncate">{activeRoomName}</span>
+                  <span className="font-bold text-slate-800 text-[16px] truncate">{activeRoomName}</span>
                 </div>
               </div>
 
@@ -559,15 +559,15 @@ export default function HQWorkspacePage() {
                           {!isMe && (
                             <span className="text-[12px] font-bold text-slate-600 mb-1 ml-1">
                               {senderInfo?.name || '알수없음'} 
-                              <span className="font-normal text-[10px] text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
+                              <span className="font-normal text-xs text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
                             </span>
                           )}
                           <div className={`flex items-end gap-1.5 ${isMe ? 'flex-row-reverse' : 'flex-row'}`}>
                             <div className={`px-4 py-2.5 rounded-2xl shadow-sm text-[14px] leading-relaxed break-words font-medium ${isMe ? 'bg-slate-800 text-white rounded-tr-sm' : 'bg-white text-slate-800 rounded-tl-sm border border-slate-100'}`}>
                               {String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)}
                             </div>
-                            <div className={`flex flex-col shrink-0 text-[10px] text-slate-500 font-bold ${isMe ? 'items-end' : 'items-start'}`}>
-                              {isMe && unreadBy > 0 && <span className="text-[#002864] mb-0.5">{unreadBy}</span>}
+                            <div className={`flex flex-col shrink-0 text-xs text-slate-500 font-bold ${isMe ? 'items-end' : 'items-start'}`}>
+                              {isMe && unreadBy > 0 && <span className="text-brand mb-0.5">{unreadBy}</span>}
                               <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>
@@ -614,7 +614,7 @@ export default function HQWorkspacePage() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
               <div className="w-20 h-20 bg-slate-200/50 rounded-full flex items-center justify-center mb-4 text-4xl shadow-inner">💬</div>
-              <p className="font-extrabold text-[15px] text-slate-500">대화방을 선택하거나 새 메시지를 시작하세요.</p>
+              <p className="font-bold text-[15px] text-slate-500">대화방을 선택하거나 새 메시지를 시작하세요.</p>
             </div>
           )}
         </div>

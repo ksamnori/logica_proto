@@ -639,7 +639,7 @@ export default function ClassReportPage() {
     }
 
     return (
-      <div className={`w-[38px] h-[38px] mx-auto rounded-[10px] flex items-center justify-center font-black text-[13px] transition-all ${bgClass} ${textClass}`}>
+      <div className={`w-[38px] h-[38px] mx-auto rounded-[10px] flex items-center justify-center font-bold text-[13px] transition-all ${bgClass} ${textClass}`}>
         {displayText}
       </div>
     );
@@ -647,11 +647,11 @@ export default function ClassReportPage() {
 
   const getTypeBadge = (type: ReportTabType) => {
     switch (type) {
-      case 'EXAM': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-blue-200">시험</span>;
-      case 'HW': return <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-amber-200">과제</span>;
-      case 'OVERDUE': return <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-rose-200">미완료</span>;
-      case 'PRINT': return <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-emerald-200">오답</span>;
-      case 'SIMILAR': return <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-violet-200">유사</span>;
+      case 'EXAM': return <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold shrink-0 border border-blue-200">시험</span>;
+      case 'HW': return <span className="bg-amber-100 text-amber-700 px-2 py-0.5 rounded text-xs font-bold shrink-0 border border-amber-200">과제</span>;
+      case 'OVERDUE': return <span className="bg-rose-100 text-rose-700 px-2 py-0.5 rounded text-xs font-bold shrink-0 border border-rose-200">미완료</span>;
+      case 'PRINT': return <span className="bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded text-xs font-bold shrink-0 border border-emerald-200">오답</span>;
+      case 'SIMILAR': return <span className="bg-violet-100 text-violet-700 px-2 py-0.5 rounded text-xs font-bold shrink-0 border border-violet-200">유사</span>;
       default: return null;
     }
   };
@@ -672,7 +672,7 @@ export default function ClassReportPage() {
       return (
         <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
           <span className="text-5xl mb-4 text-indigo-200">📝</span>
-          <p className="font-extrabold text-lg text-slate-500">좌측에서 조회할 수업 일지를 선택해주세요.</p>
+          <p className="font-bold text-lg text-slate-500">좌측에서 조회할 수업 일지를 선택해주세요.</p>
         </div>
       );
     }
@@ -688,11 +688,11 @@ export default function ClassReportPage() {
           <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col md:flex-row justify-between md:items-center gap-4">
             <div>
               <div className="flex items-center gap-3 mb-2">
-                <span className="text-sm font-black bg-indigo-100 text-indigo-600 px-3 py-1 rounded-lg shadow-sm border border-indigo-200 tracking-tight flex items-center gap-1.5">
+                <span className="text-sm font-bold bg-indigo-100 text-indigo-600 px-3 py-1 rounded-lg shadow-sm border border-indigo-200 tracking-tight flex items-center gap-1.5">
                   <span className="text-lg">🗓️</span> {fullDateWithDay} 수업
                 </span>
               </div>
-              <h2 className="text-2xl font-black text-slate-800">수업 일지 기록</h2>
+              <h2 className="text-2xl font-bold text-slate-800">수업 일지 기록</h2>
             </div>
             
             {currentUser.isAdmin && (
@@ -714,7 +714,7 @@ export default function ClassReportPage() {
           </div>
 
           <div className="bg-white p-6 md:p-8 rounded-2xl shadow-sm border border-slate-200">
-            <h3 className="text-base font-black text-slate-800 border-b border-slate-100 pb-3 mb-5 flex items-center gap-2">
+            <h3 className="text-base font-bold text-slate-800 border-b border-slate-100 pb-3 mb-5 flex items-center gap-2">
               <span className="text-xl">📚</span> 학부모 안내장 (진도 및 과제 내역)
             </h3>
             {selectedLog.homework_desc ? (
@@ -729,13 +729,13 @@ export default function ClassReportPage() {
 
             {selectedLog.lesson_log_student_comment && selectedLog.lesson_log_student_comment.length > 0 && (
               <div className="mt-5 pt-5 border-t border-slate-100">
-                <h4 className="text-sm font-black text-slate-700 mb-3 flex items-center gap-1.5">
+                <h4 className="text-sm font-bold text-slate-700 mb-3 flex items-center gap-1.5">
                   <span className="text-emerald-500">🧑‍🎓</span> 개별 과제 및 코멘트
                 </h4>
                 <div className="flex flex-col gap-2.5">
                   {selectedLog.lesson_log_student_comment.map((c: any, i: number) => (
                     <div key={i} className="flex items-start gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                      <span className="font-black text-xs text-indigo-700 bg-indigo-100 px-2.5 py-1 rounded border border-indigo-200 shrink-0">
+                      <span className="font-bold text-xs text-indigo-700 bg-indigo-100 px-2.5 py-1 rounded border border-indigo-200 shrink-0">
                         {c.student?.name || '학생'}
                       </span>
                       <span className="text-[14px] font-medium text-slate-700 whitespace-pre-wrap leading-snug pt-0.5">
@@ -749,7 +749,7 @@ export default function ClassReportPage() {
           </div>
 
           <div className="bg-yellow-50 p-6 md:p-8 rounded-2xl shadow-sm border border-yellow-200">
-            <h3 className="text-base font-black text-yellow-800 border-b border-yellow-200/60 pb-3 mb-5 flex items-center gap-2">
+            <h3 className="text-base font-bold text-yellow-800 border-b border-yellow-200/60 pb-3 mb-5 flex items-center gap-2">
               <span className="text-xl">🔒</span> 강사 특이사항 메모 <span className="text-xs font-bold text-yellow-600/70 ml-2 bg-yellow-100 px-2 py-1 rounded">(학부모 미노출)</span>
             </h3>
             {selectedLog.instructor_note ? (
@@ -772,7 +772,7 @@ export default function ClassReportPage() {
       return (
         <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
           <span className="text-5xl mb-4">👈</span>
-          <p className="font-extrabold text-lg">좌측에서 분석할 시험지나 과제를 선택해주세요.</p>
+          <p className="font-bold text-lg">좌측에서 분석할 시험지나 과제를 선택해주세요.</p>
         </div>
       );
     }
@@ -780,7 +780,7 @@ export default function ClassReportPage() {
     if (isMatrixLoading) {
       return (
         <div className="flex-1 flex flex-col items-center justify-center text-slate-400 bg-slate-50/50">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin mb-4"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin mb-4"></div>
           <p className="font-bold text-sm">학생별 정오답 데이터를 분석 중입니다...</p>
         </div>
       );
@@ -798,7 +798,7 @@ export default function ClassReportPage() {
       <>
         <div className="p-5 border-b border-slate-200 bg-slate-50 flex flex-wrap items-center justify-between shrink-0 gap-4">
           <div>
-            <h3 className="text-lg font-black text-slate-800 flex items-center gap-2">
+            <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
               {getTypeBadge(selectedItem.type)} {selectedItem.title.replace(/^\[시스템\]\s*/, '')}
             </h3>
             <div className="text-xs font-bold text-slate-500 mt-1 flex gap-3">
@@ -809,13 +809,13 @@ export default function ClassReportPage() {
           </div>
           
           <div className="flex flex-wrap gap-2.5 bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-            <div className="flex items-center gap-1"><span className="text-[11px] font-black text-emerald-500">O</span><span className="text-[10px] font-bold text-slate-600">정답</span></div>
-            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-teal-500">TO</span><span className="text-[10px] font-bold text-slate-600">힌트정답</span></div>
-            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-blue-500">RO</span><span className="text-[10px] font-bold text-slate-600">재시도정답</span></div>
-            <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-[11px] font-black text-rose-500">X</span><span className="text-[10px] font-bold text-slate-600">오답</span></div>
-            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-orange-500">TX</span><span className="text-[10px] font-bold text-slate-600">힌트오답</span></div>
-            <div className="flex items-center gap-1 ml-1"><span className="text-[11px] font-black text-orange-500">☆</span><span className="text-[10px] font-bold text-slate-600">질문</span></div>
-            <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-[11px] font-black text-slate-400">B</span><span className="text-[10px] font-bold text-slate-600">빈칸</span></div>
+            <div className="flex items-center gap-1"><span className="text-xs font-bold text-emerald-500">O</span><span className="text-xs font-bold text-slate-600">정답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-xs font-bold text-teal-500">TO</span><span className="text-xs font-bold text-slate-600">힌트정답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-xs font-bold text-blue-500">RO</span><span className="text-xs font-bold text-slate-600">재시도정답</span></div>
+            <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-xs font-bold text-rose-500">X</span><span className="text-xs font-bold text-slate-600">오답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-xs font-bold text-orange-500">TX</span><span className="text-xs font-bold text-slate-600">힌트오답</span></div>
+            <div className="flex items-center gap-1 ml-1"><span className="text-xs font-bold text-orange-500">☆</span><span className="text-xs font-bold text-slate-600">질문</span></div>
+            <div className="flex items-center gap-1 ml-1 border-l border-slate-200 pl-2"><span className="text-xs font-bold text-slate-400">B</span><span className="text-xs font-bold text-slate-600">빈칸</span></div>
           </div>
         </div>
 
@@ -824,18 +824,18 @@ export default function ClassReportPage() {
             <thead className="sticky top-0 z-20 shadow-sm">
               <tr>
                 <th className="sticky left-0 z-30 bg-[#f8fafc] p-2 min-w-[150px] w-[150px] max-w-[150px] border-r border-b border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.03)] h-[48px]">
-                  <span className="text-[13px] font-extrabold text-slate-700">학생명</span>
+                  <span className="text-[13px] font-bold text-slate-700">학생명</span>
                 </th>
                 <th className="bg-[#f8fafc] p-2 min-w-[90px] w-[90px] max-w-[90px] border-r border-b border-slate-200 text-center align-middle shadow-sm h-[48px]">
-                  <span className="text-[13px] font-extrabold text-slate-700">정답 수</span>
+                  <span className="text-[13px] font-bold text-slate-700">정답 수</span>
                 </th>
                 
                 {matrixCols.map(col => (
                   <th key={col.qId} className="bg-[#f8fafc] p-0 min-w-[48px] w-[48px] max-w-[48px] border-r border-b border-slate-200 text-center align-middle h-[48px]">
                     <div className="flex flex-col items-center justify-center gap-0.5">
                       <div className="flex items-center gap-0.5">
-                        <span className="text-[13px] font-black text-[#002864] leading-none">{col.displayNum}</span>
-                        <button onClick={() => setModalQuestion(col)} className="text-[10px] text-blue-400 hover:text-blue-600 transition-colors leading-none" title="문제 상세 보기">🔍</button>
+                        <span className="text-[13px] font-bold text-brand leading-none">{col.displayNum}</span>
+                        <button onClick={() => setModalQuestion(col)} className="text-xs text-blue-400 hover:text-blue-600 transition-colors leading-none" title="문제 상세 보기">🔍</button>
                       </div>
                       {(col.page || col.number) && (
                         <span className="text-[8px] font-bold text-blue-500 leading-none tracking-tighter truncate w-full px-0.5" title={`${col.page ? `p.${col.page}` : ''}${col.page && col.number ? '-' : ''}${col.number ? `${col.number}번` : ''}`}>
@@ -860,21 +860,21 @@ export default function ClassReportPage() {
                       <div className="flex flex-col items-center justify-center w-full h-full gap-0.5">
                         <span 
                           onClick={() => router.push(`/student/${row.studentId}`)}
-                          className="truncate w-full text-center cursor-pointer font-extrabold text-[13px] text-slate-800 hover:underline hover:text-blue-600 transition-colors leading-tight"
+                          className="truncate w-full text-center cursor-pointer font-bold text-[13px] text-slate-800 hover:underline hover:text-blue-600 transition-colors leading-tight"
                           title="학생 상세 기록 보기"
                         >
                           {row.studentName}
                         </span>
-                        <span className={`text-[9px] font-extrabold px-2 py-0.5 rounded-full leading-none ${isCompleted ? 'text-slate-400 bg-slate-100 border border-slate-200/50' : 'text-rose-500 bg-rose-50 border border-rose-100/50'}`}>
+                        <span className={`text-xs font-bold px-2 py-0.5 rounded-full leading-none ${isCompleted ? 'text-slate-400 bg-slate-100 border border-slate-200/50' : 'text-rose-500 bg-rose-50 border border-rose-100/50'}`}>
                           {row.status || '미제출'}
                         </span>
                       </div>
                     </td>
                     
                     <td className="p-0 border-r border-slate-200 text-center align-middle min-w-[90px] w-[90px] max-w-[90px] h-[48px]">
-                      <div className="bg-blue-50/50 text-[#002864] font-black text-[12px] px-1.5 py-1 rounded-lg border border-blue-100 shadow-sm inline-flex items-center justify-center gap-1 w-full max-w-[64px]">
+                      <div className="bg-blue-50/50 text-brand font-bold text-[12px] px-1.5 py-1 rounded-lg border border-blue-100 shadow-sm inline-flex items-center justify-center gap-1 w-full max-w-[64px]">
                         <span>{row.totalCorrect}</span>
-                        <span className="text-blue-200 text-[9px] font-bold">/</span>
+                        <span className="text-blue-200 text-xs font-bold">/</span>
                         <span className="text-slate-500 font-bold">{assignedCount}</span>
                       </div>
                     </td>
@@ -891,7 +891,7 @@ export default function ClassReportPage() {
             <tfoot className="sticky bottom-0 z-20 shadow-[0_-2px_5px_rgba(0,0,0,0.05)]">
               <tr>
                 <th colSpan={2} className="sticky left-0 z-30 bg-[#f8fafc] p-1 border-r border-t border-slate-200 text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.03)] h-[36px]">
-                  <span className="text-[11px] font-extrabold text-slate-700">문항별 정답률</span>
+                  <span className="text-xs font-bold text-slate-700">문항별 정답률</span>
                 </th>
                 {matrixCols.map(col => {
                   const rate = questionRates[col.qId] || 0;
@@ -901,7 +901,7 @@ export default function ClassReportPage() {
 
                   return (
                     <th key={col.qId} className="bg-[#f8fafc] p-1 border-r border-t border-slate-200 text-center align-middle min-w-[48px] w-[48px] max-w-[48px] h-[36px]">
-                      <span className={`text-[11px] font-black ${rateColor}`}>{rate}%</span>
+                      <span className={`text-xs font-bold ${rateColor}`}>{rate}%</span>
                     </th>
                   );
                 })}
@@ -931,7 +931,7 @@ export default function ClassReportPage() {
       
       <div className="flex flex-col gap-4 shrink-0">
         <div>
-          <h2 className="text-2xl font-black text-[#002864] tracking-tight flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-brand tracking-tight flex items-center gap-2">
             <span>📊</span> 반별 문항 분석 및 학습 결과
           </h2>
           <p className="text-sm font-bold text-slate-500 mt-1.5">
@@ -954,10 +954,10 @@ export default function ClassReportPage() {
                   key={c.class_id} 
                   data-class-id={c.class_id}
                   onClick={(e) => handleClassClick(e, c.class_id)}
-                  className={`px-4 py-2 rounded-xl border-2 shadow-sm flex flex-col items-start transition-all text-left min-w-[120px] max-w-[160px] shrink-0 ${isActive ? "bg-[#002864] text-white border-[#002864] transform scale-[1.02]" : "bg-white text-slate-500 border-transparent hover:border-slate-300 hover:text-slate-700"}`}
+                  className={`px-4 py-2 rounded-xl border-2 shadow-sm flex flex-col items-start transition-all text-left min-w-[120px] max-w-[160px] shrink-0 ${isActive ? "bg-brand text-white border-brand transform scale-[1.02]" : "bg-white text-slate-500 border-transparent hover:border-slate-300 hover:text-slate-700"}`}
                 >
-                  <span className="text-sm font-extrabold tracking-tight leading-tight truncate w-full">{c.name}</span>
-                  <span className="text-[10px] mt-0.5 font-medium opacity-80 leading-none tracking-tight whitespace-nowrap truncate w-full">👤 {displayInstructor}</span>
+                  <span className="text-sm font-bold tracking-tight leading-tight truncate w-full">{c.name}</span>
+                  <span className="text-xs mt-0.5 font-medium opacity-80 leading-none tracking-tight whitespace-nowrap truncate w-full">👤 {displayInstructor}</span>
                 </button>
               );
             })
@@ -985,17 +985,17 @@ export default function ClassReportPage() {
                 </span>
               )}
               <span className="text-2xl leading-none transition-transform group-hover:scale-110">📝</span>
-              <span className="text-xs font-black">수업 일지</span>
+              <span className="text-xs font-bold">수업 일지</span>
             </button>
             
             <div className="flex-[2] grid grid-cols-3 gap-1.5">
-              <button onClick={() => setActiveTab('ALL')} className={`py-1.5 rounded-lg text-[10px] font-black transition-colors ${activeTab === 'ALL' ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>전체 분석</button>
-              <button onClick={() => setActiveTab('EXAM')} className={`py-1.5 rounded-lg text-[10px] font-black transition-colors ${activeTab === 'EXAM' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>💯 시험</button>
-              <button onClick={() => setActiveTab('HW')} className={`py-1.5 rounded-lg text-[10px] font-black transition-colors ${activeTab === 'HW' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>📝 과제</button>
+              <button onClick={() => setActiveTab('ALL')} className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${activeTab === 'ALL' ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>전체 분석</button>
+              <button onClick={() => setActiveTab('EXAM')} className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${activeTab === 'EXAM' ? 'bg-blue-600 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>💯 시험</button>
+              <button onClick={() => setActiveTab('HW')} className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${activeTab === 'HW' ? 'bg-amber-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>📝 과제</button>
               
-              <button onClick={() => setActiveTab('OVERDUE')} className={`py-1.5 rounded-lg text-[10px] font-black transition-colors ${activeTab === 'OVERDUE' ? 'bg-rose-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>⏰ 미완료</button>
-              <button onClick={() => setActiveTab('PRINT')} className={`py-1.5 rounded-lg text-[10px] font-black transition-colors ${activeTab === 'PRINT' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>❌ 오답</button>
-              <button onClick={() => setActiveTab('SIMILAR')} className={`py-1.5 rounded-lg text-[10px] font-black transition-colors ${activeTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>🔄 유사</button>
+              <button onClick={() => setActiveTab('OVERDUE')} className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${activeTab === 'OVERDUE' ? 'bg-rose-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>⏰ 미완료</button>
+              <button onClick={() => setActiveTab('PRINT')} className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${activeTab === 'PRINT' ? 'bg-emerald-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>❌ 오답</button>
+              <button onClick={() => setActiveTab('SIMILAR')} className={`py-1.5 rounded-lg text-xs font-bold transition-colors ${activeTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-sm' : 'bg-white text-slate-500 border border-slate-200 hover:bg-slate-100'}`}>🔄 유사</button>
             </div>
           </div>
 
@@ -1029,8 +1029,8 @@ export default function ClassReportPage() {
                     >
                       <div className="flex items-center gap-2 mb-1.5 justify-between">
                         <div className="flex items-center gap-2 min-w-0">
-                          <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-black shrink-0 border border-indigo-200">일지</span>
-                          <span className={`text-[10px] font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>
+                          <span className="bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded text-xs font-bold shrink-0 border border-indigo-200">일지</span>
+                          <span className={`text-xs font-bold truncate ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-400' : 'text-slate-400'}`}>
                             {formatDateLabel(log.created_at)} 작성
                           </span>
                         </div>
@@ -1047,10 +1047,10 @@ export default function ClassReportPage() {
                       </div>
                       
                       <div className="flex justify-between items-center mt-0.5">
-                        <div className={`font-extrabold text-[13px] leading-snug line-clamp-1 ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-900' : 'text-slate-800'}`}>
+                        <div className={`font-bold text-[13px] leading-snug line-clamp-1 ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'text-indigo-900' : 'text-slate-800'}`}>
                           수업 일지 기록
                         </div>
-                        <div className={`text-[11px] font-black shrink-0 px-2 py-0.5 rounded border ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                        <div className={`text-xs font-bold shrink-0 px-2 py-0.5 rounded border ${selectedLog?.lesson_log_id === log.lesson_log_id ? 'bg-indigo-100 text-indigo-700 border-indigo-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
                           {shortDateStr} 수업
                         </div>
                       </div>
@@ -1065,21 +1065,21 @@ export default function ClassReportPage() {
                 <div 
                   key={item.id} 
                   onClick={() => setSelectedItem(item)}
-                  className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedItem?.id === item.id ? 'bg-[#002864] border-[#002864] shadow-md transform scale-[1.02] ml-1' : 'bg-white border-slate-200 hover:border-slate-400 hover:bg-slate-50 shadow-sm'}`}
+                  className={`p-3 rounded-xl border cursor-pointer transition-all ${selectedItem?.id === item.id ? 'bg-brand border-brand shadow-md transform scale-[1.02] ml-1' : 'bg-white border-slate-200 hover:border-slate-400 hover:bg-slate-50 shadow-sm'}`}
                 >
                   <div className="flex items-center gap-2 mb-1.5 justify-between">
                     <div className="flex items-center gap-2 min-w-0">
                       {getTypeBadge(item.type)}
-                      <span className={`text-[10px] font-bold truncate ${selectedItem?.id === item.id ? 'text-blue-200' : 'text-slate-400'}`}>{formatDateLabel(item.date)}</span>
+                      <span className={`text-xs font-bold truncate ${selectedItem?.id === item.id ? 'text-blue-200' : 'text-slate-400'}`}>{formatDateLabel(item.date)}</span>
                     </div>
-                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shrink-0 ${item.status === '완료' ? 'bg-slate-100 text-slate-400' : 'bg-rose-500 text-white shadow-sm'}`}>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded shrink-0 ${item.status === '완료' ? 'bg-slate-100 text-slate-400' : 'bg-rose-500 text-white shadow-sm'}`}>
                       {item.status}
                     </span>
                   </div>
-                  <div className={`font-extrabold text-[13px] leading-snug line-clamp-2 ${selectedItem?.id === item.id ? 'text-white' : 'text-slate-800'}`}>
+                  <div className={`font-bold text-[13px] leading-snug line-clamp-2 ${selectedItem?.id === item.id ? 'text-white' : 'text-slate-800'}`}>
                     {item.title.replace(/^\[시스템\]\s*/, '')}
                   </div>
-                  <div className={`mt-2 text-[11px] font-bold ${selectedItem?.id === item.id ? 'text-blue-200' : 'text-slate-500'}`}>
+                  <div className={`mt-2 text-xs font-bold ${selectedItem?.id === item.id ? 'text-blue-200' : 'text-slate-500'}`}>
                     배부된 전체 문항수: {item.totalQ}
                   </div>
                 </div>
@@ -1098,7 +1098,7 @@ export default function ClassReportPage() {
       {modalQuestion && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="font-bold text-lg flex items-center gap-2">
                 <span>🔍</span> {modalQuestion.displayNum}번 문항 상세 
                 {(modalQuestion.page || modalQuestion.number) && <span className="text-sm font-medium text-blue-200 ml-2">({modalQuestion.page ? `p.${modalQuestion.page} ` : ''}{modalQuestion.number ? `${modalQuestion.number}번` : ''})</span>}
@@ -1107,12 +1107,12 @@ export default function ClassReportPage() {
             </div>
             <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
+                <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
                 <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQuestion.questionText || '-').replace(/\n/g, '<br>') }} />
                 {getCleanUrl(modalQuestion.imageUrl) && <img src={getCleanUrl(modalQuestion.imageUrl)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
               </div>
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
+                <h3 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
                 <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(modalQuestion.answer || '-')} $` }} />
               </div>
             </div>

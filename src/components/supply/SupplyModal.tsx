@@ -244,7 +244,7 @@ export default function SupplyModal({
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-[9999] p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl flex flex-col overflow-hidden h-[95vh] animate-[fadeIn_0.2s_ease-out]">
         
-        <div className="bg-[#002864] p-5 flex justify-between items-center shrink-0">
+        <div className="bg-brand p-5 flex justify-between items-center shrink-0">
           <h2 className="text-white font-bold text-lg tracking-tight">📦 {reqData ? "비품 신청 상세 내용" : "새 비품 신청하기"}</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 transition-colors font-bold text-2xl leading-none">&times;</button>
         </div>
@@ -258,7 +258,7 @@ export default function SupplyModal({
                 value={type} 
                 onChange={(e) => setType(e.target.value)} 
                 disabled={isReadonly}
-                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#002864] disabled:opacity-70"
+                className="w-full px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg font-bold text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand disabled:opacity-70"
               >
                 <option value="사무용품">📌 사무용품</option>
                 <option value="교재/도서">📚 교재/도서</option>
@@ -274,7 +274,7 @@ export default function SupplyModal({
                 onChange={(e) => setContent(e.target.value)} 
                 disabled={isReadonly}
                 placeholder="예: A4 용지 2박스 주문 부탁드립니다. (링크: ...)"
-                className="flex-1 w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#002864] resize-none custom-scroll disabled:opacity-70"
+                className="flex-1 w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-lg text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand resize-none custom-scroll disabled:opacity-70"
               />
             </div>
           </div>
@@ -282,7 +282,7 @@ export default function SupplyModal({
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-700 text-sm">💬 진행 상황 및 소통 노트</h3>
-              <span className="text-[10px] font-bold text-slate-500">모든 작업자가 기록을 남길 수 있습니다.</span>
+              <span className="text-xs font-bold text-slate-500">모든 작업자가 기록을 남길 수 있습니다.</span>
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
@@ -298,13 +298,13 @@ export default function SupplyModal({
                     <div key={c.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
                       <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
                         {canDelete && (
-                          <button onClick={() => handleDeleteComment(c.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
+                          <button onClick={() => handleDeleteComment(c.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-bold text-xs transition-colors p-1" title="댓글 삭제">✕</button>
                         )}
-                        <span className="text-[10px] text-slate-500 font-bold">
+                        <span className="text-xs text-slate-500 font-bold">
                           {c.authorName} <span className="font-normal opacity-70 ml-1">{c.createdAt}</span>
                         </span>
                       </div>
-                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-blue-100 text-[#002864] border-blue-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
+                      <div className={`border px-3.5 py-2 rounded-2xl shadow-sm text-[13px] font-bold leading-snug max-w-[85%] break-words whitespace-pre-wrap ${isMe ? "bg-blue-100 text-brand border-blue-200 rounded-tr-sm" : "bg-white text-slate-700 border-slate-200 rounded-tl-sm"}`}>
                         {c.text}
                       </div>
                     </div>
@@ -326,7 +326,7 @@ export default function SupplyModal({
                   onKeyDown={(e) => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAddComment(); } }}
                   rows={1}
                   placeholder="진행 상황이나 전달할 메모를 남겨주세요." 
-                  className="flex-1 bg-slate-100 px-3 py-2 border border-transparent rounded-lg text-sm font-medium focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[80px] custom-scroll" 
+                  className="flex-1 bg-slate-100 px-3 py-2 border border-transparent rounded-lg text-sm font-medium focus:outline-none focus:ring-1 focus:ring-brand resize-none max-h-[80px] custom-scroll" 
                 />
                 <button onClick={handleAddComment} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm transition-colors shrink-0">기록 남기기</button>
               </div>
@@ -342,7 +342,7 @@ export default function SupplyModal({
             
             {/* 🌟 안건 상정 권한 적용 */}
             {reqData && (isSuperAdminOrAdmin || canSubmitAgenda) && (
-              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-brand font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정
               </button>
             )}
@@ -350,7 +350,7 @@ export default function SupplyModal({
           
           <div className="flex gap-2 justify-end">
             <button onClick={onClose} className="px-6 py-2.5 bg-slate-100 text-slate-600 font-bold text-sm rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
-            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-6 py-2.5 bg-[#002864] hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
+            <button onClick={handleSubmit} disabled={isSubmitting || isReadonly} className="px-6 py-2.5 bg-brand hover:bg-blue-900 text-white rounded-lg font-bold text-sm shadow-sm transition-colors disabled:opacity-50">
               {isSubmitting ? "저장 중..." : "변경사항 저장"}
             </button>
           </div>

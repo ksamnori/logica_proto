@@ -207,7 +207,7 @@ function DraggableMemo({
         onDoubleClick={toggleFold} 
         className={`h-8 ${headerColor} cursor-move flex justify-between items-center pl-3 pr-1.5 shrink-0 touch-none select-none`}
       >
-        <span className="text-[10px] font-black text-black/40">Logica Memo</span>
+        <span className="text-xs font-bold text-black/40">Logica Memo</span>
         <div className="flex items-center gap-0.5">
           <button onPointerDown={(e) => e.stopPropagation()} onClick={toggleFold} className="text-black/30 hover:text-black/70 transition-colors p-1.5" title={isFolded ? "펼치기" : "접기"}>
             {isFolded ? (
@@ -1290,11 +1290,11 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
         {canUseChat && (
           <button
-            className="chat-btn w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors relative"
+            className="chat-btn w-14 h-14 bg-brand text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-colors relative"
             title="메신저 열기"
           >
             <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-            {unreadCount + staffUnreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount + staffUnreadCount > 99 ? '99+' : unreadCount + staffUnreadCount}</span>}
+            {unreadCount + staffUnreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount + staffUnreadCount > 99 ? '99+' : unreadCount + staffUnreadCount}</span>}
           </button>
         )}
       </div>
@@ -1305,7 +1305,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
           className={`fixed bottom-[90px] right-6 sm:bottom-10 sm:right-[110px] w-[360px] h-[680px] max-h-[85vh] max-w-[calc(100vw-32px)] bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.2)] flex flex-col overflow-hidden border border-slate-200 z-[9998] transition-opacity duration-300 allow-guest-interaction ${isChatOpen ? 'opacity-100 pointer-events-auto' : 'opacity-0 pointer-events-none'}`}
           style={{ transform: `scale(${isChatOpen ? 1 : 0.95})`, transformOrigin: 'bottom right' }}
         >
-          <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-[#002864] text-white flex flex-col shrink-0 cursor-move touch-none select-none">
+          <div onPointerDown={handlePanelDown} onPointerMove={handlePanelMove} onPointerUp={handlePanelUp} onPointerCancel={handlePanelUp} className="bg-brand text-white flex flex-col shrink-0 cursor-move touch-none select-none">
             <div className="px-5 py-3.5 flex justify-between items-center">
               <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2 pointer-events-none"><span>💬</span> Logica 메신저</h3>
               <div className="flex gap-1.5 items-center z-10 relative">
@@ -1326,7 +1326,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                 }}
                 className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "staff" || isHQ ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
               >
-                👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
+                👥 사내 메신저 {staffUnreadCount > 0 && <span className="bg-rose-500 text-white text-xs px-1.5 py-0.5 rounded-full">{staffUnreadCount}</span>}
               </button>
 
               {!isHQ && (
@@ -1339,7 +1339,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                   }}
                   className={`flex-1 py-2 text-[13px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeTab === "parent" ? "border-white text-white" : "border-transparent text-blue-300 hover:text-blue-100 hover:border-blue-300"}`}
                 >
-                  👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
+                  👨‍👩‍👧‍👦 학부모 상담 {unreadCount > 0 && <span className="bg-rose-500 text-white text-xs px-1.5 py-0.5 rounded-full">{unreadCount}</span>}
                 </button>
               )}
             </div>
@@ -1350,7 +1350,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
               <div className="flex-1 flex flex-col min-h-0 overflow-hidden bg-slate-50 relative">
                 <div className="p-3 border-b border-slate-200 bg-white flex items-center gap-2 shrink-0">
                   <button onClick={() => { setActiveChatView("list"); loadChatRooms(); }} className="p-1 text-slate-500 hover:bg-slate-100 rounded transition-colors"><svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg></button>
-                  <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="학생 이름 검색 (재원생)" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#002864]" />
+                  <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="학생 이름 검색 (재원생)" className="flex-1 bg-slate-100 rounded px-3 py-1.5 text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand" />
                 </div>
                 <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-2">
                   {Object.keys(groupedParents).length === 0 ? (
@@ -1362,7 +1362,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                       return (
                         <div key={idx} className="mb-2.5">
                           <button onClick={() => setExpandedClasses(prev => prev.includes(className) ? prev.filter(c => c !== className) : [...prev, className])} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors border border-slate-200 shadow-sm">
-                            <span>🏷️ {className} <span className="text-[11px] text-slate-500 font-normal ml-1.5">({students.length}명)</span></span>
+                            <span>🏷️ {className} <span className="text-xs text-slate-500 font-normal ml-1.5">({students.length}명)</span></span>
                             <svg className={`w-4 h-4 text-slate-400 transform transition-transform duration-200 ${isExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                           </button>
                           {isExpanded && (
@@ -1371,7 +1371,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                 <div key={s.student_id} onClick={() => handleCreateOrOpenRoom(s.parent_id, s.name)} className="bg-white p-3 rounded-lg border border-slate-200 shadow-sm hover:border-blue-400 cursor-pointer transition-all flex items-center justify-between mb-2 last:mb-0 ml-2">
                                   <div>
                                     <div className="font-bold text-slate-700 text-sm">{s.name} 학생 학부모님</div>
-                                    <div className="text-[11px] text-slate-400 font-bold mt-0.5">{unwrap(s.parent)?.phone || '번호없음'}</div>
+                                    <div className="text-xs text-slate-400 font-bold mt-0.5">{unwrap(s.parent)?.phone || '번호없음'}</div>
                                   </div>
                                   <button className="bg-blue-50 text-blue-600 px-3 py-1.5 rounded text-xs font-bold hover:bg-blue-100 transition-colors">대화 시작</button>
                                 </div>
@@ -1390,7 +1390,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                   {chatRooms.length === 0 ? (
                     <div className="text-center py-10 flex flex-col items-center gap-3">
                       <span className="text-slate-400 font-bold text-sm">개설된 상담방이 없습니다.</span>
-                      <button onClick={showNewChatView} className="bg-[#002864] hover:bg-blue-900 text-white font-bold px-4 py-2.5 rounded-lg shadow-md text-xs transition-colors">+ 새 채팅방 개설하기</button>
+                      <button onClick={showNewChatView} className="bg-brand hover:bg-blue-900 text-white font-bold px-4 py-2.5 rounded-lg shadow-md text-xs transition-colors">+ 새 채팅방 개설하기</button>
                     </div>
                   ) : (
                     chatRooms.map((r: ChatRoom) => {
@@ -1407,7 +1407,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                             <div className="w-10 h-10 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-bold shrink-0 relative">P{r.unreadCount > 0 && <span className="absolute top-0 right-0 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white"></span>}</div>
                             <div className="flex flex-col min-w-0 flex-1">
                               <span className="font-bold text-slate-700 text-sm truncate">{pName}</span>
-                              <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${r.unreadCount > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate`}>{previewText}</span>{r.unreadCount > 0 && <div className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{r.unreadCount > 99 ? '99+' : r.unreadCount}</div>}</div>
+                              <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${r.unreadCount > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate`}>{previewText}</span>{r.unreadCount > 0 && <div className="bg-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">{r.unreadCount > 99 ? '99+' : r.unreadCount}</div>}</div>
                             </div>
                           </div>
                           <button onClick={(e) => deleteChatRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0"><svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg></button>
@@ -1423,7 +1423,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                   <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
                   </button>
-                  <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeParentName}</span><span className="text-[10px] font-bold text-emerald-600">실시간 연결됨</span></div>
+                  <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeParentName}</span><span className="text-xs font-bold text-emerald-600">실시간 연결됨</span></div>
                 </div>
                 
                 <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
@@ -1436,7 +1436,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                         
                         <div className={`flex flex-col max-w-[85%] ${msg.sender_type === "instructor" ? "items-end" : "items-start"}`}>
                           {msg.sender_type === "parent" && (
-                            <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
+                            <span className="text-xs font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
                           )}
                           
                           <div className={`flex items-end gap-1.5 ${msg.sender_type === "instructor" ? "flex-row-reverse" : "flex-row"}`}>
@@ -1452,8 +1452,8 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                 String(msg.content).split('\n').map((line: string, i: number) => <React.Fragment key={i}>{line}<br/></React.Fragment>)
                               )}
                             </div>
-                            <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_type === "instructor" ? "items-end" : "items-start"}`}>
-                              {msg.sender_type === 'instructor' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
+                            <div className={`flex flex-col shrink-0 text-xs text-slate-500 ${msg.sender_type === "instructor" ? "items-end" : "items-start"}`}>
+                              {msg.sender_type === 'instructor' && !msg.is_read && <span className="text-brand font-bold mb-0.5">1</span>}
                               <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
                             </div>
                           </div>
@@ -1466,7 +1466,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                     <div className="flex justify-start w-full mb-1">
                       <div className="w-7 h-7 rounded-full bg-white border border-slate-300 flex justify-center items-center shrink-0 mt-0.5 text-xs mr-2">P</div>
                       <div className="flex flex-col items-start max-w-[85%]">
-                        <span className="text-[11px] font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
+                        <span className="text-xs font-bold text-slate-600 mb-1 ml-1">{activeParentName}</span>
                         <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
                           메시지를 입력 중입니다...
                         </div>
@@ -1479,15 +1479,15 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                 
                 <div className="bg-white p-3 border-t flex items-end gap-2">
                   <input type="file" className="hidden" ref={fileInputRef} onChange={handleParentImageUpload} />
-                  <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-[#002864] transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
+                  <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-brand transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
                     {isUploading ? (
-                      <div className="w-5 h-5 border-2 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+                      <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin"></div>
                     ) : (
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                     )}
                   </button>
-                  <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "instructor" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
-                  <button onClick={sendMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
+                  <textarea rows={1} value={chatInput} onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "instructor" } }); }} onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMsg(); }}} className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand resize-none max-h-[100px] custom-scroll" placeholder="메시지를 입력하세요..." />
+                  <button onClick={sendMsg} className="p-2.5 bg-brand text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
                 </div>
               </div>
             )
@@ -1525,11 +1525,11 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                       
                       return (
                         <div key={tenantName} className="mb-2">
-                          <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-extrabold text-[13px] flex justify-between items-center transition-colors shadow-sm">
+                          <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200 hover:bg-slate-300 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[13px] flex justify-between items-center transition-colors shadow-sm">
                             <span className="flex items-center">
                               🏢 {tenantName} 
-                              {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-[9px] rounded font-black">내 지점</span>}
-                              <span className="text-[11px] font-normal ml-1">({tenantMembersCount}명)</span>
+                              {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded font-bold">내 지점</span>}
+                              <span className="text-xs font-normal ml-1">({tenantMembersCount}명)</span>
                             </span>
                             <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                           </button>
@@ -1561,8 +1561,8 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                     <button onClick={() => toggleDept(deptId)} className="w-full bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg font-bold text-[12px] flex justify-between items-center transition-colors">
                                       <span className="flex items-center">
                                         📁 {deptName} 
-                                        {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-[9px] rounded font-black">내 부서</span>}
-                                        <span className="text-[10px] font-normal ml-1">({deptMembers.length}명)</span>
+                                        {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded font-bold">내 부서</span>}
+                                        <span className="text-xs font-normal ml-1">({deptMembers.length}명)</span>
                                       </span>
                                       <svg className={`w-3.5 h-3.5 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                                     </button>
@@ -1588,7 +1588,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                               <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-700 border-slate-700 text-white' : 'border-slate-300'}`}>
                                                 {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
                                               </div>
-                                              <div className="relative w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[11px] shrink-0 overflow-hidden">
+                                              <div className="relative w-9 h-9 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-xs shrink-0 overflow-hidden">
                                                 <span className="absolute z-0">T</span>
                                                 {avatarUrl && (
                                                   <img 
@@ -1602,9 +1602,9 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                               <div className="flex-1 flex flex-col">
                                                 <div className="font-bold text-slate-700 text-sm flex items-center">
                                                   {inst.name}
-                                                  {isMe && <span className="ml-1 px-1.5 py-0.5 bg-[#002864] text-white text-[9px] rounded font-bold">나</span>}
+                                                  {isMe && <span className="ml-1 px-1.5 py-0.5 bg-brand text-white text-xs rounded font-bold">나</span>}
                                                 </div>
-                                                <div className="text-[11px] text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '강사'}</div>
+                                                <div className="text-xs text-slate-400 font-bold mt-0.5">{inst.chat_position || inst.position || '강사'}</div>
                                               </div>
                                             </div>
                                           )
@@ -1659,7 +1659,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                               />
                             )}
                           </div>
-                          {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-rose-500 text-white text-[10px] font-bold rounded-full border-2 border-white flex items-center justify-center z-20">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
+                          {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-[20px] px-1 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center z-20">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
                         </div>
                         <div className="flex flex-col min-w-0 flex-1">
                           <span className="font-bold text-slate-700 text-sm truncate">{r.displayTitle}</span>
@@ -1694,12 +1694,12 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                   </div>
                   
                   <div className="relative shrink-0 ml-2">
-                    <button onClick={() => setShowMembers(!showMembers)} className={`text-[11px] font-bold transition-colors flex items-center gap-1 px-2 py-1 rounded ${showMembers ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
+                    <button onClick={() => setShowMembers(!showMembers)} className={`text-xs font-bold transition-colors flex items-center gap-1 px-2 py-1 rounded ${showMembers ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}>
                       👥 {staffRoomMembers.length}
                     </button>
                     {showMembers && (
                       <div className="absolute top-8 right-0 w-52 bg-white border border-slate-200 shadow-xl rounded-xl p-2 z-50 animate-[fadeIn_0.1s_ease-out]">
-                        <div className="text-[10px] font-black text-slate-400 mb-1.5 px-2">현재 참여자 목록</div>
+                        <div className="text-xs font-bold text-slate-400 mb-1.5 px-2">현재 참여자 목록</div>
                         <div className="max-h-48 overflow-y-auto custom-scroll space-y-0.5 pr-1">
                           {staffRoomMembers.map((m: StaffRoomMember) => {
                             const instInfo = unwrap(m.instructor);
@@ -1709,14 +1709,14 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                   {instInfo?.profile_image_url ? (
                                     <img src={getProfileImageUrl(instInfo.profile_image_url) || undefined} alt="profile" className="w-full h-full object-cover" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                                   ) : (
-                                    <span className="text-[9px] font-bold text-slate-500">T</span>
+                                    <span className="text-xs font-bold text-slate-500">T</span>
                                   )}
                                 </div>
                                 <div className="flex flex-col min-w-0 flex-1">
-                                  <span className="text-[11px] font-bold text-slate-700 truncate leading-tight">
+                                  <span className="text-xs font-bold text-slate-700 truncate leading-tight">
                                     {instInfo?.name} {m.instructor_id === instId && <span className="text-blue-500">(나)</span>}
                                   </span>
-                                  <span className="text-[9px] font-medium text-slate-400 truncate leading-none mt-0.5">
+                                  <span className="text-xs font-medium text-slate-400 truncate leading-none mt-0.5">
                                     {instInfo?.chat_position || instInfo?.position || '선생님'}
                                   </span>
                                 </div>
@@ -1753,9 +1753,9 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                           )}
                           <div className={`flex flex-col max-w-[85%] ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
                             {msg.sender_id !== instId && (
-                              <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">
+                              <span className="text-xs font-bold text-slate-600 mb-1 ml-0.5">
                                 {senderInfo?.name || '알수없음'} 
-                                <span className="font-normal text-[10px] text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
+                                <span className="font-normal text-xs text-slate-400 ml-0.5">{senderInfo?.chat_position || senderInfo?.position || '선생님'}</span>
                               </span>
                             )}
                             
@@ -1772,7 +1772,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                                   String(msg.content).split('\n').map((line: string, i: number) => <React.Fragment key={i}>{line}<br/></React.Fragment>)
                                 )}
                               </div>
-                              <div className={`flex flex-col shrink-0 text-[9px] text-slate-500 ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
+                              <div className={`flex flex-col shrink-0 text-xs text-slate-500 ${msg.sender_id === instId ? 'items-end' : 'items-start'}`}>
                                 {msg.sender_id === instId && unreadBy > 0 && <span className="text-slate-600 font-bold mb-0.5">{unreadBy}</span>}
                                 <span className="whitespace-nowrap">{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
                               </div>
@@ -1797,7 +1797,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
                         )}
                       </div>
                       <div className="flex flex-col items-start max-w-[85%]">
-                        <span className="text-[11px] font-bold text-slate-600 mb-1 ml-0.5">{typingStaffName}</span>
+                        <span className="text-xs font-bold text-slate-600 mb-1 ml-0.5">{typingStaffName}</span>
                         <div className="px-3.5 py-2 rounded-2xl shadow-sm font-bold text-[13px] leading-snug break-words bg-white text-slate-400 rounded-tl-sm border border-slate-100 animate-pulse">
                           메시지를 입력 중입니다...
                         </div>

@@ -344,7 +344,7 @@ export default function MobileInstructorPortalPage() {
       days.push(
         <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1.5 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-lg transition-colors z-0">
           {multiDayBg}
-          <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
+          <span className={`text-[12px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-bold shadow-md' : (isToday ? 'bg-brand text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
           {dayTypes.length > 0 && (
@@ -408,7 +408,7 @@ export default function MobileInstructorPortalPage() {
         <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100 animate-[fadeIn_0.3s_ease-out]">
           <div className="text-center mb-6 flex flex-col items-center justify-center">
             <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-10 object-contain mb-2" alt="Logica" />
-            <span className="text-sm font-black text-[#002864] bg-blue-50 px-3 py-1 rounded-full">강사 전용 포털</span>
+            <span className="text-sm font-bold text-brand bg-blue-50 px-3 py-1 rounded-full">강사 전용 포털</span>
           </div>
           
           <input 
@@ -416,7 +416,7 @@ export default function MobileInstructorPortalPage() {
             maxLength={13} 
             value={phoneInput} 
             onChange={e => handlePhoneInput(e.target.value)} 
-            className="w-full px-4 py-3 mb-3 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" 
+            className="w-full px-4 py-3 mb-3 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-brand" 
             placeholder="등록된 연락처 (아이디)" 
           />
           <input 
@@ -424,10 +424,10 @@ export default function MobileInstructorPortalPage() {
             value={pwInput} 
             onChange={e => setPwInput(e.target.value)} 
             onKeyPress={e => e.key === 'Enter' && loginInstructor()}
-            className="w-full px-4 py-3 mb-5 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" 
+            className="w-full px-4 py-3 mb-5 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-brand" 
             placeholder="비밀번호" 
           />
-          <button onClick={loginInstructor} className="w-full bg-[#002864] text-white font-bold py-3.5 rounded-xl hover:bg-blue-900 transition-colors shadow-md">
+          <button onClick={loginInstructor} className="w-full bg-brand text-white font-bold py-3.5 rounded-xl hover:bg-blue-900 transition-colors shadow-md">
             로그인
           </button>
         </div>
@@ -474,7 +474,7 @@ export default function MobileInstructorPortalPage() {
       {viewNote && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center sm:p-4">
           <div className="bg-white w-full h-[100dvh] sm:h-auto sm:max-h-[85vh] sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="font-bold text-[15px] flex items-center gap-2">
                 📄 상세 기록 조회 {viewNote.is_secret && <span className="text-amber-300 ml-1 text-xs">🔒 비밀 회의록</span>}
               </h2>
@@ -484,23 +484,23 @@ export default function MobileInstructorPortalPage() {
             <div className="p-5 bg-slate-50 flex-1 overflow-y-auto custom-scroll flex flex-col">
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col relative">
                 {viewNote.isExternal && (
-                  <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-[10px] px-2 py-1 rounded font-black border border-purple-200">
+                  <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-xs px-2 py-1 rounded font-bold border border-purple-200">
                     🔄 구글 캘린더에서 등록됨
                   </div>
                 )}
                 <div className="mb-4 pb-3 border-b border-slate-200">
                   <div className="flex justify-between items-start mb-2">
-                    <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
-                    <span className="text-[11px] font-bold text-slate-400">
+                    <span className="px-2 py-0.5 bg-slate-100 text-brand border-slate-200 text-xs font-bold rounded border">{viewNote.type}</span>
+                    <span className="text-xs font-bold text-slate-400">
                       {viewNote.isExternal && viewNote.isMultiDay 
                         ? `일정: ${new Date(viewNote.meeting_date).toLocaleDateString('ko-KR')} ~ ${new Date(viewNote.end_date).toLocaleDateString('ko-KR')}`
                         : (viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`)}
                     </span>
                   </div>
-                  <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
+                  <h1 className="text-lg font-bold text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
                   
                   {viewNote.attendees && (
-                    <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 text-[12px] font-bold text-[#002864] mb-2">
+                    <div className="bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 text-[12px] font-bold text-brand mb-2">
                       👥 참석자: {viewNote.attendees}
                     </div>
                   )}
@@ -527,16 +527,16 @@ export default function MobileInstructorPortalPage() {
       {authState === "dashboard" ? (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
           
-          <header className="bg-[#002864] px-5 py-3.5 flex justify-between items-center shadow-md shrink-0 z-20">
+          <header className="bg-brand px-5 py-3.5 flex justify-between items-center shadow-md shrink-0 z-20">
             <div className="flex items-center gap-2">
               <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-4 sm:h-5 object-contain brightness-0 invert" alt="Logica" />
-              <span className="text-white font-black text-xs opacity-80 border-l border-white/30 pl-2">{currentUser.position || '강사'}</span>
+              <span className="text-white font-bold text-xs opacity-80 border-l border-white/30 pl-2">{currentUser.position || '강사'}</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <button onClick={() => setIsProfileModalOpen(true)} className="text-[11px] font-bold text-white bg-blue-800 hover:bg-blue-700 px-3 py-1.5 rounded-lg border border-blue-600 transition-colors shadow-sm">
+              <button onClick={() => setIsProfileModalOpen(true)} className="text-xs font-bold text-white bg-blue-800 hover:bg-blue-700 px-3 py-1.5 rounded-lg border border-blue-600 transition-colors shadow-sm">
                 정보수정
               </button>
-              <button onClick={logout} className="text-[11px] font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1.5 rounded-lg border border-rose-600 transition-colors shadow-sm">
+              <button onClick={logout} className="text-xs font-bold text-white bg-rose-500 hover:bg-rose-600 px-3 py-1.5 rounded-lg border border-rose-600 transition-colors shadow-sm">
                 로그아웃
               </button>
             </div>
@@ -548,10 +548,10 @@ export default function MobileInstructorPortalPage() {
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex items-center justify-between">
                 <div>
                   <div className="text-xs font-bold text-blue-600 mb-0.5">{currentUser.dept}</div>
-                  <h1 className="text-lg font-black text-slate-800"><span className="text-[#002864]">{currentUser.name}</span> 선생님, 환영합니다!</h1>
-                  <p className="text-[11px] text-slate-400 font-medium mt-1">오늘도 즐거운 하루 되세요.</p>
+                  <h1 className="text-lg font-bold text-slate-800"><span className="text-brand">{currentUser.name}</span> 선생님, 환영합니다!</h1>
+                  <p className="text-xs text-slate-400 font-medium mt-1">오늘도 즐거운 하루 되세요.</p>
                 </div>
-                <div className="w-12 h-12 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-black text-xl shrink-0 overflow-hidden shadow-sm border border-slate-100">
+                <div className="w-12 h-12 bg-blue-50 rounded-full flex justify-center items-center text-blue-500 font-bold text-xl shrink-0 overflow-hidden shadow-sm border border-slate-100">
                   {currentUser.profileImageUrl ? (
                     <img src={getProfileImageUrl(currentUser.profileImageUrl) || ''} alt="profile" className="w-full h-full object-cover" />
                   ) : (
@@ -562,17 +562,17 @@ export default function MobileInstructorPortalPage() {
 
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
                 <div className="flex justify-between items-center mb-3">
-                  <h2 className="text-[13px] font-black text-[#002864]">{calendarMonth.getFullYear()}년 {calendarMonth.getMonth() + 1}월</h2>
+                  <h2 className="text-[13px] font-bold text-brand">{calendarMonth.getFullYear()}년 {calendarMonth.getMonth() + 1}월</h2>
                   <div className="flex items-center gap-1.5">
                     <button onClick={fetchGoogleEvents} className="w-6 h-6 flex items-center justify-center bg-blue-50 hover:bg-blue-100 transition-colors rounded text-blue-600 font-bold border border-blue-200" title="구글 캘린더 동기화">🔄</button>
                     <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="w-6 h-6 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">◀</button>
-                    <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-2 py-0.5 border border-slate-300 rounded text-[10px] font-bold text-slate-600 bg-white">오늘</button>
+                    <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-2 py-0.5 border border-slate-300 rounded text-xs font-bold text-slate-600 bg-white">오늘</button>
                     <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="w-6 h-6 flex items-center justify-center bg-slate-50 rounded text-slate-500 font-bold border border-slate-200">▶</button>
                   </div>
                 </div>
                 <div className="grid grid-cols-7 gap-y-1 bg-slate-50 p-2 rounded-xl border border-slate-100">
                   {['일', '월', '화', '수', '목', '금', '토'].map((d, i) => (
-                    <div key={d} className={`text-center text-[10px] font-bold mb-1 ${i === 0 ? 'text-rose-500' : 'text-slate-400'}`}>{d}</div>
+                    <div key={d} className={`text-center text-xs font-bold mb-1 ${i === 0 ? 'text-rose-500' : 'text-slate-400'}`}>{d}</div>
                   ))}
                   {renderCalendarDays()}
                 </div>
@@ -580,16 +580,16 @@ export default function MobileInstructorPortalPage() {
 
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between ml-1 mb-1 mt-6">
-                  <h3 className="font-black text-[13px] text-slate-700">{selectedDate ? '선택한 날짜의 일정' : '다가오는 전체 일정'}</h3>
+                  <h3 className="font-bold text-[13px] text-slate-700">{selectedDate ? '선택한 날짜의 일정' : '다가오는 전체 일정'}</h3>
                   <div className="flex items-center gap-2">
-                    <button onClick={fetchGoogleEvents} className="text-[10px] bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded font-bold hover:bg-blue-100 transition-colors">🔄 동기화</button>
-                    <span className="text-[10px] font-bold text-slate-400">{displayItems.length}건</span>
+                    <button onClick={fetchGoogleEvents} className="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-0.5 rounded font-bold hover:bg-blue-100 transition-colors">🔄 동기화</button>
+                    <span className="text-xs font-bold text-slate-400">{displayItems.length}건</span>
                   </div>
                 </div>
                 
                 {displayItems.length === 0 ? (
                   <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center shadow-sm">
-                    <span className="text-[11px] font-bold text-slate-400">등록된 안건이나 일정이 없습니다.</span>
+                    <span className="text-xs font-bold text-slate-400">등록된 안건이나 일정이 없습니다.</span>
                   </div>
                 ) : (
                   displayItems.map(item => {
@@ -600,7 +600,7 @@ export default function MobileInstructorPortalPage() {
                     if (isGoogleEvent) {
                       theme = { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📆', border: 'border-purple-200' };
                     } else if (isMeetingNote) {
-                      theme = { bg: 'bg-[#002864]', text: 'text-white', icon: '📁', border: 'border-blue-900' };
+                      theme = { bg: 'bg-brand', text: 'text-white', icon: '📁', border: 'border-blue-900' };
                     } else {
                       theme = getThemeColor(item.type, item.title);
                     }
@@ -632,17 +632,17 @@ export default function MobileInstructorPortalPage() {
                         </div>
                         <div className="flex-1 min-w-0 flex flex-col justify-center">
                           <div className="flex items-center gap-1.5 mb-1">
-                            {item.is_secret && <span className="text-[10px]">🔒</span>}
-                            <h4 className="text-[13px] font-black text-slate-800 truncate">{item.title}</h4>
+                            {item.is_secret && <span className="text-xs">🔒</span>}
+                            <h4 className="text-[13px] font-bold text-slate-800 truncate">{item.title}</h4>
                           </div>
-                          <p className="text-[11px] font-medium text-slate-500 truncate mb-1.5">
+                          <p className="text-xs font-medium text-slate-500 truncate mb-1.5">
                             {item.is_secret ? "비밀 안건으로 보호됨" : stripHtml(item.content)}
                           </p>
                           <div className="flex items-center justify-between mt-auto">
-                            <span className={`px-1.5 py-0.5 text-[9px] font-black rounded border ${badgeStyle}`}>
+                            <span className={`px-1.5 py-0.5 text-xs font-bold rounded border ${badgeStyle}`}>
                               {badgeText}
                             </span>
-                            <span className="text-[10px] font-bold text-slate-400">
+                            <span className="text-xs font-bold text-slate-400">
                               {dateDisplay}
                             </span>
                           </div>

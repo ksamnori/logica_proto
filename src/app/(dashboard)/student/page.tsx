@@ -220,7 +220,7 @@ export default function StudentPage() {
       
       <div className="flex justify-between items-end shrink-0 mb-4">
         <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">
+          <h2 className="text-2xl font-bold text-slate-800 tracking-tight">
             {isSuperAdmin ? "전체 학생 관리" : "내 수강생 관리"}
           </h2>
           <p className="text-sm font-bold text-slate-400 mt-1">
@@ -237,11 +237,11 @@ export default function StudentPage() {
         <div className="xl:col-span-8 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-[500px]">
           <div className="p-4 border-b border-slate-200 bg-emerald-50 shrink-0 flex flex-col gap-3 rounded-t-xl">
             <div className="flex justify-between items-center">
-              <h3 className="font-extrabold text-emerald-900 flex items-center gap-2">
+              <h3 className="font-bold text-emerald-900 flex items-center gap-2">
                 <span>👨‍🎓</span> 정규 재원생 관리 <span className="bg-emerald-200 text-emerald-800 text-xs px-2 py-0.5 rounded-full">{formalStudents.length}명</span>
               </h3>
               {isSuperAdmin && (
-                <button onClick={() => window.open("/student/enroll", "_blank", "width=700,height=800,top=100,left=100")} className="bg-[#002864] text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow-sm hover:bg-blue-900 transition-colors">
+                <button onClick={() => window.open("/student/enroll", "_blank", "width=700,height=800,top=100,left=100")} className="bg-brand text-white px-4 py-1.5 rounded-lg font-bold text-xs shadow-sm hover:bg-blue-900 transition-colors">
                   + 신규 등록
                 </button>
               )}
@@ -281,12 +281,12 @@ export default function StudentPage() {
             <table className="w-full min-w-[800px] text-left border-collapse whitespace-nowrap text-sm">
               <thead className="bg-white sticky top-0 z-10 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
                 <tr>
-                  <th className="py-3 pl-6 pr-4 border-b border-slate-200 font-extrabold text-slate-500">이름 🔍</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">수강 중인 반</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">학교/학년</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">학부모 연락처</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">상태</th>
-                  <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500 text-center">담당 강사</th>
+                  <th className="py-3 pl-6 pr-4 border-b border-slate-200 font-bold text-slate-500">이름 🔍</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">수강 중인 반</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">학교/학년</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">학부모 연락처</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">상태</th>
+                  <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500 text-center">담당 강사</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -310,20 +310,20 @@ export default function StudentPage() {
 
                     return (
                       <tr key={s.student_id} className={`transition-colors ${s.displayStatus === '퇴원' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-emerald-50/40'}`}>
-                        <td className="py-3 pl-6 pr-4 border-b border-slate-100 font-extrabold text-[#002864]">
+                        <td className="py-3 pl-6 pr-4 border-b border-slate-100 font-bold text-brand">
                           <div 
                             onClick={() => router.push(`/student/${s.student_id}`)} 
                             className="flex items-center gap-1.5 cursor-pointer hover:text-emerald-600 hover:underline w-fit"
                           >
                             {s.name}
-                            {isNew && <span className="px-1.5 py-0.5 bg-rose-500 text-white text-[9px] font-black rounded shadow-sm animate-pulse">🔥 NEW</span>}
+                            {isNew && <span className="px-1.5 py-0.5 bg-rose-500 text-white text-xs font-bold rounded shadow-sm animate-pulse">🔥 NEW</span>}
                           </div>
                         </td>
                         <td className="py-3 px-4 border-b border-slate-100 font-bold">
                           {classNames.length > 0 ? (
                             <div className="flex flex-wrap gap-1 max-w-[200px] whitespace-normal">
                               {classNames.map((cName, idx) => (
-                                <span key={idx} className="bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded text-[11px] whitespace-nowrap">
+                                <span key={idx} className="bg-slate-100 text-slate-700 border border-slate-200 px-1.5 py-0.5 rounded text-xs whitespace-nowrap">
                                   {cName}
                                 </span>
                               ))}
@@ -337,12 +337,12 @@ export default function StudentPage() {
                         </td>
                         <td className="py-3 px-4 border-b border-slate-100 text-slate-600 font-bold text-xs text-center">{parentPhone}</td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center">
-                          <span className={`${statusClass} px-2 py-1.5 rounded text-[11px] font-bold whitespace-nowrap`}>{s.displayStatus || "-"}</span>
+                          <span className={`${statusClass} px-2 py-1.5 rounded text-xs font-bold whitespace-nowrap`}>{s.displayStatus || "-"}</span>
                         </td>
                         <td className="py-3 px-4 border-b border-slate-100 text-center">
                           <div className="flex flex-wrap justify-center gap-1 w-full max-w-[120px] mx-auto">
                             {instNames.length > 0 ? instNames.map((name, idx) => (
-                              <span key={idx} className="text-[11px] font-bold text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded whitespace-nowrap">
+                              <span key={idx} className="text-xs font-bold text-slate-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded whitespace-nowrap">
                                 {name} 선생님
                               </span>
                             )) : <span className="text-slate-300 text-xs">-</span>}
@@ -371,7 +371,7 @@ export default function StudentPage() {
         <div className="xl:col-span-4 bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col min-h-[400px]">
           <div className="bg-indigo-50 border-b border-indigo-100 p-4 shrink-0 flex flex-col gap-3 rounded-t-xl">
             <div className="flex justify-between items-center">
-              <h3 className="font-extrabold text-indigo-900 flex items-center gap-2">
+              <h3 className="font-bold text-indigo-900 flex items-center gap-2">
                 <span>📝</span> 진단평가 대기생 <span className="bg-indigo-200 text-indigo-800 text-xs px-2 py-0.5 rounded-full">{waitingStudents.length}명</span>
               </h3>
             </div>
@@ -416,7 +416,7 @@ export default function StudentPage() {
                     const d = new Date(testAssignment.created_at);
                     const formattedDate = `${d.getMonth() + 1}/${d.getDate()}`;
                     testDateBadge = (
-                      <span className="text-[10px] bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold border border-emerald-200 whitespace-nowrap shrink-0">
+                      <span className="text-xs bg-emerald-100 text-emerald-700 px-1.5 py-0.5 rounded font-bold border border-emerald-200 whitespace-nowrap shrink-0">
                         ✅ {formattedDate} 응시기록
                       </span>
                     );
@@ -429,13 +429,13 @@ export default function StudentPage() {
                       className="px-3 py-2 border border-slate-200 rounded-lg hover:bg-indigo-50/50 cursor-pointer transition-colors shadow-sm flex justify-between items-center bg-white gap-2"
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        <span className="font-extrabold text-[#002864] text-[13px] whitespace-nowrap hover:underline">{s.name}</span>
-                        <span className="text-[10px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap shrink-0">{s.grade || '-'}</span>
-                        <span className="text-[11px] text-slate-500 font-medium truncate">📞 {unwrap(s.parent)?.phone || "-"}</span>
+                        <span className="font-bold text-brand text-[13px] whitespace-nowrap hover:underline">{s.name}</span>
+                        <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap shrink-0">{s.grade || '-'}</span>
+                        <span className="text-xs text-slate-500 font-medium truncate">📞 {unwrap(s.parent)?.phone || "-"}</span>
                       </div>
                       <div className="flex items-center gap-1 shrink-0">
                         {testDateBadge}
-                        <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-[9px] font-bold whitespace-nowrap shrink-0">입학 대기</span>
+                        <span className="bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded text-xs font-bold whitespace-nowrap shrink-0">입학 대기</span>
                       </div>
                     </div>
                   );
@@ -447,7 +447,7 @@ export default function StudentPage() {
           <div className="bg-slate-50 border-t border-slate-200 p-2.5 flex justify-center items-center shrink-0 rounded-b-xl select-none">
             <div className="flex items-center gap-2">
               <button onClick={() => setWaitingCurrentPage(p => Math.max(1, p - 1))} disabled={waitingCurrentPage === 1} className="px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">◀</button>
-              <span className="text-[11px] font-bold text-slate-500">{waitingCurrentPage} / {totalWaitingPages}</span>
+              <span className="text-xs font-bold text-slate-500">{waitingCurrentPage} / {totalWaitingPages}</span>
               <button onClick={() => setWaitingCurrentPage(p => Math.min(totalWaitingPages, p + 1))} disabled={waitingCurrentPage === totalWaitingPages} className="px-2 py-1 border border-slate-300 rounded text-xs font-bold bg-white text-slate-600 hover:bg-slate-100 disabled:opacity-50">▶</button>
             </div>
           </div>

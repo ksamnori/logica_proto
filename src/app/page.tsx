@@ -328,7 +328,7 @@ export default function LoginPage() {
               if (nextEl) nextEl.style.display = "block";
             }}
           />
-          <h1 className="hidden font-lexend text-4xl font-bold tracking-tighter text-[#002864] mb-2">
+          <h1 className="hidden font-lexend text-4xl font-bold tracking-tighter text-brand mb-2">
             Logica
           </h1>
           <p className="text-slate-500 font-bold text-sm mt-1">관리자 및 교강사 통합 시스템</p>
@@ -349,7 +349,7 @@ export default function LoginPage() {
                 required
                 value={loginId}
                 onChange={(e) => setLoginId(e.target.value)}
-                className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] font-medium"
+                className="w-full pl-10 pr-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand font-medium"
                 placeholder="전화번호, ID, 이메일"
               />
             </div>
@@ -362,7 +362,7 @@ export default function LoginPage() {
                 type="button"
                 tabIndex={-1}
                 onClick={() => setIsPwModalOpen(true)}
-                className="text-[11px] font-bold text-blue-500 hover:text-blue-700 hover:underline transition-colors focus:outline-none"
+                className="text-xs font-bold text-blue-500 hover:text-blue-700 hover:underline transition-colors focus:outline-none"
               >
                 비밀번호를 잊으셨나요?
               </button>
@@ -378,7 +378,7 @@ export default function LoginPage() {
                 required
                 value={loginPw}
                 onChange={(e) => setLoginPw(e.target.value)}
-                className="w-full pl-10 pr-10 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864] font-medium"
+                className="w-full pl-10 pr-10 py-3 rounded-lg border border-slate-300 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand font-medium"
                 placeholder="비밀번호를 입력하세요"
               />
               <button
@@ -390,7 +390,7 @@ export default function LoginPage() {
                 onTouchStart={(e) => { e.preventDefault(); setShowLoginPw(true); }}
                 onTouchEnd={() => setShowLoginPw(false)}
                 onTouchCancel={() => setShowLoginPw(false)}
-                className={`absolute inset-y-0 right-0 flex items-center pr-3 transition-colors ${showLoginPw ? "text-[#002864]" : "text-slate-400 hover:text-slate-600"}`}
+                className={`absolute inset-y-0 right-0 flex items-center pr-3 transition-colors ${showLoginPw ? "text-brand" : "text-slate-400 hover:text-slate-600"}`}
                 aria-label="누르고 있으면 비밀번호 표시"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -405,7 +405,7 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full bg-[#002864] hover:bg-[#001f4d] text-white font-bold py-3.5 px-4 rounded-lg shadow-md transition-colors mt-2 disabled:opacity-70"
+            className="w-full bg-brand hover:bg-[#001f4d] text-white font-bold py-3.5 px-4 rounded-lg shadow-md transition-colors mt-2 disabled:opacity-70"
           >
             {isLoading ? "인증 확인 중..." : "선생님 로그인"}
           </button>
@@ -426,8 +426,8 @@ export default function LoginPage() {
       {showAdminChoice && (
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
-            <div className="bg-[#002864] p-5 text-center relative shrink-0">
-              <h2 className="text-xl font-black text-white">👑 최고 관리자 로그인</h2>
+            <div className="bg-brand p-5 text-center relative shrink-0">
+              <h2 className="text-xl font-bold text-white">👑 최고 관리자 로그인</h2>
               <p className="text-blue-200 text-sm mt-1">{adminProfileName}님, 접속할 시스템을 선택해주세요.</p>
             </div>
             
@@ -440,8 +440,8 @@ export default function LoginPage() {
                   <span className="group-hover:text-white transition-colors">🏢</span>
                 </div>
                 <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-black text-slate-800 text-[14px] group-hover:text-purple-700 transition-colors truncate">본사 워크스페이스 (HQ)</h3>
-                  <p className="text-[11px] font-bold text-slate-400 mt-0.5 truncate">본사 전용 시스템 및 가맹점 통합 관리</p>
+                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-purple-700 transition-colors truncate">본사 워크스페이스 (HQ)</h3>
+                  <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">본사 전용 시스템 및 가맹점 통합 관리</p>
                 </div>
               </button>
 
@@ -453,21 +453,21 @@ export default function LoginPage() {
                   <span className="group-hover:text-white transition-colors">📈</span>
                 </div>
                 <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-black text-slate-800 text-[14px] group-hover:text-blue-600 transition-colors truncate">학원 운영 대시보드 (Admin)</h3>
-                  <p className="text-[11px] font-bold text-slate-400 mt-0.5 truncate">매출, 원생 통계 등 학원 전반 업무 관리</p>
+                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-blue-600 transition-colors truncate">학원 운영 대시보드 (Admin)</h3>
+                  <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">매출, 원생 통계 등 학원 전반 업무 관리</p>
                 </div>
               </button>
 
               <button 
                 onClick={() => router.replace("/home")}
-                className="w-full flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-[#002864] hover:shadow-md transition-all group"
+                className="w-full flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-brand hover:shadow-md transition-all group"
               >
-                <div className="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center text-xl group-hover:bg-[#002864] transition-colors shrink-0">
+                <div className="w-10 h-10 bg-indigo-50 rounded-full flex items-center justify-center text-xl group-hover:bg-brand transition-colors shrink-0">
                   <span className="group-hover:text-white transition-colors">👨‍🏫</span>
                 </div>
                 <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-black text-slate-800 text-[14px] group-hover:text-[#002864] transition-colors truncate">강사/데스크 홈 (Home)</h3>
-                  <p className="text-[11px] font-bold text-slate-400 mt-0.5 truncate">수업 일정, 출결, 학생 개별 관리</p>
+                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-brand transition-colors truncate">강사/데스크 홈 (Home)</h3>
+                  <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">수업 일정, 출결, 학생 개별 관리</p>
                 </div>
               </button>
 
@@ -479,8 +479,8 @@ export default function LoginPage() {
                   <span className="group-hover:text-white transition-colors">📡</span>
                 </div>
                 <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-black text-slate-800 text-[14px] group-hover:text-amber-600 transition-colors truncate">클리닉 관제탑 (Supervisor)</h3>
-                  <p className="text-[11px] font-bold text-slate-400 mt-0.5 truncate">클리닉 좌석 배치 및 학생 실시간 출결 관리</p>
+                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-amber-600 transition-colors truncate">클리닉 관제탑 (Supervisor)</h3>
+                  <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">클리닉 좌석 배치 및 학생 실시간 출결 관리</p>
                 </div>
               </button>
 
@@ -492,8 +492,8 @@ export default function LoginPage() {
                   <span className="group-hover:text-white transition-colors">⚙️</span>
                 </div>
                 <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-black text-slate-800 text-[14px] group-hover:text-emerald-700 transition-colors truncate">최고 관리자 통제실</h3>
-                  <p className="text-[11px] font-bold text-slate-400 mt-0.5 truncate">시스템 설정 및 계정 권한 마스터 관리</p>
+                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-emerald-700 transition-colors truncate">최고 관리자 통제실</h3>
+                  <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">시스템 설정 및 계정 권한 마스터 관리</p>
                 </div>
               </button>
             </div>
@@ -514,7 +514,7 @@ export default function LoginPage() {
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50 shrink-0">
-              <h2 className="text-lg font-black text-slate-800 flex items-center gap-2"><span>🔑</span> 비밀번호 초기화</h2>
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><span>🔑</span> 비밀번호 초기화</h2>
               <button onClick={() => setIsPwModalOpen(false)} className="text-slate-400 hover:text-rose-400 text-2xl font-bold leading-none transition-colors">&times;</button>
             </div>
             

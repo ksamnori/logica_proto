@@ -59,7 +59,7 @@ export default function AssignBookModal({ isOpen, assignData, selectedClass, onC
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-        <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
           <h2 className="font-bold">선택 반에 교재 배정</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 text-2xl font-bold transition-colors leading-none">&times;</button>
         </div>
@@ -70,7 +70,7 @@ export default function AssignBookModal({ isOpen, assignData, selectedClass, onC
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>
-            <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-[#002864]">
+            <select value={formData.status} onChange={e => setFormData({...formData, status: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-brand">
               <option value="예정">예정 (시작 전)</option>
               <option value="진행중">진행중 (수강중)</option>
               <option value="완료">완료 (종료됨)</option>
@@ -79,11 +79,11 @@ export default function AssignBookModal({ isOpen, assignData, selectedClass, onC
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">시작일</label>
-              <input type="date" value={formData.start_date} onChange={e => setFormData({...formData, start_date: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-[#002864] text-sm" />
+              <input type="date" value={formData.start_date} onChange={e => setFormData({...formData, start_date: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-brand text-sm" />
             </div>
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-1">목표 완료일</label>
-              <input type="date" value={formData.target_end_date} onChange={e => setFormData({...formData, target_end_date: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-[#002864] text-sm" />
+              <input type="date" value={formData.target_end_date} onChange={e => setFormData({...formData, target_end_date: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold focus:outline-none focus:ring-2 focus:ring-brand text-sm" />
             </div>
           </div>
         </div>

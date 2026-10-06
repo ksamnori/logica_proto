@@ -37,13 +37,13 @@ function ExamStep2Content() {
       <header className="bg-white h-20 px-6 flex justify-between items-center shrink-0 shadow-sm border-b border-slate-200 z-10">
         <div className="flex items-center space-x-3 cursor-pointer hover:opacity-80 transition-opacity" onClick={() => router.push('/exam-list')}>
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-8 object-contain" alt="Logica" />
-          <span className="text-xl font-extrabold text-slate-800 ml-2">스마트 출제 엔진</span>
+          <span className="text-xl font-bold text-slate-800 ml-2">스마트 출제 엔진</span>
         </div>
         <div className="flex space-x-6">
           <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold">1</span><span className="font-bold text-slate-400">조건 및 단원 설정</span></div>
           {/* 🌟 편집기 탭을 눌러도 뒤로 가기 에러를 막을 수 있도록 안전 플래그(Session) 추가 */}
           <div className="flex items-center space-x-2 cursor-pointer hover:opacity-80" onClick={() => { sessionStorage.setItem("restoreExamQuestions", "1"); router.push('/exam/step2'); }}>
-            <span className="w-6 h-6 rounded-full bg-[#002864] text-white text-center text-sm font-bold shadow-sm">2</span><span className="font-bold text-[#002864]">문항 뷰어 & 편집</span>
+            <span className="w-6 h-6 rounded-full bg-brand text-white text-center text-sm font-bold shadow-sm">2</span><span className="font-bold text-brand">문항 뷰어 & 편집</span>
           </div>
           <div className="flex items-center space-x-2"><span className="w-6 h-6 rounded-full bg-slate-100 text-slate-400 text-center text-sm font-bold border border-slate-200">3</span><span className="font-bold text-slate-400">시험지 배포</span></div>
         </div>
@@ -59,7 +59,7 @@ function ExamStep2Content() {
 
 export default function ExamStep2Page() {
   return (
-    <Suspense fallback={<div className="h-screen w-full flex items-center justify-center bg-slate-50 text-[#002864] font-bold">로딩 중...</div>}>
+    <Suspense fallback={<div className="h-screen w-full flex items-center justify-center bg-slate-50 text-brand font-bold">로딩 중...</div>}>
       <ExamStep2Content />
     </Suspense>
   );

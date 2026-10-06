@@ -225,10 +225,10 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
   return (
     <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-4xl h-[85vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-        <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
           <div className="flex items-center gap-2">
             <span className="text-xl">🎙️</span>
-            <h2 className="font-black text-[15px]">
+            <h2 className="font-bold text-[15px]">
               {targetMeeting ? `[${targetMeeting.title}] 회의 녹음 및 분석` : '새 회의 실시간 녹음'}
             </h2>
           </div>
@@ -242,7 +242,7 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
                 <div className="flex flex-col items-center gap-3 w-full">
                   <div className="flex items-center gap-2 mb-2">
                     <span className="relative flex h-4 w-4"><span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span><span className="relative inline-flex rounded-full h-4 w-4 bg-rose-500"></span></span>
-                    <span className="text-rose-500 font-black text-lg tracking-widest">{formatTime(recordingTime)}</span>
+                    <span className="text-rose-500 font-bold text-lg tracking-widest">{formatTime(recordingTime)}</span>
                   </div>
                   
                   <div className="flex items-end justify-center gap-1.5 h-16 w-full mb-2">
@@ -251,13 +251,13 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
                     ))}
                   </div>
                   
-                  <p className="text-slate-400 font-bold text-[11px]">회의 내용을 고음질로 녹음하고 있습니다...</p>
+                  <p className="text-slate-400 font-bold text-xs">회의 내용을 고음질로 녹음하고 있습니다...</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center gap-2 text-center">
                   <svg className="w-10 h-10 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                   <p className="text-slate-500 font-bold text-[12px]">마이크 버튼을 눌러 회의 녹음을 시작하세요.</p>
-                  <p className="text-slate-400 font-medium text-[10px] mt-1 px-4">
+                  <p className="text-slate-400 font-medium text-xs mt-1 px-4">
                     💡 팁: 참석자가 멀리 떨어져 앉는 경우, 화자 분리 정확도를 위해<br/>무지향성 마이크(스피커폰)를 테이블 중앙에 배치하는 것을 권장합니다.
                   </p>
                 </div>
@@ -272,7 +272,7 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
 
             <div className="flex justify-center gap-3 shrink-0 mb-4">
               {!isRecording ? (
-                <button onClick={startRecording} disabled={isAnalyzing || isRequestingMic} className="px-6 py-3 bg-rose-50 text-rose-600 font-black text-[13px] rounded-full hover:bg-rose-100 transition-colors border border-rose-200 flex items-center gap-2 shadow-sm disabled:opacity-50">
+                <button onClick={startRecording} disabled={isAnalyzing || isRequestingMic} className="px-6 py-3 bg-rose-50 text-rose-600 font-bold text-[13px] rounded-full hover:bg-rose-100 transition-colors border border-rose-200 flex items-center gap-2 shadow-sm disabled:opacity-50">
                   {isRequestingMic ? (
                     <><span className="animate-spin">⏳</span> 연결 중...</>
                   ) : (
@@ -280,7 +280,7 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
                   )}
                 </button>
               ) : (
-                <button onClick={stopRecording} className="px-6 py-3 bg-slate-800 text-white font-black text-[13px] rounded-full hover:bg-slate-900 transition-colors flex items-center gap-2 shadow-sm animate-pulse">
+                <button onClick={stopRecording} className="px-6 py-3 bg-slate-800 text-white font-bold text-[13px] rounded-full hover:bg-slate-900 transition-colors flex items-center gap-2 shadow-sm animate-pulse">
                   <div className="w-3 h-3 bg-white rounded-sm"></div> 녹음 종료 및 분석 시작
                 </button>
               )}
@@ -288,16 +288,16 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
 
             <div className="flex-1 bg-white border border-slate-200 rounded-2xl p-4 overflow-y-auto custom-scroll shadow-inner">
               {isAnalyzing ? (
-                <div className="h-full flex flex-col items-center justify-center text-[#002864] gap-3">
+                <div className="h-full flex flex-col items-center justify-center text-brand gap-3">
                   <span className="animate-spin text-3xl">⏳</span>
                   <p className="font-bold text-[13px] text-center">녹음된 고음질 파일을 분석하여<br/>참석자별 목소리를 분리하고 있습니다...</p>
                 </div>
               ) : sttTranscript.length > 0 ? (
                 <div className="space-y-3 animate-[fadeIn_0.5s_ease-out]">
-                  <p className="text-[11px] text-slate-400 font-bold mb-3 border-b border-slate-100 pb-2">🗣️ 원본 대화 기록</p>
+                  <p className="text-xs text-slate-400 font-bold mb-3 border-b border-slate-100 pb-2">🗣️ 원본 대화 기록</p>
                   {sttTranscript.map((turn, idx) => (
                     <div key={idx} className="flex flex-col gap-1">
-                      <span className="text-[10px] font-black text-[#002864] bg-blue-50 w-fit px-1.5 py-0.5 rounded border border-blue-100">
+                      <span className="text-xs font-bold text-brand bg-blue-50 w-fit px-1.5 py-0.5 rounded border border-blue-100">
                         {turn.speaker}
                       </span>
                       <p className="text-[13px] text-slate-700 font-medium pl-1 leading-relaxed">{turn.text}</p>
@@ -315,23 +315,23 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
 
           {aiResult && (
             <div className="w-1/2 p-6 flex flex-col bg-white overflow-hidden animate-[fadeIn_0.3s_ease-out]">
-              <h3 className="text-[14px] font-black text-[#002864] mb-4 flex items-center justify-between gap-2">
+              <h3 className="text-[14px] font-bold text-brand mb-4 flex items-center justify-between gap-2">
                 <span>✨ AI 회의 요약 결과</span>
                 {targetMeeting && (
-                  <button onClick={appendToMeeting} className="px-3 py-1.5 bg-[#002864] text-white text-[11px] rounded-lg hover:bg-blue-900 shadow-sm transition-colors">
+                  <button onClick={appendToMeeting} className="px-3 py-1.5 bg-brand text-white text-xs rounded-lg hover:bg-blue-900 shadow-sm transition-colors">
                     💾 원본 회의록에 저장하기
                   </button>
                 )}
               </h3>
               <div className="flex-1 overflow-y-auto custom-scroll pr-2 space-y-5">
                  <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100">
-                  <h4 className="text-[11px] font-black text-blue-800 mb-2 flex items-center gap-1">📋 회의 요약</h4>
+                  <h4 className="text-xs font-bold text-blue-800 mb-2 flex items-center gap-1">📋 회의 요약</h4>
                   <p className="text-[13px] font-bold text-slate-700 leading-relaxed">{aiResult.summary}</p>
                 </div>
                 
                 {aiResult.decisions && aiResult.decisions.length > 0 && (
                   <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-                    <h4 className="text-[11px] font-black text-slate-700 mb-2 flex items-center gap-1">🎯 결정/합의 사항</h4>
+                    <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1">🎯 결정/합의 사항</h4>
                     <ul className="space-y-1.5">
                       {aiResult.decisions.map((decision: string, idx: number) => (
                         <li key={idx} className="text-[12px] font-bold text-slate-700 flex items-start gap-1.5">
@@ -344,16 +344,16 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
 
                 {aiResult.tasks && aiResult.tasks.length > 0 && (
                   <div>
-                    <h4 className="text-[12px] font-black text-[#002864] mb-3 flex items-center gap-1">
-                      🚨 추출된 업무 할당 <span className="bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded text-[10px] ml-1">{aiResult.tasks.length}건</span>
+                    <h4 className="text-[12px] font-bold text-brand mb-3 flex items-center gap-1">
+                      🚨 추출된 업무 할당 <span className="bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded text-xs ml-1">{aiResult.tasks.length}건</span>
                     </h4>
                     <div className="space-y-2">
                       {aiResult.tasks.map((task: any, idx: number) => (
                         <div key={idx} className={`p-3 rounded-lg border flex items-center justify-between gap-3 transition-colors ${task.isInserted ? 'bg-slate-50 border-slate-200 opacity-60' : 'bg-white border-amber-200 shadow-sm'}`}>
                           <div className="flex-1 min-w-0 flex flex-col justify-center">
                             <div className="flex items-center gap-1.5 mb-1">
-                              <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-black text-[9px]">{task.assignee}</span>
-                              <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold text-[9px] border border-slate-200">{task.task_type}</span>
+                              <span className="bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-bold text-xs">{task.assignee}</span>
+                              <span className="bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold text-xs border border-slate-200">{task.task_type}</span>
                             </div>
                             <p className="text-[12px] font-bold text-slate-800 line-clamp-2">{task.description}</p>
                           </div>
@@ -361,7 +361,7 @@ export default function AiRecordModal({ targetMeeting, onClose, onSuccess }: AiR
                           <button 
                             onClick={() => insertTask(task, idx)} 
                             disabled={task.isInserted}
-                            className={`shrink-0 px-3 py-1.5 rounded font-black text-[10px] transition-colors border ${task.isInserted ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white text-emerald-600 border-emerald-300 hover:bg-emerald-50 shadow-sm'}`}
+                            className={`shrink-0 px-3 py-1.5 rounded font-bold text-xs transition-colors border ${task.isInserted ? 'bg-slate-100 text-slate-400 border-slate-200' : 'bg-white text-emerald-600 border-emerald-300 hover:bg-emerald-50 shadow-sm'}`}
                           >
                             {task.isInserted ? '할당 완료' : '✅ 업무로 등록'}
                           </button>

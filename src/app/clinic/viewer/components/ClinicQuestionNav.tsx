@@ -29,11 +29,11 @@ export function ClinicQuestionNav({
     <div className="bg-white rounded-3xl shadow-lg p-6 border border-slate-200 shrink-0 relative">
       {availableBooks.length > 0 && (
         <div className="flex flex-wrap gap-1.5 mb-4 pb-4 border-b border-slate-100">
-          <button onClick={() => switchBookFilter('all')} className={`text-xs font-black px-3 py-1.5 rounded-lg border shadow-sm transition-colors ${bookFilter === 'all' ? 'bg-[#002864] border-[#002864] text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+          <button onClick={() => switchBookFilter('all')} className={`text-xs font-bold px-3 py-1.5 rounded-lg border shadow-sm transition-colors ${bookFilter === 'all' ? 'bg-brand border-brand text-white' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
             전체 <span className="font-normal opacity-80">{questions.length}</span>
           </button>
           {availableBooks.map(b => (
-            <button key={b.bookType} onClick={() => switchBookFilter(b.bookType as string)} className={`text-xs font-black px-3 py-1.5 rounded-lg border shadow-sm transition-colors ${bookFilter === b.bookType ? `${BOOK_TYPE_COLORS[b.bookType || '']?.pill || 'bg-slate-800 text-white border-slate-800'} ring-2 ring-offset-1 ring-[#002864]/30` : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
+            <button key={b.bookType} onClick={() => switchBookFilter(b.bookType as string)} className={`text-xs font-bold px-3 py-1.5 rounded-lg border shadow-sm transition-colors ${bookFilter === b.bookType ? `${BOOK_TYPE_COLORS[b.bookType || '']?.pill || 'bg-slate-800 text-white border-slate-800'} ring-2 ring-offset-1 ring-brand/30` : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>
               {b.bookType} <span className="font-normal opacity-80">{b.count}</span>
             </button>
           ))}
@@ -64,16 +64,16 @@ export function ClinicQuestionNav({
             
             let cls = '';
             if (isCalled) cls = isCurrent ? 'bg-red-600 border-red-600 text-white' : 'bg-red-100 border-red-300 text-red-700';
-            else if (isCurrent) cls = status ? `${statusPalette[status].solid} ring-2 ring-offset-2 ring-[#002864]/50` : 'bg-[#002864] border-[#002864] text-white';
+            else if (isCurrent) cls = status ? `${statusPalette[status].solid} ring-2 ring-offset-2 ring-brand/50` : 'bg-brand border-brand text-white';
             else if (status) cls = statusPalette[status].light;
             else if (hasAnswer) cls = 'bg-slate-200 border-slate-300 text-slate-700';
             else cls = 'border-slate-200 text-slate-500 hover:bg-slate-50';
 
             return (
-              <button key={i} onClick={() => { setCurrentQIndex(i); setCanvasClearTrigger(p=>p+1); }} className={`relative w-16 h-16 shrink-0 border-[3px] rounded-xl font-black text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
+              <button key={i} onClick={() => { setCurrentQIndex(i); setCanvasClearTrigger(p=>p+1); }} className={`relative w-16 h-16 shrink-0 border-[3px] rounded-xl font-bold text-2xl shadow-sm transition-colors flex items-center justify-center ${cls}`}>
                 {!isCalled && symbol ? symbol : i + 1}
                 {!isCalled && !status && hasAnswer && <span className="absolute top-1.5 right-1.5 w-3 h-3 rounded-full bg-emerald-500 shadow-sm border-2 border-white"></span>}
-                {!isCalled && symbol && <span className={`absolute -bottom-1 -right-1 rounded px-1.5 py-0.5 text-[10px] font-bold leading-none ${isCurrent ? 'bg-white/90 text-slate-700' : 'bg-white/80 text-slate-500 opacity-80'}`}>{i + 1}</span>}
+                {!isCalled && symbol && <span className={`absolute -bottom-1 -right-1 rounded px-1.5 py-0.5 text-xs font-bold leading-none ${isCurrent ? 'bg-white/90 text-slate-700' : 'bg-white/80 text-slate-500 opacity-80'}`}>{i + 1}</span>}
               </button>
             );
           })}

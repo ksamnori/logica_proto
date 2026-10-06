@@ -62,8 +62,8 @@ export default function ViewerSidebar({
       <div className="w-[720px] h-full flex flex-col">
         
         <div className="p-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0 sticky top-0 z-10">
-            <span className="font-extrabold text-slate-800 text-lg flex items-center gap-2">⚙️ 설정 및 배포 관리</span>
-            <button onClick={() => setIsSidebarFolded(true)} className="text-slate-400 hover:text-[#002864] text-xs font-bold flex items-center gap-1 transition-colors">
+            <span className="font-bold text-slate-800 text-lg flex items-center gap-2">⚙️ 설정 및 배포 관리</span>
+            <button onClick={() => setIsSidebarFolded(true)} className="text-slate-400 hover:text-brand text-xs font-bold flex items-center gap-1 transition-colors">
                 ◀ 설정 접기
             </button>
         </div>
@@ -78,37 +78,37 @@ export default function ViewerSidebar({
                   
                   <div className="flex flex-col gap-4">
                       <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">제목 표시 모드</label>
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">제목 표시 모드</label>
                           <div className="flex gap-2">
-                              <button onClick={() => handleSettingChange('titleMode', 'first')} className={`flex-1 px-2 py-1.5 rounded border font-bold text-[11px] ${titleMode === 'first' ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500 hover:bg-slate-50'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>첫 장만 표시</button>
-                              <button onClick={() => handleSettingChange('titleMode', 'all')} className={`flex-1 px-2 py-1.5 rounded border font-bold text-[11px] ${titleMode === 'all' ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500 hover:bg-slate-50'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>전체 표시</button>
+                              <button onClick={() => handleSettingChange('titleMode', 'first')} className={`flex-1 px-2 py-1.5 rounded border font-bold text-xs ${titleMode === 'first' ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500 hover:bg-slate-50'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>첫 장만 표시</button>
+                              <button onClick={() => handleSettingChange('titleMode', 'all')} className={`flex-1 px-2 py-1.5 rounded border font-bold text-xs ${titleMode === 'all' ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500 hover:bg-slate-50'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>전체 표시</button>
                           </div>
                       </div>
                       <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">디자인 템플릿</label>
-                          <select value={isAdmissionLock ? '입학테스트' : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold text-slate-700 bg-white focus:outline-none focus:border-[#002864] ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">디자인 템플릿</label>
+                          <select value={isAdmissionLock ? '입학테스트' : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-700 bg-white focus:outline-none focus:border-brand ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
                               <option value="basic1">기본1 (좌측 여백 활용)</option>
                               <option value="basic2">기본2 (슬림 헤더, 하단 라벨)</option>
                               {isAdmissionLock && <option value="입학테스트">입학테스트 전용</option>}
                           </select>
                       </div>
                       <div className={isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">색상 설정 (미리보기 즉시 반영)</label>
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">색상 설정 (미리보기 즉시 반영)</label>
                           <div className="space-y-2 border border-slate-100 p-2 rounded bg-slate-50/50">
                               <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5"><span className="text-[11px] text-slate-600 font-bold">번호 색상</span>
+                                  <div className="flex items-center gap-1.5"><span className="text-xs text-slate-600 font-bold">번호 색상</span>
                                       <div className="flex gap-1">{palette.map((p,i) => <button key={i} onClick={() => handleSettingChange('colorNum', p)} onContextMenu={(e) => savePalette(colorNum, i, e)} className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{background:p}}/>)}</div>
                                   </div>
                                   <input type="color" value={colorNum} onChange={e => handleSettingChange('colorNum', e.target.value)} className="w-6 h-5 rounded cursor-pointer p-0 border-0" />
                               </div>
                               <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5"><span className="text-[11px] text-slate-600 font-bold">제목 색상</span>
+                                  <div className="flex items-center gap-1.5"><span className="text-xs text-slate-600 font-bold">제목 색상</span>
                                       <div className="flex gap-1">{palette.map((p,i) => <button key={i} onClick={() => handleSettingChange('colorTitle', p)} onContextMenu={(e) => savePalette(colorTitle, i, e)} className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{background:p}}/>)}</div>
                                   </div>
                                   <input type="color" value={colorTitle} onChange={e => handleSettingChange('colorTitle', e.target.value)} className="w-6 h-5 rounded cursor-pointer p-0 border-0" />
                               </div>
                               <div className="flex items-center justify-between">
-                                  <div className="flex items-center gap-1.5"><span className="text-[11px] text-slate-600 font-bold">라인 색상</span>
+                                  <div className="flex items-center gap-1.5"><span className="text-xs text-slate-600 font-bold">라인 색상</span>
                                       <div className="flex gap-1">{palette.map((p,i) => <button key={i} onClick={() => handleSettingChange('colorLine', p)} onContextMenu={(e) => savePalette(colorLine, i, e)} className="w-3.5 h-3.5 rounded-full border border-slate-300" style={{background:p}}/>)}</div>
                                   </div>
                                   <input type="color" value={colorLine} onChange={e => handleSettingChange('colorLine', e.target.value)} className="w-6 h-5 rounded cursor-pointer p-0 border-0" />
@@ -117,17 +117,17 @@ export default function ViewerSidebar({
                       </div>
                       <div className="flex gap-4">
                           <div className="flex-1">
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">단 구성</label>
+                              <label className="block text-xs font-bold text-slate-500 mb-1.5">단 구성</label>
                               <div className="flex gap-1">
-                                  <button onClick={() => handleSettingChange('column', 1)} className={`flex-1 py-1.5 rounded border font-bold text-[11px] ${columns === 1 ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>1단</button>
-                                  <button onClick={() => handleSettingChange('column', 2)} className={`flex-1 py-1.5 rounded border font-bold text-[11px] ${columns === 2 ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>2단</button>
+                                  <button onClick={() => handleSettingChange('column', 1)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${columns === 1 ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>1단</button>
+                                  <button onClick={() => handleSettingChange('column', 2)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${columns === 2 ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>2단</button>
                               </div>
                           </div>
                           <div className="flex-1">
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">분할 설정</label>
+                              <label className="block text-xs font-bold text-slate-500 mb-1.5">분할 설정</label>
                               <div className="flex gap-1">
                                   {[2,4,6].map(num => (
-                                    <button key={num} onClick={() => handleSettingChange('split', num)} className={`flex-1 py-1.5 rounded border font-bold text-[11px] ${splits === num ? 'border-[#002864] bg-blue-50 text-[#002864]' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num}</button>
+                                    <button key={num} onClick={() => handleSettingChange('split', num)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${splits === num ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num}</button>
                                   ))}
                               </div>
                           </div>
@@ -143,26 +143,26 @@ export default function ViewerSidebar({
                   
                   <div className="flex-1 flex flex-col gap-4">
                       <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">시험지 제목</label>
-                          <input type="text" value={examTitle} onChange={e => handleSettingChange('examTitle', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">시험지 제목</label>
+                          <input type="text" value={examTitle} onChange={e => handleSettingChange('examTitle', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold focus:border-brand focus:outline-none" />
                       </div>
                       <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">학년 / 과정 표기</label>
-                          <input type="text" value={displayBadge} onChange={e => handleSettingChange('displayBadge', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">학년 / 과정 표기</label>
+                          <input type="text" value={displayBadge} onChange={e => handleSettingChange('displayBadge', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold focus:border-brand focus:outline-none" />
                       </div>
                       <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">날짜</label>
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">날짜</label>
                           <div className="flex flex-col gap-2">
-                              <input type="date" value={examDate} onChange={e => handleSettingChange('examDate', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none" />
+                              <input type="date" value={examDate} onChange={e => handleSettingChange('examDate', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold focus:border-brand focus:outline-none" />
                               <div className="flex gap-2">
-                                  <button onClick={() => handleSettingChange('examDate', new Date().toISOString().split('T')[0])} className="flex-1 py-1 bg-slate-50 border border-slate-200 rounded font-bold text-[11px] text-slate-600 hover:bg-slate-100 transition-colors">오늘 날짜</button>
-                                  <button onClick={() => handleSettingChange('examDate', '')} className="flex-1 py-1 bg-slate-50 border border-slate-200 rounded font-bold text-[11px] text-slate-400 hover:bg-slate-100 transition-colors">지우기</button>
+                                  <button onClick={() => handleSettingChange('examDate', new Date().toISOString().split('T')[0])} className="flex-1 py-1 bg-slate-50 border border-slate-200 rounded font-bold text-xs text-slate-600 hover:bg-slate-100 transition-colors">오늘 날짜</button>
+                                  <button onClick={() => handleSettingChange('examDate', '')} className="flex-1 py-1 bg-slate-50 border border-slate-200 rounded font-bold text-xs text-slate-400 hover:bg-slate-100 transition-colors">지우기</button>
                               </div>
                           </div>
                       </div>
                       <div>
-                          <label className="block text-[11px] font-bold text-slate-500 mb-1.5">프린트 양식</label>
-                          <select value={layoutType} onChange={e => handleSettingChange('layoutType', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold focus:border-[#002864] focus:outline-none">
+                          <label className="block text-xs font-bold text-slate-500 mb-1.5">프린트 양식</label>
+                          <select value={layoutType} onChange={e => handleSettingChange('layoutType', e.target.value)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold focus:border-brand focus:outline-none">
                               <option value="선택없음">선택없음</option>
                               <option value="과제프린트">과제프린트</option>
                               <option value="오답프린트">오답프린트</option>
@@ -175,11 +175,11 @@ export default function ViewerSidebar({
                       </div>
                       {layoutType === '주간테스트' && (
                           <div>
-                              <label className="block text-[11px] font-bold text-slate-500 mb-1.5">주차 (달력에서 날짜 선택 → ISO 주차 자동 계산, 전원 공통)</label>
+                              <label className="block text-xs font-bold text-slate-500 mb-1.5">주차 (달력에서 날짜 선택 → ISO 주차 자동 계산, 전원 공통)</label>
                               <div className="flex items-center gap-2">
-                                  <span className="shrink-0 text-[11px] font-bold text-[#002864] bg-[#EEF6FF] border border-blue-100 rounded px-2 py-1.5">{getMonthWeekLabel(testDate)}</span>
+                                  <span className="shrink-0 text-xs font-bold text-brand bg-[#EEF6FF] border border-blue-100 rounded px-2 py-1.5">{getMonthWeekLabel(testDate)}</span>
                                   <div className="relative flex-1">
-                                      <button type="button" onClick={() => setIsWeekPopupOpen(v => !v)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-[11px] font-bold text-left bg-white hover:bg-slate-50">
+                                      <button type="button" onClick={() => setIsWeekPopupOpen(v => !v)} className="w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-left bg-white hover:bg-slate-50">
                                           📅 주차 선택하기
                                       </button>
                                       {isWeekPopupOpen && (

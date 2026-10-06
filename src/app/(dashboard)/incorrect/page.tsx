@@ -309,17 +309,17 @@ export default function IncorrectPage() {
     return (
       <div key={s.id} onClick={() => handleStudentClick(s.id, s.name, '', cName)} className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm hover:border-orange-500 hover:shadow-md cursor-pointer transition-all hover:-translate-y-1 group relative">
         {showClassNameBadge && (
-          <div className="absolute top-0 right-0 bg-slate-100 text-slate-400 text-[9px] font-bold px-1.5 py-0.5 rounded-bl-lg rounded-tr-xl border-b border-l border-slate-200">
+          <div className="absolute top-0 right-0 bg-slate-100 text-slate-400 text-xs font-bold px-1.5 py-0.5 rounded-bl-lg rounded-tr-xl border-b border-l border-slate-200">
             {cName}
           </div>
         )}
         <div className={`flex justify-between items-center mb-3 ${showClassNameBadge ? 'mt-1.5' : ''}`}>
-          <div className="font-extrabold text-base text-slate-800 group-hover:text-orange-600 transition-colors">{s.name}</div>
-          <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded transition-colors group-hover:bg-orange-500 group-hover:text-white shadow-sm">상세 ➔</span>
+          <div className="font-bold text-base text-slate-800 group-hover:text-orange-600 transition-colors">{s.name}</div>
+          <span className="text-xs font-bold text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded transition-colors group-hover:bg-orange-500 group-hover:text-white shadow-sm">상세 ➔</span>
         </div>
         <div className="space-y-1.5 text-xs bg-slate-50 p-2.5 rounded-xl border border-slate-100">
-          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">해결 필요 (미해결)</span><span className="font-black text-rose-500">{pending}건</span></div>
-          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">오답 해결 (완료)</span><span className="font-black text-emerald-500">{done}건</span></div>
+          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">해결 필요 (미해결)</span><span className="font-bold text-rose-500">{pending}건</span></div>
+          <div className="flex justify-between items-center"><span className="text-slate-500 font-bold">오답 해결 (완료)</span><span className="font-bold text-emerald-500">{done}건</span></div>
         </div>
       </div>
     );
@@ -356,10 +356,10 @@ export default function IncorrectPage() {
         {/* 1. 좌측 사이드바 아코디언 메뉴 */}
         <div className="w-[260px] bg-white rounded-xl border border-slate-200 flex flex-col shrink-0 z-10 shadow-sm overflow-hidden">
           <div className="p-4 border-b border-slate-200 bg-slate-50 shrink-0 flex justify-between items-center">
-            <h3 className="text-[13px] font-extrabold text-slate-700 flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => setCurrentView({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
+            <h3 className="text-[13px] font-bold text-slate-700 flex items-center gap-1.5 cursor-pointer hover:underline" onClick={() => setCurrentView({type: 'ALL', classId: '', className: '', studentId: '', studentName: ''})}>
               <span>📂 전체 확인 대상</span>
             </h3>
-            <button onClick={toggleAllAccordions} className="text-[10px] font-bold bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 transition-colors shadow-sm focus:outline-none">
+            <button onClick={toggleAllAccordions} className="text-xs font-bold bg-white border border-slate-300 px-2 py-1 rounded hover:bg-slate-100 transition-colors shadow-sm focus:outline-none">
               {isAllExpanded ? "전체 접기" : "전체 펼치기"}
             </button>
           </div>
@@ -373,7 +373,7 @@ export default function IncorrectPage() {
                 return (
                   <div key={lvl} className="border-b border-slate-200">
                     <button onClick={() => handleLevelClick(lvl)} className="w-full flex justify-between items-center px-4 py-3.5 bg-white hover:bg-slate-50 transition-colors">
-                      <span className="font-extrabold text-slate-700 text-xs">{lvl}</span>
+                      <span className="font-bold text-slate-700 text-xs">{lvl}</span>
                       <svg className={`w-3.5 h-3.5 text-slate-400 transition-transform ${isLvlExpanded ? "rotate-180" : ""}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
                     </button>
                     {isLvlExpanded && (
@@ -418,7 +418,7 @@ export default function IncorrectPage() {
           {currentView.type === 'ALL' && (
             <>
               <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
-                <h2 className="text-lg font-extrabold text-slate-800">전체 요약 대시보드</h2>
+                <h2 className="text-lg font-bold text-slate-800">전체 요약 대시보드</h2>
                 <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-xs font-bold shadow-sm transition-colors ${isFilterActive ? 'border-orange-300 bg-orange-50 text-orange-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
                   🚨 미해결 학생만 보기
                 </button>
@@ -434,8 +434,8 @@ export default function IncorrectPage() {
                   return visibleClasses.map(c => (
                     <div key={c.class_id} className="mb-10">
                       <div className="flex items-center gap-2 mb-4 border-b border-slate-200 pb-2">
-                        <span className="bg-orange-100 text-orange-600 text-[10px] font-black px-2 py-0.5 rounded uppercase tracking-wider">{lvl}</span>
-                        <h2 className="text-lg font-extrabold text-slate-800">{c.name}</h2>
+                        <span className="bg-orange-100 text-orange-600 text-xs font-bold px-2 py-0.5 rounded uppercase tracking-wider">{lvl}</span>
+                        <h2 className="text-lg font-bold text-slate-800">{c.name}</h2>
                       </div>
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
                         {c.students.map(s => renderStudentCard(s, c.name, true))}
@@ -452,7 +452,7 @@ export default function IncorrectPage() {
             <>
               <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
                 <div>
-                  <h2 className="text-lg font-extrabold text-slate-800"><span className="text-orange-600">{currentView.className}</span> 반 오답 노트 요약</h2>
+                  <h2 className="text-lg font-bold text-slate-800"><span className="text-orange-600">{currentView.className}</span> 반 오답 노트 요약</h2>
                 </div>
                 <button onClick={() => setIsFilterActive(!isFilterActive)} className={`px-4 py-2 rounded-lg border text-xs font-bold shadow-sm transition-colors ${isFilterActive ? 'border-orange-300 bg-orange-50 text-orange-600' : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'}`}>
                   🚨 미해결 학생만 보기
@@ -470,7 +470,7 @@ export default function IncorrectPage() {
           {currentView.type === 'STUDENT' && (
             <>
               <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex justify-between items-center">
-                <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
+                <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                   <span className="bg-orange-100 text-orange-600 text-xs font-bold px-2 py-0.5 rounded border border-orange-200">{currentView.className}</span>
                   <span className="text-orange-600">{currentView.studentName}</span> 학생 오답 노트 현황
                 </h2>
@@ -479,7 +479,7 @@ export default function IncorrectPage() {
                 
                 {/* 섹션 1: 자동 생성된 오답 프린트 */}
                 <section>
-                  <div className="flex items-center gap-2 mb-4"><h3 className="text-lg font-extrabold text-slate-800">🖨️ 자동 생성된 오답 프린트</h3></div>
+                  <div className="flex items-center gap-2 mb-4"><h3 className="text-lg font-bold text-slate-800">🖨️ 자동 생성된 오답 프린트</h3></div>
                   {isLoading ? <div className="text-center font-bold text-slate-400 py-4">불러오는 중...</div>
                   : studentPrints.length === 0 ? <div className="text-sm font-bold text-slate-400 py-4 text-center border border-dashed border-slate-300 rounded-xl bg-slate-50">생성된 오답 프린트가 없습니다.</div>
                   : (
@@ -491,15 +491,15 @@ export default function IncorrectPage() {
                           <div key={p.assignment_id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between hover:border-orange-300">
                             <div className="flex justify-between items-start mb-3">
                               <div className="min-w-0 pr-4">
-                                <span className="text-[11px] font-bold text-slate-400 block mb-1">{dateStr} 자동 생성</span>
-                                <h4 className="font-extrabold text-slate-700 text-[15px] truncate" title={p.exam_master?.title}>{p.exam_master?.title || '제목 없음'}</h4>
+                                <span className="text-xs font-bold text-slate-400 block mb-1">{dateStr} 자동 생성</span>
+                                <h4 className="font-bold text-slate-700 text-[15px] truncate" title={p.exam_master?.title}>{p.exam_master?.title || '제목 없음'}</h4>
                               </div>
-                              <span className={`${statusBadge} border px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0`}>{p.status}</span>
+                              <span className={`${statusBadge} border px-2 py-0.5 rounded-full text-xs font-bold shrink-0`}>{p.status}</span>
                             </div>
                             <div className="mt-4 flex justify-end items-center pt-3 border-t border-slate-100">
                               <div className="flex gap-2">
-                                <button onClick={() => handleDeletePrint(p.assignment_id, p.exam_master.exam_id)} className="text-[11px] font-bold text-slate-500 hover:text-rose-500 transition-colors flex items-center gap-1">🗑️ 삭제</button>
-                                <button onClick={() => router.push(`/exam/review?assignment_id=${p.assignment_id}`)} className="text-[11px] font-bold text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded shadow-sm transition-colors">결과 확인 ➔</button>
+                                <button onClick={() => handleDeletePrint(p.assignment_id, p.exam_master.exam_id)} className="text-xs font-bold text-slate-500 hover:text-rose-500 transition-colors flex items-center gap-1">🗑️ 삭제</button>
+                                <button onClick={() => router.push(`/exam/review?assignment_id=${p.assignment_id}`)} className="text-xs font-bold text-white bg-orange-500 hover:bg-orange-600 px-3 py-1.5 rounded shadow-sm transition-colors">결과 확인 ➔</button>
                               </div>
                             </div>
                           </div>
@@ -511,7 +511,7 @@ export default function IncorrectPage() {
 
                 {/* 섹션 2: 개별 오답 문항 기록 */}
                 <section>
-                  <div className="flex items-center gap-2 mb-4"><h3 className="text-lg font-extrabold text-slate-800">📊 최근 발생한 개별 오답 문항</h3></div>
+                  <div className="flex items-center gap-2 mb-4"><h3 className="text-lg font-bold text-slate-800">📊 최근 발생한 개별 오답 문항</h3></div>
                   {isLoading ? <div className="text-center font-bold text-slate-400 py-4">불러오는 중...</div>
                   : studentRecords.length === 0 ? <div className="text-sm font-bold text-slate-400 py-4 text-center border border-dashed border-slate-300 rounded-xl bg-slate-50">발생한 개별 오답 기록이 없습니다. 🎉</div>
                   : (
@@ -534,10 +534,10 @@ export default function IncorrectPage() {
                           <div key={rec.record_id} className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm hover:border-orange-300">
                             <div className="flex justify-between items-start mb-3">
                               <div className="min-w-0 pr-4">
-                                <span className="text-[11px] font-bold text-slate-400 block mb-1">{dateStr} 발생 | 출처: {rec.source_type}</span>
-                                <h4 className="font-extrabold text-slate-700 text-[15px] truncate" title={title}>{title}</h4>
+                                <span className="text-xs font-bold text-slate-400 block mb-1">{dateStr} 발생 | 출처: {rec.source_type}</span>
+                                <h4 className="font-bold text-slate-700 text-[15px] truncate" title={title}>{title}</h4>
                               </div>
-                              <span className={`${statusBadge} px-2 py-0.5 rounded-full text-[11px] font-bold shrink-0`}>{isResolved ? "해결완료" : "미해결"}</span>
+                              <span className={`${statusBadge} px-2 py-0.5 rounded-full text-xs font-bold shrink-0`}>{isResolved ? "해결완료" : "미해결"}</span>
                             </div>
                             <div className="mt-4 flex justify-between items-center pt-3 border-t border-slate-100">
                               <div className="flex gap-3 text-xs font-bold">
@@ -545,8 +545,8 @@ export default function IncorrectPage() {
                                 <span className="flex items-center gap-1"><span className="text-slate-400 font-normal">재시도</span> <span className="text-slate-700 text-sm">{rec.retry_count}회</span></span>
                               </div>
                               <div className="flex items-center gap-2">
-                                <button onClick={() => handleDeleteRecord(rec.record_id)} className="text-[11px] font-bold text-slate-500 hover:text-rose-500 transition-colors flex items-center gap-1">🗑️ 삭제</button>
-                                <button onClick={() => alert('오답 상세 확인 및 클리닉 기능은 준비 중입니다.')} className="text-[11px] font-bold text-slate-500 bg-slate-50 hover:bg-slate-200 border border-slate-200 px-3 py-1.5 rounded transition-colors shadow-sm focus:outline-none">상세 보기 ➔</button>
+                                <button onClick={() => handleDeleteRecord(rec.record_id)} className="text-xs font-bold text-slate-500 hover:text-rose-500 transition-colors flex items-center gap-1">🗑️ 삭제</button>
+                                <button onClick={() => alert('오답 상세 확인 및 클리닉 기능은 준비 중입니다.')} className="text-xs font-bold text-slate-500 bg-slate-50 hover:bg-slate-200 border border-slate-200 px-3 py-1.5 rounded transition-colors shadow-sm focus:outline-none">상세 보기 ➔</button>
                               </div>
                             </div>
                           </div>

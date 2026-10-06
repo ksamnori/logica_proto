@@ -497,9 +497,9 @@ export default function AdmissionAnalyticsPage() {
       <main className="flex-1 overflow-y-auto custom-scroll p-4 sm:p-8 relative">
         <div className="max-w-[1500px] w-full mx-auto relative pb-24 space-y-6">
           
-          <div className="bg-[#002864] text-white p-6 rounded-2xl shadow-md flex justify-between items-center no-print shrink-0 flex-wrap gap-4">
+          <div className="bg-brand text-white p-6 rounded-2xl shadow-md flex justify-between items-center no-print shrink-0 flex-wrap gap-4">
             <div>
-              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-sm mb-3 transition-colors bg-blue-900/40 px-3 py-1.5 rounded-lg border border-blue-800/50 w-fit shadow-sm">
+              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-sm mb-3 transition-colors bg-blue-900/40 px-3 py-1.5 rounded-lg border border-blue-800/50 w-fit shadow-sm">
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
               </button>
               <h1 className="text-2xl font-bold tracking-tight">📊 입학 진단평가 본사 대시보드</h1>
@@ -523,7 +523,7 @@ export default function AdmissionAnalyticsPage() {
                 <select 
                   value={selectedTenantId} 
                   onChange={(e) => setSelectedTenantId(e.target.value)}
-                  className="bg-white text-slate-800 font-extrabold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                  className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="all">🏢 전체 지점 합산</option>
                   {tenantList.map(t => (
@@ -537,7 +537,7 @@ export default function AdmissionAnalyticsPage() {
                 <select 
                   value={selectedDate} 
                   onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime("all"); }}
-                  className="bg-white text-slate-800 font-extrabold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                  className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="all">전체 누적 날짜</option>
                   {reportStats.availableDates?.map(date => (
@@ -547,7 +547,7 @@ export default function AdmissionAnalyticsPage() {
                 <select 
                   value={selectedTime} 
                   onChange={(e) => setSelectedTime(e.target.value)}
-                  className="bg-white text-slate-800 font-extrabold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                  className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="all">전체 시간</option>
                   {reportStats.availableTimes?.map(time => (
@@ -561,7 +561,7 @@ export default function AdmissionAnalyticsPage() {
                 <select 
                   value={selectedExamId} 
                   onChange={(e) => setSelectedExamId(e.target.value)}
-                  className="bg-white text-slate-800 font-extrabold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-48 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
+                  className="bg-white text-slate-800 font-bold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-48 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   {examList.length === 0 ? <option value="">조건에 맞는 시험지가 없습니다.</option> : null}
                   {examList.map(exam => (
@@ -582,21 +582,21 @@ export default function AdmissionAnalyticsPage() {
               {/* 1. KPI 영역 */}
               <div className="grid grid-cols-3 gap-4 shrink-0">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center relative overflow-hidden transition-transform hover:-translate-y-1">
-                  {(excludeTest || selectedDate !== "all") && <div className="absolute top-2 left-2 text-[10px] bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-200">필터 적용됨</div>}
+                  {(excludeTest || selectedDate !== "all") && <div className="absolute top-2 left-2 text-xs bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-200">필터 적용됨</div>}
                   <span className="text-slate-500 font-bold text-sm mb-1">조건 내 응시 인원</span>
-                  <span className="text-3xl font-black text-[#002864]">
+                  <span className="text-3xl font-bold text-brand">
                     {isLoading ? "-" : reportStats.summary?.totalStudents || 0} <span className="text-lg font-bold text-slate-400">명</span>
                   </span>
                 </div>
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center transition-transform hover:-translate-y-1">
                   <span className="text-slate-500 font-bold text-sm mb-1">조건 내 평균 점수</span>
-                  <span className="text-3xl font-black text-emerald-600">
+                  <span className="text-3xl font-bold text-emerald-600">
                     {isLoading ? "-" : reportStats.summary?.averageScore || 0} <span className="text-lg font-bold text-slate-400">점</span>
                   </span>
                 </div>
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center transition-transform hover:-translate-y-1">
                   <span className="text-slate-500 font-bold text-sm mb-1">조건 내 최고점</span>
-                  <span className="text-3xl font-black text-rose-500">
+                  <span className="text-3xl font-bold text-rose-500">
                     {isLoading ? "-" : reportStats.summary?.highestScore || 0} <span className="text-lg font-bold text-slate-400">점</span>
                   </span>
                 </div>
@@ -605,8 +605,8 @@ export default function AdmissionAnalyticsPage() {
               {/* 2. 차트 영역 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
                 <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex items-center justify-between">
-                  <h3 className="font-extrabold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (선택된 지점 기준)</h3>
-                  <span className="text-[10px] text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">현재 선택: 초록색</span>
+                  <h3 className="font-bold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (선택된 지점 기준)</h3>
+                  <span className="text-xs text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">현재 선택: 초록색</span>
                 </div>
                 <div className="w-full h-52 p-4 relative">
                   {semesterStats.length > 0 ? (
@@ -620,8 +620,8 @@ export default function AdmissionAnalyticsPage() {
               {/* 3. 정답률 2단 분할 테이블 영역 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
                 <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex justify-between items-center shrink-0">
-                  <h3 className="font-extrabold text-slate-800 text-[15px]">📈 필터 조건 내 문항 정답률</h3>
-                  {isLoading && <span className="text-[11px] font-bold text-emerald-600 animate-pulse bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">업데이트 중...</span>}
+                  <h3 className="font-bold text-slate-800 text-[15px]">📈 필터 조건 내 문항 정답률</h3>
+                  {isLoading && <span className="text-xs font-bold text-emerald-600 animate-pulse bg-emerald-50 px-2 py-0.5 rounded border border-emerald-100">업데이트 중...</span>}
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-200">
@@ -630,10 +630,10 @@ export default function AdmissionAnalyticsPage() {
                       <table className="w-full text-left border-collapse min-w-max">
                         <thead className="bg-slate-100/40 text-slate-500 border-b border-slate-200 sticky top-0 z-10">
                           <tr>
-                            <th className="py-2.5 px-2 text-center font-bold text-[11px] w-[60px] whitespace-nowrap">문항</th>
-                            <th className="py-2.5 px-2 text-center font-bold text-[11px] w-[50px] whitespace-nowrap">배점</th>
-                            <th className="py-2.5 px-3 font-bold text-[11px] whitespace-nowrap">정답률 분포 시각화</th>
-                            <th className="py-2.5 px-2 text-right font-bold text-[11px] w-[55px] pr-4 whitespace-nowrap">%</th>
+                            <th className="py-2.5 px-2 text-center font-bold text-xs w-[60px] whitespace-nowrap">문항</th>
+                            <th className="py-2.5 px-2 text-center font-bold text-xs w-[50px] whitespace-nowrap">배점</th>
+                            <th className="py-2.5 px-3 font-bold text-xs whitespace-nowrap">정답률 분포 시각화</th>
+                            <th className="py-2.5 px-2 text-right font-bold text-xs w-[55px] pr-4 whitespace-nowrap">%</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -649,7 +649,7 @@ export default function AdmissionAnalyticsPage() {
                                       <button onClick={() => setModalQ(q)} title="문제 보기" className="text-sm grayscale opacity-60 hover:grayscale-0 hover:opacity-100 transition-all hover:scale-125 active:scale-95 leading-none mt-0.5">
                                         🔍
                                       </button>
-                                      <span className="font-extrabold text-slate-800 text-[13px] w-6 text-left">{q.logicalNumber}</span>
+                                      <span className="font-bold text-slate-800 text-[13px] w-6 text-left">{q.logicalNumber}</span>
                                     </div>
                                   </td>
                                   <td className="py-2.5 px-2 text-center text-[12px] font-bold text-slate-500 bg-slate-50/40 whitespace-nowrap">
@@ -658,12 +658,12 @@ export default function AdmissionAnalyticsPage() {
                                   <td className="py-2.5 px-3 align-middle">
                                     <div className="w-full max-w-[150px] bg-slate-200 rounded-full h-[6px] relative group cursor-pointer shadow-inner">
                                       <div className={`${rateColor} h-[6px] rounded-full transition-all duration-700 ease-out shadow-sm`} style={{ width: `${q.correctRate}%` }}></div>
-                                      <div className="hidden group-hover:flex absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] px-2 py-0.5 rounded shadow-md z-20 font-bold items-center gap-1">
+                                      <div className="hidden group-hover:flex absolute -top-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs px-2 py-0.5 rounded shadow-md z-20 font-bold items-center gap-1">
                                         <span className="text-emerald-300">{q.correctCount}</span> / {q.totalCount}명
                                       </div>
                                     </div>
                                   </td>
-                                  <td className="py-2.5 px-2 text-right pr-4 font-extrabold text-slate-800 text-[13px] whitespace-nowrap">
+                                  <td className="py-2.5 px-2 text-right pr-4 font-bold text-slate-800 text-[13px] whitespace-nowrap">
                                     {q.correctRate.toFixed(1)}
                                   </td>
                                 </tr>
@@ -683,7 +683,7 @@ export default function AdmissionAnalyticsPage() {
             <div className="lg:col-span-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-[calc(100vh-140px)] sticky top-6">
               <div className="bg-emerald-700 p-5 shrink-0 flex justify-between items-center shadow-sm z-10">
                 <h3 className="font-bold text-white text-lg">🏆 {selectedTenantId === "all" ? "전체 통합" : "해당 지점"} 랭킹</h3>
-                <span className="bg-emerald-800 text-emerald-100 text-[11px] font-bold px-2.5 py-1 rounded-md border border-emerald-600 shadow-inner">고득점순</span>
+                <span className="bg-emerald-800 text-emerald-100 text-xs font-bold px-2.5 py-1 rounded-md border border-emerald-600 shadow-inner">고득점순</span>
               </div>
               
               <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50">
@@ -699,23 +699,23 @@ export default function AdmissionAnalyticsPage() {
                         title="클릭하여 학생별 문항 정오표 보기"
                       >
                         <div className="flex items-center gap-3">
-                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-black shrink-0 shadow-sm ${index < 3 ? 'bg-gradient-to-br from-amber-200 to-amber-100 text-amber-700 border border-amber-300' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
+                          <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[13px] font-bold shrink-0 shadow-sm ${index < 3 ? 'bg-gradient-to-br from-amber-200 to-amber-100 text-amber-700 border border-amber-300' : 'bg-slate-100 text-slate-500 border border-slate-200'}`}>
                             {index + 1}
                           </div>
                           <div className="flex flex-col min-w-0">
                             <div className="flex items-center gap-2">
-                              <span className="font-extrabold text-slate-800 truncate text-[15px] group-hover:text-emerald-700 transition-colors">{st.studentName}</span>
+                              <span className="font-bold text-slate-800 truncate text-[15px] group-hover:text-emerald-700 transition-colors">{st.studentName}</span>
                             </div>
                             <div className="flex items-center gap-1.5 mt-1.5">
-                              <span className="text-[10px] text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200/60 shadow-sm whitespace-nowrap">
+                              <span className="text-xs text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200/60 shadow-sm whitespace-nowrap">
                                 🗓️ {st.dateStr} ⏰ {st.timeStr}
                               </span>
                             </div>
                           </div>
                         </div>
-                        <div className="font-black text-xl text-emerald-600 shrink-0 ml-2 group-hover:scale-110 transition-transform origin-right flex flex-col items-end">
+                        <div className="font-bold text-xl text-emerald-600 shrink-0 ml-2 group-hover:scale-110 transition-transform origin-right flex flex-col items-end">
                           <div>{st.totalScore}<span className="text-[13px] text-slate-400 font-bold ml-0.5">점</span></div>
-                          <span className="text-[10px] text-slate-400 font-medium group-hover:text-emerald-500 transition-colors whitespace-nowrap mt-1">상세표 👆</span>
+                          <span className="text-xs text-slate-400 font-medium group-hover:text-emerald-500 transition-colors whitespace-nowrap mt-1">상세표 👆</span>
                         </div>
                       </div>
                     ))
@@ -733,13 +733,13 @@ export default function AdmissionAnalyticsPage() {
             <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
               <div className="bg-emerald-700 p-5 text-white flex justify-between items-center shrink-0 shadow-sm">
                 <div>
-                  <h2 className="font-black text-xl flex items-center gap-2">👨‍🎓 {modalStudent.studentName} 학생 상세 채점표</h2>
+                  <h2 className="font-bold text-xl flex items-center gap-2">👨‍🎓 {modalStudent.studentName} 학생 상세 채점표</h2>
                   <p className="text-emerald-200 text-sm mt-1 font-bold">응시 일시: {modalStudent.dateStr} {modalStudent.timeStr} (원천 데이터 검증)</p>
                 </div>
                 <div className="flex items-center gap-4">
                   <div className="text-right">
                     <span className="text-emerald-200 text-xs font-bold">총점</span>
-                    <div className="text-3xl font-black">{modalStudent.totalScore}점</div>
+                    <div className="text-3xl font-bold">{modalStudent.totalScore}점</div>
                   </div>
                   <button onClick={() => setModalStudent(null)} className="text-white hover:text-emerald-300 font-bold text-4xl leading-none transition-colors ml-2">&times;</button>
                 </div>
@@ -756,14 +756,14 @@ export default function AdmissionAnalyticsPage() {
                     const isPartial = !isFull && earnedScore > 0;
 
                     let bgClass = "bg-white border-slate-200 hover:border-slate-300";
-                    let icon = <span className="text-rose-500 font-black text-xl">X</span>;
+                    let icon = <span className="text-rose-500 font-bold text-xl">X</span>;
                     
                     if (isFull) {
                       bgClass = "bg-emerald-50 border-emerald-300 hover:border-emerald-400";
-                      icon = <span className="text-emerald-500 font-black text-xl">O</span>;
+                      icon = <span className="text-emerald-500 font-bold text-xl">O</span>;
                     } else if (isPartial) {
                       bgClass = "bg-amber-50 border-amber-300 hover:border-amber-400";
-                      icon = <span className="text-amber-500 font-black text-xl">△</span>;
+                      icon = <span className="text-amber-500 font-bold text-xl">△</span>;
                     }
 
                     return (
@@ -775,14 +775,14 @@ export default function AdmissionAnalyticsPage() {
                       >
                         <div className="flex items-center gap-1.5 mb-1">
                           <span className="text-xs font-bold text-slate-500">문항 {q.logicalNumber}</span>
-                          <span className="text-[10px] grayscale opacity-50">🔍</span>
+                          <span className="text-xs grayscale opacity-50">🔍</span>
                         </div>
                         <div className="mb-2">{icon}</div>
-                        <div className="text-[11px] font-black text-slate-700 bg-white/60 px-2 py-1 rounded border border-slate-200/50 w-full text-center">
+                        <div className="text-xs font-bold text-slate-700 bg-white/60 px-2 py-1 rounded border border-slate-200/50 w-full text-center">
                           득점: {earnedScore.toFixed(1)} / {q.assignedScore.toFixed(1)}
                         </div>
                         {ans?.grading_code && (
-                          <div className="text-[9px] font-bold text-slate-400 mt-1">코드: {ans.grading_code}</div>
+                          <div className="text-xs font-bold text-slate-400 mt-1">코드: {ans.grading_code}</div>
                         )}
                       </div>
                     );
@@ -801,16 +801,16 @@ export default function AdmissionAnalyticsPage() {
         {modalQ && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 no-print animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-              <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0 shadow-sm">
+              <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0 shadow-sm">
                 <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> 문항 {modalQ.logicalNumber} 상세 뷰어</h2>
                 <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-3xl leading-none transition-colors">&times;</button>
               </div>
               <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
                 
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-between">
+                  <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-4 flex items-center justify-between">
                     질문 내용
-                    <span className="text-[11px] bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-bold border border-slate-200 shadow-inner">배점: {modalQ.assignedScore.toFixed(1)}점</span>
+                    <span className="text-xs bg-slate-100 text-slate-600 px-2.5 py-1 rounded-md font-bold border border-slate-200 shadow-inner">배점: {modalQ.assignedScore.toFixed(1)}점</span>
                   </h3>
                   <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed text-[15px]" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.questionContent || '문제 텍스트가 없습니다.') }} />
                   {getCleanUrl(modalQ.imageUrl) && (
@@ -819,14 +819,14 @@ export default function AdmissionAnalyticsPage() {
                 </div>
 
                 <div className="bg-blue-50/50 p-5 rounded-xl border border-blue-200 shadow-sm">
-                  <h3 className="font-extrabold text-blue-800 border-b border-blue-200/50 pb-2 mb-3">정답</h3>
-                  <div className="math-text text-blue-800 font-black text-[16px] whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.answerContent || '정답 데이터가 없습니다.') }} />
+                  <h3 className="font-bold text-blue-800 border-b border-blue-200/50 pb-2 mb-3">정답</h3>
+                  <div className="math-text text-blue-800 font-bold text-[16px] whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.answerContent || '정답 데이터가 없습니다.') }} />
                 </div>
 
                 <div className="bg-emerald-50 p-5 rounded-xl border border-emerald-200 shadow-sm flex items-center justify-between">
                   <span className="font-bold text-emerald-800">이 문항의 현재 정답률</span>
                   <div className="flex flex-col items-end">
-                    <span className="font-black text-emerald-600 text-2xl">{modalQ.correctRate.toFixed(1)}%</span>
+                    <span className="font-bold text-emerald-600 text-2xl">{modalQ.correctRate.toFixed(1)}%</span>
                     <span className="text-xs font-bold text-emerald-800/60 mt-0.5">총 {modalQ.totalCount}명 중 {modalQ.correctCount}명 정답</span>
                   </div>
                 </div>

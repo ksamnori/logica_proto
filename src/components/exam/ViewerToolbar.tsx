@@ -51,14 +51,14 @@ export default function ViewerToolbar({
             onMouseDown={() => startZoom(-0.01)} onMouseUp={stopZoom} onMouseLeave={stopZoom} onTouchStart={() => startZoom(-0.01)} onTouchEnd={stopZoom}
             className="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700 font-bold transition-colors text-lg leading-none pb-0.5"
           >-</button>
-          <span className="text-slate-600 font-bold text-[11px] w-12 text-center">🔍 {Math.round(zoomFactor * 100)}%</span>
+          <span className="text-slate-600 font-bold text-xs w-12 text-center">🔍 {Math.round(zoomFactor * 100)}%</span>
           <button 
             onMouseDown={() => startZoom(0.01)} onMouseUp={stopZoom} onMouseLeave={stopZoom} onTouchStart={() => startZoom(0.01)} onTouchEnd={stopZoom}
             className="w-7 h-7 flex items-center justify-center rounded text-slate-500 hover:bg-slate-200 hover:text-slate-700 font-bold transition-colors text-lg leading-none pb-0.5"
           >+</button>
       </div>
 
-      <button onClick={resetZoom} className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-[11px] text-slate-500 hover:bg-slate-50">초기화</button>
+      <button onClick={resetZoom} className="px-2.5 py-1.5 rounded-lg border border-slate-300 font-bold text-xs text-slate-500 hover:bg-slate-50">초기화</button>
     </div>
   );
 }

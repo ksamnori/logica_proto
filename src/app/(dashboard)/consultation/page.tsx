@@ -220,7 +220,7 @@ export default function ConsultationManagementPage() {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
           <span className="text-slate-500 font-bold text-sm">학생 및 상담 기록을 동기화하는 중입니다...</span>
         </div>
       </div>
@@ -235,11 +235,11 @@ export default function ConsultationManagementPage() {
           <div className="absolute inset-0 opacity-10 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')]"></div>
           <div className="relative z-10 flex justify-between items-center ml-6">
             <div>
-              <h1 className="text-3xl font-black tracking-tight font-lexend flex items-center gap-3">
+              <h1 className="text-3xl font-bold tracking-tight font-lexend flex items-center gap-3">
                 <span>💬 학부모 정기 상담 관리</span>
                 <span className="bg-blue-500/30 text-blue-100 text-[15px] px-3 py-1 rounded-lg font-bold border border-blue-400/30 shadow-sm flex items-center">🏢 {tenantName}</span>
               </h1>
-              <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">전체 대상자 {totalDisplayStudents}명 중 상담 요망(30일 경과) <span className="text-rose-400 font-black">{totalOverdueCount}</span>명</p>
+              <p className="text-slate-300 text-sm mt-2 font-medium tracking-tight">전체 대상자 {totalDisplayStudents}명 중 상담 요망(30일 경과) <span className="text-rose-400 font-bold">{totalOverdueCount}</span>명</p>
             </div>
           </div>
         </header>
@@ -276,7 +276,7 @@ export default function ConsultationManagementPage() {
                   checked={hideTestStudents}
                   onChange={(e) => setHideTestStudents(e.target.checked)}
                 />
-                <span className="text-xs font-black text-slate-700 select-none flex items-center gap-1">🚫 '테스트' 학생 숨기기</span>
+                <span className="text-xs font-bold text-slate-700 select-none flex items-center gap-1">🚫 '테스트' 학생 숨기기</span>
               </label>
 
               <label className="flex items-center gap-2 cursor-pointer bg-rose-50 hover:bg-rose-100 px-3 py-2 rounded-lg border border-rose-200 transition-colors shadow-inner shrink-0">
@@ -286,7 +286,7 @@ export default function ConsultationManagementPage() {
                   checked={overdueOnly}
                   onChange={(e) => setOverdueOnly(e.target.checked)}
                 />
-                <span className="text-xs font-black text-rose-700 select-none flex items-center gap-1">🚨 30일 경과 미상담자만 보기</span>
+                <span className="text-xs font-bold text-rose-700 select-none flex items-center gap-1">🚨 30일 경과 미상담자만 보기</span>
               </label>
             </div>
 
@@ -321,39 +321,39 @@ export default function ConsultationManagementPage() {
                     <table className="w-full text-left border-collapse min-w-[800px]">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase w-32">학생 이름</th>
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase w-48">소속 반</th>
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-56">최근 상담 기록</th>
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-28">담당자</th>
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-center w-32">상태</th>
-                          <th className="py-3 px-4 text-xs font-extrabold text-slate-500 uppercase text-right">관리 액션</th>
+                          <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase w-32">학생 이름</th>
+                          <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase w-48">소속 반</th>
+                          <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase text-center w-56">최근 상담 기록</th>
+                          <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase text-center w-28">담당자</th>
+                          <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase text-center w-32">상태</th>
+                          <th className="py-3 px-4 text-xs font-bold text-slate-500 uppercase text-right">관리 액션</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredDisplayGroups.map(({ cName, cInstructor, students, total, overdueCount }) => (
                           <React.Fragment key={cName}>
                             <tr className="bg-slate-100/80 border-b border-slate-200">
-                              <td colSpan={6} className="py-2.5 px-4 text-xs font-black text-indigo-800 align-middle">
+                              <td colSpan={6} className="py-2.5 px-4 text-xs font-bold text-indigo-800 align-middle">
                                 <span className="w-2 h-3.5 bg-indigo-500 inline-block align-middle mr-2 rounded-full"></span>
                                 {cName} 
-                                {cName !== '미배정' && <span className="text-indigo-500 font-bold ml-1.5 text-[11px]">({cInstructor})</span>}
-                                <span className="text-slate-500 font-bold ml-2 text-[11px]">(총 {total}명)</span>
-                                {overdueCount > 0 && <span className="ml-2 bg-rose-100 text-rose-600 text-[10px] px-2 py-0.5 rounded-full border border-rose-200">상담 필요 {overdueCount}명</span>}
+                                {cName !== '미배정' && <span className="text-indigo-500 font-bold ml-1.5 text-xs">({cInstructor})</span>}
+                                <span className="text-slate-500 font-bold ml-2 text-xs">(총 {total}명)</span>
+                                {overdueCount > 0 && <span className="ml-2 bg-rose-100 text-rose-600 text-xs px-2 py-0.5 rounded-full border border-rose-200">상담 필요 {overdueCount}명</span>}
                               </td>
                             </tr>
                             {students.map(student => {
                               const isOverdue = student.isOverdue;
                               const rowBg = isOverdue ? "bg-rose-50/30 hover:bg-rose-50" : "hover:bg-slate-50";
                               const statusBadge = isOverdue 
-                                ? <span className="bg-rose-100 text-rose-700 border border-rose-300 px-2 py-1 rounded text-[10px] font-black shadow-sm flex items-center justify-center gap-1">🚨 {student.daysPassed === 999 ? '기록 없음' : `${student.daysPassed}일 경과`}</span>
-                                : <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-1 rounded text-[10px] font-bold flex items-center justify-center">✓ 정상 관리중</span>;
+                                ? <span className="bg-rose-100 text-rose-700 border border-rose-300 px-2 py-1 rounded text-xs font-bold shadow-sm flex items-center justify-center gap-1">🚨 {student.daysPassed === 999 ? '기록 없음' : `${student.daysPassed}일 경과`}</span>
+                                : <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-2 py-1 rounded text-xs font-bold flex items-center justify-center">✓ 정상 관리중</span>;
 
                               const typeBadgeColor = getConsultBadgeColor(student.lastConsultType, student.isLastAdmission);
 
                               return (
                                 <tr key={student.id} className={`border-b border-slate-100 last:border-0 transition-colors ${rowBg}`}>
                                   <td className="py-3 px-4 align-middle">
-                                    <span className={`text-sm font-extrabold ${isOverdue ? 'text-rose-700' : 'text-slate-800'}`}>{student.name}</span>
+                                    <span className={`text-sm font-bold ${isOverdue ? 'text-rose-700' : 'text-slate-800'}`}>{student.name}</span>
                                   </td>
                                   <td className="py-3 px-4 text-xs font-bold text-slate-600 align-middle">{student.className}</td>
                                   
@@ -361,11 +361,11 @@ export default function ConsultationManagementPage() {
                                   <td className="py-3 px-4 text-center align-middle">
                                     <div className="flex items-center justify-center gap-1.5">
                                       {student.lastConsultType !== '-' && (
-                                        <span className={`text-[10px] font-bold px-1.5 py-[2px] rounded border leading-none ${typeBadgeColor}`}>
+                                        <span className={`text-xs font-bold px-1.5 py-[2px] rounded border leading-none ${typeBadgeColor}`}>
                                           {student.lastConsultType}
                                         </span>
                                       )}
-                                      <span className="text-xs font-extrabold text-slate-600">
+                                      <span className="text-xs font-bold text-slate-600">
                                         {getKSTDateStr(student.lastConsultDate)}
                                       </span>
                                     </div>
@@ -399,7 +399,7 @@ export default function ConsultationManagementPage() {
                   {filteredDisplayGroups.map(({ cName, cInstructor, students, total, overdueCount }) => (
                     <div key={cName} className="bg-white rounded-2xl border border-slate-200 p-5 shadow-sm">
                       <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
-                        <h4 className="text-sm font-black text-slate-800 flex items-center gap-2">
+                        <h4 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                           <span className="w-1.5 h-4 bg-indigo-500 rounded-full"></span>
                           {cName}
                           {cName !== '미배정' && <span className="text-indigo-500 font-bold text-xs">({cInstructor})</span>}
@@ -424,27 +424,27 @@ export default function ConsultationManagementPage() {
                               className={`p-3 rounded-xl border flex flex-col gap-1.5 cursor-pointer transition-all shadow-sm group ${cardBg}`}
                             >
                               <div className="flex justify-between items-start">
-                                <span className={`text-sm font-extrabold ${titleColor}`}>{student.name}</span>
-                                {isOverdue && <span className="text-[9px] font-black bg-rose-600 text-white px-1.5 py-0.5 rounded shadow-sm animate-pulse">상담요망</span>}
+                                <span className={`text-sm font-bold ${titleColor}`}>{student.name}</span>
+                                {isOverdue && <span className="text-xs font-bold bg-rose-600 text-white px-1.5 py-0.5 rounded shadow-sm animate-pulse">상담요망</span>}
                               </div>
 
                               <div className="flex flex-col gap-1 mt-1 border-t border-slate-100 pt-1.5">
-                                <div className="flex justify-between items-center text-[11px]">
+                                <div className="flex justify-between items-center text-xs">
                                   <span className="font-bold text-slate-400 shrink-0">최근 기록</span>
                                   <div className="flex items-center gap-1.5 truncate">
-                                    {student.lastConsultType !== '-' && <span className={`text-[9px] font-bold px-1 rounded border ${typeBadgeColor}`}>{student.lastConsultType}</span>}
-                                    <span className={`font-extrabold truncate ${isOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
+                                    {student.lastConsultType !== '-' && <span className={`text-xs font-bold px-1 rounded border ${typeBadgeColor}`}>{student.lastConsultType}</span>}
+                                    <span className={`font-bold truncate ${isOverdue ? 'text-rose-600' : 'text-slate-600'}`}>
                                       {getKSTDateStr(student.lastConsultDate)}
                                     </span>
                                   </div>
                                 </div>
                                 
-                                <div className="flex justify-between items-center text-[11px]">
+                                <div className="flex justify-between items-center text-xs">
                                   <div className="flex items-center gap-1.5">
                                     <span className="font-bold text-slate-400 shrink-0">담당자</span>
-                                    <span className="font-extrabold text-slate-600 bg-slate-100 px-1.5 rounded truncate max-w-[60px]">{student.lastConsultant}</span>
+                                    <span className="font-bold text-slate-600 bg-slate-100 px-1.5 rounded truncate max-w-[60px]">{student.lastConsultant}</span>
                                   </div>
-                                  <span className={`text-[10px] font-black shrink-0 ${isOverdue ? 'text-rose-500' : 'text-emerald-500'}`}>
+                                  <span className={`text-xs font-bold shrink-0 ${isOverdue ? 'text-rose-500' : 'text-emerald-500'}`}>
                                     {student.daysPassed === 999 ? '기록없음' : `${student.daysPassed}일 전`}
                                   </span>
                                 </div>

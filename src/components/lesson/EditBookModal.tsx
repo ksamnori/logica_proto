@@ -51,18 +51,18 @@ export default function EditBookModal({ isOpen, bookData, onClose, onSuccess }: 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-sm rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-        <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
           <h2 className="font-bold">마스터 교재 수정</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 text-2xl font-bold transition-colors leading-none">&times;</button>
         </div>
         <div className="p-6 space-y-4">
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">교재 이름</label>
-            <input type="text" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#002864] text-sm" />
+            <input type="text" value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand text-sm" />
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">교재 구분</label>
-            <select value={formData.book_type} onChange={e => setFormData({...formData, book_type: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#002864]">
+            <select value={formData.book_type} onChange={e => setFormData({...formData, book_type: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand">
               <option value="주교재">주교재</option>
               <option value="부교재">부교재</option>
               <option value="연산교재">연산교재</option>
@@ -71,12 +71,12 @@ export default function EditBookModal({ isOpen, bookData, onClose, onSuccess }: 
           </div>
           <div>
             <label className="block text-xs font-bold text-slate-500 mb-1">기준 회차 (분량)</label>
-            <input type="number" value={formData.target_sessions} onChange={e => setFormData({...formData, target_sessions: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-[#002864] text-sm" />
+            <input type="number" value={formData.target_sessions} onChange={e => setFormData({...formData, target_sessions: e.target.value})} className="w-full px-3 py-2 border border-slate-300 rounded-lg font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand text-sm" />
           </div>
         </div>
         <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
           <button onClick={onClose} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold rounded-lg hover:bg-slate-50 transition-colors shadow-sm">취소</button>
-          <button onClick={handleSave} disabled={isSaving} className="px-4 py-2 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">수정 저장</button>
+          <button onClick={handleSave} disabled={isSaving} className="px-4 py-2 bg-brand text-white font-bold rounded-lg hover:bg-blue-900 transition-colors shadow-sm disabled:opacity-50">수정 저장</button>
         </div>
       </div>
     </div>

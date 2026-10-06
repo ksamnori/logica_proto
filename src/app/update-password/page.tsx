@@ -45,7 +45,7 @@ export default function UpdatePasswordPage() {
       <div className="bg-white w-full max-w-md p-8 rounded-2xl shadow-xl border border-slate-200">
         <div className="text-center mb-6">
           <span className="text-4xl mb-3 block">🔒</span>
-          <h2 className="text-xl font-extrabold text-slate-800">새 비밀번호 설정</h2>
+          <h2 className="text-xl font-bold text-slate-800">새 비밀번호 설정</h2>
           <p className="text-sm font-bold text-slate-500 mt-2">앞으로 사용할 새로운 비밀번호를 입력해주세요.</p>
         </div>
 

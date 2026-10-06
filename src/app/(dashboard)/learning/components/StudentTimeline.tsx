@@ -2,6 +2,7 @@
 "use client";
 
 import React, { useState, useEffect } from 'react';
+import LearningRow, { statusToneOf } from "./LearningRow";
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
 
@@ -87,7 +88,7 @@ const InlineCalendar = ({ label, dateValue, onDateChange, colorTheme }: { label:
       <button
         key={d}
         onClick={() => onDateChange(dateStr)}
-        className={`w-6 h-6 flex items-center justify-center rounded-full text-[11px] font-bold transition-all
+        className={`w-6 h-6 flex items-center justify-center rounded-full text-xs font-bold transition-all
           ${isSelected ? `${theme.bg} text-white shadow-md transform scale-110` :
             isToday ? `${theme.text} ${theme.lightBg} border ${theme.border}` :
             `text-slate-600 hover:bg-slate-100`}`}
@@ -100,14 +101,14 @@ const InlineCalendar = ({ label, dateValue, onDateChange, colorTheme }: { label:
   return (
     <div className="bg-white border border-slate-200 shadow-sm rounded-2xl p-3 w-[220px]">
       <div className="flex justify-between items-center mb-3">
-        <span className={`text-[10px] font-black ${theme.text} ${theme.lightBg} px-2 py-1 rounded-md shadow-sm border ${theme.border}`}>{label}</span>
+        <span className={`text-xs font-bold ${theme.text} ${theme.lightBg} px-2 py-1 rounded-md shadow-sm border ${theme.border}`}>{label}</span>
         <div className="flex items-center gap-1">
-          <button onClick={handlePrevMonth} className="w-5 h-5 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors text-[10px]">◀</button>
-          <span className="font-extrabold text-[12px] text-slate-700 w-14 text-center">{year}.{String(month + 1).padStart(2, '0')}</span>
-          <button onClick={handleNextMonth} className="w-5 h-5 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors text-[10px]">▶</button>
+          <button onClick={handlePrevMonth} className="w-5 h-5 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors text-xs">◀</button>
+          <span className="font-bold text-[12px] text-slate-700 w-14 text-center">{year}.{String(month + 1).padStart(2, '0')}</span>
+          <button onClick={handleNextMonth} className="w-5 h-5 flex items-center justify-center hover:bg-slate-100 rounded-full text-slate-400 transition-colors text-xs">▶</button>
         </div>
       </div>
-      <div className="grid grid-cols-7 gap-1 mb-1.5 text-center text-[10px] font-black text-slate-400">
+      <div className="grid grid-cols-7 gap-1 mb-1.5 text-center text-xs font-bold text-slate-400">
         <div className="text-rose-400">일</div><div>월</div><div>화</div><div>수</div><div>목</div><div>금</div><div className="text-blue-400">토</div>
       </div>
       <div className="grid grid-cols-7 gap-1 justify-items-center">
@@ -543,22 +544,22 @@ export default function StudentTimeline({
     return (
       <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-3">
         <div className="flex justify-between items-center">
-          <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
-            <span className="bg-[#002864] text-white text-[11px] font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap">{currentView?.className || '반 미지정'}</span>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <span className="bg-brand text-white text-xs font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap">{currentView?.className || '반 미지정'}</span>
             <span 
               onClick={() => currentView?.studentId && router.push(`/student/${currentView.studentId}`)}
-              className="text-[#002864] whitespace-nowrap cursor-pointer hover:underline hover:text-blue-600 transition-colors"
+              className="text-brand whitespace-nowrap cursor-pointer hover:underline hover:text-blue-600 transition-colors"
               title="학생 상세 페이지로 이동"
             >
               {currentView?.studentName || '알 수 없음'}
             </span> 학생 전체 활동 타임라인
           </h2>
           <div className="flex bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm">
-            <button onClick={() => setDateFilter('1W')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1W' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1주일</button>
+            <button onClick={() => setDateFilter('1W')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1W' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1주일</button>
             <div className="w-px bg-slate-300"></div>
-            <button onClick={() => setDateFilter('1M')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1M' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1개월</button>
+            <button onClick={() => setDateFilter('1M')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1M' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1개월</button>
             <div className="w-px bg-slate-300"></div>
-            <button onClick={() => setDateFilter('ALL')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === 'ALL' ? 'bg-[#002864] text-white' : 'text-slate-500 hover:bg-slate-50'}`}>전체</button>
+            <button onClick={() => setDateFilter('ALL')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === 'ALL' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>전체</button>
           </div>
         </div>
 
@@ -614,7 +615,7 @@ export default function StudentTimeline({
            <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden shadow-inner">
               <div className={`h-full transition-all duration-700 ${rate >= 80 ? 'bg-emerald-400' : rate >= 50 ? 'bg-amber-400' : 'bg-rose-400'}`} style={{ width: `${rate}%` }}></div>
            </div>
-           <span className={`text-[10px] font-black w-7 text-right ${rate >= 80 ? 'text-emerald-600' : rate >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>{rate}%</span>
+           <span className={`text-xs font-bold w-7 text-right ${rate >= 80 ? 'text-emerald-600' : rate >= 50 ? 'text-amber-600' : 'text-rose-600'}`}>{rate}%</span>
         </div>
       );
 
@@ -622,9 +623,9 @@ export default function StudentTimeline({
         return (
           <div key={key} className="flex items-center py-1 px-1.5 ml-10 hover:bg-slate-50 rounded transition-colors group">
             <label className="flex items-center gap-2 cursor-pointer flex-1 min-w-0 py-1">
-              <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer" />
-              <span className="flex-1 text-[13px] font-semibold text-slate-600 truncate group-hover:text-[#002864] transition-colors min-w-0" title={displayName}>{displayName}</span>
-              {stat.pending > 0 && <span className="ml-1 text-[10px] font-extrabold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}
+              <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-brand shrink-0 cursor-pointer" />
+              <span className="flex-1 text-[13px] font-semibold text-slate-600 truncate group-hover:text-brand transition-colors min-w-0" title={displayName}>{displayName}</span>
+              {stat.pending > 0 && <span className="ml-1 text-xs font-bold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}
             </label>
             {progressBar}
           </div>
@@ -634,10 +635,10 @@ export default function StudentTimeline({
       return (
         <details key={key} open={depth <= 2} className={depth === 1 ? "mb-2" : "mb-1 pl-1 ml-2 border-l border-slate-200"}>
           <summary className={`cursor-pointer flex items-center py-1.5 transition-colors select-none group ${depth === 1 ? "bg-slate-50 hover:bg-slate-100 px-3 rounded-lg border border-slate-200 shadow-sm" : "hover:bg-slate-50 px-2 rounded-md"}`}>
-            <svg className="w-4 h-4 text-slate-400 group-hover:text-[#002864] transition-transform details-arrow shrink-0 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7-7"></path></svg>
-            <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-[#002864] shrink-0 cursor-pointer mr-2" />
-            <span className={`flex-1 truncate min-w-0 ${depth === 1 ? "text-[14px] font-extrabold text-[#002864]" : "text-[13px] font-bold text-slate-700"}`} title={displayName}>{displayName}</span>
-            {stat.pending > 0 && <span className="ml-2 text-[10px] font-extrabold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}
+            <svg className="w-4 h-4 text-slate-400 group-hover:text-brand transition-transform details-arrow shrink-0 mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7-7"></path></svg>
+            <input type="checkbox" checked={selectedTaxonomyIds.has(key)} onChange={e => toggleTaxNode(key, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-brand shrink-0 cursor-pointer mr-2" />
+            <span className={`flex-1 truncate min-w-0 ${depth === 1 ? "text-[14px] font-bold text-brand" : "text-[13px] font-bold text-slate-700"}`} title={displayName}>{displayName}</span>
+            {stat.pending > 0 && <span className="ml-2 text-xs font-bold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-[1px] rounded shadow-sm whitespace-nowrap shrink-0 flex items-center justify-center">오답 {stat.pending}</span>}
             {progressBar}
           </summary>
           <div className={depth === 1 ? "pl-2 mt-1 space-y-0.5" : "mt-0.5 space-y-0.5"}>
@@ -656,7 +657,7 @@ export default function StudentTimeline({
         <div className="bg-white w-[1100px] h-[720px] max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
 
           <div className="flex justify-between items-center px-6 py-4 border-b border-slate-200 bg-white shrink-0">
-            <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
               <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs border border-blue-200">마법사</span>
               {currentView?.studentName} 학생 맞춤 클리닉 출제
             </h2>
@@ -696,19 +697,19 @@ export default function StudentTimeline({
                   <div className="flex flex-col h-full">
                     <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 mb-6 flex justify-between items-center">
                       <span className="text-xs font-bold text-slate-600 flex items-center gap-1">💡 선택한 기간에 발생한 <strong className="text-sky-600">미해결 오답</strong>을 조회합니다.</span>
-                      <span className="text-xs font-black text-rose-500 bg-rose-50 px-2 py-1 rounded shadow-sm border border-rose-100">조회된 오답: {basePendingCount}개</span>
+                      <span className="text-xs font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded shadow-sm border border-rose-100">조회된 오답: {basePendingCount}개</span>
                     </div>
                     <div className="flex items-start justify-center flex-1 pb-10 gap-2 mt-2">
                       <div className="flex flex-col items-center gap-2">
                         <InlineCalendar label="시작일" dateValue={startDate} onDateChange={setStartDate} colorTheme="blue" />
-                        <div className="text-[11px] font-black text-sky-600 bg-sky-50 px-3 py-1 rounded-full border border-sky-100 shadow-sm">{startDate}</div>
+                        <div className="text-xs font-bold text-sky-600 bg-sky-50 px-3 py-1 rounded-full border border-sky-100 shadow-sm">{startDate}</div>
                       </div>
                       <div className="flex flex-col items-center justify-center h-[230px] px-2">
                         <svg className="w-4 h-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg>
                       </div>
                       <div className="flex flex-col items-center gap-2">
                         <InlineCalendar label="종료일" dateValue={endDate} onDateChange={setEndDate} colorTheme="red" />
-                        <div className="text-[11px] font-black text-rose-500 bg-rose-50 px-3 py-1 rounded-full border border-rose-100 shadow-sm">{endDate}</div>
+                        <div className="text-xs font-bold text-rose-500 bg-rose-50 px-3 py-1 rounded-full border border-rose-100 shadow-sm">{endDate}</div>
                       </div>
                     </div>
                   </div>
@@ -717,7 +718,7 @@ export default function StudentTimeline({
                 {modalTab === 'SELECTED' && (
                   <div>
                     <div className="flex justify-between items-center mb-4 bg-slate-50 px-4 py-2 rounded-lg border border-slate-200">
-                      <span className="text-xs font-bold text-slate-600">타임라인에서 선택된 학습지 <span className="text-rose-500 font-black">{selectedBlocks.length}개</span>의 오답을 추출합니다.</span>
+                      <span className="text-xs font-bold text-slate-600">타임라인에서 선택된 학습지 <span className="text-rose-500 font-bold">{selectedBlocks.length}개</span>의 오답을 추출합니다.</span>
                     </div>
                     <ul className="border border-slate-200 rounded-lg overflow-hidden bg-white shadow-sm">
                       {filteredTimeline.filter(item => selectedBlocks.includes(item.id)).map(item => {
@@ -725,7 +726,7 @@ export default function StudentTimeline({
                         return (
                           <li key={item.id} className="px-4 py-3 border-b last:border-0 border-slate-100 flex items-center justify-between hover:bg-slate-50 transition-colors">
                             <span className="font-bold text-sm text-slate-700 truncate w-3/4">{(item.title || '').replace(/^\[시스템\]\s*/, '')}</span>
-                            <span className="text-xs font-black text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100 shadow-sm">오답 {finalXCount}개</span>
+                            <span className="text-xs font-bold text-rose-500 bg-rose-50 px-2 py-1 rounded border border-rose-100 shadow-sm">오답 {finalXCount}개</span>
                           </li>
                         )
                       })}
@@ -740,25 +741,25 @@ export default function StudentTimeline({
               <div className="p-6 flex-1 overflow-y-auto custom-scrollbar">
 
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 text-[13px] font-bold text-slate-600 leading-loose shadow-sm break-keep">
-                  대상 문제의 <span className="text-sky-500 font-black">쌍둥이문제</span>
+                  대상 문제의 <span className="text-sky-500 font-bold">쌍둥이문제</span>
                   <select
                     value={twinCount}
                     onChange={e => { setTwinCount(Number(e.target.value)); setGenMethod('TWIN'); }}
-                    className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-black cursor-pointer shadow-sm"
+                    className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-bold cursor-pointer shadow-sm"
                   >
                     {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
-                  </select>개와 <span className="text-sky-500 font-black">유사문제</span>
+                  </select>개와 <span className="text-sky-500 font-bold">유사문제</span>
                   <select
                     value={similarCount}
                     onChange={e => { setSimilarCount(Number(e.target.value)); setGenMethod('TWIN'); }}
-                    className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-black cursor-pointer shadow-sm"
+                    className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-bold cursor-pointer shadow-sm"
                   >
                     {[0, 1, 2, 3].map(n => <option key={n} value={n}>{n}</option>)}
                   </select>개로 학습지를 만듭니다. 유사문제 난이도는
                   <select
                     value={difficultyOption}
                     onChange={e => { setDifficultyOption(e.target.value); setGenMethod('TWIN'); }}
-                    className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-black cursor-pointer shadow-sm"
+                    className="border border-slate-300 rounded-md mx-1.5 p-1 outline-none text-slate-800 bg-white focus:border-sky-500 font-bold cursor-pointer shadow-sm"
                   >
                     <option value="그대로">그대로</option><option value="더 쉽게">더 쉽게</option><option value="더 어렵게">더 어렵게</option>
                   </select> 출제합니다.
@@ -787,14 +788,14 @@ export default function StudentTimeline({
 
               <div className="bg-slate-50/80 border-t border-slate-200 p-6 shrink-0 flex flex-col items-center">
                 <div className="text-center flex flex-col items-center justify-center">
-                  <span className="font-extrabold text-slate-800 text-base">최종 출제 문항 수</span>
+                  <span className="font-bold text-slate-800 text-base">최종 출제 문항 수</span>
                   <div className="flex items-end mt-1 h-12">
                     {isCalculating ? (
-                      <span className="font-black text-2xl text-sky-500 tracking-tighter animate-pulse mb-1">매칭 중...</span>
+                      <span className="font-bold text-2xl text-sky-500 tracking-tighter animate-pulse mb-1">매칭 중...</span>
                     ) : (
                       <>
-                        <span className="font-black text-4xl text-[#002864] tracking-tighter">{matchedCache.length}</span>
-                        <span className="font-extrabold text-slate-800 text-base mb-1 ml-1.5">개</span>
+                        <span className="font-bold text-4xl text-brand tracking-tighter">{matchedCache.length}</span>
+                        <span className="font-bold text-slate-800 text-base mb-1 ml-1.5">개</span>
                       </>
                     )}
                   </div>
@@ -802,7 +803,7 @@ export default function StudentTimeline({
 
                 <div className="flex gap-2 w-full mt-4">
                   <button onClick={handleEditAndCreate} disabled={matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-white border border-slate-300 rounded-xl shadow-sm hover:bg-slate-50 transition-colors text-sm font-bold text-slate-600 disabled:opacity-50">편집 후 만들기</button>
-                  <button onClick={handleCreatePrint} disabled={isEngineRunning || matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-extrabold text-white disabled:opacity-50">바로 배부하기</button>
+                  <button onClick={handleCreatePrint} disabled={isEngineRunning || matchedCache.length === 0 || isCalculating} className="flex-1 px-4 py-3.5 bg-sky-500 hover:bg-sky-600 border border-transparent rounded-xl shadow-md transition-colors text-sm font-bold text-white disabled:opacity-50">바로 배부하기</button>
                 </div>
               </div>
             </div>
@@ -849,114 +850,75 @@ export default function StudentTimeline({
                 ? 'border-rose-400 bg-rose-50/30 shadow-rose-100'
                 : isCompleted
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80'
-                  : 'bg-white border-slate-200 hover:border-[#002864]';
+                  : 'bg-white border-slate-200 hover:border-brand';
 
               const displayTitle = (item.title || '제목 없음').replace(/^\[시스템\]\s*/, '');
               
               const finalOCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['O', 'RO', 'TO'].includes(a.grading_code)).length : (item.oCount || 0);
               const finalXCount = item.rawAnswers ? item.rawAnswers.filter((a: any) => ['X', 'TX', '☆', 'B'].includes(a.grading_code)).length : (item.xCount || 0);
 
+              // 타임라인은 종류가 섞이므로 종류 배지를 항상 표시 (구분용 파스텔 색)
+              const TYPE_META: Record<string, { label: string; cls: string }> = {
+                exam: { label: '주간/중간테스트', cls: 'bg-blue-100 text-blue-700 border-blue-200' },
+                quarterly: { label: '분기평가', cls: 'bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200' },
+                print: { label: '오답', cls: 'bg-emerald-100 text-emerald-700 border-emerald-200' },
+                similar: { label: '오답유사', cls: 'bg-violet-100 text-violet-700 border-violet-200' },
+                overdue: { label: '미완료과제', cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+                archive: { label: '보존됨', cls: 'bg-slate-200 text-slate-700 border-slate-300' },
+                raw_inc: { label: '원본오답', cls: 'bg-rose-100 text-rose-700 border-rose-200' },
+              };
+              const meta = TYPE_META[item.type] || (item.type.includes('hw') ? { label: '과제', cls: 'bg-amber-100 text-amber-700 border-amber-200' } : { label: '', cls: '' });
+              const isRawLike = item.type === 'raw_inc' || item.type === 'archive';
+              const isExamLike = item.type === 'exam' || item.type === 'quarterly' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue';
+              const completeKind = (item.type === 'quarterly' || item.type === 'exam') ? 'exam' : item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam';
+              const printKind = isRawLike ? 'raw_inc' : item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam');
+              const statusText = item.status || '미제출';
+              const goDetail = () => {
+                let detailHref = '';
+                if (item.type === 'hw') detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
+                else if (item.type === 'quarterly') detailHref = `/exam/review?assignment_id=${item.realId}&student_id=${currentView.studentId}`;
+                else detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
+                window.location.href = detailHref;
+              };
+              const doDelete = () => {
+                if (item.type === 'exam' || item.type === 'quarterly' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId);
+                else if (item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId);
+                else if (item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId);
+                else if (isRawLike) handleDeleteRawIncArchive(item.realId, currentView.studentId, item.type === 'archive');
+              };
+
               return (
-                <div key={`${item.id}_${idx}`} onClick={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
-                  className={`border-[1.5px] rounded-xl p-2.5 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}
-                >
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                    <div className="shrink-0 text-[10px] font-bold text-slate-400 leading-none">
-                      {formatDateLabel(item.created_at || item.date, true)} 
-                    </div>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 leading-none whitespace-nowrap ${badgeColor}`}>{typeLabel}</span>
-                    
-                    {item.subTitle && (
-                      <span className="text-[10px] font-bold text-indigo-600 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded shadow-sm shrink-0 leading-none whitespace-nowrap">
-                        {item.subTitle}
-                      </span>
-                    )}
-                    <div className="font-extrabold text-[13px] text-slate-700 truncate leading-none pt-[1px]" title={displayTitle}>
-                      {displayTitle}
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 justify-end ml-2">
-                    <div className="text-[11px] font-bold text-slate-500 whitespace-nowrap">총 {item.total || 0}문항</div>
-
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm leading-none">✅ {finalOCount}</span>
-                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm leading-none">❌ {finalXCount}</span>
-                    </div>
-
-                    <div className="flex items-center gap-1.5 ml-1">
-                      <button onClick={(e) => handleForceComplete(e, (item.type === 'quarterly' || item.type === 'exam') ? 'exam' : item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam', item.realId, currentView.studentId)} className="text-[10px] font-bold text-slate-600 hover:text-emerald-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0 transition-colors">
-                        ✅ 완료처리
-                      </button>
-                      <span className={`w-[48px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 leading-none ${isCompleted ? 'bg-slate-300 text-slate-700 border border-slate-400' : 'bg-rose-50 text-rose-500 border border-rose-200'}`}>
-                        {item.status || '미제출'}
-                      </span>
-                    </div>
-
-                    <div className="flex items-center gap-2 shrink-0 border-l border-slate-200 pl-3 ml-1">
-                      {item.type === 'raw_inc' && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); openRawIncManageModal(currentView.studentId, currentView.studentName, item.realId); }} 
-                          className="text-[14px] hover:text-rose-600 transition-colors" 
-                          title="이 덩어리 안의 개별 문항 확인 및 삭제"
-                        >
-                          ✂️
-                        </button>
-                      )}
-
-                      <button 
-                        onClick={(e) => handleRenameItem(e, item.type, item.realId, item.masterId, displayTitle)} 
-                        className="text-[13px] hover:text-amber-500 transition-colors" 
-                        title="이름 변경"
-                      >
-                        🏷️
-                      </button>
-
-                      {(item.type === 'raw_inc' || item.type === 'archive') ? (
-                        <button onClick={(e) => handleEditRawIncorrectToStep2?.(e, item.target_questions, displayTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[13px] hover:text-blue-600 transition-colors" title="맞춤 오답 다시 출제하기">✏️</button>
-                      ) : (item.type === 'exam' || item.type === 'quarterly' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue') ? (
-                        <button onClick={(e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type)} className="text-[13px] hover:text-blue-600 transition-colors" title="문제 수정">✏️</button>
-                      ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId)} className="text-[13px] hover:text-blue-600 transition-colors" title="과제 문항 수정">✏️</button>
-                      )}
-                      
-                      <button onClick={(e) => { e.stopPropagation(); if(item.type === 'exam' || item.type === 'quarterly' || item.type === 'hw_exam' || item.type === 'overdue') handleDeleteExam(item.realId, currentView.studentId); else if(item.type.includes('hw')) handleDeleteHomework(item.realId, currentView.studentId); else if(item.type === 'print' || item.type === 'similar') handleDeletePrint(item.realId, item.masterId, currentView.studentId); else if(item.type === 'raw_inc' || item.type === 'archive') handleDeleteRawIncArchive(item.realId, currentView.studentId, item.type === 'archive'); }} className="text-[13px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                      
-                      <button 
-                        onClick={(e) => handlePrintItem(e, item.type === 'raw_inc' || item.type === 'archive' ? 'raw_inc' : item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam'), item.masterId, item.target_questions, displayTitle, item.subTitle)} 
-                        className="text-[14px] hover:text-emerald-600 transition-colors" 
-                        title="전체 문제 눈으로 확인하기 / 단일 출력"
-                      >
-                        🖨️
-                      </button>
-
-                      {(item.type === 'raw_inc' || item.type === 'archive') ? (
-                        <button onClick={(e) => { 
-                            e.stopPropagation(); 
-                            handlePrintItem(e, 'raw_inc', null, item.target_questions, displayTitle, item.subTitle);
-                          }} 
-                          className="text-[10px] font-bold text-white bg-rose-600 hover:bg-rose-700 px-2 py-1 rounded transition-colors shadow-sm ml-1 whitespace-nowrap"
-                        >문제 보기 ➔</button>
-                      ) : (
-                        <button onClick={(e) => { 
-                            e.stopPropagation(); 
-                            let detailHref = '';
-                            if (item.type === 'hw') {
-                              detailHref = `/homework/review?homework_id=${item.realId}&student_id=${currentView.studentId}`;
-                            } else if (item.type === 'quarterly') {
-                              detailHref = `/exam/review?assignment_id=${item.realId}&student_id=${currentView.studentId}`;
-                            } else {
-                              detailHref = `/homework/review?assignment_id=${item.realId}&student_id=${currentView.studentId}&is_exam_hw=true`;
-                            }
-                            window.location.href = detailHref; 
-                          }} 
-                          className="text-[10px] font-bold text-slate-500 bg-slate-100 border border-slate-200 hover:bg-slate-200 px-2 py-1 rounded transition-colors shadow-sm ml-1 whitespace-nowrap"
-                        >상세 ➔</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <LearningRow
+                  key={`${item.id}_${idx}`}
+                  selected={isSelected}
+                  completed={isCompleted}
+                  onToggle={() => setSelectedBlocks(p => p.includes(item.id) ? p.filter(id => id !== item.id) : [...p, item.id])}
+                  title={displayTitle}
+                  typeLabel={meta.label || undefined}
+                  typeClass={meta.cls}
+                  subTitle={item.subTitle}
+                  date={item.created_at || item.date}
+                  totalQ={item.total || 0}
+                  oCount={finalOCount}
+                  xCount={finalXCount}
+                  status={statusText}
+                  statusTone={statusToneOf(statusText, !!isCompleted, item.type === 'overdue')}
+                  onComplete={(e) => handleForceComplete(e, completeKind, item.realId, currentView.studentId)}
+                  primary={isRawLike
+                    ? { label: '문제 보기', tone: 'danger', onClick: (e) => handlePrintItem(e, 'raw_inc', null, item.target_questions, displayTitle, item.subTitle) }
+                    : { label: '상세', onClick: goDetail }}
+                  menu={[
+                    { label: '문항 확인 및 개별 삭제', hidden: item.type !== 'raw_inc', onClick: () => openRawIncManageModal(currentView.studentId, currentView.studentName, item.realId) },
+                    { label: '이름 변경', onClick: (e) => handleRenameItem(e, item.type, item.realId, item.masterId, displayTitle) },
+                    isRawLike
+                      ? { label: '맞춤 오답 다시 출제', onClick: (e) => handleEditRawIncorrectToStep2?.(e, item.target_questions, displayTitle, currentView?.studentName, currentView?.studentId, currentView?.classId) }
+                      : isExamLike
+                        ? { label: '문제 수정', onClick: (e) => handleEditExamToStep2?.(e, item.realId, item.masterId, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId, item.type) }
+                        : { label: '과제 문항 수정', onClick: (e) => handleEditHomeworkToStep2?.(e, item.type, item.realId, item.target_questions, displayTitle, item.subTitle, currentView?.studentName, currentView?.studentId, currentView?.classId) },
+                    { label: '문제 보기 및 출력', onClick: (e) => handlePrintItem(e, printKind, item.masterId, item.target_questions, displayTitle, item.subTitle) },
+                    { label: '삭제', danger: true, onClick: doDelete },
+                  ]}
+                />
               );
             })}
           </div>

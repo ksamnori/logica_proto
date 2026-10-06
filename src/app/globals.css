@@ -13,21 +13,21 @@
      (기본 팔레트를 재정의하면 구분용 색이 서로 합쳐지므로 재정의하지 않는다)
    ========================================================== */
 @theme {
-  /* 의미 이름 */
+  /* 의미 이름 (Tailwind 기본 파스텔과 같은 값: 연한 배경은 100단계, 글자는 700단계) */
   --color-brand: #002864;
   --color-brand-hover: #001A42;
-  --color-success: #0F8A5F;
-  --color-success-soft: #E7F4EE;
-  --color-success-ink: #0B5E41;
-  --color-warn: #E9A23B;
-  --color-warn-soft: #FDF1DC;
-  --color-warn-ink: #7A4A00;
-  --color-danger: #C8372D;
-  --color-danger-soft: #FBEAE8;
-  --color-danger-ink: #A32A22;
-  --color-info: #2F6FB2;
-  --color-info-soft: #EAF1F9;
-  --color-info-ink: #24578F;
+  --color-success: #10B981;
+  --color-success-soft: #D1FAE5;
+  --color-success-ink: #047857;
+  --color-warn: #F59E0B;
+  --color-warn-soft: #FEF3C7;
+  --color-warn-ink: #B45309;
+  --color-danger: #F43F5E;
+  --color-danger-soft: #FFE4E6;
+  --color-danger-ink: #BE123C;
+  --color-info: #0EA5E9;
+  --color-info-soft: #E0F2FE;
+  --color-info-ink: #0369A1;
   --color-ink: #1F2933;
   --color-body: #3E4C59;
   --color-muted: #616E7C;
@@ -56,4 +56,3 @@ body {
 .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .custom-scroll::-webkit-scrollbar-track { background: transparent; }
 .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-

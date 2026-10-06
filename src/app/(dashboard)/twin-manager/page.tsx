@@ -636,7 +636,7 @@ export default function TwinManagerPage() {
         <div className="absolute top-2 right-2 flex items-center gap-2">
           <button 
             onClick={(e) => { e.stopPropagation(); setEditingQ(q); forceMathJaxRender(); }} 
-            className="text-[10px] text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 px-1.5 py-1 rounded border border-slate-200 shadow-sm transition-colors"
+            className="text-xs text-slate-400 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 px-1.5 py-1 rounded border border-slate-200 shadow-sm transition-colors"
           >
             ✏️ 편집
           </button>
@@ -654,26 +654,26 @@ export default function TwinManagerPage() {
               }}
               className="w-3.5 h-3.5 text-fuchsia-600 rounded border-slate-300 focus:ring-fuchsia-500 cursor-pointer"
             />
-            <span className="text-[10px] font-black text-slate-100 bg-slate-700 px-1.5 py-0.5 rounded shadow-sm">
+            <span className="text-xs font-bold text-slate-100 bg-slate-700 px-1.5 py-0.5 rounded shadow-sm">
               {q.final_printed_page || q.detected_page_num || '?'}p
             </span>
-            <span className="text-xs font-black text-slate-800">{formatQNum(q.question_number, q.sub_num)}</span>
+            <span className="text-xs font-bold text-slate-800">{formatQNum(q.question_number, q.sub_num)}</span>
           </div>
           <button 
             onClick={() => toggleDerivationType(q, colIndex)}
-            className={`text-[9px] font-bold px-1.5 py-0.5 rounded border shadow-sm transition-colors ${q.derivation_type === '유사' ? 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100' : 'bg-fuchsia-50 text-fuchsia-600 border-fuchsia-200 hover:bg-fuchsia-100'}`}
+            className={`text-xs font-bold px-1.5 py-0.5 rounded border shadow-sm transition-colors ${q.derivation_type === '유사' ? 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100' : 'bg-fuchsia-50 text-fuchsia-600 border-fuchsia-200 hover:bg-fuchsia-100'}`}
           >
             {q.derivation_type === '유사' ? '유사' : '쌍둥이'} 🔄
           </button>
         </div>
         
-        <div className="text-[11px] font-medium text-slate-600 line-clamp-2 leading-relaxed whitespace-pre-wrap">{q.question}</div>
+        <div className="text-xs font-medium text-slate-600 line-clamp-2 leading-relaxed whitespace-pre-wrap">{q.question}</div>
 
         <div className="mt-1 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
           {parentQ && (
             <div className="flex items-center gap-1">
               <span className="text-slate-300 text-xs">ㄴ</span>
-              <button onClick={(e) => scrollToQuestion(parentQ.question_id, e)} className="text-[10px] font-bold text-indigo-700 bg-indigo-50/80 px-1.5 py-0.5 rounded hover:bg-indigo-100 truncate flex-1 text-left border border-indigo-100 shadow-sm transition-colors">
+              <button onClick={(e) => scrollToQuestion(parentQ.question_id, e)} className="text-xs font-bold text-indigo-700 bg-indigo-50/80 px-1.5 py-0.5 rounded hover:bg-indigo-100 truncate flex-1 text-left border border-indigo-100 shadow-sm transition-colors">
                 [부모] {parentQ.book_name || parentQ.source_book_name} {parentQ.final_printed_page}p, {formatQNum(parentQ.question_number)}
               </button>
             </div>
@@ -682,7 +682,7 @@ export default function TwinManagerPage() {
           {myChildren.map(child => (
             <div key={child.question_id} className="flex items-center gap-1">
               <span className="text-slate-300 text-xs">ㄴ</span>
-              <button onClick={(e) => scrollToQuestion(child.question_id, e)} className="text-[10px] font-bold text-emerald-700 bg-emerald-50/80 px-1.5 py-0.5 rounded hover:bg-emerald-100 truncate flex-1 text-left border border-emerald-100 shadow-sm transition-colors">
+              <button onClick={(e) => scrollToQuestion(child.question_id, e)} className="text-xs font-bold text-emerald-700 bg-emerald-50/80 px-1.5 py-0.5 rounded hover:bg-emerald-100 truncate flex-1 text-left border border-emerald-100 shadow-sm transition-colors">
                 [{child.derivation_type === '유사' ? '유사' : '쌍둥이'}] {child.book_name || child.source_book_name} {child.final_printed_page}p, {formatQNum(child.question_number)}
               </button>
             </div>
@@ -706,7 +706,7 @@ export default function TwinManagerPage() {
           <div className="bg-white w-full max-w-6xl h-full max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
             <div className="p-5 bg-gradient-to-r from-fuchsia-600 to-indigo-600 flex justify-between items-center shrink-0">
               <div>
-                <h2 className="text-xl font-black text-white flex items-center gap-2">
+                <h2 className="text-xl font-bold text-white flex items-center gap-2">
                   <span>👯</span> 체크된 문항 AI 쌍둥이/유사 생성기
                 </h2>
                 <p className="text-fuchsia-100 font-bold text-xs mt-1">
@@ -722,7 +722,7 @@ export default function TwinManagerPage() {
               {isGeneratingTwins ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4">
                   <span className="text-5xl animate-spin">🌀</span>
-                  <p className="font-extrabold text-lg">AI가 쌍둥이와 유사 문제를 생성하고 있습니다...</p>
+                  <p className="font-bold text-lg">AI가 쌍둥이와 유사 문제를 생성하고 있습니다...</p>
                   <p className="text-sm font-bold text-slate-400">선택된 문항이 많을수록 시간이 더 걸릴 수 있습니다.</p>
                 </div>
               ) : generatedTwins.length > 0 ? (
@@ -738,18 +738,18 @@ export default function TwinManagerPage() {
                             onChange={(e) => handleTwinChange(idx, 'isSelected', e.target.checked)}
                             className="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
                           />
-                          <span className={`px-2 py-1 rounded text-xs font-black transition-colors ${twin.isSelected === false ? 'text-slate-400 bg-slate-100' : (twin.question_type === '유사' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700')}`}>
+                          <span className={`px-2 py-1 rounded text-xs font-bold transition-colors ${twin.isSelected === false ? 'text-slate-400 bg-slate-100' : (twin.question_type === '유사' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700')}`}>
                             {twin.question_type === '유사' ? '💡 유사 문항' : '👯 쌍둥이 문항'}
                           </span>
                         </label>
                         
                         <div className="flex items-center gap-2">
-                           <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md">
+                           <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md">
                              부모: {twin.parent_q.final_printed_page}p, {formatQNum(twin.parent_q.question_number)}
                            </span>
                            <button
                              onClick={() => handleTwinChange(idx, 'isPreviewMode', !twin.isPreviewMode)}
-                             className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold transition-colors shadow-sm ${twin.isPreviewMode ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                             className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-colors shadow-sm ${twin.isPreviewMode ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
                            >
                              {twin.isPreviewMode ? <><span>✏️</span> 편집 모드</> : <><span>👀</span> 수식 미리보기</>}
                            </button>
@@ -757,7 +757,7 @@ export default function TwinManagerPage() {
                       </div>
                       
                       <div className="flex flex-col gap-1.5 flex-1 mt-1">
-                        <label className="text-[11px] font-bold text-slate-500">문제 텍스트</label>
+                        <label className="text-xs font-bold text-slate-500">문제 텍스트</label>
                         {twin.isPreviewMode ? (
                           <div className="w-full min-h-[6rem] p-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
                             {twin.question || <span className="text-slate-400 italic text-xs">텍스트가 없습니다.</span>}
@@ -768,7 +768,7 @@ export default function TwinManagerPage() {
                       </div>
 
                       <div className="flex flex-col gap-1.5 mt-2">
-                        <label className="text-[11px] font-bold text-slate-500">정답</label>
+                        <label className="text-xs font-bold text-slate-500">정답</label>
                         {twin.isPreviewMode ? (
                           <div className="w-full min-h-[38px] p-2 px-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner font-bold text-emerald-800 flex items-center">
                             {twin.answer || <span className="text-slate-400 italic text-xs">정답이 없습니다.</span>}
@@ -812,7 +812,7 @@ export default function TwinManagerPage() {
               <button 
                 onClick={saveTwinsToDB} 
                 disabled={isGeneratingTwins || generatedTwins.length === 0 || isLoading}
-                className="px-8 py-3 bg-[#002864] hover:bg-blue-900 disabled:bg-slate-300 text-white font-black rounded-xl shadow-lg transition-colors flex items-center gap-2"
+                className="px-8 py-3 bg-brand hover:bg-blue-900 disabled:bg-slate-300 text-white font-bold rounded-xl shadow-lg transition-colors flex items-center gap-2"
               >
                 {isLoading ? "저장 중..." : `💾 선택된 ${generatedTwins.filter(t => t.isSelected !== false).length}개 문항 DB에 배포 (자동 번호계산 적용)`}
               </button>
@@ -833,55 +833,55 @@ export default function TwinManagerPage() {
             <div className="p-5 flex flex-col gap-4 bg-slate-50 overflow-y-auto custom-scroll flex-1">
               <div className="flex gap-4 p-4 bg-slate-100/50 rounded-xl border border-slate-200 flex-wrap">
                 <div className="flex-1 flex flex-col gap-1 min-w-[100px]">
-                  <label className="text-[10px] font-bold text-slate-500">페이지</label>
+                  <label className="text-xs font-bold text-slate-500">페이지</label>
                   <input type="number" value={editingQ.final_printed_page || ''} onChange={e => setEditingQ({...editingQ, final_printed_page: e.target.value})} className="px-3 py-2 border rounded-lg text-xs outline-none focus:border-blue-400" />
                 </div>
                 <div className="flex-1 flex flex-col gap-1 min-w-[100px]">
-                  <label className="text-[10px] font-bold text-slate-500">문항 번호</label>
+                  <label className="text-xs font-bold text-slate-500">문항 번호</label>
                   <input type="text" value={editingQ.question_number || ''} onChange={e => setEditingQ({...editingQ, question_number: e.target.value})} className="px-3 py-2 border rounded-lg text-xs outline-none focus:border-blue-400" />
                 </div>
                 <div className="flex-1 flex flex-col gap-1 min-w-[100px]">
-                  <label className="text-[10px] font-bold text-slate-500">꼬리 번호(Sub)</label>
+                  <label className="text-xs font-bold text-slate-500">꼬리 번호(Sub)</label>
                   <input type="number" value={editingQ.sub_num || ''} onChange={e => setEditingQ({...editingQ, sub_num: e.target.value})} className="px-3 py-2 border rounded-lg text-xs outline-none focus:border-blue-400" />
                 </div>
                 <div className="flex-1 flex flex-col gap-1 min-w-[100px]">
-                  <label className="text-[10px] font-bold text-slate-500">난이도</label>
+                  <label className="text-xs font-bold text-slate-500">난이도</label>
                   <select value={editingQ.difficulty || '미지정'} onChange={e => setEditingQ({...editingQ, difficulty: e.target.value})} className="px-3 py-2 border rounded-lg text-xs outline-none focus:border-blue-400">
                     <option value="최상">최상</option><option value="상">상</option><option value="중">중</option><option value="하">하</option><option value="최하">최하</option><option value="미지정">미지정</option>
                   </select>
                 </div>
                 <div className="flex-1 flex flex-col gap-1 min-w-[100px]">
-                  <label className="text-[10px] font-bold text-slate-500">예상 정답률(%)</label>
+                  <label className="text-xs font-bold text-slate-500">예상 정답률(%)</label>
                   <input type="number" step="0.1" value={editingQ.solving_probability || ''} onChange={e => setEditingQ({...editingQ, solving_probability: e.target.value})} placeholder="빈칸 가능" className="px-3 py-2 border rounded-lg text-xs outline-none focus:border-blue-400" />
                 </div>
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-bold text-slate-500">문제 내용 (LaTeX 허용)</label>
+                <label className="text-xs font-bold text-slate-500">문제 내용 (LaTeX 허용)</label>
                 <textarea value={editingQ.question || ''} onChange={e => setEditingQ({...editingQ, question: e.target.value})} className="p-3 border rounded-xl text-sm font-medium h-32 resize-y outline-none focus:border-blue-400 bg-yellow-50/30" />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-[10px] font-bold text-slate-500">정답 텍스트</label>
+                <label className="text-xs font-bold text-slate-500">정답 텍스트</label>
                 <input type="text" value={editingQ.answer || ''} onChange={e => setEditingQ({...editingQ, answer: e.target.value})} className="p-3 border rounded-xl text-sm font-bold outline-none focus:border-blue-400" />
               </div>
 
               <div className="border-t border-slate-200 mt-2 pt-4">
-                <h4 className="text-sm font-extrabold text-emerald-700 mb-3">📝 4단계 풀이 해설</h4>
+                <h4 className="text-sm font-bold text-emerald-700 mb-3">📝 4단계 풀이 해설</h4>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">Step 1. 개념</label>
+                    <label className="text-xs font-bold text-slate-500">Step 1. 개념</label>
                     <textarea value={editingQ.step_1_concept || ''} onChange={e => setEditingQ({...editingQ, step_1_concept: e.target.value})} className="p-2.5 border rounded-lg h-20 outline-none focus:border-emerald-400 text-xs resize-none" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">Step 2. 접근</label>
+                    <label className="text-xs font-bold text-slate-500">Step 2. 접근</label>
                     <textarea value={editingQ.step_2_approach || ''} onChange={e => setEditingQ({...editingQ, step_2_approach: e.target.value})} className="p-2.5 border rounded-lg h-20 outline-none focus:border-emerald-400 text-xs resize-none" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">Step 3. 과정</label>
+                    <label className="text-xs font-bold text-slate-500">Step 3. 과정</label>
                     <textarea value={editingQ.step_3_process || ''} onChange={e => setEditingQ({...editingQ, step_3_process: e.target.value})} className="p-2.5 border rounded-lg h-24 outline-none focus:border-emerald-400 text-xs resize-none" />
                   </div>
                   <div className="flex flex-col gap-1">
-                    <label className="text-[10px] font-bold text-slate-500">Step 4. 결론</label>
+                    <label className="text-xs font-bold text-slate-500">Step 4. 결론</label>
                     <textarea value={editingQ.step_4_conclusion || ''} onChange={e => setEditingQ({...editingQ, step_4_conclusion: e.target.value})} className="p-2.5 border rounded-lg h-24 outline-none focus:border-emerald-400 text-xs resize-none" />
                   </div>
                 </div>
@@ -895,7 +895,7 @@ export default function TwinManagerPage() {
               
               <div className="flex gap-2">
                 <button onClick={() => setEditingQ(null)} className="px-6 py-2.5 text-xs font-bold bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-lg">취소</button>
-                <button onClick={saveQuestionEdit} className="px-8 py-2.5 text-xs font-black text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">💾 즉시 저장</button>
+                <button onClick={saveQuestionEdit} className="px-8 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm">💾 즉시 저장</button>
               </div>
             </div>
           </div>
@@ -905,7 +905,7 @@ export default function TwinManagerPage() {
       {/* 상단 컨트롤 바 */}
       <div className="bg-white rounded-2xl p-4 border border-slate-200 shadow-sm flex flex-col gap-3 mb-4 shrink-0 pr-20">
         <div className="flex flex-wrap items-center gap-4">
-          <h1 className="text-xl font-black text-[#002864] flex items-center gap-2">
+          <h1 className="text-xl font-bold text-brand flex items-center gap-2">
             <span>🗂️</span> 쌍둥이 문제 팩토리 (수동 배정)
           </h1>
           
@@ -926,7 +926,7 @@ export default function TwinManagerPage() {
             </button>
           </div>
         </div>
-        <p className="text-[11px] font-bold text-slate-500">
+        <p className="text-xs font-bold text-slate-500">
           원하는 문제집 5벌을 띄워놓고 드래그 앤 드롭으로 문항을 분배하여 완벽한 1벌의 쌍둥이 문제지를 완성합니다.
         </p>
       </div>
@@ -942,12 +942,12 @@ export default function TwinManagerPage() {
             onDrop={(e) => onDrop(e, idx)}
           >
             <div className={`p-3 border-b border-slate-200 shrink-0 bg-white`}>
-              <div className={`text-xs font-black mb-1.5 text-${col.theme}-700 flex justify-between items-center`}>
+              <div className={`text-xs font-bold mb-1.5 text-${col.theme}-700 flex justify-between items-center`}>
                 <span>{col.title}</span>
                 {col.bookName && col.questions.length > 0 && (
                   <button 
                     onClick={() => handleRenameColumnBook(idx, col.bookName)}
-                    className="text-[10px] font-bold text-slate-500 bg-slate-100 hover:bg-blue-100 hover:text-blue-700 px-2 py-0.5 rounded border border-slate-200 shadow-sm transition-colors"
+                    className="text-xs font-bold text-slate-500 bg-slate-100 hover:bg-blue-100 hover:text-blue-700 px-2 py-0.5 rounded border border-slate-200 shadow-sm transition-colors"
                     title="이 탭에 불러와진 교재 묶음의 이름을 통째로 변경합니다."
                   >
                     ✏️ 이름 일괄 변경
@@ -973,7 +973,7 @@ export default function TwinManagerPage() {
                 </datalist>
                 <button 
                   onClick={() => fetchColumnData(idx, col.bookName)}
-                  className={`px-3 py-1.5 text-white text-[10px] rounded-lg font-bold shadow-sm shrink-0 transition-colors ${idx < 3 ? 'bg-slate-700 hover:bg-slate-800' : 'bg-blue-600 hover:bg-blue-700'}`}
+                  className={`px-3 py-1.5 text-white text-xs rounded-lg font-bold shadow-sm shrink-0 transition-colors ${idx < 3 ? 'bg-slate-700 hover:bg-slate-800' : 'bg-blue-600 hover:bg-blue-700'}`}
                 >
                   {idx < 3 ? '조회' : '불러오기 / 신규지정'}
                 </button>
@@ -985,7 +985,7 @@ export default function TwinManagerPage() {
               
               <div className="relative z-10 h-full">
                 {col.questions.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-slate-400 font-bold text-[11px] text-center border-2 border-dashed border-slate-300 rounded-lg pointer-events-none bg-slate-50/50">
+                  <div className="h-full flex items-center justify-center text-slate-400 font-bold text-xs text-center border-2 border-dashed border-slate-300 rounded-lg pointer-events-none bg-slate-50/50">
                     {!col.bookName ? "이름을 지정하고 조회하세요." : "여기로 문제 카드를 끌어오세요."}
                   </div>
                 ) : (

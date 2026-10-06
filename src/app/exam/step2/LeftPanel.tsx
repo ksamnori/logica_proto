@@ -78,9 +78,9 @@ const AddTreeNode = React.memo(({ nodeKey, node, depth, selectedAddIds, toggleAd
 
     return (
       <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 3 ? "mb-2" : "mb-1 pl-1 ml-2 border-l border-slate-200"}>
-        <summary className={depth === 3 ? "font-bold text-[16px] cursor-pointer py-2 bg-slate-100 px-3 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2 text-[#002864]" : "flex items-center space-x-2 p-1.5 hover:bg-blue-50 rounded-lg transition-colors select-none cursor-pointer group text-slate-700 font-bold text-[14px]"}>
+        <summary className={depth === 3 ? "font-bold text-[16px] cursor-pointer py-2 bg-slate-100 px-3 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2 text-brand" : "flex items-center space-x-2 p-1.5 hover:bg-blue-50 rounded-lg transition-colors select-none cursor-pointer group text-slate-700 font-bold text-[14px]"}>
           <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
-          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleAddFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded border-slate-300 accent-[#002864] cursor-pointer shrink-0" />
+          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleAddFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer shrink-0" />
           <span className="truncate">{nodeKey}</span>
         </summary>
         {isOpen && (
@@ -380,8 +380,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
     <section className="w-[45%] bg-white border-r border-slate-200 flex flex-col relative z-10 shadow-[4px_0_15px_rgba(0,0,0,0.03)] min-h-0">
       {!twinViewOpen && (
         <div className="flex border-b border-slate-200 shrink-0">
-          <button onClick={() => { setLeftTab("list"); setShowAddResults(false); }} className={`flex-1 py-3 text-[14px] font-extrabold transition-all ${leftTab === "list" ? "text-[#002864] border-b-[3px] border-[#002864] bg-white" : "text-slate-400 hover:text-slate-600 bg-slate-50 border-b-[3px] border-transparent hover:bg-white"}`}>문항 목록 / 통계</button>
-          <button onClick={() => setLeftTab("add")} className={`flex-1 py-3 text-[14px] font-extrabold transition-all ${leftTab === "add" ? "text-[#002864] border-b-[3px] border-[#002864] bg-white" : "text-slate-400 hover:text-slate-600 bg-slate-50 border-b-[3px] border-transparent hover:bg-white"}`}>새 문제 추가</button>
+          <button onClick={() => { setLeftTab("list"); setShowAddResults(false); }} className={`flex-1 py-3 text-[14px] font-bold transition-all ${leftTab === "list" ? "text-brand border-b-[3px] border-brand bg-white" : "text-slate-400 hover:text-slate-600 bg-slate-50 border-b-[3px] border-transparent hover:bg-white"}`}>문항 목록 / 통계</button>
+          <button onClick={() => setLeftTab("add")} className={`flex-1 py-3 text-[14px] font-bold transition-all ${leftTab === "add" ? "text-brand border-b-[3px] border-brand bg-white" : "text-slate-400 hover:text-slate-600 bg-slate-50 border-b-[3px] border-transparent hover:bg-white"}`}>새 문제 추가</button>
         </div>
       )}
 
@@ -390,10 +390,10 @@ export default function LeftPanel({ examData }: { examData: any }) {
         <div className="flex-1 flex flex-col overflow-hidden bg-white min-h-0">
           <div className="px-6 py-5 shrink-0 border-b border-slate-200 bg-white">
             <div className="flex justify-between items-end mb-4">
-              <span className="text-slate-800 font-extrabold text-lg">📊 출제 통계 요약</span>
+              <span className="text-slate-800 font-bold text-lg">📊 출제 통계 요약</span>
               <div className="text-right">
                 <span className="text-slate-400 font-bold text-sm">학습지 문제 수</span>
-                <span className="text-3xl font-extrabold text-[#002864] ml-2">{questions.length}<span className="text-base text-slate-500 ml-1">제</span></span>
+                <span className="text-3xl font-bold text-brand ml-2">{questions.length}<span className="text-base text-slate-500 ml-1">제</span></span>
               </div>
             </div>
             <div className="flex justify-around items-stretch h-28 px-4 pb-2 mt-2 border-b border-slate-100">
@@ -402,11 +402,11 @@ export default function LeftPanel({ examData }: { examData: any }) {
                 const labelColors = ["text-slate-500", "text-sky-600", "text-blue-700", "text-indigo-600", "text-rose-600"];
                 return (
                   <div key={st.label} className="flex flex-col items-center justify-end h-full w-1/5">
-                    <span className={`text-[11px] font-bold ${colors[i].split(' ')[1]}`}>{st.pct}%</span>
+                    <span className={`text-xs font-bold ${colors[i].split(' ')[1]}`}>{st.pct}%</span>
                     <div className="flex-1 w-full flex flex-col justify-end items-center mt-1">
                       <div className={`w-8 rounded-t-md transition-all duration-700 shadow-inner ${colors[i].split(' ')[0]}`} style={{ height: `${st.hPct}%`, minHeight: '4px' }}></div>
                     </div>
-                    <span className={`text-[13px] font-extrabold mt-1 ${labelColors[i]}`}>{st.label}</span>
+                    <span className={`text-[13px] font-bold mt-1 ${labelColors[i]}`}>{st.label}</span>
                   </div>
                 );
               })}
@@ -421,18 +421,18 @@ export default function LeftPanel({ examData }: { examData: any }) {
                 </div>
                 <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm overflow-x-auto no-scrollbar">
                   <label className="flex items-center space-x-2 px-1 cursor-pointer shrink-0">
-                    <input type="checkbox" checked={questions.length > 0 && checkedIds.size === questions.length} onChange={(e) => toggleAllChecks(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-[#002864] cursor-pointer" />
-                    <span className="text-[13px] font-extrabold text-slate-600 whitespace-nowrap">전체 선택</span>
+                    <input type="checkbox" checked={questions.length > 0 && checkedIds.size === questions.length} onChange={(e) => toggleAllChecks(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer" />
+                    <span className="text-[13px] font-bold text-slate-600 whitespace-nowrap">전체 선택</span>
                   </label>
                   <div className="flex space-x-1.5 shrink-0 ml-auto">
-                    <button onClick={moveSelectedToTop} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↑ 맨 위로</button>
-                    <button onClick={moveSelectedToBottom} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↓ 맨 아래로</button>
+                    <button onClick={moveSelectedToTop} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↑ 맨 위로</button>
+                    <button onClick={moveSelectedToBottom} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↓ 맨 아래로</button>
                     
-                    <button onClick={sortBySource} className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11px] font-bold rounded border border-blue-200 transition-colors shadow-sm whitespace-nowrap" title="교재 및 페이지/번호 순으로 전체 정렬">🔄 순서 정렬</button>
+                    <button onClick={sortBySource} className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded border border-blue-200 transition-colors shadow-sm whitespace-nowrap" title="교재 및 페이지/번호 순으로 전체 정렬">🔄 순서 정렬</button>
                     
-                    <button onClick={autoMergeSubQuestions} className="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11px] font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 정렬/병합</button>
-                    <button onClick={mergeSelected} className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[11px] font-bold rounded border border-indigo-200 transition-colors shadow-sm whitespace-nowrap">🔗 선택 병합</button>
-                    <button onClick={deleteSelected} className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11px] font-bold rounded border border-rose-200 transition-colors whitespace-nowrap">🗑️ 삭제</button>
+                    <button onClick={autoMergeSubQuestions} className="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 정렬/병합</button>
+                    <button onClick={mergeSelected} className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-bold rounded border border-indigo-200 transition-colors shadow-sm whitespace-nowrap">🔗 선택 병합</button>
+                    <button onClick={deleteSelected} className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded border border-rose-200 transition-colors whitespace-nowrap">🗑️ 삭제</button>
                   </div>
                 </div>
               </div>
@@ -458,7 +458,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
                         className={`flex items-center justify-between bg-white hover:bg-blue-50 p-2.5 rounded-xl border transition-all shadow-sm cursor-pointer select-none ${draggedIdx === idx ? 'opacity-50 border-blue-400' : 'border-slate-200'}`}>
                       <div className="flex items-center space-x-2 w-[55%] pointer-events-none">
                         
-                        <input type="checkbox" checked={checkedIds.has(g.id)} readOnly className="w-4 h-4 rounded border-slate-300 accent-[#002864] shrink-0" />
+                        <input type="checkbox" checked={checkedIds.has(g.id)} readOnly className="w-4 h-4 rounded border-slate-300 accent-brand shrink-0" />
                         
                         <div className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-100 rounded cursor-grab pointer-events-auto" 
                              title="드래그하여 순서 변경"
@@ -466,7 +466,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
                         </div>
                         
-                        <span className="font-extrabold text-[#002864] text-[15px] w-5 text-center cursor-pointer hover:underline pointer-events-auto" 
+                        <span className="font-bold text-brand text-[15px] w-5 text-center cursor-pointer hover:underline pointer-events-auto" 
                               onClick={(e) => {
                                 e.stopPropagation();
                                 document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -475,8 +475,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
                         </span>
                         
                         <div className="flex items-center space-x-1.5 overflow-hidden pointer-events-none">
-                          <span className="text-[11px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap">{typeName}</span>
-                          <span className={`text-[12px] font-extrabold px-1 border-l-2 ${diffColor}`}>{diff}</span>
+                          <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap">{typeName}</span>
+                          <span className={`text-[12px] font-bold px-1 border-l-2 ${diffColor}`}>{diff}</span>
                         </div>
                       </div>
                       
@@ -504,10 +504,10 @@ export default function LeftPanel({ examData }: { examData: any }) {
             <div className="flex-1 flex flex-col overflow-hidden min-h-0">
               <div className="px-6 py-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0 shadow-sm">
                 <div>
-                  <h3 className="font-extrabold text-lg flex items-center gap-2">🔍 새로운 문항 검색</h3>
+                  <h3 className="font-bold text-lg flex items-center gap-2">🔍 새로운 문항 검색</h3>
                   <p className="text-xs text-slate-400 font-bold mt-1">단원이나 유형을 선택하여 문항을 검색하세요.</p>
                 </div>
-                <button onClick={searchNewQuestions} className="px-5 py-2.5 bg-[#002864] text-white text-sm font-extrabold rounded-lg shadow-sm hover:bg-blue-900 transition-colors">문항 검색하기</button>
+                <button onClick={searchNewQuestions} className="px-5 py-2.5 bg-brand text-white text-sm font-bold rounded-lg shadow-sm hover:bg-blue-900 transition-colors">문항 검색하기</button>
               </div>
 
               {/* 🌟 1. 검색 필터 UI 패널 추가 */}
@@ -519,12 +519,12 @@ export default function LeftPanel({ examData }: { examData: any }) {
                       <input 
                         type="text" placeholder="단어 1 (예: 쎈)" 
                         value={addBookName1} onChange={(e) => setAddBookName1(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand" 
                       />
                       <input 
                         type="text" placeholder="단어 2 (옵션)" 
                         value={addBookName2} onChange={(e) => setAddBookName2(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand" 
                       />
                     </div>
                   </div>
@@ -534,13 +534,13 @@ export default function LeftPanel({ examData }: { examData: any }) {
                       <input 
                         type="number" placeholder="시작" min="1"
                         value={addPageStart} onChange={(e) => setAddPageStart(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864] text-center" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand text-center" 
                       />
                       <span className="text-slate-400 font-bold">~</span>
                       <input 
                         type="number" placeholder="끝" min="1"
                         value={addPageEnd} onChange={(e) => setAddPageEnd(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-[#002864] text-center" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand text-center" 
                       />
                       <span className="text-slate-500 font-bold text-sm shrink-0">p</span>
                     </div>
@@ -555,7 +555,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   <div className="shrink-0 border-b border-slate-200 bg-white shadow-sm z-10">
                     <div className="flex px-4 pt-4 space-x-5 border-b border-slate-100 overflow-x-auto whitespace-nowrap no-scrollbar">
                       {Object.keys(addMasterData).sort(sortD1).map(d1 => (
-                        <button key={d1} onClick={() => setCurrentAddD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentAddD1 === d1 ? 'border-[#002864] text-[#002864]' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
+                        <button key={d1} onClick={() => setCurrentAddD1(d1)} className={`pb-3 px-2 text-base font-bold border-b-4 transition-colors ${currentAddD1 === d1 ? 'border-brand text-brand' : 'border-transparent text-slate-400 hover:text-slate-600'}`}>{d1}</button>
                       ))}
                     </div>
                     <div className="flex px-4 py-3 gap-2 flex-wrap">
@@ -586,8 +586,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0">
               <div className="px-6 py-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0 shadow-sm">
-                <div><h3 className="font-extrabold text-lg flex items-center gap-2">📑 문항 검색 결과 <span className="text-[#002864] bg-blue-50 px-2 py-0.5 rounded text-sm">{newSearchResults.length}</span></h3></div>
-                <button onClick={() => setShowAddResults(false)} className="px-4 py-2 bg-slate-100 text-slate-600 text-sm font-extrabold rounded-lg border border-slate-300 hover:bg-slate-200 transition-colors">⟵ 다시 선택</button>
+                <div><h3 className="font-bold text-lg flex items-center gap-2">📑 문항 검색 결과 <span className="text-brand bg-blue-50 px-2 py-0.5 rounded text-sm">{newSearchResults.length}</span></h3></div>
+                <button onClick={() => setShowAddResults(false)} className="px-4 py-2 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg border border-slate-300 hover:bg-slate-200 transition-colors">⟵ 다시 선택</button>
               </div>
               <div className="relative flex-1 bg-slate-50 min-h-0">
                 <div className="absolute inset-0 overflow-y-auto custom-scrollbar p-6 space-y-4">
@@ -603,16 +603,16 @@ export default function LeftPanel({ examData }: { examData: any }) {
                      else if(d === '최상') diffColor = "text-rose-500 bg-rose-50 border-rose-100";
 
                      return (
-                       <div key={q.question_id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative hover:border-[#002864] transition-colors group">
+                       <div key={q.question_id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative hover:border-brand transition-colors group">
                          <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3">
                            <div className="flex flex-col gap-1.5">
                              <div className="flex gap-1.5 items-center">
-                               <span className="text-[11px] font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">{getTypeName(q)}</span>
-                               <span className={`text-[11px] font-bold px-1.5 py-0.5 rounded border ${diffColor}`}>{d}</span>
-                               <span className="text-[11px] font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{d6}</span>
+                               <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">{getTypeName(q)}</span>
+                               <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${diffColor}`}>{d}</span>
+                               <span className="text-xs font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{d6}</span>
                              </div>
                              {/* 검색 결과에서도 출처(교재/페이지) 표시 */}
-                             <div className="text-[11px] font-bold text-slate-500 flex items-center gap-1.5 mt-1">
+                             <div className="text-xs font-bold text-slate-500 flex items-center gap-1.5 mt-1">
                                <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200 leading-none">출처</span>
                                <span className="leading-none mt-0.5">
                                  {q.source_book_name || q.book_name || q.pdf_source || '출처 없음'}
@@ -621,7 +621,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
                                </span>
                              </div>
                            </div>
-                           <button onClick={() => addNewQuestionToExam(q)} className="bg-[#002864] hover:bg-blue-900 text-white text-[12px] font-bold px-4 py-2 rounded shadow-sm transition-colors shrink-0">➕ 추가</button>
+                           <button onClick={() => addNewQuestionToExam(q)} className="bg-brand hover:bg-blue-900 text-white text-[12px] font-bold px-4 py-2 rounded shadow-sm transition-colors shrink-0">➕ 추가</button>
                          </div>
                          <div className="font-myungjo text-[15px] font-semibold leading-[2.0] text-slate-800 break-keep" dangerouslySetInnerHTML={{ __html: formatText(q.question) }} />
                          {q.image_url && <img src={getCleanUrl(q.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded" alt="" />}
@@ -641,7 +641,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
         <div className="absolute inset-0 flex flex-col bg-slate-50 z-30 min-h-0">
           <div className="bg-indigo-600 text-white px-6 py-4 flex justify-between items-center shrink-0 shadow-md">
             <div>
-              <h3 className="font-extrabold text-lg flex items-center">
+              <h3 className="font-bold text-lg flex items-center">
                 <span className="bg-white text-indigo-700 px-2 py-0.5 rounded mr-2 text-sm">{twinTarget ? twinTarget.idx + 1 : 0}번</span> 쌍둥이/유사 문항 검색
               </h3>
               <p className="text-indigo-200 text-xs mt-1">원하는 문항을 우측 시험지에 즉시 반영할 수 있습니다.</p>
@@ -658,9 +658,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   <div key={altQ.question_id} className="bg-white border-2 border-slate-200 rounded-xl p-5 shadow-sm hover:border-indigo-400 transition-all">
                     <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
                       <div className="flex items-center space-x-2">
-                        {isTwin ? <span className="text-[11px] bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-extrabold shadow-sm">🚀 쌍둥이</span> : <span className="text-[11px] bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded font-bold shadow-sm">💡 유사</span>}
-                        <span className="text-[11px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold shadow-sm shrink-0">{getTypeName(altQ)}</span>
-                        <span className="text-[11px] text-slate-500 font-bold border border-slate-200 px-1 rounded">{altQ.difficulty || '중'}</span>
+                        {isTwin ? <span className="text-xs bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold shadow-sm">🚀 쌍둥이</span> : <span className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded font-bold shadow-sm">💡 유사</span>}
+                        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold shadow-sm shrink-0">{getTypeName(altQ)}</span>
+                        <span className="text-xs text-slate-500 font-bold border border-slate-200 px-1 rounded">{altQ.difficulty || '중'}</span>
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => addTwinToExam(altQ)} className="px-3 py-1.5 bg-emerald-600 text-white text-[13px] font-bold rounded shadow-sm hover:bg-emerald-700">이 문항 추가</button>

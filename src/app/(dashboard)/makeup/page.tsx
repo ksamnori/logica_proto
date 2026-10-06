@@ -269,7 +269,7 @@ export default function MakeupPage() {
       <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center gap-3 shrink-0 flex-wrap">
         <span className="font-bold text-slate-600 text-sm mr-2">🔍 보강 필터</span>
         
-        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+        <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
           <option value="all">모든 상태</option>
           <option value="예정">예정</option>
           <option value="진행중">진행중</option>
@@ -277,19 +277,19 @@ export default function MakeupPage() {
           <option value="취소">취소</option>
         </select>
         
-        <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864]">
+        <select value={filterInstructor} onChange={e => setFilterInstructor(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
           <option value="all">모든 담당 강사</option>
           {instructors.map(inst => <option key={inst.instructor_id} value={inst.instructor_id}>{inst.name} 선생님</option>)}
         </select>
         
-        <input type="text" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} placeholder="학생 이름 검색" className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864] w-40" />
+        <input type="text" value={filterSearch} onChange={e => setFilterSearch(e.target.value)} placeholder="학생 이름 검색" className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand w-40" />
         
         <button onClick={resetFilters} className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm rounded-lg transition-colors border border-slate-300 flex items-center gap-1">
           🔄 전체보기
         </button>
 
         {canEditMakeup && (
-          <button onClick={() => openModal()} className="ml-auto bg-[#002864] text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
+          <button onClick={() => openModal()} className="ml-auto bg-brand text-white px-4 py-2 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
             새 보강 일정 등록
           </button>
         )}
@@ -300,15 +300,15 @@ export default function MakeupPage() {
           <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
             <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm border-b border-slate-200">
               <tr>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">예정일</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">시간</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">강의실</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">대상 학생 🔍</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">담당 강사</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">보강 내용(단원)</th>
-                <th className="py-3 px-4 font-extrabold text-slate-500 text-center">상태</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">예정일</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">시간</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">강의실</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">대상 학생 🔍</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">담당 강사</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">보강 내용(단원)</th>
+                <th className="py-3 px-4 font-bold text-slate-500 text-center">상태</th>
                 {(canEditMakeup || canDeleteMakeup) && (
-                  <th className="py-3 px-4 font-extrabold text-slate-500 text-center">관리</th>
+                  <th className="py-3 px-4 font-bold text-slate-500 text-center">관리</th>
                 )}
               </tr>
             </thead>
@@ -339,13 +339,13 @@ export default function MakeupPage() {
                   return (
                     <tr key={m.makeup_id} className="hover:bg-blue-50/50 transition-colors border-b border-slate-100">
                       <td className="py-3 px-4 text-center font-bold text-slate-600">{dateStr}</td>
-                      <td className="py-3 px-4 text-center font-extrabold text-[#002864] bg-blue-50/30">{timeStr}</td>
+                      <td className="py-3 px-4 text-center font-bold text-brand bg-blue-50/30">{timeStr}</td>
                       <td className="py-3 px-4 text-center font-bold text-slate-700">{roomStr}</td>
                       
                       {/* 🌟 1. onClick 이벤트 연결 2. 파란색 글씨 명확히 적용 */}
                       <td 
                         onClick={() => handleStudentClick(m.student?.student_id)}
-                        className="py-3 px-4 text-center font-extrabold text-blue-600 cursor-pointer hover:underline"
+                        className="py-3 px-4 text-center font-bold text-blue-600 cursor-pointer hover:underline"
                       >
                         {m.student?.name || '알수없음'} <span className="text-xs text-slate-400 font-medium">({className})</span>
                       </td>

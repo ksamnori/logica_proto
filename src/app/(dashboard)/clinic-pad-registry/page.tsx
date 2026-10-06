@@ -142,8 +142,8 @@ export default function ClinicPadRegistryPage() {
                                     style={{ width: w, height: h, transform: `scale(${scale})`, transformOrigin: 'top left' }}
                                     className={`w-full h-full rounded-xl p-2 flex flex-col items-center justify-center gap-1 shadow-sm border-2 transition-colors ${deviceId ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100' : 'bg-white/80 border-dashed border-slate-300 hover:bg-slate-50'}`}
                                 >
-                                    <span className="text-slate-600 text-[11px] font-black">{seat.number}번</span>
-                                    <span className={`text-[9px] font-bold truncate max-w-full px-1 ${deviceId ? 'text-emerald-700' : 'text-slate-400'}`}>
+                                    <span className="text-slate-600 text-xs font-bold">{seat.number}번</span>
+                                    <span className={`text-xs font-bold truncate max-w-full px-1 ${deviceId ? 'text-emerald-700' : 'text-slate-400'}`}>
                                         {deviceId ? deviceId : '미등록'}
                                     </span>
                                 </button>
@@ -162,10 +162,10 @@ export default function ClinicPadRegistryPage() {
                             value={deviceIdInput}
                             onChange={(e) => setDeviceIdInput(e.target.value)}
                             placeholder="기기ID"
-                            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-[#002864]/30"
+                            className="w-full border border-slate-200 rounded-lg px-3 py-2.5 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-brand/30"
                         />
                         <div className="flex flex-col gap-2">
-                            <button onClick={handleSave} disabled={saving} className="bg-[#002864] text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">
+                            <button onClick={handleSave} disabled={saving} className="bg-brand text-white font-bold text-sm px-5 py-2.5 rounded-lg disabled:opacity-50">
                                 {saving ? '저장 중...' : '저장'}
                             </button>
                             {deviceBySeat[String(modalSeat.number)] && (

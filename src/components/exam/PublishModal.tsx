@@ -265,7 +265,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[99] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-4xl rounded-xl shadow-2xl flex flex-col overflow-hidden h-[80vh]">
         <div className="p-4 flex justify-between items-center border-b border-slate-200 shrink-0">
-          <h2 className="text-lg font-extrabold text-slate-800 flex items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
             학습지 배부하기 <span className="text-sm font-bold text-slate-400 font-normal truncate max-w-[300px]">{title}</span>
           </h2>
           <button onClick={onClose} className="text-slate-400 hover:text-rose-500 font-bold text-xl">&times;</button>
@@ -273,8 +273,8 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
         
         <div className="px-4 pt-3 shrink-0">
           <div className="flex border border-slate-200 rounded-md overflow-hidden bg-slate-50">
-            <button onClick={() => { setPublishTab('grade'); setPublishSearch(""); }} className={`flex-1 py-2 text-sm font-extrabold transition-colors ${publishTab === 'grade' ? 'bg-white text-slate-800 border-b-2 border-[#002864]' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>학년별 선택</button>
-            <button onClick={() => { setPublishTab('class'); setPublishSearch(""); }} className={`flex-1 py-2 text-sm font-extrabold transition-colors ${publishTab === 'class' ? 'bg-white text-slate-800 border-b-2 border-[#002864]' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>수강반별 선택</button>
+            <button onClick={() => { setPublishTab('grade'); setPublishSearch(""); }} className={`flex-1 py-2 text-sm font-bold transition-colors ${publishTab === 'grade' ? 'bg-white text-slate-800 border-b-2 border-brand' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>학년별 선택</button>
+            <button onClick={() => { setPublishTab('class'); setPublishSearch(""); }} className={`flex-1 py-2 text-sm font-bold transition-colors ${publishTab === 'class' ? 'bg-white text-slate-800 border-b-2 border-brand' : 'text-slate-400 hover:text-slate-600 border-b-2 border-transparent'}`}>수강반별 선택</button>
           </div>
         </div>
 
@@ -305,7 +305,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                       <div className="px-4 py-2.5 bg-slate-50 flex justify-between items-center cursor-pointer hover:bg-slate-100" onClick={() => toggleGroup(groupName)}>
                         <div className="flex items-center gap-2">
                           <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${isExpanded ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                          <span className="text-sm font-extrabold text-slate-700">{groupName} <span className="text-slate-400 font-bold ml-1">{groupedStudents[groupName].length}명</span></span>
+                          <span className="text-sm font-bold text-slate-700">{groupName} <span className="text-slate-400 font-bold ml-1">{groupedStudents[groupName].length}명</span></span>
                         </div>
                         <button onClick={(e) => selectAllInGroup(groupName, e)} className="bg-blue-100 text-blue-600 px-2 py-0.5 rounded text-xs hover:bg-blue-200 transition-colors shadow-sm ml-2 font-bold">+ 전체선택</button>
                       </div>
@@ -316,7 +316,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                             const defaultClassName = s.displayClassNames.split(',')[0] || '반 미지정';
                             return (
                               <div key={s.student_id} className="px-4 py-2 bg-white flex justify-between items-center hover:bg-blue-50 border-t border-slate-50 transition-colors">
-                                <span className="text-sm font-bold text-slate-600 ml-6">{s.name} <span className="text-[11px] text-slate-400 font-medium">({formatGrade(s.grade)} | {defaultClassName})</span></span>
+                                <span className="text-sm font-bold text-slate-600 ml-6">{s.name} <span className="text-xs text-slate-400 font-medium">({formatGrade(s.grade)} | {defaultClassName})</span></span>
                                 <button onClick={() => toggleStudentSelect(s, defaultClassId, defaultClassName)} className="text-blue-500 hover:text-blue-700 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 100-2h-2V7z" clipRule="evenodd"></path></svg></button>
                               </div>
                             );
@@ -346,9 +346,9 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                         <div className="px-4 py-2.5 bg-slate-50 flex justify-between items-center cursor-pointer hover:bg-slate-100" onClick={() => toggleClassGroup(c.class_id)}>
                           <div className="flex items-center gap-2">
                             <svg className={`w-4 h-4 text-slate-400 transform transition-transform ${isExpanded ? "" : "-rotate-90"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                            <span className="text-sm font-extrabold text-slate-700">
+                            <span className="text-sm font-bold text-slate-700">
                               {c.name} 
-                              <span className="text-[11px] text-slate-500 font-bold ml-1">({instName ? `${instName} 선생님` : '선생님 미지정'})</span>
+                              <span className="text-xs text-slate-500 font-bold ml-1">({instName ? `${instName} 선생님` : '선생님 미지정'})</span>
                               <span className="text-slate-400 font-bold ml-1">{c.students.length}명</span>
                             </span>
                           </div>
@@ -358,7 +358,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
                           <div>
                             {studentsInClass.map((s: any) => (
                               <div key={s.student_id} className="px-4 py-2 bg-white flex justify-between items-center hover:bg-blue-50 border-t border-slate-50 transition-colors">
-                                <span className="text-sm font-bold text-slate-600 ml-6">{s.name} <span className="text-[11px] text-slate-400 font-medium">({formatGrade(s.grade)})</span></span>
+                                <span className="text-sm font-bold text-slate-600 ml-6">{s.name} <span className="text-xs text-slate-400 font-medium">({formatGrade(s.grade)})</span></span>
                                 <button onClick={() => toggleStudentSelect(s, c.class_id, c.name)} className="text-blue-500 hover:text-blue-700 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 100-2h-2V7z" clipRule="evenodd"></path></svg></button>
                               </div>
                             ))}
@@ -376,19 +376,19 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
 
           <div className="w-1/2 flex flex-col border border-slate-200 rounded-md overflow-hidden bg-slate-50">
             <div className="p-3 border-b border-slate-200 bg-white flex justify-between items-center shrink-0">
-              <span className="text-sm font-extrabold text-slate-800">배부 대상 목록 <span className="text-[#002864] font-black">{selectedStudents.length}건</span></span>
+              <span className="text-sm font-bold text-slate-800">배부 대상 목록 <span className="text-brand font-bold">{selectedStudents.length}건</span></span>
             </div>
             <div className="flex-1 overflow-y-auto custom-scroll relative bg-white">
               {selectedStudents.length === 0 ? (
                 <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-6 text-center z-0">
-                  <span className="text-sm font-bold">왼쪽의 <span className="bg-blue-500 text-white rounded-full w-4 h-4 inline-flex items-center justify-center font-black mx-1">+</span> 를 눌러<br/>출제할 학생/반을 선택해 주세요.</span>
+                  <span className="text-sm font-bold">왼쪽의 <span className="bg-blue-500 text-white rounded-full w-4 h-4 inline-flex items-center justify-center font-bold mx-1">+</span> 를 눌러<br/>출제할 학생/반을 선택해 주세요.</span>
                 </div>
               ) : (
                 <div className="relative z-10 bg-white min-h-full">
                   {selectedStudents.map(sel => (
                     <div key={`${sel.student_id}_${sel.class_id}`} className="px-4 py-2.5 bg-white flex justify-between items-center border-b border-slate-100 hover:bg-slate-50 transition-colors">
                       <span className="text-sm font-bold text-slate-800">
-                        {sel.name} <span className="text-[11px] text-slate-400 ml-1">({formatGrade(sel.grade)} | <span className="text-[#002864]">{sel.className}</span>)</span>
+                        {sel.name} <span className="text-xs text-slate-400 ml-1">({formatGrade(sel.grade)} | <span className="text-brand">{sel.className}</span>)</span>
                       </span>
                       <button onClick={() => toggleStudentSelect({ student_id: sel.student_id }, sel.class_id, sel.className)} className="text-rose-400 hover:text-rose-600 focus:outline-none"><svg className="w-5 h-5 fill-current" viewBox="0 0 20 20"><path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM7 9a1 1 0 000 2h6a1 1 0 100-2H7z" clipRule="evenodd"></path></svg></button>
                     </div>
@@ -407,7 +407,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
           </label>
           <button 
             onClick={submitPublish} 
-            className={`px-6 py-2.5 font-extrabold text-sm rounded-md transition-colors shadow-sm ${selectedStudents.length > 0 ? 'bg-[#002864] hover:bg-blue-900 text-white cursor-pointer' : 'bg-slate-100 text-slate-400 pointer-events-none'}`}
+            className={`px-6 py-2.5 font-bold text-sm rounded-md transition-colors shadow-sm ${selectedStudents.length > 0 ? 'bg-brand hover:bg-blue-900 text-white cursor-pointer' : 'bg-slate-100 text-slate-400 pointer-events-none'}`}
           >
             선택 완료 및 배포
           </button>

@@ -152,7 +152,7 @@ export const renderParentRelations = (q: any, parentSourceMap: Record<string, an
         const content = line.replace(/^\[(쌍둥이|유사)\]/, '').trim();
         return (
           <div key={i} className="text-[12px] font-bold text-slate-500 leading-tight tracking-wide flex items-center gap-1.5 bg-slate-50 px-2 py-1 rounded border border-slate-100">
-            {isTwin ? <span className="text-rose-500 font-extrabold">[쌍둥이]</span> : <span className="text-indigo-500 font-extrabold">[유사]</span>}
+            {isTwin ? <span className="text-rose-500 font-bold">[쌍둥이]</span> : <span className="text-indigo-500 font-bold">[유사]</span>}
             <span>{content}</span>
           </div>
         );

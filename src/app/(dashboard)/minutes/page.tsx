@@ -374,7 +374,7 @@ export default function MinutesPage() {
       days.push(
         <div key={i} onClick={() => setSelectedDate(isSelected ? null : new Date(year, month, i))} className="text-center py-1 flex flex-col items-center justify-center relative cursor-pointer hover:bg-slate-100 rounded-full transition-colors z-0">
           {multiDayBg}
-          <span className={`text-[11px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-black shadow-md' : (isToday ? 'bg-[#002864] text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
+          <span className={`text-[11px] w-6 h-6 flex items-center justify-center rounded-full transition-colors relative z-10 ${isSelected ? 'bg-rose-500 text-white font-bold shadow-md' : (isToday ? 'bg-brand text-white font-bold shadow-sm' : 'text-slate-700 font-medium')}`}>
             {i}
           </span>
           {dayTypes.length > 0 && (
@@ -604,13 +604,13 @@ export default function MinutesPage() {
       <div className="pt-2 pb-3 px-2 shrink-0 flex items-center justify-between">
         <div className="flex items-center gap-4">
           <div>
-            <h1 className="text-2xl font-black text-slate-800 tracking-tight font-lexend flex items-center gap-2">
-              <span className="bg-gradient-to-br from-[#002864] to-[#3b82f6] text-transparent bg-clip-text">Logica</span>
-              <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-inner text-[#002864] font-black">
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight font-lexend flex items-center gap-2">
+              <span className="bg-gradient-to-br from-brand to-[#3b82f6] text-transparent bg-clip-text">Logica</span>
+              <span className="flex items-center gap-1.5 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200 shadow-inner text-brand font-bold">
                 <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
                 AI Minutes
               </span>
-              <span className="bg-gradient-to-r from-blue-50 to-indigo-50 text-indigo-600 border border-indigo-200 text-[9px] px-1.5 py-0.5 rounded-full font-black ml-1 shadow-sm uppercase tracking-wider">Beta</span>
+              <span className="bg-gradient-to-r from-blue-50 to-indigo-50 text-indigo-600 border border-indigo-200 text-[9px] px-1.5 py-0.5 rounded-full font-bold ml-1 shadow-sm uppercase tracking-wider">Beta</span>
             </h1>
             <p className="text-slate-500 font-bold text-[11px] mt-1 tracking-tight">인공지능 회의록 및 안건 관리 시스템</p>
           </div>
@@ -643,18 +643,18 @@ export default function MinutesPage() {
                   if (allowManual) setIsNewAgendaModalOpen(true);
                   else alert("수동 안건 작성 권한이 없습니다.");
                 }} 
-                className={`flex-1 bg-white border border-blue-200 rounded-xl flex items-center justify-center py-3.5 group shadow-sm transition-all ${allowManual ? 'hover:border-[#002864] hover:shadow-lg hover:-translate-y-0.5' : 'opacity-50 cursor-not-allowed'}`}
+                className={`flex-1 bg-white border border-blue-200 rounded-xl flex items-center justify-center py-3.5 group shadow-sm transition-all ${allowManual ? 'hover:border-brand hover:shadow-lg hover:-translate-y-0.5' : 'opacity-50 cursor-not-allowed'}`}
                 title={allowManual ? "새 안건 수동 작성" : "권한 없음"}
               >
-                <div className={`w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center ${allowManual ? 'group-hover:bg-[#002864] transition-colors shadow-inner group-hover:shadow-[0_0_15px_rgba(0,40,100,0.4)]' : ''}`}>
-                  <svg className={`w-5 h-5 text-[#002864] ${allowManual ? 'group-hover:text-white transition-colors' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
+                <div className={`w-10 h-10 bg-blue-50 rounded-full flex items-center justify-center ${allowManual ? 'group-hover:bg-brand transition-colors shadow-inner group-hover:shadow-[0_0_15px_rgba(0,40,100,0.4)]' : ''}`}>
+                  <svg className={`w-5 h-5 text-brand ${allowManual ? 'group-hover:text-white transition-colors' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"></path></svg>
                 </div>
               </button>
             </div>
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scroll p-3 space-y-1.5">
-            <p className="px-3 py-1.5 text-[10px] font-black text-slate-400">내 노트북</p>
+            <p className="px-3 py-1.5 text-[10px] font-bold text-slate-400">내 노트북</p>
             {['전체 안건', '주간 회의', '임시 회의', '상담/면담'].map(folder => {
               const unresolvedCount = getUnresolvedCount(folder);
               return (
@@ -668,10 +668,10 @@ export default function MinutesPage() {
                     {folder === '주간 회의' && <span className="mr-2 text-sm opacity-70">📁</span>}
                     {folder === '임시 회의' && <span className="mr-2 text-sm opacity-70">📁</span>}
                     {folder === '상담/면담' && <span className="mr-2 text-sm opacity-70">📁</span>}
-                    <span className={`${folder === '전체 안건' ? 'text-[13px] font-black' : 'text-[12px] font-bold'} ${activeFolder === folder ? 'text-[#002864]' : 'text-slate-600'}`}>{folder}</span>
+                    <span className={`${folder === '전체 안건' ? 'text-[13px] font-bold' : 'text-[12px] font-bold'} ${activeFolder === folder ? 'text-brand' : 'text-slate-600'}`}>{folder}</span>
                   </div>
                   {unresolvedCount > 0 && (
-                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-black ${activeFolder === folder ? 'bg-[#002864] text-white' : 'bg-slate-200 text-slate-500'}`}>
+                    <span className={`px-1.5 py-0.5 rounded-full text-[9px] font-bold ${activeFolder === folder ? 'bg-brand text-white' : 'bg-slate-200 text-slate-500'}`}>
                       {unresolvedCount}
                     </span>
                   )}
@@ -688,7 +688,7 @@ export default function MinutesPage() {
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                   <div className="bg-gradient-to-br from-emerald-400 to-teal-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group transition-all">
                     <div className="relative z-10">
-                      <h3 className="font-black text-lg drop-shadow-sm leading-tight">스마트폰에서도<br/>편하게</h3>
+                      <h3 className="font-bold text-lg drop-shadow-sm leading-tight">스마트폰에서도<br/>편하게</h3>
                       <span className="inline-block mt-1 bg-white/20 px-2 py-0.5 rounded text-[11px] font-bold">(공사중)</span>
                     </div>
                     <div className="absolute -bottom-6 -right-4 w-28 h-28 bg-white/20 rounded-full group-hover:scale-110 transition-transform"></div>
@@ -700,7 +700,7 @@ export default function MinutesPage() {
                     else alert("음성 회의록 작성 권한이 없습니다.");
                   }} className={`bg-gradient-to-br from-blue-400 to-indigo-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group transition-all ${allowRecord ? 'cursor-pointer hover:shadow-md hover:-translate-y-1' : 'opacity-70 cursor-not-allowed'}`}>
                     <div className="relative z-10">
-                      <h3 className="font-black text-lg drop-shadow-sm leading-tight">AI 실시간 녹음<br/>및 요약</h3>
+                      <h3 className="font-bold text-lg drop-shadow-sm leading-tight">AI 실시간 녹음<br/>및 요약</h3>
                     </div>
                     <div className="absolute -top-4 -right-4 w-28 h-28 bg-white/20 rounded-full group-hover:scale-110 transition-transform"></div>
                     <div className="absolute bottom-4 right-5 z-10 text-5xl drop-shadow-md">🎙️</div>
@@ -711,7 +711,7 @@ export default function MinutesPage() {
                     else alert("회의록 병합 권한이 없습니다.");
                   }} className={`bg-gradient-to-br from-violet-400 to-purple-500 text-white p-5 rounded-2xl shadow-sm relative overflow-hidden h-32 flex flex-col justify-between group transition-all ${allowBind ? 'cursor-pointer hover:shadow-md hover:-translate-y-1' : 'opacity-70 cursor-not-allowed'}`}>
                     <div className="relative z-10">
-                      <h3 className="font-black text-lg drop-shadow-sm leading-tight">안건 병합하여<br/>회의록 생성</h3>
+                      <h3 className="font-bold text-lg drop-shadow-sm leading-tight">안건 병합하여<br/>회의록 생성</h3>
                     </div>
                     <div className="absolute -bottom-4 -left-4 w-28 h-28 bg-white/20 rounded-full group-hover:scale-110 transition-transform"></div>
                     <div className="absolute bottom-4 right-5 z-10 text-5xl drop-shadow-md">💡</div>
@@ -732,17 +732,17 @@ export default function MinutesPage() {
                 <div className="flex items-center gap-2">
                   {activeFolder === '전체 안건' && (
                     <label className="flex items-center gap-1.5 cursor-pointer ml-1">
-                      <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                      <input type="checkbox" checked={isAllSelected} onChange={toggleSelectAll} className="w-4 h-4 accent-brand cursor-pointer" />
                       <span className="text-[11px] font-bold text-slate-500">전체 선택</span>
                     </label>
                   )}
-                  <h2 className="text-base font-black text-slate-800 tracking-tight ml-2">
+                  <h2 className="text-base font-bold text-slate-800 tracking-tight ml-2">
                     {activeFolder} <span className="text-xs font-bold text-slate-400 ml-1">{filteredAgendas.length}건</span>
                   </h2>
                 </div>
                 {activeFolder === '전체 안건' && (
                   <label className="flex items-center gap-1.5 cursor-pointer bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
-                    <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} className="w-3 h-3 accent-[#002864]" />
+                    <input type="checkbox" checked={showResolved} onChange={(e) => setShowResolved(e.target.checked)} className="w-3 h-3 accent-brand" />
                     <span className="text-[11px] font-bold text-slate-600">완료(병합)된 안건 포함</span>
                   </label>
                 )}
@@ -760,7 +760,7 @@ export default function MinutesPage() {
                     if (isGoogleEvent) {
                       theme = { bg: 'bg-purple-50', text: 'text-purple-600', icon: '📆', border: 'border-purple-200' };
                     } else if (isMeetingNote) {
-                      theme = { bg: 'bg-[#002864]', text: 'text-white', icon: '📁', border: 'border-blue-900' };
+                      theme = { bg: 'bg-brand', text: 'text-white', icon: '📁', border: 'border-blue-900' };
                     } else {
                       theme = getThemeColor(note.type, note.title);
                     }
@@ -793,11 +793,11 @@ export default function MinutesPage() {
                       <div 
                         key={note.id} 
                         onClick={() => isMeetingNote || isGoogleEvent ? checkAccessAndOpen(note) : toggleSelect(note.id)} 
-                        className={`flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border transition-all group ${isMeetingNote || isGoogleEvent ? 'cursor-pointer hover:shadow-md hover:border-slate-300' : 'cursor-pointer hover:bg-slate-50'} ${isChecked ? 'border-[#002864] bg-blue-50/30 ring-1 ring-[#002864]' : 'border-slate-200 hover:border-slate-300'}`}
+                        className={`flex items-center gap-3 p-3 rounded-xl bg-white shadow-sm border transition-all group ${isMeetingNote || isGoogleEvent ? 'cursor-pointer hover:shadow-md hover:border-slate-300' : 'cursor-pointer hover:bg-slate-50'} ${isChecked ? 'border-brand bg-blue-50/30 ring-1 ring-brand' : 'border-slate-200 hover:border-slate-300'}`}
                       >
                         {!isMeetingNote && !isGoogleEvent && activeFolder === '전체 안건' && (
                           <div className="shrink-0 flex items-center mt-1.5">
-                            <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(note.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-[#002864] cursor-pointer" />
+                            <input type="checkbox" checked={isChecked} onChange={() => toggleSelect(note.id)} onClick={(e) => e.stopPropagation()} className="w-4 h-4 accent-brand cursor-pointer" />
                           </div>
                         )}
 
@@ -810,15 +810,15 @@ export default function MinutesPage() {
                             {note.is_secret && <span className="text-[10px]" title="비밀 회의록">🔒</span>}
                             <h4 
                               onClick={(e) => { if(!isMeetingNote && !isGoogleEvent) { e.stopPropagation(); checkAccessAndOpen(note); } }} 
-                              className={`text-[13px] font-black truncate transition-colors ${(!isMeetingNote && !isGoogleEvent) ? 'cursor-pointer hover:underline' : ''} ${isChecked ? 'text-[#002864]' : 'text-slate-800'}`}
+                              className={`text-[13px] font-bold truncate transition-colors ${(!isMeetingNote && !isGoogleEvent) ? 'cursor-pointer hover:underline' : ''} ${isChecked ? 'text-brand' : 'text-slate-800'}`}
                             >
                               {note.title}
                             </h4>
-                            <span className={`px-1.5 py-0.5 text-[8px] font-black rounded text-nowrap border ${badgeStyle}`}>
+                            <span className={`px-1.5 py-0.5 text-[8px] font-bold rounded text-nowrap border ${badgeStyle}`}>
                               {badgeText}
                             </span>
                             {isMeetingNote && note.attendees && (
-                              <span className="text-[9px] font-bold text-[#002864] bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 ml-1 truncate">
+                              <span className="text-[9px] font-bold text-brand bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 ml-1 truncate">
                                 👥 {note.attendees}
                               </span>
                             )}
@@ -844,7 +844,7 @@ export default function MinutesPage() {
                             <div className="flex items-center gap-1.5 text-[9px] font-bold text-slate-400 text-right">
                               <span className="text-slate-500">✍️ {getInstructorName(note.created_by, note.isExternal)}</span>
                               <span className="text-slate-300">|</span>
-                              <span className={note.meeting_date ? "text-[#002864]" : ""}>
+                              <span className={note.meeting_date ? "text-brand" : ""}>
                                  {note.meeting_date ? `일정: ${dateDisplay}` : `생성: ${dateDisplay}`}
                               </span>
                             </div>
@@ -870,13 +870,13 @@ export default function MinutesPage() {
           </div>
 
           {selectedIds.length > 0 && (
-            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#002864] text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 animate-[slideUp_0.3s_ease-out] border border-blue-900 z-30">
+            <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-brand text-white px-5 py-2.5 rounded-full shadow-2xl flex items-center gap-3 animate-[slideUp_0.3s_ease-out] border border-blue-900 z-30">
               <span className="font-bold text-xs"><span className="text-amber-400">{selectedIds.length}개</span>의 안건이 선택됨</span>
               <div className="w-px h-3 bg-slate-500"></div>
               <button onClick={() => {
                 if (allowBind) setIsBindMeetingOpen(true);
                 else alert("회의록 병합 권한이 없습니다.");
-              }} className={`text-xs font-black bg-white text-[#002864] px-3 py-1.5 rounded-full transition-colors shadow-sm ${allowBind ? 'hover:bg-slate-100' : 'opacity-50 cursor-not-allowed'}`}>
+              }} className={`text-xs font-bold bg-white text-brand px-3 py-1.5 rounded-full transition-colors shadow-sm ${allowBind ? 'hover:bg-slate-100' : 'opacity-50 cursor-not-allowed'}`}>
                 회의록 병합하기 ✨
               </button>
             </div>
@@ -886,12 +886,12 @@ export default function MinutesPage() {
         <div className="hidden xl:flex w-[300px] border-l border-slate-200 bg-slate-50/50 flex-col shrink-0 p-4">
           <div className="flex justify-between items-center mb-3">
             <div className="flex items-baseline gap-2">
-              <h2 className="text-lg font-black text-slate-800 tracking-tighter">{calendarMonth.getFullYear()}.{calendarMonth.getMonth() + 1}</h2>
+              <h2 className="text-lg font-bold text-slate-800 tracking-tighter">{calendarMonth.getFullYear()}.{calendarMonth.getMonth() + 1}</h2>
               <button onClick={() => {setCalendarMonth(new Date()); setSelectedDate(null);}} className="px-2 py-0.5 border border-slate-300 rounded-full text-[9px] font-bold text-slate-500 hover:bg-slate-200 transition-colors bg-white shadow-sm">오늘</button>
             </div>
             <div className="flex gap-1.5">
-              <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="text-slate-400 hover:text-[#002864] transition-colors"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7"></path></svg></button>
-              <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="text-slate-400 hover:text-[#002864] transition-colors"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg></button>
+              <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() - 1, 1))} className="text-slate-400 hover:text-brand transition-colors"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M15 19l-7-7 7-7"></path></svg></button>
+              <button onClick={() => setCalendarMonth(new Date(calendarMonth.getFullYear(), calendarMonth.getMonth() + 1, 1))} className="text-slate-400 hover:text-brand transition-colors"><svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M9 5l7 7-7 7"></path></svg></button>
             </div>
           </div>
 
@@ -905,14 +905,14 @@ export default function MinutesPage() {
           <div className="mb-4">
             <button 
               onClick={() => { setSelectedIds([]); setIsScheduleMeetingOpen(true); }}
-              className="w-full bg-[#002864] hover:bg-blue-900 text-white font-bold text-[12px] py-2 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5"
+              className="w-full bg-brand hover:bg-blue-900 text-white font-bold text-[12px] py-2 rounded-xl shadow-sm transition-colors flex items-center justify-center gap-1.5"
             >
               <span>➕</span> 새 일정 예약
             </button>
           </div>
 
           <div className="mb-4 flex-1 overflow-y-auto custom-scroll pr-1">
-            <h3 className="text-[11px] font-black text-slate-500 mb-2">{selectedDate ? `${selectedDate.getDate()}일 예약된 회의` : '다가오는 일정 전체'}</h3>
+            <h3 className="text-[11px] font-bold text-slate-500 mb-2">{selectedDate ? `${selectedDate.getDate()}일 예약된 회의` : '다가오는 일정 전체'}</h3>
             <div className="space-y-2">
               {displayMeetings.length === 0 ? (
                 <div className="text-[10px] font-bold text-slate-400 text-center py-3 bg-white rounded-lg border border-slate-100">일정이 없습니다.</div>
@@ -942,16 +942,16 @@ export default function MinutesPage() {
                   if (isGoogleEvent) badgeText = '구글 일정';
 
                   return (
-                    <div key={m.id} onClick={() => checkAccessAndOpen(m)} className={`p-2.5 rounded-xl border shadow-sm cursor-pointer transition-colors group ${theme.bg} ${theme.border} hover:border-[#002864] relative`}>
+                    <div key={m.id} onClick={() => checkAccessAndOpen(m)} className={`p-2.5 rounded-xl border shadow-sm cursor-pointer transition-colors group ${theme.bg} ${theme.border} hover:border-brand relative`}>
                       {isGoogleEvent && (
-                        <div className="absolute -top-2 -right-2 bg-purple-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-black shadow-sm">Google</div>
+                        <div className="absolute -top-2 -right-2 bg-purple-500 text-white text-[8px] px-1.5 py-0.5 rounded-full font-bold shadow-sm">Google</div>
                       )}
                       <div className="flex justify-between items-start mb-0.5 gap-2">
                         <div className="flex items-center gap-1 min-w-0">
                           {m.is_secret && <span className="text-[10px]">🔒</span>}
-                          <h4 className={`text-[12px] font-black line-clamp-1 group-hover:text-[#002864] ${theme.text}`}>{m.title}</h4>
+                          <h4 className={`text-[12px] font-bold line-clamp-1 group-hover:text-brand ${theme.text}`}>{m.title}</h4>
                         </div>
-                        <span className={`shrink-0 text-[8px] font-black px-1.5 py-0.5 rounded border bg-white opacity-80 ${theme.border} ${theme.text}`}>{badgeText}</span>
+                        <span className={`shrink-0 text-[8px] font-bold px-1.5 py-0.5 rounded border bg-white opacity-80 ${theme.border} ${theme.text}`}>{badgeText}</span>
                       </div>
                       <div className={`text-[10px] font-bold flex items-center gap-1 opacity-70 ${theme.text}`}>
                         <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
@@ -992,7 +992,7 @@ export default function MinutesPage() {
       {viewNote && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-3xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="font-bold text-[15px] flex items-center gap-2">
                 {isEditingNote ? '📝 안건 내용 수정' : `📄 상세 기록 조회`}
                 {viewNote.is_secret && !isEditingNote && <span className="text-amber-300 ml-1 text-xs">🔒 비밀 회의록</span>}
@@ -1009,7 +1009,7 @@ export default function MinutesPage() {
                       type="text" 
                       value={editNoteTitle} 
                       onChange={e => setEditNoteTitle(e.target.value)} 
-                      className="w-full text-[13px] font-black text-slate-800 border border-slate-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:border-[#002864]" 
+                      className="w-full text-[13px] font-bold text-slate-800 border border-slate-300 rounded-lg p-2.5 mb-3 focus:outline-none focus:border-brand" 
                     />
                     <label className="text-[11px] font-bold text-slate-500 mb-1">상세 내용 수정</label>
                     <div className="flex-1 border border-slate-200 rounded-lg overflow-hidden shadow-inner min-h-[300px]">
@@ -1019,23 +1019,23 @@ export default function MinutesPage() {
                 ) : (
                   <>
                     {viewNote.isExternal && (
-                      <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-[10px] px-2 py-1 rounded font-black border border-purple-200">
+                      <div className="absolute top-4 right-4 bg-purple-100 text-purple-700 text-[10px] px-2 py-1 rounded font-bold border border-purple-200">
                         🔄 구글 캘린더에서 등록됨
                       </div>
                     )}
                     <div className="mb-4 pb-3 border-b border-slate-200">
                       <div className="flex justify-between items-start mb-2 print:hidden">
-                        <span className="px-2 py-0.5 bg-slate-100 text-[#002864] border-slate-200 text-[10px] font-black rounded border">{viewNote.type}</span>
+                        <span className="px-2 py-0.5 bg-slate-100 text-brand border-slate-200 text-[10px] font-bold rounded border">{viewNote.type}</span>
                         <span className="text-[11px] font-bold text-slate-400">
                           {viewNote.isExternal && viewNote.isMultiDay 
                             ? `일정: ${new Date(viewNote.meeting_date).toLocaleDateString('ko-KR')} ~ ${new Date(viewNote.end_date).toLocaleDateString('ko-KR')}`
                             : (viewNote.meeting_date ? `일정: ${new Date(viewNote.meeting_date).toLocaleString('ko-KR')}` : `등록일: ${new Date(viewNote.created_at).toLocaleString('ko-KR')}`)}
                         </span>
                       </div>
-                      <h1 className="text-lg font-black text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
+                      <h1 className="text-lg font-bold text-slate-800 leading-snug mb-2">{viewNote.title}</h1>
                       
                       {viewNote.attendees && (
-                        <div className="participants bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 text-[12px] font-bold text-[#002864] mb-2">
+                        <div className="participants bg-blue-50/50 p-2.5 rounded-lg border border-blue-100 text-[12px] font-bold text-brand mb-2">
                           👥 참석자: {viewNote.attendees}
                         </div>
                       )}
@@ -1052,7 +1052,7 @@ export default function MinutesPage() {
                   <span className="text-[11px] text-slate-500 font-bold">내용을 수정 중입니다...</span>
                   <div className="flex gap-2">
                     <button onClick={() => setIsEditingNote(false)} className="px-4 py-2 bg-slate-100 text-slate-600 font-bold text-[12px] rounded-lg hover:bg-slate-200 transition-colors">수정 취소</button>
-                    <button onClick={saveEditedNote} className="px-5 py-2 bg-[#002864] text-white font-bold text-[12px] rounded-lg hover:bg-blue-900 transition-colors shadow-sm">변경사항 저장</button>
+                    <button onClick={saveEditedNote} className="px-5 py-2 bg-brand text-white font-bold text-[12px] rounded-lg hover:bg-blue-900 transition-colors shadow-sm">변경사항 저장</button>
                   </div>
                 </>
               ) : (
@@ -1080,7 +1080,7 @@ export default function MinutesPage() {
                         <span>✏️</span> 상세 편집
                       </button>
                     )}
-                    <button onClick={handlePrint} className="px-4 py-2 bg-blue-50 text-[#002864] font-bold text-[12px] rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1.5 border border-blue-200">
+                    <button onClick={handlePrint} className="px-4 py-2 bg-blue-50 text-brand font-bold text-[12px] rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1.5 border border-blue-200">
                       <span>🖨️</span> 인쇄하기
                     </button>
                     <button onClick={() => setViewNote(null)} className="px-5 py-2 bg-slate-800 text-white font-bold text-[12px] rounded-lg hover:bg-slate-900 transition-colors shadow-sm">닫기</button>

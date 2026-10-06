@@ -2,6 +2,7 @@
 "use client";
 
 import React from "react";
+import LearningRow, { statusToneOf } from "./LearningRow";
 
 const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
@@ -78,14 +79,14 @@ export default function GlobalList({
       <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2">
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-[14px] font-extrabold text-slate-800 flex items-center gap-1.5">
+            <h2 className="text-[14px] font-bold text-slate-800 flex items-center gap-1.5">
               {currentView.type === 'CLASS' ? (
-                <span className="text-[#002864]">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : activeTab === 'RAW_INCORRECT' ? '누적 원본 오답 목록' : activeTab === 'ARCHIVE' ? '해결된 오답 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-brand">📌 [{currentView.className}] 반 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : activeTab === 'RAW_INCORRECT' ? '누적 원본 오답 목록' : activeTab === 'ARCHIVE' ? '해결된 오답 목록' : '미완료 과제 목록'}</span> 
               ) : (
-                <span className="text-[#002864]">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : activeTab === 'RAW_INCORRECT' ? '누적 원본 오답 목록' : activeTab === 'ARCHIVE' ? '해결된 오답 목록' : '미완료 과제 목록'}</span> 
+                <span className="text-brand">🌐 학원 전체 {activeTab === 'EXAM' ? '주간/중간테스트 목록' : activeTab === 'QUARTERLY' ? '분기평가 목록' : activeTab === 'HOMEWORK' ? '과제 목록' : activeTab === 'INCORRECT' ? '오답 목록' : activeTab === 'SIMILAR' ? '오답유사 목록' : activeTab === 'RAW_INCORRECT' ? '누적 원본 오답 목록' : activeTab === 'ARCHIVE' ? '해결된 오답 목록' : '미완료 과제 목록'}</span> 
               )}
             </h2>
-            <p className="text-[11px] font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
+            <p className="text-xs font-bold text-slate-500 mt-0.5">배부된 전체 목록을 최신순으로 확인하고 수정합니다.</p>
           </div>
         </div>
 
@@ -96,18 +97,18 @@ export default function GlobalList({
           </label>
           <div className="flex items-center gap-1.5">
             {activeTab === 'HOMEWORK' && globalSelectedBlocks.length >= 2 && (
-              <button onClick={handleExtractCommonHomework} className="px-3 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-[11px] transition-colors whitespace-nowrap shadow-sm mr-2 animate-pulse">
+              <button onClick={handleExtractCommonHomework} className="px-3 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-xs transition-colors whitespace-nowrap shadow-sm mr-2 animate-pulse">
                 🔗 공통 과제 분리
               </button>
             )}
-            <button onClick={handleBulkCompleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap">
+            <button onClick={handleBulkCompleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap">
               ✅ 선택 완료처리 ({globalSelectedBlocks.length})
             </button>
-            <button onClick={handleBulkDeleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap">
+            <button onClick={handleBulkDeleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap">
               🗑️ 선택 삭제 ({globalSelectedBlocks.length})
             </button>
             
-            <button onClick={handleBulkPrint} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[11px] transition-colors disabled:opacity-40 whitespace-nowrap shadow-sm">
+            <button onClick={handleBulkPrint} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap shadow-sm">
               🖨️ 선택 한 장에 모아 출력 ({globalSelectedBlocks.length})
             </button>
           </div>
@@ -160,7 +161,7 @@ export default function GlobalList({
                 ? 'border-rose-400 bg-rose-50/30 shadow-rose-100' 
                 : isCompleted 
                   ? 'bg-slate-200/60 border-slate-300 text-slate-600 hover:bg-slate-200/80' 
-                  : 'bg-white border-slate-200 hover:border-[#002864]';
+                  : 'bg-white border-slate-200 hover:border-brand';
 
               const eType = m?.exam_type || '';
               let detailHref = '';
@@ -178,89 +179,48 @@ export default function GlobalList({
               let inferredType = res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue');
               const rId = inferredType === 'hw' ? hw.homework_id : res.assignment_id;
 
+              // 종류 배지: 같은 탭 안에서 종류가 섞일 때만 표시 (과제 탭, 원본오답·보존됨)
+              const showType = activeTab === 'HOMEWORK' || res.type === 'archive' || res.type === 'raw_inc';
+              const typeText = res.type === 'archive' ? '보존됨' : res.type === 'raw_inc' ? '원본오답' : res.is_exam_hw ? '문제지 과제' : '교재 과제';
+              const typeCls = res.type === 'archive' ? 'bg-slate-200 text-slate-700 border-slate-300' : res.type === 'raw_inc' ? 'bg-rose-100 text-rose-700 border-rose-200' : res.is_exam_hw ? 'bg-sky-100 text-sky-700 border-sky-200' : 'bg-amber-100 text-amber-700 border-amber-200';
+              const isRawLike = res.type === 'raw_inc' || res.type === 'archive';
+              const isPlainHw = activeTab === 'HOMEWORK' && !res.is_exam_hw;
+              const completeKind = isPlainHw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam';
+              const printKind = isRawLike ? 'raw_inc' : res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : isPlainHw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue');
+
               return (
-                <div key={`${itemId}_${idx}`} onClick={() => toggleGlobalSelection(itemId)} className={`border-[1.5px] rounded-xl p-2 flex items-center justify-between gap-3 transition-all cursor-pointer shadow-sm ${rowBgClass}`}>
-                  <div className="flex items-center gap-2 min-w-0 flex-1">
-                    <input type="checkbox" checked={isSelected} readOnly className="w-4 h-4 accent-rose-500 pointer-events-none shrink-0" />
-                    <div className="shrink-0 text-[10px] font-bold text-slate-400 leading-none">
-                      {formatDateLabel(createdDate, true)}
-                    </div>
-                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-extrabold border shrink-0 leading-none whitespace-nowrap ${typeColor}`}>{typeBadge}</span>
-                    <span className="bg-[#002864] text-white text-[9px] px-1.5 py-0.5 rounded font-bold shrink-0 leading-none">{className}</span>
-                    <span className="text-[11px] font-bold text-slate-700 shrink-0 truncate max-w-[60px] leading-none pt-[1px]">{studentName}</span>
-                    <div className="flex-1 font-extrabold text-[12px] text-slate-700 truncate leading-none pt-[1px]" title={titleStr}>{titleStr}</div>
-                  </div>
-
-                  <div className="flex items-center gap-2 shrink-0 justify-end ml-2">
-                    <div className="text-[10px] font-bold text-slate-500 whitespace-nowrap">총 {totalQ || 0}문항</div>
-                    
-                    <div className="flex items-center gap-1">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm leading-none">✅ {finalOCount}</span>
-                      <span className="text-[10px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm leading-none">❌ {finalXCount}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-1.5 ml-1">
-                      <button onClick={(e) => handleForceComplete(e, activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam', activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw.homework_id : res.assignment_id, res.student_id)} className="text-[9px] font-bold text-slate-600 hover:text-emerald-600 bg-white border border-slate-200 px-1.5 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0 transition-colors">
-                        ✅ 완료처리
-                      </button>
-                      <span className={`w-[44px] text-center px-1 py-0.5 rounded text-[9px] font-extrabold whitespace-nowrap shrink-0 leading-none ${statusBadge}`}>{statusStr}</span>
-                    </div>
-                    
-                    <div className="flex items-center gap-1.5 shrink-0 border-l border-slate-200 pl-2.5 ml-1">
-                      {res.type === 'raw_inc' && (
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); openRawIncManageModal(res.student_id, studentName, res.realId); }} 
-                          className="text-[13px] hover:text-rose-600 transition-colors" 
-                          title="이 덩어리 안의 개별 문항 확인 및 삭제"
-                        >
-                          ✂️
-                        </button>
-                      )}
-
-                      <button 
-                        onClick={(e) => handleRenameItem(e, inferredType, rId, m?.exam_id, titleStr)} 
-                        className="text-[12px] hover:text-amber-500 transition-colors" 
-                        title="이름 변경"
-                      >
-                        🏷️
-                      </button>
-
-                      {(res.type === 'raw_inc' || res.type === 'archive') ? (
-                        <button onClick={(e) => handleEditRawIncorrectToStep2?.(e, res.target_questions, titleStr, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors" title="맞춤 오답 다시 출제하기">✏️</button>
-                      ) : !(activeTab === 'HOMEWORK' && !res.is_exam_hw) ? (
-                        <button onClick={(e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type)} className="text-[12px] hover:text-blue-600 transition-colors" title="문제 수정">✏️</button>
-                      ) : (
-                        <button onClick={(e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id)} className="text-[12px] hover:text-blue-600 transition-colors" title="과제 문항 수정">✏️</button>
-                      )}
-                      
-                      <button onClick={(e) => { e.stopPropagation(); activeTab === 'HOMEWORK' && !res.is_exam_hw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); }} className="text-[12px] hover:text-rose-500 transition-colors" title="삭제">🗑️</button>
-                      
-                      <button 
-                        onClick={(e) => handlePrintItem(e, res.type === 'raw_inc' || res.type === 'archive' ? 'raw_inc' : res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !res.is_exam_hw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue'), res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle)} 
-                        className="text-[13px] hover:text-emerald-600 transition-colors" 
-                        title="전체 문제 눈으로 확인하기 / 단일 출력"
-                      >
-                        🖨️
-                      </button>
-
-                      {(inferredType === 'raw_inc' || inferredType === 'archive' || res.type === 'raw_inc' || res.type === 'archive') ? (
-                        <button onClick={(e) => { 
-                            e.stopPropagation(); 
-                            handlePrintItem(e, 'raw_inc', null, res.target_questions || hw.target_questions, titleStr, res.subTitle);
-                          }} 
-                          className="text-[9px] font-bold text-white bg-rose-600 hover:bg-rose-700 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 whitespace-nowrap"
-                        >문제 보기 ➔</button>
-                      ) : (
-                        <button onClick={(e) => { 
-                            e.stopPropagation(); 
-                            window.location.href = detailHref; 
-                          }} 
-                          className="text-[9px] font-bold text-white bg-[#002864] hover:bg-blue-900 px-1.5 py-1 rounded transition-colors shadow-sm ml-0.5 whitespace-nowrap"
-                        >상세 ➔</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                <LearningRow
+                  key={`${itemId}_${idx}`}
+                  selected={isSelected}
+                  completed={isCompleted}
+                  onToggle={() => toggleGlobalSelection(itemId)}
+                  leadName={studentName}
+                  title={titleStr}
+                  typeLabel={showType ? typeText : undefined}
+                  typeClass={typeCls}
+                  classCode={className}
+                  date={createdDate}
+                  totalQ={totalQ || 0}
+                  oCount={finalOCount}
+                  xCount={finalXCount}
+                  status={statusStr}
+                  statusTone={statusToneOf(statusStr, isCompleted, activeTab === 'OVERDUE')}
+                  onComplete={(e) => handleForceComplete(e, completeKind, isPlainHw ? hw.homework_id : res.assignment_id, res.student_id)}
+                  primary={isRawLike
+                    ? { label: '문제 보기', tone: 'danger', onClick: (e) => handlePrintItem(e, 'raw_inc', null, res.target_questions || hw.target_questions, titleStr, res.subTitle) }
+                    : { label: '상세', onClick: () => { window.location.href = detailHref; } }}
+                  menu={[
+                    { label: '문항 확인 및 개별 삭제', hidden: res.type !== 'raw_inc', onClick: () => openRawIncManageModal(res.student_id, studentName, res.realId) },
+                    { label: '이름 변경', onClick: (e) => handleRenameItem(e, inferredType, rId, m?.exam_id, titleStr) },
+                    isRawLike
+                      ? { label: '맞춤 오답 다시 출제', onClick: (e) => handleEditRawIncorrectToStep2?.(e, res.target_questions, titleStr, studentName, res.student_id, res.class_id) }
+                      : !isPlainHw
+                        ? { label: '문제 수정', onClick: (e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type) }
+                        : { label: '과제 문항 수정', onClick: (e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id) },
+                    { label: '문제 보기 및 출력', onClick: (e) => handlePrintItem(e, printKind, res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle) },
+                    { label: '삭제', danger: true, onClick: () => { isPlainHw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); } },
+                  ]}
+                />
               );
             })}
           </div>

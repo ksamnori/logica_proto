@@ -517,7 +517,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     <>
       <div className="mb-6">
         <div className="px-4 sm:px-6 py-4 border-b border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sm:gap-0 bg-white rounded-t-2xl border shadow-sm relative z-10">
-          <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+          <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
             <span>📡</span> 실시간 동선
             
             <div className="relative ml-2 font-normal">
@@ -542,19 +542,19 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                 checked={hideTestStudents}
                 onChange={(e) => setHideTestStudents(e.target.checked)}
               />
-              <span className="text-[11px] font-black text-slate-700 select-none flex items-center gap-1">🚫 테스트 제외</span>
+              <span className="text-xs font-bold text-slate-700 select-none flex items-center gap-1">🚫 테스트 제외</span>
             </label>
 
             <div className="bg-slate-100 p-1 rounded-lg flex items-center shadow-inner shrink-0">
               <button 
                 onClick={() => handleViewModeChange('card')} 
-                className={`px-3 py-1.5 text-[11px] font-bold rounded-md transition-colors ${viewMode === 'card' ? 'bg-white text-indigo-600 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-600'}`}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${viewMode === 'card' ? 'bg-white text-indigo-600 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 🗃️ 카드
               </button>
               <button 
                 onClick={() => handleViewModeChange('list')} 
-                className={`px-3 py-1.5 text-[11px] font-bold rounded-md transition-colors ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-600'}`}
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition-colors ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm border border-slate-200/50' : 'text-slate-400 hover:text-slate-600'}`}
               >
                 🗂️ 리스트
               </button>
@@ -578,38 +578,38 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           <div className="w-full lg:w-[200px] bg-slate-50 border-r border-slate-200 flex flex-col shrink-0">
             <div className="p-4 flex flex-col gap-3">
               <div>
-                <span className="text-[11px] font-bold text-slate-500 mb-2 block">
+                <span className="text-xs font-bold text-slate-500 mb-2 block">
                   {selectedAttClassId === 'all' ? '학원 전체 동선 요약' : '반별 동선 요약'}
                 </span>
                 
                 <div className="flex flex-col gap-1.5">
                   <button onClick={() => handleStatusFilterChange(null)} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === null ? 'border-slate-800 ring-1 ring-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-300'}`}>
-                    <span className="text-[11px] font-bold text-slate-700">🌐 전체 보기</span>
-                    <span className="text-sm font-black text-slate-800">{flowSummary.total}명</span>
+                    <span className="text-xs font-bold text-slate-700">🌐 전체 보기</span>
+                    <span className="text-sm font-bold text-slate-800">{flowSummary.total}명</span>
                   </button>
                   <button onClick={() => handleStatusFilterChange('inClass')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'inClass' ? 'border-blue-500 ring-1 ring-blue-500 bg-blue-50' : 'border-slate-200 hover:border-blue-300'}`}>
-                    <span className="text-[11px] font-bold text-slate-500">🏫 원내 체류</span>
-                    <span className="text-sm font-black text-blue-600">{flowSummary.inClass}명</span>
+                    <span className="text-xs font-bold text-slate-500">🏫 원내 체류</span>
+                    <span className="text-sm font-bold text-blue-600">{flowSummary.inClass}명</span>
                   </button>
                   <button onClick={() => handleStatusFilterChange('inClinic')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'inClinic' ? 'border-purple-500 ring-1 ring-purple-500 bg-purple-50' : 'border-slate-200 hover:border-purple-300'}`}>
-                    <span className="text-[11px] font-bold text-slate-500">✍️ 클리닉중</span>
-                    <span className="text-sm font-black text-purple-600">{flowSummary.inClinic}명</span>
+                    <span className="text-xs font-bold text-slate-500">✍️ 클리닉중</span>
+                    <span className="text-sm font-bold text-purple-600">{flowSummary.inClinic}명</span>
                   </button>
                   <button onClick={() => handleStatusFilterChange('goneHome')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'goneHome' ? 'border-emerald-500 ring-1 ring-emerald-500 bg-emerald-50' : 'border-slate-200 hover:border-emerald-300'}`}>
-                    <span className="text-[11px] font-bold text-slate-500">👋 하원 완료</span>
-                    <span className="text-sm font-black text-emerald-600">{flowSummary.goneHome}명</span>
+                    <span className="text-xs font-bold text-slate-500">👋 하원 완료</span>
+                    <span className="text-sm font-bold text-emerald-600">{flowSummary.goneHome}명</span>
                   </button>
                   <button onClick={() => handleStatusFilterChange('notArrived')} className={`flex justify-between items-center w-full text-left bg-white border rounded-lg p-2 shadow-sm transition-all ${statusFilter === 'notArrived' ? 'border-slate-400 ring-1 ring-slate-400 bg-slate-100' : 'border-slate-200 hover:border-slate-300'}`}>
-                    <span className="text-[11px] font-bold text-slate-500">❓ 미등원 (결석)</span>
-                    <span className="text-sm font-black text-slate-500">{flowSummary.notArrived + flowSummary.absent}명</span>
+                    <span className="text-xs font-bold text-slate-500">❓ 미등원 (결석)</span>
+                    <span className="text-sm font-bold text-slate-500">{flowSummary.notArrived + flowSummary.absent}명</span>
                   </button>
                 </div>
 
               </div>
               
               <div className="flex flex-col gap-1.5 pt-2 border-t border-slate-200">
-                <span className="text-[11px] font-bold text-slate-500 mb-0.5">일괄 출결 처리</span>
-                <button onClick={bulkAttend} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-[#002864] hover:bg-blue-900 text-white py-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+                <span className="text-xs font-bold text-slate-500 mb-0.5">일괄 출결 처리</span>
+                <button onClick={bulkAttend} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-brand hover:bg-blue-900 text-white py-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
                   일괄 등원 처리 (카톡)
                 </button>
                 <button onClick={bulkGoHome} disabled={!selectedAttClassId} className="w-full text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
@@ -633,22 +633,22 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                     <table className="w-full text-left border-collapse table-auto">
                       <thead>
                         <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">이름</th>
-                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">상태</th>
-                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[60px] text-center">날짜(요일)</th>
-                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[40px] text-center">등원</th>
-                          <th className="py-2.5 px-1 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider min-w-[40px] text-center">하원</th>
-                          <th className="py-2.5 px-2 text-[10px] font-extrabold text-slate-500 uppercase tracking-wider text-left pl-3 w-full">출결 관리</th>
+                          <th className="py-2.5 px-2 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">이름</th>
+                          <th className="py-2.5 px-1 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[50px] text-center">상태</th>
+                          <th className="py-2.5 px-1 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[60px] text-center">날짜(요일)</th>
+                          <th className="py-2.5 px-1 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[40px] text-center">등원</th>
+                          <th className="py-2.5 px-1 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[40px] text-center">하원</th>
+                          <th className="py-2.5 px-2 text-xs font-bold text-slate-500 uppercase tracking-wider text-left pl-3 w-full">출결 관리</th>
                         </tr>
                       </thead>
                       <tbody>
                         {filteredDisplayGroups.map(({ cName, cInstructor, students, totalCount }) => (
                           <React.Fragment key={cName}>
                             <tr className="bg-slate-100/60 border-b border-slate-200">
-                              <td colSpan={6} className="py-1.5 px-3 text-[11px] font-black text-indigo-700">
+                              <td colSpan={6} className="py-1.5 px-3 text-xs font-bold text-indigo-700">
                                 <span className="w-1.5 h-3 bg-indigo-500 inline-block align-middle mr-1.5 rounded-full"></span>
                                 {cName} 
-                                {cName !== '미배정' && <span className="text-indigo-400 font-bold text-[9px] ml-1">({cInstructor})</span>}
+                                {cName !== '미배정' && <span className="text-indigo-400 font-bold text-xs ml-1">({cInstructor})</span>}
                                 <span className="text-slate-400 font-bold ml-1">
                                   (반 전체 {totalCount}명 {(statusFilter || searchQuery) && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>})
                                 </span>
@@ -669,35 +669,35 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                               return (
                                 <tr key={student.id} className={`border-b border-slate-100 last:border-0 hover:bg-indigo-50/40 transition-colors ${isNotArrived ? 'opacity-80 grayscale-[0.3]' : ''}`}>
                                   <td className="py-1.5 px-2 text-center">
-                                    <span className={`text-[11px] font-extrabold truncate block max-w-[60px] mx-auto ${isNotArrived ? 'text-slate-500' : 'text-slate-800'}`} title={student.name}>
+                                    <span className={`text-xs font-bold truncate block max-w-[60px] mx-auto ${isNotArrived ? 'text-slate-500' : 'text-slate-800'}`} title={student.name}>
                                       {student.name}
                                     </span>
                                   </td>
                                   <td className="py-1.5 px-1 text-center">
-                                    <span className={`px-1.5 py-0.5 rounded text-[9px] font-black border ${flowColor} whitespace-nowrap`}>
+                                    <span className={`px-1.5 py-0.5 rounded text-xs font-bold border ${flowColor} whitespace-nowrap`}>
                                       {flowIcon} {flowText}
                                     </span>
                                   </td>
-                                  <td className="py-1.5 px-1 text-center text-[10px] font-bold text-slate-500 whitespace-nowrap">
+                                  <td className="py-1.5 px-1 text-center text-xs font-bold text-slate-500 whitespace-nowrap">
                                     {dateAndDayStr}
                                   </td>
-                                  <td className="py-1.5 px-1 text-center text-[10px] font-bold text-blue-700">{timeInStr}</td>
-                                  <td className="py-1.5 px-1 text-center text-[10px] font-bold text-emerald-700">{timeOutStr}</td>
+                                  <td className="py-1.5 px-1 text-center text-xs font-bold text-blue-700">{timeInStr}</td>
+                                  <td className="py-1.5 px-1 text-center text-xs font-bold text-emerald-700">{timeOutStr}</td>
                                   <td className="py-1.5 px-2 text-left pl-3">
                                     <div className="flex items-center justify-start gap-1 flex-nowrap whitespace-nowrap">
-                                      <button onClick={() => handleAttAction(student, 'PRESENT')} className="px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-[9px] transition-colors border border-blue-100 whitespace-nowrap">등원</button>
-                                      <button onClick={() => handleAttAction(student, 'LATE')} className="px-1.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded text-[9px] transition-colors border border-amber-100 whitespace-nowrap">지각</button>
-                                      <button onClick={() => handleAttAction(student, 'CLINIC')} className="px-1.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded text-[9px] transition-colors border border-purple-100 whitespace-nowrap">클리닉</button>
-                                      <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className="px-1.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded text-[9px] transition-colors border border-indigo-100 whitespace-nowrap">조퇴</button>
-                                      <button onClick={() => handleAttAction(student, 'GO_HOME')} className="px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded text-[9px] transition-colors border border-emerald-100 whitespace-nowrap">하원</button>
-                                      <button onClick={() => handleAttAction(student, 'ABSENT')} className="px-1.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded text-[9px] transition-colors border border-rose-100 whitespace-nowrap">결석</button>
+                                      <button onClick={() => handleAttAction(student, 'PRESENT')} className="px-1.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded text-xs transition-colors border border-blue-100 whitespace-nowrap">등원</button>
+                                      <button onClick={() => handleAttAction(student, 'LATE')} className="px-1.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 font-bold rounded text-xs transition-colors border border-amber-100 whitespace-nowrap">지각</button>
+                                      <button onClick={() => handleAttAction(student, 'CLINIC')} className="px-1.5 py-1 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded text-xs transition-colors border border-purple-100 whitespace-nowrap">클리닉</button>
+                                      <button onClick={() => handleAttAction(student, 'EARLY_LEAVE')} className="px-1.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-bold rounded text-xs transition-colors border border-indigo-100 whitespace-nowrap">조퇴</button>
+                                      <button onClick={() => handleAttAction(student, 'GO_HOME')} className="px-1.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded text-xs transition-colors border border-emerald-100 whitespace-nowrap">하원</button>
+                                      <button onClick={() => handleAttAction(student, 'ABSENT')} className="px-1.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 font-bold rounded text-xs transition-colors border border-rose-100 whitespace-nowrap">결석</button>
                                       
                                       <div className="w-[1px] h-3 bg-slate-200 mx-0.5 shrink-0"></div>
                                       
-                                      <button onClick={() => openManualModal(student)} className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 border border-slate-200 font-bold rounded text-[9px] transition-colors" title="수동 설정">
+                                      <button onClick={() => openManualModal(student)} className="px-1.5 py-1 text-slate-500 hover:bg-slate-100 border border-slate-200 font-bold rounded text-xs transition-colors" title="수동 설정">
                                         ⚙️수동
                                       </button>
-                                      <button onClick={() => handleAttAction(student, 'DELETE')} className="px-1.5 py-1 text-rose-500 hover:bg-rose-50 border border-rose-200 font-bold rounded text-[9px] transition-colors" title="기록 삭제">
+                                      <button onClick={() => handleAttAction(student, 'DELETE')} className="px-1.5 py-1 text-rose-500 hover:bg-rose-50 border border-rose-200 font-bold rounded text-xs transition-colors" title="기록 삭제">
                                         🗑️삭제
                                       </button>
                                     </div>
@@ -714,10 +714,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                   <div className="flex flex-col gap-4">
                     {filteredDisplayGroups.map(({ cName, cInstructor, students, totalCount }) => (
                       <div key={cName}>
-                        <h4 className="text-xs font-extrabold text-slate-700 mb-2 flex items-center gap-1.5 pl-1">
+                        <h4 className="text-xs font-bold text-slate-700 mb-2 flex items-center gap-1.5 pl-1">
                           <span className="w-1.5 h-3 bg-indigo-500 rounded-full"></span>
                           {cName} 
-                          <span className="text-[10px] font-bold text-slate-400 ml-1">
+                          <span className="text-xs font-bold text-slate-400 ml-1">
                             반 전체 {totalCount}명 {(statusFilter || searchQuery) && <span className="text-indigo-500 bg-indigo-50 px-1 rounded ml-1">필터됨 {students.length}명</span>}
                           </span>
                         </h4>
@@ -744,13 +744,13 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                               <div key={student.id} className={`p-2 rounded-xl border flex flex-col justify-between transition-all relative gap-1.5 ${cardBgClass} ${isMenuOpen ? 'z-50 shadow-md ring-2 ring-indigo-200' : 'z-10 shadow-sm'}`}>
                                 <div className="flex justify-between items-start w-full min-w-0">
                                   <div className="flex flex-col gap-0.5 min-w-0 flex-1 pr-1">
-                                    <span className="font-extrabold text-slate-800 text-[12px] truncate w-full leading-tight">{student.name}</span>
+                                    <span className="font-bold text-slate-800 text-[12px] truncate w-full leading-tight">{student.name}</span>
                                     
                                     <div className="flex items-center justify-between w-full mt-0.5">
-                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-black border ${flowColor} whitespace-nowrap shrink-0`}>
+                                      <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold border ${flowColor} whitespace-nowrap shrink-0`}>
                                         {flowIcon} {flowText}
                                       </span>
-                                      <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap shrink-0 pl-1">
+                                      <span className="text-xs font-bold text-slate-400 whitespace-nowrap shrink-0 pl-1">
                                         {!timeInStr && !timeOutStr ? '기록 없음' : (
                                           <>
                                             {timeInStr && <span className="text-blue-600">{timeInStr}</span>}
@@ -769,21 +769,21 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
                                     
                                     {isMenuOpen && (
                                       <div className="absolute right-0 top-5 w-28 bg-white shadow-2xl rounded-xl border border-slate-200 z-[9999] py-1 text-left">
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'LATE'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-amber-600 hover:bg-slate-50 flex items-center gap-1.5">⏰ 지각 처리</button>
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'EARLY_LEAVE'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-indigo-600 hover:bg-slate-50 flex items-center gap-1.5">🏃 조퇴 처리</button>
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'ABSENT'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-rose-600 hover:bg-slate-50 flex items-center gap-1.5">❌ 결석 처리</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'LATE'); }} className="w-full text-left px-3 py-1.5 text-xs font-bold text-amber-600 hover:bg-slate-50 flex items-center gap-1.5">⏰ 지각 처리</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'EARLY_LEAVE'); }} className="w-full text-left px-3 py-1.5 text-xs font-bold text-indigo-600 hover:bg-slate-50 flex items-center gap-1.5">🏃 조퇴 처리</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'ABSENT'); }} className="w-full text-left px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-slate-50 flex items-center gap-1.5">❌ 결석 처리</button>
                                         <hr className="border-slate-100 my-0.5" />
-                                        <button onClick={() => openManualModal(student)} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">⚙️ 수동 설정</button>
-                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-3 py-1.5 text-[10px] font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-1.5">🗑️ 기록 삭제</button>
+                                        <button onClick={() => openManualModal(student)} className="w-full text-left px-3 py-1.5 text-xs font-bold text-slate-700 hover:bg-slate-50 flex items-center gap-1.5">⚙️ 수동 설정</button>
+                                        <button onClick={() => { setActiveAttMenu(null); handleAttAction(student, 'DELETE'); }} className="w-full text-left px-3 py-1.5 text-xs font-bold text-rose-500 hover:bg-slate-50 flex items-center gap-1.5">🗑️ 기록 삭제</button>
                                       </div>
                                     )}
                                   </div>
                                 </div>
 
                                 <div className="flex gap-1 mt-1 pt-1.5 border-t border-slate-100">
-                                  <button onClick={() => handleAttAction(student, 'PRESENT')} className="flex-1 py-1 flex items-center justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-md text-[9px] tracking-tighter whitespace-nowrap transition-colors border border-blue-100">등원</button>
-                                  <button onClick={() => handleAttAction(student, 'CLINIC')} className="flex-1 py-1 flex items-center justify-center bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-md text-[9px] tracking-tighter whitespace-nowrap transition-colors border border-purple-100">클리닉</button>
-                                  <button onClick={() => handleAttAction(student, 'GO_HOME')} className="flex-1 py-1 flex items-center justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-md text-[9px] tracking-tighter whitespace-nowrap transition-colors border border-emerald-100">하원</button>
+                                  <button onClick={() => handleAttAction(student, 'PRESENT')} className="flex-1 py-1 flex items-center justify-center bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-md text-xs tracking-tighter whitespace-nowrap transition-colors border border-blue-100">등원</button>
+                                  <button onClick={() => handleAttAction(student, 'CLINIC')} className="flex-1 py-1 flex items-center justify-center bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold rounded-md text-xs tracking-tighter whitespace-nowrap transition-colors border border-purple-100">클리닉</button>
+                                  <button onClick={() => handleAttAction(student, 'GO_HOME')} className="flex-1 py-1 flex items-center justify-center bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-md text-xs tracking-tighter whitespace-nowrap transition-colors border border-emerald-100">하원</button>
                                 </div>
                               </div>
                             );
@@ -803,11 +803,11 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       {manualModalData && (
         <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/50 backdrop-blur-sm px-4">
           <div className="bg-white p-6 rounded-2xl w-full max-w-sm shadow-2xl">
-            <h3 className="text-lg font-black text-slate-800 mb-5 border-b border-slate-100 pb-3 flex items-center gap-2">⚙️ 수동 상태 설정 <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded ml-auto">{manualModalData.name}</span></h3>
+            <h3 className="text-lg font-bold text-slate-800 mb-5 border-b border-slate-100 pb-3 flex items-center gap-2">⚙️ 수동 상태 설정 <span className="text-sm font-bold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded ml-auto">{manualModalData.name}</span></h3>
             
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-extrabold text-slate-500 mb-1.5">위치 / 상태</label>
+                <label className="block text-xs font-bold text-slate-500 mb-1.5">위치 / 상태</label>
                 <select value={manualForm.status} onChange={e => setManualForm({...manualForm, status: e.target.value})} className="border border-slate-300 p-2.5 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500 bg-slate-50">
                   <option value="등원">🏫 원내체류 (등원)</option>
                   <option value="클리닉중">✍️ 클리닉중</option>
@@ -821,14 +821,14 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
               {manualForm.status !== "NONE" && manualForm.status !== "결석" && (
                 <div>
-                  <label className="block text-xs font-extrabold text-slate-500 mb-1.5">등원 시간</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">등원 시간</label>
                   <input type="time" value={manualForm.checkIn} onChange={e => setManualForm({...manualForm, checkIn: e.target.value})} className="border border-slate-300 p-2 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500" />
                 </div>
               )}
 
               {manualForm.status !== "NONE" && manualForm.status !== "결석" && (
                 <div>
-                  <label className="block text-xs font-extrabold text-slate-500 mb-1.5">종료/하원 시간</label>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">종료/하원 시간</label>
                   <input type="time" value={manualForm.checkOut} onChange={e => setManualForm({...manualForm, checkOut: e.target.value})} className="border border-slate-300 p-2 w-full rounded-xl text-sm font-bold text-slate-700 focus:outline-none focus:border-indigo-500" />
                 </div>
               )}

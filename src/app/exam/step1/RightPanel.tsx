@@ -56,7 +56,7 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
 
   return (
     <div className="flex-1 overflow-y-auto p-8 pb-32 custom-scrollbar">
-      <h2 className="font-extrabold text-2xl text-slate-800 mb-6 flex items-center justify-between">
+      <h2 className="font-bold text-2xl text-slate-800 mb-6 flex items-center justify-between">
         <span>🎯 출제 조건 설정</span>
         {isSettingsDisabled && <span className="text-sm bg-rose-100 text-rose-600 px-3 py-1 rounded-lg">테스트 전용 자동 설정 모드</span>}
       </h2>
@@ -70,16 +70,16 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
           <div className="flex items-center justify-between mb-5">
             <div className="flex space-x-2">
               {qCountOptions.map(num => (
-                <button key={num} onClick={() => setQCount(num)} className={`w-16 py-2 rounded-lg font-bold border-2 transition-all ${qCount === num ? 'border-[#002864] text-[#002864] bg-blue-50' : 'border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{num}</button>
+                <button key={num} onClick={() => setQCount(num)} className={`w-16 py-2 rounded-lg font-bold border-2 transition-all ${qCount === num ? 'border-brand text-brand bg-blue-50' : 'border-transparent bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>{num}</button>
               ))}
             </div>
             <div className="flex items-center space-x-2">
-              <input type="number" min="1" max="150" value={qCount} onChange={(e) => setQCount(Number(e.target.value))} className="w-20 px-3 py-2 rounded-lg text-[#002864] font-extrabold text-center border border-slate-300 outline-none focus:border-[#002864]" />
+              <input type="number" min="1" max="150" value={qCount} onChange={(e) => setQCount(Number(e.target.value))} className="w-20 px-3 py-2 rounded-lg text-brand font-bold text-center border border-slate-300 outline-none focus:border-brand" />
               <span className="text-slate-500 font-bold text-sm">문제</span>
             </div>
           </div>
           <div className="relative pt-2">
-            <input type="range" min="1" max="150" value={qCount} onChange={(e) => setQCount(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-[#002864]" />
+            <input type="range" min="1" max="150" value={qCount} onChange={(e) => setQCount(Number(e.target.value))} className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-brand" />
             <div className="flex justify-between text-xs text-slate-400 mt-2 font-bold"><span>1</span><span>150</span></div>
           </div>
         </div>
@@ -95,15 +95,15 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
           </div>
 
           <div className="relative w-full h-12 bg-slate-100 rounded-lg flex select-none mb-3 shadow-inner" ref={diffTrackRef}>
-            <div className="bg-slate-200 rounded-l-lg text-slate-500 flex items-center justify-center font-extrabold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[0]}%` }}>{diffBounds[0] >= 5 ? `${diffBounds[0]}%` : ''}</div>
-            <div className="bg-sky-200 text-sky-800 flex items-center justify-center font-extrabold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[1]-diffBounds[0]}%` }}>{diffBounds[1]-diffBounds[0] >= 5 ? `${diffBounds[1]-diffBounds[0]}%` : ''}</div>
-            <div className="bg-blue-500 text-white shadow-[inset_0_0_10px_rgba(0,0,0,0.1)] flex items-center justify-center font-extrabold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[2]-diffBounds[1]}%` }}>{diffBounds[2]-diffBounds[1] >= 5 ? `${diffBounds[2]-diffBounds[1]}%` : ''}</div>
-            <div className="bg-indigo-500 text-white flex items-center justify-center font-extrabold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[3]-diffBounds[2]}%` }}>{diffBounds[3]-diffBounds[2] >= 5 ? `${diffBounds[3]-diffBounds[2]}%` : ''}</div>
-            <div className="bg-rose-400 rounded-r-lg text-white flex items-center justify-center font-extrabold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${100-diffBounds[3]}%` }}>{100-diffBounds[3] >= 5 ? `${100-diffBounds[3]}%` : ''}</div>
+            <div className="bg-slate-200 rounded-l-lg text-slate-500 flex items-center justify-center font-bold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[0]}%` }}>{diffBounds[0] >= 5 ? `${diffBounds[0]}%` : ''}</div>
+            <div className="bg-sky-200 text-sky-800 flex items-center justify-center font-bold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[1]-diffBounds[0]}%` }}>{diffBounds[1]-diffBounds[0] >= 5 ? `${diffBounds[1]-diffBounds[0]}%` : ''}</div>
+            <div className="bg-blue-500 text-white shadow-[inset_0_0_10px_rgba(0,0,0,0.1)] flex items-center justify-center font-bold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[2]-diffBounds[1]}%` }}>{diffBounds[2]-diffBounds[1] >= 5 ? `${diffBounds[2]-diffBounds[1]}%` : ''}</div>
+            <div className="bg-indigo-500 text-white flex items-center justify-center font-bold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${diffBounds[3]-diffBounds[2]}%` }}>{diffBounds[3]-diffBounds[2] >= 5 ? `${diffBounds[3]-diffBounds[2]}%` : ''}</div>
+            <div className="bg-rose-400 rounded-r-lg text-white flex items-center justify-center font-bold text-[13px] overflow-hidden transition-all duration-100" style={{ width: `${100-diffBounds[3]}%` }}>{100-diffBounds[3] >= 5 ? `${100-diffBounds[3]}%` : ''}</div>
             
             {[0, 1, 2, 3].map((idx) => (
               <div key={idx} onMouseDown={() => { draggingHandleRef.current = idx; }} onTouchStart={() => { draggingHandleRef.current = idx; }} 
-                   className="absolute top-1/2 -translate-y-1/2 -ml-[7px] w-[14px] h-[28px] bg-white border-2 border-[#002864] rounded cursor-ew-resize flex items-center justify-center gap-[2px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
+                   className="absolute top-1/2 -translate-y-1/2 -ml-[7px] w-[14px] h-[28px] bg-white border-2 border-brand rounded cursor-ew-resize flex items-center justify-center gap-[2px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
                    style={{ left: `${diffBounds[idx]}%` }}>
                 <div className="w-[2px] h-[12px] bg-slate-300 rounded-[1px]"></div><div className="w-[2px] h-[12px] bg-slate-300 rounded-[1px]"></div>
               </div>
@@ -112,7 +112,7 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
           <div className="flex w-full mt-1">
             <div className="text-center text-[13px] font-bold text-slate-500 transition-all duration-100" style={{ width: `${diffBounds[0]}%` }}>최하</div>
             <div className="text-center text-[13px] font-bold text-sky-600 transition-all duration-100" style={{ width: `${diffBounds[1]-diffBounds[0]}%` }}>하</div>
-            <div className="text-center text-[15px] font-extrabold text-blue-700 transition-all duration-100" style={{ width: `${diffBounds[2]-diffBounds[1]}%` }}>중</div>
+            <div className="text-center text-[15px] font-bold text-blue-700 transition-all duration-100" style={{ width: `${diffBounds[2]-diffBounds[1]}%` }}>중</div>
             <div className="text-center text-[13px] font-bold text-indigo-600 transition-all duration-100" style={{ width: `${diffBounds[3]-diffBounds[2]}%` }}>상</div>
             <div className="text-center text-[13px] font-bold text-rose-500 transition-all duration-100" style={{ width: `${100-diffBounds[3]}%` }}>최상</div>
           </div>
@@ -128,12 +128,12 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                 <input 
                   type="text" placeholder="단어 1 (예: 쎈)" 
                   value={bookName1} onChange={(e) => setBookName1(e.target.value)} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864]" 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand" 
                 />
                 <input 
                   type="text" placeholder="단어 2 (예: 수학상)" 
                   value={bookName2} onChange={(e) => setBookName2(e.target.value)} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864]" 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand" 
                 />
               </div>
             </div>
@@ -143,13 +143,13 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                 <input 
                   type="number" placeholder="시작" min="1"
                   value={pageStart} onChange={(e) => setPageStart(e.target.value)} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864] text-center" 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand text-center" 
                 />
                 <span className="text-slate-400 font-bold">~</span>
                 <input 
                   type="number" placeholder="끝" min="1"
                   value={pageEnd} onChange={(e) => setPageEnd(e.target.value)} 
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-[#002864] text-center" 
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand text-center" 
                 />
                 <span className="text-slate-500 font-bold text-sm shrink-0">p</span>
               </div>
@@ -164,15 +164,15 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
               <label className="block text-sm font-bold text-slate-500 mb-3">문제 유형 (복수 선택 가능)</label>
               <div className="space-y-3">
                 <label className="flex items-center space-x-2 cursor-pointer">
-                  <input type="checkbox" checked={types.obj} onChange={e => setTypes({...types, obj: e.target.checked})} className="w-4 h-4 accent-[#002864] rounded border-slate-300" />
+                  <input type="checkbox" checked={types.obj} onChange={e => setTypes({...types, obj: e.target.checked})} className="w-4 h-4 accent-brand rounded border-slate-300" />
                   <span className="text-slate-700 font-medium text-sm">객관식</span>
                 </label>
                 <label className="flex items-center space-x-2 cursor-pointer">
-                  <input type="checkbox" checked={types.subj} onChange={e => setTypes({...types, subj: e.target.checked})} className="w-4 h-4 accent-[#002864] rounded border-slate-300" />
+                  <input type="checkbox" checked={types.subj} onChange={e => setTypes({...types, subj: e.target.checked})} className="w-4 h-4 accent-brand rounded border-slate-300" />
                   <span className="text-slate-700 font-medium text-sm">주관식 (단답형)</span>
                 </label>
                 <label className="flex items-center space-x-2 cursor-pointer">
-                  <input type="checkbox" checked={types.essay} onChange={e => setTypes({...types, essay: e.target.checked})} className="w-4 h-4 accent-[#002864] rounded border-slate-300" />
+                  <input type="checkbox" checked={types.essay} onChange={e => setTypes({...types, essay: e.target.checked})} className="w-4 h-4 accent-brand rounded border-slate-300" />
                   <span className="text-slate-700 font-medium text-sm">서술형</span>
                 </label>
               </div>
@@ -181,7 +181,7 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
             <div>
               <div className="flex justify-between items-center mb-3">
                 <label className="block text-sm font-bold text-slate-500">세부 정답률 필터</label>
-                <span className="text-xs font-extrabold text-[#002864] bg-blue-50 px-2 py-0.5 rounded border border-blue-200">{rateMax}% ~ {rateMin}%</span>
+                <span className="text-xs font-bold text-brand bg-blue-50 px-2 py-0.5 rounded border border-blue-200">{rateMax}% ~ {rateMin}%</span>
               </div>
               
               <div className="relative w-full h-10 flex items-center">
@@ -201,7 +201,7 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                        className="dual-slider absolute w-full h-2 appearance-none bg-transparent pointer-events-none" />
               </div>
               
-              <div className="flex justify-between mt-1 text-[11px] font-bold text-slate-400">
+              <div className="flex justify-between mt-1 text-xs font-bold text-slate-400">
                 <span>100% (쉬움)</span>
                 <span>0% (어려움)</span>
               </div>

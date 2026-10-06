@@ -35,9 +35,9 @@ export default function PointBadge({ points, className = '' }: { points: number 
   return (
     <div className={`relative inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full shadow-sm border ${bump ? 'point-badge-bump' : ''} ${className}`}>
       <span className="text-lg">🪙</span>
-      <span className="font-lexend font-black tabular-nums">{points === null ? '···' : points.toLocaleString()} P</span>
+      <span className="font-lexend font-bold tabular-nums">{points === null ? '···' : points.toLocaleString()} P</span>
       {floaters.map(f => (
-        <span key={f.id} className="point-badge-float absolute -top-1 right-3 text-xs font-black text-emerald-500 pointer-events-none">+{f.amount}</span>
+        <span key={f.id} className="point-badge-float absolute -top-1 right-3 text-xs font-bold text-emerald-500 pointer-events-none">+{f.amount}</span>
       ))}
       <style dangerouslySetInnerHTML={{ __html: `
         @keyframes point-badge-bump-kf { 0% { transform: translateY(0) scale(1); } 30% { transform: translateY(-6px) scale(1.12); } 55% { transform: translateY(1px) scale(0.97); } 100% { transform: translateY(0) scale(1); } }

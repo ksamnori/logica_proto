@@ -318,8 +318,8 @@ export default function QuestionDBUploadPage() {
     <div className="flex flex-col h-full bg-slate-50 font-pretendard p-6 overflow-hidden items-center">
       <div className="w-full max-w-4xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-4 overflow-hidden h-[calc(100vh-6rem)]">
         
-        <div className="bg-[#002864] p-6 text-white shrink-0">
-          <h1 className="text-2xl font-black flex items-center gap-2">
+        <div className="bg-brand p-6 text-white shrink-0">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
             <span>🗄️</span> 마스터 문제은행 스마트 업로드
           </h1>
           <p className="text-blue-200 text-sm mt-2 font-medium">
@@ -351,7 +351,7 @@ export default function QuestionDBUploadPage() {
                 <input id="jsonFileInput" type="file" accept=".json" onChange={handleFileSelect} className="hidden" />
                 <div className="text-3xl mb-2">{isDragOver ? '📂' : '📄'}</div>
                 <p className="text-slate-600 font-bold text-xs mb-1">JSON 파일 드래그 & 클릭</p>
-                <div className="text-[10px] text-slate-500 font-medium h-4 mt-1">
+                <div className="text-xs text-slate-500 font-medium h-4 mt-1">
                   {fileName ? <span className="text-indigo-600 font-bold bg-indigo-100 px-2 py-0.5 rounded">{fileName}</span> : "필수 업로드"}
                 </div>
               </div>
@@ -371,7 +371,7 @@ export default function QuestionDBUploadPage() {
                 <input id="imageFileInput" type="file" multiple accept="image/*" onChange={handleImageSelect} className="hidden" />
                 <div className="text-3xl mb-2">{isImageDragOver ? '🖼️' : '📸'}</div>
                 <p className="text-slate-600 font-bold text-xs mb-1">이미지 다중 선택 & 드래그</p>
-                <div className="text-[10px] text-slate-500 font-medium h-4 mt-1">
+                <div className="text-xs text-slate-500 font-medium h-4 mt-1">
                   {imageFiles.length > 0 ? <span className="text-emerald-600 font-bold bg-emerald-100 px-2 py-0.5 rounded">총 {imageFiles.length}개 파일 대기 중</span> : "선택 안 함"}
                 </div>
               </div>
@@ -379,7 +379,7 @@ export default function QuestionDBUploadPage() {
           </div>
 
           <div className="pt-2 border-t border-slate-100">
-            <label className="block text-sm font-bold text-slate-700 mb-2">3. 강제 지정할 교재 이름 (book_name) <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1 font-bold">전국 공용 설정</span></label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">3. 강제 지정할 교재 이름 (book_name) <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1 font-bold">전국 공용 설정</span></label>
             <input 
               type="text" 
               value={bookTitle} 
@@ -389,7 +389,7 @@ export default function QuestionDBUploadPage() {
             />
           </div>
 
-          <div className="bg-slate-900 rounded-xl p-4 h-40 overflow-y-auto custom-scroll font-mono text-[11px] text-emerald-400 shadow-inner">
+          <div className="bg-slate-900 rounded-xl p-4 h-40 overflow-y-auto custom-scroll font-mono text-xs text-emerald-400 shadow-inner">
             {uploadLogs.length === 0 ? (
               <span className="text-slate-600">대기 중... 작업할 파일을 드래그 앤 드롭 하세요.</span>
             ) : (
@@ -405,7 +405,7 @@ export default function QuestionDBUploadPage() {
             <div className="mb-4 space-y-2">
               {imageFiles.length > 0 && (
                 <div>
-                  <div className="flex justify-between text-[11px] font-bold text-emerald-700 mb-1">
+                  <div className="flex justify-between text-xs font-bold text-emerald-700 mb-1">
                     <span>🖼️ 이미지 덮어쓰기 진행률</span>
                     <span>{imageUploadProgress}%</span>
                   </div>
@@ -415,7 +415,7 @@ export default function QuestionDBUploadPage() {
                 </div>
               )}
               <div>
-                <div className="flex justify-between text-[11px] font-bold text-indigo-700 mb-1">
+                <div className="flex justify-between text-xs font-bold text-indigo-700 mb-1">
                   <span>🗄️ JSON DB 동기화 진행률</span>
                   <span>{uploadProgress}%</span>
                 </div>
@@ -429,9 +429,9 @@ export default function QuestionDBUploadPage() {
           <button 
             onClick={processUpload} 
             disabled={(!fileData && imageFiles.length === 0) || isUploading}
-            className={`w-full py-4 rounded-xl font-black text-lg transition-all shadow-md flex items-center justify-center gap-2
+            className={`w-full py-4 rounded-xl font-bold text-lg transition-all shadow-md flex items-center justify-center gap-2
               ${(!fileData && imageFiles.length === 0) ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : 
-                isUploading ? 'bg-indigo-400 text-white cursor-wait' : 'bg-[#002864] hover:bg-blue-900 text-white active:scale-[0.98]'}`}
+                isUploading ? 'bg-indigo-400 text-white cursor-wait' : 'bg-brand hover:bg-blue-900 text-white active:scale-[0.98]'}`}
           >
             {isUploading ? "데이터 동기화 진행 중..." : "🚀 파일 및 데이터 스마트 동기화 시작"}
           </button>

@@ -31,7 +31,7 @@ const GradeButton = memo(({ code, ansId, currentCode, qId, tqId, title, onClick 
     <button 
       onClick={() => onClick(ansId, code, qId, tqId)} 
       title={title}
-      className={`flex justify-center items-center rounded-md text-[12px] font-extrabold h-8 transition-all ${isChecked ? checkedClass : bgClass}`}
+      className={`flex justify-center items-center rounded-md text-[12px] font-bold h-8 transition-all ${isChecked ? checkedClass : bgClass}`}
     >
       {code}
     </button>
@@ -822,9 +822,9 @@ function ReviewContent() {
       <main className="flex-1 overflow-y-auto custom-scroll p-4 sm:p-8 relative">
         <div className="max-w-[1500px] w-full mx-auto relative pb-24">
           
-          <div className="bg-[#002864] text-white p-6 rounded-t-2xl shadow-md flex justify-between items-center no-print">
+          <div className="bg-brand text-white p-6 rounded-t-2xl shadow-md flex justify-between items-center no-print">
             <div>
-              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
+              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
               </button>
               <h1 className="text-2xl font-bold tracking-tight">{headerInfo.title}</h1>
@@ -836,12 +836,12 @@ function ReviewContent() {
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
                   window.open(`/print/report?assignment_id=${assignmentId}&_bust=${bustStr}`, '_blank');
-                }} className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 transition-colors">
+                }} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 transition-colors">
                   📊 진단 분석 레포트 열기
                 </button>
               )}
               <span className="text-lg font-bold bg-blue-900/50 px-4 py-2 rounded-lg border border-blue-800 flex items-center whitespace-nowrap shrink-0">
-                현재 실시간 총점: <span className="text-emerald-300 text-3xl font-black ml-3">{totalScore}</span> <span className="ml-1 text-sm text-blue-200 font-normal">점</span>
+                현재 실시간 총점: <span className="text-emerald-300 text-3xl font-bold ml-3">{totalScore}</span> <span className="ml-1 text-sm text-blue-200 font-normal">점</span>
               </span>
             </div>
           </div>
@@ -860,8 +860,8 @@ function ReviewContent() {
                     <div className="flex items-center justify-between">
                       <span className="text-sm">컴팩트 채점 도구 (14버튼)</span>
                       <div className="flex gap-2">
-                        <button onClick={() => markAll('O')} className="px-2.5 py-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded text-[11px] font-extrabold border border-emerald-300 transition-colors">✅ 전체 O</button>
-                        <button onClick={() => markAll('X')} className="px-2.5 py-1 bg-rose-100 text-rose-700 hover:bg-rose-200 rounded text-[11px] font-extrabold border border-rose-300 transition-colors">❌ 전체 X</button>
+                        <button onClick={() => markAll('O')} className="px-2.5 py-1 bg-emerald-100 text-emerald-700 hover:bg-emerald-200 rounded text-xs font-bold border border-emerald-300 transition-colors">✅ 전체 O</button>
+                        <button onClick={() => markAll('X')} className="px-2.5 py-1 bg-rose-100 text-rose-700 hover:bg-rose-200 rounded text-xs font-bold border border-rose-300 transition-colors">❌ 전체 X</button>
                       </div>
                     </div>
                   </th>
@@ -877,11 +877,11 @@ function ReviewContent() {
                       
                       let markHtml = <span className="text-slate-300 font-bold">-</span>;
                       if (currentCode) {
-                        if (['O', 'TO'].includes(currentCode)) markHtml = <span className="text-emerald-500 font-extrabold text-xl">{currentCode}</span>;
-                        else if (['X', 'TX'].includes(currentCode)) markHtml = <span className="text-red-500 font-extrabold text-xl">{currentCode}</span>;
-                        else if (currentCode === '☆') markHtml = <span className="text-amber-500 font-extrabold text-xl">☆</span>;
-                        else if (currentCode === 'B') markHtml = <span className="text-slate-500 font-extrabold text-lg block border border-slate-300 rounded bg-white w-6 h-6 mx-auto"></span>;
-                        else if (['a','b','c','x','y','z','p','q'].includes(currentCode)) markHtml = <span className="text-sky-500 font-extrabold text-lg">{currentCode}</span>;
+                        if (['O', 'TO'].includes(currentCode)) markHtml = <span className="text-emerald-500 font-bold text-xl">{currentCode}</span>;
+                        else if (['X', 'TX'].includes(currentCode)) markHtml = <span className="text-red-500 font-bold text-xl">{currentCode}</span>;
+                        else if (currentCode === '☆') markHtml = <span className="text-amber-500 font-bold text-xl">☆</span>;
+                        else if (currentCode === 'B') markHtml = <span className="text-slate-500 font-bold text-lg block border border-slate-300 rounded bg-white w-6 h-6 mx-auto"></span>;
+                        else if (['a','b','c','x','y','z','p','q'].includes(currentCode)) markHtml = <span className="text-sky-500 font-bold text-lg">{currentCode}</span>;
                       }
 
                       const rowBg = ['O', 'TO', 'a', 'b', 'c'].includes(currentCode) ? 'bg-emerald-50/30' : (['X', 'TX', 'x', 'y', 'z', 'p', 'q', '☆', 'B'].includes(currentCode) ? 'bg-red-50/30' : 'bg-white');
@@ -897,10 +897,10 @@ function ReviewContent() {
 
                       return (
                         <tr key={a.answer_id} className={`transition-colors border-b border-slate-200 ${rowBg}`}>
-                          {subIdx === 0 && <td className="p-3 text-center font-bold text-sm text-[#002864] border-b border-slate-200 bg-white" rowSpan={g.items.length}>{gNum}</td>}
+                          {subIdx === 0 && <td className="p-3 text-center font-bold text-sm text-brand border-b border-slate-200 bg-white" rowSpan={g.items.length}>{gNum}</td>}
                           {subIdx === 0 && (
                             <td className="p-3 text-center border-b border-slate-200 bg-white" rowSpan={g.items.length}>
-                              <button onClick={() => setModalQ(g)} className="bg-white border border-slate-300 hover:bg-slate-100 hover:border-slate-400 text-slate-600 text-[11px] font-bold py-1.5 px-2 rounded shadow-sm w-full">문제 🔍</button>
+                              <button onClick={() => setModalQ(g)} className="bg-white border border-slate-300 hover:bg-slate-100 hover:border-slate-400 text-slate-600 text-xs font-bold py-1.5 px-2 rounded shadow-sm w-full">문제 🔍</button>
                             </td>
                           )}
                           <td className="p-3 font-bold text-emerald-700 bg-white/50 text-[13px] leading-tight break-all whitespace-pre-wrap">
@@ -910,9 +910,9 @@ function ReviewContent() {
                             <div className="flex items-center justify-between gap-2">
                               <div className="min-w-0 relative whitespace-pre-wrap">{sAnswerHTML}</div>
                               {wrongLog.length > 0 && (
-                                <button onClick={() => setModalWrongLog(wrongLog)} title={`이전 오답 ${wrongLog.length}개 보기`} className="shrink-0 relative w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white flex items-center justify-center text-[10px] leading-none transition-colors border border-rose-200 z-0">
+                                <button onClick={() => setModalWrongLog(wrongLog)} title={`이전 오답 ${wrongLog.length}개 보기`} className="shrink-0 relative w-5 h-5 rounded-full bg-rose-50 hover:bg-rose-500 text-rose-500 hover:text-white flex items-center justify-center text-xs leading-none transition-colors border border-rose-200 z-0">
                                   📝
-                                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[8px] font-black rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">{wrongLog.length}</span>
+                                  <span className="absolute -top-1 -right-1 bg-rose-500 text-white text-[8px] font-bold rounded-full w-3.5 h-3.5 flex items-center justify-center leading-none">{wrongLog.length}</span>
                                 </button>
                               )}
                             </div>
@@ -947,7 +947,7 @@ function ReviewContent() {
             <div className="mt-8 mb-6 flex justify-center no-print">
               <button 
                 onClick={() => router.back()} 
-                className="bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
+                className="bg-brand hover:bg-blue-900 text-white font-bold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
                 이전 화면으로 (입학테스트 관리)
@@ -958,12 +958,12 @@ function ReviewContent() {
               <span className={`mr-5 text-sm font-bold ${Object.keys(pendingUpdates).length > 0 ? 'text-orange-500' : 'text-slate-500'}`}>
                 저장 대기 중인 변경사항: {Object.keys(pendingUpdates).length}건 {Object.keys(pendingUpdates).length > 0 && '🟡'}
               </span>
-              <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
+              <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                 {isSaving ? "저장 중... ⏳" : "1️⃣ 채점 내역 DB 저장 및 오답노트 전송"}
               </button>
               {/* 🌟 [권한적용] 하단 생성/열람/삭제 버튼들 */}
               {hasReportAuth && headerInfo.type === '입학테스트' && (
-                <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
+                <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                   {isGeneratingReport ? "리포트 생성 중... ⏳" : "2️⃣ 진단 리포트 생성하기 🪄"}
                 </button>
               )}
@@ -971,7 +971,7 @@ function ReviewContent() {
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
                   window.open(`/print/report?assignment_id=${assignmentId}&_bust=${bustStr}`, '_blank');
-                }} className="bg-emerald-500 hover:bg-emerald-600 text-white font-extrabold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5">
+                }} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5">
                   3️⃣ 진단 리포트 열기 📊
                 </button>
               )}
@@ -979,7 +979,7 @@ function ReviewContent() {
                 <button 
                   onClick={handleDeleteReport} 
                   disabled={isDeletingReport} 
-                  className="bg-white hover:bg-rose-50 text-rose-500 font-extrabold text-sm py-3.5 px-4 rounded-xl shadow-sm transition-transform hover:-translate-y-0.5 border border-rose-200 ml-4 disabled:opacity-50"
+                  className="bg-white hover:bg-rose-50 text-rose-500 font-bold text-sm py-3.5 px-4 rounded-xl shadow-sm transition-transform hover:-translate-y-0.5 border border-rose-200 ml-4 disabled:opacity-50"
                 >
                   {isDeletingReport ? "삭제 중..." : "🗑️ 리포트 삭제"}
                 </button>
@@ -991,13 +991,13 @@ function ReviewContent() {
         {modalQ && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 no-print">
             <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-              <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+              <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
                 <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> 문항 상세 및 해설 뷰어</h2>
                 <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
               </div>
               <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
+                  <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
                   {modalQ.items.map((row: any, idx: number) => {
                     const q = row.question; const pre = modalQ.items.length > 1 ? `<b class="text-blue-600">(${idx + 1})</b> ` : '';
                     return (
@@ -1009,7 +1009,7 @@ function ReviewContent() {
                   })}
                 </div>
                 <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                  <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
+                  <h3 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
                   {modalQ.items.map((row: any, idx: number) => {
                     const q = row.question; const pre = modalQ.items.length > 1 ? `<b class="text-blue-600">(${idx + 1})</b> ` : '';
                     return (
@@ -1021,7 +1021,7 @@ function ReviewContent() {
                   })}
                 </div>
                 <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                  <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-4">해설 및 풀이 단계</h3>
+                  <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-4">해설 및 풀이 단계</h3>
                   <div className="space-y-5 text-sm text-slate-600">
                     {modalQ.items.map((row: any, idx: number) => {
                       const q = row.question; const pre = modalQ.items.length > 1 ? `(${idx + 1}) ` : '';

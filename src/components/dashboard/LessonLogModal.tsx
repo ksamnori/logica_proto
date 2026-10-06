@@ -167,7 +167,7 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
     <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm px-4">
       <div className="bg-white rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
         <div className="bg-gradient-to-r from-indigo-700 to-blue-800 p-5 text-white flex justify-between items-center shrink-0">
-          <h3 className="text-lg font-black flex items-center gap-2">📝 {lessonForm.lesson_log_id ? "수업 일지 내용 수정" : "새 수업 일지 작성"}</h3>
+          <h3 className="text-lg font-bold flex items-center gap-2">📝 {lessonForm.lesson_log_id ? "수업 일지 내용 수정" : "새 수업 일지 작성"}</h3>
           <button onClick={onClose} disabled={isLoading} className="text-white hover:text-rose-400 text-2xl font-bold leading-none transition-colors">&times;</button>
         </div>
         
@@ -176,8 +176,8 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
           {/* 🌟 1. 상단 1열: 수업일자, 과제명, 기한을 한 줄로 배치 */}
           <div className="flex flex-col md:flex-row gap-4">
             <div className="flex flex-col gap-1.5 md:w-1/4 shrink-0">
-              <label className="text-sm font-black text-slate-700 flex items-center gap-1.5">
-                📅 수업 일자 <span className="text-[10px] text-slate-400 font-normal">(소급가능)</span>
+              <label className="text-sm font-bold text-slate-700 flex items-center gap-1.5">
+                📅 수업 일자 <span className="text-xs text-slate-400 font-normal">(소급가능)</span>
               </label>
               <input 
                 type="date" 
@@ -188,8 +188,8 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
             </div>
             
             <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-[13px] font-black text-indigo-700 flex items-center gap-1">
-                <span>🏷️ 과제명</span> <span className="text-[10px] font-bold bg-indigo-50 text-indigo-400 px-1.5 py-0.5 rounded">(선택)</span>
+              <label className="text-[13px] font-bold text-indigo-700 flex items-center gap-1">
+                <span>🏷️ 과제명</span> <span className="text-xs font-bold bg-indigo-50 text-indigo-400 px-1.5 py-0.5 rounded">(선택)</span>
               </label>
               <input 
                 type="text" 
@@ -201,8 +201,8 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
             </div>
 
             <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-[13px] font-black text-indigo-700 flex items-center gap-1">
-                <span>⏰ 기한</span> <span className="text-[10px] font-bold bg-indigo-50 text-indigo-400 px-1.5 py-0.5 rounded">(선택)</span>
+              <label className="text-[13px] font-bold text-indigo-700 flex items-center gap-1">
+                <span>⏰ 기한</span> <span className="text-xs font-bold bg-indigo-50 text-indigo-400 px-1.5 py-0.5 rounded">(선택)</span>
               </label>
               <input 
                 type="text" 
@@ -217,7 +217,7 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
           {/* 🌟 2. 텍스트 영역: 진도와 공통 과제 내용을 똑같은 높이로 나란히 배치 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
+              <label className="text-sm font-bold text-indigo-700 flex items-center gap-1.5">
                 <span>📖 오늘의 진도</span> <span className="text-rose-500">*</span>
               </label>
               <textarea 
@@ -230,7 +230,7 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
             </div>
 
             <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-black text-indigo-700 flex items-center gap-1.5">
+              <label className="text-sm font-bold text-indigo-700 flex items-center gap-1.5">
                 <span>📝 공통 과제 내용</span> <span className="text-rose-500">*</span>
               </label>
               <textarea 
@@ -244,9 +244,9 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
           </div>
 
           <div className="flex flex-col gap-2 pt-2">
-            <label className="text-sm font-black text-emerald-700 flex items-center gap-1.5">
+            <label className="text-sm font-bold text-emerald-700 flex items-center gap-1.5">
               <span>🧑‍🎓 개별 특이 과제 / 코멘트</span>
-              <span className="text-[11px] text-emerald-600/70 font-bold bg-emerald-50 px-2 py-0.5 rounded">(선택)</span>
+              <span className="text-xs text-emerald-600/70 font-bold bg-emerald-50 px-2 py-0.5 rounded">(선택)</span>
             </label>
             <div className="flex flex-col gap-2">
               {lessonForm.individual_comments.map((ic, idx) => (
@@ -296,9 +296,9 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
           </div>
 
           <div className="flex flex-col gap-1.5 pt-4 border-t border-slate-200">
-            <label className="text-sm font-black text-slate-500 flex items-center gap-1.5">
+            <label className="text-sm font-bold text-slate-500 flex items-center gap-1.5">
               <span>🔒 강사 특이사항 메모</span>
-              <span className="text-[11px] text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded">(학부모 미노출)</span>
+              <span className="text-xs text-slate-400 font-bold bg-slate-100 px-2 py-0.5 rounded">(학부모 미노출)</span>
             </label>
             <textarea 
               value={lessonForm.instructor_note} 
@@ -313,7 +313,7 @@ export default function LessonLogModal({ isOpen, onClose, onSuccess, classId, st
         
         <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
           <button onClick={onClose} disabled={isLoading} className="px-6 py-3 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-xl text-sm transition-colors shadow-sm">취소</button>
-          <button onClick={handleSubmit} disabled={isLoading} className="px-6 py-3 bg-[#002864] hover:bg-blue-900 text-white font-black rounded-xl text-sm shadow-md transition-colors flex items-center gap-2">
+          <button onClick={handleSubmit} disabled={isLoading} className="px-6 py-3 bg-brand hover:bg-blue-900 text-white font-bold rounded-xl text-sm shadow-md transition-colors flex items-center gap-2">
             {isLoading ? "처리 중..." : `✅ ${lessonForm.lesson_log_id ? "수정 내용 저장" : "새 일지 등록 완료"}`}
           </button>
         </div>

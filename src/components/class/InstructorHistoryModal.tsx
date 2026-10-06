@@ -94,7 +94,7 @@ export default function InstructorHistoryModal({ isOpen, onClose, classId, class
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95 duration-200">
         
         {/* 모달 헤더 */}
-        <div className="bg-[#002864] text-white px-6 py-4 flex justify-between items-center shrink-0">
+        <div className="bg-brand text-white px-6 py-4 flex justify-between items-center shrink-0">
           <div>
             <h2 className="text-lg font-bold flex items-center gap-2">👨‍🏫 강사 배정 이력</h2>
             <p className="text-blue-200 text-xs mt-1 font-medium">[{className}] 반의 역대 담당 강사 기록입니다.</p>
@@ -126,20 +126,20 @@ export default function InstructorHistoryModal({ isOpen, onClose, classId, class
                   <div className="flex justify-between items-start mb-2.5">
                     <div className="flex flex-col gap-1">
                       <div className="flex items-center gap-2">
-                        <span className={`font-black text-[15px] ${isActive ? "text-blue-900" : "text-slate-700"}`}>
+                        <span className={`font-bold text-[15px] ${isActive ? "text-blue-900" : "text-slate-700"}`}>
                           {history.instructor?.name || "알 수 없음"} 강사
                         </span>
                         {isActive ? (
-                          <span className="text-[10px] bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold shadow-sm">
+                          <span className="text-xs bg-blue-600 text-white px-1.5 py-0.5 rounded font-bold shadow-sm">
                             현재 담당
                           </span>
                         ) : (
-                          <span className="text-[10px] bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-bold">
+                          <span className="text-xs bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded border border-slate-200 font-bold">
                             배정 종료
                           </span>
                         )}
                       </div>
-                      <div className="text-[11px] font-bold text-slate-500">
+                      <div className="text-xs font-bold text-slate-500">
                         🗓️ {history.start_date} ~ {history.end_date || "현재"}
                       </div>
                     </div>
@@ -154,17 +154,17 @@ export default function InstructorHistoryModal({ isOpen, onClose, classId, class
                           value={tempReason}
                           onChange={(e) => setTempReason(e.target.value)}
                           placeholder="교체 사유 입력 (예: 퇴사, 스케줄 변경)"
-                          className="flex-1 text-xs px-2 py-1.5 rounded border border-slate-300 font-medium focus:outline-none focus:border-[#002864] focus:ring-1 focus:ring-[#002864]"
+                          className="flex-1 text-xs px-2 py-1.5 rounded border border-slate-300 font-medium focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand"
                         />
                         <button 
                           onClick={() => saveChangeReason(history.history_id)}
-                          className="text-[11px] bg-[#002864] text-white px-3 py-1.5 rounded font-bold hover:bg-blue-900 shadow-sm transition-colors shrink-0"
+                          className="text-xs bg-brand text-white px-3 py-1.5 rounded font-bold hover:bg-blue-900 shadow-sm transition-colors shrink-0"
                         >
                           저장
                         </button>
                         <button 
                           onClick={() => setIsEditingReason(null)}
-                          className="text-[11px] bg-white text-slate-600 border border-slate-300 px-3 py-1.5 rounded font-bold hover:bg-slate-50 shadow-sm transition-colors shrink-0"
+                          className="text-xs bg-white text-slate-600 border border-slate-300 px-3 py-1.5 rounded font-bold hover:bg-slate-50 shadow-sm transition-colors shrink-0"
                         >
                           취소
                         </button>
@@ -172,7 +172,7 @@ export default function InstructorHistoryModal({ isOpen, onClose, classId, class
                     ) : (
                       <div className="flex justify-between items-end">
                         <div className="flex flex-col">
-                          <span className="text-[10px] font-bold text-slate-400 mb-0.5">교체 사유</span>
+                          <span className="text-xs font-bold text-slate-400 mb-0.5">교체 사유</span>
                           <span className="text-[12px] font-medium text-slate-600">
                             {history.change_reason || "-"}
                           </span>
@@ -183,7 +183,7 @@ export default function InstructorHistoryModal({ isOpen, onClose, classId, class
                               setIsEditingReason(history.history_id);
                               setTempReason(history.change_reason || "");
                             }}
-                            className="text-[11px] text-slate-400 hover:text-[#002864] font-bold underline decoration-slate-300 underline-offset-2 transition-colors shrink-0"
+                            className="text-xs text-slate-400 hover:text-brand font-bold underline decoration-slate-300 underline-offset-2 transition-colors shrink-0"
                           >
                             사유 기록하기
                           </button>

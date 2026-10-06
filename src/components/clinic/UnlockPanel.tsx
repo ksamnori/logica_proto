@@ -59,7 +59,7 @@ export default function UnlockPanel() {
         <span className="font-bold text-[13px]">🔓 채점 확인 대기 ({rows.length})</span>
         <button
           onClick={load}
-          className="text-[11px] bg-white/20 hover:bg-white/30 px-2 py-1 rounded font-bold"
+          className="text-xs bg-white/20 hover:bg-white/30 px-2 py-1 rounded font-bold"
         >
           {loading ? "..." : "새로고침"}
         </button>
@@ -77,14 +77,14 @@ export default function UnlockPanel() {
             return (
               <div key={r.assignment_id} className="p-3 flex items-center justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="font-extrabold text-slate-800 text-[13px] truncate">{name}</div>
-                  <div className="text-[10px] text-slate-500 truncate">{title}</div>
-                  <div className="text-[10px] text-slate-400">가채점 {r.total_score ?? 0}점</div>
+                  <div className="font-bold text-slate-800 text-[13px] truncate">{name}</div>
+                  <div className="text-xs text-slate-500 truncate">{title}</div>
+                  <div className="text-xs text-slate-400">가채점 {r.total_score ?? 0}점</div>
                 </div>
                 <button
                   onClick={() => unlock(r.assignment_id, name)}
                   disabled={busyId === r.assignment_id}
-                  className="shrink-0 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-[11px] font-bold px-3 py-2 rounded-lg"
+                  className="shrink-0 bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-300 text-white text-xs font-bold px-3 py-2 rounded-lg"
                 >
                   {busyId === r.assignment_id ? "처리중" : "확정 & 해제"}
                 </button>

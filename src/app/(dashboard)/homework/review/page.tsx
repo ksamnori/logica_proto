@@ -123,7 +123,7 @@ const QuestionContent = memo(({ textToRender, imageUrl, answer }: { textToRender
         {imageUrl && <img src={imageUrl} className="max-w-full max-h-40 mt-2 mix-blend-multiply" alt="" />}
       </div>
       <div className="mt-2 pt-2 border-t border-dashed border-slate-200 flex items-center gap-2">
-         <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-[10px] font-extrabold shrink-0">DB 정답</span>
+         <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold shrink-0">DB 정답</span>
          <div className="font-bold text-blue-800 text-[13px] math-text truncate">
            {answer ? <MathText html={answer} /> : <span className="text-slate-400 font-normal italic">-</span>}
          </div>
@@ -610,16 +610,16 @@ function HomeworkReviewContent() {
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden font-pretendard">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-4">
-          <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-extrabold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
+          <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
           </button>
           <div className="w-px h-6 bg-slate-300"></div>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="bg-[#002864] text-white text-[10px] px-2 py-0.5 rounded font-bold">{homeworkInfo?.class?.name || '반 미지정'}</span>
+              <span className="bg-brand text-white text-xs px-2 py-0.5 rounded font-bold">{homeworkInfo?.class?.name || '반 미지정'}</span>
               <span className="text-slate-500 font-bold text-xs">{studentInfo?.name} 학생 ({studentInfo?.grade || '-'})</span>
             </div>
-            <h1 className="text-xl font-extrabold text-slate-800 tracking-tight leading-none">
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">
               📚 {homeworkInfo?.homework_title} <span className="text-sm text-slate-400 font-bold ml-2">실시간 쾌속 채점</span>
             </h1>
           </div>
@@ -627,13 +627,13 @@ function HomeworkReviewContent() {
         
         <div className="flex items-center gap-4">
           {saveStatus && (
-            <div className={`px-4 py-1.5 rounded-full text-sm font-extrabold shadow-sm transition-all ${saveStatus.includes('✅') ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : saveStatus.includes('❌') ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-amber-100 text-amber-700 border border-amber-200 animate-pulse'}`}>
+            <div className={`px-4 py-1.5 rounded-full text-sm font-bold shadow-sm transition-all ${saveStatus.includes('✅') ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : saveStatus.includes('❌') ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-amber-100 text-amber-700 border border-amber-200 animate-pulse'}`}>
               {saveStatus}
             </div>
           )}
           <div className="text-right mr-2 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
-            <div className="text-[11px] font-bold text-slate-500 mb-0.5">채점 완료 진행률</div>
-            <div className="font-black text-lg text-[#002864] leading-none">{gradedQ} / {totalQ}</div>
+            <div className="text-xs font-bold text-slate-500 mb-0.5">채점 완료 진행률</div>
+            <div className="font-bold text-lg text-brand leading-none">{gradedQ} / {totalQ}</div>
           </div>
         </div>
       </header>
@@ -688,14 +688,14 @@ function HomeworkReviewContent() {
                       <div key={q.tq_id} className={`flex items-center p-4 gap-4 ${subIdx > 0 ? 'border-t border-slate-100' : ''} ${rowBg} transition-colors`}>
                         {/* 🌟 수정된 왼쪽 문항정보 레이아웃 */}
                         <div className="flex flex-col items-center justify-start shrink-0 w-[72px] gap-1.5 pt-1">
-                          <span className="text-[#002864] font-black text-[18px] whitespace-nowrap leading-none">{q.displayQNum}</span>
+                          <span className="text-brand font-bold text-[18px] whitespace-nowrap leading-none">{q.displayQNum}</span>
                           
                           <div className="flex flex-col items-center gap-0.5 w-full mt-1">
-                            <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="출처 페이지">
+                            <span className="text-xs font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="출처 페이지">
                               {q.page_number || q.final_printed_page || q.detected_page_num || '-'}p
                             </span>
                             {q.question_number && (
-                              <span className="text-[9px] font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="실제 문제 번호">
+                              <span className="text-xs font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="실제 문제 번호">
                                 No.{q.question_number}
                               </span>
                             )}
@@ -703,7 +703,7 @@ function HomeworkReviewContent() {
                           
                           <button 
                             onClick={() => setModalStudentAns({ qNum: q.displayQNum || q.question_number, input: studentInputMap[q.tq_id] || null })} 
-                            className={`text-[10px] font-bold py-1 px-1.5 rounded shadow-sm transition-colors w-full mt-auto flex items-center justify-center gap-1 ${hasStudentInput ? 'bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-600' : 'bg-slate-50 border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
+                            className={`text-xs font-bold py-1 px-1.5 rounded shadow-sm transition-colors w-full mt-auto flex items-center justify-center gap-1 ${hasStudentInput ? 'bg-indigo-50 border border-indigo-200 hover:bg-indigo-100 text-indigo-600' : 'bg-slate-50 border border-slate-200 text-slate-400 hover:bg-slate-100'}`}
                             title="학생이 제출한 필기/텍스트 답안 보기"
                           >
                             📝 답안
@@ -719,17 +719,17 @@ function HomeworkReviewContent() {
                         <div className="flex items-center justify-center shrink-0 px-2">
                            <button onClick={() => setModalQ(q)} className="w-[42px] h-[48px] flex flex-col items-center justify-center gap-0.5 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 rounded-lg shadow-sm transition-colors" title="상세 해설 보기">
                              <span className="text-[14px] leading-none">🔍</span>
-                             <span className="text-[10px] font-extrabold leading-none">풀이</span>
+                             <span className="text-xs font-bold leading-none">풀이</span>
                            </button>
                         </div>
 
                         <div className="grid grid-cols-2 gap-1.5 shrink-0 w-[120px]">
-                          <button onClick={() => handleGrade(q.tq_id, 'O')} className={`h-8 rounded font-black text-xs transition-all ${mark === 'O' ? 'bg-[#10b981] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-emerald-50 hover:text-[#10b981] border border-slate-200'}`}>O</button>
-                          <button onClick={() => handleGrade(q.tq_id, 'X')} className={`h-8 rounded font-black text-xs transition-all ${mark === 'X' ? 'bg-[#ef4444] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-rose-50 hover:text-[#ef4444] border border-slate-200'}`}>X</button>
-                          <button onClick={() => handleGrade(q.tq_id, 'TO')} className={`h-8 rounded font-bold text-[11px] transition-all ${mark === 'TO' ? 'bg-[#14b8a6] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-teal-50 hover:text-[#14b8a6] border border-slate-200'}`}>TO</button>
-                          <button onClick={() => handleGrade(q.tq_id, 'TX')} className={`h-8 rounded font-bold text-[11px] transition-all ${mark === 'TX' ? 'bg-[#f97316] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-orange-50 hover:text-[#f97316] border border-slate-200'}`}>TX</button>
-                          <button onClick={() => handleGrade(q.tq_id, 'RO')} className={`h-8 rounded font-bold text-[11px] transition-all ${mark === 'RO' ? 'bg-[#3b82f6] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-blue-50 hover:text-[#3b82f6] border border-slate-200'}`}>RO</button>
-                          <button onClick={() => handleGrade(q.tq_id, '☆')} className={`h-8 rounded font-black text-sm transition-all ${mark === '☆' ? 'bg-[#f59e0b] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-amber-50 hover:text-[#f59e0b] border border-slate-200'}`}>☆</button>
+                          <button onClick={() => handleGrade(q.tq_id, 'O')} className={`h-8 rounded font-bold text-xs transition-all ${mark === 'O' ? 'bg-[#10b981] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-emerald-50 hover:text-[#10b981] border border-slate-200'}`}>O</button>
+                          <button onClick={() => handleGrade(q.tq_id, 'X')} className={`h-8 rounded font-bold text-xs transition-all ${mark === 'X' ? 'bg-[#ef4444] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-rose-50 hover:text-[#ef4444] border border-slate-200'}`}>X</button>
+                          <button onClick={() => handleGrade(q.tq_id, 'TO')} className={`h-8 rounded font-bold text-xs transition-all ${mark === 'TO' ? 'bg-[#14b8a6] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-teal-50 hover:text-[#14b8a6] border border-slate-200'}`}>TO</button>
+                          <button onClick={() => handleGrade(q.tq_id, 'TX')} className={`h-8 rounded font-bold text-xs transition-all ${mark === 'TX' ? 'bg-[#f97316] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-orange-50 hover:text-[#f97316] border border-slate-200'}`}>TX</button>
+                          <button onClick={() => handleGrade(q.tq_id, 'RO')} className={`h-8 rounded font-bold text-xs transition-all ${mark === 'RO' ? 'bg-[#3b82f6] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-blue-50 hover:text-[#3b82f6] border border-slate-200'}`}>RO</button>
+                          <button onClick={() => handleGrade(q.tq_id, '☆')} className={`h-8 rounded font-bold text-sm transition-all ${mark === '☆' ? 'bg-[#f59e0b] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-amber-50 hover:text-[#f59e0b] border border-slate-200'}`}>☆</button>
                           <button onClick={() => handleGrade(q.tq_id, 'B')} className={`h-8 rounded font-bold text-xs transition-all col-span-2 ${mark === 'B' ? 'bg-[#64748b] text-white shadow transform scale-105' : 'bg-white text-slate-400 hover:bg-slate-100 hover:text-[#64748b] border border-slate-200'}`}>B (빈칸)</button>
                         </div>
                       </div>
@@ -744,7 +744,7 @@ function HomeworkReviewContent() {
         <div className="mt-6 pt-6 border-t border-slate-300 flex justify-center pb-20 gap-4">
           <button 
             onClick={() => router.back()} 
-            className="bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
+            className="bg-brand hover:bg-blue-900 text-white font-bold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
             이전 화면으로 돌아가기
@@ -756,14 +756,14 @@ function HomeworkReviewContent() {
       {modalQ && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> {modalQ.displayQNum || modalQ.question_number}번 문항 상세</h2>
               <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
             <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
               
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
+                <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-slate-100 text-slate-500 px-2 py-0.5 rounded text-xs">질문</span>
                 </h3>
                 <MathText isDiv className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" html={formatMathTextForWeb(modalQ.question || modalQ.text_question || '-').replace(/\n/g, '<br>')} />
@@ -771,7 +771,7 @@ function HomeworkReviewContent() {
               </div>
               
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3 flex items-center gap-2">
+                <h3 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-3 flex items-center gap-2">
                   <span className="bg-blue-200 text-blue-800 px-2 py-0.5 rounded text-xs">정답</span>
                 </h3>
                 <MathText isDiv className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" html={`$ ${formatMathTextForWeb(modalQ.answer || '-')} $`} />

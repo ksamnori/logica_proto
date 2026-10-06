@@ -981,7 +981,7 @@ export default function ExamViewerPage() {
         const topRightStack = (dateHtml || courseBadge) ? `<div class="flex flex-col items-end gap-1">${dateHtml}${courseBadge}</div>` : '';
         const hHtml = `
             <div class="flex justify-between items-start border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
-                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-[#002864] -mt-2\\'>입학테스트</h1>'">
+                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>입학테스트</h1>'">
                 <div class="mt-7">${topRightStack}</div>
             </div>`;
 
@@ -1581,7 +1581,7 @@ export default function ExamViewerPage() {
           } as React.CSSProperties}
         >
           {isSidebarFolded && !isBulkPrintMode && (
-             <button onClick={() => setIsSidebarFolded(false)} className="absolute left-0 top-6 z-50 bg-white border border-slate-300 border-l-0 rounded-r-xl px-2.5 py-4 shadow-md hover:bg-slate-50 flex flex-col items-center gap-1.5 text-slate-500 hover:text-[#002864] transition-colors">
+             <button onClick={() => setIsSidebarFolded(false)} className="absolute left-0 top-6 z-50 bg-white border border-slate-300 border-l-0 rounded-r-xl px-2.5 py-4 shadow-md hover:bg-slate-50 flex flex-col items-center gap-1.5 text-slate-500 hover:text-brand transition-colors">
                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
                  <span className="text-[11px] font-black tracking-widest" style={{ writingMode: 'vertical-rl' }}>설정 펼치기</span>
              </button>

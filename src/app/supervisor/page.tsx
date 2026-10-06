@@ -234,7 +234,7 @@ export default function SupervisorDashboard() {
             <div className="h-screen flex items-center justify-center bg-slate-200 font-['Pretendard']">
                 <div className="bg-white p-8 rounded-2xl shadow-xl w-96 text-center border border-slate-200">
                     <div className="animate-spin text-4xl mb-4">⏳</div>
-                    <h2 className="text-xl font-extrabold text-slate-800 mb-2">권한 확인 중</h2>
+                    <h2 className="text-xl font-bold text-slate-800 mb-2">권한 확인 중</h2>
                     <p className="text-sm text-slate-500 font-bold">{authMessage}</p>
                 </div>
             </div>
@@ -246,9 +246,9 @@ export default function SupervisorDashboard() {
             <div className="h-screen flex items-center justify-center bg-slate-200 font-['Pretendard']">
                 <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border border-slate-200">
                     <div className="text-5xl mb-4">⛔</div>
-                    <h2 className="text-2xl font-extrabold text-rose-600 mb-2">접근 권한 없음</h2>
+                    <h2 className="text-2xl font-bold text-rose-600 mb-2">접근 권한 없음</h2>
                     <p className="text-sm text-slate-600 mb-6 font-bold leading-relaxed">{authMessage}</p>
-                    <p className="text-xs text-slate-400 mb-6">수퍼바이저 대시보드는 <span className="text-[#002864] font-extrabold">최고관리자</span>, <span className="text-[#002864] font-extrabold">원장</span> 및 <span className="text-[#002864] font-extrabold">실장</span> 권한만 접속할 수 있습니다.</p>
+                    <p className="text-xs text-slate-400 mb-6">수퍼바이저 대시보드는 <span className="text-brand font-bold">최고관리자</span>, <span className="text-brand font-bold">원장</span> 및 <span className="text-brand font-bold">실장</span> 권한만 접속할 수 있습니다.</p>
                     <button onClick={() => window.history.back()} className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3 rounded-lg shadow-md transition-colors">이전 화면으로 돌아가기</button>
                 </div>
             </div>
@@ -273,7 +273,7 @@ export default function SupervisorDashboard() {
                 <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 animate-[fadeIn_0.3s_ease-out]">
                     <button 
                         onClick={() => setIsVerificationListOpen(true)} 
-                        className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3.5 rounded-full font-black shadow-[0_8px_30px_rgba(245,158,11,0.5)] animate-bounce flex items-center gap-3 transition-colors border-2 border-white/20"
+                        className="bg-amber-500 hover:bg-amber-600 text-white px-6 py-3.5 rounded-full font-bold shadow-[0_8px_30px_rgba(245,158,11,0.5)] animate-bounce flex items-center gap-3 transition-colors border-2 border-white/20"
                     >
                         <span className="text-xl">🚨</span> 
                         <span>{pendingVerifications.length}건의 테스트 채점 검수 대기중!</span>
@@ -285,8 +285,8 @@ export default function SupervisorDashboard() {
                 <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9998] flex items-center justify-center p-4 md:p-8 animate-[fadeIn_0.2s_ease-out]">
                     <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-lg overflow-hidden flex flex-col max-h-[80vh]">
                         <div className="bg-amber-500 text-white px-6 py-5 flex justify-between items-center shrink-0">
-                            <h2 className="text-xl font-black flex items-center gap-2"><span className="text-2xl">🚨</span> 채점 검수 대기 목록</h2>
-                            <button onClick={() => setIsVerificationListOpen(false)} className="text-white/70 hover:text-white text-3xl font-black transition-colors">&times;</button>
+                            <h2 className="text-xl font-bold flex items-center gap-2"><span className="text-2xl">🚨</span> 채점 검수 대기 목록</h2>
+                            <button onClick={() => setIsVerificationListOpen(false)} className="text-white/70 hover:text-white text-3xl font-bold transition-colors">&times;</button>
                         </div>
                         <div className="flex-1 overflow-y-auto p-2 bg-slate-50 custom-scroll">
                             {pendingVerifications.length === 0 ? (
@@ -294,12 +294,12 @@ export default function SupervisorDashboard() {
                             ) : pendingVerifications.map(exam => (
                                 <div key={exam.assignment_id} className="flex justify-between items-center p-4 m-2 bg-white rounded-xl shadow-sm border border-slate-200 hover:border-amber-300 transition-colors">
                                     <div>
-                                        <p className="font-black text-slate-800 text-lg">{exam.studentName} <span className="text-sm font-bold text-slate-500">학생</span></p>
+                                        <p className="font-bold text-slate-800 text-lg">{exam.studentName} <span className="text-sm font-bold text-slate-500">학생</span></p>
                                         <p className="text-xs font-bold text-slate-400 mt-1">{exam.examTitle}</p>
                                     </div>
                                     <button 
                                         onClick={() => { setIsVerificationListOpen(false); openVerificationModal(exam); }} 
-                                        className="bg-[#002864] hover:bg-blue-900 text-white px-5 py-2.5 rounded-lg text-sm font-black shadow-md transition-colors"
+                                        className="bg-brand hover:bg-blue-900 text-white px-5 py-2.5 rounded-lg text-sm font-bold shadow-md transition-colors"
                                     >
                                         검수하기
                                     </button>
@@ -313,9 +313,9 @@ export default function SupervisorDashboard() {
             {verifyingExam && (
                 <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 md:p-8 animate-[fadeIn_0.2s_ease-out]">
                     <div className="bg-slate-100 rounded-[2rem] shadow-2xl w-full max-w-5xl h-full max-h-[90vh] flex flex-col overflow-hidden">
-                        <div className="bg-[#002864] text-white px-8 py-5 flex justify-between items-center shrink-0">
+                        <div className="bg-brand text-white px-8 py-5 flex justify-between items-center shrink-0">
                             <div>
-                                <h2 className="text-2xl font-black">📝 {verifyingExam.studentName} 학생 테스트 오답 검수</h2>
+                                <h2 className="text-2xl font-bold">📝 {verifyingExam.studentName} 학생 테스트 오답 검수</h2>
                                 <p className="text-sm font-bold text-blue-200 mt-1">{verifyingExam.examTitle}</p>
                             </div>
                             {/* 🌟 수식 새로고침 버튼 추가 */}
@@ -323,7 +323,7 @@ export default function SupervisorDashboard() {
                                 <button onClick={forceMathRefresh} className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
                                     <span>🔄</span> 수식 깨짐 해결
                                 </button>
-                                <button onClick={() => setVerifyingExam(null)} className="text-white/70 hover:text-white text-4xl font-black transition-colors">&times;</button>
+                                <button onClick={() => setVerifyingExam(null)} className="text-white/70 hover:text-white text-4xl font-bold transition-colors">&times;</button>
                             </div>
                         </div>
                         
@@ -331,7 +331,7 @@ export default function SupervisorDashboard() {
                             {verifyingAnswers.length === 0 ? (
                                 <div className="text-center py-20 flex flex-col items-center">
                                     <span className="text-6xl mb-4">💯</span>
-                                    <span className="text-slate-500 font-extrabold text-xl">가채점 결과 모두 정답입니다! (오답 없음)</span>
+                                    <span className="text-slate-500 font-bold text-xl">가채점 결과 모두 정답입니다! (오답 없음)</span>
                                 </div>
                             ) : verifyingAnswers.map((ans, idx) => {
                                 const isOverridden = verificationOverrides[ans.answer_id] === true;
@@ -361,20 +361,20 @@ export default function SupervisorDashboard() {
                                         <div className="w-full md:w-1/3 p-6 flex flex-col justify-between bg-slate-50">
                                             <div className="flex flex-col gap-4">
                                                 <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm overflow-hidden">
-                                                    <span className="text-xs font-black text-slate-400 block mb-1">학생 입력 답안</span>
+                                                    <span className="text-xs font-bold text-slate-400 block mb-1">학생 입력 답안</span>
                                                     {ans.isDrawing ? (
                                                         <span className="inline-block px-3 py-1 bg-slate-100 text-slate-600 font-bold rounded-lg text-sm">✍️ 손글씨 풀이 (좌측 확인)</span>
                                                     ) : (
-                                                        <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-black rounded-lg text-lg truncate max-w-full" title={ans.cleanInput}>{ans.cleanInput || '미입력'}</span>
+                                                        <span className="inline-block px-3 py-1 bg-slate-100 text-slate-800 font-bold rounded-lg text-lg truncate max-w-full" title={ans.cleanInput}>{ans.cleanInput || '미입력'}</span>
                                                     )}
                                                 </div>
                                                 <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 shadow-sm overflow-hidden">
-                                                    <span className="text-xs font-black text-emerald-600 block mb-1">실제 정답</span>
+                                                    <span className="text-xs font-bold text-emerald-600 block mb-1">실제 정답</span>
                                                     {/* 🌟 MathText 컴포넌트로 교체 완료 */}
                                                     {ans.correctAnswer ? (
-                                                        <MathText className="inline-block font-black text-emerald-800 text-lg leading-tight font-myungjo" html={ans.correctAnswer} />
+                                                        <MathText className="inline-block font-bold text-emerald-800 text-lg leading-tight font-myungjo" html={ans.correctAnswer} />
                                                     ) : (
-                                                        <span className="inline-block font-black text-emerald-600 text-sm opacity-60">정답 데이터 없음</span>
+                                                        <span className="inline-block font-bold text-emerald-600 text-sm opacity-60">정답 데이터 없음</span>
                                                     )}
                                                 </div>
                                             </div>
@@ -382,11 +382,11 @@ export default function SupervisorDashboard() {
                                             <div className="mt-6 flex flex-col gap-2">
                                                 <button 
                                                     onClick={() => setVerificationOverrides(p => ({ ...p, [ans.answer_id]: true }))}
-                                                    className={`w-full py-3.5 rounded-xl font-black text-lg transition-all ${isOverridden ? 'bg-emerald-500 text-white shadow-md ring-2 ring-emerald-300 ring-offset-2' : 'bg-white border-2 border-slate-200 text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600'}`}
+                                                    className={`w-full py-3.5 rounded-xl font-bold text-lg transition-all ${isOverridden ? 'bg-emerald-500 text-white shadow-md ring-2 ring-emerald-300 ring-offset-2' : 'bg-white border-2 border-slate-200 text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-600'}`}
                                                 >✅ 정답으로 인정</button>
                                                 <button 
                                                     onClick={() => setVerificationOverrides(p => { const next = {...p}; delete next[ans.answer_id]; return next; })}
-                                                    className={`w-full py-3.5 rounded-xl font-black text-lg transition-all ${!isOverridden ? 'bg-rose-500 text-white shadow-md ring-2 ring-rose-300 ring-offset-2' : 'bg-white border-2 border-slate-200 text-slate-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600'}`}
+                                                    className={`w-full py-3.5 rounded-xl font-bold text-lg transition-all ${!isOverridden ? 'bg-rose-500 text-white shadow-md ring-2 ring-rose-300 ring-offset-2' : 'bg-white border-2 border-slate-200 text-slate-500 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-600'}`}
                                                 >❌ 오답 유지</button>
                                             </div>
                                         </div>
@@ -402,7 +402,7 @@ export default function SupervisorDashboard() {
                                 await supervisorData.confirmVerification(verifyingExam.assignment_id, verifyingExam.student_id, verificationOverrides);
                                 setVerifyingExam(null);
                                 setIsVerifying(false);
-                            }} disabled={isVerifying} className="px-10 py-4 bg-[#002864] hover:bg-blue-900 text-white text-lg font-black rounded-xl shadow-lg transition-colors flex items-center gap-2 disabled:opacity-50">
+                            }} disabled={isVerifying} className="px-10 py-4 bg-brand hover:bg-blue-900 text-white text-lg font-bold rounded-xl shadow-lg transition-colors flex items-center gap-2 disabled:opacity-50">
                                 {isVerifying ? '처리 중...' : '최종 확정 및 오답 클리닉 개방'}
                             </button>
                         </div>
@@ -415,19 +415,19 @@ export default function SupervisorDashboard() {
                 <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 md:p-8 animate-[fadeIn_0.2s_ease-out]">
                     <div className="bg-slate-100 rounded-[2rem] shadow-2xl w-full max-w-4xl h-full max-h-[85vh] flex flex-col overflow-hidden">
                         <div className="bg-rose-600 text-white px-8 py-5 flex justify-between items-center shrink-0">
-                            <h2 className="text-2xl font-black">🙋 {activeStudents[callProcessModal.seat]?.name || '학생'} 질문 상세 보기</h2>
+                            <h2 className="text-2xl font-bold">🙋 {activeStudents[callProcessModal.seat]?.name || '학생'} 질문 상세 보기</h2>
                             {/* 🌟 수식 새로고침 버튼 추가 */}
                             <div className="flex items-center gap-4">
                                 <button onClick={forceMathRefresh} className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
                                     <span>🔄</span> 수식 깨짐 해결
                                 </button>
-                                <button onClick={() => setCallProcessModal(null)} className="text-white/70 hover:text-white text-4xl font-black transition-colors">&times;</button>
+                                <button onClick={() => setCallProcessModal(null)} className="text-white/70 hover:text-white text-4xl font-bold transition-colors">&times;</button>
                             </div>
                         </div>
                         <div className="flex-1 overflow-y-auto p-6 md:p-8 space-y-4 custom-scroll bg-white">
                             <div className="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
-                                <span className="text-xl font-extrabold text-rose-600">{callProcessModal.seat} <span className="text-base text-slate-400 font-bold ml-1">좌석</span></span>
-                                <span className="text-sm font-black px-3 py-1.5 rounded bg-rose-600 shadow-sm text-white">{callProcessModal.qNum}번 문항{callProcessModal.callInfo.source ? ' · '+callProcessModal.callInfo.source : ''}</span>
+                                <span className="text-xl font-bold text-rose-600">{callProcessModal.seat} <span className="text-base text-slate-400 font-bold ml-1">좌석</span></span>
+                                <span className="text-sm font-bold px-3 py-1.5 rounded bg-rose-600 shadow-sm text-white">{callProcessModal.qNum}번 문항{callProcessModal.callInfo.source ? ' · '+callProcessModal.callInfo.source : ''}</span>
                             </div>
                             
                             <MathText className="text-[16px] md:text-[17px] text-slate-800 font-myungjo font-semibold leading-[1.8] break-keep" html={callProcessModal.callInfo.questionText} />
@@ -436,7 +436,7 @@ export default function SupervisorDashboard() {
                                 <div className="mt-4 flex flex-col gap-2">
                                     {callProcessModal.callInfo.options.map((opt: string, i: number) => (
                                         <div key={i} className="text-[15px] text-slate-700 font-medium flex gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100">
-                                            <span className="font-black text-rose-400 shrink-0">{i + 1}.</span>
+                                            <span className="font-bold text-rose-400 shrink-0">{i + 1}.</span>
                                             <MathText className="flex-1" html={opt} />
                                         </div>
                                     ))}
@@ -448,13 +448,13 @@ export default function SupervisorDashboard() {
                             )}
                             
                             <div className="mt-6 pt-4 border-t-2 border-dashed border-slate-200 flex items-start gap-3">
-                                <span className="text-xs font-black px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 shrink-0 mt-0.5">정답</span>
-                                <MathText className="text-[16px] md:text-lg font-black text-emerald-700" html={callProcessModal.callInfo.answer ? `$ ${callProcessModal.callInfo.answer.replace(/\$/g, '')} $` : '정보 없음'} />
+                                <span className="text-xs font-bold px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 shrink-0 mt-0.5">정답</span>
+                                <MathText className="text-[16px] md:text-lg font-bold text-emerald-700" html={callProcessModal.callInfo.answer ? `$ ${callProcessModal.callInfo.answer.replace(/\$/g, '')} $` : '정보 없음'} />
                             </div>
                             
                             {callProcessModal.callInfo.explanation && (
                                 <div className="mt-5 pt-4 border-t-2 border-dashed border-slate-200">
-                                    <span className="text-xs font-black px-2 py-1 rounded border border-slate-300 bg-slate-100 text-slate-600">해설</span>
+                                    <span className="text-xs font-bold px-2 py-1 rounded border border-slate-300 bg-slate-100 text-slate-600">해설</span>
                                     <div className="mt-2.5 bg-slate-50 p-4 rounded-xl border border-slate-100">
                                         <MathText className="text-[14px] md:text-[15px] text-slate-600 font-medium leading-relaxed" html={callProcessModal.callInfo.explanation.replace(/\n/g, '<br>')} />
                                     </div>
@@ -463,10 +463,10 @@ export default function SupervisorDashboard() {
                         </div>
                         <div className="bg-slate-50 p-6 border-t border-slate-200 flex justify-end gap-3 shrink-0 rounded-b-[2rem]">
                             <button onClick={() => setCallProcessModal(null)} className="px-6 py-4 bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-bold rounded-xl transition-colors">닫기</button>
-                            <button onClick={() => { taAction(callProcessModal.seat, 'cancel_call', callProcessModal.qNum, 'skip'); setCallProcessModal(null); }} className="px-8 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 text-lg font-black rounded-xl shadow-sm transition-colors">
+                            <button onClick={() => { taAction(callProcessModal.seat, 'cancel_call', callProcessModal.qNum, 'skip'); setCallProcessModal(null); }} className="px-8 py-4 bg-slate-200 hover:bg-slate-300 text-slate-700 text-lg font-bold rounded-xl shadow-sm transition-colors">
                                 ⏭️ 설명 생략 (그냥 넘기기)
                             </button>
-                            <button onClick={() => { taAction(callProcessModal.seat, 'cancel_call', callProcessModal.qNum, 'hint'); setCallProcessModal(null); }} className="px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white text-lg font-black rounded-xl shadow-lg transition-colors">
+                            <button onClick={() => { taAction(callProcessModal.seat, 'cancel_call', callProcessModal.qNum, 'hint'); setCallProcessModal(null); }} className="px-8 py-4 bg-amber-500 hover:bg-amber-600 text-white text-lg font-bold rounded-xl shadow-lg transition-colors">
                                 💡 힌트 제공 후 종료
                             </button>
                         </div>
@@ -478,7 +478,7 @@ export default function SupervisorDashboard() {
                 <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center">
                     <div className="bg-white rounded-2xl shadow-2xl p-8 text-center max-w-sm">
                         <div className="text-4xl mb-3">🔒</div>
-                        <h3 className="text-lg font-extrabold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
                         <p className="text-sm text-slate-500">관리자가 좌석 배치를 편집하는 동안에는<br />클리닉 기능이 잠시 멈춥니다. 잠시만 기다려주세요.</p>
                     </div>
                 </div>
@@ -526,7 +526,7 @@ export default function SupervisorDashboard() {
                         <span className="text-xl">📡</span>
                     </div>
                     <div>
-                        <h1 className="text-lg font-black tracking-tight text-white flex items-center gap-2">
+                        <h1 className="text-lg font-bold tracking-tight text-white flex items-center gap-2">
                             Logica Clinic <span className="font-medium text-slate-400">|</span> 관제탑
                         </h1>
                         <p className="text-[11px] text-slate-400 font-medium mt-0.5 tracking-tight">전체 좌석 현황 모니터링 및 실시간 제어 시스템</p>
@@ -543,7 +543,7 @@ export default function SupervisorDashboard() {
 
                     <div className="flex items-center gap-3 bg-slate-800/50 pl-4 pr-3 py-1.5 rounded-xl border border-slate-700/50 hidden xl:flex">
                         <div className="text-right">
-                            <div className="text-xs font-black font-mono text-slate-200">{isMounted ? new Date(now).toLocaleTimeString('ko-KR', { hour12: false }) : '--:--:--'}</div>
+                            <div className="text-xs font-bold font-mono text-slate-200">{isMounted ? new Date(now).toLocaleTimeString('ko-KR', { hour12: false }) : '--:--:--'}</div>
                             <div className="text-[9px] text-slate-500 font-bold">UPTIME {isMounted ? formatDuration(now - startedAt) : '00:00'}</div>
                         </div>
                         <span className={`w-2.5 h-2.5 rounded-full shrink-0 shadow-[0_0_8px_rgba(0,0,0,0.5)] ${connectionStatus === 'connected' ? 'bg-emerald-500 dot-live' : connectionStatus === 'error' ? 'bg-rose-500' : 'bg-amber-500'}`}></span>

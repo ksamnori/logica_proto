@@ -317,10 +317,10 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
           if (isChatOpen) { setActiveRoomId(null); setActiveChatView("list"); }
           setIsChatOpen(!isChatOpen);
         }} 
-        className={`fixed w-14 h-14 bg-[#002864] text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen ? 'max-sm:hidden' : ''}`}
+        className={`fixed w-14 h-14 bg-brand text-white rounded-full shadow-[0_8px_20px_rgba(0,40,100,0.4)] flex items-center justify-center hover:bg-blue-900 transition-transform hover:scale-105 active:scale-95 z-[9999] bottom-6 right-6 sm:bottom-10 sm:right-10 ${isChatOpen ? 'max-sm:hidden' : ''}`}
       >
         <svg className="w-7 h-7 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"></path></svg>
-        {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-[11px] font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
+        {unreadCount > 0 && !isChatOpen && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center shadow-sm pointer-events-none">{unreadCount > 99 ? '99+' : unreadCount}</span>}
       </button>
 
       <div 
@@ -330,7 +330,7 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
           sm:right-10 sm:bottom-[90px] sm:w-[360px] sm:h-[550px] sm:border sm:border-slate-200 sm:rounded-2xl sm:shadow-2xl sm:origin-bottom-right
         `} 
       >
-        <div className="bg-[#002864] text-white px-5 py-4 flex justify-between items-center shrink-0">
+        <div className="bg-brand text-white px-5 py-4 flex justify-between items-center shrink-0">
           <h3 className="font-lexend font-bold text-[15px] flex items-center gap-2"><span>💬</span> 학원 및 선생님 상담</h3>
           <button onClick={() => { setIsChatOpen(false); setActiveRoomId(null); setActiveChatView("list"); }} className="text-blue-200 hover:text-white transition-colors p-1.5 z-10 relative">
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
@@ -340,18 +340,18 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
         {activeChatView === "list" ? (
           <div className="flex-1 flex flex-col overflow-hidden bg-slate-50">
             <div className="shrink-0 p-3 pb-1 border-b border-slate-200 bg-white shadow-sm">
-              <h3 className="text-[11px] font-extrabold text-[#002864] mb-2.5 flex items-center gap-1">👩‍🏫 상담 가능한 선생님</h3>
+              <h3 className="text-xs font-bold text-brand mb-2.5 flex items-center gap-1">👩‍🏫 상담 가능한 선생님</h3>
               <div className="flex gap-3 overflow-x-auto custom-scroll pb-2 px-1">
-                {staffList.length === 0 ? <div className="text-[10px] text-slate-400 py-2">현재 배정된 선생님이 없습니다.</div> :
+                {staffList.length === 0 ? <div className="text-xs text-slate-400 py-2">현재 배정된 선생님이 없습니다.</div> :
                   staffList.map(staff => {
                     const avatarUrl = getProfileImageUrl(staff.profile_image_url);
                     return (
                       <div key={staff.instructor_id} onClick={() => createOrOpenRoom(staff.instructor_id, `${staff.name} ${formatPosition(staff.position)}`, avatarUrl)} className="flex flex-col items-center gap-1 cursor-pointer group shrink-0 w-14">
-                        <div className="relative w-11 h-11 rounded-full bg-[#002864]/5 border border-[#002864]/10 flex items-center justify-center text-[#002864] text-lg font-black group-hover:bg-[#002864] group-hover:text-white transition-colors shadow-sm overflow-hidden">
+                        <div className="relative w-11 h-11 rounded-full bg-brand/5 border border-brand/10 flex items-center justify-center text-brand text-lg font-bold group-hover:bg-brand group-hover:text-white transition-colors shadow-sm overflow-hidden">
                           <span className="absolute z-0">{staff.name.substring(1) || staff.name}</span>
                           {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                         </div>
-                        <span className="text-[10px] font-bold text-slate-700 truncate w-full text-center group-hover:text-[#002864] mt-0.5">
+                        <span className="text-xs font-bold text-slate-700 truncate w-full text-center group-hover:text-brand mt-0.5">
                           {staff.name} {formatPosition(staff.position)}
                         </span>
                       </div>
@@ -361,7 +361,7 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
               </div>
             </div>
             <div className="flex-1 overflow-y-auto custom-scroll p-3">
-              <h3 className="text-[11px] font-extrabold text-slate-400 mb-2 px-1">진행 중인 대화</h3>
+              <h3 className="text-xs font-bold text-slate-400 mb-2 px-1">진행 중인 대화</h3>
               <div className="space-y-2">
                 {chatRooms.length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">진행 중인 대화가 없습니다.<br/>선생님을 선택해 대화를 시작하세요.</div> :
                   chatRooms.map(r => {
@@ -376,15 +376,15 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
                     
                     const isUnread = sorted.filter((m: any) => m.sender_type === "instructor" && !m.is_read).length;
                     return (
-                      <div key={r.room_id} onClick={() => openChatRoom(r.room_id, staffName, avatarUrl)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-[#002864] transition-all flex items-center justify-between cursor-pointer group">
+                      <div key={r.room_id} onClick={() => openChatRoom(r.room_id, staffName, avatarUrl)} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-brand transition-all flex items-center justify-between cursor-pointer group">
                         <div className="flex items-center gap-3 flex-1 min-w-0">
                           <div className="relative w-10 h-10 bg-slate-100 rounded-full flex justify-center items-center text-slate-600 font-bold shrink-0 border border-slate-200 text-lg overflow-hidden">
                             <span className="absolute z-0">👨‍🏫</span>
                             {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
                           </div>
                           <div className="flex flex-col min-w-0 flex-1">
-                            <span className="font-bold text-slate-700 text-sm truncate group-hover:text-[#002864] transition-colors">{staffName}</span>
-                            <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${isUnread > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate flex-1 pr-2`}>{preview}</span>{isUnread > 0 && <div className="bg-rose-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm">{isUnread > 99 ? '99+' : isUnread}</div>}</div>
+                            <span className="font-bold text-slate-700 text-sm truncate group-hover:text-brand transition-colors">{staffName}</span>
+                            <div className="flex justify-between items-center mt-0.5"><span className={`text-[11.5px] ${isUnread > 0 ? 'text-slate-700 font-bold' : 'text-slate-400 font-medium'} truncate flex-1 pr-2`}>{preview}</span>{isUnread > 0 && <div className="bg-rose-500 text-white text-xs font-bold px-2 py-0.5 rounded-full shadow-sm">{isUnread > 99 ? '99+' : isUnread}</div>}</div>
                           </div>
                         </div>
                         <button onClick={(e) => deleteChatRoom(e, r.room_id)} className="p-2 ml-1 text-slate-300 hover:text-rose-500 rounded-lg hover:bg-rose-50 transition-colors" title="대화방 삭제">
@@ -403,7 +403,7 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
               <button onClick={() => { setActiveChatView("list"); setActiveRoomId(null); loadChatRooms(); }} className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15 19l-7-7 7-7"></path></svg>
               </button>
-              <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeStaffName}</span><span className="text-[10px] font-bold text-emerald-600">실시간 연결됨</span></div>
+              <div className="flex flex-col flex-1 min-w-0"><span className="font-bold text-slate-800 text-[13px] truncate">{activeStaffName}</span><span className="text-xs font-bold text-emerald-600">실시간 연결됨</span></div>
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll p-4 flex flex-col gap-3 pb-2">
@@ -431,8 +431,8 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
                           String(msg.content).split('\n').map((line, i) => <React.Fragment key={i}>{line}<br/></React.Fragment>)
                         )}
                       </div>
-                      <div className="flex flex-col items-end shrink-0 text-[9px] text-slate-500">
-                        {msg.sender_type === 'parent' && !msg.is_read && <span className="text-[#002864] font-bold mb-0.5">1</span>}
+                      <div className="flex flex-col items-end shrink-0 text-xs text-slate-500">
+                        {msg.sender_type === 'parent' && !msg.is_read && <span className="text-brand font-bold mb-0.5">1</span>}
                         <span>{new Date(msg.created_at).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
                     </div>
@@ -459,9 +459,9 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
             
             <div className="bg-white p-3 border-t border-slate-200 shrink-0 flex items-end gap-2 relative z-20">
               <input type="file" className="hidden" ref={fileInputRef} onChange={handleImageUpload} />
-              <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-[#002864] transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
+              <button onClick={() => fileInputRef.current?.click()} disabled={isUploading} className="p-2.5 text-slate-400 hover:text-brand transition-colors rounded-xl bg-slate-50 hover:bg-blue-50 shrink-0 border border-slate-200 shadow-sm" title="사진/파일 전송">
                 {isUploading ? (
-                  <div className="w-5 h-5 border-2 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+                  <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin"></div>
                 ) : (
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13"></path></svg>
                 )}
@@ -472,10 +472,10 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
                 value={chatInput} 
                 onChange={(e) => { setChatInput(e.target.value); activeChannelRef.current?.send({ type: "broadcast", event: "typing", payload: { sender_type: "parent" } }); }} 
                 onKeyPress={e => { if(e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendParentMsg(); }}} 
-                className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#002864] resize-none max-h-[100px] custom-scroll" 
+                className="flex-1 bg-slate-100 rounded-xl px-4 py-2.5 text-[14px] font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand resize-none max-h-[100px] custom-scroll" 
                 placeholder="메시지를 입력하세요..." 
               />
-              <button onClick={sendParentMsg} className="p-2.5 bg-[#002864] text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
+              <button onClick={sendParentMsg} className="p-2.5 bg-brand text-white rounded-xl hover:bg-blue-900 transition-colors shadow-sm shrink-0"><svg className="w-5 h-5 translate-x-[1px]" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"></path></svg></button>
             </div>
           </div>
         )}

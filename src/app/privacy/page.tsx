@@ -7,7 +7,7 @@ export default function PrivacyPolicyPage() {
   return (
     <div className="min-h-screen bg-slate-50 py-12 px-4 sm:px-6 lg:px-8 font-pretendard">
       <div className="max-w-3xl mx-auto bg-white p-8 sm:p-12 rounded-2xl shadow-sm border border-slate-200 text-slate-700">
-        <h1 className="text-2xl sm:text-3xl font-black text-[#002864] mb-8 border-b border-slate-200 pb-4">
+        <h1 className="text-2xl sm:text-3xl font-bold text-brand mb-8 border-b border-slate-200 pb-4">
           (주)이배움 로지카대치본원학원 개인정보 처리방침
         </h1>
 

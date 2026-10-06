@@ -318,8 +318,8 @@ export default function BookUploadPage() {
       {/* 🌟 크기 통일: w-full max-w-4xl */}
       <div className="w-full max-w-4xl bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col mt-4 overflow-hidden h-[calc(100vh-6rem)]">
         
-        <div className="bg-[#002864] p-6 text-white shrink-0">
-          <h1 className="text-2xl font-black flex items-center gap-2">
+        <div className="bg-brand p-6 text-white shrink-0">
+          <h1 className="text-2xl font-bold flex items-center gap-2">
             <span>🚀</span> 통합 교재(Textbook) 일괄 업로드
           </h1>
           <p className="text-blue-200 text-sm mt-2 font-medium">
@@ -360,7 +360,7 @@ export default function BookUploadPage() {
 
           <div className="grid grid-cols-2 gap-5 pt-4 border-t border-slate-100">
             <div className="col-span-2">
-              <label className="block text-sm font-bold text-slate-700 mb-2">2. 교재 공식 명칭 <span className="text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1 font-bold">전국 공용 자동 설정</span></label>
+              <label className="block text-sm font-bold text-slate-700 mb-2">2. 교재 공식 명칭 <span className="text-xs bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded ml-1 font-bold">전국 공용 자동 설정</span></label>
               <input 
                 type="text" value={bookTitle} onChange={(e) => setBookTitle(e.target.value)} 
                 placeholder="파일을 올리면 자동으로 추출됩니다."
@@ -387,7 +387,7 @@ export default function BookUploadPage() {
             </div>
           </div>
 
-          <div className="bg-slate-900 rounded-xl p-4 h-32 overflow-y-auto custom-scroll font-mono text-[11px] text-emerald-400 shadow-inner">
+          <div className="bg-slate-900 rounded-xl p-4 h-32 overflow-y-auto custom-scroll font-mono text-xs text-emerald-400 shadow-inner">
             {uploadLogs.length === 0 ? <span className="text-slate-600">시스템 대기 중... JSON 파일을 로드해주세요.</span>
             : uploadLogs.map((log, i) => <div key={i} className="mb-1">{`> ${log}`}</div>)}
           </div>
@@ -408,8 +408,8 @@ export default function BookUploadPage() {
           
           <button 
             onClick={processUpload} disabled={!fileData || isUploading}
-            className={`w-full py-4 rounded-xl font-black text-lg transition-all shadow-md flex items-center justify-center gap-2
-              ${!fileData ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isUploading ? 'bg-indigo-400 text-white cursor-wait' : 'bg-[#002864] hover:bg-blue-900 text-white active:scale-[0.98]'}`}
+            className={`w-full py-4 rounded-xl font-bold text-lg transition-all shadow-md flex items-center justify-center gap-2
+              ${!fileData ? 'bg-slate-200 text-slate-400 cursor-not-allowed' : isUploading ? 'bg-indigo-400 text-white cursor-wait' : 'bg-brand hover:bg-blue-900 text-white active:scale-[0.98]'}`}
           >
             {isUploading ? "데이터 동기화 진행 중..." : "🚀 완벽하게 교재 및 문항 일괄 등록 시작"}
           </button>

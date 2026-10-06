@@ -44,7 +44,7 @@ export const buildHeaderHtml = (badge: string, title: string, showTitle: boolean
     return `
         <div class="flex justify-between items-end border-b-[2px] pb-1 shrink-0 w-full relative z-10 bg-white" style="border-bottom-color: var(--color-line);">
             <div class="h-[80px] flex items-center gap-4 overflow-hidden" style="max-width: 70%;">
-                <img src="${LOGO_FOOTER_LEFT_URL}" class="h-9 object-contain shrink-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-lg shrink-0\\'>LOGICA</span>'">
+                <img src="${LOGO_FOOTER_LEFT_URL}" class="h-9 object-contain shrink-0" onerror="this.outerHTML='<span class=\\'font-lexend font-bold text-black text-lg shrink-0\\'>LOGICA</span>'">
                 <h1 class="text-[22px] font-bold whitespace-nowrap overflow-hidden text-ellipsis translate-y-1" style="color: var(--color-title);">${title}</h1>
                 ${yearHtml}
             </div>
@@ -73,7 +73,7 @@ export const buildFooterHtml = (badge: string, pageIndex: number, totalPages: nu
     const displayPageNum = `${pageIndex + 1} / ${totalPages}`;
     return `
         <div class="border-t-[2px] pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20" style="border-top-color: var(--color-line);">
-            <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
+            <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-bold text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
             <div class="absolute right-0 bottom-0 flex justify-end items-end pointer-events-none">
                 <div class="text-[13px] text-slate-500 font-bold whitespace-nowrap text-right tracking-widest">${displayPageNum}</div>
             </div>
@@ -82,7 +82,7 @@ export const buildFooterHtml = (badge: string, pageIndex: number, totalPages: nu
 
   return `
       <div class="border-t-[2px] pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20" style="border-top-color: var(--color-line);">
-          <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
+          <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-bold text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
           <div class="absolute right-0 bottom-0 flex justify-end items-end pointer-events-none">
               <div class="text-[14px] text-slate-400 font-bold whitespace-nowrap text-right tracking-widest">${pageIndex + 1} / ${totalPages}</div>
           </div>
@@ -97,7 +97,7 @@ export const generateGroupBlock = (g: any) => {
       if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
           imgHtml = `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
       }
-      const prefix = g.questions.length > 1 ? `<span class="font-extrabold text-black mr-1">(${q.sub_num || sIdx + 1})</span>` : '';
+      const prefix = g.questions.length > 1 ? `<span class="font-bold text-black mr-1">(${q.sub_num || sIdx + 1})</span>` : '';
       subHtml += `
           <div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}">
               <div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(q.question)}</div>

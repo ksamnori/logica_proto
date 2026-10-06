@@ -79,7 +79,7 @@ export default function StudentShopPage() {
       <nav className="bg-white px-8 py-4 flex justify-between items-center border-b border-slate-200 sticky top-0 z-20 shadow-sm">
         <div className="flex items-center gap-4">
           <button onClick={() => router.push('/student/portal')} className="text-slate-400 hover:text-slate-700 font-bold text-sm">← 포탈로</button>
-          <h1 className="text-lg font-black text-[#002864]">🛒 포인트 상점</h1>
+          <h1 className="text-lg font-bold text-brand">🛒 포인트 상점</h1>
         </div>
         <PointBadge points={points} className="bg-amber-50 border-amber-200 text-amber-600" />
       </nav>
@@ -101,17 +101,17 @@ export default function StudentShopPage() {
                     {p.imageDataUrl ? <img src={p.imageDataUrl} className="w-full h-full object-cover" /> : <span className="text-4xl">🎁</span>}
                     {soldOut && (
                       <div className="absolute inset-0 bg-slate-900/50 flex items-center justify-center">
-                        <span className="text-white font-black text-sm">품절</span>
+                        <span className="text-white font-bold text-sm">품절</span>
                       </div>
                     )}
                   </div>
                   <div className="p-4 flex flex-col flex-1">
                     <h3 className="font-bold text-slate-800 text-sm truncate">{p.name}</h3>
                     {p.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2 flex-1">{p.description}</p>}
-                    {p.stock !== null && !soldOut && <p className="text-[10px] text-slate-400 mt-1">재고 {p.stock}개</p>}
+                    {p.stock !== null && !soldOut && <p className="text-xs text-slate-400 mt-1">재고 {p.stock}개</p>}
                     <div className="flex items-center justify-between mt-3">
-                      <span className="font-black text-amber-600 font-lexend">{p.price.toLocaleString()} P</span>
-                      <button onClick={() => setConfirmTarget(p)} disabled={!canBuy} className="bg-[#002864] hover:bg-blue-900 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
+                      <span className="font-bold text-amber-600 font-lexend">{p.price.toLocaleString()} P</span>
+                      <button onClick={() => setConfirmTarget(p)} disabled={!canBuy} className="bg-brand hover:bg-blue-900 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
                         {soldOut ? '품절' : affordable ? '구매하기' : points !== null ? `${(p.price - points).toLocaleString()}P 부족` : '포인트 부족'}
                       </button>
                     </div>
@@ -130,7 +130,7 @@ export default function StudentShopPage() {
             <p className="text-sm text-slate-500 mb-2">{confirmTarget.price.toLocaleString()} P를 사용해서 구매할까요?</p>
             <div className="flex gap-2 mt-3">
               <button onClick={() => setConfirmTarget(null)} disabled={purchasing} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">취소</button>
-              <button onClick={confirmPurchase} disabled={purchasing} className="flex-1 py-2.5 rounded-xl bg-[#002864] text-white text-sm font-semibold shadow-md hover:bg-blue-900 disabled:opacity-50">{purchasing ? '처리 중...' : '구매 확정'}</button>
+              <button onClick={confirmPurchase} disabled={purchasing} className="flex-1 py-2.5 rounded-xl bg-brand text-white text-sm font-semibold shadow-md hover:bg-blue-900 disabled:opacity-50">{purchasing ? '처리 중...' : '구매 확정'}</button>
             </div>
           </div>
         </div>

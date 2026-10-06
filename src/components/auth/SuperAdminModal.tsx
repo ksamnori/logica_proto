@@ -88,7 +88,7 @@ export default function SuperAdminModal({ isOpen, onClose }: SuperAdminModalProp
       <div className="bg-slate-800 border border-slate-600 w-full max-w-sm rounded-2xl shadow-2xl overflow-hidden text-white">
         <div className="p-6">
           <div className="flex justify-between items-center mb-6">
-            <h2 className="text-xl font-black text-rose-500 tracking-tight">👑 SUPER ADMIN</h2>
+            <h2 className="text-xl font-bold text-rose-500 tracking-tight">👑 SUPER ADMIN</h2>
             <button onClick={onClose} className="text-slate-400 hover:text-white transition-colors text-2xl leading-none">&times;</button>
           </div>
           <form onSubmit={handleSuperLogin} className="space-y-4">

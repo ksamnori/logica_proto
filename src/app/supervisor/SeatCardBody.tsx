@@ -55,8 +55,8 @@ export default function SeatCardBody({
             {/* 1. 상단 헤더: 좌석, 이름, 리셋, 상태 */}
             <div className="flex items-center justify-between pb-1 border-b border-slate-200 shrink-0">
                 <div className="flex items-center gap-1 min-w-0">
-                    <span className="shrink-0 bg-[#002864] text-white text-[10px] font-black w-4 h-4 flex items-center justify-center rounded shadow-sm leading-none">{seat}</span>
-                    <span className="font-extrabold text-slate-900 text-[12px] truncate leading-none" title={student.name}>{student.name}</span>
+                    <span className="shrink-0 bg-brand text-white text-[10px] font-bold w-4 h-4 flex items-center justify-center rounded shadow-sm leading-none">{seat}</span>
+                    <span className="font-bold text-slate-900 text-[12px] truncate leading-none" title={student.name}>{student.name}</span>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                     {interactive && (
@@ -64,7 +64,7 @@ export default function SeatCardBody({
                             ↻ 리셋
                         </button>
                     )}
-                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm leading-none ${badgeBg}`}>{badgeText}</span>
+                    <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded shadow-sm leading-none ${badgeBg}`}>{badgeText}</span>
                 </div>
             </div>
 
@@ -104,7 +104,7 @@ export default function SeatCardBody({
             {/* 4. 하단 영역 */}
             {student.firstSeenAt && student.clinicDurationMs != null && (
                 <div className={`flex items-center justify-between border-t border-slate-200 pt-1 mt-0.5 shrink-0 ${pe}`}>
-                    <span className={`text-[11px] font-black leading-none ${isUrgent ? 'text-rose-600' : 'text-slate-700'}`}>
+                    <span className={`text-[11px] font-bold leading-none ${isUrgent ? 'text-rose-600' : 'text-slate-700'}`}>
                         ⏳ {isMounted ? formatDuration(remainingMs) : '00:00'}
                     </span>
                     <div className="flex items-center rounded border border-slate-300 bg-white overflow-hidden shadow-sm shrink-0">

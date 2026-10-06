@@ -139,7 +139,7 @@ export default function FactoryDashboardPage() {
       <div className="bg-slate-900 rounded-2xl p-8 shadow-lg flex flex-col md:flex-row justify-between items-center mb-6 shrink-0 gap-4 relative overflow-hidden">
         <div className="absolute top-0 right-0 -mt-10 -mr-10 w-40 h-40 bg-white opacity-5 rounded-full blur-2xl"></div>
         <div className="relative z-10">
-          <h1 className="text-3xl font-black text-white flex items-center gap-3">
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
             <span>📊</span> 마스터 DB 컨트롤 타워
             <span className="text-xs font-bold text-slate-900 bg-emerald-400 px-2.5 py-1 rounded shadow-sm tracking-widest uppercase">Live Status</span>
           </h1>
@@ -163,17 +163,17 @@ export default function FactoryDashboardPage() {
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
               <div className="w-12 h-12 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-2xl mb-3 shadow-sm">📚</div>
               <p className="text-sm font-bold text-slate-500 mb-1">시스템에 등록된 전체 교재</p>
-              <h3 className="text-3xl font-black text-slate-800">{stats.totalBooks.toLocaleString()} <span className="text-lg text-slate-400">권</span></h3>
+              <h3 className="text-3xl font-bold text-slate-800">{stats.totalBooks.toLocaleString()} <span className="text-lg text-slate-400">권</span></h3>
             </div>
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
               <div className="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-2xl mb-3 shadow-sm">🧠</div>
               <p className="text-sm font-bold text-slate-500 mb-1">마스터 문제은행 누적 문항</p>
-              <h3 className="text-3xl font-black text-indigo-700">{stats.totalQuestions.toLocaleString()} <span className="text-lg text-indigo-400">제</span></h3>
+              <h3 className="text-3xl font-bold text-indigo-700">{stats.totalQuestions.toLocaleString()} <span className="text-lg text-indigo-400">제</span></h3>
             </div>
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center justify-center text-center">
               <div className="w-12 h-12 bg-rose-50 text-rose-600 rounded-full flex items-center justify-center text-2xl mb-3 shadow-sm">🔥</div>
               <p className="text-sm font-bold text-slate-500 mb-1">최근 7일간 새로 추가된 문항</p>
-              <h3 className="text-3xl font-black text-rose-600">+{stats.recentUploads.toLocaleString()} <span className="text-lg text-rose-400">제</span></h3>
+              <h3 className="text-3xl font-bold text-rose-600">+{stats.recentUploads.toLocaleString()} <span className="text-lg text-rose-400">제</span></h3>
             </div>
           </div>
 
@@ -182,7 +182,7 @@ export default function FactoryDashboardPage() {
             
             {/* 학교급별 분포 */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h3 className="text-lg font-extrabold text-slate-800 mb-6 flex items-center gap-2">
+              <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
                 <span>🏫</span> 학교급별 문항 적재 현황
               </h3>
               <div>
@@ -194,9 +194,9 @@ export default function FactoryDashboardPage() {
                   <div className="flex justify-between items-center p-4 bg-rose-50 rounded-xl border border-rose-100">
                     <div>
                       <h4 className="text-sm font-bold text-rose-800">⚠️ 분류 작업이 필요한 문항</h4>
-                      <p className="text-[11px] font-medium text-rose-600 mt-1">Taxonomy 분류 체계가 매핑되지 않은 고아 문항들입니다.</p>
+                      <p className="text-xs font-medium text-rose-600 mt-1">Taxonomy 분류 체계가 매핑되지 않은 고아 문항들입니다.</p>
                     </div>
-                    <div className="text-xl font-black text-rose-600">{stats.schoolLevel['분류필요'].toLocaleString()}제</div>
+                    <div className="text-xl font-bold text-rose-600">{stats.schoolLevel['분류필요'].toLocaleString()}제</div>
                   </div>
                 </div>
               </div>
@@ -204,7 +204,7 @@ export default function FactoryDashboardPage() {
 
             {/* 난이도 분포 */}
             <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              <h3 className="text-lg font-extrabold text-slate-800 mb-6 flex items-center gap-2">
+              <h3 className="text-lg font-bold text-slate-800 mb-6 flex items-center gap-2">
                 <span>📈</span> 문항 난이도 분포도
               </h3>
               <div>

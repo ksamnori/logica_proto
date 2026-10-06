@@ -69,7 +69,7 @@ const GradeButton = memo(({ code, currentCode, onClick }: GradeButtonProps) => {
   return (
     <button
       onClick={onClick}
-      className={`flex justify-center items-center text-[10px] font-bold h-[28px] w-full transition-colors ${isChecked ? checkedClass : bgClass}`}
+      className={`flex justify-center items-center text-xs font-bold h-[28px] w-full transition-colors ${isChecked ? checkedClass : bgClass}`}
     >
       {code}
     </button>
@@ -930,14 +930,14 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     <div className="flex flex-col h-full overflow-hidden bg-slate-50 w-full font-pretendard">
       <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm">
         <div>
-          <h2 className="text-[14px] font-black text-[#002864] flex items-center gap-1.5">{headerInfo.title}</h2>
-          <p className="text-[11px] font-bold text-slate-500 mt-0.5">{headerInfo.subtitle}</p>
+          <h2 className="text-[14px] font-bold text-brand flex items-center gap-1.5">{headerInfo.title}</h2>
+          <p className="text-xs font-bold text-slate-500 mt-0.5">{headerInfo.subtitle}</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={`text-[11px] font-bold whitespace-nowrap ${pendingCount > 0 ? 'text-orange-500 animate-pulse' : 'text-slate-400'}`}>
+          <span className={`text-xs font-bold whitespace-nowrap ${pendingCount > 0 ? 'text-orange-500 animate-pulse' : 'text-slate-400'}`}>
             {pendingCount > 0 ? '실시간 저장 중...' : '모두 저장됨'}
           </span>
-          <button onClick={saveMatrixGrades} disabled={isSaving || pendingCount > 0} className="text-[11px] font-black bg-[#002864] hover:bg-blue-900 text-white rounded-lg px-4 py-2 shadow-sm transition-colors disabled:opacity-50">
+          <button onClick={saveMatrixGrades} disabled={isSaving || pendingCount > 0} className="text-xs font-bold bg-brand hover:bg-blue-900 text-white rounded-lg px-4 py-2 shadow-sm transition-colors disabled:opacity-50">
             {isSaving ? "처리 중..." : "💾 최종 완료 및 마감"}
           </button>
         </div>
@@ -952,16 +952,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
               <tr>
                 <th className="sticky left-0 z-30 bg-slate-200 p-2 min-w-[150px] w-[150px] border-r border-b text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
                   <div className="flex justify-between items-end px-1">
-                    <span className="text-[11px] font-bold text-slate-500">문항 ⬇</span>
-                    <span className="text-[11px] font-bold text-slate-500">학생 ➔</span>
+                    <span className="text-xs font-bold text-slate-500">문항 ⬇</span>
+                    <span className="text-xs font-bold text-slate-500">학생 ➔</span>
                   </div>
                 </th>
                 {matrixData.cols.map(c => (
                   <th key={c.id} className="p-2 min-w-[140px] w-[140px] border-r border-b bg-slate-100 text-center align-top relative group">
-                    <div className="font-extrabold text-[12px] text-[#002864] truncate" title={c.name}>{c.name}</div>
+                    <div className="font-bold text-[12px] text-brand truncate" title={c.name}>{c.name}</div>
                     
                     {!isHomeworkMode && (
-                      <div className="text-[10px] text-slate-500 font-bold mt-0.5 mb-1 bg-white border border-slate-200 rounded px-1 w-max mx-auto">
+                      <div className="text-xs text-slate-500 font-bold mt-0.5 mb-1 bg-white border border-slate-200 rounded px-1 w-max mx-auto">
                         총점: <span className="text-emerald-600">{c.totalScore}</span>
                       </div>
                     )}
@@ -970,11 +970,11 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                       <div className="mt-1 flex flex-col gap-1 mb-2">
                         {c.hasReport ? (
                           <div className="flex items-center justify-center gap-1">
-                            <button onClick={() => window.open(`/print/report?assignment_id=${c.assignmentId}&t=${Date.now()}`, '_blank')} className="text-[9px] font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded px-1.5 py-0.5 hover:bg-emerald-100">열기</button>
-                            <button onClick={() => handleDeleteReport(c.id, c.assignmentId)} disabled={processingReportId === c.id} className="text-[9px] font-bold bg-rose-50 text-rose-500 border border-rose-200 rounded px-1.5 py-0.5 hover:bg-rose-100 disabled:opacity-50">삭제</button>
+                            <button onClick={() => window.open(`/print/report?assignment_id=${c.assignmentId}&t=${Date.now()}`, '_blank')} className="text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded px-1.5 py-0.5 hover:bg-emerald-100">열기</button>
+                            <button onClick={() => handleDeleteReport(c.id, c.assignmentId)} disabled={processingReportId === c.id} className="text-xs font-bold bg-rose-50 text-rose-500 border border-rose-200 rounded px-1.5 py-0.5 hover:bg-rose-100 disabled:opacity-50">삭제</button>
                           </div>
                         ) : (
-                          <button onClick={() => triggerReportGeneration(c.id, c.assignmentId)} disabled={processingReportId === c.id} className="text-[9px] font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded px-2 py-0.5 mx-auto hover:bg-blue-100 disabled:opacity-50">
+                          <button onClick={() => triggerReportGeneration(c.id, c.assignmentId)} disabled={processingReportId === c.id} className="text-xs font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded px-2 py-0.5 mx-auto hover:bg-blue-100 disabled:opacity-50">
                             {processingReportId === c.id ? "생성 중.." : "리포트 발급"}
                           </button>
                         )}
@@ -982,8 +982,8 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                     )}
 
                     <div className="flex mt-2">
-                      <button onClick={()=>markCol(c.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-[10px] font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
-                      <button onClick={()=>markCol(c.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-[10px] font-bold hover:bg-rose-100 transition-colors">전체 X</button>
+                      <button onClick={()=>markCol(c.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-xs font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
+                      <button onClick={()=>markCol(c.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-xs font-bold hover:bg-rose-100 transition-colors">전체 X</button>
                     </div>
                   </th>
                 ))}
@@ -995,10 +995,10 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                   <td className="sticky left-0 z-10 bg-white p-1.5 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle min-w-[150px] w-[150px]">
                     <div className="flex justify-between items-center mb-1 border-b border-slate-100 pb-1 px-0.5">
                       <div className="flex items-center gap-1 min-w-0">
-                        <span className="text-[12px] font-black text-[#002864] shrink-0">
+                        <span className="text-[12px] font-bold text-brand shrink-0">
                           {r.displayNum}{r.displayNum.includes('(') ? '' : '번'}
                         </span>
-                        <div className="flex items-center text-[9px] font-bold text-slate-400 bg-slate-50 px-1 py-0.5 rounded border border-slate-200 truncate leading-none mt-0.5">
+                        <div className="flex items-center text-xs font-bold text-slate-400 bg-slate-50 px-1 py-0.5 rounded border border-slate-200 truncate leading-none mt-0.5">
                           <span title="출처 페이지">{r.pageNum ? `${r.pageNum}p` : '-p'}</span>
                           {r.qNumber && (
                             <>
@@ -1008,19 +1008,19 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                           )}
                         </div>
                       </div>
-                      <button onClick={()=>setModalQ(r.fullQuestion)} className="text-[11px] text-slate-400 hover:text-blue-500 font-bold px-0.5 transition-colors shrink-0" title="상세 보기">🔍</button>
+                      <button onClick={()=>setModalQ(r.fullQuestion)} className="text-xs text-slate-400 hover:text-blue-500 font-bold px-0.5 transition-colors shrink-0" title="상세 보기">🔍</button>
                     </div>
                     
                     <div 
                       onClick={()=>setModalQ(r.fullQuestion)}
-                      className="text-[10px] text-blue-700 font-bold bg-blue-50/50 hover:bg-blue-100 px-1 py-1 rounded border border-blue-100 mb-1 cursor-pointer transition-colors text-center overflow-hidden line-clamp-1 break-all" 
+                      className="text-xs text-blue-700 font-bold bg-blue-50/50 hover:bg-blue-100 px-1 py-1 rounded border border-blue-100 mb-1 cursor-pointer transition-colors text-center overflow-hidden line-clamp-1 break-all" 
                       title="클릭하여 문제/정답 전체 보기"
                       dangerouslySetInnerHTML={{__html: formatMathTextForWeb(r.answer || "-")}} 
                     />
                     
                     <div className="flex mt-auto">
-                      <button onClick={()=>markRow(r.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-[10px] font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
-                      <button onClick={()=>markRow(r.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-[10px] font-bold hover:bg-rose-100 transition-colors">전체 X</button>
+                      <button onClick={()=>markRow(r.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-xs font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
+                      <button onClick={()=>markRow(r.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-xs font-bold hover:bg-rose-100 transition-colors">전체 X</button>
                     </div>
                   </td>
                   
@@ -1047,10 +1047,10 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                       <td key={key} className="p-2 border-r border-b transition-colors align-middle relative">
                         <div className="flex items-center justify-between mb-1 px-1 h-[16px]">
                            <div className="flex items-center gap-1 min-w-0 shrink-0">
-                             <span className="shrink-0 flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 text-[9px] font-black" title="학생 화면에서의 문제 번호">
+                             <span className="shrink-0 flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold" title="학생 화면에서의 문제 번호">
                                {cell.studentQNum}
                              </span>
-                             <div className="text-[9px] text-slate-500 font-semibold truncate max-w-[45px] cursor-help" title={!isImg && hasInput ? cell.studentInput : ''}>
+                             <div className="text-xs text-slate-500 font-semibold truncate max-w-[45px] cursor-help" title={!isImg && hasInput ? cell.studentInput : ''}>
                                {isImg ? (
                                  <span onClick={() => setModalImg(cleanInputUrl || cell.studentInput)} className="text-blue-500 underline cursor-zoom-in">이미지 보기</span>
                                ) : hasInput ? (
@@ -1090,18 +1090,18 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       {modalQ && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-[#002864] p-4 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
               <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> {modalQ.displayQNum || modalQ.items?.[0]?.question?.question_number}번 문항 상세</h2>
               <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
             <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="font-extrabold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
+                <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
                 <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.items?.[0]?.question?.question || '-').replace(/\n/g, '<br>') }} />
                 {getCleanUrl(modalQ.items?.[0]?.question?.image_url) && <img src={getCleanUrl(modalQ.items[0].question.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
               </div>
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                <h3 className="font-extrabold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
+                <h3 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
                 <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(modalQ.items?.[0]?.question?.answer || '-')} $` }} />
               </div>
             </div>

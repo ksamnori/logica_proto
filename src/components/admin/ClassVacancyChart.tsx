@@ -5,9 +5,9 @@ import React, { useEffect, useRef } from "react";
 import Chart from "chart.js/auto";
 
 const ClassVacancyBadge = ({ vacancy }: { vacancy: number }) => {
-  if (vacancy <= 0) return <span className="text-[9px] font-black text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded shadow-sm">마감</span>;
-  if (vacancy <= 2) return <span className="text-[9px] font-black text-amber-500 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded shadow-sm">마감 임박</span>;
-  return <span className="text-[9px] font-black text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded shadow-sm">{vacancy}자리 여유</span>;
+  if (vacancy <= 0) return <span className="text-xs font-bold text-rose-500 bg-rose-50 border border-rose-100 px-1.5 py-0.5 rounded shadow-sm">마감</span>;
+  if (vacancy <= 2) return <span className="text-xs font-bold text-amber-500 bg-amber-50 border border-amber-100 px-1.5 py-0.5 rounded shadow-sm">마감 임박</span>;
+  return <span className="text-xs font-bold text-emerald-600 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded shadow-sm">{vacancy}자리 여유</span>;
 };
 
 interface ClassVacancyChartProps {
@@ -69,25 +69,25 @@ export default function ClassVacancyChart({ classStats, levelCounts, openClassMo
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
       <div className="lg:col-span-2 bg-transparent rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden h-[380px]">
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-white shrink-0 rounded-t-2xl">
-          <h3 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">🏫 수강반 결원 모니터링 <span className="text-xs font-normal text-slate-400">(목표 정원 기준)</span></h3>
-          <span className="text-[10px] font-bold text-rose-500 bg-rose-50 border border-rose-100 px-2 py-1 rounded shadow-sm">결원이 많은 순 (모집 시급) 정렬</span>
+          <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">🏫 수강반 결원 모니터링 <span className="text-xs font-normal text-slate-400">(목표 정원 기준)</span></h3>
+          <span className="text-xs font-bold text-rose-500 bg-rose-50 border border-rose-100 px-2 py-1 rounded shadow-sm">결원이 많은 순 (모집 시급) 정렬</span>
         </div>
         <div className="flex-1 overflow-y-auto custom-scroll p-5 bg-transparent border-t-0 border-slate-200">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {classStats.length === 0 ? <div className="col-span-full text-center py-10 text-slate-400 font-bold text-sm">운영 중인 반이 없습니다.</div> : 
               classStats.map(c => {
                 const bgClass = c.vacancy > 2 ? 'bg-blue-50/20 border-blue-200' : 'bg-white border-slate-200';
-                const barColor = c.vacancy <= 0 ? 'bg-rose-400' : c.vacancy <= 2 ? 'bg-amber-400' : 'bg-[#002864]';
+                const barColor = c.vacancy <= 0 ? 'bg-rose-400' : c.vacancy <= 2 ? 'bg-amber-400' : 'bg-brand';
                 return (
                   <div key={c.class_id} onClick={() => openClassModal(c)} className={`p-3 border rounded-xl hover:shadow-md transition-all cursor-pointer flex flex-col justify-between ${bgClass}`}>
                     <div className="flex justify-between items-start mb-2 gap-1">
-                      <span className="text-[11px] font-extrabold text-slate-700 truncate" title={c.name}>{c.name}</span>
+                      <span className="text-xs font-bold text-slate-700 truncate" title={c.name}>{c.name}</span>
                       <ClassVacancyBadge vacancy={c.vacancy} />
                     </div>
                     <div>
                       <div className="flex justify-between items-end mb-1">
-                        <span className="text-[10px] font-bold text-slate-400">{c.instructor?.name || '미정'} 선생님</span>
-                        <span className="text-sm font-black text-[#002864]">{c.sCount}<span className="text-[9px] text-slate-400 font-bold ml-0.5">/ {c.capacity}명</span></span>
+                        <span className="text-xs font-bold text-slate-400">{c.instructor?.name || '미정'} 선생님</span>
+                        <span className="text-sm font-bold text-brand">{c.sCount}<span className="text-xs text-slate-400 font-bold ml-0.5">/ {c.capacity}명</span></span>
                       </div>
                       <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner mt-1">
                         <div className={`${barColor} h-1.5 rounded-full transition-all duration-1000`} style={{ width: `${c.fillRate}%` }}></div>
@@ -103,7 +103,7 @@ export default function ClassVacancyChart({ classStats, levelCounts, openClassMo
 
       <div className="lg:col-span-1 bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden h-[380px]">
         <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50 shrink-0">
-          <h3 className="text-sm font-extrabold text-slate-800">📊 레벨별 수강 비중 <span className="text-xs font-normal text-slate-500">(총 수강 건수)</span></h3>
+          <h3 className="text-sm font-bold text-slate-800">📊 레벨별 수강 비중 <span className="text-xs font-normal text-slate-500">(총 수강 건수)</span></h3>
         </div>
         <div className="flex-1 p-5 flex flex-col items-center justify-center relative bg-white">
           <div className="absolute inset-0 p-5 pb-8 flex items-center justify-center">

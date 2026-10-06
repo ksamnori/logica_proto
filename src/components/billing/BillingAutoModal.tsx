@@ -83,7 +83,7 @@ export default function BillingAutoModal({ isOpen, onClose, classes, students }:
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[99] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-4xl rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         <div className="bg-slate-100 p-4 border-b border-slate-200 flex justify-between items-center shrink-0">
-          <h3 className="text-base font-extrabold text-slate-800">새 예약 등록 <span className="text-xs font-normal text-slate-500 ml-2">학원 전체/클래스별/수강생별 청구서 생성 및 발송 자동화</span></h3>
+          <h3 className="text-base font-bold text-slate-800">새 예약 등록 <span className="text-xs font-normal text-slate-500 ml-2">학원 전체/클래스별/수강생별 청구서 생성 및 발송 자동화</span></h3>
           <button onClick={onClose} className="text-slate-400 hover:text-emerald-500 text-2xl font-bold transition-colors leading-none">&times;</button>
         </div>
         <div className="flex h-[550px]">
@@ -177,14 +177,14 @@ export default function BillingAutoModal({ isOpen, onClose, classes, students }:
                           <tr key={r.rule_id} className={`hover:bg-slate-50 transition-opacity ${r.is_active ? 'opacity-100' : 'opacity-50'}`}>
                             <td className="py-3 px-3 text-left"><div className="text-slate-800 text-[12px] truncate max-w-[150px]">{r.target_name}</div></td>
                             <td className="py-3 text-[12px] text-slate-600">{sText}</td>
-                            <td className="py-3">{r.is_generate && <span className="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded mr-1 text-[10px]">생성</span>}{r.is_send && <span className="bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded text-[10px]">발송</span>}</td>
+                            <td className="py-3">{r.is_generate && <span className="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded mr-1 text-xs">생성</span>}{r.is_send && <span className="bg-amber-100 text-amber-600 px-1.5 py-0.5 rounded text-xs">발송</span>}</td>
                             <td className="py-3 text-center">
                               <label className="relative inline-flex items-center cursor-pointer">
                                 <input type="checkbox" checked={r.is_active} onChange={e => toggleRuleActive(r.rule_id, e.target.checked)} className="sr-only peer" />
                                 <div className="w-9 h-5 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-500"></div>
                               </label>
                             </td>
-                            <td className="py-3"><button onClick={() => deleteRule(r.rule_id)} className="text-rose-500 bg-white border border-rose-200 hover:bg-rose-500 hover:text-white px-2.5 py-1 rounded-lg text-[11px] shadow-sm">삭제</button></td>
+                            <td className="py-3"><button onClick={() => deleteRule(r.rule_id)} className="text-rose-500 bg-white border border-rose-200 hover:bg-rose-500 hover:text-white px-2.5 py-1 rounded-lg text-xs shadow-sm">삭제</button></td>
                           </tr>
                         );
                       })

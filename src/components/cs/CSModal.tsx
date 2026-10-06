@@ -304,7 +304,7 @@ export default function CSModal({
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">진행 상태</label>
-                <select value={modalData.status} onChange={(e) => handleModalChange("status", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-black text-sm focus:outline-none focus:border-rose-600 bg-white">
+                <select value={modalData.status} onChange={(e) => handleModalChange("status", e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-white">
                   <option value="대기" className="text-rose-600">대기 (미처리)</option>
                   <option value="처리중" className="text-amber-600">처리 중</option>
                   <option value="완료" className="text-emerald-600">완료됨</option>
@@ -318,7 +318,7 @@ export default function CSModal({
                     className="sr-only peer" 
                   />
                   <div className="w-9 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-slate-800"></div>
-                  <span className="ml-2 text-xs font-bold text-slate-600 group-hover:text-slate-800 transition-colors">🔒 비공개 <span className="text-[10px] font-normal text-slate-400">(권한자 전용)</span></span>
+                  <span className="ml-2 text-xs font-bold text-slate-600 group-hover:text-slate-800 transition-colors">🔒 비공개 <span className="text-xs font-normal text-slate-400">(권한자 전용)</span></span>
                 </label>
               </div>
             </div>
@@ -327,7 +327,7 @@ export default function CSModal({
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 overflow-hidden">
             <div className="bg-slate-100 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
               <h3 className="font-bold text-slate-700 text-sm">💬 처리 상황 / 코멘트</h3>
-              <span className="text-[10px] font-bold text-slate-500">권한이 있는 작업자가 기록을 남길 수 있습니다.</span>
+              <span className="text-xs font-bold text-slate-500">권한이 있는 작업자가 기록을 남길 수 있습니다.</span>
             </div>
             
             <div className="flex-1 overflow-y-auto custom-scroll p-4 bg-slate-50/50 flex flex-col gap-3">
@@ -342,9 +342,9 @@ export default function CSModal({
                     <div key={cmt.id} className={`flex flex-col w-full group ${isMe ? "items-end" : "items-start"}`}>
                       <div className={`flex items-center gap-2 mb-1 ${!isMe ? "ml-1 flex-row-reverse" : ""}`}>
                         {canDelete && (
-                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-black text-xs transition-colors p-1" title="댓글 삭제">✕</button>
+                          <button onClick={() => handleDeleteComment(cmt.id)} className="hidden group-hover:block text-slate-300 hover:text-rose-500 font-bold text-xs transition-colors p-1" title="댓글 삭제">✕</button>
                         )}
-                        <span className="text-[10px] text-slate-500 font-bold">
+                        <span className="text-xs text-slate-500 font-bold">
                           {cmt.authorName} <span className="font-normal opacity-70 ml-1">{cmt.createdAt}</span>
                         </span>
                       </div>
@@ -381,7 +381,7 @@ export default function CSModal({
             )}
             
             {modalData.request_id && (isSuperAdminOrAdmin || canSubmitAgenda) && (
-              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-[#002864] font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
+              <button onClick={submitAgenda} className="px-4 py-2.5 bg-slate-100 text-brand font-bold text-[13px] rounded-lg hover:bg-blue-50 hover:text-blue-700 transition-colors border border-slate-200 hover:border-blue-200 flex items-center gap-1.5">
                 🎙️ 회의 안건 상정
               </button>
             )}

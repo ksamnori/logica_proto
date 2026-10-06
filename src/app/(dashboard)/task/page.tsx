@@ -243,8 +243,8 @@ export default function TaskBoardPage() {
         className={`task-card p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-1.5 transition-all active:scale-95 ${canDrag ? 'cursor-pointer hover:-translate-y-0.5 hover:shadow-md' : 'cursor-pointer hover:bg-slate-50 opacity-95'} ${isCollapsed ? 'bg-slate-50/70 opacity-80 hover:opacity-100' : 'bg-white'}`}
       >
         <div className="flex justify-between items-start mb-1">
-          <span className={`text-[10px] font-black ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{task.memo_type}</span>
-          {isCollapsed && <span className="text-[9px] font-bold text-slate-400">{updatedDateStr}</span>}
+          <span className={`text-xs font-bold ${typeColor} px-2 py-0.5 rounded shadow-sm border`}>{task.memo_type}</span>
+          {isCollapsed && <span className="text-xs font-bold text-slate-400">{updatedDateStr}</span>}
         </div>
         
         {/* 🌟 [변경] 접힌 상태에서는 1줄(line-clamp-1)만 노출되도록 분기 */}
@@ -258,18 +258,18 @@ export default function TaskBoardPage() {
             {cmts.length > 0 && (
               <div className="mt-2.5 space-y-1.5 border-t border-slate-100 pt-2.5">
                 {cmts.slice(-2).map((c: any) => (
-                  <div key={c.id} className="text-[10px] bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
+                  <div key={c.id} className="text-xs bg-slate-50 p-1.5 rounded border border-slate-100 text-slate-600 truncate">
                     <span className="font-bold text-slate-500">{c.authorName}:</span> {c.text}
                   </div>
                 ))}
               </div>
             )}
             <div className="flex flex-col mt-2 pt-2 border-t border-slate-100 gap-1.5">
-              <div className="flex justify-between items-center text-[10px] font-bold">
+              <div className="flex justify-between items-center text-xs font-bold">
                 <span className="text-slate-500">최종 수정: {updaterName}</span>
                 <span className="text-slate-400">{updatedDateStr}</span>
               </div>
-              <div className="flex justify-between items-center text-[10px] font-bold">
+              <div className="flex justify-between items-center text-xs font-bold">
                 <span className="text-blue-500">작성: {task.author_name}</span>
                 <span className="text-slate-400">{createdDateStr}</span>
               </div>
@@ -282,7 +282,7 @@ export default function TaskBoardPage() {
           <div className={`pt-2 flex justify-center ${isCollapsed ? 'mt-0' : 'border-t border-slate-100 mt-1'}`}>
             <button
               onClick={(e) => toggleCardExpand(e, task.memo_id)}
-              className="text-[10px] font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
+              className="text-xs font-bold text-slate-400 hover:text-slate-600 flex items-center gap-1 px-3 py-1 rounded hover:bg-slate-200 transition-colors"
             >
               {isExpanded ? "▲ 요약 보기" : "▼ 상세 보기"}
             </button>
@@ -296,7 +296,7 @@ export default function TaskBoardPage() {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
           <span className="text-slate-500 font-bold text-sm">업무 보드 데이터를 불러오는 중입니다...</span>
         </div>
       </div>
@@ -319,7 +319,7 @@ export default function TaskBoardPage() {
       <div className="flex-1 flex gap-6 overflow-hidden pb-2">
         <div className="flex-1 min-w-[250px] bg-slate-100/50 border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-inner">
           <div className="p-4 bg-slate-100 border-b border-slate-200 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-slate-700">📑 할 일 (To-Do)</h3>
+            <h3 className="font-bold text-slate-700">📑 할 일 (To-Do)</h3>
             <span className="bg-slate-200 text-slate-600 text-xs px-2 py-0.5 rounded-full font-bold">{todos.length}</span>
           </div>
           <div 
@@ -332,7 +332,7 @@ export default function TaskBoardPage() {
 
         <div className="flex-1 min-w-[250px] bg-blue-50/30 border border-blue-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
           <div className="p-4 bg-blue-50 border-b border-blue-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-blue-700">🚀 진행 중 (In Progress)</h3>
+            <h3 className="font-bold text-blue-700">🚀 진행 중 (In Progress)</h3>
             <span className="bg-blue-200 text-blue-700 text-xs px-2 py-0.5 rounded-full font-bold">{inProgress.length}</span>
           </div>
           <div 
@@ -345,7 +345,7 @@ export default function TaskBoardPage() {
 
         <div className="flex-1 min-w-[250px] bg-emerald-50/30 border border-emerald-100 rounded-2xl flex flex-col overflow-hidden shadow-inner">
           <div className="p-4 bg-emerald-50 border-b border-emerald-100 shrink-0 flex justify-between items-center rounded-t-2xl">
-            <h3 className="font-black text-emerald-700">✅ 완료 (Done)</h3>
+            <h3 className="font-bold text-emerald-700">✅ 완료 (Done)</h3>
             <span className="bg-emerald-200 text-emerald-700 text-xs px-2 py-0.5 rounded-full font-bold">{dones.length}</span>
           </div>
           <div 
@@ -357,17 +357,17 @@ export default function TaskBoardPage() {
         </div>
 
         <div className="w-[300px] shrink-0 flex flex-col gap-4 overflow-hidden">
-          <button onClick={() => openModal()} className="w-full bg-[#002864] hover:bg-blue-900 text-white px-5 py-3.5 rounded-xl font-extrabold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
+          <button onClick={() => openModal()} className="w-full bg-brand hover:bg-blue-900 text-white px-5 py-3.5 rounded-xl font-bold shadow-sm transition-colors flex items-center justify-center gap-2 shrink-0 text-sm">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"></path></svg>
             새 업무 공유 작성하기
           </button>
 
           <div className="flex-1 bg-white border border-slate-200 rounded-2xl flex flex-col overflow-hidden shadow-sm min-h-0">
             <div className="p-4 bg-slate-800 text-white shrink-0 flex justify-between items-center rounded-t-2xl">
-              <h3 className="font-black text-sm">📊 분류별 통계 및 보관함</h3>
+              <h3 className="font-bold text-sm">📊 분류별 통계 및 보관함</h3>
             </div>
             <div className="p-3 border-b border-slate-100 bg-slate-50 shrink-0">
-              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-[#002864] shadow-sm cursor-pointer" />
+              <input type="month" value={statsMonth} onChange={(e) => setStatsMonth(e.target.value)} className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-slate-700 focus:outline-none focus:border-brand shadow-sm cursor-pointer" />
             </div>
             <div className="p-3 border-b border-slate-100 shrink-0">
               <div className="grid grid-cols-2 gap-2 text-xs font-bold text-slate-600">
@@ -394,8 +394,8 @@ export default function TaskBoardPage() {
                   return (
                     <div key={t.memo_id} className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm cursor-pointer hover:border-slate-400 transition-colors" onClick={() => openModal(t)}>
                       <div className="flex justify-between items-start mb-2">
-                        <span className={`text-[9px] font-black ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{t.memo_type}</span>
-                        <span className="text-[10px] font-bold text-slate-400">{dateStr}</span>
+                        <span className={`text-xs font-bold ${typeColor} px-1.5 py-0.5 rounded border shadow-sm`}>{t.memo_type}</span>
+                        <span className="text-xs font-bold text-slate-400">{dateStr}</span>
                       </div>
                       <div className="text-xs font-bold text-slate-700 leading-snug line-clamp-2">{t.content}</div>
                     </div>

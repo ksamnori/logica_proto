@@ -234,7 +234,7 @@ export default function ShopAdminPage() {
       <div className="h-full flex items-center justify-center bg-slate-50">
         <div className="bg-white p-8 rounded-2xl shadow-xl max-w-md text-center border border-slate-200">
           <div className="text-5xl mb-4">⛔</div>
-          <h2 className="text-xl font-extrabold text-rose-600 mb-2">접근 권한 없음</h2>
+          <h2 className="text-xl font-bold text-rose-600 mb-2">접근 권한 없음</h2>
           <p className="text-sm text-slate-500 font-bold">상점 관리는 접근 권한이 있는 관리자만 접속할 수 있습니다.</p>
         </div>
       </div>
@@ -246,14 +246,14 @@ export default function ShopAdminPage() {
     : purchases;
 
   const statusBadge = (p: ShopPurchase) => {
-    if (p.status === 'cancelled') return <span className="ml-2 text-[9px] font-bold px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-500">취소됨</span>;
+    if (p.status === 'cancelled') return <span className="ml-2 text-xs font-bold px-1.5 py-0.5 rounded-full bg-slate-200 text-slate-500">취소됨</span>;
     return null;
   };
 
   return (
     <div className="h-full overflow-y-auto bg-slate-50 p-8 font-pretendard">
       <div className="max-w-6xl mx-auto">
-        <h1 className="text-2xl font-black text-slate-800 mb-6">🛒 포인트 상점 관리</h1>
+        <h1 className="text-2xl font-bold text-slate-800 mb-6">🛒 포인트 상점 관리</h1>
 
         <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-6">
           {/* 좌측 패널: 상품 폼 & 포인트 관리 */}
@@ -263,7 +263,7 @@ export default function ShopAdminPage() {
             <form onSubmit={handleSubmit} className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-4 shrink-0">
               <div className="flex items-center justify-between">
                 <h2 className="font-bold text-slate-700 text-sm">{editingId ? '상품 수정' : '새 상품 등록'}</h2>
-                {editingId && <button type="button" onClick={resetForm} className="text-[11px] font-bold text-slate-400 hover:text-slate-600">취소하고 새로 등록</button>}
+                {editingId && <button type="button" onClick={resetForm} className="text-xs font-bold text-slate-400 hover:text-slate-600">취소하고 새로 등록</button>}
               </div>
 
               <div>
@@ -277,26 +277,26 @@ export default function ShopAdminPage() {
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1.5">상품명</label>
-                <input value={name} onChange={e => setName(e.target.value)} placeholder="예: 학원 굿즈 연필" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#002864]" />
+                <input value={name} onChange={e => setName(e.target.value)} placeholder="예: 학원 굿즈 연필" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-brand" />
               </div>
 
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1.5">설명 (선택)</label>
-                <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="상품 설명" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#002864] resize-none" />
+                <textarea value={description} onChange={e => setDescription(e.target.value)} rows={3} placeholder="상품 설명" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-brand resize-none" />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1.5">가격 (P)</label>
-                  <input type="number" min={0} step={1} value={price} onChange={e => setPrice(e.target.value)} placeholder="1000" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#002864]" />
+                  <input type="number" min={0} step={1} value={price} onChange={e => setPrice(e.target.value)} placeholder="1000" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-brand" />
                 </div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1.5">재고 (비우면 무제한)</label>
-                  <input type="number" min={0} step={1} value={stock} onChange={e => setStock(e.target.value)} placeholder="예: 10" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-[#002864]" />
+                  <input type="number" min={0} step={1} value={stock} onChange={e => setStock(e.target.value)} placeholder="예: 10" className="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm focus:outline-none focus:border-brand" />
                 </div>
               </div>
 
-              <button type="submit" disabled={submitting} className="w-full bg-[#002864] hover:bg-blue-900 disabled:opacity-50 text-white font-bold py-3 rounded-xl shadow-sm transition-colors">{submitting ? '처리 중...' : editingId ? '수정 완료' : '상품 등록'}</button>
+              <button type="submit" disabled={submitting} className="w-full bg-brand hover:bg-blue-900 disabled:opacity-50 text-white font-bold py-3 rounded-xl shadow-sm transition-colors">{submitting ? '처리 중...' : editingId ? '수정 완료' : '상품 등록'}</button>
             </form>
 
             {/* 🌟 신규 추가: 학생 포인트 관리 패널 */}
@@ -318,7 +318,7 @@ export default function ShopAdminPage() {
                         onClick={() => handleSelectStudent(s)}
                         className="px-4 py-3 hover:bg-slate-50 cursor-pointer text-sm font-bold text-slate-700 border-b border-slate-100 last:border-0 flex items-center justify-between"
                       >
-                        {s.name} <span className="text-[11px] text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded">{s.grade}</span>
+                        {s.name} <span className="text-xs text-slate-400 font-medium bg-slate-100 px-1.5 py-0.5 rounded">{s.grade}</span>
                       </li>
                     ))}
                   </ul>
@@ -328,22 +328,22 @@ export default function ShopAdminPage() {
               {selectedStudent && (
                 <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4 animate-[fadeIn_0.2s_ease-out]">
                   <div className="flex justify-between items-center">
-                    <div className="font-black text-slate-800 text-lg flex items-center gap-2">
+                    <div className="font-bold text-slate-800 text-lg flex items-center gap-2">
                       {selectedStudent.name} 
                       <span className="text-xs font-bold text-slate-500 bg-white px-2 py-0.5 rounded border border-slate-200">{selectedStudent.grade}</span>
                     </div>
-                    <button onClick={() => setSelectedStudent(null)} className="text-[10px] font-bold text-slate-400 hover:text-rose-500 bg-white border border-slate-200 px-2 py-1 rounded transition-colors">✕ 닫기</button>
+                    <button onClick={() => setSelectedStudent(null)} className="text-xs font-bold text-slate-400 hover:text-rose-500 bg-white border border-slate-200 px-2 py-1 rounded transition-colors">✕ 닫기</button>
                   </div>
                   
                   <div className="flex justify-between items-center bg-white p-3 rounded-lg border border-slate-200 shadow-sm">
                     <span className="text-xs font-bold text-slate-500">현재 보유 포인트</span>
-                    <span className="font-black text-amber-600 text-lg">
+                    <span className="font-bold text-amber-600 text-lg">
                       {studentPoints === null ? '조회 중...' : `${studentPoints.toLocaleString()} P`}
                     </span>
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-[10px] font-bold text-slate-400">보상 (칭찬)</p>
+                    <p className="text-xs font-bold text-slate-400">보상 (칭찬)</p>
                     <div className="grid grid-cols-2 gap-2">
                       <button disabled={isPointUpdating || studentPoints === null} onClick={() => handlePointUpdate(500, '성적 우수')} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold py-2 rounded-lg transition-colors shadow-sm disabled:opacity-50">+500P (성적)</button>
                       <button disabled={isPointUpdating || studentPoints === null} onClick={() => handlePointUpdate(100, '출결/태도 우수')} className="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 text-xs font-bold py-2 rounded-lg transition-colors shadow-sm disabled:opacity-50">+100P (출결)</button>
@@ -353,7 +353,7 @@ export default function ShopAdminPage() {
                   </div>
 
                   <div className="space-y-2">
-                    <p className="text-[10px] font-bold text-slate-400">차감 (패널티)</p>
+                    <p className="text-xs font-bold text-slate-400">차감 (패널티)</p>
                     <div className="grid grid-cols-2 gap-2">
                       <button disabled={isPointUpdating || studentPoints === null} onClick={() => handlePointUpdate(-100, '지각/결석')} className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2 rounded-lg transition-colors shadow-sm disabled:opacity-50">-100P (지각/결석)</button>
                       <button disabled={isPointUpdating || studentPoints === null} onClick={() => handlePointUpdate(-200, '과제 미흡')} className="bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold py-2 rounded-lg transition-colors shadow-sm disabled:opacity-50">-200P (과제미흡)</button>
@@ -361,7 +361,7 @@ export default function ShopAdminPage() {
                   </div>
 
                   <div className="pt-3 border-t border-slate-200 space-y-2">
-                     <p className="text-[10px] font-bold text-slate-400">직접 입력</p>
+                     <p className="text-xs font-bold text-slate-400">직접 입력</p>
                      <div className="flex gap-2">
                        <input type="number" min="1" value={customPointAmount} onChange={e => setCustomPointAmount(e.target.value)} placeholder="금액" className="w-24 border border-slate-200 rounded-lg px-2 py-1.5 text-xs font-bold text-center focus:outline-none focus:border-amber-500" />
                        <button disabled={isPointUpdating || studentPoints === null || !customPointAmount} onClick={() => { handlePointUpdate(Number(customPointAmount), '직접 입력 지급'); setCustomPointAmount(''); }} className="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold py-1.5 rounded-lg disabled:opacity-50 transition-colors shadow-sm">지급 (+)</button>
@@ -382,19 +382,19 @@ export default function ShopAdminPage() {
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {products.map(p => (
-                    <div key={p.id} className={`border rounded-xl overflow-hidden group relative ${editingId === p.id ? 'border-[#002864] ring-2 ring-blue-100' : 'border-slate-200'}`}>
+                    <div key={p.id} className={`border rounded-xl overflow-hidden group relative ${editingId === p.id ? 'border-brand ring-2 ring-blue-100' : 'border-slate-200'}`}>
                       <div className="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden">
                         {p.imageDataUrl ? <img src={p.imageDataUrl} className="w-full h-full object-cover" /> : <span className="text-3xl">🎁</span>}
                       </div>
                       <div className="p-3">
                         <p className="font-bold text-slate-800 text-xs truncate">{p.name}</p>
-                        <p className="text-amber-600 font-black text-sm mt-0.5">{p.price.toLocaleString()} P</p>
+                        <p className="text-amber-600 font-bold text-sm mt-0.5">{p.price.toLocaleString()} P</p>
                         <div className="flex items-center gap-1 mt-1">
-                          <span className="text-[9px] text-slate-400">{p.stock === null ? '무제한' : `재고 ${p.stock}`}</span>
+                          <span className="text-xs text-slate-400">{p.stock === null ? '무제한' : `재고 ${p.stock}`}</span>
                         </div>
                       </div>
                       <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button onClick={() => startEdit(p)} title="수정" className="bg-white/90 hover:bg-blue-50 text-[#002864] text-xs font-bold w-7 h-7 rounded-full shadow-sm flex items-center justify-center">✏️</button>
+                        <button onClick={() => startEdit(p)} title="수정" className="bg-white/90 hover:bg-blue-50 text-brand text-xs font-bold w-7 h-7 rounded-full shadow-sm flex items-center justify-center">✏️</button>
                         <button onClick={() => handleDelete(p.id)} title="삭제" className="bg-white/90 hover:bg-rose-50 text-rose-500 text-xs font-bold w-7 h-7 rounded-full shadow-sm flex items-center justify-center">✕</button>
                       </div>
                     </div>
@@ -406,7 +406,7 @@ export default function ShopAdminPage() {
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="font-bold text-slate-700 text-sm">구매내역 <span className="text-slate-400 font-normal">({filteredPurchases.length}{purchaseSearch.trim() ? ` / 전체 ${purchases.length}` : ''}건)</span></h2>
-                <input value={purchaseSearch} onChange={e => setPurchaseSearch(e.target.value)} placeholder="학생 이름 검색" className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 w-36 focus:outline-none focus:border-[#002864]" />
+                <input value={purchaseSearch} onChange={e => setPurchaseSearch(e.target.value)} placeholder="학생 이름 검색" className="text-xs border border-slate-200 rounded-lg px-2.5 py-1.5 w-36 focus:outline-none focus:border-brand" />
               </div>
               {filteredPurchases.length === 0 ? (
                 <p className="text-center text-slate-300 text-sm py-8">{purchaseSearch.trim() ? '검색 결과가 없습니다.' : '아직 구매 기록이 없습니다.'}</p>
@@ -423,10 +423,10 @@ export default function ShopAdminPage() {
                       <div className="text-right flex items-center gap-2 shrink-0">
                         <div>
                           <span className="font-bold text-amber-600">-{o.pricePaid.toLocaleString()}P</span>
-                          <span className="text-[10px] text-slate-400 ml-2">{new Date(o.purchasedAt).toLocaleString('ko-KR')}</span>
+                          <span className="text-xs text-slate-400 ml-2">{new Date(o.purchasedAt).toLocaleString('ko-KR')}</span>
                         </div>
                         {o.status !== 'cancelled' && (
-                          <button onClick={() => handleCancel(o)} className="text-[10px] font-bold text-rose-500 hover:text-rose-700 shrink-0">취소</button>
+                          <button onClick={() => handleCancel(o)} className="text-xs font-bold text-rose-500 hover:text-rose-700 shrink-0">취소</button>
                         )}
                       </div>
                     </div>

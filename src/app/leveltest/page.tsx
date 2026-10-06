@@ -436,7 +436,7 @@ export default function LevelTestPage() {
   return (
     <div className="p-8 min-h-screen flex justify-center items-start bg-slate-50 relative">
       
-      <button onClick={handleCloseWindow} className="fixed top-6 right-6 bg-slate-800 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl shadow-2xl transition-all duration-300 font-extrabold flex items-center gap-2 z-50 group border border-slate-600 hover:border-rose-500">
+      <button onClick={handleCloseWindow} className="fixed top-6 right-6 bg-slate-800 hover:bg-rose-600 text-white px-5 py-2.5 rounded-xl shadow-2xl transition-all duration-300 font-bold flex items-center gap-2 z-50 group border border-slate-600 hover:border-rose-500">
         <svg className="w-5 h-5 group-hover:rotate-90 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
         창 닫기
       </button>
@@ -445,7 +445,7 @@ export default function LevelTestPage() {
         
         {/* 1. 방 개설 영역 */}
         <div className="bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col h-[750px]">
-          <div className={`${editSessionId ? 'bg-amber-700' : 'bg-[#002864]'} text-white p-6 shrink-0 transition-colors`}>
+          <div className={`${editSessionId ? 'bg-amber-700' : 'bg-brand'} text-white p-6 shrink-0 transition-colors`}>
             <h2 className="text-xl font-bold">🗓️ 1. 입학테스트 일정(방) {editSessionId ? "수정 모드" : "개설"}</h2>
             <p className={`${editSessionId ? 'text-amber-200' : 'text-blue-200'} text-sm mt-1 transition-colors`}>자동 코드 네이밍 시스템 (예: LT42A2607) 적용</p>
           </div>
@@ -454,8 +454,8 @@ export default function LevelTestPage() {
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">테스트 방 코드 설정 <span className="text-red-500">*</span></label>
               <div className="flex space-x-2">
-                <span className="px-3 py-2 bg-slate-200 rounded-lg border border-slate-300 font-extrabold text-slate-700 flex items-center shrink-0">LT</span>
-                <select value={sGradeSem} onChange={(e) => setSGradeSem(e.target.value)} className="w-1/3 px-2 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700 text-sm">
+                <span className="px-3 py-2 bg-slate-200 rounded-lg border border-slate-300 font-bold text-slate-700 flex items-center shrink-0">LT</span>
+                <select value={sGradeSem} onChange={(e) => setSGradeSem(e.target.value)} className="w-1/3 px-2 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700 text-sm">
                   <optgroup label="초등">
                     <option value="11">초1-1</option><option value="12">초1-2</option>
                     <option value="21">초2-1</option><option value="22">초2-2</option>
@@ -473,35 +473,35 @@ export default function LevelTestPage() {
                     <option value="01">고1-1</option><option value="02">고1-2</option>
                   </optgroup>
                 </select>
-                <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-1/4 px-2 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700 text-sm">
+                <select value={sCode} onChange={(e) => setSCode(e.target.value)} className="w-1/4 px-2 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700 text-sm">
                   <option value="A">A</option><option value="B">B</option><option value="C">C</option><option value="D">D</option><option value="E">E</option>
                 </select>
-                <select value={sYymm} onChange={(e) => setSYymm(e.target.value)} className="w-1/3 px-2 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700 text-sm">
+                <select value={sYymm} onChange={(e) => setSYymm(e.target.value)} className="w-1/3 px-2 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700 text-sm">
                   {yymmOptions.map(opt => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
                 </select>
               </div>
               <div className={`mt-2 p-2.5 rounded-lg text-sm font-bold flex justify-between items-center shadow-inner ${editSessionId ? 'bg-amber-50 border border-amber-200 text-amber-800' : 'bg-blue-50 border border-blue-200 text-blue-800'}`}>
                 <span>{editSessionId ? '수정 후 적용될 이름:' : '최종 생성될 방 이름:'}</span>
-                <span className={`${editSessionId ? 'text-amber-700' : 'text-[#002864]'} text-lg font-black tracking-wider`}>{previewName}</span>
+                <span className={`${editSessionId ? 'text-amber-700' : 'text-brand'} text-lg font-bold tracking-wider`}>{previewName}</span>
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">사용할 시험지 선택 <span className="text-red-500">*</span></label>
-              <select value={examId} onChange={handleExamChange} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700">
+              <select value={examId} onChange={handleExamChange} className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700">
                 <option value="">{exams.length === 0 ? "시험지를 불러오는 중..." : "(필수) 사용할 시험지를 선택하세요"}</option>
                 {exams.map(e => <option key={e.exam_id} value={e.exam_id}>{e.title} {e.sub_title ? `[${e.sub_title}]` : '[과정정보 없음]'}</option>)}
               </select>
             </div>
             <div>
               <label className="block text-sm font-bold text-slate-700 mb-1">시험 구분 코멘트 (선택)</label>
-              <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: [초6/중1] 입학테스트 공통" className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700 text-sm" />
+              <input type="text" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="예: [초6/중1] 입학테스트 공통" className="w-full px-3 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700 text-sm" />
             </div>
 
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">시험 날짜 <span className="text-red-500">*</span></label>
-                <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700" />
+                <input type="date" value={testDate} onChange={(e) => setTestDate(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700" />
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">시작 시간 <span className="text-red-500">*</span></label>
@@ -509,7 +509,7 @@ export default function LevelTestPage() {
                   <select 
                     value={testHour} 
                     onChange={(e) => setTestHour(e.target.value)} 
-                    className="w-1/2 px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700 cursor-pointer"
+                    className="w-1/2 px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700 cursor-pointer"
                   >
                     <option value="">시</option>
                     {hours.map(h => (
@@ -519,7 +519,7 @@ export default function LevelTestPage() {
                   <select 
                     value={testMinute} 
                     onChange={(e) => setTestMinute(e.target.value)} 
-                    className="w-1/2 px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none font-bold text-slate-700 cursor-pointer"
+                    className="w-1/2 px-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none font-bold text-slate-700 cursor-pointer"
                   >
                     <option value="">분</option>
                     {minutes.map(m => (
@@ -531,7 +531,7 @@ export default function LevelTestPage() {
             </div>
             
             <div className="flex gap-2 mt-2">
-              <button onClick={saveSession} disabled={isLoading} className={`flex-1 ${editSessionId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-[#002864] hover:bg-blue-900'} text-white font-bold py-3 rounded-lg transition-colors shadow-md text-lg disabled:opacity-50`}>
+              <button onClick={saveSession} disabled={isLoading} className={`flex-1 ${editSessionId ? 'bg-amber-600 hover:bg-amber-700' : 'bg-brand hover:bg-blue-900'} text-white font-bold py-3 rounded-lg transition-colors shadow-md text-lg disabled:opacity-50`}>
                 {isLoading ? "처리 중..." : (editSessionId ? "테스트 방 수정하기" : "테스트 방 개설하기")}
               </button>
               {editSessionId && (
@@ -554,17 +554,17 @@ export default function LevelTestPage() {
                   return (
                     <div key={s.admission_session_id} className={`border ${editSessionId === s.admission_session_id ? 'border-amber-400 bg-amber-50' : 'border-slate-200 hover:bg-slate-50'} rounded-lg p-3 transition-colors flex justify-between items-start group`}>
                       <div className="flex-1 pr-2 min-w-0">
-                        <div className={`font-bold ${editSessionId === s.admission_session_id ? 'text-amber-800' : 'text-[#002864]'} truncate`}>{s.title}</div>
-                        <div className="text-[11px] text-slate-400 mt-1 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
+                        <div className={`font-bold ${editSessionId === s.admission_session_id ? 'text-amber-800' : 'text-brand'} truncate`}>{s.title}</div>
+                        <div className="text-xs text-slate-400 mt-1 flex items-center gap-1.5 whitespace-nowrap overflow-hidden">
                           <span className="shrink-0">🗓️ {tDate} {tTime}</span><span className="shrink-0">|</span><span className="truncate" title={examTitle}>📝 {examTitle}</span>
                         </div>
-                        {s.session_comment && <div className="mt-2 text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded w-fit inline-block truncate max-w-full">💬 {s.session_comment}</div>}
+                        {s.session_comment && <div className="mt-2 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-100 px-2 py-1 rounded w-fit inline-block truncate max-w-full">💬 {s.session_comment}</div>}
                       </div>
                       <div className="mt-1 opacity-0 group-hover:opacity-100 flex gap-1 shrink-0 transition-opacity">
-                        <button onClick={() => handleEditClick(s)} className="bg-white hover:bg-amber-50 text-amber-600 hover:text-amber-700 border border-slate-200 hover:border-amber-300 px-2.5 py-1 rounded text-[11px] font-bold shadow-sm transition-colors">
+                        <button onClick={() => handleEditClick(s)} className="bg-white hover:bg-amber-50 text-amber-600 hover:text-amber-700 border border-slate-200 hover:border-amber-300 px-2.5 py-1 rounded text-xs font-bold shadow-sm transition-colors">
                           수정
                         </button>
-                        <button onClick={() => deleteSession(s.admission_session_id, s.title)} className="bg-white hover:bg-rose-50 text-rose-500 hover:text-rose-600 border border-slate-200 hover:border-rose-300 px-2.5 py-1 rounded text-[11px] font-bold shadow-sm transition-colors">
+                        <button onClick={() => deleteSession(s.admission_session_id, s.title)} className="bg-white hover:bg-rose-50 text-rose-500 hover:text-rose-600 border border-slate-200 hover:border-rose-300 px-2.5 py-1 rounded text-xs font-bold shadow-sm transition-colors">
                           삭제
                         </button>
                       </div>
@@ -625,7 +625,7 @@ export default function LevelTestPage() {
                  if (isAssigned) {
                    const tResult = appData.test_result || "대기";
                    let resultBadge = <span className="text-xs bg-slate-200 text-slate-600 px-2 py-0.5 rounded font-bold">⏳ 대기</span>;
-                   if (tResult === "합격") resultBadge = <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-extrabold">🎉 합격</span>;
+                   if (tResult === "합격") resultBadge = <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded font-bold">🎉 합격</span>;
                    else if (tResult === "불합격") resultBadge = <span className="text-xs bg-red-100 text-red-600 border border-red-200 px-2 py-0.5 rounded font-bold">❌ 불합격</span>;
 
                    return (
@@ -634,7 +634,7 @@ export default function LevelTestPage() {
                          <div className="w-5 h-5 flex items-center justify-center bg-emerald-500 rounded text-white text-xs font-bold shrink-0">✓</div>
                          <div className="flex flex-col min-w-0">
                            <div className="flex items-center gap-2">
-                             <span className="font-extrabold text-slate-800 truncate">{std.name}</span>
+                             <span className="font-bold text-slate-800 truncate">{std.name}</span>
                              {resultBadge}
                            </div>
                            <span className="text-xs text-slate-400 font-medium mt-0.5 truncate">{korGradeName} | {getPhone(std)}</span>
@@ -657,7 +657,7 @@ export default function LevelTestPage() {
                          <input type="checkbox" checked={checkedStudents.includes(std.student_id)} onChange={() => toggleStudentCheck(std.student_id)} className="w-5 h-5 accent-emerald-600 shrink-0" />
                          <div className="flex items-center min-w-0">
                            <span className="font-bold text-slate-800 truncate">{std.name}</span>
-                           <span className="text-xs bg-[#002864] text-white px-2 py-0.5 rounded ml-2 font-bold shrink-0">{korGradeName}</span>
+                           <span className="text-xs bg-brand text-white px-2 py-0.5 rounded ml-2 font-bold shrink-0">{korGradeName}</span>
                          </div>
                        </div>
                        <div className="text-sm text-slate-500 font-medium shrink-0">{getPhone(std)}</div>
@@ -671,7 +671,7 @@ export default function LevelTestPage() {
           </div>
 
           <div className="p-6 bg-slate-50 border-t border-slate-200 shrink-0">
-            <button onClick={assignStudents} disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-lg py-4 rounded-xl transition-all shadow-lg disabled:opacity-50">
+            <button onClick={assignStudents} disabled={isLoading} className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-lg py-4 rounded-xl transition-all shadow-lg disabled:opacity-50">
               {isLoading ? "배정 처리 중... ⏳" : "선택한 대기생 배정 완료하기 ✅"}
             </button>
           </div>
@@ -692,11 +692,11 @@ export default function LevelTestPage() {
             <div className="p-6 space-y-5 overflow-y-auto custom-scroll">
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">지원자 이름</label>
-                <div className="font-extrabold text-xl text-[#002864]">{counselData.name}</div>
+                <div className="font-bold text-xl text-brand">{counselData.name}</div>
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">입학테스트 결과 판정</label>
-                <select value={counselData.result} onChange={e => setCounselData({ ...counselData, result: e.target.value })} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] font-bold text-slate-700 focus:outline-none">
+                <select value={counselData.result} onChange={e => setCounselData({ ...counselData, result: e.target.value })} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand font-bold text-slate-700 focus:outline-none">
                   <option value="대기">⏳ 대기 (결과 미정)</option>
                   <option value="합격">🎉 합격 (입학 승인)</option>
                   <option value="불합격">❌ 불합격</option>
@@ -704,12 +704,12 @@ export default function LevelTestPage() {
               </div>
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1">상담 메모</label>
-                <textarea rows={4} value={counselData.memo} onChange={e => setCounselData({ ...counselData, memo: e.target.value })} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-[#002864] focus:outline-none text-sm resize-none custom-scroll" placeholder="상담 내용, 특이사항, 배정 희망 반 등을 자유롭게 기록하세요."></textarea>
+                <textarea rows={4} value={counselData.memo} onChange={e => setCounselData({ ...counselData, memo: e.target.value })} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:ring-2 focus:ring-brand focus:outline-none text-sm resize-none custom-scroll" placeholder="상담 내용, 특이사항, 배정 희망 반 등을 자유롭게 기록하세요."></textarea>
               </div>
             </div>
             <div className="p-5 bg-slate-50 border-t border-slate-200 flex justify-end space-x-2 shrink-0">
               <button onClick={() => setCounselData(null)} className="px-5 py-2.5 rounded-lg font-bold text-slate-600 bg-white border border-slate-300 hover:bg-slate-50 transition-colors">취소</button>
-              <button onClick={saveCounseling} disabled={isLoading} className="px-5 py-2.5 rounded-lg font-bold text-white bg-[#002864] hover:bg-blue-900 shadow transition-colors disabled:opacity-50">기록 저장하기</button>
+              <button onClick={saveCounseling} disabled={isLoading} className="px-5 py-2.5 rounded-lg font-bold text-white bg-brand hover:bg-blue-900 shadow transition-colors disabled:opacity-50">기록 저장하기</button>
             </div>
           </div>
         </div>

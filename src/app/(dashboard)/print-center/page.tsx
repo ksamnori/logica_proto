@@ -112,7 +112,7 @@ export default function PrintCenterPage() {
         <div className="print-hidden p-6 bg-white border-b border-slate-200 shrink-0 shadow-sm z-10 sticky top-0">
           <div className="max-w-5xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
             <div>
-              <h1 className="text-2xl font-black text-[#002864] flex items-center gap-2">
+              <h1 className="text-2xl font-black text-brand flex items-center gap-2">
                 <span>🖨️</span> 교육청 서류 출력 센터
               </h1>
               <p className="text-sm font-bold text-slate-500 mt-1">원하시는 양식을 선택하고 인쇄 버튼을 눌러주세요.</p>
@@ -123,7 +123,7 @@ export default function PrintCenterPage() {
             
             <button 
               onClick={handlePrint}
-              className="px-8 py-3 bg-[#002864] text-white font-black rounded-xl shadow-md hover:bg-blue-900 transition-colors flex items-center gap-2 text-lg shrink-0"
+              className="px-8 py-3 bg-brand text-white font-black rounded-xl shadow-md hover:bg-blue-900 transition-colors flex items-center gap-2 text-lg shrink-0"
             >
               <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M17 17h2a2 2 0 002-2v-4a2 2 0 00-2-2H5a2 2 0 00-2 2v4a2 2 0 002 2h2m2 4h6a2 2 0 002-2v-4a2 2 0 00-2-2H9a2 2 0 00-2 2v4a2 2 0 002 2zm8-12V5a2 2 0 00-2-2H9a2 2 0 00-2 2v4h10z"></path></svg>
               A4 인쇄하기

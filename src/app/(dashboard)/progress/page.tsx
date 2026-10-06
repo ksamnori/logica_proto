@@ -407,15 +407,15 @@ export default function ProgressPage() {
 
     const current = getStartPage(selectedStudentId, bookId);
     const suggested = current === undefined ? suggestStartPage(selectedStudentId, pages, groupedQs, bookId) : undefined;
-    const accent = type === 'main' ? 'text-[#002864] border-blue-200' : 'text-[#059669] border-emerald-200';
+    const accent = type === 'main' ? 'text-brand border-blue-200' : 'text-[#059669] border-emerald-200';
 
     return (
       <div className={`flex items-center gap-1.5 bg-white px-2 py-1 rounded-md border shadow-sm shrink-0 ${accent}`} title="중간에 합류한 학생은 시작 페이지 이전을 진도율 계산에서 제외합니다.">
-        <span className="text-[11px] font-black whitespace-nowrap">시작</span>
+        <span className="text-xs font-bold whitespace-nowrap">시작</span>
         <select
           value={current ?? ''}
           onChange={(e) => saveStartPage(selectedStudentId, bookId, e.target.value === '' ? null : Number(e.target.value))}
-          className="text-[11px] font-bold bg-transparent outline-none cursor-pointer"
+          className="text-xs font-bold bg-transparent outline-none cursor-pointer"
         >
           <option value="">처음부터</option>
           {pages.slice(1).map(p => <option key={p} value={p}>{p}p부터</option>)}
@@ -423,7 +423,7 @@ export default function ProgressPage() {
         {suggested !== undefined && (
           <button
             onClick={() => saveStartPage(selectedStudentId, bookId, suggested)}
-            className="text-[10px] font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100 whitespace-nowrap"
+            className="text-xs font-bold text-amber-700 bg-amber-50 border border-amber-200 px-1.5 py-0.5 rounded hover:bg-amber-100 whitespace-nowrap"
             title="다른 학생들의 진도 기준으로 추정한 합류 시점 페이지"
           >
             추천 {suggested}p
@@ -992,7 +992,7 @@ export default function ProgressPage() {
     if (type === 'wb') {
       if (st === "done") {
         return (
-          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-[#fef3c7] hover:text-[#b45309] hover:border-[#fcd34d]">
+          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold rounded py-0.5 shrink-0 ml-4 transition-colors bg-emerald-100 text-emerald-700 border border-emerald-300 hover:bg-[#fef3c7] hover:text-[#b45309] hover:border-[#fcd34d]">
             <span className="group-hover/qbadge:hidden">완료</span>
             <span className="hidden group-hover/qbadge:inline tracking-tighter">과제</span>
           </span>
@@ -1000,7 +1000,7 @@ export default function ProgressPage() {
       }
       if (st === "homework") {
         return (
-          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
+          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
             <span className="group-hover/qbadge:hidden">과제배부</span>
             <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
           </span>
@@ -1008,14 +1008,14 @@ export default function ProgressPage() {
       }
       if (st === "partial") {
         return (
-          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 shrink-0 ml-4 transition-colors">
+          <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, st); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-emerald-600 hover:text-white hover:border-emerald-600 shrink-0 ml-4 transition-colors">
             <span className="group-hover/qbadge:hidden">진행중</span>
             <span className="hidden group-hover/qbadge:inline tracking-tighter">완료</span>
           </span>
         );
       }
       return (
-        <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, "대기"); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors hover:bg-emerald-600 hover:text-white hover:border-emerald-600">
+        <span onClick={(e) => { e.stopPropagation(); handleWbBadgeCycle(tqId, "대기"); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors hover:bg-emerald-600 hover:text-white hover:border-emerald-600">
           <span className="group-hover/qbadge:hidden">대기</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">완료</span>
         </span>
@@ -1024,7 +1024,7 @@ export default function ProgressPage() {
     
     if (st === "done") {
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 shrink-0 ml-4 transition-colors bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300">
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold rounded py-0.5 shrink-0 ml-4 transition-colors bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300">
           <span className="group-hover/qbadge:hidden">진도완료</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
@@ -1032,7 +1032,7 @@ export default function ProgressPage() {
     }
     if (st === "homework") {
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
           <span className="group-hover/qbadge:hidden">과제배부</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
@@ -1040,14 +1040,14 @@ export default function ProgressPage() {
     }
     if (st === "partial") {
       return (
-        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
+        <span onClick={(e) => { e.stopPropagation(); cancelSingleQuestion(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 shrink-0 ml-4 transition-colors">
           <span className="group-hover/qbadge:hidden">진행중</span>
           <span className="hidden group-hover/qbadge:inline tracking-tighter">취소</span>
         </span>
       );
     }
     return (
-      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors hover:bg-[#002864] hover:text-white hover:border-[#002864]">
+      <span onClick={(e) => { e.stopPropagation(); markSingleQuestionCompleted(tqId, type); }} className="group/qbadge cursor-pointer w-[50px] text-center inline-block text-xs font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 shrink-0 ml-4 transition-colors hover:bg-brand hover:text-white hover:border-brand">
         <span className="group-hover/qbadge:hidden">대기</span>
         <span className="hidden group-hover/qbadge:inline tracking-tighter">진도처리</span>
       </span>
@@ -1080,13 +1080,13 @@ export default function ProgressPage() {
       <div className="bg-white px-6 py-4 border border-slate-200 rounded-xl flex flex-col gap-3 shrink-0 shadow-sm">
         <div className="flex items-center gap-3 w-full">
           <span className="text-xs font-bold text-slate-500 mr-1">수강반:</span>
-          <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-[#002864] bg-slate-50 w-48 shadow-sm text-sm">
+          <select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-brand bg-slate-50 w-48 shadow-sm text-sm">
             <option value="">수강반 선택...</option>
             {classes.map(c => <option key={c.class_id} value={c.class_id}>{c.name}</option>)}
           </select>
           <div className="w-px h-5 bg-slate-300 mx-2"></div>
           <span className="text-xs font-bold text-slate-500">본교재:</span>
-          <select value={selectedBookId} onChange={(e) => setSelectedBookId(e.target.value)} disabled={!selectedClassId} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] bg-white w-64 shadow-sm text-sm disabled:opacity-50">
+          <select value={selectedBookId} onChange={(e) => setSelectedBookId(e.target.value)} disabled={!selectedClassId} className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-brand focus:outline-none focus:ring-2 focus:ring-brand bg-white w-64 shadow-sm text-sm disabled:opacity-50">
             <option value="">본교재 선택...</option>
             {textbooks.map((b: any) => <option key={b.book_id} value={b.book_id}>[{b.textbook.book_type}] {b.textbook.title}</option>)}
           </select>
@@ -1103,11 +1103,11 @@ export default function ProgressPage() {
         <div className="bg-white px-6 py-2.5 border-b border-slate-200 flex shrink-0 items-center">
           <span className="text-xs font-bold text-slate-400 mr-2 shrink-0">적용 대상:</span>
           <div className="flex gap-2 flex-1 overflow-x-auto custom-scroll pr-4 items-center">
-            <button onClick={() => setSelectedStudentId("all")} className={`px-5 py-1.5 rounded-full border text-sm shrink-0 transition-colors ${selectedStudentId === "all" ? "bg-[#002864] text-white border-[#002864] font-extrabold" : "bg-white text-slate-500 font-bold hover:bg-slate-50"}`}>
+            <button onClick={() => setSelectedStudentId("all")} className={`px-5 py-1.5 rounded-full border text-sm shrink-0 transition-colors ${selectedStudentId === "all" ? "bg-brand text-white border-brand font-bold" : "bg-white text-slate-500 font-bold hover:bg-slate-50"}`}>
               전체 진도
             </button>
             {students.map(s => (
-              <button key={s.id} onClick={() => setSelectedStudentId(s.id)} className={`px-5 py-1.5 rounded-full border text-sm shrink-0 transition-colors ${selectedStudentId === s.id ? "bg-[#002864] text-white border-[#002864] font-extrabold" : "bg-white text-slate-500 font-bold hover:bg-slate-50"}`}>
+              <button key={s.id} onClick={() => setSelectedStudentId(s.id)} className={`px-5 py-1.5 rounded-full border text-sm shrink-0 transition-colors ${selectedStudentId === s.id ? "bg-brand text-white border-brand font-bold" : "bg-white text-slate-500 font-bold hover:bg-slate-50"}`}>
                 {s.name}
               </button>
             ))}
@@ -1121,13 +1121,13 @@ export default function ProgressPage() {
             <div className="w-[140px] shrink-0 border-r border-slate-200 bg-blue-50/50 flex flex-col overflow-y-auto custom-scroll shadow-[inset_-2px_0_5px_rgba(0,0,0,0.02)] z-20 select-none pointer-events-auto" draggable={false} onDragStart={(e) => e.preventDefault()}>
               <div className="sticky top-0 bg-blue-50/90 backdrop-blur-sm border-b border-slate-200 p-2 shrink-0 z-30 flex flex-col items-center">
                 <label className="flex items-center justify-between gap-1.5 cursor-pointer w-full p-2 bg-white border border-slate-300 rounded-lg shadow-sm hover:bg-slate-50 transition-colors select-none" draggable={false} onDragStart={(e) => e.preventDefault()} title="모든 페이지 선택">
-                  <span className="text-[11px] font-black text-[#002864]">전체선택</span>
-                  <input type="checkbox" checked={mainPages.length > 0 && checkedMainPages.length === mainPages.length} onChange={(e) => setCheckedMainPages(e.target.checked ? mainPages : [])} className="w-4 h-4 accent-[#002864]" />
+                  <span className="text-xs font-bold text-brand">전체선택</span>
+                  <input type="checkbox" checked={mainPages.length > 0 && checkedMainPages.length === mainPages.length} onChange={(e) => setCheckedMainPages(e.target.checked ? mainPages : [])} className="w-4 h-4 accent-brand" />
                 </label>
               </div>
               
               <div className="flex flex-col gap-2 p-2 pb-10">
-                {mainPages.length === 0 && <div className="text-center py-4"><span className="text-[10px] font-bold text-slate-400 italic">교재<br/>미선택</span></div>}
+                {mainPages.length === 0 && <div className="text-center py-4"><span className="text-xs font-bold text-slate-400 italic">교재<br/>미선택</span></div>}
                 {mainPages.map(p => {
                   const status = getPageStatus(p, 'main');
                   const isActive = activeMainPage === p;
@@ -1140,19 +1140,19 @@ export default function ProgressPage() {
                       onClick={() => setActiveMainPage(p)} 
                       draggable={false} 
                       onDragStart={(e) => e.preventDefault()}
-                      className={`flex items-center justify-between p-2 rounded-lg border shadow-sm transition-all cursor-pointer group select-none ${isActive ? 'bg-white border-[#002864] ring-1 ring-[#002864]' : 'bg-white/60 border-slate-200 hover:border-blue-300'} ${isBeforeStart ? 'opacity-50' : ''}`}
+                      className={`flex items-center justify-between p-2 rounded-lg border shadow-sm transition-all cursor-pointer group select-none ${isActive ? 'bg-white border-brand ring-1 ring-brand' : 'bg-white/60 border-slate-200 hover:border-blue-300'} ${isBeforeStart ? 'opacity-50' : ''}`}
                       title={isBeforeStart ? `합류 이전 페이지 (${p}p) - 진도율 계산 제외` : undefined}
                     >
                       <div className="flex items-center gap-1.5 shrink-0">
-                        <input type="checkbox" checked={checkedMainPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedMainPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 accent-[#002864] cursor-pointer" />
-                        <span className={`text-[12px] font-black w-6 text-center ${isActive ? "text-[#002864]" : "text-slate-500 group-hover:text-[#002864]"}`}>{p}p</span>
+                        <input type="checkbox" checked={checkedMainPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedMainPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 accent-brand cursor-pointer" />
+                        <span className={`text-[12px] font-bold w-6 text-center ${isActive ? "text-brand" : "text-slate-500 group-hover:text-brand"}`}>{p}p</span>
                       </div>
                       
                       <div className="flex items-center shrink-0">
-                        {status === "done" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'main'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "homework" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'main'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "partial" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'main'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); markSinglePageCompleted(p, 'main'); }} className="group/pbadge w-10 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-[#002864] hover:text-white transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">체크</span></span>}
+                        {status === "done" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'main'); }} className="group/pbadge w-10 text-center text-xs font-bold rounded py-0.5 bg-[#e0e7ff] text-[#3730a3] border border-[#818cf8] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
+                        {status === "homework" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'main'); }} className="group/pbadge w-10 text-center text-xs font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
+                        {status === "partial" && <span onClick={(e) => { e.stopPropagation(); cancelSinglePage(p, 'main'); }} className="group/pbadge w-10 text-center text-xs font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
+                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); markSinglePageCompleted(p, 'main'); }} className="group/pbadge w-10 text-center inline-block text-xs font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-brand hover:text-white transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">체크</span></span>}
                       </div>
                     </div>
                   );
@@ -1167,16 +1167,16 @@ export default function ProgressPage() {
                   onClick={() => openProgressModal('main')}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="bg-[#002864] text-white px-2.5 py-1 rounded text-xs font-bold">📘 본교재</span>
-                    <span className="text-[#002864] font-extrabold text-sm">{activeMainPage !== null ? `${activeMainPage} Page` : "- Page"}</span>
+                    <span className="bg-brand text-white px-2.5 py-1 rounded text-xs font-bold">📘 본교재</span>
+                    <span className="text-brand font-bold text-sm">{activeMainPage !== null ? `${activeMainPage} Page` : "- Page"}</span>
                   </div>
                   <div className="flex items-center gap-2 border-l border-slate-300 pl-4" title="클릭하여 상세 매트릭스 뷰 보기">
                     <div className="w-32 h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner relative">
-                       <div className="absolute top-0 left-0 h-full bg-[#002864] transition-all group-hover:bg-blue-500" style={{ width: `${mainProgress.percent}%` }}></div>
+                       <div className="absolute top-0 left-0 h-full bg-brand transition-all group-hover:bg-blue-500" style={{ width: `${mainProgress.percent}%` }}></div>
                     </div>
-                    <span className="text-xs font-black text-[#002864] group-hover:text-blue-600">{mainProgress.percent}%</span>
-                    {mainProgress.startPage !== undefined && <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">({mainProgress.startPage}p~ 기준)</span>}
-                    <span className="text-[10px] font-bold text-blue-500 bg-white border border-blue-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap">매트릭스 뷰 🔍</span>
+                    <span className="text-xs font-bold text-brand group-hover:text-blue-600">{mainProgress.percent}%</span>
+                    {mainProgress.startPage !== undefined && <span className="text-xs font-bold text-slate-400 whitespace-nowrap">({mainProgress.startPage}p~ 기준)</span>}
+                    <span className="text-xs font-bold text-blue-500 bg-white border border-blue-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap">매트릭스 뷰 🔍</span>
                   </div>
                 </div>
 
@@ -1189,7 +1189,7 @@ export default function ProgressPage() {
                     const ids = (groupedMainQs[activeMainPage] || []).map((q: any) => q.tq_id);
                     if (isChecked) setCheckedMainQs(prev => Array.from(new Set([...prev, ...ids])));
                     else setCheckedMainQs(prev => prev.filter(id => !ids.includes(id)));
-                  }} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
+                  }} className="w-[1.1rem] h-[1.1rem] accent-brand" />
                   <span className="font-bold text-slate-600">현재 페이지 전체 선택</span>
                 </label>
               </div>
@@ -1203,11 +1203,11 @@ export default function ProgressPage() {
                           <input type="checkbox" checked={checkedMainQs.includes(q.tq_id)} onChange={(e) => {
                             if (e.target.checked) setCheckedMainQs(prev => [...prev, q.tq_id]);
                             else setCheckedMainQs(prev => prev.filter(id => id !== q.tq_id));
-                          }} className="w-[1.1rem] h-[1.1rem] accent-[#002864]" />
+                          }} className="w-[1.1rem] h-[1.1rem] accent-brand" />
                         </div>
                         <div className="w-28 py-2 px-3 flex flex-col justify-center border-r border-slate-100 shrink-0 overflow-hidden">
-                          <span className="text-slate-400 font-medium text-[10px] truncate leading-tight">{q.question_category || "일반"}</span>
-                          <button onClick={() => setModalQuestion({ ...q, type: 'main' })} className="text-slate-700 font-extrabold text-[14px] text-left hover:text-blue-600 hover:underline">{q.question_number || "-"}</button>
+                          <span className="text-slate-400 font-medium text-xs truncate leading-tight">{q.question_category || "일반"}</span>
+                          <button onClick={() => setModalQuestion({ ...q, type: 'main' })} className="text-slate-700 font-bold text-[14px] text-left hover:text-blue-600 hover:underline">{q.question_number || "-"}</button>
                         </div>
                         <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
                           <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">
@@ -1228,13 +1228,13 @@ export default function ProgressPage() {
             <div className="w-[140px] shrink-0 border-r border-emerald-200 bg-emerald-50/80 flex flex-col overflow-y-auto custom-scroll shadow-[inset_-2px_0_5px_rgba(0,0,0,0.02)] z-20 select-none pointer-events-auto" draggable={false} onDragStart={(e) => e.preventDefault()}>
               <div className="sticky top-0 bg-emerald-50/90 backdrop-blur-sm border-b border-emerald-200 p-2 shrink-0 z-30 flex flex-col items-center">
                 <label className="flex items-center justify-between gap-1.5 cursor-pointer w-full p-2 bg-white border border-emerald-300 rounded-lg shadow-sm hover:bg-emerald-50 transition-colors select-none" draggable={false} onDragStart={(e) => e.preventDefault()} title="모든 페이지 선택">
-                  <span className="text-[11px] font-black text-[#059669]">전체선택</span>
+                  <span className="text-xs font-bold text-[#059669]">전체선택</span>
                   <input type="checkbox" checked={wbPages.length > 0 && checkedWbPages.length === wbPages.length} onChange={(e) => setCheckedWbPages(e.target.checked ? wbPages : [])} className="w-4 h-4 accent-[#059669]" />
                 </label>
               </div>
               
               <div className="flex flex-col gap-2 p-2 pb-10">
-                {wbPages.length === 0 && <div className="text-center py-4"><span className="text-[10px] font-bold text-emerald-600/60 italic">교재<br/>미선택</span></div>}
+                {wbPages.length === 0 && <div className="text-center py-4"><span className="text-xs font-bold text-emerald-600/60 italic">교재<br/>미선택</span></div>}
                 {wbPages.map(p => {
                   const status = getPageStatus(p, 'wb');
                   const isActive = activeWbPage === p;
@@ -1252,14 +1252,14 @@ export default function ProgressPage() {
                     >
                       <div className="flex items-center gap-1.5 shrink-0">
                         <input type="checkbox" checked={checkedWbPages.includes(p)} onChange={(e) => { e.stopPropagation(); setCheckedWbPages(prev => e.target.checked ? [...prev, p] : prev.filter(id => id !== p)); }} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 accent-[#059669] cursor-pointer" />
-                        <span className={`text-[12px] font-black w-6 text-center ${isActive ? "text-[#059669]" : "text-emerald-700 group-hover:text-[#059669]"}`}>{p}p</span>
+                        <span className={`text-[12px] font-bold w-6 text-center ${isActive ? "text-[#059669]" : "text-emerald-700 group-hover:text-[#059669]"}`}>{p}p</span>
                       </div>
                       
                       <div className="flex items-center shrink-0">
-                        {status === "done" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'done'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-pointer hover:bg-[#fef3c7] hover:text-[#b45309] hover:border-[#fcd34d] transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">과제</span></span>}
-                        {status === "homework" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'homework'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
-                        {status === "partial" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'partial'); }} className="group/pbadge w-10 text-center text-[10px] font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">완료</span></span>}
-                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, '대기'); }} className="group/pbadge w-10 text-center inline-block text-[10px] font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">완료</span></span>}
+                        {status === "done" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'done'); }} className="group/pbadge w-10 text-center text-xs font-bold rounded py-0.5 bg-emerald-100 text-emerald-700 border border-emerald-300 cursor-pointer hover:bg-[#fef3c7] hover:text-[#b45309] hover:border-[#fcd34d] transition-colors"><span className="group-hover/pbadge:hidden">완료</span><span className="hidden group-hover/pbadge:inline tracking-tighter">과제</span></span>}
+                        {status === "homework" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'homework'); }} className="group/pbadge w-10 text-center text-xs font-bold rounded py-0.5 bg-[#fef3c7] text-[#b45309] border border-[#fcd34d] cursor-pointer hover:bg-rose-100 hover:text-rose-600 hover:border-rose-300 transition-colors"><span className="group-hover/pbadge:hidden">과제</span><span className="hidden group-hover/pbadge:inline tracking-tighter">취소</span></span>}
+                        {status === "partial" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, 'partial'); }} className="group/pbadge w-10 text-center text-xs font-bold rounded py-0.5 bg-blue-100 text-blue-700 border border-blue-300 cursor-pointer hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"><span className="group-hover/pbadge:hidden">진행</span><span className="hidden group-hover/pbadge:inline tracking-tighter">완료</span></span>}
+                        {status === "대기" && <span onClick={(e) => { e.stopPropagation(); handleWbPageBadgeCycle(p, '대기'); }} className="group/pbadge w-10 text-center inline-block text-xs font-bold text-slate-400 bg-slate-100 py-0.5 rounded border border-slate-200 cursor-pointer hover:bg-emerald-600 hover:text-white hover:border-emerald-600 transition-colors"><span className="group-hover/pbadge:hidden">대기</span><span className="hidden group-hover/pbadge:inline tracking-tighter">완료</span></span>}
                       </div>
                     </div>
                   );
@@ -1275,15 +1275,15 @@ export default function ProgressPage() {
                 >
                   <div className="flex items-center gap-2">
                     <span className="bg-[#059669] text-white px-2.5 py-1 rounded text-xs font-bold">📗 워크북/과제</span>
-                    <span className="text-[#059669] font-extrabold text-sm">{activeWbPage !== null ? `${activeWbPage} Page` : "- Page"}</span>
+                    <span className="text-[#059669] font-bold text-sm">{activeWbPage !== null ? `${activeWbPage} Page` : "- Page"}</span>
                   </div>
                   <div className="flex items-center gap-2 border-l border-slate-300 pl-4" title="클릭하여 상세 매트릭스 뷰 보기">
                     <div className="w-32 h-2.5 bg-slate-200 rounded-full overflow-hidden shadow-inner relative">
                        <div className="absolute top-0 left-0 h-full bg-[#059669] transition-all group-hover:bg-emerald-500" style={{ width: `${wbProgress.percent}%` }}></div>
                     </div>
-                    <span className="text-xs font-black text-[#059669] group-hover:text-emerald-600">{wbProgress.percent}%</span>
-                    {wbProgress.startPage !== undefined && <span className="text-[10px] font-bold text-slate-400 whitespace-nowrap">({wbProgress.startPage}p~ 기준)</span>}
-                    <span className="text-[10px] font-bold text-emerald-500 bg-white border border-emerald-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap">매트릭스 뷰 🔍</span>
+                    <span className="text-xs font-bold text-[#059669] group-hover:text-emerald-600">{wbProgress.percent}%</span>
+                    {wbProgress.startPage !== undefined && <span className="text-xs font-bold text-slate-400 whitespace-nowrap">({wbProgress.startPage}p~ 기준)</span>}
+                    <span className="text-xs font-bold text-emerald-500 bg-white border border-emerald-200 px-1.5 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity shadow-sm whitespace-nowrap">매트릭스 뷰 🔍</span>
                   </div>
                 </div>
 
@@ -1314,8 +1314,8 @@ export default function ProgressPage() {
                           }} className="w-[1.1rem] h-[1.1rem] accent-[#059669]" />
                         </div>
                         <div className="w-24 py-2 px-3 flex flex-col justify-center border-r border-emerald-50 shrink-0">
-                          <span className="text-emerald-500 font-medium text-[10px] truncate leading-tight">{wq.question_category || "일반"}</span>
-                          <button onClick={() => setModalQuestion({ ...wq, type: 'wb' })} className="text-emerald-700 font-extrabold text-[14px] text-left hover:text-emerald-500 hover:underline">{wq.question_number || "-"}</button>
+                          <span className="text-emerald-500 font-medium text-xs truncate leading-tight">{wq.question_category || "일반"}</span>
+                          <button onClick={() => setModalQuestion({ ...wq, type: 'wb' })} className="text-emerald-700 font-bold text-[14px] text-left hover:text-emerald-500 hover:underline">{wq.question_number || "-"}</button>
                         </div>
                         <div className="py-2 px-3 flex-1 flex items-center font-bold text-slate-800 text-[14px] justify-between">
                           <div className="text-xs font-medium text-slate-700 line-clamp-3 leading-relaxed break-all whitespace-pre-wrap">
@@ -1343,16 +1343,16 @@ export default function ProgressPage() {
           </div>
           
           {/* 🌟 1. 신규 추가된 '모두 진도 완료 처리' 버튼 */}
-          <button onClick={() => executeProgressAction("DONE_ONLY")} className="px-5 py-2.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2 border border-emerald-300">
+          <button onClick={() => executeProgressAction("DONE_ONLY")} className="px-5 py-2.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 font-bold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2 border border-emerald-300">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
             모두 진도 완료 처리
           </button>
 
-          <button onClick={() => executeProgressAction("DONE_AND_WB_HW")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
+          <button onClick={() => executeProgressAction("DONE_AND_WB_HW")} className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7"></path></svg>
             선택항목 진도/과제 일괄 처리
           </button>
-          <button onClick={() => executeProgressAction("MAIN_HW_AND_WB_HW")} className="px-5 py-2.5 bg-[#002864] hover:bg-blue-900 text-white font-extrabold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
+          <button onClick={() => executeProgressAction("MAIN_HW_AND_WB_HW")} className="px-5 py-2.5 bg-brand hover:bg-blue-900 text-white font-bold text-sm rounded-xl transition-colors shadow-sm flex items-center gap-2">
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477-4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"></path></svg>
             모두 과제 배부
           </button>

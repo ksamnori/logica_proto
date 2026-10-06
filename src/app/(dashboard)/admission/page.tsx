@@ -557,12 +557,12 @@ export default function AdmissionPage() {
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-bold text-slate-600 text-sm mr-1">🔍 검색 필터</span>
           
-          <select value={filterDateTime} onChange={e => setFilterDateTime(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864] min-w-[140px] bg-slate-50 hover:bg-white transition-colors cursor-pointer">
+          <select value={filterDateTime} onChange={e => setFilterDateTime(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand min-w-[140px] bg-slate-50 hover:bg-white transition-colors cursor-pointer">
             <option value="ALL">🗓️ 일시 전체</option>
             {uniqueDateTimes.map(dt => <option key={dt as string} value={dt as string}>{formatDateTimeDisplay(dt as string)}</option>)}
           </select>
           
-          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-[#002864] min-w-[120px] bg-slate-50 hover:bg-white transition-colors cursor-pointer">
+          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand min-w-[120px] bg-slate-50 hover:bg-white transition-colors cursor-pointer">
             <option value="ALL">👨‍🎓 학년 전체</option>
             {uniqueGrades.map(g => <option key={g as string} value={g as string}>{g as string}</option>)}
           </select>
@@ -573,7 +573,7 @@ export default function AdmissionPage() {
               value={searchKeyword} 
               onChange={e => setSearchKeyword(e.target.value)} 
               placeholder="방 코드(LT..), 시험지명 검색" 
-              className="border border-slate-300 text-slate-700 text-sm font-bold rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:border-[#002864] w-[220px] bg-slate-50 focus:bg-white transition-colors"
+              className="border border-slate-300 text-slate-700 text-sm font-bold rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:border-brand w-[220px] bg-slate-50 focus:bg-white transition-colors"
             />
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">⌨️</span>
           </div>
@@ -592,7 +592,7 @@ export default function AdmissionPage() {
         </div>
         
         <div className="flex items-center gap-2">
-          <button onClick={() => window.open('/student/enroll?mode=admission', '_blank', 'width=700,height=850,top=100,left=100')} className="bg-[#002864] text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
+          <button onClick={() => window.open('/student/enroll?mode=admission', '_blank', 'width=700,height=850,top=100,left=100')} className="bg-brand text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-sm hover:bg-blue-900 transition-colors">
             + 대기생 등록
           </button>
           <button onClick={() => setIsLevelTestModalOpen(true)} className="bg-emerald-600 text-white px-5 py-2.5 rounded-lg font-bold text-sm shadow-sm hover:bg-emerald-700 transition-colors">
@@ -607,7 +607,7 @@ export default function AdmissionPage() {
           
           <div className="p-4 border-b border-slate-200 bg-slate-50 flex justify-between items-center shrink-0">
             <div className="flex items-center">
-              <h3 className="font-bold text-[#002864] flex items-center gap-2">
+              <h3 className="font-bold text-brand flex items-center gap-2">
                 <span>🗓️</span> 
                 개설된 일정 목록 
                 <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-full ml-1">{filteredSessions.length}건</span>
@@ -618,7 +618,7 @@ export default function AdmissionPage() {
                   if (primarySort === "date") setDateSortOrder(prev => prev === "desc" ? "asc" : "desc");
                   setPrimarySort("date");
                 }} 
-                className={`ml-3 text-[10px] font-bold border px-2 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1 ${primarySort === 'date' ? 'bg-[#002864] text-white border-[#002864]' : 'bg-white text-slate-600 border-slate-200 hover:text-[#002864] hover:border-[#002864]'}`}
+                className={`ml-3 text-xs font-bold border px-2 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1 ${primarySort === 'date' ? 'bg-brand text-white border-brand' : 'bg-white text-slate-600 border-slate-200 hover:text-brand hover:border-brand'}`}
                 title="일자를 최우선 기준으로 정렬합니다"
               >
                 {dateSortOrder === "desc" ? "🔻 최신순" : "🔺 과거순"}
@@ -629,13 +629,13 @@ export default function AdmissionPage() {
                   if (primarySort === "grade") setGradeSortOrder(prev => prev === "asc" ? "desc" : "asc");
                   setPrimarySort("grade");
                 }} 
-                className={`ml-1 text-[10px] font-bold border px-2 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1 ${primarySort === 'grade' ? 'bg-[#002864] text-white border-[#002864]' : 'bg-white text-slate-600 border-slate-200 hover:text-[#002864] hover:border-[#002864]'}`}
+                className={`ml-1 text-xs font-bold border px-2 py-1.5 rounded transition-colors shadow-sm flex items-center gap-1 ${primarySort === 'grade' ? 'bg-brand text-white border-brand' : 'bg-white text-slate-600 border-slate-200 hover:text-brand hover:border-brand'}`}
                 title="학년을 최우선 기준으로 정렬합니다"
               >
                 {gradeSortOrder === "asc" ? "🔺 저학년순" : "🔻 고학년순"}
               </button>
             </div>
-            <button onClick={() => setRefreshTrigger(prev => prev + 1)} className="text-[12px] font-bold text-slate-500 hover:text-[#002864]">새로고침 ↻</button>
+            <button onClick={() => setRefreshTrigger(prev => prev + 1)} className="text-[12px] font-bold text-slate-500 hover:text-brand">새로고침 ↻</button>
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scroll flex flex-col">
@@ -662,18 +662,18 @@ export default function AdmissionPage() {
                   >
                     <div className="flex justify-between items-center mb-1">
                       <div className="flex items-center gap-2 min-w-0">
-                        <div className="text-[14px] font-black text-slate-800 tracking-tight shrink-0">
+                        <div className="text-[14px] font-bold text-slate-800 tracking-tight shrink-0">
                           🗓️ {formatDateTimeDisplay(sessionDt)}
                         </div>
                         <h4 className="font-bold text-[13px] text-blue-800 truncate">{s.title}</h4>
                         {s._extractedGrade && s._extractedGrade !== '기타' && (
-                          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1 py-0.5 rounded text-[9px] font-bold shrink-0 hidden lg:inline-block">
+                          <span className="bg-emerald-50 text-emerald-600 border border-emerald-200 px-1 py-0.5 rounded text-xs font-bold shrink-0 hidden lg:inline-block">
                             {s._extractedGrade}
                           </span>
                         )}
                       </div>
                       <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                        <span className="bg-blue-100 text-blue-700 text-[10px] font-extrabold px-1.5 py-0.5 rounded-full">
+                        <span className="bg-blue-100 text-blue-700 text-xs font-bold px-1.5 py-0.5 rounded-full">
                           {s.admission_application?.length || 0}명
                         </span>
                         <button onClick={(e) => { 
@@ -681,7 +681,7 @@ export default function AdmissionPage() {
                           setSelectedSession(s); 
                           sessionStorage.setItem('logica_adm_selected_session_id', String(s.admission_session_id));
                           setTimeout(() => setIsAssignModalOpen(true), 0); 
-                        }} className="text-[10px] bg-[#002864] text-white px-2 py-0.5 rounded font-bold shadow-sm">
+                        }} className="text-xs bg-brand text-white px-2 py-0.5 rounded font-bold shadow-sm">
                           + 배정
                         </button>
                       </div>
@@ -690,16 +690,16 @@ export default function AdmissionPage() {
                     <div className="flex flex-row items-center min-w-0 mt-1 gap-1.5">
                       {s.exam_id ? (
                         <>
-                          <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?exam_id=${s.exam_id}`, '_blank'); }} className="text-[11px] font-extrabold text-[#002864] hover:text-blue-600 hover:underline truncate text-left shrink-0 max-w-[50%]" title={fullExamName}>
+                          <button onClick={(e) => { e.stopPropagation(); window.open(`/exam/viewer?exam_id=${s.exam_id}`, '_blank'); }} className="text-xs font-bold text-brand hover:text-blue-600 hover:underline truncate text-left shrink-0 max-w-[50%]" title={fullExamName}>
                             📝 {fullExamName}
                           </button>
                           {s.session_comment && (
-                            <span className="text-[10px] font-medium text-emerald-700 truncate min-w-0" title={s.session_comment}>
+                            <span className="text-xs font-medium text-emerald-700 truncate min-w-0" title={s.session_comment}>
                               ↳ {s.session_comment}
                             </span>
                           )}
                         </>
-                      ) : <span className="text-[11px] font-bold text-slate-400 truncate shrink-0">📝 시험지 미지정</span>}
+                      ) : <span className="text-xs font-bold text-slate-400 truncate shrink-0">📝 시험지 미지정</span>}
                     </div>
                   </div>
                 );
@@ -721,7 +721,7 @@ export default function AdmissionPage() {
                   <button 
                     key={num} 
                     onClick={() => setCurrentPage(num)}
-                    className={`px-3 py-1 font-bold text-xs rounded transition-colors ${currentPage === num ? 'bg-[#002864] text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-[#002864]'}`}
+                    className={`px-3 py-1 font-bold text-xs rounded transition-colors ${currentPage === num ? 'bg-brand text-white shadow-sm' : 'text-slate-600 hover:bg-white hover:text-brand'}`}
                   >
                     {num}
                   </button>
@@ -789,22 +789,22 @@ export default function AdmissionPage() {
                       if (shadowAssign) {
                         gradeBtnHtml = (
                           <div className="flex items-center">
-                            <button onClick={() => router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`)} className={`text-[11px] px-2.5 py-1.5 rounded font-bold shadow-sm border transition-colors flex items-center gap-1 shrink-0 ${isDone ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-[#002864] text-white border-[#002864] hover:bg-blue-900'}`}>
+                            <button onClick={() => router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`)} className={`text-xs px-2.5 py-1.5 rounded font-bold shadow-sm border transition-colors flex items-center gap-1 shrink-0 ${isDone ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-brand text-white border-brand hover:bg-blue-900'}`}>
                               {isDone ? '채점/리뷰' : '채점하기'}
                             </button>
                             {isDone && hasReportAuth && (
-                              <button onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')} className="text-[11px] bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0">
+                              <button onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')} className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0">
                                 📊 리포트
                               </button>
                             )}
                           </div>
                         );
-                        scoreDisplay = isDone ? <span className="font-black text-[#002864] bg-blue-50 px-2 py-1.5 rounded border border-blue-100 text-[13px] w-14 text-center shrink-0 shadow-sm">{shadowAssign.total_score || 0}점</span> : <span className="font-bold text-slate-300 text-[12px] w-14 text-center shrink-0">-점</span>;
+                        scoreDisplay = isDone ? <span className="font-bold text-brand bg-blue-50 px-2 py-1.5 rounded border border-blue-100 text-[13px] w-14 text-center shrink-0 shadow-sm">{shadowAssign.total_score || 0}점</span> : <span className="font-bold text-slate-300 text-[12px] w-14 text-center shrink-0">-점</span>;
                       } else {
                         if (selectedSession?.exam_id) {
-                          gradeBtnHtml = <button onClick={() => forceAssignExam(app.student_id, selectedSession.admission_session_id, selectedSession.exam_id)} className="text-[11px] bg-amber-50 hover:bg-amber-100 text-amber-600 px-3 py-1.5 rounded border border-amber-300 transition-colors font-extrabold shadow-md shrink-0 animate-pulse">수동 연결 시도</button>;
+                          gradeBtnHtml = <button onClick={() => forceAssignExam(app.student_id, selectedSession.admission_session_id, selectedSession.exam_id)} className="text-xs bg-amber-50 hover:bg-amber-100 text-amber-600 px-3 py-1.5 rounded border border-amber-300 transition-colors font-bold shadow-md shrink-0 animate-pulse">수동 연결 시도</button>;
                         } else {
-                          gradeBtnHtml = <span className="text-[10px] font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded shrink-0">시험지없음</span>;
+                          gradeBtnHtml = <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded shrink-0">시험지없음</span>;
                         }
                         scoreDisplay = <span className="font-bold text-slate-300 text-[12px] w-14 text-center shrink-0">-</span>;
                       }
@@ -817,12 +817,12 @@ export default function AdmissionPage() {
                       return (
                         <tr key={app.application_id} className="hover:bg-blue-50/50 transition-colors">
                           <td className="py-3 px-3 text-center text-xs text-slate-400 font-bold">{idx + 1}</td>
-                          <td className="py-3 px-5 font-extrabold text-[#002864] cursor-pointer hover:underline" onClick={() => window.open(`/student/${app.student_id}`, '_blank')}>{app.student?.name}</td>
+                          <td className="py-3 px-5 font-bold text-brand cursor-pointer hover:underline" onClick={() => window.open(`/student/${app.student_id}`, '_blank')}>{app.student?.name}</td>
                           <td className="px-5 text-sm font-bold text-slate-600">{app.student?.school || '-'}</td>
                           <td className="px-5 text-sm font-bold text-slate-600">{formatGrade(app.student?.grade)}</td>
                           <td className="px-5 text-sm font-bold text-slate-500">{displayPhone}</td>
                           <td className="px-2 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold shadow-sm whitespace-nowrap ${badgeStyle}`}>
+                            <span className={`px-2 py-0.5 rounded text-xs font-bold shadow-sm whitespace-nowrap ${badgeStyle}`}>
                               {displayResult}
                             </span>
                           </td>
@@ -831,8 +831,8 @@ export default function AdmissionPage() {
                               {scoreDisplay}
                               {gradeBtnHtml}
                               <div className="w-px h-5 bg-slate-200 mx-1"></div>
-                              <button onClick={() => setCounselData({ appId: app.application_id, studentId: app.student_id, name: app.student?.name, result: displayResult, memo: app.counseling_memo || '' })} className="text-[11px] bg-white text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded font-bold hover:bg-slate-50 transition-colors shadow-sm shrink-0">상담/결과</button>
-                              <button onClick={() => unassignStudent(app.student_id, app.student?.name, selectedSession?.admission_session_id)} className="text-[11px] bg-rose-50 text-rose-500 border border-rose-200 px-2.5 py-1.5 rounded font-bold hover:bg-rose-500 hover:text-white transition-colors shadow-sm shrink-0">배정취소</button>
+                              <button onClick={() => setCounselData({ appId: app.application_id, studentId: app.student_id, name: app.student?.name, result: displayResult, memo: app.counseling_memo || '' })} className="text-xs bg-white text-slate-700 border border-slate-300 px-2.5 py-1.5 rounded font-bold hover:bg-slate-50 transition-colors shadow-sm shrink-0">상담/결과</button>
+                              <button onClick={() => unassignStudent(app.student_id, app.student?.name, selectedSession?.admission_session_id)} className="text-xs bg-rose-50 text-rose-500 border border-rose-200 px-2.5 py-1.5 rounded font-bold hover:bg-rose-500 hover:text-white transition-colors shadow-sm shrink-0">배정취소</button>
                             </div>
                           </td>
                         </tr>

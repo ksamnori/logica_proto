@@ -245,7 +245,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col h-[750px] max-h-[90vh]">
         
         {/* 헤더 */}
-        <div className="bg-[#002864] text-white p-5 flex justify-between items-center shrink-0">
+        <div className="bg-brand text-white p-5 flex justify-between items-center shrink-0">
           <div>
             <h3 className="font-bold text-lg flex items-center gap-2">👨‍🎓 입학 대기생 배정하기</h3>
             <p className="text-blue-200 text-xs mt-1">{session.title} 방에 배정합니다.</p>
@@ -257,7 +257,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           <select 
             value={filterGrade} 
             onChange={(e) => setFilterGrade(e.target.value)} 
-            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-[#002864] w-32"
+            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-brand w-32"
           >
             <option value="all">🎓 전체 학년</option>
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g}</option>)}
@@ -266,7 +266,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           <select 
             value={filterDate} 
             onChange={(e) => setFilterDate(e.target.value)} 
-            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-[#002864] w-36"
+            className="px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-600 focus:outline-none focus:ring-1 focus:ring-brand w-36"
           >
             <option value="all">🗓️ 전체 날짜</option>
             {uniqueDates.map(d => <option key={d} value={d as string}>{d}</option>)}
@@ -278,7 +278,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
               placeholder="이름, 학교, 연락처 검색" 
               value={searchKeyword}
               onChange={(e) => setSearchKeyword(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-[#002864] transition-colors"
+              className="w-full pl-9 pr-3 py-2 bg-slate-50 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 focus:outline-none focus:ring-1 focus:ring-brand transition-colors"
             />
             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔍</span>
           </div>
@@ -286,10 +286,10 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
 
         <div className="p-3 bg-slate-50 border-b border-slate-200 flex justify-between items-center shrink-0">
           <span className="text-sm font-bold text-slate-700">
-            검색된 대기생: <span className="text-[#002864]">{filteredWaiting.length}</span>명
+            검색된 대기생: <span className="text-brand">{filteredWaiting.length}</span>명
           </span>
           <label className="flex items-center space-x-1.5 cursor-pointer text-xs text-slate-600 font-bold bg-white border border-slate-300 px-2.5 py-1.5 rounded hover:bg-slate-50 transition-colors shadow-sm">
-            <input type="checkbox" checked={isAllWaitingChecked} onChange={(e) => toggleAllWaiting(e.target.checked)} className="w-3.5 h-3.5 accent-[#002864]" />
+            <input type="checkbox" checked={isAllWaitingChecked} onChange={(e) => toggleAllWaiting(e.target.checked)} className="w-3.5 h-3.5 accent-brand" />
             <span>현재 목록 전체 선택</span>
           </label>
         </div>
@@ -301,34 +301,34 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
             ) : (
               filteredWaiting.map(std => {
                 const sourceBadge = std.source === 'temp' 
-                  ? <span className="text-[10px] bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
-                  : <span className="text-[10px] bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
+                  ? <span className="text-xs bg-blue-100 text-blue-700 border border-blue-200 px-1.5 py-0.5 rounded font-bold shrink-0">📝 폼제출</span>
+                  : <span className="text-xs bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded font-bold shrink-0">👤 신규생</span>;
 
                 return (
                   <label key={std.id} className="flex items-center justify-between p-3 bg-white border border-slate-200 rounded-lg cursor-pointer hover:bg-blue-50 shadow-sm transition-all hover:border-blue-300 gap-2">
                     <div className="flex items-center space-x-3 min-w-0 flex-1">
-                      <input type="checkbox" checked={selectedWaitingIds.includes(std.id)} onChange={() => toggleWaitingCheck(std.id)} className="w-4 h-4 accent-[#002864] shrink-0" />
+                      <input type="checkbox" checked={selectedWaitingIds.includes(std.id)} onChange={() => toggleWaitingCheck(std.id)} className="w-4 h-4 accent-brand shrink-0" />
                       
                       <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <span className="font-extrabold text-slate-800 text-[14px] shrink-0">{std.student_name}</span>
+                        <span className="font-bold text-slate-800 text-[14px] shrink-0">{std.student_name}</span>
                         {sourceBadge}
-                        <span className="text-[10px] bg-[#002864] text-white px-1.5 py-0.5 rounded font-bold shrink-0">{formatKoreanGrade(std.grade)}</span>
+                        <span className="text-xs bg-brand text-white px-1.5 py-0.5 rounded font-bold shrink-0">{formatKoreanGrade(std.grade)}</span>
                         
                         <span className="text-slate-200 shrink-0">|</span>
                         <span className="text-[12px] text-slate-600 font-bold truncate">🏫 {std.school_name || '학교미입력'}</span>
                         
                         <span className="text-slate-200 shrink-0 hidden sm:inline-block">|</span>
-                        <span className="text-[11px] text-[#002864] font-black shrink-0 hidden sm:inline-block bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                        <span className="text-xs text-brand font-bold shrink-0 hidden sm:inline-block bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
                           📅 {formatTestDate(std.test_date) || "날짜없음"}
                         </span>
                       </div>
                     </div>
                     
                     <div className="flex flex-col items-end gap-1 shrink-0">
-                      <div className="text-[11px] font-black text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200">
+                      <div className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded border border-slate-200">
                         📞 {std.contact}
                       </div>
-                      <span className="text-[10px] text-slate-400 font-medium">접수: {formatDateTime(std.created_at)}</span>
+                      <span className="text-xs text-slate-400 font-medium">접수: {formatDateTime(std.created_at)}</span>
                     </div>
                   </label>
                 );
@@ -341,7 +341,7 @@ export default function AssignModal({ isOpen, onClose, session, onSuccess, getGr
           <button 
             onClick={submitAssign} 
             disabled={isSubmitting || selectedWaitingIds.length === 0} 
-            className="w-full bg-[#002864] hover:bg-blue-900 text-white font-extrabold py-3.5 rounded-xl shadow-md transition-all text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-brand hover:bg-blue-900 text-white font-bold py-3.5 rounded-xl shadow-md transition-all text-sm flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {isSubmitting ? "배정 중... ⏳" : `✅ 선택한 대기생 배정 완료하기 (${selectedWaitingIds.length}명)`}
           </button>

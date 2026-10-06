@@ -44,7 +44,7 @@ export default function NewAgendaModal({ currentUser, onClose, onSuccess }: NewA
   const getTheme = () => {
     if (type === "긴급") return { bg: "bg-rose-600", text: "text-white", icon: "🚨", border: "border-rose-300" };
     if (type === "기타") return { bg: "bg-emerald-600", text: "text-white", icon: "📌", border: "border-emerald-300" };
-    return { bg: "bg-[#002864]", text: "text-white", icon: "📝", border: "border-blue-300" };
+    return { bg: "bg-brand", text: "text-white", icon: "📝", border: "border-blue-300" };
   };
   const theme = getTheme();
 
@@ -58,7 +58,7 @@ export default function NewAgendaModal({ currentUser, onClose, onSuccess }: NewA
         <div className="p-5 space-y-4 bg-slate-50 flex-1">
           <div className="flex items-end gap-3">
             <div className="w-1/4">
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">안건 종류</label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">안건 종류</label>
               <select value={type} onChange={e => setType(e.target.value)} className={`w-full text-[12px] font-bold text-slate-700 border ${theme.border} rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-opacity-50 transition-colors`}>
                 <option value="일반">📝 일반/업무</option>
                 <option value="긴급">🚨 긴급/이슈</option>
@@ -66,21 +66,21 @@ export default function NewAgendaModal({ currentUser, onClose, onSuccess }: NewA
               </select>
             </div>
             <div className="flex-1">
-              <label className="block text-[11px] font-bold text-slate-500 mb-1">안건 제목 <span className="text-rose-500">*</span></label>
+              <label className="block text-xs font-bold text-slate-500 mb-1">안건 제목 <span className="text-rose-500">*</span></label>
               <input type="text" value={title} onChange={e => setTitle(e.target.value)} placeholder="회의에서 논의할 핵심 주제" className={`w-full text-[12px] font-bold text-slate-800 border ${theme.border} rounded-lg p-2 focus:outline-none focus:ring-2 focus:ring-opacity-50`} />
             </div>
             <div className="shrink-0">
-              <button onClick={() => alert("녹음 모달로 연결하거나 녹음 로직을 시작합니다. (추가 구현 필요)")} className="h-[38px] px-3 bg-white text-blue-600 border border-blue-200 rounded-lg text-[11px] font-bold shadow-sm hover:bg-blue-50 transition-colors flex items-center gap-1">
+              <button onClick={() => alert("녹음 모달로 연결하거나 녹음 로직을 시작합니다. (추가 구현 필요)")} className="h-[38px] px-3 bg-white text-blue-600 border border-blue-200 rounded-lg text-xs font-bold shadow-sm hover:bg-blue-50 transition-colors flex items-center gap-1">
                 🎙️ 음성 녹음
               </button>
             </div>
           </div>
           <div className="flex flex-col flex-1 min-h-[250px]">
             <div className="flex justify-between items-center mb-1">
-              <label className="block text-[11px] font-bold text-slate-500">상세 내용 및 의견 <span className="text-rose-500">*</span></label>
+              <label className="block text-xs font-bold text-slate-500">상세 내용 및 의견 <span className="text-rose-500">*</span></label>
               <label className="flex items-center gap-1.5 cursor-pointer bg-white px-2 py-1 rounded border border-slate-200 shadow-sm hover:bg-slate-50 transition-colors">
                 <input type="checkbox" checked={isSecret} onChange={e => setIsSecret(e.target.checked)} className="w-3 h-3 accent-slate-800" />
-                <span className="text-[10px] font-bold text-slate-600">🔒 비밀 안건으로 등록</span>
+                <span className="text-xs font-bold text-slate-600">🔒 비밀 안건으로 등록</span>
               </label>
             </div>
             <div className={`flex-1 h-full rounded-lg overflow-hidden border ${theme.border}`}><SimpleEditor value={content} onChange={setContent} /></div>

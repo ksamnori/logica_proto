@@ -256,10 +256,10 @@ export default function LaunchSpecialClassPage() {
           </div>
 
           <div className="flex gap-3">
-            <button onClick={registerClass} disabled={isSubmitting} className="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white font-extrabold text-lg py-4 px-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.01] disabled:opacity-50">
+            <button onClick={registerClass} disabled={isSubmitting} className="flex-1 bg-indigo-700 hover:bg-indigo-800 text-white font-bold text-lg py-4 px-4 rounded-xl shadow-lg transition-all transform hover:scale-[1.01] disabled:opacity-50">
               {isSubmitting ? "처리 중..." : "자동 코드 부여 및 특강/메이크업 반 개설하기"}
             </button>
-            <button onClick={() => window.close()} className="px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-lg rounded-xl shadow-sm transition-all border border-slate-300">
+            <button onClick={() => window.close()} className="px-8 py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-lg rounded-xl shadow-sm transition-all border border-slate-300">
               창 닫기
             </button>
           </div>

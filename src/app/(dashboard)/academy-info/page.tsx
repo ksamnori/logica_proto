@@ -367,7 +367,7 @@ export default function AcademyInfoPage() {
     return (
       <div className="flex w-full h-screen items-center justify-center bg-slate-50">
         <div className="flex flex-col items-center gap-4">
-          <div className="w-8 h-8 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+          <div className="w-8 h-8 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
           <span className="text-slate-500 font-bold text-sm">보안 권한을 확인하는 중입니다...</span>
         </div>
       </div>
@@ -387,7 +387,7 @@ export default function AcademyInfoPage() {
       <div className="h-full flex flex-col font-pretendard bg-slate-50 p-8 items-center justify-center">
         <div className="bg-white p-10 rounded-2xl shadow-sm border border-slate-200 text-center max-w-md">
           <div className="text-4xl mb-4">🏢</div>
-          <h2 className="text-lg font-black text-slate-800 mb-2">소속 지점 정보가 없습니다.</h2>
+          <h2 className="text-lg font-bold text-slate-800 mb-2">소속 지점 정보가 없습니다.</h2>
           <p className="text-sm font-medium text-slate-500">현재 선생님의 계정에 등록된 지점(테넌트) 정보가 없거나 올바르지 않습니다.<br/>최고관리자에게 지점 배정을 요청해주세요.</p>
         </div>
       </div>
@@ -400,7 +400,7 @@ export default function AcademyInfoPage() {
       {/* 헤더 영역 */}
       <div className="shrink-0 flex items-end justify-between mb-6">
         <div>
-          <h1 className="text-2xl font-black text-slate-800 tracking-tight flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-slate-800 tracking-tight flex items-center gap-2">
             🏢 학원 정보 관리
           </h1>
           <p className="text-slate-500 font-bold text-[12px] mt-1">
@@ -415,8 +415,8 @@ export default function AcademyInfoPage() {
         {isHQ && (
           <div className="w-full lg:w-72 bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col shrink-0 overflow-hidden h-full">
             <div className="p-4 border-b border-slate-200 bg-slate-50/50 flex justify-between items-center shrink-0">
-              <span className="font-black text-sm text-slate-700">지점 목록 (HQ)</span>
-              <button onClick={handleCreateNewTenant} className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 hover:bg-emerald-100 transition-colors">
+              <span className="font-bold text-sm text-slate-700">지점 목록 (HQ)</span>
+              <button onClick={handleCreateNewTenant} className="text-xs font-bold text-emerald-600 bg-emerald-50 px-2 py-1 rounded border border-emerald-100 hover:bg-emerald-100 transition-colors">
                 + 신규 지점 등록
               </button>
             </div>
@@ -428,12 +428,12 @@ export default function AcademyInfoPage() {
                   className={`w-full text-left p-3 mb-1 rounded-xl transition-colors border flex flex-col gap-1 ${activeTenant.tenant_id === t.tenant_id ? 'bg-blue-50 border-blue-200 shadow-sm' : 'bg-transparent border-transparent hover:bg-slate-50'}`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className={`font-bold text-[13px] ${activeTenant.tenant_id === t.tenant_id ? 'text-[#002864]' : 'text-slate-700'}`}>{t.name}</span>
-                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${t.tenant_type === 'HQ' ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : (t.tenant_type === 'DIRECT' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 'bg-amber-100 text-amber-600 border-amber-200')}`}>
+                    <span className={`font-bold text-[13px] ${activeTenant.tenant_id === t.tenant_id ? 'text-brand' : 'text-slate-700'}`}>{t.name}</span>
+                    <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${t.tenant_type === 'HQ' ? 'bg-indigo-100 text-indigo-600 border-indigo-200' : (t.tenant_type === 'DIRECT' ? 'bg-emerald-100 text-emerald-600 border-emerald-200' : 'bg-amber-100 text-amber-600 border-amber-200')}`}>
                       {t.tenant_type === 'HQ' ? '본사' : (t.tenant_type === 'DIRECT' ? '직영점' : '가맹점')}
                     </span>
                   </div>
-                  <div className={`text-[10px] truncate ${activeTenant.tenant_id === t.tenant_id ? 'text-blue-500' : 'text-slate-400'}`}>
+                  <div className={`text-xs truncate ${activeTenant.tenant_id === t.tenant_id ? 'text-blue-500' : 'text-slate-400'}`}>
                     {t.address || '주소 미등록'}
                   </div>
                 </button>
@@ -450,11 +450,11 @@ export default function AcademyInfoPage() {
                 🏫
               </div>
               <div>
-                <h2 className="text-base font-black text-[#002864] flex items-center gap-2">
+                <h2 className="text-base font-bold text-brand flex items-center gap-2">
                   {activeTenant.name}
-                  <span className="text-[10px] bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md font-bold">{activeTenant.status}</span>
+                  <span className="text-xs bg-slate-200 text-slate-600 px-1.5 py-0.5 rounded-md font-bold">{activeTenant.status}</span>
                 </h2>
-                <p className="text-[11px] text-slate-500 font-medium mt-0.5">지점 상세 정보 및 로고/전경 관리</p>
+                <p className="text-xs text-slate-500 font-medium mt-0.5">지점 상세 정보 및 로고/전경 관리</p>
               </div>
             </div>
             
@@ -462,7 +462,7 @@ export default function AcademyInfoPage() {
               {isEditing ? (
                 <>
                   <button onClick={() => { setIsEditing(false); syncForm(activeTenant); }} className="bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-sm px-5 py-2.5 rounded-xl transition-all">취소</button>
-                  <button onClick={handleSave} className="bg-[#002864] hover:bg-blue-900 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5"><span>💾</span> 저장하기</button>
+                  <button onClick={handleSave} className="bg-brand hover:bg-blue-900 text-white font-bold text-sm px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5"><span>💾</span> 저장하기</button>
                 </>
               ) : (
                 <button onClick={() => setIsEditing(true)} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold text-sm px-6 py-2.5 rounded-xl shadow-sm transition-all flex items-center gap-1.5">
@@ -477,9 +477,9 @@ export default function AcademyInfoPage() {
               
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
                 <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-2">
-                  <h3 className="text-sm font-black text-slate-800">대표 이미지 (로고 및 전경)</h3>
+                  <h3 className="text-sm font-bold text-slate-800">대표 이미지 (로고 및 전경)</h3>
                   {isEditing && (
-                    <button onClick={() => fileInputRef.current?.click()} className="text-[11px] font-bold bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1 shadow-sm">
+                    <button onClick={() => fileInputRef.current?.click()} className="text-xs font-bold bg-blue-50 text-blue-600 border border-blue-200 px-3 py-1.5 rounded-lg hover:bg-blue-100 transition-colors flex items-center gap-1 shadow-sm">
                       <span>📸</span> 이미지 업로드
                     </button>
                   )}
@@ -493,7 +493,7 @@ export default function AcademyInfoPage() {
                     ) : (
                       <div className="text-center">
                         <span className="text-4xl text-slate-300 block mb-2">🏞️</span>
-                        <span className="text-[11px] font-bold text-slate-400">등록된 이미지가 없습니다.</span>
+                        <span className="text-xs font-bold text-slate-400">등록된 이미지가 없습니다.</span>
                       </div>
                     )}
                     
@@ -508,14 +508,14 @@ export default function AcademyInfoPage() {
 
                   <div>
                     <p className="text-[12px] font-bold text-slate-600 mb-2">권장 해상도 및 포맷</p>
-                    <ul className="text-[11px] font-medium text-slate-500 space-y-1.5 list-disc pl-4">
+                    <ul className="text-xs font-medium text-slate-500 space-y-1.5 list-disc pl-4">
                       <li>권장 비율: <strong className="text-indigo-600">16:9 와이드 (예: 800 x 450 픽셀)</strong></li>
                       <li>지원 포맷: JPG, PNG, WEBP (최대 5MB)</li>
                       <li>등록된 이미지는 학원 홈페이지 대문 및 지점 안내 페이지 등에서 공통으로 사용됩니다.</li>
                     </ul>
                     {isEditing && (
                       <div className="mt-4 p-3 bg-amber-50 border border-amber-100 rounded-lg">
-                        <p className="text-[10px] font-bold text-amber-700">💡 이미지를 업로드하면 마우스로 드래그하여 위치를 조정하고 크기를 자를 수 있는 편집창이 열립니다.</p>
+                        <p className="text-xs font-bold text-amber-700">💡 이미지를 업로드하면 마우스로 드래그하여 위치를 조정하고 크기를 자를 수 있는 편집창이 열립니다.</p>
                       </div>
                     )}
                   </div>
@@ -523,39 +523,39 @@ export default function AcademyInfoPage() {
               </div>
 
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-black text-slate-800 mb-4 border-b border-slate-100 pb-2">기본 정보</h3>
+                <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">기본 정보</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5">학원(지점)명</label>
-                    <input type="text" disabled={!isEditing} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-[#002864] disabled:opacity-60 disabled:bg-slate-100" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">학원(지점)명</label>
+                    <input type="text" disabled={!isEditing} value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-brand disabled:opacity-60 disabled:bg-slate-100" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5">지점 형태 (수정 불가)</label>
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">지점 형태 (수정 불가)</label>
                     <input type="text" disabled value={activeTenant.tenant_type === 'HQ' ? '본사 (Headquarters)' : (activeTenant.tenant_type === 'DIRECT' ? '직영점 (Direct Branch)' : '가맹점 (Franchise)')} className="w-full bg-slate-100 border border-slate-200 text-slate-500 font-bold px-4 py-2.5 rounded-lg cursor-not-allowed" />
                   </div>
                 </div>
               </div>
 
               <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                <h3 className="text-sm font-black text-slate-800 mb-4 border-b border-slate-100 pb-2">운영 정보</h3>
+                <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-100 pb-2">운영 정보</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 mb-5">
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5">대표자명</label>
-                    <input type="text" disabled={!isEditing} value={formData.ceo_name} onChange={e => setFormData({...formData, ceo_name: e.target.value})} placeholder="홍길동" className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-[#002864] disabled:opacity-60 disabled:bg-slate-100" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">대표자명</label>
+                    <input type="text" disabled={!isEditing} value={formData.ceo_name} onChange={e => setFormData({...formData, ceo_name: e.target.value})} placeholder="홍길동" className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-brand disabled:opacity-60 disabled:bg-slate-100" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5">사업자 등록번호</label>
-                    <input type="text" disabled={!isEditing} value={formData.business_number} onChange={e => setFormData({...formData, business_number: e.target.value})} placeholder="123-45-67890" className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-[#002864] disabled:opacity-60 disabled:bg-slate-100" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">사업자 등록번호</label>
+                    <input type="text" disabled={!isEditing} value={formData.business_number} onChange={e => setFormData({...formData, business_number: e.target.value})} placeholder="123-45-67890" className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-brand disabled:opacity-60 disabled:bg-slate-100" />
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5">대표 연락처</label>
-                    <input type="text" disabled={!isEditing} value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="02-1234-5678" className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-[#002864] disabled:opacity-60 disabled:bg-slate-100" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">대표 연락처</label>
+                    <input type="text" disabled={!isEditing} value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} placeholder="02-1234-5678" className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-brand disabled:opacity-60 disabled:bg-slate-100" />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-extrabold text-slate-500 mb-1.5">학원 주소</label>
-                    <input type="text" disabled={!isEditing} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="서울시 강남구 테헤란로..." className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-[#002864] disabled:opacity-60 disabled:bg-slate-100" />
+                    <label className="block text-xs font-bold text-slate-500 mb-1.5">학원 주소</label>
+                    <input type="text" disabled={!isEditing} value={formData.address} onChange={e => setFormData({...formData, address: e.target.value})} placeholder="서울시 강남구 테헤란로..." className="w-full bg-slate-50 border border-slate-300 text-slate-800 font-bold px-4 py-2.5 rounded-lg focus:outline-none focus:border-brand disabled:opacity-60 disabled:bg-slate-100" />
                   </div>
                 </div>
               </div>
@@ -570,7 +570,7 @@ export default function AcademyInfoPage() {
       {isCropperOpen && rawImageSrc && (
         <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]">
-            <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
+            <div className="bg-brand p-5 text-white flex justify-between items-center shrink-0">
               <h2 className="text-lg font-bold tracking-tight">✂️ 대표 이미지 편집</h2>
               <button onClick={() => { setIsCropperOpen(false); setRawImageSrc(null); }} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
@@ -614,7 +614,7 @@ export default function AcademyInfoPage() {
                   min="0.5" max="3" step="0.01" 
                   value={zoom} 
                   onChange={(e) => setZoom(Number(e.target.value))} 
-                  className="flex-1 accent-[#002864] h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
+                  className="flex-1 accent-brand h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer" 
                 />
                 <span className="text-xs font-bold text-slate-500 w-12 text-right">{Math.round(zoom * 100)}%</span>
               </div>
@@ -622,7 +622,7 @@ export default function AcademyInfoPage() {
 
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end gap-2 shrink-0">
               <button onClick={() => { setIsCropperOpen(false); setRawImageSrc(null); }} className="px-5 py-2.5 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200 shadow-sm transition-colors text-sm">취소</button>
-              <button onClick={generateCrop} className="px-6 py-2.5 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 shadow-sm transition-colors flex items-center gap-1.5 text-sm">
+              <button onClick={generateCrop} className="px-6 py-2.5 bg-brand text-white font-bold rounded-lg hover:bg-blue-900 shadow-sm transition-colors flex items-center gap-1.5 text-sm">
                 <span>✂️</span> 크롭 적용 및 임시 저장
               </button>
             </div>

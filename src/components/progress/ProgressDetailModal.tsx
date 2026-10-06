@@ -223,22 +223,22 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
         
         <div className="px-6 py-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0 select-none">
           <div>
-             <h2 className="text-xl font-black text-slate-800 flex items-center gap-2 tracking-tight">
+             <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2 tracking-tight">
                <span>🔍</span> 상세 진도 매트릭스 뷰
              </h2>
              <div className="flex items-center gap-3 mt-1.5">
-               <span className="text-[12px] font-extrabold text-[#002864] bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200 shadow-sm">{data.bookTitle}</span>
-               <span className="text-[11px] font-bold text-slate-400">* 표 안을 잡고 끌거나, 박스를 클릭하면 문제가 뜹니다.</span>
+               <span className="text-[12px] font-bold text-brand bg-blue-50 px-2.5 py-0.5 rounded border border-blue-200 shadow-sm">{data.bookTitle}</span>
+               <span className="text-xs font-bold text-slate-400">* 표 안을 잡고 끌거나, 박스를 클릭하면 문제가 뜹니다.</span>
              </div>
              
              <div className="flex items-center gap-2 bg-white px-2.5 py-1 rounded-md border border-slate-200 shadow-sm flex-wrap mt-2">
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-blue-50 border border-blue-400 inline-block shadow-sm"></span>O</span>
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-red-50 border border-red-400 inline-block shadow-sm"></span>X</span>
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-emerald-50 border border-emerald-400 inline-block shadow-sm"></span>TO</span>
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-rose-50 border border-rose-400 inline-block shadow-sm"></span>TX</span>
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-amber-50 border border-amber-400 inline-block shadow-sm"></span>☆</span>
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-slate-100 border border-slate-400 inline-block shadow-sm"></span>B</span>
-                 <span className="text-[10px] font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-indigo-50 border border-indigo-300 inline-block shadow-sm"></span>✔</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-blue-50 border border-blue-400 inline-block shadow-sm"></span>O</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-red-50 border border-red-400 inline-block shadow-sm"></span>X</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-emerald-50 border border-emerald-400 inline-block shadow-sm"></span>TO</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-rose-50 border border-rose-400 inline-block shadow-sm"></span>TX</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-amber-50 border border-amber-400 inline-block shadow-sm"></span>☆</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-slate-100 border border-slate-400 inline-block shadow-sm"></span>B</span>
+                 <span className="text-xs font-bold text-slate-600 flex items-center gap-1"><span className="w-2.5 h-3.5 rounded-sm bg-indigo-50 border border-indigo-300 inline-block shadow-sm"></span>✔</span>
              </div>
           </div>
           
@@ -250,7 +250,7 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                 onMouseLeave={stopContinuousScroll}
                 onTouchStart={() => startContinuousScroll('left')}
                 onTouchEnd={stopContinuousScroll}
-                className="px-4 py-1.5 bg-white hover:bg-slate-50 rounded-md text-slate-600 font-bold shadow-sm transition-transform active:scale-95 text-[11px] flex items-center gap-1 select-none pointer-events-auto"
+                className="px-4 py-1.5 bg-white hover:bg-slate-50 rounded-md text-slate-600 font-bold shadow-sm transition-transform active:scale-95 text-xs flex items-center gap-1 select-none pointer-events-auto"
               >
                 ◀ 좌로 이동
               </button>
@@ -261,7 +261,7 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                 onMouseLeave={stopContinuousScroll}
                 onTouchStart={() => startContinuousScroll('right')}
                 onTouchEnd={stopContinuousScroll}
-                className="px-4 py-1.5 bg-white hover:bg-slate-50 rounded-md text-slate-600 font-bold shadow-sm transition-transform active:scale-95 text-[11px] flex items-center gap-1 select-none pointer-events-auto"
+                className="px-4 py-1.5 bg-white hover:bg-slate-50 rounded-md text-slate-600 font-bold shadow-sm transition-transform active:scale-95 text-xs flex items-center gap-1 select-none pointer-events-auto"
               >
                 우로 이동 ▶
               </button>
@@ -284,8 +284,8 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
         >
            {isLoading ? (
               <div className="flex flex-col items-center justify-center h-full gap-4">
-                 <div className="w-10 h-10 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
-                 <div className="font-extrabold text-slate-500 text-sm">상세 채점 데이터를 매핑 중입니다...</div>
+                 <div className="w-10 h-10 border-4 border-brand border-t-transparent rounded-full animate-spin"></div>
+                 <div className="font-bold text-slate-500 text-sm">상세 채점 데이터를 매핑 중입니다...</div>
               </div>
            ) : data.pages.length === 0 ? (
               <div className="flex flex-col items-center justify-center h-full text-slate-400 font-bold">
@@ -297,11 +297,11 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                <thead>
                  <tr>
                    <th className="sticky top-0 left-0 z-30 bg-[#f8fafc] border-b border-r border-slate-300 py-2.5 px-3 shadow-[2px_2px_5px_rgba(0,0,0,0.05)] w-24 min-w-[96px] text-center">
-                     <span className="text-[11px] font-black text-slate-500">학생명</span>
+                     <span className="text-xs font-bold text-slate-500">학생명</span>
                    </th>
                    {data.pages.map(p => (
                      <th key={p} id={`page-col-${p}`} className="sticky top-0 z-20 bg-white border-b border-r border-slate-200 py-2 px-2 text-center min-w-[70px] shadow-[0_2px_5px_rgba(0,0,0,0.02)]">
-                       <span className="text-[12px] font-black text-[#002864]">{p}p</span>
+                       <span className="text-[12px] font-bold text-brand">{p}p</span>
                      </th>
                    ))}
                  </tr>
@@ -309,7 +309,7 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                <tbody>
                  {data.students.map((stu, sIdx) => (
                    <tr key={stu.id} className="group hover:bg-blue-50/20 transition-colors">
-                     <td className={`sticky left-0 z-10 border-b border-r border-slate-300 py-2 px-3 font-black text-[12px] text-slate-700 shadow-[2px_0_5px_rgba(0,0,0,0.03)] group-hover:bg-blue-50/50 ${sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
+                     <td className={`sticky left-0 z-10 border-b border-r border-slate-300 py-2 px-3 font-bold text-[12px] text-slate-700 shadow-[2px_0_5px_rgba(0,0,0,0.03)] group-hover:bg-blue-50/50 ${sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
                        <div className="truncate w-full text-center">{stu.name}</div>
                      </td>
                      
@@ -329,7 +329,7 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                                       if (dragDistance.current > 5) return; 
                                       setSelectedQ(q);
                                     }}
-                                    className={`w-[20px] h-[20px] flex items-center justify-center rounded-[3px] border hover:scale-125 transition-transform text-[9px] font-black tracking-tighter cursor-pointer ${getBlockStyle(code)}`}
+                                    className={`w-[20px] h-[20px] flex items-center justify-center rounded-[3px] border hover:scale-125 transition-transform text-xs font-bold tracking-tighter cursor-pointer ${getBlockStyle(code)}`}
                                  >
                                     {getCodeLabel(code)}
                                  </div>
@@ -350,8 +350,8 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
       {qData && (
         <div className="fixed inset-0 z-[200] flex justify-center items-center bg-slate-900/40 backdrop-blur-sm p-4 animate-[fadeIn_0.1s_ease-out]">
           <div className="bg-white w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-[#002864] px-5 py-3.5 flex justify-between items-center text-white shrink-0 shadow-md z-10">
-              <h3 className="font-extrabold text-sm flex items-center gap-2">
+            <div className="bg-brand px-5 py-3.5 flex justify-between items-center text-white shrink-0 shadow-md z-10">
+              <h3 className="font-bold text-sm flex items-center gap-2">
                 <span>🔍</span> {qData.page_number}p - {String(qData.question_number).replace(/TWIN/gi, 'T').replace(/SIMILAR/gi, 'S').replace(/CLINIC/gi, 'C')}번 문항 상세
               </h3>
               <button onClick={() => { setSelectedQ(null); setQData(null); }} className="text-white/80 hover:text-rose-400 transition-colors font-bold text-2xl leading-none">&times;</button>
@@ -359,20 +359,20 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
             
             <div className="p-6 overflow-y-auto custom-scroll bg-slate-50 space-y-4">
                <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="text-[11px] font-black text-slate-400 mb-2.5 border-b border-slate-100 pb-2">질문 내용</div>
+                  <div className="text-xs font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-2">질문 내용</div>
                   <div className="math-text text-slate-800 font-medium whitespace-pre-wrap leading-relaxed" 
                        dangerouslySetInnerHTML={{ __html: renderHTML(qData.question) }} />
                </div>
                
                <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
-                  <div className="text-[11px] font-black text-blue-400 mb-2.5 border-b border-blue-200 pb-2">DB 정답</div>
+                  <div className="text-xs font-bold text-blue-400 mb-2.5 border-b border-blue-200 pb-2">DB 정답</div>
                   <div className="math-text text-blue-800 font-bold text-[15px] whitespace-pre-wrap" 
                        dangerouslySetInnerHTML={{ __html: renderAnswer(qData.answer || qData.solution || '-') }} />
                </div>
 
                {qData.explanation && !(qData.step_1_concept || qData.step_2_approach || qData.step_3_process || qData.step_4_conclusion) && (
                  <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="text-[11px] font-black text-slate-400 mb-2.5 border-b border-slate-100 pb-2">상세 해설</div>
+                    <div className="text-xs font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-2">상세 해설</div>
                     <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed"
                          dangerouslySetInnerHTML={{ __html: renderHTML(qData.explanation) }} />
                  </div>
@@ -381,31 +381,31 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                {/* 🌟 원본 스키마 컬럼명 완벽 대응 */}
                {(qData.step_1_concept || qData.step_2_approach || qData.step_3_process || qData.step_4_conclusion) && (
                  <div className="mt-6 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                   <div className="text-[12px] font-black text-slate-600 mb-4 border-b border-slate-100 pb-2 flex items-center gap-1.5">
+                   <div className="text-[12px] font-bold text-slate-600 mb-4 border-b border-slate-100 pb-2 flex items-center gap-1.5">
                      <span>💡</span> 4단계 상세 해설
                    </div>
                    <div className="space-y-5">
                      {qData.step_1_concept && (
                        <div className="relative pl-3 border-l-4 border-emerald-400">
-                         <div className="text-[11px] font-black text-emerald-600 mb-1">1단계 (조건 분석)</div>
+                         <div className="text-xs font-bold text-emerald-600 mb-1">1단계 (조건 분석)</div>
                          <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_1_concept) }} />
                        </div>
                      )}
                      {qData.step_2_approach && (
                        <div className="relative pl-3 border-l-4 border-indigo-400">
-                         <div className="text-[11px] font-black text-indigo-600 mb-1">2단계 (개념 적용)</div>
+                         <div className="text-xs font-bold text-indigo-600 mb-1">2단계 (개념 적용)</div>
                          <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_2_approach) }} />
                        </div>
                      )}
                      {qData.step_3_process && (
                        <div className="relative pl-3 border-l-4 border-amber-400">
-                         <div className="text-[11px] font-black text-amber-600 mb-1">3단계 (수식 전개)</div>
+                         <div className="text-xs font-bold text-amber-600 mb-1">3단계 (수식 전개)</div>
                          <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_3_process) }} />
                        </div>
                      )}
                      {qData.step_4_conclusion && (
                        <div className="relative pl-3 border-l-4 border-rose-400">
-                         <div className="text-[11px] font-black text-rose-600 mb-1">4단계 (검토 및 마무리)</div>
+                         <div className="text-xs font-bold text-rose-600 mb-1">4단계 (검토 및 마무리)</div>
                          <div className="math-text text-slate-700 text-[13px] font-medium whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: renderHTML(qData.step_4_conclusion) }} />
                        </div>
                      )}

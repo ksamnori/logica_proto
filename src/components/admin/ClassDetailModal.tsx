@@ -17,7 +17,7 @@ export default function ClassDetailModal({ isOpen, onClose, classModalData, clas
   return (
     <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0">
+        <div className="bg-brand p-5 text-white flex justify-between items-center shrink-0">
           <h2 className="text-xl font-bold tracking-tight">🏫 반 상세 정보 및 수강생 목록</h2>
           <button onClick={onClose} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
         </div>
@@ -51,7 +51,7 @@ export default function ClassDetailModal({ isOpen, onClose, classModalData, clas
                 {classSchedules.map(s => (
                   <div key={s.day} className={`flex items-center gap-4 bg-white p-2.5 rounded-lg border border-slate-200`}>
                     <label className="flex items-center gap-2 w-16 shrink-0">
-                      <input type="checkbox" disabled checked={s.checked} className="w-5 h-5 accent-[#002864]" />
+                      <input type="checkbox" disabled checked={s.checked} className="w-5 h-5 accent-brand" />
                       <span className={`font-bold ${s.day === '토' ? 'text-blue-600' : s.day === '일' ? 'text-red-500' : 'text-slate-700'}`}>{s.day}</span>
                     </label>
                     {s.checked && (
@@ -96,7 +96,7 @@ export default function ClassDetailModal({ isOpen, onClose, classModalData, clas
                     const uniqueClasses = Array.from(new Set(s.enrollment?.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
                     return (
                       <tr key={s.student_id}>
-                        <td className="py-2.5 px-4 font-bold text-[#002864]">{s.name}</td>
+                        <td className="py-2.5 px-4 font-bold text-brand">{s.name}</td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold">{s.grade || "-"}</td>
                         <td className="py-2.5 px-4 text-slate-600 text-xs font-bold max-w-[200px] truncate">{uniqueClasses}</td>
                       </tr>

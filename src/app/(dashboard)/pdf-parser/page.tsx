@@ -454,7 +454,7 @@ export default function PdfParserPage() {
       
       <div className="bg-slate-900 rounded-2xl p-6 shadow-lg flex flex-col xl:flex-row justify-between items-center shrink-0 gap-6">
         <div>
-          <h1 className="text-2xl font-black text-white flex items-center gap-2">
+          <h1 className="text-2xl font-bold text-white flex items-center gap-2">
             <span>✂️</span> PDF 문항 추출기 <span className="text-xs bg-indigo-500 text-indigo-50 px-2 py-0.5 rounded ml-2">Auto Parser</span>
           </h1>
           <p className="text-sm font-bold text-slate-400 mt-1">AI를 통해 텍스트를 자동 추출하거나 마우스로 드래그하여 이미지를 잘라냅니다.</p>
@@ -462,12 +462,12 @@ export default function PdfParserPage() {
 
         <div className="flex items-center gap-4 bg-slate-800 p-3 rounded-xl border border-slate-700 w-full xl:w-auto">
           <div className="flex flex-col gap-1 flex-1 xl:w-64">
-            <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">저장될 마스터 교재명</label>
+            <label className="text-xs font-bold text-indigo-400 uppercase tracking-widest">저장될 마스터 교재명</label>
             <input type="text" value={bookTitle} onChange={e => setBookTitle(e.target.value)} placeholder="PDF를 드롭하면 자동입력" className="px-3 py-1.5 bg-slate-900 text-white border border-slate-600 rounded-lg text-sm font-bold focus:outline-none focus:border-indigo-500" />
           </div>
           <div className="flex flex-col gap-1 w-24">
-            <label className="text-[10px] font-black text-indigo-400 uppercase tracking-widest">시작 번호</label>
-            <input type="number" value={currentQNum} onChange={e => setCurrentQNum(parseInt(e.target.value)||1)} className="px-3 py-1.5 bg-slate-900 text-white border border-slate-600 rounded-lg text-sm font-black focus:outline-none focus:border-indigo-500 text-center" />
+            <label className="text-xs font-bold text-indigo-400 uppercase tracking-widest">시작 번호</label>
+            <input type="number" value={currentQNum} onChange={e => setCurrentQNum(parseInt(e.target.value)||1)} className="px-3 py-1.5 bg-slate-900 text-white border border-slate-600 rounded-lg text-sm font-bold focus:outline-none focus:border-indigo-500 text-center" />
           </div>
         </div>
       </div>
@@ -478,9 +478,9 @@ export default function PdfParserPage() {
         <div className="flex-[2] bg-slate-800 rounded-2xl border border-slate-700 shadow-sm flex flex-col overflow-hidden relative">
           
           <div className="p-3 bg-slate-900/50 border-b border-slate-700 flex justify-between items-center shrink-0">
-            <h2 className="font-extrabold text-white text-sm flex items-center gap-2">
+            <h2 className="font-bold text-white text-sm flex items-center gap-2">
               📄 PDF 원본 뷰어
-              {ocrLoaded && <span className="text-[9px] font-bold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30">OCR 엔진 ON</span>}
+              {ocrLoaded && <span className="text-xs font-bold bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30">OCR 엔진 ON</span>}
             </h2>
 
             {pdfDoc && (
@@ -490,14 +490,14 @@ export default function PdfParserPage() {
                   <input type="number" value={aiStartPage} onChange={e=>setAiStartPage(Number(e.target.value))} className="w-12 px-1 py-0.5 text-center text-xs font-bold bg-slate-900 text-white border border-slate-600 rounded" />
                   <span className="text-slate-400 text-xs">~</span>
                   <input type="number" value={aiEndPage} onChange={e=>setAiEndPage(Number(e.target.value))} className="w-12 px-1 py-0.5 text-center text-xs font-bold bg-slate-900 text-white border border-slate-600 rounded" />
-                  <button onClick={runAiFullScan} disabled={isAiScanning} className="ml-2 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-black rounded shadow-sm disabled:opacity-50 transition-colors flex items-center gap-1">
+                  <button onClick={runAiFullScan} disabled={isAiScanning} className="ml-2 px-3 py-1 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded shadow-sm disabled:opacity-50 transition-colors flex items-center gap-1">
                     {isAiScanning ? `처리중... ${aiProgress.current}/${aiProgress.total}` : "🤖 AI 자동 추출 시작"}
                   </button>
                 </div>
 
                 <div className="flex items-center gap-3 bg-slate-800 rounded-lg p-1 border border-slate-600 shadow-sm">
                   <button onClick={() => setPageNum(p => Math.max(1, p - 1))} disabled={pageNum <= 1 || isAiScanning} className="px-3 py-1 hover:bg-slate-700 text-white rounded text-xs font-bold disabled:opacity-30">◀ 이전</button>
-                  <span className="text-xs font-black text-indigo-300 w-16 text-center">{pageNum} / {numPages}</span>
+                  <span className="text-xs font-bold text-indigo-300 w-16 text-center">{pageNum} / {numPages}</span>
                   <button onClick={() => setPageNum(p => Math.min(numPages, p + 1))} disabled={pageNum >= numPages || isAiScanning} className="px-3 py-1 hover:bg-slate-700 text-white rounded text-xs font-bold disabled:opacity-30">다음 ▶</button>
                 </div>
               </div>
@@ -511,7 +511,7 @@ export default function PdfParserPage() {
             onDrop={handlePdfDrop}
           >
             {activeCropTarget && (
-              <div className="sticky top-0 left-0 w-full bg-yellow-400/90 text-yellow-900 font-black text-sm p-3 mb-4 text-center rounded shadow-lg z-30 pointer-events-none backdrop-blur animate-pulse">
+              <div className="sticky top-0 left-0 w-full bg-yellow-400/90 text-yellow-900 font-bold text-sm p-3 mb-4 text-center rounded shadow-lg z-30 pointer-events-none backdrop-blur animate-pulse">
                 현재 타겟 모드 작동 중! 마우스로 드래그하면 선택한 곳에 이미지가 추가됩니다.
               </div>
             )}
@@ -520,7 +520,7 @@ export default function PdfParserPage() {
               <div className={`w-full max-w-lg p-10 border-2 border-dashed rounded-2xl text-center transition-colors cursor-pointer ${isDragOver ? "border-indigo-500 bg-indigo-500/10" : "border-slate-600 hover:border-slate-500 hover:bg-slate-700/50"}`} onClick={() => document.getElementById('pdfInput')?.click()}>
                 <input id="pdfInput" type="file" accept=".pdf" onChange={handleFileInput} className="hidden" />
                 <span className="text-5xl block mb-4 opacity-80">📁</span>
-                <p className="text-lg font-extrabold text-white mb-2">여기에 PDF 파일을 끌어다 놓으세요</p>
+                <p className="text-lg font-bold text-white mb-2">여기에 PDF 파일을 끌어다 놓으세요</p>
                 <p className="text-sm font-medium text-slate-400">클릭해서 파일을 선택하셔도 됩니다.</p>
               </div>
             ) : (
@@ -545,12 +545,12 @@ export default function PdfParserPage() {
           
           <div className="p-4 bg-indigo-50 border-b border-indigo-100 flex justify-between items-center shrink-0">
             <div>
-              <h2 className="font-extrabold text-indigo-900 text-sm flex items-center gap-1.5">
+              <h2 className="font-bold text-indigo-900 text-sm flex items-center gap-1.5">
                 <span>📥</span> 추출 대기열
               </h2>
-              <p className="text-[10px] font-bold text-indigo-500 mt-0.5">드래그한 이미지나 AI 추출 데이터가 쌓입니다.</p>
+              <p className="text-xs font-bold text-indigo-500 mt-0.5">드래그한 이미지나 AI 추출 데이터가 쌓입니다.</p>
             </div>
-            <span className="bg-indigo-600 text-white font-black text-xs px-2 py-1 rounded-lg">{parsedItems.length}개 대기중</span>
+            <span className="bg-indigo-600 text-white font-bold text-xs px-2 py-1 rounded-lg">{parsedItems.length}개 대기중</span>
           </div>
 
           <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-4 bg-slate-50/50">
@@ -572,15 +572,15 @@ export default function PdfParserPage() {
                     
                     <div className="flex items-center gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-100 pr-8">
                       <div className="flex items-center gap-1.5 flex-[0.8] min-w-0">
-                        <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap shrink-0">페이지:</span>
+                        <span className="text-xs font-bold text-slate-600 whitespace-nowrap shrink-0">페이지:</span>
                         <input type="text" value={item.pageNum} onChange={(e) => updateItem(item.id, 'pageNum', e.target.value)} className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-bold text-indigo-700 outline-none focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm" />
                       </div>
                       <div className="flex items-center gap-1.5 flex-[0.8] min-w-0">
-                        <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap shrink-0">번호:</span>
+                        <span className="text-xs font-bold text-slate-600 whitespace-nowrap shrink-0">번호:</span>
                         <input type="text" value={item.qNum} onChange={(e) => updateItem(item.id, 'qNum', e.target.value)} className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-bold text-indigo-700 outline-none focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm" />
                       </div>
                       <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span className="text-[11px] font-bold text-slate-600 whitespace-nowrap shrink-0">난이도:</span>
+                        <span className="text-xs font-bold text-slate-600 whitespace-nowrap shrink-0">난이도:</span>
                         <select value={item.difficulty} onChange={(e) => updateItem(item.id, 'difficulty', e.target.value)} className="w-full px-2 py-1.5 border border-slate-300 rounded text-xs font-bold text-indigo-700 outline-none focus:ring-1 focus:ring-indigo-500 bg-white shadow-sm">
                           <option value="최상">최상</option>
                           <option value="상">상</option>
@@ -595,14 +595,14 @@ export default function PdfParserPage() {
                       {item.preview ? (
                         <div className="relative w-full h-40 bg-slate-100 rounded-lg border border-slate-200 flex items-center justify-center p-2 overflow-hidden shadow-sm">
                           <img src={item.preview} alt="메인 문제" className="max-w-full max-h-full object-contain mix-blend-multiply" />
-                          <span className="absolute bottom-2 left-2 bg-slate-700/80 text-white text-[10px] px-2 py-1 rounded font-bold backdrop-blur-sm">메인 이미지</span>
+                          <span className="absolute bottom-2 left-2 bg-slate-700/80 text-white text-xs px-2 py-1 rounded font-bold backdrop-blur-sm">메인 이미지</span>
                           <button onClick={() => { updateItem(item.id, 'blob', undefined); updateItem(item.id, 'preview', undefined); }} className="absolute top-2 right-2 bg-white/90 rounded-full w-6 h-6 flex items-center justify-center shadow text-rose-500 text-[12px] leading-none hover:bg-white hover:text-rose-600 transition-colors">✕</button>
                         </div>
                       ) : (
-                        <button onClick={() => setActiveCropTarget(isTargetBlob ? null : {id: item.id, field: 'blob'})} className={`w-full h-24 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-[11px] font-bold transition-colors shadow-sm ${isTargetBlob ? 'bg-indigo-100 border-indigo-400 text-indigo-700' : 'bg-slate-50 border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-500'}`}>
+                        <button onClick={() => setActiveCropTarget(isTargetBlob ? null : {id: item.id, field: 'blob'})} className={`w-full h-24 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-xs font-bold transition-colors shadow-sm ${isTargetBlob ? 'bg-indigo-100 border-indigo-400 text-indigo-700' : 'bg-slate-50 border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-500'}`}>
                           <span className="text-2xl mb-1">+</span>
                           <span>메인 이미지 채우기</span>
-                          {isTargetBlob && <span className="text-[9px] text-indigo-600 mt-1 font-black animate-pulse">드래그 대기중...</span>}
+                          {isTargetBlob && <span className="text-xs text-indigo-600 mt-1 font-bold animate-pulse">드래그 대기중...</span>}
                         </button>
                       )}
                       
@@ -610,28 +610,28 @@ export default function PdfParserPage() {
                         {item.preview2 ? (
                           <div className="relative h-28 bg-violet-50 rounded-lg border border-violet-200 flex items-center justify-center p-1 shadow-sm">
                             <img src={item.preview2} alt="추가 문제" className="max-w-full max-h-full object-contain mix-blend-multiply" />
-                            <span className="absolute bottom-1 left-1 bg-violet-600/70 text-white text-[9px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm">문제 이미지 2</span>
+                            <span className="absolute bottom-1 left-1 bg-violet-600/70 text-white text-xs px-1.5 py-0.5 rounded font-bold backdrop-blur-sm">문제 이미지 2</span>
                             <button onClick={() => { updateItem(item.id, 'blob2', undefined); updateItem(item.id, 'preview2', undefined); }} className="absolute top-1 right-1 bg-white/90 rounded-full w-5 h-5 flex items-center justify-center shadow text-rose-500 text-[12px] leading-none hover:bg-white hover:text-rose-600 transition-colors">✕</button>
                           </div>
                         ) : (
-                          <button onClick={() => setActiveCropTarget(isTargetBlob2 ? null : {id: item.id, field: 'blob2'})} className={`h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-[11px] font-bold transition-colors shadow-sm ${isTargetBlob2 ? 'bg-violet-100 border-violet-400 text-violet-700' : 'bg-slate-50 border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-500'}`}>
+                          <button onClick={() => setActiveCropTarget(isTargetBlob2 ? null : {id: item.id, field: 'blob2'})} className={`h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-xs font-bold transition-colors shadow-sm ${isTargetBlob2 ? 'bg-violet-100 border-violet-400 text-violet-700' : 'bg-slate-50 border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-500'}`}>
                             <span className="text-2xl mb-1">+</span>
                             <span>문제 이미지 추가</span>
-                            {isTargetBlob2 && <span className="text-[9px] text-violet-600 mt-1 font-black animate-pulse">드래그 대기중...</span>}
+                            {isTargetBlob2 && <span className="text-xs text-violet-600 mt-1 font-bold animate-pulse">드래그 대기중...</span>}
                           </button>
                         )}
 
                         {item.answerPreview ? (
                           <div className="relative h-28 bg-emerald-50 rounded-lg border border-emerald-200 flex items-center justify-center p-1 shadow-sm">
                             <img src={item.answerPreview} alt="정답 이미지" className="max-w-full max-h-full object-contain mix-blend-multiply" />
-                            <span className="absolute bottom-1 left-1 bg-emerald-600/70 text-white text-[9px] px-1.5 py-0.5 rounded font-bold backdrop-blur-sm">정답 이미지</span>
+                            <span className="absolute bottom-1 left-1 bg-emerald-600/70 text-white text-xs px-1.5 py-0.5 rounded font-bold backdrop-blur-sm">정답 이미지</span>
                             <button onClick={() => { updateItem(item.id, 'answerBlob', undefined); updateItem(item.id, 'answerPreview', undefined); }} className="absolute top-1 right-1 bg-white/90 rounded-full w-5 h-5 flex items-center justify-center shadow text-rose-500 text-[12px] leading-none hover:bg-white hover:text-rose-600 transition-colors">✕</button>
                           </div>
                         ) : (
-                          <button onClick={() => setActiveCropTarget(isTargetAnswer ? null : {id: item.id, field: 'answerBlob'})} className={`h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-[11px] font-bold transition-colors shadow-sm ${isTargetAnswer ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-500'}`}>
+                          <button onClick={() => setActiveCropTarget(isTargetAnswer ? null : {id: item.id, field: 'answerBlob'})} className={`h-28 rounded-lg border-2 border-dashed flex flex-col items-center justify-center text-xs font-bold transition-colors shadow-sm ${isTargetAnswer ? 'bg-emerald-100 border-emerald-400 text-emerald-700' : 'bg-slate-50 border-slate-300 text-slate-400 hover:bg-slate-100 hover:text-slate-500'}`}>
                             <span className="text-2xl mb-1">+</span>
                             <span>정답 이미지 추가</span>
-                            {isTargetAnswer && <span className="text-[9px] text-emerald-600 mt-1 font-black animate-pulse">드래그 대기중...</span>}
+                            {isTargetAnswer && <span className="text-xs text-emerald-600 mt-1 font-bold animate-pulse">드래그 대기중...</span>}
                           </button>
                         )}
                       </div>
@@ -639,11 +639,11 @@ export default function PdfParserPage() {
 
                     <div className="flex flex-col gap-1.5 border-t border-slate-100 pt-3">
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] font-bold text-slate-500">문제 텍스트</span>
+                        <span className="text-xs font-bold text-slate-500">문제 텍스트</span>
                         <div className="flex items-center gap-1.5">
                           <button 
                             onClick={() => updateItem(item.id, 'isPreviewMode', !item.isPreviewMode)}
-                            className={`flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold transition-colors shadow-sm ${item.isPreviewMode ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
+                            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-bold transition-colors shadow-sm ${item.isPreviewMode ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}
                           >
                             {item.isPreviewMode ? <><span>✏️</span> 텍스트 편집 모드</> : <><span>👀</span> 수식 미리보기</>}
                           </button>
@@ -652,7 +652,7 @@ export default function PdfParserPage() {
                             <button 
                               onClick={() => handleExtractText(item.id, item.preview)} 
                               disabled={item.isExtracting}
-                              className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded text-[10px] font-bold transition-colors shadow-sm disabled:opacity-50"
+                              className="flex items-center gap-1 bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded text-xs font-bold transition-colors shadow-sm disabled:opacity-50"
                             >
                               {item.isExtracting ? <span className="animate-pulse">분석 중...</span> : <><span>🪄</span> OCR 추출</>}
                             </button>
@@ -675,7 +675,7 @@ export default function PdfParserPage() {
                     </div>
                     
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-1 rounded border border-emerald-100 whitespace-nowrap">정답 텍스트</span>
+                      <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-1.5 py-1 rounded border border-emerald-100 whitespace-nowrap">정답 텍스트</span>
                       {item.isPreviewMode ? (
                         <div className="flex-1 px-2 py-1 border border-slate-200 rounded text-sm font-bold text-emerald-800 bg-white overflow-x-auto shadow-inner min-h-[28px] flex items-center">
                           {item.answer || <span className="text-slate-400 italic text-xs font-medium">정답이 없습니다.</span>}
@@ -694,7 +694,7 @@ export default function PdfParserPage() {
             <button 
               onClick={uploadToDb} 
               disabled={parsedItems.length === 0 || isUploading}
-              className="w-full py-3 bg-[#002864] hover:bg-blue-900 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-black rounded-xl shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2"
+              className="w-full py-3 bg-brand hover:bg-blue-900 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold rounded-xl shadow-md transition-all active:scale-[0.98] flex items-center justify-center gap-2"
             >
               {isUploading ? "🚀 마스터 DB로 쏘아 올리는 중..." : "🚀 대기열 전체 DB 일괄 저장"}
             </button>

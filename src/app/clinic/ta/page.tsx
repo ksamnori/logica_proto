@@ -44,10 +44,10 @@ export default function TaHubPage() {
   return (
     <div className="min-h-screen flex items-center justify-center relative bg-slate-50 font-pretendard">
       <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col z-10 border border-slate-200">
-        <div className="bg-[#002864] p-6 text-center relative shrink-0">
-          <h2 className="text-xl font-black text-white tracking-tighter">Logica Clinic TA</h2>
+        <div className="bg-brand p-6 text-center relative shrink-0">
+          <h2 className="text-xl font-bold text-white tracking-tighter">Logica Clinic TA</h2>
           <p className="text-blue-200 text-sm mt-1.5 font-medium">
-            환영합니다, <span className="font-extrabold text-white">{taName}</span> 조교님
+            환영합니다, <span className="font-bold text-white">{taName}</span> 조교님
           </p>
         </div>
         
@@ -60,7 +60,7 @@ export default function TaHubPage() {
               <span className="group-hover:text-white transition-colors">🧑‍🏫</span>
             </div>
             <div className="text-left flex-1 min-w-0">
-              <h3 className="font-black text-slate-800 text-[15px] group-hover:text-blue-700 transition-colors truncate">조교 패드 (현장용)</h3>
+              <h3 className="font-bold text-slate-800 text-[15px] group-hover:text-blue-700 transition-colors truncate">조교 패드 (현장용)</h3>
               <p className="text-[12px] font-bold text-slate-400 mt-1 truncate">클리닉 순회 및 학생 호출 · 힌트 응대</p>
             </div>
             <span className="text-slate-300 group-hover:text-blue-600 font-bold transition-colors">➔</span>
@@ -74,7 +74,7 @@ export default function TaHubPage() {
               <span className="group-hover:text-white transition-colors">📝</span>
             </div>
             <div className="text-left flex-1 min-w-0">
-              <h3 className="font-black text-slate-800 text-[15px] group-hover:text-emerald-700 transition-colors truncate">조교 채점 (데스크용)</h3>
+              <h3 className="font-bold text-slate-800 text-[15px] group-hover:text-emerald-700 transition-colors truncate">조교 채점 (데스크용)</h3>
               <p className="text-[12px] font-bold text-slate-400 mt-1 truncate">제출된 시험지 및 과제 수동 집중 채점</p>
             </div>
             <span className="text-slate-300 group-hover:text-emerald-600 font-bold transition-colors">➔</span>
@@ -89,7 +89,7 @@ export default function TaHubPage() {
                 <span className="group-hover:text-white transition-colors">🏠</span>
               </div>
               <div className="text-left flex-1 min-w-0">
-                <h3 className="font-black text-slate-800 text-[15px] group-hover:text-indigo-700 transition-colors truncate">메인 메뉴 (Home)</h3>
+                <h3 className="font-bold text-slate-800 text-[15px] group-hover:text-indigo-700 transition-colors truncate">메인 메뉴 (Home)</h3>
                 <p className="text-[12px] font-bold text-slate-400 mt-1 truncate">일반 강사 대시보드로 이동</p>
               </div>
               <span className="text-slate-300 group-hover:text-indigo-600 font-bold transition-colors">➔</span>
