@@ -1,7 +1,7 @@
 // src/app/(dashboard)/makeup/page.tsx
 "use client";
 
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -21,6 +21,9 @@ export default function MakeupPage() {
   const [students, setStudents] = useState<any[]>([]);
   const [instructors, setInstructors] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  // 🌟 [교재 관리 연동] /makeup?new=1&classId=... 로 들어오면 그 반 학생만 보이는 새 보강 등록 창을 연다
+  const [modalClassId, setModalClassId] = useState<string | null>(null);
+  const deepLinkHandledRef = useRef(false);
 
   // === 필터 상태 ===
   const [filterStatus, setFilterStatus] = useState("all");
@@ -163,8 +166,35 @@ export default function MakeupPage() {
       console.error(e);
     } finally {
       setIsLoading(false);
+      handleDeepLinkOnce();
     }
   };
+
+  // 🌟 [교재 관리 연동] 첫 로딩이 끝난 뒤 한 번만 처리
+  const handleDeepLinkOnce = () => {
+    if (deepLinkHandledRef.current) return;
+    deepLinkHandledRef.current = true;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('new') !== '1') return;
+    window.history.replaceState(null, '', '/makeup');
+    if (!canEditMakeup) {
+      alert("⛔ 보강 일정을 등록할 권한이 없습니다.");
+      return;
+    }
+    setModalClassId(params.get('classId'));
+    setSelectedMakeup(null);
+    setIsModalOpen(true);
+  };
+
+  // 반에서 넘어온 경우 등록 창의 학생 목록을 그 반 '수강중' 학생으로 좁힘 (해당 학생이 없으면 전체)
+  const modalStudents = useMemo(() => {
+    if (!modalClassId) return students;
+    const inClass = students.filter((s: any) => {
+      const enrolls = Array.isArray(s.enrollment) ? s.enrollment : [];
+      return enrolls.some((e: any) => e?.class?.class_id === modalClassId && e.status === '수강중');
+    });
+    return inClass.length > 0 ? inClass : students;
+  }, [students, modalClassId]);
 
   const filteredMakeups = useMemo(() => {
     const searchLow = filterSearch.trim().toLowerCase();
@@ -183,6 +213,7 @@ export default function MakeupPage() {
   };
 
   const openModal = (makeup: any | null = null) => {
+    setModalClassId(null);
     setSelectedMakeup(makeup);
     setIsModalOpen(true);
   };
@@ -350,9 +381,9 @@ export default function MakeupPage() {
       <MakeupModal 
         isOpen={isModalOpen} 
         makeupData={selectedMakeup} 
-        students={students} 
+        students={modalStudents} 
         instructors={instructors} 
-        onClose={() => setIsModalOpen(false)} 
+        onClose={() => { setIsModalOpen(false); setModalClassId(null); }} 
         onSuccess={fetchInitialData} 
       />
     </div>

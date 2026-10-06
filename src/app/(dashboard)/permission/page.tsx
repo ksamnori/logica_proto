@@ -112,6 +112,7 @@ const PERMISSION_GROUPS = [
       { id: "action_twin_delete", label: "↳ [권한] 문항 영구 삭제 (위험)", isAction: true },
 
       { id: "/mapper", label: "교재 수동 연결 도구" },
+      { id: "/competency-mapper", label: "교과 역량 매핑 (유형별 역량 AI 매핑·검수)" },
       { id: "/book-upload", label: "교재 구조 (textbook) 일괄 업로드" },
       { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },
     ]

@@ -479,86 +479,114 @@ export default function ParentPortalPage() {
     }
   };
 
+  // ==========================================================
+  // 🎨 화면 (2026-10 리디자인, StudentCard와 같은 규칙)
+  // 색: 남색 #002864(주색) / 바탕 #F5F7FA / 선 #E4E7EB / 본문 #1F2933 / 보조 #616E7C
+  // ==========================================================
+  const LOGO_URL = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png";
+  const inputCls = "w-full min-h-[48px] px-4 rounded-lg border border-[#CBD2D9] bg-white text-[16px] text-[#1F2933] placeholder:text-[#9AA5B1] outline-none focus:border-[#002864] focus:ring-2 focus:ring-[#002864]/15";
+  const primaryBtn = "w-full min-h-[48px] rounded-lg bg-[#002864] text-white text-[16px] font-semibold hover:bg-[#001a42] transition-colors";
+  const secondaryBtn = "w-full min-h-[48px] rounded-lg border border-[#CBD2D9] bg-white text-[#3E4C59] text-[16px] font-semibold hover:bg-[#F5F7FA] transition-colors";
+
+  const AcademyInfo = () => (
+    <div className="text-[12px] text-[#616E7C] leading-relaxed text-center">
+      <p className="font-semibold text-[#3E4C59]">(주)이배움 로지카대치본원학원</p>
+      <p>대표자 천종현, 사업자등록번호 732-85-02927</p>
+      <p>서울특별시 강남구 역삼로 448, 3층(대치동)</p>
+      <p>대표번호 <a href="tel:025558875" className="underline underline-offset-2 text-[#3E4C59]">02-555-8875</a></p>
+    </div>
+  );
+
   const renderAuthSection = () => {
     if (authState === "dashboard") return null;
     if (isKakaoLoading) return (
-      <div className="flex-1 flex items-center justify-center p-4 bg-slate-50">
-        <div className="text-lg font-bold text-[#FEE500] bg-slate-800 px-6 py-3 rounded-full animate-pulse shadow-lg">카카오 계정 연동 중...</div>
+      <div className="flex-1 flex flex-col items-center justify-center gap-4 p-6 bg-[#F5F7FA]" role="status">
+        <span className="w-8 h-8 border-[3px] border-[#002864] border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
+        <p className="text-[16px] font-semibold text-[#1F2933]">카카오 계정을 확인하고 있어요</p>
       </div>
     );
-    
+
     return (
-      <div className="flex-1 flex items-center justify-center p-4 h-full bg-slate-50">
-        <div className="bg-white p-8 rounded-2xl shadow-xl w-full max-w-md border border-slate-100">
-          <div className="text-center mb-6 flex justify-center">
-            <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-10 object-contain" alt="Logica" />
-          </div>
-          {authState === "check_phone" && (
-            <div className="animate-[fadeIn_0.3s_ease-out]">
-              <button onClick={loginWithKakao} className="w-full flex items-center justify-center gap-2 bg-[#FEE500] text-[#000000] font-black py-4 px-4 rounded-xl hover:bg-[#e6cf00] transition-colors shadow-md mb-6">
-                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 3c-5.523 0-10 3.51-10 7.839 0 2.825 1.83 5.305 4.606 6.643l-1.18 4.316c-.086.315.267.559.53.376l5.06-3.348c.323.033.655.051.984.051 5.523 0 10-3.51 10-7.839C22 6.51 17.523 3 12 3z"/></svg>
-                카카오톡으로 1초만에 시작하기
-              </button>
-              
-              <div className="flex items-center my-6">
-                <div className="flex-1 border-t border-slate-200"></div>
-                <span className="px-4 text-xs font-bold text-slate-400">또는 다른 방법으로 로그인</span>
-                <div className="flex-1 border-t border-slate-200"></div>
-              </div>
-              
-              <input type="text" maxLength={13} value={phoneInput} onChange={e => handlePhoneInput(e.target.value)} className="w-full px-4 py-3 mb-4 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" placeholder="등록된 학부모 휴대전화번호" />
-              <button onClick={checkPhone} className="w-full bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl hover:bg-slate-200 transition-colors">전화번호로 로그인</button>
-            </div>
-          )}
-
-          <div className="mt-6 text-center">
-            <a 
-              href="/privacy" 
-              target="_blank" 
-              rel="noopener noreferrer" 
-              className="text-[11px] font-bold text-slate-400 hover:text-slate-600 underline decoration-slate-300 underline-offset-2"
-            >
-              개인정보 처리방침
-            </a>
-          </div>
-
-          {authState === "login" && (
-            <div className="animate-[fadeIn_0.3s_ease-out]">
-              <input type="password" value={pwInput} onChange={e => setPwInput(e.target.value)} className="w-full px-4 py-3 mb-4 rounded-xl border border-slate-300 text-center font-bold outline-none focus:border-[#002864]" placeholder="비밀번호 입력" />
-              <div className="flex gap-2">
-                <button onClick={() => setAuthState("check_phone")} className="w-1/3 bg-slate-100 text-slate-600 font-bold py-3.5 rounded-xl">뒤로</button>
-                <button onClick={loginParent} className="w-2/3 bg-[#002864] text-white font-bold py-3.5 rounded-xl">로그인</button>
+      <div className="flex-1 overflow-y-auto bg-[#F5F7FA]">
+        <div className="min-h-full flex flex-col items-center justify-center px-5 py-10">
+          <div className="w-full max-w-[400px] bg-white rounded-2xl border border-[#E4E7EB] px-6 py-8 flex flex-col gap-6">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <img src={LOGO_URL} className="h-9 object-contain" alt="로지카" />
+              <div>
+                <h1 className="text-[20px] font-bold text-[#1F2933]">
+                  {authState === "setup" ? "처음 오셨군요" : "학부모님, 반가워요"}
+                </h1>
+                <p className="text-[14px] text-[#616E7C] mt-1">
+                  {authState === "check_phone" && "자녀의 출결, 진도, 성적을 확인할 수 있어요."}
+                  {authState === "login" && "비밀번호를 입력해 주세요."}
+                  {authState === "setup" && "앞으로 쓰실 비밀번호를 정해 주세요."}
+                </p>
               </div>
             </div>
-          )}
-          {authState === "setup" && (
-            <div className="animate-[fadeIn_0.3s_ease-out]">
-              <div className="bg-blue-50 text-blue-600 font-bold text-xs p-3 rounded-lg mb-4 text-center">처음 오셨군요! 사용할 비밀번호를 설정해주세요.</div>
-              <input type="text" value={setupName} onChange={e => setSetupName(e.target.value)} className="w-full px-4 py-2.5 mb-3 rounded-lg border border-slate-300 font-bold text-center placeholder:text-slate-400" placeholder="학부모님 성함 (선택사항, 비워둬도 무방합니다)" />
-              <input type="password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className="w-full px-4 py-2.5 mb-4 rounded-lg border border-slate-300 font-bold text-center" placeholder="사용할 비밀번호 설정 (필수)" />
-              
-              <label className="flex items-start gap-2 mb-5 cursor-pointer text-left px-1">
-                <input 
-                  type="checkbox" 
-                  checked={isAgreed} 
-                  onChange={(e) => setIsAgreed(e.target.checked)}
-                  className="mt-1 w-4 h-4 text-[#002864] rounded border-slate-300 focus:ring-[#002864]"
-                />
-                <span className="text-[11px] text-slate-600 leading-relaxed font-semibold">
-                  (필수) 만 14세 미만 자녀의 개인정보 수집·이용 및 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[#002864] underline underline-offset-2">개인정보 처리방침</a>에 동의하며, 본인이 법정대리인임을 확인합니다.
-                </span>
-              </label>
 
-              <button onClick={setupParent} className="w-full bg-emerald-600 text-white font-bold py-3.5 rounded-xl">비밀번호 설정 완료</button>
-            </div>
-          )}
+            {authState === "check_phone" && (
+              <div className="flex flex-col gap-5">
+                <button type="button" onClick={loginWithKakao} className="w-full min-h-[52px] flex items-center justify-center gap-2 rounded-lg bg-[#FEE500] text-[rgba(0,0,0,0.85)] text-[16px] font-semibold hover:bg-[#F4DC00] transition-colors">
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3c-5.523 0-10 3.51-10 7.839 0 2.825 1.83 5.305 4.606 6.643l-1.18 4.316c-.086.315.267.559.53.376l5.06-3.348c.323.033.655.051.984.051 5.523 0 10-3.51 10-7.839C22 6.51 17.523 3 12 3z"/></svg>
+                  카카오로 시작하기
+                </button>
 
-          <div className="mt-8 pt-6 border-t border-slate-100 text-center">
-            <div className="text-[10px] text-slate-400 leading-relaxed">
-              <p className="font-bold text-slate-500 mb-1">(주)이배움 로지카대치본원학원</p>
-              <p>대표자: 천종현 | 사업자등록번호: 732-85-02927</p>
-              <p>주소: 서울특별시 강남구 역삼로 448, 3층(대치동)</p>
-              <p>대표번호: 02-555-8875</p>
+                <div className="flex items-center gap-3" aria-hidden="true">
+                  <div className="flex-1 border-t border-[#E4E7EB]"></div>
+                  <span className="text-[13px] text-[#616E7C]">또는 전화번호로</span>
+                  <div className="flex-1 border-t border-[#E4E7EB]"></div>
+                </div>
+
+                <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); checkPhone(); }}>
+                  <label htmlFor="parent-phone" className="text-[14px] font-semibold text-[#3E4C59]">학원에 등록한 학부모 휴대전화번호</label>
+                  <input id="parent-phone" type="tel" inputMode="numeric" autoComplete="tel" maxLength={13} value={phoneInput} onChange={e => handlePhoneInput(e.target.value)} className={`${inputCls} tracking-wide`} placeholder="010-0000-0000" />
+                  <button type="submit" className={secondaryBtn}>전화번호로 로그인</button>
+                </form>
+              </div>
+            )}
+
+            {authState === "login" && (
+              <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); loginParent(); }}>
+                <div className="rounded-lg bg-[#F5F7FA] px-4 py-3 text-[15px] text-[#3E4C59] tabular-nums">{phoneInput}</div>
+                <label htmlFor="parent-pw" className="text-[14px] font-semibold text-[#3E4C59]">비밀번호</label>
+                <input id="parent-pw" type="password" autoComplete="current-password" value={pwInput} onChange={e => setPwInput(e.target.value)} className={inputCls} placeholder="비밀번호 입력" autoFocus />
+                <div className="flex gap-2 mt-1">
+                  <button type="button" onClick={() => setAuthState("check_phone")} className={`${secondaryBtn} !w-1/3`}>뒤로</button>
+                  <button type="submit" className={`${primaryBtn} !w-2/3`}>로그인</button>
+                </div>
+              </form>
+            )}
+
+            {authState === "setup" && (
+              <form className="flex flex-col gap-3" onSubmit={(e) => { e.preventDefault(); setupParent(); }}>
+                <div className="rounded-lg bg-[#F5F7FA] px-4 py-3 text-[15px] text-[#3E4C59] tabular-nums">{phoneInput}</div>
+                <label htmlFor="parent-name" className="text-[14px] font-semibold text-[#3E4C59]">학부모님 성함 <span className="font-normal text-[#616E7C]">(선택)</span></label>
+                <input id="parent-name" type="text" autoComplete="name" value={setupName} onChange={e => setSetupName(e.target.value)} className={inputCls} placeholder="비워 두셔도 돼요" />
+                <label htmlFor="parent-new-pw" className="text-[14px] font-semibold text-[#3E4C59] mt-1">사용할 비밀번호</label>
+                <input id="parent-new-pw" type="password" autoComplete="new-password" value={setupPw} onChange={e => setSetupPw(e.target.value)} className={inputCls} placeholder="비밀번호 입력" />
+
+                <label className="flex items-start gap-3 mt-2 cursor-pointer rounded-lg border border-[#E4E7EB] px-3 py-3">
+                  <input
+                    type="checkbox"
+                    checked={isAgreed}
+                    onChange={(e) => setIsAgreed(e.target.checked)}
+                    className="mt-0.5 w-5 h-5 shrink-0 accent-[#002864]"
+                  />
+                  <span className="text-[13px] text-[#3E4C59] leading-relaxed">
+                    (필수) 만 14세 미만 자녀의 개인정보 수집·이용 및 <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[#002864] underline underline-offset-2">개인정보 처리방침</a>에 동의하며, 본인이 법정대리인임을 확인합니다.
+                  </span>
+                </label>
+
+                <div className="flex gap-2 mt-1">
+                  <button type="button" onClick={() => setAuthState("check_phone")} className={`${secondaryBtn} !w-1/3`}>뒤로</button>
+                  <button type="submit" className={`${primaryBtn} !w-2/3`}>설정하고 시작하기</button>
+                </div>
+              </form>
+            )}
+
+            <div className="flex flex-col gap-4 pt-5 border-t border-[#E4E7EB]">
+              <a href="/privacy" target="_blank" rel="noopener noreferrer" className="text-[13px] text-[#616E7C] underline underline-offset-2 text-center">개인정보 처리방침</a>
+              <AcademyInfo />
             </div>
           </div>
         </div>
@@ -569,58 +597,64 @@ export default function ParentPortalPage() {
   const selectedStudent = studentsData.find(s => s.student_id === selectedStudentId);
 
   return (
-    <div className="text-slate-800 relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-slate-50 overscroll-none">
-      
+    <div className="text-[#1F2933] relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-[#F5F7FA] overscroll-none">
+
       {authState === "dashboard" ? (
-        <div className="flex-1 flex flex-col h-full overflow-hidden relative animate-[fadeIn_0.3s_ease-out]">
-          
-          <header className="bg-white px-6 py-4 flex justify-between items-center shadow-sm shrink-0 z-20">
-            <div className="flex items-center">
-              <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" className="h-6 object-contain" alt="Logica" />
+        <div className="flex-1 flex flex-col h-full overflow-hidden relative">
+
+          <header className="bg-white shrink-0 z-20 border-b border-[#E4E7EB]">
+            <div className="w-full max-w-2xl mx-auto px-4 h-14 flex justify-between items-center">
+              <img src={LOGO_URL} className="h-6 object-contain" alt="로지카" />
+              <button type="button" onClick={logout} className="min-h-[44px] px-3 text-[14px] font-medium text-[#616E7C] hover:text-[#1F2933] rounded-lg transition-colors">
+                로그아웃
+              </button>
             </div>
-            <button onClick={logout} className="text-xs font-bold text-slate-500 hover:text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg transition-colors">
-              로그아웃
-            </button>
+
+            {!isDashboardLoading && studentsData.length > 1 && (
+              <nav aria-label="자녀 선택" className="w-full max-w-2xl mx-auto px-4 pb-3 flex gap-2 overflow-x-auto">
+                {studentsData.map((student) => {
+                  const active = selectedStudentId === student.student_id;
+                  return (
+                    <button
+                      key={student.student_id}
+                      type="button"
+                      aria-pressed={active}
+                      onClick={() => setSelectedStudentId(student.student_id)}
+                      className={`shrink-0 min-h-[40px] px-4 rounded-full text-[14px] transition-colors ${
+                        active
+                          ? "bg-[#002864] text-white font-semibold"
+                          : "bg-white text-[#3E4C59] font-medium border border-[#CBD2D9] hover:bg-[#F5F7FA]"
+                      }`}
+                    >
+                      {student.name}
+                    </button>
+                  );
+                })}
+              </nav>
+            )}
           </header>
 
           {isDashboardLoading ? (
-            <div className="flex-1 flex flex-col items-center justify-center bg-slate-50 z-50">
-              <div className="relative flex justify-center items-center">
-                <div className="absolute animate-ping w-12 h-12 rounded-full bg-[#002864]/20"></div>
-                <div className="w-12 h-12 border-4 border-[#002864] border-t-transparent rounded-full animate-spin"></div>
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center" role="status">
+              <span className="w-8 h-8 border-[3px] border-[#002864] border-t-transparent rounded-full animate-spin" aria-hidden="true"></span>
+              <div>
+                <p className="text-[16px] font-semibold text-[#1F2933]">자녀의 학습 기록을 불러오고 있어요</p>
+                <p className="mt-1 text-[14px] text-[#616E7C]">기록이 많으면 몇 초 걸릴 수 있어요.</p>
               </div>
-              <p className="mt-6 text-sm font-black text-[#002864] tracking-tight">자녀의 최신 학습 데이터를 분석 중입니다</p>
-              <p className="mt-1 text-[11px] font-bold text-slate-400">데이터의 양에 따라 수 초가 걸릴 수 있습니다.</p>
             </div>
           ) : (
             <>
-              {studentsData.length > 1 && (
-                <div className="bg-white px-4 pb-3 shrink-0 z-10 border-b border-slate-200">
-                  <div className="flex gap-2 bg-slate-100 p-1 rounded-xl">
-                    {studentsData.map((student) => (
-                      <button
-                        key={student.student_id}
-                        onClick={() => setSelectedStudentId(student.student_id)}
-                        className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${
-                          selectedStudentId === student.student_id
-                            ? "bg-white text-slate-800 shadow-sm border border-slate-200"
-                            : "text-slate-400 hover:text-slate-600"
-                        }`}
-                      >
-                        {student.name}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <main className="flex-1 overflow-y-auto custom-scroll w-full mx-auto p-4 sm:p-6 pb-32 overscroll-contain">
-                <div className="w-full max-w-4xl mx-auto">
+              <main className="flex-1 overflow-y-auto w-full px-4 py-4 sm:py-6 pb-32 overscroll-contain">
+                <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
                   {!selectedStudent ? (
-                    <div className="text-center py-16 text-slate-400 font-bold bg-white rounded-2xl border border-slate-200 shadow-sm">등록된 자녀 정보가 없습니다.</div>
+                    <div className="bg-white rounded-xl border border-[#E4E7EB] px-5 py-12 text-center flex flex-col gap-2">
+                      <p className="text-[16px] font-semibold text-[#1F2933]">연결된 자녀 정보가 없어요</p>
+                      <p className="text-[14px] text-[#616E7C]">학원에 등록된 연락처와 로그인한 번호가 같은지 학원에 확인해 주세요.</p>
+                    </div>
                   ) : (
-                    <StudentCard student={selectedStudent} />
+                    <StudentCard key={selectedStudent.student_id} student={selectedStudent} />
                   )}
+                  <AcademyInfo />
                 </div>
               </main>
 

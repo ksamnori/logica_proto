@@ -5,9 +5,47 @@
 /* 그 다음 Tailwind를 불러옵니다. */
 @import "tailwindcss";
 
+/* ==========================================================
+   🎨 로지카 디자인 규칙 (2026-10)
+   색은 뜻으로만 쓴다: 남색=브랜드·주 버튼 / 초록=완료·정상 / 호박=진행·주의 / 빨강=위험·오류 / 하늘=정보
+   - 아래 의미 이름(bg-brand, text-success, bg-danger-soft 등)은 "상태"를 표시할 때 쓴다.
+   - 시간표 선생님별 색, 분류 색처럼 "구분"을 위한 색은 Tailwind 기본 팔레트(화사한 파스텔)를 그대로 쓴다.
+     (기본 팔레트를 재정의하면 구분용 색이 서로 합쳐지므로 재정의하지 않는다)
+   ========================================================== */
+@theme {
+  /* 의미 이름 */
+  --color-brand: #002864;
+  --color-brand-hover: #001A42;
+  --color-success: #0F8A5F;
+  --color-success-soft: #E7F4EE;
+  --color-success-ink: #0B5E41;
+  --color-warn: #E9A23B;
+  --color-warn-soft: #FDF1DC;
+  --color-warn-ink: #7A4A00;
+  --color-danger: #C8372D;
+  --color-danger-soft: #FBEAE8;
+  --color-danger-ink: #A32A22;
+  --color-info: #2F6FB2;
+  --color-info-soft: #EAF1F9;
+  --color-info-ink: #24578F;
+  --color-ink: #1F2933;
+  --color-body: #3E4C59;
+  --color-muted: #616E7C;
+  --color-line: #E4E7EB;
+  --color-ground: #F5F7FA;
+
+}
+
 body {
   font-family: 'Pretendard', sans-serif;
-  background-color: #f1f5f9;
+  background-color: #F5F7FA;
+  color: #1F2933;
+}
+
+/* 키보드로 이동할 때 현재 위치가 보이도록 */
+:focus-visible {
+  outline: 2px solid #002864;
+  outline-offset: 2px;
 }
 
 .font-lexend {
@@ -18,3 +56,4 @@ body {
 .custom-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .custom-scroll::-webkit-scrollbar-track { background: transparent; }
 .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+

@@ -49,6 +49,9 @@ export default function TeacherDashboardPage() {
   const [tenantId, setTenantId] = useState("hq");
   const [myClasses, setMyClasses] = useState<any[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>("all");
+  // 🌟 [교재 관리 연동] /home?classId=...&openNotice=1 로 들어오면 그 반의 '알림/과제 전송' 창을 자동으로 연다
+  const pendingNoticeClassRef = useRef<string | null>(null);
+  const [studentsClassId, setStudentsClassId] = useState<string | null>(null);
 
   const [students, setStudents] = useState<any[]>([]);
   const [classStats, setClassStats] = useState({ avgScore: 0, hwRate: 0, bookName: "-", bookProgress: 0, bookId: null as string | null });
@@ -257,12 +260,26 @@ export default function TeacherDashboardPage() {
 
     setMyClasses(sortedClasses);
     
+    // 🌟 [교재 관리 연동] 주소로 넘어온 반이 내 담당 반이면 그 반을 최우선 선택
+    const urlParams = new URLSearchParams(window.location.search);
+    const requestedClassId = urlParams.get("classId");
+    const wantsNotice = urlParams.get("openNotice") === "1";
+    const requestedExists = !!requestedClassId && sortedClasses.some((c: any) => c.class_id === requestedClassId);
+    if (requestedClassId && !requestedExists) {
+      window.history.replaceState(null, "", "/home");
+      alert("선택하신 반은 선생님의 담당 반이 아니어서 홈 화면에서 알림을 보낼 수 없습니다.\n담당 선생님 계정에서 진행하거나, 운영 대시보드의 단체 발송을 이용해주세요.");
+    }
+
     if (sortedClasses.length > 0) {
       // 🌟 이전에 선택했던 반 상태를 localStorage에서 불러와 최우선 적용
       const savedClassId = localStorage.getItem("logica_last_selected_class");
       const existsInList = sortedClasses.some((c: any) => c.class_id === savedClassId);
       
-      if (savedClassId && existsInList) {
+      if (requestedClassId && requestedExists) {
+        setSelectedClassId(requestedClassId);
+        if (wantsNotice) pendingNoticeClassRef.current = requestedClassId;
+        else window.history.replaceState(null, "", "/home");
+      } else if (savedClassId && existsInList) {
         setSelectedClassId(savedClassId);
       } else {
         setSelectedClassId(sortedClasses[0].class_id);
@@ -355,6 +372,7 @@ export default function TeacherDashboardPage() {
 
     if (allTargetIds.length === 0) {
       setStudents([]);
+      setStudentsClassId(classId);
       setClassStats({ avgScore: 0, hwRate: 0, bookName: "주교재 미배정", bookProgress: 0, bookId: null });
       return;
     }
@@ -366,6 +384,7 @@ export default function TeacherDashboardPage() {
       .in("student_id", allTargetIds);
     
     setStudents((classStudents || []).sort((a: any, b: any) => (a.name || "").localeCompare(b.name || "")));
+    setStudentsClassId(classId);
     const activeStudentIds = (classStudents || []).map((s: any) => s.student_id);
 
     const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 3600000).toISOString();
@@ -589,6 +608,17 @@ export default function TeacherDashboardPage() {
       console.error("일지 불러오기 실패:", err);
     }
   };
+
+  // 🌟 [교재 관리 연동] 요청된 반의 학생 목록이 준비되면 알림/과제 전송 창을 한 번만 자동으로 연다
+  useEffect(() => {
+    const target = pendingNoticeClassRef.current;
+    if (!target) return;
+    if (selectedClassId !== target || studentsClassId !== target) return;
+    pendingNoticeClassRef.current = null;
+    window.history.replaceState(null, "", "/home");
+    openMessageModal();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClassId, studentsClassId, students]);
 
   const openMessageModal = async () => {
     if (!selectedClassId || selectedClassId === "all") return alert("먼저 반을 선택해주세요.");

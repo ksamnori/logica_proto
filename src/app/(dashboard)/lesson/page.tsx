@@ -71,6 +71,9 @@ export default function LessonPage() {
   const [assignedBooks, setAssignedBooks] = useState<any[]>([]);
   
   const [attendanceAlerts, setAttendanceAlerts] = useState<any[]>([]);
+  // 🌟 [클래스 인사이트] 최근 7일 마감 과제 미제출 학생 (실데이터)
+  const [hwMissingAlerts, setHwMissingAlerts] = useState<{ student_id: string; name: string; count: number }[]>([]);
+  const [isHwAlertLoading, setIsHwAlertLoading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
 
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
@@ -137,10 +140,79 @@ export default function LessonPage() {
     if (selectedClass) {
       fetchClassAssignedBooks(selectedClass);
       fetchAttendanceAlerts(selectedClass.class_id);
+      fetchHomeworkMissingAlerts(selectedClass.class_id);
     } else {
       setAttendanceAlerts([]);
+      setHwMissingAlerts([]);
     }
   }, [selectedClass]);
+
+  // 🌟 [클래스 인사이트] 과제 미제출 통계
+  // 대상: 이 반에서 마감일이 최근 7일 안에 이미 지난 과제 (진도 완료 기록용 시스템 과제 제외)
+  // 판정: 대상 학생의 결과가 없거나 상태가 제출완료/채점완료/완료가 아니면 '미제출'
+  // 학생 범위: 이 반에 '수강중'이고 학생 상태가 '재원'인 학생 (수강종료 학생 제외)
+  const fetchHomeworkMissingAlerts = async (classId: string) => {
+    setIsHwAlertLoading(true);
+    try {
+      const now = new Date();
+      const weekAgo = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+
+      const { data: enrollRows, error: enErr } = await supabase
+        .from('enrollment')
+        .select('student_id, student(name, status)')
+        .eq('class_id', classId)
+        .eq('status', '수강중');
+      if (enErr) throw enErr;
+
+      const studentNameMap = new Map<string, string>();
+      (enrollRows || []).forEach((r: any) => {
+        const stu = unwrap(r.student);
+        if (stu && stu.status === '재원') studentNameMap.set(r.student_id, stu.name || '알수없음');
+      });
+      if (studentNameMap.size === 0) { setHwMissingAlerts([]); return; }
+
+      const hwRows: any[] = [];
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase
+          .from('homework_assignment')
+          .select('homework_id, homework_title, due_date, target_student_id, student_homework_result(student_id, status)')
+          .eq('class_id', classId)
+          .lt('due_date', now.toISOString())
+          .gte('due_date', weekAgo.toISOString())
+          .range(from, from + 999);
+        if (error) throw error;
+        if (!data || data.length === 0) break;
+        hwRows.push(...data);
+        if (data.length < 1000) break;
+      }
+
+      const DONE = ['제출완료', '채점완료', '완료'];
+      const missingCount = new Map<string, number>();
+      hwRows
+        .filter((hw: any) => hw.homework_title !== '[시스템] 수업 진도 완료 기록')
+        .forEach((hw: any) => {
+          const targets: string[] = hw.target_student_id ? [hw.target_student_id] : Array.from(studentNameMap.keys());
+          const results: any[] = hw.student_homework_result || [];
+          targets.forEach(sId => {
+            if (!studentNameMap.has(sId)) return;
+            const res = results.find(r => r.student_id === sId);
+            if (!res || !DONE.includes(res.status)) {
+              missingCount.set(sId, (missingCount.get(sId) || 0) + 1);
+            }
+          });
+        });
+
+      const list = Array.from(missingCount.entries())
+        .map(([student_id, count]) => ({ student_id, name: studentNameMap.get(student_id) || '알수없음', count }))
+        .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+      setHwMissingAlerts(list);
+    } catch (e) {
+      console.error("과제 미제출 통계 로드 실패:", e);
+      setHwMissingAlerts([]);
+    } finally {
+      setIsHwAlertLoading(false);
+    }
+  };
 
   const fetchAttendanceAlerts = async (classId: string) => {
     try {
@@ -1047,10 +1119,24 @@ export default function LessonPage() {
                    <span>🚨</span> 요주의 학생 알림
                  </span>
                  <div className="bg-rose-50 border border-rose-200 p-3 rounded-xl flex flex-col gap-2 shadow-sm">
-                   <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-rose-100">
-                     <span className="text-[10px] font-bold text-slate-600">어제 과제 미제출</span>
-                     <span className="text-[11px] font-black text-rose-600">2명</span>
+                   <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-rose-100" title="이 반에서 최근 7일 안에 마감된 과제 중 아직 제출(완료)하지 않은 학생 수">
+                     <span className="text-[10px] font-bold text-slate-600">최근 7일 과제 미제출</span>
+                     <span className="text-[11px] font-black text-rose-600">{isHwAlertLoading ? '...' : `${hwMissingAlerts.length}명`}</span>
                    </div>
+                   {!isHwAlertLoading && hwMissingAlerts.slice(0, 5).map(item => (
+                     <button
+                       key={item.student_id}
+                       onClick={() => router.push(`/student/${item.student_id}`)}
+                       className="flex justify-between items-center bg-white p-2 rounded-lg border border-rose-100 hover:border-rose-300 transition-colors text-left"
+                       title="학생 상세 화면으로 이동"
+                     >
+                       <span className="text-[10px] font-bold text-slate-600 truncate">{item.name} 학생</span>
+                       <span className="text-[10px] font-black text-rose-600">미제출 {item.count}건</span>
+                     </button>
+                   ))}
+                   {!isHwAlertLoading && hwMissingAlerts.length > 5 && (
+                     <div className="text-[9px] font-bold text-rose-400 text-right">외 {hwMissingAlerts.length - 5}명</div>
+                   )}
                    
                    {attendanceAlerts.length === 0 ? (
                       <div className="flex justify-center items-center bg-white p-2 rounded-lg border border-rose-100">
@@ -1074,7 +1160,6 @@ export default function LessonPage() {
                        );
                      })
                    )}
-                   <div className="text-[9px] font-bold text-rose-400 mt-0.5 text-right">* 과제 미제출은 아직 가상 UI입니다.</div>
                  </div>
                </div>
 
@@ -1083,12 +1168,18 @@ export default function LessonPage() {
                    <span>⚡</span> 빠른 실행 액션
                  </span>
                  <div className="flex flex-col gap-1.5">
-                   <button className="w-full bg-white border border-slate-200 hover:border-[#fef01b] hover:bg-[#fef01b]/10 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
+                   <button
+                     onClick={() => router.push(`/home?classId=${selectedClass.class_id}&openNotice=1`)}
+                     title="홈 화면의 '알림/과제 전송' 창을 이 반으로 엽니다."
+                     className="w-full bg-white border border-slate-200 hover:border-[#fef01b] hover:bg-[#fef01b]/10 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
                      <span>💬 학부모 전체 알림톡 발송</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>
-                   <button className="w-full bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
-                     <span>🏥 클리닉(보충) 강제 배정</span>
+                   <button
+                     onClick={() => router.push(`/makeup?new=1&classId=${selectedClass.class_id}`)}
+                     title="보강 관리에서 이 반 학생의 새 보강 일정을 등록합니다."
+                     className="w-full bg-white border border-slate-200 hover:border-indigo-300 hover:bg-indigo-50 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">
+                     <span>🏥 클리닉(보충) 배정</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>
                    <button className="w-full bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-700 p-2.5 rounded-xl text-[11px] font-black transition-colors shadow-sm text-left flex items-center justify-between group">

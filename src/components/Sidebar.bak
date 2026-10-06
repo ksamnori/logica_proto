@@ -97,7 +97,7 @@ export default function Sidebar() {
     if (path === '/ta-tools' && displayRole === 'TA') return true;
 
     // 조교(TA)는 팩토리 영역(DB 건드리는 메뉴) 원천 차단
-    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper'];
+    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload'];
     if (factoryPaths.includes(path) && displayRole === 'TA') return false;
 
     // 🌟 그 외 모든 직급(파트강사 포함)은 오직 DB(권한 관리 페이지) 설정값에 따릅니다.
@@ -108,7 +108,7 @@ export default function Sidebar() {
   const MenuItem = ({ path, linkTo, label, desc, full = false }: { path: string, linkTo?: string, label: string, desc?: string, full?: boolean }) => {
     const active = pathname === (linkTo || path) || pathname.startsWith((linkTo || path) + "/");
     const disabled = !canAccess(path);
-    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper'].includes(path);
+    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload'].includes(path);
 
     const baseClass = `flex flex-col items-center justify-center px-2 py-2 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
 
@@ -276,7 +276,6 @@ export default function Sidebar() {
             
             <MenuItem path="/twin-manager" label="쌍둥이 문제 팩토리 (수동 배정)" full />
             <MenuItem path="/mapper" label="교재 수동 연결 도구" full />
-            <MenuItem path="/competency-mapper" label="교과 역량 매핑" full />
 
             <MenuItem path="/book-upload" label="교재 DB 업로드" />
             <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
