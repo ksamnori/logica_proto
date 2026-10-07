@@ -22,7 +22,9 @@ const COG_SHORT: Record<string, string> = { "이해 및 연산": "이해", "적�
 
 const BATCH_SIZE = 20;
 const REVIEW_CONF = 0.6;     // 이 값 미만이면 검수 필요
-const BULK_CONF = 0.8;       // 일괄 확정 기준
+const BULK_CONF = 0.8;       // 일괄 확정 기준 (기본값, 화면에서 바꿀 수 있음)
+const CONF_OPTIONS = [0.5, 0.6, 0.7, 0.8, 0.9];
+const GAP_OPTIONS = [0, 0.1, 0.2, 0.3];
 const SAMPLE_SIZE = 100;
 const PAGE_SIZE = 40;
 
@@ -39,7 +41,7 @@ type CompRow = {
   status?: string; is_sample?: boolean; question_count?: number;
 };
 type QStat = { count: number; cognitive: Record<string, number>; qids: string[] };
-type Tab = "all" | "pending" | "review" | "ai_done" | "confirmed" | "sample";
+type Tab = "all" | "pending" | "review" | "mismatch" | "ai_done" | "confirmed" | "sample";
 
 const STATUS_LABEL: Record<string, { text: string; cls: string }> = {
   PENDING: { text: "미처리", cls: "bg-slate-100 text-slate-500" },
@@ -65,6 +67,7 @@ const leafName = (c: Cat) => c.depth7 || c.depth6 || c.depth5 || c.depth4 || "(�
 const parentPath = (c: Cat) => [c.depth1, c.depth2, c.depth3, c.depth4, c.depth5, c.depth7 ? c.depth6 : null].filter(Boolean).join(" > ");
 const fullPath = (c: Cat) => [c.depth1, c.depth2, c.depth3, c.depth4, c.depth5, c.depth6, c.depth7].filter(Boolean).join(" > ");
 const effPrimary = (r?: CompRow) => (r?.final_primary || r?.ai_primary || null) as Comp | null;
+const isMismatch = (r?: CompRow) => !!(r?.ai_primary && r?.ai_run2_primary && r.ai_run2_primary !== r.ai_primary);
 
 // AI 결과로 상태 계산 (확정된 행은 유지)
 function computeStatus(r: CompRow): string {
@@ -97,6 +100,8 @@ export default function CompetencyMapperPage() {
   const [progress, setProgress] = useState({ done: 0, total: 0, failed: 0, startedAt: 0 });
   const stopRef = useRef(false);
   const [toast, setToast] = useState("");
+  const [minConf, setMinConf] = useState(BULK_CONF);  // 일괄 확정·자동 선택 기준 확신도
+  const [minGap, setMinGap] = useState(0.1);         // 1·2차 확신도 차이가 이보다 작으면 사람이 보도록 남김
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 2500); };
 
@@ -183,6 +188,7 @@ export default function CompetencyMapperPage() {
       const st = r?.status || "PENDING";
       if (tab === "pending" && st !== "PENDING") return false;
       if (tab === "review" && st !== "NEEDS_REVIEW") return false;
+      if (tab === "mismatch" && !(isMismatch(r) && st !== "CONFIRMED")) return false;
       if (tab === "ai_done" && st !== "AI_DONE") return false;
       if (tab === "confirmed" && st !== "CONFIRMED") return false;
       if (tab === "sample" && !r?.is_sample) return false;
@@ -406,10 +412,11 @@ export default function CompetencyMapperPage() {
     const targets = filtered.filter(c => {
       const r = compMap[c.category_id];
       return r && r.status !== "CONFIRMED" && !r.is_sample && r.ai_primary && r.ai_run2_primary === r.ai_primary
-        && (r.ai_confidence ?? 0) >= BULK_CONF && (r.ai_run2_confidence ?? 0) >= BULK_CONF;
+        && (r.ai_confidence ?? 0) >= minConf && (r.ai_run2_confidence ?? 0) >= minConf;
     });
-    if (targets.length === 0) { alert(`현재 조건에서 일괄 확정할 유형이 없습니다.\n(1차·2차 주 역량이 같고 두 확신도가 모두 ${BULK_CONF * 100}% 이상인 유형만 대상, 표본 제외)`); return; }
-    if (!confirm(`${targets.length}개 유형을 AI 1차 결과대로 확정합니다.\n대상: 1차·2차 주 역량이 같고 확신도가 모두 ${BULK_CONF * 100}% 이상, 표본 제외\n\n계속할까요?`)) return;
+    const pctText = Math.round(minConf * 100);
+    if (targets.length === 0) { alert(`현재 조건에서 일괄 확정할 유형이 없습니다.\n(1차·2차 주 역량이 같고 두 확신도가 모두 ${pctText}% 이상인 유형만 대상, 표본 제외)`); return; }
+    if (!confirm(`${targets.length}개 유형을 AI 1차 결과대로 확정합니다.\n대상: 1차·2차 주 역량이 같고 확신도가 모두 ${pctText}% 이상, 표본 제외\n\n계속할까요?`)) return;
     const now = new Date().toISOString();
     try {
       await upsertRows(targets.map(c => {
@@ -418,6 +425,44 @@ export default function CompetencyMapperPage() {
       }));
       showToast(`${targets.length}개 유형을 확정했습니다.`);
     } catch (e: any) { alert("일괄 확정 실패: " + e.message); }
+  };
+
+  // 1·2차 주 역량이 다른 유형: 확신도가 높은 쪽을 골라 확정
+  // 조건: 고른 쪽 확신도 ≥ 기준, 두 확신도 차이 ≥ 최소 차이. 못 미치면 검수 필요로 남김. 표본·확정 유형 제외.
+  const pickPlan = useMemo(() => {
+    const plan = { run1: [] as string[], run2: [] as string[], lowConf: 0, closeGap: 0, total: 0 };
+    filtered.forEach(c => {
+      const r = compMap[c.category_id];
+      if (!r || !isMismatch(r) || r.status === "CONFIRMED" || r.is_sample) return;
+      plan.total++;
+      const c1 = r.ai_confidence ?? 0, c2 = r.ai_run2_confidence ?? 0;
+      const best = Math.max(c1, c2);
+      if (best < minConf) { plan.lowConf++; return; }
+      if (Math.abs(c1 - c2) < minGap || c1 === c2) { plan.closeGap++; return; }
+      (c1 > c2 ? plan.run1 : plan.run2).push(c.category_id);
+    });
+    return plan;
+  }, [filtered, compMap, minConf, minGap]);
+
+  const autoPick = async () => {
+    const n = pickPlan.run1.length + pickPlan.run2.length;
+    const pctText = Math.round(minConf * 100), gapText = Math.round(minGap * 100);
+    if (pickPlan.total === 0) { alert("현재 조건에 1차·2차 주 역량이 다른 유형이 없습니다.\n(확정된 유형과 표본은 제외)"); return; }
+    if (n === 0) { alert(`1·2차가 다른 유형 ${pickPlan.total}개 중 기준을 넘는 유형이 없습니다.\n- 높은 쪽 확신도가 ${pctText}% 미만: ${pickPlan.lowConf}개\n- 두 확신도 차이가 ${gapText}%p 미만: ${pickPlan.closeGap}개\n\n기준을 낮추거나 [1·2차 다름] 탭에서 직접 골라 주세요.`); return; }
+    if (!confirm(
+      `1·2차 주 역량이 다른 유형 ${pickPlan.total}개 중 ${n}개를 확신도가 높은 쪽으로 확정합니다.\n\n` +
+      `- 1차 결과로 확정: ${pickPlan.run1.length}개\n- 2차 결과로 확정: ${pickPlan.run2.length}개\n` +
+      `- 그대로 남김 (높은 쪽도 ${pctText}% 미만): ${pickPlan.lowConf}개\n- 그대로 남김 (차이 ${gapText}%p 미만): ${pickPlan.closeGap}개\n\n` +
+      `보조 역량도 고른 쪽 결과를 씁니다. 확정한 뒤에도 각 유형에서 [확정 해제]로 되돌릴 수 있습니다. 계속할까요?`)) return;
+    const now = new Date().toISOString();
+    const rows: CompRow[] = [
+      ...pickPlan.run1.map(id => { const r = compMap[id]; return { category_id: id, final_primary: r.ai_primary, final_secondary: r.ai_secondary ?? null }; }),
+      ...pickPlan.run2.map(id => { const r = compMap[id]; return { category_id: id, final_primary: r.ai_run2_primary, final_secondary: (r.ai_run2_secondary && r.ai_run2_secondary !== r.ai_run2_primary) ? r.ai_run2_secondary : null }; }),
+    ].map(x => ({ ...x, status: "CONFIRMED", reviewed_by: myId(), reviewed_at: now }));
+    try {
+      await upsertRows(rows);
+      showToast(`${n}개 유형을 확정했습니다. (1차 ${pickPlan.run1.length} · 2차 ${pickPlan.run2.length})`);
+    } catch (e: any) { alert("자동 선택 실패: " + e.message); }
   };
 
   const drawSamples = async () => {
@@ -536,7 +581,7 @@ export default function CompetencyMapperPage() {
           {/* 필터 + 실행 */}
           <div className="sticky top-0 z-20 bg-white border border-slate-200 rounded-xl p-4 mb-4 flex flex-col gap-3 shadow-sm">
             <div className="flex flex-wrap gap-2 items-center">
-              {([["all", "전체"], ["pending", "미처리"], ["review", "검수 필요"], ["ai_done", "AI 판정"], ["confirmed", "확정"], ["sample", "표본 검증"]] as [Tab, string][]).map(([k, label]) => (
+              {([["all", "전체"], ["pending", "미처리"], ["review", "검수 필요"], ["mismatch", "1·2차 다름"], ["ai_done", "AI 판정"], ["confirmed", "확정"], ["sample", "표본 검증"]] as [Tab, string][]).map(([k, label]) => (
                 <button key={k} onClick={() => setTab(k)} className={`px-3 py-1.5 rounded-lg text-xs font-bold border ${tab === k ? "bg-brand text-white border-brand" : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"}`}>{label}</button>
               ))}
               <span className="mx-1 h-5 w-px bg-slate-200" />
@@ -561,7 +606,7 @@ export default function CompetencyMapperPage() {
               <button onClick={() => runAI("run1")} disabled={!!running} className="px-4 py-2 rounded-lg text-xs font-bold bg-brand text-white disabled:opacity-50">▶ AI 판정 시작 (1차 매핑)</button>
               <button onClick={() => runAI("run2")} disabled={!!running} className="px-4 py-2 rounded-lg text-xs font-bold bg-white text-brand border border-brand disabled:opacity-50">AI 2차 검증</button>
               <button onClick={() => runAI("redo")} disabled={!!running} title="현재 조건의 유형을 지금 판정 기준으로 다시 판정합니다. 확정된 유형은 제외." className="px-4 py-2 rounded-lg text-xs font-bold bg-white text-slate-700 border border-slate-300 disabled:opacity-50">현재 조건 다시 판정</button>
-              <button onClick={bulkConfirm} disabled={!!running} className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white disabled:opacity-50">조건 충족 유형 일괄 확정</button>
+              <button onClick={bulkConfirm} disabled={!!running} title={`1·2차 주 역량이 같고 두 확신도가 모두 ${Math.round(minConf * 100)}% 이상인 유형을 확정`} className="px-4 py-2 rounded-lg text-xs font-bold bg-emerald-600 text-white disabled:opacity-50">조건 충족 유형 일괄 확정</button>
               {!running && (
                 <span className="text-xs text-slate-500">
                   위 조건(탭·교육과정·학교급·검색)에 맞는 유형 중 아직 판정되지 않은 것만 처리합니다. 처음에는 범위를 좁혀 시험해 보세요.
@@ -579,6 +624,29 @@ export default function CompetencyMapperPage() {
                   <div className="h-2 bg-slate-100 rounded"><div className="h-2 bg-brand rounded" style={{ width: `${progress.total ? ((progress.done + progress.failed) / progress.total) * 100 : 0}%` }} /></div>
                 </div>
               )}
+            </div>
+            <div className="flex flex-wrap gap-2 items-center bg-violet-50 border border-violet-100 rounded-lg px-3 py-2">
+              <span className="text-xs font-bold text-violet-900">1·2차가 다를 때 자동 선택</span>
+              <label className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                기준 확신도
+                <select value={minConf} onChange={e => setMinConf(Number(e.target.value))} className="text-xs font-bold border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                  {CONF_OPTIONS.map(v => <option key={v} value={v}>{Math.round(v * 100)}% 이상</option>)}
+                </select>
+              </label>
+              <label className="text-xs font-bold text-slate-600 flex items-center gap-1">
+                두 확신도 차이
+                <select value={minGap} onChange={e => setMinGap(Number(e.target.value))} className="text-xs font-bold border border-slate-200 rounded-lg px-2 py-1 bg-white">
+                  {GAP_OPTIONS.map(v => <option key={v} value={v}>{v === 0 ? "상관없음" : `${Math.round(v * 100)}%p 이상`}</option>)}
+                </select>
+              </label>
+              <button onClick={autoPick} disabled={!!running || pickPlan.run1.length + pickPlan.run2.length === 0} className="px-4 py-1.5 rounded-lg text-xs font-bold bg-violet-600 text-white disabled:opacity-40">
+                확신도 높은 쪽으로 확정 ({(pickPlan.run1.length + pickPlan.run2.length).toLocaleString()}개)
+              </button>
+              <span className="text-xs text-slate-600">
+                현재 조건의 1·2차 다름 <b>{pickPlan.total.toLocaleString()}</b>개 → 1차 선택 <b>{pickPlan.run1.length}</b> · 2차 선택 <b>{pickPlan.run2.length}</b> · 남김 <b>{pickPlan.lowConf + pickPlan.closeGap}</b>
+                <span className="text-slate-400"> (확신도 부족 {pickPlan.lowConf}, 차이 작음 {pickPlan.closeGap})</span>
+              </span>
+              <span className="w-full text-xs text-slate-500">기준 확신도는 [조건 충족 유형 일괄 확정]에도 같이 적용됩니다. 확정·표본 유형은 건드리지 않습니다.</span>
             </div>
             {tab === "sample" && (
               <div className="text-xs text-slate-500 bg-slate-50 rounded-lg p-2">
@@ -644,8 +712,12 @@ export default function CompetencyMapperPage() {
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <span className="text-slate-500 font-bold w-8">2차</span>
                             <CompChip v={r.ai_run2_primary as Comp} active={!mismatch} small />
+                            {mismatch && r.ai_run2_secondary && r.ai_run2_secondary !== r.ai_run2_primary && <CompChip v={r.ai_run2_secondary as Comp} active={false} small />}
                             <span className={`font-bold ${mismatch ? "text-rose-600" : "text-emerald-600"}`}>{mismatch ? "1차와 다름" : "1차와 같음"}</span>
                             <span className="text-slate-400">확신 {Math.round((r.ai_run2_confidence ?? 0) * 100)}%</span>
+                            {mismatch && st !== "CONFIRMED" && (pickPlan.run1.includes(c.category_id) || pickPlan.run2.includes(c.category_id)) && (
+                              <span className="font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded">자동 선택 시 {pickPlan.run1.includes(c.category_id) ? "1차" : "2차"}</span>
+                            )}
                           </div>
                         )}
                       </div>

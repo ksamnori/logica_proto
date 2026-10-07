@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { phoneVariants } from '@/lib/normalize';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,8 +32,9 @@ export async function GET(request: Request) {
     const { data: parentData } = await supabaseAdmin
       .from('parent')
       .select('parent_id, name')
-      .eq('phone', callerNumber)
-      .single();
+      .in('phone', phoneVariants(callerNumber))
+      .limit(1)
+      .maybeSingle();
 
     // 2. call_log 테이블에 기록 Insert (Realtime 팝업 트리거)
     const { error: insertError } = await supabaseAdmin

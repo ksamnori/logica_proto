@@ -4,6 +4,8 @@
 // - 제외: 입학테스트·진단평가
 // - 정답률: 처음 풀었을 때 맞힌 문항(O)만 정답. 고친 뒤 정답률은 O + RO + TO
 // - 비교: 같은 학원·같은 학년 재원생 평균
+// - 주간테스트: 시험 종류가 '주간테스트'인 시험만 따로 모아 학생 상세의 '주간테스트 성적' 탭과 같은 방식으로 계산
+//   (점수 = 맞힌 문항 ÷ 시험지 전체 문항 × 100, 반 평균 = 같은 시험지를 본 학생 평균, 날짜 = 시험지의 시험 날짜, 없으면 배정일)
 import { supabase } from "@/lib/supabase";
 
 export const COMPETENCIES = ["문제해결", "추론", "의사소통", "연결", "정보처리"] as const;
@@ -95,6 +97,8 @@ export type Report = {
   trend: { ym: string; me: MonthStat | null; peer: { count: number; rate: number; diff: number; grade: number | null } | null }[];
   attitude: {
     firstRate: number; finalRate: number; selfFixed: number; hinted: number; hintRate: number; wrongLeft: number;
+    // 과제와 시험을 나눠 본 처음/고친 뒤 정답률
+    split: { kind: "과제" | "시험"; n: number; firstRate: number; finalRate: number }[];
     attendance: { present: number; late: number; early: number; absent: number };
     homework: { total: number; done: number; rate: number };
   };
@@ -108,7 +112,134 @@ export type Report = {
     best: string[]; weak: string[];
   }[];
   unclassified: number;
+  weekly: WeeklyReport;
 };
+
+// ---------- 주간테스트 (학생 상세의 '주간테스트 성적' 탭과 같은 계산) ----------
+export type WeeklyTest = {
+  assignment_id: number; title: string; date: string; totalQ: number;
+  first: number; final: number;            // 내 점수 (100점 환산)
+  classFirst: number; classFinal: number;  // 같은 시험지를 본 학생 평균
+  takers: number;
+  o: number; ro: number; to: number; x: number;
+};
+export type WeeklyReport = {
+  tests: WeeklyTest[];                     // 리포트 달의 시험만, 날짜순
+  avgFirst: number | null; avgFinal: number | null;
+  classAvgFirst: number | null; classAvgFinal: number | null;
+  trend: { ym: string; me: number | null; cls: number | null; meFinal: number | null; clsFinal: number | null }[]; // 최근 3개월
+  units: { name: string; n: number; first: number; final: number }[]; // 단원(중단원)별 성취도
+};
+
+const PRE_TEST_STATUS = ["응시전", "미응시", "예정", "대기"];
+
+async function loadWeekly(studentId: string, ym: string, months: string[]): Promise<WeeklyReport> {
+  const empty: WeeklyReport = { tests: [], avgFirst: null, avgFinal: null, classAvgFirst: null, classAvgFinal: null, trend: months.map(m => ({ ym: m, me: null, cls: null, meFinal: null, clsFinal: null })), units: [] };
+
+  const { data: mineAsg, error } = await supabase.from("exam_assignment")
+    .select("assignment_id, exam_id, status, created_at, exam_master!inner(title, total_questions, exam_type, exam_date)")
+    .eq("student_id", studentId)
+    .eq("exam_master.exam_type", "주간테스트")
+    // 시험 날짜가 배정일과 다를 수 있어 앞뒤로 한 달씩 넉넉히 가져온 뒤 시험 날짜로 다시 거름
+    .gte("created_at", monthStartUtcIso(shiftYm(months[0], -1)))
+    .lt("created_at", monthStartUtcIso(shiftYm(ym, 2)));
+  if (error) { console.warn("주간테스트 조회 실패:", error.message); return empty; }
+  const myList = (mineAsg || []).filter((a: any) => !PRE_TEST_STATUS.includes(a.status));
+  if (myList.length === 0) return empty;
+
+  // 같은 시험지를 본 학생 전체 (반 평균용)
+  const examIds: string[] = Array.from(new Set<string>(myList.map((a: any) => String(a.exam_id))));
+  const allAsg = (await selectIn("exam_assignment", "assignment_id, exam_id, student_id, status", "exam_id", examIds))
+    .filter((a: any) => !PRE_TEST_STATUS.includes(a.status));
+  const answers = await selectInPaged("student_answer", "exam_assignment_id, question_id, attempt_number, grading_code, updated_at", "exam_assignment_id",
+    allAsg.map((a: any) => a.assignment_id), q => q.order("answer_id"));
+
+  // 문항별 마지막 시도만
+  const last = new Map<string, any>();
+  answers.forEach((a: any) => {
+    if (a.grading_code == null) return;
+    const k = `${a.exam_assignment_id}_${a.question_id}`;
+    const p = last.get(k);
+    const rank = (a.attempt_number || 1) * 1e13 + new Date(a.updated_at).getTime();
+    if (!p || rank >= p._rank) last.set(k, { ...a, _rank: rank });
+  });
+  const byAsg = new Map<number, any[]>();
+  last.forEach(a => { if (!byAsg.has(a.exam_assignment_id)) byAsg.set(a.exam_assignment_id, []); byAsg.get(a.exam_assignment_id)!.push(a); });
+
+  const totalQOf = new Map<string, number>();
+  myList.forEach((a: any) => totalQOf.set(String(a.exam_id), unwrap(a.exam_master)?.total_questions || 0));
+  const countOf = (asgId: number) => {
+    const c = { o: 0, ro: 0, to: 0, x: 0, n: 0 };
+    (byAsg.get(asgId) || []).forEach(a => {
+      const g = String(a.grading_code).trim(); c.n++;
+      if (g === "O") c.o++; else if (g === "RO") c.ro++; else if (g === "TO") c.to++; else if (g === "X" || g === "TX") c.x++;
+    });
+    return c;
+  };
+  const scoreOf = (examId: string, asgId: number) => {
+    const c = countOf(asgId);
+    const total = totalQOf.get(examId) || c.n || 1;
+    return { ...c, total, first: Math.round((c.o / total) * 100), final: Math.round(((c.o + c.ro + c.to) / total) * 100) };
+  };
+
+  // 채점이 하나도 안 된 시험은 빼고 계산
+  const graded = (asgId: number) => (byAsg.get(asgId) || []).length > 0;
+  const classAvg = new Map<string, { first: number; final: number; n: number }>();
+  examIds.forEach(eid => {
+    const list = allAsg.filter((a: any) => String(a.exam_id) === eid && graded(a.assignment_id)).map((a: any) => scoreOf(eid, a.assignment_id));
+    classAvg.set(eid, { first: Math.round(avg(list.map(s => s.first))), final: Math.round(avg(list.map(s => s.final))), n: list.length });
+  });
+
+  const allTests: (WeeklyTest & { ym: string })[] = myList.filter((a: any) => graded(a.assignment_id)).map((a: any) => {
+    const s = scoreOf(String(a.exam_id), a.assignment_id);
+    const ca = classAvg.get(String(a.exam_id))!;
+    // 시험지에 시험 날짜가 있으면 그 날짜, 없으면 배정일
+    const day = unwrap(a.exam_master)?.exam_date || kstDate(a.created_at);
+    return {
+      assignment_id: a.assignment_id, title: unwrap(a.exam_master)?.title || "주간테스트", date: day, ym: String(day).slice(0, 7),
+      totalQ: s.total, first: s.first, final: s.final, classFirst: ca.first, classFinal: ca.final, takers: ca.n,
+      o: s.o, ro: s.ro, to: s.to, x: s.x,
+    };
+  }).sort((a, b) => a.date.localeCompare(b.date));
+
+  const tests = allTests.filter(t => t.ym === ym);
+  const inRange = allTests.filter(t => months.includes(t.ym));
+  const mean = (v: number[]) => v.length ? Math.round(avg(v)) : null;
+  const trend = months.map(m => {
+    const ts = inRange.filter(t => t.ym === m);
+    return { ym: m, me: mean(ts.map(t => t.first)), cls: mean(ts.map(t => t.classFirst)), meFinal: mean(ts.map(t => t.final)), clsFinal: mean(ts.map(t => t.classFinal)) };
+  });
+
+  // 단원별 성취도 (이번 달 주간테스트 문항만, 중단원 depth4 기준)
+  let units: WeeklyReport["units"] = [];
+  const myAnswers = tests.flatMap(t => byAsg.get(t.assignment_id) || []);
+  if (myAnswers.length) {
+    const qRows = await selectIn("question_db", "question_id, taxonomy_id", "question_id", myAnswers.map(a => a.question_id), 200);
+    const taxOf = new Map<string, string>(qRows.filter((q: any) => q.taxonomy_id && q.taxonomy_id !== "미분류").map((q: any) => [q.question_id, q.taxonomy_id]));
+    const taxIds = Array.from(new Set(taxOf.values()));
+    const items = await selectIn("master_item", "item_id, category_id", "item_id", taxIds);
+    const itemToCat = new Map<string, string>(items.map((i: any) => [i.item_id, i.category_id]));
+    const cats = await selectIn("master_category", "category_id, depth2, depth3, depth4", "category_id", taxIds.map(t => itemToCat.get(t) || t));
+    const catMap = new Map<string, any>(cats.map((c: any) => [c.category_id, c]));
+    const uMap = new Map<string, { n: number; o: number; f: number }>();
+    myAnswers.forEach(a => {
+      const t = taxOf.get(a.question_id); if (!t) return;
+      const c = catMap.get(itemToCat.get(t) || t); if (!c) return;
+      const name = c.depth4 || c.depth3 || c.depth2 || "기타";
+      if (!uMap.has(name)) uMap.set(name, { n: 0, o: 0, f: 0 });
+      const u = uMap.get(name)!; const g = String(a.grading_code).trim();
+      u.n++; if (g === "O") u.o++; if (FINAL_OK.includes(g)) u.f++;
+    });
+    units = Array.from(uMap.entries()).map(([name, u]) => ({ name, n: u.n, first: pct(u.o, u.n), final: pct(u.f, u.n) })).sort((a, b) => b.n - a.n);
+  }
+
+  return {
+    tests: tests.map(({ ym: _ym, ...t }) => t),
+    avgFirst: mean(tests.map(t => t.first)), avgFinal: mean(tests.map(t => t.final)),
+    classAvgFirst: mean(tests.map(t => t.classFirst)), classAvgFinal: mean(tests.map(t => t.classFinal)),
+    trend, units,
+  };
+}
 
 // ---------- 메인 ----------
 export async function buildMonthlyReport(studentId: string, ym: string, onStep?: (t: string) => void): Promise<Report> {
@@ -328,6 +459,13 @@ export async function buildMonthlyReport(studentId: string, ym: string, onStep?:
 
   const selfFixed = mine.filter(r => r.code === "RO").length;
   const hinted = mine.filter(r => r.code === "TO" || r.code === "TX").length;
+  const split = ([["hw", "과제"], ["exam", "시험"]] as const).map(([k, kind]) => {
+    const rs = mine.filter(r => r.sourceKind === k);
+    return { kind, n: rs.length, firstRate: pct(rs.filter(r => r.first).length, rs.length), finalRate: pct(rs.filter(r => r.final).length, rs.length) };
+  });
+
+  step("주간테스트 성적을 불러오는 중");
+  const weekly = await loadWeekly(studentId, ym, months);
 
   return {
     student: { student_id: stu.student_id, name: stu.name, grade: stu.grade, school: stu.school, classNames },
@@ -340,9 +478,10 @@ export async function buildMonthlyReport(studentId: string, ym: string, onStep?:
     attitude: {
       firstRate: meStat.rate, finalRate: meStat.finalRate, selfFixed, hinted, hintRate: pct(hinted, mine.length),
       wrongLeft: mine.filter(r => !r.final).length,
+      split,
       attendance,
       homework: { total: hwList.length, done: hwDone, rate: pct(hwDone, hwList.length) },
     },
-    weeks, cognitive, competency, sheets, units, unclassified,
+    weeks, cognitive, competency, sheets, units, unclassified, weekly,
   };
 }

@@ -108,7 +108,12 @@ export default function ParentPortalPage() {
       const rawPhone = kakaoPhone.replace(/[^0-9]/g, ""); 
 
       try {
-        const { data: foundParentId, error } = await supabase.rpc('get_parent_by_phone', { phone_req: rawPhone });
+        // 학부모 번호는 010-1234-5678 형식으로 저장되므로 두 형식 모두로 찾아봄
+        let { data: foundParentId } = await supabase.rpc('get_parent_by_phone', { phone_req: rawPhone });
+        if (!foundParentId) {
+          const hyphen = rawPhone.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
+          if (hyphen !== rawPhone) ({ data: foundParentId } = await supabase.rpc('get_parent_by_phone', { phone_req: hyphen }));
+        }
         
         if (foundParentId) {
           const token = await getParentAuthToken(foundParentId);

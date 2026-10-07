@@ -5,7 +5,7 @@
 
 import React, { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
-import { buildMonthlyReport, Report, DIFF_LABELS, ymLabel, shiftYm } from "@/lib/monthlyReport";
+import { buildMonthlyReport, Report, WeeklyTest, DIFF_LABELS, ymLabel, shiftYm } from "@/lib/monthlyReport";
 
 // 표지 제목: 바꾸고 싶으면 이 두 줄만 고치면 됨 (예: "Learning Report" / "월간 학습 리포트")
 const REPORT_TITLE_EN = "LOGICA Report";
@@ -82,6 +82,46 @@ function Radar({ items: raw }: { items: { name: string; me: number | null; peer:
           </g>
         );
       })}
+    </svg>
+  );
+}
+
+// 주간테스트 성장 그래프: 막대(내 처음/고친 뒤 점수) + 점선(같은 시험지 평균)
+const W_FIRST = "#0EA5E9", W_FINAL = "#A7F3D0", W_CLS_FIRST = "#9AA5B1", W_CLS_FINAL = "#059669";
+function WeeklyChart({ tests }: { tests: WeeklyTest[] }) {
+  const W = 680, H = 230, PL = 34, PR = 12, PT = 28, PB = 40;
+  const n = tests.length;
+  const step = (W - PL - PR) / Math.max(n, 1);
+  const bw = Math.min(40, step * 0.5);
+  const x = (i: number) => PL + step * i + step / 2;
+  const y = (v: number) => PT + (1 - v / 100) * (H - PT - PB);
+  const line = (k: "classFirst" | "classFinal") => tests.map((t, i) => `${x(i)},${y(t[k])}`).join(" ");
+  const short = (s: string) => (s.length > 10 ? s.slice(0, 10) + "…" : s);
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" role="img" aria-label="주간테스트 점수 그래프">
+      {[0, 25, 50, 75, 100].map(v => (
+        <g key={v}>
+          <line x1={PL} y1={y(v)} x2={W - PR} y2={y(v)} stroke="#EEF0F2" />
+          <text x={PL - 6} y={y(v) + 4} fontSize="10" fill="#9AA5B1" textAnchor="end">{v}</text>
+        </g>
+      ))}
+      {tests.map((t, i) => (
+        <g key={t.assignment_id}>
+          {t.final > 0 && <rect x={x(i) - bw / 2} y={y(t.final)} width={bw} height={y(0) - y(t.final)} rx="5" fill={W_FINAL} />}
+          {t.first > 0 && <rect x={x(i) - bw / 2} y={y(t.first)} width={bw} height={y(0) - y(t.first)} rx="5" fill={W_FIRST} />}
+          <text x={x(i)} y={y(Math.max(t.final, t.first)) - 8} fontSize="12" fontWeight="700" fill="#0369A1" textAnchor="middle">{t.first}{t.final > t.first ? `→${t.final}` : ""}</text>
+          <text x={x(i)} y={H - 22} fontSize="10" fill="#616E7C" textAnchor="middle">{t.date.slice(5).replace("-", "/")}</text>
+          <text x={x(i)} y={H - 8} fontSize="10" fill="#7B8794" textAnchor="middle">{short(t.title)}</text>
+        </g>
+      ))}
+      {n > 1 && <polyline points={line("classFirst")} fill="none" stroke={W_CLS_FIRST} strokeWidth="1.8" strokeDasharray="4 4" />}
+      {n > 1 && <polyline points={line("classFinal")} fill="none" stroke={W_CLS_FINAL} strokeWidth="1.8" strokeDasharray="4 4" />}
+      {tests.map((t, i) => (
+        <g key={`d${t.assignment_id}`}>
+          <circle cx={x(i)} cy={y(t.classFirst)} r="3.5" fill="#fff" stroke={W_CLS_FIRST} strokeWidth="1.8" />
+          <circle cx={x(i)} cy={y(t.classFinal)} r="3.5" fill="#fff" stroke={W_CLS_FINAL} strokeWidth="1.8" />
+        </g>
+      ))}
     </svg>
   );
 }
@@ -261,7 +301,7 @@ function ReportPages({ r, comment, setComment }: { r: Report; comment: string; s
       <Page title="학습 태도" name={name} period={r.period}>
         <div className="avoid-break grid grid-cols-2 gap-6">
           <div className="rounded-2xl bg-sky-50 p-5">
-            <div className="text-[14px] text-sky-800">처음 정답률 → 오답을 고친 뒤 정답률</div>
+            <div className="text-[14px] text-sky-800">처음 정답률 → 오답을 고친 뒤 정답률 <span className="text-[12px] text-sky-600">(과제·시험 전체)</span></div>
             <div className="flex items-baseline gap-3 mt-2">
               <span className="text-[48px] font-bold text-sky-700 tabular-nums leading-none">{r.attitude.firstRate}%</span>
               <span className="text-[24px] text-[#9AA5B1]">→</span>
@@ -272,6 +312,17 @@ function ReportPages({ r, comment, setComment }: { r: Report; comment: string; s
               <div className="absolute inset-y-0 left-0 bg-sky-500 rounded-full" style={{ width: `${r.attitude.firstRate}%` }} />
             </div>
             <p className="text-[13px] text-[#3E4C59] leading-relaxed mt-3">처음에 틀린 문제 중 클리닉과 오답 정리로 {r.attitude.finalRate - r.attitude.firstRate}%p를 더 해결했어요. 아직 해결하지 못한 문항은 {r.attitude.wrongLeft}개예요.</p>
+            <div className="mt-3 pt-3 border-t border-sky-100 flex flex-col gap-1.5">
+              {r.attitude.split.filter(s => s.n > 0).map(s => (
+                <div key={s.kind} className="flex items-center gap-2 text-[13px] tabular-nums">
+                  <span className={`inline-block w-10 text-center rounded px-1.5 py-0.5 text-[12px] font-semibold ${s.kind === "과제" ? "bg-amber-100 text-amber-800" : "bg-sky-100 text-sky-800"}`}>{s.kind}</span>
+                  <span className="font-bold text-sky-700">{s.firstRate}%</span>
+                  <span className="text-[#9AA5B1]">→</span>
+                  <span className="font-bold text-emerald-600">{s.finalRate}%</span>
+                  <span className="text-[12px] text-[#7B8794]">{s.n}문항</span>
+                </div>
+              ))}
+            </div>
           </div>
           <div className="rounded-2xl bg-violet-50 p-5 grid grid-cols-2 gap-4">
             {[
@@ -315,6 +366,8 @@ function ReportPages({ r, comment, setComment }: { r: Report; comment: string; s
         </div>
         <p className="text-[12px] text-[#7B8794] mt-2">칸 안의 숫자는 푼 문항 수, 괄호 안은 처음 정답률입니다.</p>
       </Page>
+
+      <WeeklyPage r={r} />
 
       <Page title="학습평가" name={name} period={r.period}>
         <div className="avoid-break grid grid-cols-[320px_1fr] gap-6 items-center">
@@ -487,6 +540,106 @@ function ReportPages({ r, comment, setComment }: { r: Report; comment: string; s
         </Page>
       ))}
     </>
+  );
+}
+
+function WeeklyPage({ r }: { r: Report }) {
+  const w = r.weekly;
+  const monthNum = Number(r.ym.slice(5, 7));
+  if (!w || w.tests.length === 0) {
+    return (
+      <Page title="주간테스트" name={r.student.name} period={r.period}>
+        <div className="rounded-xl bg-[#F5F7FA] p-10 text-center text-[16px] text-[#616E7C]">{monthNum}월에 채점된 주간테스트가 없습니다.</div>
+      </Page>
+    );
+  }
+  const diff = (a: number | null, b: number | null) => (a == null || b == null ? null : a - b);
+  const gap = diff(w.avgFirst, w.classAvgFirst);
+  const cards = [
+    { label: "응시 횟수", value: `${w.tests.length}`, unit: "회", sub: `${w.tests.reduce((s, t) => s + t.totalQ, 0)}문항`, bg: "bg-violet-50", color: "#8B5CF6" },
+    { label: "처음 점수 평균", value: `${w.avgFirst ?? "-"}`, unit: "점", sub: `반 평균 ${w.classAvgFirst ?? "-"}점${gap != null ? ` · ${gap >= 0 ? "+" : ""}${gap}점` : ""}`, bg: "bg-sky-50", color: "#0EA5E9" },
+    { label: "정리 후 점수 평균", value: `${w.avgFinal ?? "-"}`, unit: "점", sub: `반 평균 ${w.classAvgFinal ?? "-"}점`, bg: "bg-emerald-50", color: "#10B981" },
+  ];
+  return (
+    <Page title="주간테스트" name={r.student.name} period={r.period}>
+      <div className="avoid-break grid grid-cols-[1fr_1fr_1fr_284px] gap-3 items-stretch">
+        {cards.map(c => (
+          <div key={c.label} className={`rounded-2xl p-3.5 ${c.bg}`}>
+            <div className="text-[13px] text-[#3E4C59]">{c.label}</div>
+            <div className="text-[34px] font-bold leading-tight tabular-nums mt-1" style={{ color: c.color }}>{c.value}<span className="text-[18px]">{c.unit}</span></div>
+            <div className="text-[12px] text-[#616E7C] mt-1 tabular-nums">{c.sub}</div>
+          </div>
+        ))}
+        <div className="rounded-2xl bg-sky-50 p-3 flex flex-col items-center">
+          <div className="self-start flex items-center gap-1.5 text-[11px] text-[#7B8794]"><svg width="18" height="6"><line x1="0" y1="3" x2="18" y2="3" stroke={PEER} strokeWidth="1.5" strokeDasharray="3 3" /></svg>월별 처음 점수 평균 · 점선은 반 평균</div>
+          <TrendChart points={w.trend.map(t => ({ label: ymLabel(t.ym), me: t.me, peer: t.cls }))} color="#0EA5E9" />
+        </div>
+      </div>
+
+      <h3 className="text-[18px] font-bold mt-8 mb-2">시험별 점수 변화</h3>
+      <div className="avoid-break rounded-2xl border border-sky-100 p-4">
+        <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-[#3E4C59] mb-2">
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: W_FIRST }} />내 점수 (처음)</span>
+          <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm" style={{ background: W_FINAL }} />내 점수 (오답 정리 후)</span>
+          <span className="flex items-center gap-1.5"><svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke={W_CLS_FIRST} strokeWidth="1.8" strokeDasharray="3 3" /><circle cx="10" cy="5" r="3" fill="#fff" stroke={W_CLS_FIRST} strokeWidth="1.5" /></svg>반 평균 (처음)</span>
+          <span className="flex items-center gap-1.5"><svg width="20" height="10"><line x1="0" y1="5" x2="20" y2="5" stroke={W_CLS_FINAL} strokeWidth="1.8" strokeDasharray="3 3" /><circle cx="10" cy="5" r="3" fill="#fff" stroke={W_CLS_FINAL} strokeWidth="1.5" /></svg>반 평균 (오답 정리 후)</span>
+        </div>
+        <WeeklyChart tests={w.tests} />
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-sky-100 mt-6">
+        <table className="w-full text-[13px] tabular-nums">
+          <thead className="bg-sky-50 text-sky-900">
+            <tr>
+              <th className="font-semibold px-3 py-2 w-[64px]">날짜</th>
+              <th className="text-left font-semibold px-3 py-2">시험지</th>
+              <th className="font-semibold px-2 py-2 w-[110px]">내 점수</th>
+              <th className="font-semibold px-2 py-2 w-[110px]">반 평균</th>
+              <th className="text-left font-semibold px-3 py-2 w-[190px]">채점 결과</th>
+            </tr>
+          </thead>
+          <tbody>
+            {w.tests.map(t => (
+              <tr key={t.assignment_id} className="border-t border-sky-50 avoid-break">
+                <td className="px-3 py-2 text-center">{t.date.slice(5).replace("-", "/")}</td>
+                <td className="px-3 py-2">{t.title}<span className="text-[12px] text-[#9AA5B1]"> · {t.totalQ}문항</span></td>
+                <td className="px-2 py-2 text-center"><b className="text-sky-700">{t.first}</b><span className="text-[#9AA5B1]"> → </span><b className="text-emerald-600">{t.final}</b></td>
+                <td className="px-2 py-2 text-center text-[#616E7C]">{t.classFirst} → {t.classFinal}</td>
+                <td className="px-3 py-2">
+                  <div className="flex flex-wrap gap-1 text-[11px] font-semibold">
+                    {t.o > 0 && <span className="rounded bg-emerald-100 text-emerald-700 px-1.5 py-0.5">정답 {t.o}</span>}
+                    {t.ro > 0 && <span className="rounded bg-sky-100 text-sky-700 px-1.5 py-0.5">스스로 고침 {t.ro}</span>}
+                    {t.to > 0 && <span className="rounded bg-teal-100 text-teal-700 px-1.5 py-0.5">힌트 후 정답 {t.to}</span>}
+                    {t.x > 0 && <span className="rounded bg-rose-100 text-rose-700 px-1.5 py-0.5">오답 {t.x}</span>}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {w.units.length > 0 && (
+        <>
+          <h3 className="text-[18px] font-bold mt-8 mb-2">주간테스트 단원별 성취도</h3>
+          <div className="avoid-break grid grid-cols-2 gap-x-8 gap-y-3">
+            {w.units.slice(0, 10).map(u => (
+              <div key={u.name}>
+                <div className="flex justify-between text-[13px] mb-1">
+                  <span className="font-semibold truncate pr-2">{u.name}</span>
+                  <span className="shrink-0 tabular-nums"><b className="text-sky-700">{u.first}%</b><span className="text-[#9AA5B1]"> → </span><b className="text-emerald-600">{u.final}%</b><span className="text-[11px] text-[#9AA5B1]"> · {u.n}문항</span></span>
+                </div>
+                <div className="h-2 rounded-full bg-[#EEF0F2] relative overflow-hidden">
+                  <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${u.final}%`, background: W_FINAL }} />
+                  <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${u.first}%`, background: W_FIRST }} />
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <p className="text-[12px] text-[#7B8794] leading-relaxed mt-4">시험 종류가 '주간테스트'인 시험만 모았습니다. 점수는 시험지 전체 문항 중 맞힌 문항의 비율(100점 만점)이고, 반 평균은 같은 시험지를 본 학생들의 평균입니다. 날짜는 시험지에 적힌 시험 날짜(없으면 배정한 날) 기준입니다.</p>
+    </Page>
   );
 }
 

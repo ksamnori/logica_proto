@@ -875,7 +875,7 @@ export default function AdminDashboardPage() {
             <div>
               <h1 className="text-3xl font-bold tracking-tight font-lexend flex items-center gap-3">
                 <span>LOGICA 학원 통합 관리</span>
-                <span className="bg-blue-500/30 text-blue-100 text-[15px] px-3 py-1 rounded-lg font-bold border border-blue-400/30 font-pretendard shadow-sm flex items-center shadow-inner">🏢 {tenantName}</span>
+                <span className="bg-blue-500/30 text-blue-100 text-[15px] px-3 py-1 rounded-lg font-bold border border-blue-400/30 font-pretendard shadow-sm flex items-center">🏢 {tenantName}</span>
                 <button onClick={() => router.push('/supervisor')} className="shrink-0 ml-3 bg-gradient-to-r from-indigo-500 to-blue-600 hover:from-indigo-600 hover:to-blue-700 text-white border border-indigo-400/50 px-4 py-1.5 rounded-xl text-sm font-bold shadow-md transition-all flex items-center gap-1.5">
                   <span className="text-lg">📡</span> 클리닉 관제탑
                 </button>
@@ -887,56 +887,50 @@ export default function AdminDashboardPage() {
 
         <main className="flex-1 overflow-visible px-8 pb-10 -mt-14 relative z-10 bg-transparent">
           
+          {/* 전체 16칸 그리드 시스템 */}
           <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[repeat(16,minmax(0,1fr))] gap-6 mb-6 px-6 sticky top-4 z-[50]">
             
-            <div className="xl:col-span-2 col-span-1 bg-white rounded-2xl p-4 sm:p-5 border border-slate-200/80 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden flex flex-col justify-between h-64">
+            {/* 1. 핵심 지표 박스 (잘림 현상 해결: 내부 여백 및 간격 최적화) */}
+            <div className="xl:col-span-2 col-span-1 bg-white rounded-2xl p-4 border border-slate-200/80 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden flex flex-col justify-between h-64">
               <div className="absolute right-[-10px] top-[-10px] w-32 h-32 bg-slate-50 rounded-full opacity-50 pointer-events-none"></div>
               
-              <div className="flex-1 flex justify-between items-start border-b border-slate-100 pb-2 cursor-pointer group relative z-10" onClick={() => router.push('/student')}>
-                 <div className="flex flex-col">
-                   <span className="text-xs font-bold text-slate-500 mb-0.5 whitespace-nowrap">전체 재원생</span>
-                   <div className="flex items-baseline gap-1">
-                     <span className="text-2xl sm:text-3xl font-bold text-brand group-hover:text-blue-600 transition-colors leading-none tracking-tight">{kpi.totalStu}</span>
-                     <span className="text-xs font-bold text-slate-400">명</span>
-                   </div>
+              {/* 전체 재원생 섹션 */}
+              <div className="flex-1 flex flex-col justify-center border-b border-slate-100 pb-2 cursor-pointer group relative z-10" onClick={() => router.push('/student')}>
+                 <span className="text-xs font-bold text-slate-500 mb-0.5">전체 재원생</span>
+                 
+                 <div className="flex items-baseline gap-1 mb-1.5">
+                   <span className="text-3xl font-bold text-brand group-hover:text-blue-600 transition-colors leading-none tracking-tight">{kpi.totalStu}</span>
+                   <span className="text-xs font-bold text-slate-400">명</span>
                  </div>
-                 <div className="flex flex-col gap-1 shrink-0 items-end mt-1">
-                   <span className="text-xs font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm whitespace-nowrap">
+                 
+                 <div className="flex gap-1 flex-wrap">
+                   <span className="text-[11px] font-bold text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-100 shadow-sm">
                      신규 +{kpi.newStu}
                    </span>
-                   <span className="text-xs font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm whitespace-nowrap">
+                   <span className="text-[11px] font-bold text-rose-500 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 shadow-sm">
                      퇴원 {kpi.leftStu > 0 ? `-${kpi.leftStu}` : '0'}
                    </span>
                  </div>
               </div>
-              
-              <div className="flex-1 flex flex-col justify-center border-b border-slate-100 py-2 cursor-pointer group relative z-10" onClick={() => router.push('/billing')}>
-                 <div className="flex justify-between items-end mb-1.5">
-                   <span className="text-xs font-bold text-slate-500 whitespace-nowrap">{new Date().getMonth() + 1}월 수납률</span>
-                   <span className="text-lg font-bold text-sky-600 group-hover:text-sky-400 transition-colors leading-none">{kpi.payRate}%</span>
-                 </div>
-                 <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden shadow-inner">
-                   <div className={`h-full rounded-full transition-all ${kpi.payRate < 60 ? 'bg-rose-500' : 'bg-sky-400'}`} style={{ width: `${kpi.payRate}%` }}></div>
-                 </div>
-              </div>
 
-              <div className="flex-1 flex justify-between items-end pt-2 cursor-pointer group relative z-10" onClick={() => router.push('/admission')}>
-                 <div className="flex flex-col">
-                   <span className="text-xs font-bold text-slate-500 mb-0.5 whitespace-nowrap">입학 대기생</span>
-                   <div className="flex items-baseline gap-1">
-                     <span className="text-2xl font-bold text-amber-500 group-hover:text-amber-400 transition-colors leading-none tracking-tight">{kpi.waitingStu}</span>
-                     <span className="text-xs font-bold text-slate-400">명</span>
-                   </div>
+              {/* 입학 대기생 섹션 */}
+              <div className="flex-1 flex flex-col justify-center pt-2 cursor-pointer group relative z-10" onClick={() => router.push('/admission')}>
+                 <span className="text-xs font-bold text-slate-500 mb-0.5">입학 대기생</span>
+                 
+                 <div className="flex items-baseline gap-1 mb-1.5">
+                   <span className="text-2xl font-bold text-amber-500 group-hover:text-amber-400 transition-colors leading-none tracking-tight">{kpi.waitingStu}</span>
+                   <span className="text-xs font-bold text-slate-400">명</span>
                  </div>
-                 <div className="flex flex-col items-end shrink-0 mb-0.5">
-                   <span className="text-xs font-bold text-slate-400 whitespace-nowrap mb-0.5">이번 달 승인</span>
-                   <span className="text-xs font-bold text-amber-600 bg-amber-50 px-2 py-0.5 rounded border border-amber-200 shadow-sm whitespace-nowrap">
-                     {kpi.passedStu} 명
+                 
+                 <div className="flex gap-1 flex-wrap">
+                   <span className="text-[11px] font-bold text-amber-600 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 shadow-sm">
+                     이번 달 승인 {kpi.passedStu}명
                    </span>
                  </div>
               </div>
             </div>
 
+            {/* 2. 유선 문의 대장 (기존 2칸 유지) */}
             <div 
               onClick={() => setIsInquiryOpen(true)}
               className="xl:col-span-2 col-span-1 bg-white rounded-2xl p-5 border border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all cursor-pointer h-64 flex flex-col items-center justify-center group relative overflow-hidden"
@@ -948,10 +942,12 @@ export default function AdminDashboardPage() {
               <span className="text-xs font-bold text-slate-400 bg-slate-100 px-2.5 py-1 rounded-md border border-slate-200 group-hover:text-indigo-600 group-hover:bg-indigo-100 transition-colors shadow-sm">단축키: Alt + C</span>
             </div>
 
+            {/* 3. 통합 원생 검색기 (공간을 5칸에서 6칸으로 다시 확장) */}
             <div className="xl:col-span-6 md:col-span-2 col-span-1 h-64 w-full [&>*]:h-full [&>*]:w-full">
               <QuickSearchWidget allStudentsData={allStudentsData} />
             </div>
 
+            {/* 4. 학부모 요청 (기존 3칸 유지) */}
             <div onClick={() => router.push('/cs')} className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-rose-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-rose-400 transition-colors cursor-pointer h-64 flex flex-col">
               <div className="absolute left-0 top-0 w-1.5 h-full bg-rose-500"></div>
               <div className="flex justify-between items-center mb-3 pl-1 shrink-0 relative z-10">
@@ -975,6 +971,7 @@ export default function AdminDashboardPage() {
               </div>
             </div>
 
+            {/* 5. 업무 공유 보드 (기존 3칸 유지) */}
             <div className="xl:col-span-3 col-span-1 bg-white rounded-2xl p-5 border border-purple-100 shadow-[0_8px_30px_rgba(0,0,0,0.06)] relative overflow-hidden hover:border-purple-300 transition-colors cursor-pointer h-64 flex flex-col" onClick={() => router.push('/task')}>
               <div className="flex justify-between items-center mb-2 shrink-0 relative z-10">
                 <span className="text-sm font-bold text-slate-700 flex items-center gap-1">📌 업무 공유 보드</span>

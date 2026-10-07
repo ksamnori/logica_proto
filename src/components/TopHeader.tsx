@@ -5,6 +5,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { getSecureNotifications } from "@/app/actions/profile";
 import { supabase } from "@/lib/supabase";
+import QuickMemo from "@/components/QuickMemo";
 
 interface MemoData {
   memo_id: string;
@@ -460,7 +461,12 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
           <svg className={`w-5 h-5 transition-transform duration-500 ${isHeaderExpanded ? '' : 'rotate-180'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2.5" d="M9 5l7 7-7 7" /></svg>
         </button>
 
-        <div className={`relative shrink-0 transition-all duration-500 ${isHeaderExpanded ? 'ml-2' : 'ml-1'}`}>
+        {/* 퀵 메모(포스트잇) — 플로팅 버튼에서 옮겨옴. 권한이 없으면 버튼 자체가 숨겨짐 */}
+        <div className={`shrink-0 empty:hidden transition-all duration-500 ${isHeaderExpanded ? 'ml-2' : 'ml-1'}`}>
+          <QuickMemo instId={instId} />
+        </div>
+
+        <div className={`relative shrink-0 transition-all duration-500 ml-2`}>
           <button onClick={toggleNotiWindow} className="w-10 h-10 rounded-full bg-slate-50 border border-slate-200 flex items-center justify-center hover:bg-slate-100 transition-colors focus:outline-none">
             🔔 {unreadNotiCount > 0 && (
               <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center leading-none">

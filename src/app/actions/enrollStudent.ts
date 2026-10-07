@@ -4,6 +4,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import bcrypt from "bcryptjs";
+import { formatPhone, normalizeGrade, phoneVariants } from "@/lib/normalize";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -24,7 +25,11 @@ export async function registerStudentAction(data: {
   grade: string;
   status: string;
 }) {
-  const { name, password, studentContact, parentContact, school, grade, status } = data;
+  const { name, password, school, status } = data;
+  // 번호·학년 표기 통일 (010-1234-5678, 초1/중3 …)
+  const studentContact = formatPhone(data.studentContact);
+  const parentContact = formatPhone(data.parentContact);
+  const grade = normalizeGrade(data.grade, data.school);
 
   try {
     const secureTenantId = await getTenantId();
@@ -36,7 +41,8 @@ export async function registerStudentAction(data: {
       const { data: existingParent, error: fetchError } = await supabaseAdmin
         .from("parent")
         .select("parent_id")
-        .eq("phone", parentContact)
+        .in("phone", phoneVariants(parentContact))
+        .limit(1)
         .maybeSingle();
 
       if (fetchError) throw fetchError;

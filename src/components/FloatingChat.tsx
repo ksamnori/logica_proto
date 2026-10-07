@@ -5,17 +5,6 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { RealtimeChannel } from "@supabase/supabase-js";
 
-export interface MemoRecord {
-  memo_id: string;
-  content: string;
-  pos_x: number;
-  pos_y: number;
-  color: string;
-  z_index: number;
-  memo_type?: string;
-  author_name?: string;
-}
-
 export interface ChatMessage {
   message_id: string;
   room_id: string;
@@ -108,131 +97,6 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-function DraggableMemo({ 
-  memo, 
-  onUpdate, 
-  onDelete, 
-  onFocus 
-}: { 
-  memo: MemoRecord; 
-  onUpdate: (id: string, updates: Partial<MemoRecord>) => void; 
-  onDelete: (id: string) => void; 
-  onFocus: (id: string) => void; 
-}) {
-  const [content, setContent] = useState(memo.content || "");
-  
-  const [pos, setPos] = useState({ 
-    x: Math.round(memo.pos_x || 100), 
-    y: Math.round(memo.pos_y || 100) 
-  });
-  
-  const [isFolded, setIsFolded] = useState(false); 
-  
-  const memoRef = useRef<HTMLDivElement>(null);
-  const dragInfo = useRef({ isDragging: false, startX: 0, startY: 0 });
-  const typingTimer = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    const foldedState = localStorage.getItem(`memo_folded_${memo.memo_id}`);
-    if (foldedState === 'true') setIsFolded(true);
-  }, [memo.memo_id]);
-
-  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.isPrimary) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragInfo.current = { isDragging: true, startX: e.clientX - pos.x, startY: e.clientY - pos.y };
-    onFocus(memo.memo_id); 
-  };
-
-  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragInfo.current.isDragging || !e.isPrimary) return;
-    
-    let nextX = e.clientX - dragInfo.current.startX;
-    let nextY = e.clientY - dragInfo.current.startY;
-
-    if (memoRef.current) {
-      const rect = memoRef.current.getBoundingClientRect();
-      const maxX = window.innerWidth - rect.width;
-      const maxY = window.innerHeight - rect.height;
-      nextX = Math.max(0, Math.min(nextX, maxX));
-      nextY = Math.max(0, Math.min(nextY, maxY));
-    }
-
-    setPos({ x: Math.round(nextX), y: Math.round(nextY) });
-  };
-
-  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!e.isPrimary || !dragInfo.current.isDragging) return;
-    dragInfo.current.isDragging = false;
-    e.currentTarget.releasePointerCapture(e.pointerId);
-    
-    onUpdate(memo.memo_id, { 
-      pos_x: Math.round(pos.x), 
-      pos_y: Math.round(pos.y) 
-    });
-  };
-
-  const handleContentChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const val = e.target.value;
-    setContent(val);
-    if (typingTimer.current) clearTimeout(typingTimer.current);
-    typingTimer.current = setTimeout(() => {
-      onUpdate(memo.memo_id, { content: val });
-    }, 1000);
-  };
-
-  const toggleFold = () => {
-    const nextState = !isFolded;
-    setIsFolded(nextState);
-    localStorage.setItem(`memo_folded_${memo.memo_id}`, String(nextState));
-  };
-
-  let headerColor = "bg-yellow-300";
-  if (memo.color === "bg-pink-200") headerColor = "bg-pink-300";
-  else if (memo.color === "bg-blue-200") headerColor = "bg-blue-300";
-  else if (memo.color === "bg-emerald-200") headerColor = "bg-emerald-300";
-
-  return (
-    <div 
-      ref={memoRef}
-      onPointerDown={() => onFocus(memo.memo_id)}
-      className={`fixed w-64 ${isFolded ? 'h-8 rounded-lg' : 'h-64 rounded-b-lg rounded-tr-lg'} ${memo.color} shadow-xl flex flex-col overflow-hidden border border-black/5 transition-[height,border-radius] duration-300 ease-in-out allow-guest-interaction`}
-      style={{ left: 0, top: 0, transform: `translate(${pos.x}px, ${pos.y}px)`, zIndex: memo.z_index || 9900 }}
-    >
-      <div 
-        onPointerDown={handlePointerDown} 
-        onPointerMove={handlePointerMove} 
-        onPointerUp={handlePointerUp} 
-        onPointerCancel={handlePointerUp}
-        onDoubleClick={toggleFold} 
-        className={`h-8 ${headerColor} cursor-move flex justify-between items-center pl-3 pr-1.5 shrink-0 touch-none select-none`}
-      >
-        <span className="text-xs font-bold text-black/40">Logica Memo</span>
-        <div className="flex items-center gap-0.5">
-          <button onPointerDown={(e) => e.stopPropagation()} onClick={toggleFold} className="text-black/30 hover:text-black/70 transition-colors p-1.5" title={isFolded ? "펼치기" : "접기"}>
-            {isFolded ? (
-              <svg className="w-3.5 h-3.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M19 9l-7 7-7-7"></path></svg>
-            ) : (
-              <svg className="w-3.5 h-3.5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 15l7-7 7 7"></path></svg>
-            )}
-          </button>
-          <button onPointerDown={(e) => e.stopPropagation()} onClick={() => onDelete(memo.memo_id)} className="text-black/30 hover:text-rose-500 transition-colors p-1.5" title="삭제">
-            <svg className="w-4 h-4 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M6 18L18 6M6 6l12 12"></path></svg>
-          </button>
-        </div>
-      </div>
-      
-      <textarea 
-        value={content}
-        onChange={handleContentChange}
-        placeholder="내용을 입력하세요..."
-        className={`flex-1 w-full bg-transparent resize-none p-3 focus:outline-none text-slate-800 text-[13px] font-medium placeholder:text-black/20 custom-scroll transition-opacity duration-200 ${isFolded ? 'opacity-0' : 'opacity-100'}`}
-      />
-      {!isFolded && <div className="absolute bottom-0 right-0 w-6 h-6 bg-black/5" style={{ clipPath: "polygon(100% 0, 0 100%, 100% 100%)" }}></div>}
-    </div>
-  );
-}
-
 export default function FloatingChat({ instId: propInstId, onMicClick }: { instId?: string; onMicClick?: () => void }) {
   
   const [instId, setInstId] = useState<string>(propInstId || "");
@@ -297,11 +161,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
   const [expandedTenants, setExpandedTenants] = useState<string[]>([]);
   const [expandedDepts, setExpandedDepts] = useState<string[]>([]);
 
-  const [memos, setMemos] = useState<MemoRecord[]>([]);
-  const [highestZ, setHighestZ] = useState(9900);
-
   const [canUseChat, setCanUseChat] = useState(false);
-  const [canUseMemo, setCanUseMemo] = useState(false);
 
   useEffect(() => {
     const checkFeaturesAccess = async () => {
@@ -310,7 +170,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
       if (role === 'SUPER_ADMIN') {
         setCanUseChat(true);
-        setCanUseMemo(true);
         return;
       }
 
@@ -324,7 +183,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
         if (data && data.allowed_menus) {
           setCanUseChat(data.allowed_menus.includes('action_use_chat'));
-          setCanUseMemo(data.allowed_menus.includes('action_use_memo'));
         }
       }
     };
@@ -417,9 +275,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
     
     if (Math.abs(e.clientX - iconDrag.current.clickX) < 5 && Math.abs(e.clientY - iconDrag.current.clickY) < 5) {
       const target = iconDrag.current.targetNode as HTMLElement;
-      if (target && target.closest('.memo-btn') && canUseMemo) {
-        createMemo();
-      } else if (target && target.closest('.chat-btn') && canUseChat) {
+      if (target && target.closest('.chat-btn') && canUseChat) {
         
         // 🌟 해결: 최소화 복구 시 즉시 읽음 처리 및 기존 방 상태 유지!
         if (!isChatOpen) {
@@ -552,7 +408,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
     checkHQStatus();
     loadStaffRooms(); 
-    loadMemos();
 
     const channelName = `inst_global_${instId}`;
     supabase.getChannels().forEach((ch: RealtimeChannel) => { if (ch.topic.includes(channelName)) supabase.removeChannel(ch); });
@@ -623,63 +478,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
       if (activeStaffChannelRef.current) supabase.removeChannel(activeStaffChannelRef.current);
     };
   }, [instId, startFlashing]);
-
-  const loadMemos = async () => {
-    const { data } = await supabase.from('instructor_quick_memo').select('*').eq('instructor_id', instId).order('z_index', { ascending: true });
-    const rawMemos = (data as unknown as MemoRecord[]) || [];
-    if (rawMemos.length > 0) {
-      setMemos(rawMemos);
-      const maxZ = Math.max(...rawMemos.map((m: MemoRecord) => m.z_index || 9900));
-      setHighestZ(maxZ + 1);
-    }
-  };
-
-  const createMemo = async () => {
-    const colors = ["bg-yellow-200", "bg-pink-200", "bg-blue-200", "bg-emerald-200"];
-    const randomColor = colors[Math.floor(Math.random() * colors.length)];
-    const newZ = highestZ + 1;
-    
-    const count = memos.length;
-    let startX = window.innerWidth - 290 - ((count % 10) * 20); 
-    let startY = 80 + ((count % 10) * 40); 
-    
-    startX = Math.max(0, startX);
-    startY = Math.max(0, startY);
-
-    const { data } = await supabase.from('instructor_quick_memo').insert({
-      instructor_id: instId,
-      color: randomColor,
-      pos_x: startX,
-      pos_y: startY,
-      z_index: newZ
-    }).select().single();
-
-    if (data) {
-      setMemos(prev => [...prev, data as unknown as MemoRecord]);
-      setHighestZ(newZ);
-    }
-  };
-
-  const updateMemo = async (memoId: string, updates: Partial<MemoRecord>) => {
-    await supabase.from('instructor_quick_memo').update(updates).eq('memo_id', memoId);
-    setMemos(prev => prev.map((m: MemoRecord) => m.memo_id === memoId ? { ...m, ...updates } : m));
-  };
-
-  const deleteMemo = async (memoId: string) => {
-    if(!confirm("이 메모를 삭제하시겠습니까?")) return;
-    await supabase.from('instructor_quick_memo').delete().eq('memo_id', memoId);
-    setMemos(prev => prev.filter((m: MemoRecord) => m.memo_id !== memoId));
-    localStorage.removeItem(`memo_folded_${memoId}`);
-  };
-
-  const focusMemo = async (memoId: string) => {
-    const targetMemo = memos.find((m: MemoRecord) => m.memo_id === memoId);
-    if (targetMemo && targetMemo.z_index !== highestZ) {
-      const newZ = highestZ + 1;
-      setHighestZ(newZ);
-      await updateMemo(memoId, { z_index: newZ });
-    }
-  };
 
   const loadChatRooms = async () => {
     if (isHQ) return; 
@@ -1251,16 +1049,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
   return (
     <>
-      {canUseMemo && memos.map((memo: MemoRecord) => (
-        <DraggableMemo 
-          key={memo.memo_id} 
-          memo={memo} 
-          onUpdate={updateMemo} 
-          onDelete={deleteMemo} 
-          onFocus={focusMemo} 
-        />
-      ))}
-
       <div
         ref={iconRef} 
         onPointerDown={handleIconDown} 
@@ -1276,15 +1064,6 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
             title="AI 실시간 음성 녹음"
           >
             <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>
-          </button>
-        )}
-
-        {canUseMemo && (
-          <button
-            className="memo-btn w-12 h-12 bg-amber-400 text-amber-900 rounded-full shadow-[0_4px_15px_rgba(251,191,36,0.5)] flex items-center justify-center hover:bg-amber-500 hover:scale-105 transition-all"
-            title="새 메모(포스트잇) 추가"
-          >
-            <svg className="w-6 h-6 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"></path></svg>
           </button>
         )}
 

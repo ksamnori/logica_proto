@@ -4,6 +4,7 @@
 import { createClient } from "@supabase/supabase-js";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { phoneVariants } from "@/lib/normalize";
 
 // bcrypt 해시는 항상 $2a$ / $2b$ / $2y$ 로 시작합니다.
 function isHashed(value: string | null | undefined) {
@@ -21,7 +22,8 @@ export async function verifyParentPhone(phone: string) {
     const { data, error } = await supabaseAdmin
       .from("parent")
       .select("parent_id, password_hash")
-      .eq("phone", phone)
+      .in("phone", phoneVariants(phone))
+      .limit(1)
       .maybeSingle();
 
     if (error || !data) return { success: false, message: "등록된 연락처가 없습니다." };
@@ -38,7 +40,8 @@ export async function loginParentAction(phone: string, pwInput: string) {
     const { data, error } = await supabaseAdmin
       .from("parent")
       .select("parent_id, password_hash")
-      .eq("phone", phone)
+      .in("phone", phoneVariants(phone))
+      .limit(1)
       .maybeSingle();
 
     if (error || !data) return { success: false, message: "계정을 찾을 수 없습니다." };

@@ -4,6 +4,7 @@
 import { useState, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase"; 
+import { formatPhone, normalizeGrade, phoneVariants } from "@/lib/normalize";
 import { hashPin } from "@/app/actions/studentAuth";
 import { deleteStudentCompletely } from "@/app/actions/consultation";
 
@@ -196,18 +197,18 @@ export default function AdminDashboardPage() {
     try {
       let finalParentId = null;
       if (pContact) {
-        const { data: existingParent } = await supabase.from('parent').select('parent_id').eq('phone', pContact).maybeSingle();
+        const { data: existingParent } = await supabase.from('parent').select('parent_id').in('phone', phoneVariants(pContact)).limit(1).maybeSingle();
         if (existingParent) {
           finalParentId = existingParent.parent_id;
         } else {
-          const { data: newParent, error: insertParentError } = await supabase.from('parent').insert([{ phone: pContact, name: `${sName} 학부모` }]).select('parent_id').single();
+          const { data: newParent, error: insertParentError } = await supabase.from('parent').insert([{ phone: formatPhone(pContact), name: `${sName} 학부모` }]).select('parent_id').single();
           if (insertParentError) throw insertParentError;
           finalParentId = newParent.parent_id;
         }
       }
 
       // 🌟 [수정] 학생 연락처가 비어있으면 학부모 연락처를 ID로 사용
-      let baseContact = sContact.trim() === "" ? pContact : sContact;
+      let baseContact = formatPhone(sContact.trim() === "" ? pContact : sContact);
       let finalContact = baseContact;
       
       const { data: existingContacts } = await supabase.from('student').select('phone').like('phone', `${baseContact}%`);
@@ -231,7 +232,7 @@ export default function AdminDashboardPage() {
       }
 
       const { error: studentError } = await supabase.from('student').insert([{
-          name: sName, grade: sGrade, school: sSchool, phone: finalContact,
+          name: sName, grade: normalizeGrade(sGrade, sSchool), school: sSchool, phone: finalContact,
           password_hash: sPw ? await hashPin(sPw) : null, status: sStatus, parent_id: finalParentId, tenant_id: sTenantId
       }]);
       if (studentError) throw studentError;
@@ -278,8 +279,8 @@ export default function AdminDashboardPage() {
       const { error } = await supabase.from('student').update({
         name: editStudent.name,
         school: editStudent.school || null,
-        grade: editStudent.grade || null,
-        phone: editStudent.phone || null,
+        grade: normalizeGrade(editStudent.grade, editStudent.school) || null,
+        phone: formatPhone(editStudent.phone) || null,
         status: editStudent.status,
         tenant_id: editStudent.tenant_id
       }).eq('student_id', editStudent.student_id);
@@ -459,13 +460,13 @@ export default function AdminDashboardPage() {
   };
 
   const tabClass = (tabName: string) => 
-    `flex-1 py-4 text-[15px] text-center transition-all font-bold ${activeTab === tabName ? 'border-b-4 border-brand text-brand bg-white' : 'border-l border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100 hover:text-slate-800'}`;
+    `flex-1 py-4 text-[15px] text-center transition-all font-bold ${activeTab === tabName ? 'border-b-4 border-[#002864] text-[#002864] bg-white' : 'border-l border-slate-200 text-slate-500 bg-slate-50 hover:bg-slate-100 hover:text-slate-800'}`;
 
   return (
     <div className="flex items-center justify-center min-h-screen p-6 bg-slate-100 font-sans">
       <div className="bg-white w-full max-w-5xl rounded-2xl shadow-xl overflow-hidden flex flex-col h-[850px]">
         
-        <div className="bg-brand text-white p-6 shrink-0 relative flex justify-between items-center">
+        <div className="bg-[#002864] text-white p-6 shrink-0 relative flex justify-between items-center">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">⚙️ Logica 슈퍼 어드민 센터</h1>
             <div className="flex items-center gap-3 mt-2">
@@ -474,10 +475,10 @@ export default function AdminDashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => window.location.href = '/admin-dashboard'} className="bg-blue-50 text-brand font-bold py-2 px-5 rounded-lg shadow-md hover:bg-blue-100 transition-colors text-sm flex items-center gap-2 border border-blue-200">
+            <button onClick={() => window.location.href = '/admin-dashboard'} className="bg-blue-50 text-[#002864] font-bold py-2 px-5 rounded-lg shadow-md hover:bg-blue-100 transition-colors text-sm flex items-center gap-2 border border-blue-200">
               <span>📊</span> 운영 대시보드
             </button>
-            <button onClick={handleLogout} className="bg-white text-brand font-bold py-2 px-5 rounded-lg shadow-md hover:bg-slate-100 transition-colors text-sm flex items-center gap-2">
+            <button onClick={handleLogout} className="bg-white text-[#002864] font-bold py-2 px-5 rounded-lg shadow-md hover:bg-slate-100 transition-colors text-sm flex items-center gap-2">
               <span>🔐</span> 로그아웃
             </button>
           </div>
@@ -500,34 +501,34 @@ export default function AdminDashboardPage() {
                 <div className="grid grid-cols-2 gap-5">
                   <div className="col-span-2 bg-slate-50 p-4 border border-slate-200 rounded-lg">
                     <label className="block text-sm font-bold text-slate-700 mb-1">소속 지점 (Tenant) <span className="text-red-500">*</span></label>
-                    <select value={sTenantId} onChange={(e) => setSTenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-700">
+                    <select value={sTenantId} onChange={(e) => setSTenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-700">
                       {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                     </select>
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">이름 <span className="text-red-500">*</span></label>
-                    <input type="text" value={sName} onChange={(e) => setSName(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand" placeholder="예: 홍길동" />
+                    <input type="text" value={sName} onChange={(e) => setSName(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="예: 홍길동" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">초기 비밀번호 <span className="text-red-500">*</span></label>
-                    <input type="password" value={sPw} onChange={(e) => setSPw(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand" placeholder="비밀번호 입력" />
+                    <input type="password" value={sPw} onChange={(e) => setSPw(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="비밀번호 입력" />
                   </div>
                   {/* 🌟 학부모 연락처 및 학생 연락처 위치/순서 조정 */}
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">학부모 연락처 (기본 ID 역할) <span className="text-red-500">*</span></label>
-                    <input type="text" value={pContact} onChange={handlePhoneChange(setPContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand" placeholder="010-0000-0000" />
+                    <input type="text" value={pContact} onChange={handlePhoneChange(setPContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="010-0000-0000" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">학생 연락처 (선택)</label>
-                    <input type="text" value={sContact} onChange={handlePhoneChange(setSContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand" placeholder="010-0000-0000" />
+                    <input type="text" value={sContact} onChange={handlePhoneChange(setSContact)} maxLength={13} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="010-0000-0000" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">학교</label>
-                    <input type="text" value={sSchool} onChange={(e) => setSSchool(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand" placeholder="예: 로지카중학교" />
+                    <input type="text" value={sSchool} onChange={(e) => setSSchool(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]" placeholder="예: 로지카중학교" />
                   </div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">학년 <span className="text-red-500">*</span></label>
-                    <select value={sGrade} onChange={(e) => setSGrade(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand">
+                    <select value={sGrade} onChange={(e) => setSGrade(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864]">
                       <option value="7세 반">7세 반</option>
                       {[1,2,3,4,5,6].map(g => <option key={g} value={`초${g}`}>초등학교 {g}학년</option>)}
                       {[1,2,3].map(g => <option key={g+6} value={`중${g}`}>중학교 {g}학년</option>)}
@@ -536,7 +537,7 @@ export default function AdminDashboardPage() {
                   </div>
                   <div className="col-span-2">
                     <label className="block text-sm font-bold text-slate-700 mb-1">학생 상태 <span className="text-red-500">*</span></label>
-                    <select value={sStatus} onChange={(e) => setSStatus(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 font-bold text-brand focus:outline-none focus:ring-2 focus:ring-brand bg-blue-50">
+                    <select value={sStatus} onChange={(e) => setSStatus(e.target.value)} className="w-full px-4 py-3 rounded-lg border border-slate-300 font-bold text-[#002864] focus:outline-none focus:ring-2 focus:ring-[#002864] bg-blue-50">
                       <option value="입학테스트">📝 입학테스트 대기</option>
                       <option value="재원">✅ 정규 재원생</option>
                       <option value="휴원">⏸️ 휴원생</option>
@@ -544,7 +545,7 @@ export default function AdminDashboardPage() {
                     </select>
                   </div>
                 </div>
-                <button disabled={isStudentSubmitting} onClick={registerStudent} className={`w-full mt-8 text-white font-bold py-3.5 px-4 rounded-xl shadow-md transition-colors text-lg ${isStudentSubmitting ? 'bg-slate-400' : 'bg-brand hover:bg-[#001f4d]'}`}>
+                <button disabled={isStudentSubmitting} onClick={registerStudent} className={`w-full mt-8 text-white font-bold py-3.5 px-4 rounded-xl shadow-md transition-colors text-lg ${isStudentSubmitting ? 'bg-slate-400' : 'bg-[#002864] hover:bg-[#001f4d]'}`}>
                   {isStudentSubmitting ? "등록 처리 중... ⏳" : "학생 DB에 등록하기"}
                 </button>
               </div>
@@ -562,7 +563,7 @@ export default function AdminDashboardPage() {
                     <select 
                       value={studentListTenantFilter} 
                       onChange={(e) => setStudentListTenantFilter(e.target.value)}
-                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand"
+                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
                     >
                       <option value="all">🏢 전체 지점</option>
                       {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
@@ -574,13 +575,13 @@ export default function AdminDashboardPage() {
                   <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
                     <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <tr>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">지점</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">이름</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">학교/학년</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">학생 연락처</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">학부모 연락처</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-center text-slate-500">상태</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-center text-slate-500">관리 액션</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">지점</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이름</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">학교/학년</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">학생 연락처</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">학부모 연락처</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-center text-slate-500">상태</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-center text-slate-500">관리 액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
@@ -592,7 +593,7 @@ export default function AdminDashboardPage() {
                         studentsList.map(stu => (
                           <tr key={stu.student_id} className={stu.status === '퇴원' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-blue-50/50 transition-colors'}>
                             <td className="py-3 px-4 font-bold text-slate-600">{unwrap(stu.academy_tenant)?.name || '-'}</td>
-                            <td className="py-3 px-4 font-bold text-brand">{stu.name}</td>
+                            <td className="py-3 px-4 font-bold text-[#002864]">{stu.name}</td>
                             <td className="py-3 px-4 text-slate-500 font-bold text-xs">{stu.school || '-'} / {stu.grade || '-'}</td>
                             <td className="py-3 px-4 font-bold text-slate-700">{stu.phone || '-'}</td>
                             <td className="py-3 px-4 font-bold text-slate-500">{unwrap(stu.parent)?.phone || '-'}</td>
@@ -626,17 +627,17 @@ export default function AdminDashboardPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2 bg-slate-50 p-4 border border-slate-200 rounded-lg">
                     <label className="block text-sm font-bold text-slate-700 mb-1">소속 지점 (Tenant) <span className="text-red-500">*</span></label>
-                    <select value={iTenantId} onChange={(e) => setITenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-brand font-bold text-slate-700">
+                    <select value={iTenantId} onChange={(e) => setITenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-700">
                       {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                     </select>
                   </div>
 
-                  <div><label className="block text-sm font-bold text-slate-700 mb-1">로그인 이메일 계정 *</label><input type="email" value={iEmail} onChange={(e) => setIEmail(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand" placeholder="email@example.com" /></div>
-                  <div><label className="block text-sm font-bold text-slate-700 mb-1">초기 비밀번호 (6자리 이상) *</label><input type="password" value={iPw} onChange={(e) => setIPw(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand" placeholder="비밀번호 입력" /></div>
-                  <div><label className="block text-sm font-bold text-slate-700 mb-1">이름 *</label><input type="text" value={iName} onChange={(e) => setIName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand" placeholder="예: 김로지" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">로그인 이메일 계정 *</label><input type="email" value={iEmail} onChange={(e) => setIEmail(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="email@example.com" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">초기 비밀번호 (6자리 이상) *</label><input type="password" value={iPw} onChange={(e) => setIPw(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="비밀번호 입력" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">이름 *</label><input type="text" value={iName} onChange={(e) => setIName(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="예: 김로지" /></div>
                   <div>
                     <label className="block text-sm font-bold text-slate-700 mb-1">직급 *</label>
-                    <select value={iPosition} onChange={(e) => setIPosition(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand font-bold">
+                    <select value={iPosition} onChange={(e) => setIPosition(e.target.value)} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864] font-bold">
                       <option value="원장">원장</option>
                       <option value="부원장">부원장</option>
                       <option value="실장">실장</option>
@@ -646,7 +647,7 @@ export default function AdminDashboardPage() {
                       <option value="테스트/체험">테스트/체험 (GUEST)</option>
                     </select>
                   </div>
-                  <div><label className="block text-sm font-bold text-slate-700 mb-1">연락처</label><input type="text" value={iPhone} onChange={handlePhoneChange(setIPhone)} maxLength={13} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-brand" placeholder="010-0000-0000" /></div>
+                  <div><label className="block text-sm font-bold text-slate-700 mb-1">연락처</label><input type="text" value={iPhone} onChange={handlePhoneChange(setIPhone)} maxLength={13} className="w-full px-4 py-2 rounded-lg border border-slate-300 focus:outline-none focus:border-[#002864]" placeholder="010-0000-0000" /></div>
                 </div>
                 <div className="mt-4 p-3 bg-blue-50 border border-blue-100 rounded-lg text-xs font-bold text-blue-800">
                   💡 등록된 이메일 계정을 통해 <b>비밀번호 찾기(재설정 메일 발송)</b> 기능이 지원됩니다. 실제 사용하는 이메일을 입력해주세요.
@@ -669,7 +670,7 @@ export default function AdminDashboardPage() {
                     <select 
                       value={instructorListTenantFilter} 
                       onChange={(e) => setInstructorListTenantFilter(e.target.value)}
-                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-brand"
+                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
                     >
                       <option value="all">🏢 전체 지점</option>
                       {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
@@ -681,13 +682,13 @@ export default function AdminDashboardPage() {
                   <table className="w-full text-left border-collapse whitespace-nowrap text-sm">
                     <thead className="bg-slate-50 sticky top-0 z-10 shadow-sm">
                       <tr>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">지점</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">이름</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">이메일 계정</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">직급</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-slate-500">연락처</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-center text-slate-500">상태</th>
-                        <th className="py-3 px-4 border-b border-slate-200 font-bold text-center text-slate-500">관리 액션</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">지점</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이름</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">이메일 계정</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">직급</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-slate-500">연락처</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-center text-slate-500">상태</th>
+                        <th className="py-3 px-4 border-b border-slate-200 font-extrabold text-center text-slate-500">관리 액션</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 text-slate-700 font-medium">
@@ -699,7 +700,7 @@ export default function AdminDashboardPage() {
                         instructors.map(inst => (
                           <tr key={inst.instructor_id} className={inst.status === '퇴사' ? 'bg-slate-50/50 opacity-70' : 'hover:bg-blue-50/50 transition-colors'}>
                             <td className="py-3 px-4 font-bold text-slate-600">{unwrap(inst.academy_tenant)?.name || '-'}</td>
-                            <td className="py-3 px-4 font-bold text-brand">{inst.name}</td>
+                            <td className="py-3 px-4 font-bold text-[#002864]">{inst.name}</td>
                             <td className="py-3 px-4 text-slate-500 font-mono text-xs">{inst.email || inst.login_id}</td>
                             <td className="py-3 px-4 font-bold text-slate-700">
                               {inst.position === '테스트/체험' ? <span className="text-purple-600 bg-purple-50 px-2 py-0.5 rounded border border-purple-200 text-xs">체험용 GUEST</span> : inst.position}
@@ -736,7 +737,7 @@ export default function AdminDashboardPage() {
       {isStudentEditModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-brand p-4 text-white flex justify-between items-center">
+            <div className="bg-[#002864] p-4 text-white flex justify-between items-center">
               <h2 className="font-bold text-lg">👨‍🎓 학생 정보 수정 (어드민)</h2>
               <button onClick={() => setIsStudentEditModalOpen(false)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
@@ -744,34 +745,34 @@ export default function AdminDashboardPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-500 mb-1">소속 지점</label>
-                  <select value={editStudent.tenant_id || ""} onChange={(e) => setEditStudent({...editStudent, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand">
+                  <select value={editStudent.tenant_id || ""} onChange={(e) => setEditStudent({...editStudent, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
                     {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                   </select>
                 </div>
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={editStudent.name || ''} onChange={(e) => setEditStudent({...editStudent, name: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand" /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={editStudent.name || ''} onChange={(e) => setEditStudent({...editStudent, name: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>
-                  <select value={editStudent.status || '재원'} onChange={(e) => setEditStudent({...editStudent, status: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand">
+                  <select value={editStudent.status || '재원'} onChange={(e) => setEditStudent({...editStudent, status: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
                     <option value="재원">✅ 재원생</option><option value="휴원">⏸️ 휴원생</option><option value="입학테스트">📝 입학 대기</option><option value="퇴원">❌ 퇴원생</option>
                   </select>
                 </div>
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">학교</label><input type="text" value={editStudent.school || ''} onChange={(e) => setEditStudent({...editStudent, school: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand" /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">학교</label><input type="text" value={editStudent.school || ''} onChange={(e) => setEditStudent({...editStudent, school: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">학년</label>
                   {/* 🌟 수정 모달에도 학년 value 단축형 동일 적용 */}
-                  <select value={editStudent.grade || ''} onChange={(e) => setEditStudent({...editStudent, grade: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand">
+                  <select value={editStudent.grade || ''} onChange={(e) => setEditStudent({...editStudent, grade: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
                     <option value="7세 반">7세 반</option>
                     {[1,2,3,4,5,6].map(g => <option key={g} value={`초${g}`}>초 {g}</option>)}
                     {[1,2,3].map(g => <option key={g+6} value={`중${g}`}>중 {g}</option>)}
                     {[1,2,3].map(g => <option key={g+9} value={`고${g}`}>고 {g}</option>)}
                   </select>
                 </div>
-                <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">학생 연락처</label><input type="text" value={editStudent.phone || ''} onChange={handlePhoneChange((val: string) => setEditStudent({...editStudent, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand" /></div>
+                <div className="col-span-2"><label className="block text-xs font-bold text-slate-500 mb-1">학생 연락처</label><input type="text" value={editStudent.phone || ''} onChange={handlePhoneChange((val: string) => setEditStudent({...editStudent, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
               </div>
             </div>
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end gap-3">
               <button onClick={() => setIsStudentEditModalOpen(false)} className="px-4 py-2 bg-slate-100 font-bold text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">취소</button>
-              <button onClick={saveStudentEdit} className="px-5 py-2 bg-brand text-white font-bold rounded-lg hover:bg-blue-900 shadow-sm transition-colors">학생 정보 저장</button>
+              <button onClick={saveStudentEdit} className="px-5 py-2 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 shadow-sm transition-colors">학생 정보 저장</button>
             </div>
           </div>
         </div>
@@ -781,7 +782,7 @@ export default function AdminDashboardPage() {
       {isEditModalOpen && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="bg-brand p-4 text-white flex justify-between items-center">
+            <div className="bg-[#002864] p-4 text-white flex justify-between items-center">
               <h2 className="font-bold text-lg">👨‍🏫 관리자 정보 수정</h2>
               <button onClick={() => setIsEditModalOpen(false)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
             </div>
@@ -789,15 +790,15 @@ export default function AdminDashboardPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-500 mb-1">소속 지점</label>
-                  <select value={editInst.tenant_id || ""} onChange={(e) => setEditInst({...editInst, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand">
+                  <select value={editInst.tenant_id || ""} onChange={(e) => setEditInst({...editInst, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
                     {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                   </select>
                 </div>
 
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={editInst.name || ''} onChange={(e) => setEditInst({...editInst, name: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand" /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">이름</label><input type="text" value={editInst.name || ''} onChange={(e) => setEditInst({...editInst, name: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">직급</label>
-                  <select value={editInst.position || '파트강사'} onChange={(e) => setEditInst({...editInst, position: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand">
+                  <select value={editInst.position || '파트강사'} onChange={(e) => setEditInst({...editInst, position: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
                     <option value="원장">원장</option>
                     <option value="부원장">부원장</option>
                     <option value="실장">실장</option>
@@ -807,19 +808,19 @@ export default function AdminDashboardPage() {
                     <option value="테스트/체험">테스트/체험 (GUEST)</option>
                   </select>
                 </div>
-                <div><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={editInst.phone || ''} onChange={handlePhoneChange((val: string) => setEditInst({...editInst, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand" /></div>
+                <div><label className="block text-xs font-bold text-slate-500 mb-1">연락처</label><input type="text" value={editInst.phone || ''} onChange={handlePhoneChange((val: string) => setEditInst({...editInst, phone: val}))} maxLength={13} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
                 <div>
                   <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>
-                  <select value={editInst.status || '재직'} onChange={(e) => setEditInst({...editInst, status: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand">
+                  <select value={editInst.status || '재직'} onChange={(e) => setEditInst({...editInst, status: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
                     <option value="재직">✅ 재직</option><option value="휴직">⏸️ 휴직</option><option value="퇴사">❌ 퇴사 (접속 차단)</option>
                   </select>
                 </div>
               </div>
-              <div><label className="block text-xs font-bold text-slate-500 mb-1">이메일 계정</label><input type="email" value={editInst.email || ''} onChange={(e) => setEditInst({...editInst, email: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-brand" /></div>
+              <div><label className="block text-xs font-bold text-slate-500 mb-1">이메일 계정</label><input type="email" value={editInst.email || ''} onChange={(e) => setEditInst({...editInst, email: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]" /></div>
             </div>
             <div className="p-4 bg-white border-t border-slate-200 flex justify-end gap-3">
               <button onClick={() => setIsEditModalOpen(false)} className="px-4 py-2 bg-slate-100 font-bold text-slate-600 rounded-lg hover:bg-slate-200 transition-colors">취소</button>
-              <button onClick={saveInstructorEdit} className="px-5 py-2 bg-brand text-white font-bold rounded-lg hover:bg-blue-900 shadow-sm transition-colors">저장하기</button>
+              <button onClick={saveInstructorEdit} className="px-5 py-2 bg-[#002864] text-white font-bold rounded-lg hover:bg-blue-900 shadow-sm transition-colors">저장하기</button>
             </div>
           </div>
         </div>
