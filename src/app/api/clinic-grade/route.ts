@@ -6,7 +6,7 @@ export async function POST(req: Request) {
     const { imageDataUrl, correct, questionText } = await req.json();
     
     const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
     if (!apiKey) {
       return NextResponse.json({ error: '서버에 GEMINI_API_KEY 환경변수가 설정되지 않았습니다.' }, { status: 500 });

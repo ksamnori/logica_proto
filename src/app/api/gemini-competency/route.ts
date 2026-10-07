@@ -6,7 +6,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 
 const COMPETENCIES = ["문제해결", "추론", "의사소통", "연결", "정보처리"] as const;
-const MODEL_NAME = process.env.GEMINI_COMPETENCY_MODEL || "gemini-3.5-flash";
+const MODEL_NAME = process.env.GEMINI_COMPETENCY_MODEL || "gemini-3.8-flash";
 const MAX_ITEMS = 40;
 
 type InItem = {

@@ -6,7 +6,7 @@ export async function POST(req: Request) {
     const { questionText } = await req.json();
     
     const apiKey = process.env.GEMINI_API_KEY;
-    const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    const model = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
 
     if (!apiKey) {
       return NextResponse.json({ hint: null });
