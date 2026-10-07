@@ -1182,7 +1182,10 @@ export default function LessonPage() {
                      <span>🏥 클리닉(보충) 배정</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>
-                   <button className="w-full bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-700 p-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm text-left flex items-center justify-between group">
+                   <button
+                     onClick={() => window.open(`/print/class-report?class_id=${selectedClass.class_id}`, "_blank")}
+                     title="이 반 학생들의 이번 달 성취도를 A4 리포트로 엽니다. 인쇄하거나 PDF로 저장할 수 있습니다."
+                     className="w-full bg-white border border-slate-200 hover:border-emerald-300 hover:bg-emerald-50 text-slate-700 p-2.5 rounded-xl text-xs font-bold transition-colors shadow-sm text-left flex items-center justify-between group">
                      <span>📊 반 전체 성취도 리포트 인쇄</span>
                      <span className="opacity-0 group-hover:opacity-100 transition-opacity">→</span>
                    </button>

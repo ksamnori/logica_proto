@@ -231,7 +231,8 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
   const baseStudents = useMemo(() => {
     let filtered = attStudents;
     if (hideTestStudents) {
-      filtered = filtered.filter(s => !s.name.includes('테스트'));
+      // 이름에 '테스트'·'선생님'이 들어간 더미 학생 제외 (띄어쓰기 무시)
+      filtered = filtered.filter(s => !/테스트|선생님/.test(String(s.name || '').replace(/\s/g, '')));
     }
     if (searchQuery.trim() !== "") {
       filtered = filtered.filter(s => s.name.includes(searchQuery.trim()));
@@ -535,7 +536,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           </h3>
           
           <div className="flex items-center gap-3 w-full sm:w-auto mt-2 sm:mt-0">
-            <label className="flex items-center gap-1.5 cursor-pointer bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0 mr-1">
+            <label title="이름에 '테스트' 또는 '선생님'이 들어간 학생을 명단에서 뺍니다" className="flex items-center gap-1.5 cursor-pointer bg-slate-50 hover:bg-slate-100 px-3 py-1.5 rounded-lg border border-slate-200 transition-colors shadow-inner shrink-0 mr-1">
               <input 
                 type="checkbox" 
                 className="w-3.5 h-3.5 accent-slate-600 rounded cursor-pointer"

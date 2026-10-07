@@ -430,7 +430,10 @@ export default function AdminDashboardPage() {
 
     const { data } = await query;
     let enrolled = 0, newM = 0, leftM = 0;
+    // 이름에 '테스트'·'선생님'이 들어간 더미 학생은 인원에서 제외 (신규·퇴원 수 포함)
+    const isDummy = (name: any) => /테스트|선생님/.test(String(name || '').replace(/\s/g, ''));
     data?.forEach((s: any) => {
+      if (isDummy(s.name)) return;
       if (s.status === '재원') {
         enrolled++;
         if (s.created_at >= firstDayOfMonth) newM++;

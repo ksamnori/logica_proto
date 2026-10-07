@@ -12,9 +12,9 @@ export const COMPETENCIES = ["문제해결", "추론", "의사소통", "연결",
 export const COGNITIVE_LEVELS = ["이해 및 연산", "적용 및 응용", "추론 및 문제 해결"] as const;
 export const DIFF_LABELS = ["최하", "하", "중", "상", "최상"]; // 1~5
 
-const FINAL_OK = ["O", "RO", "TO"];
-const EXCLUDED_EXAM_TYPES = ["입학테스트", "진단평가"];
-const MIN_COMP_ITEMS = 5;
+export const FINAL_OK = ["O", "RO", "TO"];
+export const EXCLUDED_EXAM_TYPES = ["입학테스트", "진단평가"];
+export const MIN_COMP_ITEMS = 5;
 const MIN_TYPE_ITEMS = 2;
 
 // ---------- 날짜 (KST) ----------
@@ -27,7 +27,7 @@ export const shiftYm = (ym: string, delta: number) => {
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
 };
 export const ymLabel = (ym: string) => `${Number(ym.slice(5, 7))}월`;
-const monthStartUtcIso = (ym: string) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1) - KST).toISOString();
+export const monthStartUtcIso = (ym: string) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)) - 1, 1) - KST).toISOString();
 export const lastDay = (ym: string) => new Date(Date.UTC(Number(ym.slice(0, 4)), Number(ym.slice(5, 7)), 0)).getUTCDate();
 
 // 그 달의 몇째 주 (월요일 시작)
@@ -38,10 +38,10 @@ export const weekOfMonth = (ymd: string) => {
 };
 
 // ---------- 유틸 ----------
-const chunk = <T,>(arr: T[], n: number) => { const out: T[][] = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
-const unwrap = (v: any) => Array.isArray(v) ? v[0] : v;
+export const chunk = <T,>(arr: T[], n: number) => { const out: T[][] = []; for (let i = 0; i < arr.length; i += n) out.push(arr.slice(i, i + n)); return out; };
+export const unwrap = (v: any) => Array.isArray(v) ? v[0] : v;
 
-async function selectIn(table: string, select: string, col: string, values: (string | number)[], size = 150) {
+export async function selectIn(table: string, select: string, col: string, values: (string | number)[], size = 150) {
   const out: any[] = [];
   for (const part of chunk(Array.from(new Set(values)), size)) {
     if (part.length === 0) continue;
@@ -52,7 +52,7 @@ async function selectIn(table: string, select: string, col: string, values: (str
   return out;
 }
 
-async function selectInPaged(table: string, select: string, col: string, values: string[], extra: (q: any) => any) {
+export async function selectInPaged(table: string, select: string, col: string, values: string[], extra: (q: any) => any) {
   const out: any[] = [];
   for (const part of chunk(values, 100)) {
     for (let from = 0; ; from += 1000) {
@@ -66,7 +66,7 @@ async function selectInPaged(table: string, select: string, col: string, values:
   return out;
 }
 
-const diffNum = (d: any): number | null => {
+export const diffNum = (d: any): number | null => {
   if (d == null) return null;
   const s = String(d).trim();
   const i = DIFF_LABELS.indexOf(s);
@@ -76,8 +76,8 @@ const diffNum = (d: any): number | null => {
 };
 
 export const gradeOf = (rate: number) => rate >= 90 ? 1 : rate >= 80 ? 2 : rate >= 70 ? 3 : rate >= 50 ? 4 : 5;
-const pct = (a: number, b: number) => b > 0 ? Math.round((a / b) * 100) : 0;
-const avg = (arr: number[]) => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
+export const pct = (a: number, b: number) => b > 0 ? Math.round((a / b) * 100) : 0;
+export const avg = (arr: number[]) => arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
 
 // ---------- 타입 ----------
 type Rec = {
@@ -131,7 +131,7 @@ export type WeeklyReport = {
   units: { name: string; n: number; first: number; final: number }[]; // 단원(중단원)별 성취도
 };
 
-const PRE_TEST_STATUS = ["응시전", "미응시", "예정", "대기"];
+export const PRE_TEST_STATUS = ["응시전", "미응시", "예정", "대기"];
 
 async function loadWeekly(studentId: string, ym: string, months: string[]): Promise<WeeklyReport> {
   const empty: WeeklyReport = { tests: [], avgFirst: null, avgFinal: null, classAvgFirst: null, classAvgFinal: null, trend: months.map(m => ({ ym: m, me: null, cls: null, meFinal: null, clsFinal: null })), units: [] };
