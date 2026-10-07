@@ -1,7 +1,8 @@
 // src/app/(dashboard)/class/page.tsx
 "use client";
 
-import React, { useEffect, useState, useMemo, useRef } from "react";
+import React, { useEffect, useState, useMemo, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import ClassEditModal from "@/components/class/ClassEditModal";
@@ -284,6 +285,36 @@ export default function ClassPage() {
   const openEditModal = (classItem: any) => { setSelectedClass(classItem); setIsEditModalOpen(true); };
   const closeEditModal = () => { setIsEditModalOpen(false); setSelectedClass(null); };
 
+  // ---------- 반 정보 툴팁 (화면 밖으로 나가지 않도록 body에 띄움) ----------
+  type TipData = { cls: any; instName: string; studentCount: number; studentNamesStr: string; rect: DOMRect };
+  const [tip, setTip] = useState<TipData | null>(null);
+  const [tipPos, setTipPos] = useState<{ left: number; top: number } | null>(null);
+  const tipRef = useRef<HTMLDivElement>(null);
+  const tipHideTimer = useRef<any>(null);
+  const showTip = (d: TipData) => { if (tipHideTimer.current) clearTimeout(tipHideTimer.current); setTipPos(null); setTip(d); };
+  const hideTipSoon = () => { if (tipHideTimer.current) clearTimeout(tipHideTimer.current); tipHideTimer.current = setTimeout(() => setTip(null), 150); };
+  const keepTip = () => { if (tipHideTimer.current) clearTimeout(tipHideTimer.current); };
+  useLayoutEffect(() => {
+    if (!tip || !tipRef.current) return;
+    const M = 8, GAP = 6;
+    const w = tipRef.current.offsetWidth, h = tipRef.current.offsetHeight;
+    const r = tip.rect;
+    let top = r.bottom + GAP;                                    // 기본: 블록 아래
+    if (top + h > window.innerHeight - M) top = r.top - h - GAP; // 아래가 모자라면 위
+    top = Math.max(M, Math.min(top, window.innerHeight - h - M));
+    let left = r.left;
+    if (left + w > window.innerWidth - M) left = r.right - w;    // 오른쪽이 모자라면 오른쪽 끝 맞춤
+    left = Math.max(M, Math.min(left, window.innerWidth - w - M));
+    setTipPos({ left, top });
+  }, [tip]);
+  useEffect(() => {
+    const close = () => setTip(null);
+    const el = scrollRef.current;
+    el?.addEventListener('scroll', close);
+    window.addEventListener('resize', close);
+    return () => { el?.removeEventListener('scroll', close); window.removeEventListener('resize', close); };
+  }, [viewMode, isAuthorized]);
+
   const openHistoryModal = (cId: string, cName: string, e?: React.MouseEvent) => {
     if (e) { e.preventDefault(); e.stopPropagation(); }
     setHistoryClassId(cId); setHistoryClassName(cName); setIsHistoryModalOpen(true);
@@ -545,8 +576,8 @@ export default function ClassPage() {
           >
             <div className="flex w-full min-w-max min-h-full">
               
-              <div className="w-14 shrink-0 border-r border-slate-300 bg-slate-50 z-30 sticky left-0 pointer-events-none print-time-col">
-                <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-40 flex items-center justify-center font-bold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
+              <div className="w-14 shrink-0 border-r border-slate-300 bg-slate-50 z-[80] sticky left-0 pointer-events-none print-time-col">
+                <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-[90] flex items-center justify-center font-bold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
                   평일시간
                 </div>
                 <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${wdRowCount})` }}>
@@ -678,7 +709,7 @@ export default function ClassPage() {
                     <React.Fragment key={day}>
                       {isSaturday && (
                         <div className="w-14 shrink-0 border-l border-r border-slate-300 bg-slate-50 relative pointer-events-none print-time-col">
-                          <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-20 flex items-center justify-center font-bold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
+                          <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-[70] flex items-center justify-center font-bold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
                             토요시간
                           </div>
                           <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${satRowCount})` }}>
@@ -692,7 +723,7 @@ export default function ClassPage() {
                       )}
                       
                       <div className="print-day-col border-r border-slate-300 relative shrink-0" style={{ flex: `${totalCols} 1 0%`, maxWidth: `${totalCols * 140}px`, minWidth: `${minWidthFinal}px` }}>
-                        <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-bold text-[13px] bg-white sticky top-0 z-20 shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
+                        <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-bold text-[13px] bg-white sticky top-0 z-[70] shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
                           {day}요일
                         </div>
                         
@@ -732,6 +763,8 @@ export default function ClassPage() {
                                   }
                                   openEditModal(b.classObj);
                                 }}
+                                onMouseEnter={(e) => { if (dragState.current.isDown) return; showTip({ cls: b.classObj, instName, studentCount, studentNamesStr, rect: e.currentTarget.getBoundingClientRect() }); }}
+                                onMouseLeave={hideTipSoon}
                                 className={`print-box absolute rounded-lg px-1 py-1.5 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.06)] border transition-transform hover:-translate-y-1 hover:shadow-lg hover:z-[60] flex flex-col items-center text-center group ${colorClass} bg-opacity-95 hover:bg-opacity-100`}
                                 style={{ 
                                   top: `calc(var(--hour-height) * ${s - startHour})`, 
@@ -756,36 +789,6 @@ export default function ClassPage() {
 
                                 <div className="print-block-time print-text text-[9px] font-semibold opacity-60 mt-auto w-full tracking-tighter">{b.start.slice(0,5)} ~ {b.end.slice(0,5)}</div>
                                 
-                                {/* 🌟 툴팁 다리(Bridge) 개선 및 클릭 충돌 방지 적용 */}
-                                <div className={`print-hide absolute hidden group-hover:flex flex-col top-full pt-2.5 z-[100] w-52 ${dayIndex >= 4 ? 'right-0' : 'left-0'}`}>
-                                   <div 
-                                     className="p-3 bg-slate-800 text-white text-xs rounded-xl shadow-2xl pointer-events-auto flex flex-col w-full text-left cursor-default border border-slate-700"
-                                     onClick={(e) => e.stopPropagation()} 
-                                   >
-                                     <div className="font-bold text-blue-200 text-[13px] mb-2.5 leading-tight tracking-tight">{b.classObj.name}</div>
-                                     <div className="text-slate-300 mb-1.5 flex justify-between w-full items-center">
-                                       <span>강사</span> 
-                                       <div className="flex items-center gap-2">
-                                         <span className="font-bold text-white text-[13px]">{instName}</span>
-                                         <button 
-                                           onClick={(e) => openHistoryModal(b.classObj.class_id, b.classObj.name, e)} 
-                                           className="text-[10px] bg-slate-600 hover:bg-slate-500 text-slate-100 px-2 py-1 rounded border border-slate-500 transition-colors shadow-sm cursor-pointer"
-                                         >
-                                           이력
-                                         </button>
-                                       </div>
-                                     </div>
-                                     <div className="text-slate-300 mb-1.5 flex justify-between w-full"><span>대상</span> <span className="font-bold text-white">{b.classObj.target_grade || '-'}</span></div>
-                                     <div className="text-slate-300 mb-1.5 flex justify-between w-full"><span>인원</span> <span className="font-bold text-white">{studentCount}명</span></div>
-                                     <div className="text-slate-300 mb-2 flex justify-between w-full border-b border-slate-600 pb-2.5"><span>상태</span> <span className={`font-bold ${b.classObj.status === '진행중' ? 'text-emerald-400' : 'text-amber-400'}`}>{b.classObj.status || '-'}</span></div>
-                                     
-                                     {students.length > 0 && (
-                                       <div className="text-[11px] leading-relaxed text-slate-300 break-words mt-1 w-full text-left">
-                                         {studentNamesStr}
-                                       </div>
-                                     )}
-                                   </div>
-                                </div>
                               </div>
                             )
                           })}
@@ -810,6 +813,38 @@ export default function ClassPage() {
       <div className="print-hide no-print">
         <ClassEditModal isOpen={isEditModalOpen} classItem={selectedClass} instructors={instructors} currentUser={currentUser} onClose={closeEditModal} onSuccess={fetchClasses} />
       </div>
+      {tip && typeof document !== 'undefined' && createPortal(
+        <div
+          ref={tipRef}
+          onMouseEnter={keepTip}
+          onMouseLeave={hideTipSoon}
+          className="print-hide fixed z-[9500] w-52"
+          style={{ left: tipPos?.left ?? -9999, top: tipPos?.top ?? -9999, visibility: tipPos ? 'visible' : 'hidden' }}
+        >
+          <div className="p-3 bg-slate-800 text-white text-xs rounded-xl shadow-2xl flex flex-col w-full text-left cursor-default border border-slate-700">
+            <div className="font-bold text-blue-200 text-[13px] mb-2.5 leading-tight tracking-tight">{tip.cls.name}</div>
+            <div className="text-slate-300 mb-1.5 flex justify-between w-full items-center">
+              <span>강사</span>
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-white text-[13px]">{tip.instName}</span>
+                <button
+                  onClick={(e) => { setTip(null); openHistoryModal(tip.cls.class_id, tip.cls.name, e); }}
+                  className="text-[10px] bg-slate-600 hover:bg-slate-500 text-slate-100 px-2 py-1 rounded border border-slate-500 transition-colors shadow-sm cursor-pointer"
+                >
+                  이력
+                </button>
+              </div>
+            </div>
+            <div className="text-slate-300 mb-1.5 flex justify-between w-full"><span>대상</span> <span className="font-bold text-white">{tip.cls.target_grade || '-'}</span></div>
+            <div className="text-slate-300 mb-1.5 flex justify-between w-full"><span>인원</span> <span className="font-bold text-white">{tip.studentCount}명</span></div>
+            <div className="text-slate-300 mb-2 flex justify-between w-full border-b border-slate-600 pb-2.5"><span>상태</span> <span className={`font-bold ${tip.cls.status === '진행중' ? 'text-emerald-400' : 'text-amber-400'}`}>{tip.cls.status || '-'}</span></div>
+            {tip.studentCount > 0 && (
+              <div className="text-[11px] leading-relaxed text-slate-300 break-words mt-1 w-full text-left">{tip.studentNamesStr}</div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 }
