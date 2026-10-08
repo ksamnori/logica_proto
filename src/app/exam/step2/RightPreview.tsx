@@ -266,6 +266,9 @@ export default function RightPreview({ examData }: { examData: any }) {
         });
       };
       
+      // 시험지에 같은 문항을 또 넣으면 화면용 id 뒤에 '_added_시각'이 붙음 → DB에는 원래 문항 id로 저장
+      const parentRealId = String(aiTargetInfo.q.question_id).replace(/_added_\d+$/, '');
+
       const dbInserts = [];
       let selectedQuestionUiData = null;
 
@@ -304,7 +307,7 @@ export default function RightPreview({ examData }: { examData: any }) {
           step_3_process: twin.step_3_process,
           step_4_conclusion: twin.step_4_conclusion,
           problem_type: twin.question_type || '유사', 
-          parent_question_id: aiTargetInfo.q.question_id, 
+          parent_question_id: parentRealId, 
           derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -394,7 +397,7 @@ export default function RightPreview({ examData }: { examData: any }) {
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-32 space-y-6 scroll-smooth" id="right-problem-list">
-        {isLoading ? <div className="text-center font-bold text-slate-500 mt-20 flex flex-col items-center"><svg className="animate-spin h-12 w-12 text-brand mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><p>DB에서 문제를 추출 중입니다...</p></div> : 
+        {isLoading ? <div className="text-center font-bold text-slate-500 mt-20 flex flex-col items-center"><svg className="animate-spin h-12 w-12 text-[#002864] mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><p>DB에서 문제를 추출 중입니다...</p></div> : 
          questions.map((g: any, idx: number) => {
            const qNum = idx + 1;
            const repQ = g.items[0];
@@ -409,7 +412,7 @@ export default function RightPreview({ examData }: { examData: any }) {
            const isDragOverTarget = dragOverIdx === idx && draggedIdx !== idx;
 
            let cardClass = "rounded-xl shadow-sm overflow-hidden flex flex-row group transition-colors duration-200 border-2 ";
-           if (isDragged) cardClass += "opacity-40 border-dashed border-brand bg-slate-50 ";
+           if (isDragged) cardClass += "opacity-40 border-dashed border-[#002864] bg-slate-50 ";
            else if (isDragOverTarget) cardClass += "border-emerald-400 bg-emerald-50/50 z-20 shadow-md ";
            else cardClass += "bg-white border-slate-200 hover:border-blue-400 ";
 
@@ -647,7 +650,7 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                            <div className="flex justify-end gap-2 mt-4">
                                <button onClick={() => setEditingId(null)} className="px-4 py-2 bg-white border border-slate-300 text-slate-600 font-bold text-xs rounded hover:bg-slate-50 shadow-sm cursor-pointer">취소</button>
-                               <button onClick={saveEdit} className="px-4 py-2 bg-brand text-white font-bold text-xs rounded hover:bg-blue-900 shadow-sm cursor-pointer">💾 각각 저장</button>
+                               <button onClick={saveEdit} className="px-4 py-2 bg-[#002864] text-white font-bold text-xs rounded hover:bg-blue-900 shadow-sm cursor-pointer">💾 각각 저장</button>
                            </div>
                          </div>
                        )}
@@ -799,7 +802,7 @@ export default function RightPreview({ examData }: { examData: any }) {
               <button 
                 onClick={saveTwinAndReplace} 
                 disabled={isGeneratingTwins || generatedTwins.length === 0 || isSavingTwin}
-                className="px-8 py-3 bg-brand hover:bg-blue-900 disabled:bg-slate-300 text-white font-black rounded-xl shadow-lg transition-colors flex items-center gap-2"
+                className="px-8 py-3 bg-[#002864] hover:bg-blue-900 disabled:bg-slate-300 text-white font-black rounded-xl shadow-lg transition-colors flex items-center gap-2"
               >
                 {isSavingTwin ? "저장 중..." : `💾 생성된 ${generatedTwins.length}개 모두 DB 저장 및 선택 문항으로 교체`}
               </button>
