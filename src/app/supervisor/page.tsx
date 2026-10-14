@@ -11,7 +11,6 @@ import SeatGrid from './SeatGrid';
 import SeatCardBody from './SeatCardBody';
 import UnlockPanel from "@/components/clinic/UnlockPanel";
 
-// 🌟 재사용 가능한 MathText 컴포넌트 추가
 const MathText = React.memo(function MathText({ html, className }: { html: string; className?: string }) {
     const ref = useRef<HTMLDivElement>(null);
     useEffect(() => {
@@ -43,7 +42,6 @@ export default function SupervisorDashboard() {
     const [verificationOverrides, setVerificationOverrides] = useState<Record<string, boolean>>({});
     const [isVerifying, setIsVerifying] = useState(false);
 
-    // 🌟 학생 호출 처리 모달 상태
     const [callProcessModal, setCallProcessModal] = useState<{ isOpen: boolean, seat: string, qNum: any, callInfo: any } | null>(null);
 
     const mathJaxRef = useRef(false);
@@ -73,7 +71,6 @@ export default function SupervisorDashboard() {
         });
     }, []);
 
-    // MathJax 완벽 렌더링을 위해 의존성에 callProcessModal 추가
     useEffect(() => {
         if (verifyingAnswers.length > 0 || callProcessModal) {
             const timer = setTimeout(() => {
@@ -87,7 +84,6 @@ export default function SupervisorDashboard() {
         }
     }, [verifyingAnswers, verifyingExam, callProcessModal]);
 
-    // 🌟 수동 수식 새로고침 함수
     const forceMathRefresh = () => {
         const mj = (window as any).MathJax;
         if (mj && mj.typesetPromise) {
@@ -134,8 +130,10 @@ export default function SupervisorDashboard() {
                     catch (e) { return []; }
                 };
 
+                const numericTqIds = qIds.filter(id => typeof id === 'number' || (typeof id === 'string' && !id.includes('-') && !isNaN(Number(id)))).map(Number);
+
                 const [tqByTqId, tqByQid] = await Promise.all([
-                    fetchSafe(supabaseClient.from('textbook_question').select('*').in('tq_id', qIds)),
+                    numericTqIds.length > 0 ? fetchSafe(supabaseClient.from('textbook_question').select('*').in('tq_id', numericTqIds)) : Promise.resolve([]),
                     fetchSafe(supabaseClient.from('textbook_question').select('*').in('question_id', qIds))
                 ]);
                 
@@ -162,7 +160,7 @@ export default function SupervisorDashboard() {
 
                 qIds.forEach(id => {
                     const strId = String(id);
-                    let tqBase = tqMapByTqId.get(strId) || tqMapByQid.get(strId);
+                    const tqBase = tqMapByTqId.get(strId) || tqMapByQid.get(strId);
                     let qDbBase = qDbMap.get(strId);
 
                     if (tqBase && tqBase.question_id) {
@@ -171,8 +169,17 @@ export default function SupervisorDashboard() {
 
                     const fallbackDb = qDbBase || {};
                     const fallbackTq = tqBase || {};
+                    let rawMeta: any = {};
+                    if (fallbackTq.raw_metadata) {
+                        try {
+                            rawMeta = typeof fallbackTq.raw_metadata === 'string' ? JSON.parse(fallbackTq.raw_metadata) : fallbackTq.raw_metadata;
+                        } catch (e) {}
+                    }
 
-                    let rawImgUrl = parseVal(fallbackDb.image_url) || parseVal(fallbackDb.image_2_url);
+                    let rawImgUrl = parseVal(fallbackDb.image_url) || parseVal(fallbackDb.image_2_url) || parseVal(rawMeta.image_url) || parseVal(rawMeta.imageUrl) || parseVal(fallbackTq.image_url);
+                    if (rawImgUrl.startsWith('[')) {
+                        try { rawImgUrl = JSON.parse(rawImgUrl)[0] || ''; } catch (e) {}
+                    }
                     let finalImgUrl = '';
                     
                     if (rawImgUrl) {
@@ -185,9 +192,9 @@ export default function SupervisorDashboard() {
                     }
 
                     qMap[strId] = {
-                        questionText: parseVal(fallbackTq.question) || parseVal(fallbackDb.question) || parseVal(fallbackDb.question_text),
+                        questionText: parseVal(fallbackTq.question) || parseVal(rawMeta.question) || parseVal(fallbackDb.question) || parseVal(fallbackDb.question_text),
                         imageUrl: finalImgUrl,
-                        correctAnswer: parseVal(fallbackTq.answer) || parseVal(fallbackDb.answer)
+                        correctAnswer: parseVal(fallbackTq.answer) || parseVal(rawMeta.answer) || parseVal(fallbackDb.answer)
                     };
                 });
             }
@@ -257,12 +264,9 @@ export default function SupervisorDashboard() {
 
     const studentCount = Object.keys(activeStudents).length;
     const vacantCount = Math.max(0, seats.length - studentCount);
-    let callingCount = 0, hintingCount = 0, awayCount = 0, timeUrgentCount = 0;
+    let callingCount = 0;
 
     Object.values(activeStudents).forEach((st: any) => {
-        if (st.status === 'away') awayCount++;
-        if (st.status === 'hint') hintingCount++;
-        if (st.firstSeenAt && st.clinicDurationMs && (st.firstSeenAt + st.clinicDurationMs) - now <= 5 * 60 * 1000) timeUrgentCount++;
         if (st.calls && Object.keys(st.calls).length > 0) callingCount++;
     });
 
@@ -318,7 +322,6 @@ export default function SupervisorDashboard() {
                                 <h2 className="text-2xl font-bold">📝 {verifyingExam.studentName} 학생 테스트 오답 검수</h2>
                                 <p className="text-sm font-bold text-blue-200 mt-1">{verifyingExam.examTitle}</p>
                             </div>
-                            {/* 🌟 수식 새로고침 버튼 추가 */}
                             <div className="flex items-center gap-4">
                                 <button onClick={forceMathRefresh} className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
                                     <span>🔄</span> 수식 깨짐 해결
@@ -333,13 +336,12 @@ export default function SupervisorDashboard() {
                                     <span className="text-6xl mb-4">💯</span>
                                     <span className="text-slate-500 font-bold text-xl">가채점 결과 모두 정답입니다! (오답 없음)</span>
                                 </div>
-                            ) : verifyingAnswers.map((ans, idx) => {
+                            ) : verifyingAnswers.map((ans) => {
                                 const isOverridden = verificationOverrides[ans.answer_id] === true;
                                 return (
                                     <div key={ans.answer_id} className={`bg-white rounded-2xl shadow-sm border-[3px] overflow-hidden flex flex-col md:flex-row transition-colors ${isOverridden ? 'border-emerald-400' : 'border-rose-200'}`}>
                                         <div className="w-full md:w-2/3 p-6 relative bg-white border-b md:border-b-0 md:border-r border-slate-100 min-h-[300px] flex flex-col justify-start items-start">
                                             <div className="relative w-full max-w-full z-10 text-lg">
-                                                {/* 🌟 MathText 컴포넌트로 교체 완료 */}
                                                 {ans.questionText ? (
                                                     <MathText className="font-bold text-slate-800 leading-relaxed font-myungjo" html={ans.questionText} />
                                                 ) : (
@@ -370,7 +372,6 @@ export default function SupervisorDashboard() {
                                                 </div>
                                                 <div className="bg-emerald-50 p-3 rounded-xl border border-emerald-100 shadow-sm overflow-hidden">
                                                     <span className="text-xs font-bold text-emerald-600 block mb-1">실제 정답</span>
-                                                    {/* 🌟 MathText 컴포넌트로 교체 완료 */}
                                                     {ans.correctAnswer ? (
                                                         <MathText className="inline-block font-bold text-emerald-800 text-lg leading-tight font-myungjo" html={ans.correctAnswer} />
                                                     ) : (
@@ -416,7 +417,6 @@ export default function SupervisorDashboard() {
                     <div className="bg-slate-100 rounded-[2rem] shadow-2xl w-full max-w-4xl h-full max-h-[85vh] flex flex-col overflow-hidden">
                         <div className="bg-rose-600 text-white px-8 py-5 flex justify-between items-center shrink-0">
                             <h2 className="text-2xl font-bold">🙋 {activeStudents[callProcessModal.seat]?.name || '학생'} 질문 상세 보기</h2>
-                            {/* 🌟 수식 새로고침 버튼 추가 */}
                             <div className="flex items-center gap-4">
                                 <button onClick={forceMathRefresh} className="flex items-center gap-1.5 bg-white/20 hover:bg-white/30 text-white px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
                                     <span>🔄</span> 수식 깨짐 해결
@@ -541,7 +541,7 @@ export default function SupervisorDashboard() {
                         <div className="flex items-center gap-1.5 px-3 py-1 rounded-lg bg-rose-500/20 border border-rose-500/30 text-[11px] font-bold text-rose-300 shadow-sm"><span className="text-rose-400">🚨</span>호출 {callingCount}</div>
                     </div>
 
-                    <div className="flex items-center gap-3 bg-slate-800/50 pl-4 pr-3 py-1.5 rounded-xl border border-slate-700/50 hidden xl:flex">
+                    <div className="hidden xl:flex items-center gap-3 bg-slate-800/50 pl-4 pr-3 py-1.5 rounded-xl border border-slate-700/50">
                         <div className="text-right">
                             <div className="text-xs font-bold font-mono text-slate-200">{isMounted ? new Date(now).toLocaleTimeString('ko-KR', { hour12: false }) : '--:--:--'}</div>
                             <div className="text-[9px] text-slate-500 font-bold">UPTIME {isMounted ? formatDuration(now - startedAt) : '00:00'}</div>

@@ -1,14 +1,14 @@
 // src/app/clinic/viewer/hooks/useClinicRealtime.ts
 import { useEffect, useRef } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
-import { resolveTodaySession, clearActiveCall, clearActiveRecheck, clearAway } from "@/lib/clinicSession";
+import { resolveTodaySession } from "@/lib/clinicSession";
 import { awardClinicMinutePoints } from "@/app/actions/shopPoints";
 import { getKSTDateString, CLINIC_ROOM, isObjectiveQuestion } from '../utils';
 
 interface UseClinicRealtimeProps {
   supabaseClient: SupabaseClient;
   studentInfo: { id: string; name: string; classes: string[] };
-  params: { round: number; className: string; weekType: string; assignmentId: string; homeworkIdsStr: string; assignmentIdsStr: string; overdue: boolean };
+  params: { round: number; className: string; weekType: string; assignmentId: string; homeworkIdsStr: string; assignmentIdsStr: string; overdue: boolean; retry?: boolean };
   questions: any[];
   currentQIndex: number;
   isTimedRound: boolean;
@@ -94,7 +94,6 @@ export function useClinicRealtime({
           delete newCalls['REFRESH'];
           await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
           
-          // 🌟 강제 새로고침을 차단하고 튕기지 않게 알림만 띄웁니다!
           if (setRecheckToast) {
               setRecheckToast('🎉 밖에서 채점이 확정되었습니다! (학습 종료 후 포탈에서 확인 가능)');
               setTimeout(() => setRecheckToast(""), 4000);
@@ -215,17 +214,18 @@ export function useClinicRealtime({
     runSelfCorrectionRef.current = runSelfCorrection;
     const interval = setInterval(runSelfCorrection, 5000);
     const handleFocus = () => runSelfCorrection();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') runSelfCorrection();
+    };
     
     window.addEventListener('focus', handleFocus);
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') runSelfCorrection();
-    });
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => { 
         cancelled = true; 
         clearInterval(interval); 
         window.removeEventListener('focus', handleFocus);
-        document.removeEventListener('visibilitychange', handleFocus);
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [studentInfo.id, questions]); 
 
@@ -248,7 +248,7 @@ export function useClinicRealtime({
 
       const idx = questions.findIndex(qItem =>
         type === 'exam'
-          ? (String(qItem.examAssignmentId) === String(newData.exam_assignment_id) && String(qItem.question_id) === String(newData.question_id))
+          ? ((!qItem.examAssignmentId || !newData.exam_assignment_id || String(qItem.examAssignmentId) === String(newData.exam_assignment_id)) && String(qItem.question_id) === String(newData.question_id))
           : (String(qItem.homework_id) === String(newData.homework_id) && String(qItem.tq_id) === String(newData.tq_id))
       );
 
@@ -257,7 +257,7 @@ export function useClinicRealtime({
       const newCode = newData.grading_code;
       const isCorrect = ['O', 'TO', 'RO'].includes(newCode);
       const currentStatus = qBoxStatus.current[idx];
-      const wasCorrect = ['correct_blue', 'correct_yellow', 'retry_yellow'].includes(currentStatus || '');
+      const wasCorrect = ['correct_blue', 'correct_yellow', 'retry_yellow', 'O', 'TO', 'RO'].includes(currentStatus || '');
 
       const { setRecheckToast, processCorrectAnswer, forceUpdate, setCanvasClearTrigger } = callbacksRef.current;
 
@@ -305,8 +305,8 @@ export function useClinicRealtime({
         });
         
         const channel = supabaseClient.channel(channelName)
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer' }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
               if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
           });
@@ -425,7 +425,6 @@ export function useClinicRealtime({
          });
       }
     } else if (payload.action === 'force_refresh') {
-      // 🌟 강제 새로고침을 차단하고 튕기지 않게 알림만 띄웁니다!
       if (callbacksRef.current.setRecheckToast) {
           callbacksRef.current.setRecheckToast('🎉 밖에서 채점이 확정되었습니다! (학습 종료 후 포탈에서 확인 가능)');
           setTimeout(() => callbacksRef.current.setRecheckToast(""), 4000);
@@ -545,7 +544,6 @@ export function useClinicRealtime({
       clinicChannelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: mySeatRef.current, action, data: { name: studentInfo.name, studentId: studentInfo.id, ...extra } } });
 
       if (action === 'update_activity' && extra.activity) {
-          const sid = clinicSessionStateRef.current?.id;
           clinicChannelRef.current.track({
               seat: mySeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
               activity: extra.activity, updatedAt: Date.now(),

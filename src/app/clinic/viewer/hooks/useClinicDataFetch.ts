@@ -2,12 +2,12 @@
 import { useState, useCallback } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { resolvePendingHomeworkQuestions } from '@/lib/clinicHomework';
-import { formatMathTextForWeb, getCleanUrl, combineDbHints, textbookHintFields, hydrateHintState } from '../utils';
+import { formatMathTextForWeb, getCleanUrl, safeParseOptions, combineDbHints, textbookHintFields, hydrateHintState } from '../utils';
 
 interface UseClinicDataFetchProps {
   supabaseClient: SupabaseClient;
   studentInfo: { id: string; name: string; classes: string[] };
-  params: { round: number; className: string; weekType: string; assignmentId: string; homeworkIdsStr: string; assignmentIdsStr: string; overdue: boolean };
+  params: { round: number; className: string; weekType: string; assignmentId: string; homeworkIdsStr: string; assignmentIdsStr: string; overdue: boolean; retry?: boolean };
   forceUpdate: () => void;
   refs: {
     studentAnswers: React.MutableRefObject<Record<number, string | null>>;
@@ -21,6 +21,8 @@ interface UseClinicDataFetchProps {
     examAssignmentTotalsRef: React.MutableRefObject<Record<string, number>>;
   };
 }
+
+const NON_TIMED_EXAM_TYPES = ['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사', '미완료과제'];
 
 export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceUpdate, refs }: UseClinicDataFetchProps) {
   const [questions, setQuestions] = useState<any[]>([]);
@@ -92,7 +94,12 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
   const fetchHomeworkSimilarIncorrect = async (sId: string) => {
     try {
       const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, tq_id, question_id, source_type').eq('student_id', sId).eq('source_type', '과제오답').is('resolved_at', null);
-      if (!records || records.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
+      if (!records || records.length === 0) {
+        setIsTimedRound(false);
+        setPendingQCount(`이번 주 시험/과제오답유사: 없음`);
+        setQuestions([]);
+        return;
+      }
 
       let qIds = [...new Set(records.filter((r:any) => r.question_id).map((r:any) => r.question_id))];
       
@@ -130,7 +137,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(qItem.question),
-            imageUrl: getCleanUrl(qItem.image_url), options: typeof qItem.options === 'string' ? JSON.parse(qItem.options) : qItem.options,
+            imageUrl: getCleanUrl(qItem.image_url), options: safeParseOptions(qItem.options),
             answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '',
             hintText: dbHint,
             aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -147,7 +154,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, tq_id: tq.tq_id, question_id: tq.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
-            imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
+            imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), options: safeParseOptions(raw.options),
             answer: String(tq.answer || '').trim(), explanation: raw.explanation || raw.solution || '',
             hintText: dbHint || tbFields.hintText,
             hasHint: !!dbHint || tbFields.hasHint,
@@ -160,7 +167,12 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         }
       });
 
-      if (mapped.length === 0) { setPendingQCount(`이번 주 과제오답유사: 없음`); setQuestions([]); return; }
+      if (mapped.length === 0) {
+        setIsTimedRound(false);
+        setPendingQCount(`이번 주 과제오답유사: 없음`);
+        setQuestions([]);
+        return;
+      }
       
       setIsTimedRound(false);
       setGlobalExamTitle('이번 주 과제오답유사');
@@ -169,14 +181,19 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       
       await loadExistingAnswers(sId, mapped, '이번 주 과제오답유사');
       setQuestions(mapped);
-    } catch(e) {}
+    } catch (e) {
+      console.error('fetchHomeworkSimilarIncorrect error:', e);
+      setPendingQCount('문제를 불러오지 못했습니다.');
+    }
   };
 
-  const fetchWeeklyTest = async (sId: string, week: string, cls: string, assignId: string) => {
+  // 🌟 odd/even 의존성을 없애고 실제 배정된 시험지 종류(exam_type)로 타이머 및 폴백을 자동 판별
+  const fetchWeeklyTest = async (sId: string, _week: string, cls: string, assignId: string) => {
     try {
       let matchedExamId = null; let matchedTitle = null; let matchedAssignId = assignId;
       let displayLabel = '시험';
 
+      // 1. 지정된 assignmentId가 있으면 우선 조회
       if (matchedAssignId) {
         const { data } = await supabaseClient.from('exam_assignment')
           .select('exam_id, exam_master(title, exam_type)')
@@ -192,17 +209,14 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         }
       }
 
-      if (!matchedExamId && week === 'even') {
-        return fetchHomeworkSimilarIncorrect(sId);
-      }
-
+      // 2. 지정된 assignmentId가 없으면 미완료 정규 테스트 -> 오답유사 순으로 탐색
       if (!matchedExamId) {
         const { data: cData } = await supabaseClient.from('class').select('class_id').eq('name', cls).maybeSingle();
         let query = supabaseClient.from('exam_assignment')
           .select('assignment_id, exam_id, exam_master!inner(title, exam_type)')
           .eq('student_id', sId)
-          .not('exam_master.exam_type', 'in', '("과제", "과제프린트", "오답프린트", "오답유사", "과제오답유사", "미완료과제")')
-          .not('status', 'in', '("제출완료", "채점완료", "완료")');
+          .not('exam_master.exam_type', 'in', '("과제", "과제프린트", "오답프린트", "오답", "오답유사", "과제오답유사", "미완료과제")')
+          .not('status', 'in', '("제출완료", "채점완료", "완료", "최종완료")');
 
         if (cData?.class_id) query = query.eq('class_id', cData.class_id);
 
@@ -214,13 +228,34 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
           matchedTitle = master?.title;
           displayLabel = master?.exam_type || '시험';
+        } else {
+          // 정규 테스트가 없으면 배정된 오답유사/과제오답유사 시험지가 있는지 확인
+          let simQuery = supabaseClient.from('exam_assignment')
+            .select('assignment_id, exam_id, exam_master!inner(title, exam_type)')
+            .eq('student_id', sId)
+            .in('exam_master.exam_type', ['오답유사', '과제오답유사'])
+            .not('status', 'in', '("제출완료", "채점완료", "완료", "최종완료")');
+
+          if (cData?.class_id) simQuery = simQuery.eq('class_id', cData.class_id);
+          const { data: simData } = await simQuery.order('created_at', { ascending: false }).limit(1).maybeSingle();
+
+          if (simData) {
+            matchedAssignId = String(simData.assignment_id);
+            matchedExamId = simData.exam_id;
+            const master: any = Array.isArray(simData.exam_master) ? simData.exam_master[0] : simData.exam_master;
+            matchedTitle = master?.title;
+            displayLabel = master?.exam_type || '과제오답유사';
+          }
         }
       }
 
+      // 3. 배정된 시험지가 아예 없으면 과제오답 기록(student_incorrect_record) 폴백 시도
       if (!matchedExamId) {
-        setPendingQCount(`이번 주 시험: 없음`);
-        setQuestions([]); return;
+        return fetchHomeworkSimilarIncorrect(sId);
       }
+
+      const isTimedExam = !NON_TIMED_EXAM_TYPES.includes(displayLabel) && !params.retry;
+      setIsTimedRound(isTimedExam);
 
       setGlobalExamTitle(matchedTitle || `이번 주 ${displayLabel}`);
       const { data: items } = await supabaseClient.from('exam_item').select('*, question_db(*)').eq('exam_id', matchedExamId).order('sort_order', { ascending: true });
@@ -234,7 +269,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           index: i, uid: 'rq' + i + '_' + Date.now(), question_id: it.question_db.question_id, record_id: null,
           examAssignmentId: matchedAssignId,
           source: matchedTitle || `이번 주 ${displayLabel}`, questionText: formatMathTextForWeb(it.question_db.question),
-          imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
+          imageUrl: getCleanUrl(it.question_db.image_url), options: safeParseOptions(it.question_db.options),
           answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
           hintText: dbHint,
           aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -244,6 +279,10 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       });
       refs.totalQuestionsInRoundRef.current = mapped.length;
       refs.hintState.current = hydrateHintState(sId, mapped);
+
+      if (!isTimedExam && matchedAssignId) {
+        refs.examAssignmentTotalsRef.current[matchedAssignId] = mapped.length;
+      }
 
       const is60MinTest = ['중간평가', '중간테스트', '분기평가', '분기테스트'].includes(displayLabel) || 
                           ['중간평가', '중간테스트', '분기평가', '분기테스트'].some(k => (matchedTitle || '').includes(k));
@@ -255,9 +294,12 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       const titleBase = matchedTitle || `이번 주 ${displayLabel}`;
       const limitText = is60MinTest ? '60분 제한' : '20분 제한';
       
-      await loadExistingAnswers(sId, mapped, ((params.round === 1 && week === 'odd') || params.round === 4) ? `${titleBase} (${limitText})` : titleBase);
+      await loadExistingAnswers(sId, mapped, isTimedExam ? `${titleBase} (${limitText})` : titleBase);
       setQuestions(mapped);
-    } catch(e) {}
+    } catch (e) {
+      console.error('fetchWeeklyTest error:', e);
+      setPendingQCount('시험 문제를 불러오지 못했습니다.');
+    }
   };
 
   const fetchAssignedExamQuestions = async (assignId: string) => {
@@ -278,7 +320,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         examAssignmentId: assignId, question_id: it.question_db.question_id,
         bookId: Number(assignId), bookType, bookTitle: title || '배정된 과제',
         source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
-        imageUrl: getCleanUrl(it.question_db.image_url), options: typeof it.question_db.options === 'string' ? JSON.parse(it.question_db.options) : it.question_db.options,
+        imageUrl: getCleanUrl(it.question_db.image_url), options: safeParseOptions(it.question_db.options),
         answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
         hintText: dbHint,
         aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -298,6 +340,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
   const fetchHomework = async (sId: string, hwIdsStr: string, assignId: string = '', assignIdsStr: string = '') => {
     try {
+      setIsTimedRound(false);
       const hwIdsArray = hwIdsStr ? hwIdsStr.split(',').map(Number).filter(n => !isNaN(n)) : [];
       const assignIdsArray = assignIdsStr ? assignIdsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
       const [{ rows: qs }, { rows: examRows, title: examTitle }] = await Promise.all([
@@ -319,7 +362,6 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
       const hwQIds = qs.map((qItem: any) => qItem.question_id).filter(Boolean);
       const { data: freshQDb } = hwQIds.length > 0 
-        // 🌟 버그 수정: page_number 제거하고 final_printed_page, detected_page_num 안전하게 추가
         ? await supabaseClient.from('question_db').select('question_id, step_1_concept, step_2_approach, final_printed_page, detected_page_num, question_number').in('question_id', hwQIds)
         : { data: [] };
       const freshQDbMap = new Map((freshQDb || []).map((qItem: any) => [qItem.question_id, qItem]));
@@ -333,7 +375,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: qItem.homeworkId, tq_id: qItem.tq_id, question_id: qItem.question_id,
           source: qItem.homeworkTitle || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
-          imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || qItem.image_url), options: typeof raw.options === 'string' ? JSON.parse(raw.options) : raw.options,
+          imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || qItem.image_url), options: safeParseOptions(raw.options),
           answer: String(qItem.answer || '').trim(), explanation: raw.explanation || raw.solution || '', 
           hintText: dbHint || tbFields.hintText,
           hasHint: !!dbHint || tbFields.hasHint,
@@ -352,11 +394,15 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       
       await loadExistingAnswers(sId, mapped, baseTitle);
       setQuestions(mapped);
-    } catch(e){}
+    } catch (e) {
+      console.error('fetchHomework error:', e);
+      setPendingQCount('과제를 불러오지 못했습니다.');
+    }
   };
 
   const fetchIncorrect = async (sId: string) => {
     try {
+      setIsTimedRound(false);
       const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, question_id, source_type, question_db(*)').eq('student_id', sId).is('resolved_at', null).in('status', ['X', 'TX', 'T', '☆', 'B', 'TO', 'RO']);
       if (!records || records.length === 0) { setPendingQCount(`대기 중인 오답: 0문제`); setQuestions([]); return; }
       
@@ -366,7 +412,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
           source: r.source_type || '오답노트', questionText: formatMathTextForWeb(qItem.question),
-          imageUrl: getCleanUrl(qItem.image_url), options: typeof qItem.options === 'string' ? JSON.parse(qItem.options) : qItem.options,
+          imageUrl: getCleanUrl(qItem.image_url), options: safeParseOptions(qItem.options),
           answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '', 
           hintText: dbHint,
           aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -379,13 +425,14 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       
       await loadExistingAnswers(sId, mapped, '대기 중인 오답');
       setQuestions(mapped);
-    } catch(e){}
+    } catch (e) {
+      console.error('fetchIncorrect error:', e);
+      setPendingQCount('오답 문제를 불러오지 못했습니다.');
+    }
   };
 
   const fetchQuestions = useCallback(async () => {
     const { round, weekType, className, assignmentId, homeworkIdsStr, assignmentIdsStr } = params;
-    const isTimed = (round === 1 && weekType === 'odd') || round === 4;
-    setIsTimedRound(isTimed);
 
     if (round === 1 || round === 4) await fetchWeeklyTest(studentInfo.id, weekType, className, assignmentId);
     else if (round === 2 || round === 3) await fetchHomework(studentInfo.id, homeworkIdsStr, assignmentId, assignmentIdsStr);

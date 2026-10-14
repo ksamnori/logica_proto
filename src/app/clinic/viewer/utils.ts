@@ -10,7 +10,11 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-flash-latest';
 export const PEN_COLORS = ['#1C2530', '#DC2626', '#2563EB', '#16A34A'];
 export const ERASER_WIDTH_MULTIPLIER = 6;
 
-export const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+// 🌟 수퍼바이저·학생포털과 동일하게 오전 6시 리셋 기준 적용
+export const getKSTDateString = () => {
+  const kstAdjusted = new Date(Date.now() + 9 * 60 * 60 * 1000 - 6 * 60 * 60 * 1000);
+  return kstAdjusted.toISOString().split('T')[0];
+};
 
 export const formatMathTextForWeb = (text: string) => {
   if (!text) return "";
@@ -37,6 +41,20 @@ export const getCleanUrl = (url: string) => {
     validUrl = SUPABASE_URL + '/storage/v1/object/public/question_images/' + validUrl; 
   }
   return validUrl;
+};
+
+export const safeParseOptions = (options: any): string[] => {
+  if (!options) return [];
+  if (Array.isArray(options)) return options;
+  if (typeof options === 'string') {
+    try {
+      const parsed = JSON.parse(options);
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (e) {
+      return [];
+    }
+  }
+  return [];
 };
 
 export const CIRCLED_DIGITS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
@@ -145,7 +163,6 @@ export const textbookHintFields = (bookType: string | null | undefined) => {
   return { hasHint: true, needsAiHint: true, hintText: null };
 };
 
-// 🌟 DB에 저장된 빈칸(" ", "null" 텍스트 등)을 완벽하게 걸러내어, 실제 데이터가 있을 때만 HTML로 병합합니다.
 export const combineDbHints = (step1: any, step2: any) => {
   const s1 = String(step1 || '').trim();
   const s2 = String(step2 || '').trim();

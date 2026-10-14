@@ -12,7 +12,6 @@ export const QuestionDisplay = React.memo(function QuestionDisplay({ html, image
     }
   }, [html]);
   
-  // 🌟 태그 문제 복원 보강
   const processedHtml = html
       .replace(/&lt;\s*b\s*&gt;/gi, '<b>')
       .replace(/&lt;\s*\/\s*b\s*&gt;/gi, '</b>')

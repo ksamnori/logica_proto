@@ -4,7 +4,7 @@
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@supabase/supabase-js";
-import { closeSessionAtLimit, setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway, checkAndBumpToggleCooldown } from "@/lib/clinicSession";
+import { setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway, checkAndBumpToggleCooldown } from "@/lib/clinicSession";
 import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from "@/hooks/useToggleCooldown";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { spendPoints } from "@/app/actions/shopPoints";
@@ -24,8 +24,8 @@ import { ViewerModals } from "./components/ViewerModals";
 import { HintRevealBox } from "./components/HintRevealBox"; 
 
 import {
-  SUPABASE_URL, SUPABASE_ANON_KEY, ROUND1_TIME_LIMIT_SECONDS,
-  PEN_COLORS, ERASER_WIDTH_MULTIPLIER, getKSTDateString, formatMathTextForWeb,
+  SUPABASE_URL, SUPABASE_ANON_KEY,
+  PEN_COLORS, formatMathTextForWeb,
   saveHintState, keypadAnswersMatch, isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion
 } from "./utils";
 
@@ -69,7 +69,7 @@ export default function ClinicViewer() {
   const [recheckToast, setRecheckToast] = useState("");
   const [myAwayActive, setMyAwayActive] = useState(false);
   const [pendingRecheckReview, setPendingRecheckReview] = useState<any[]>([]);
-  const [sessionInfo, setSessionInfo] = useState<any>(null);
+  const [, setSessionInfo] = useState<any>(null);
   const [canvasClearTrigger, setCanvasClearTrigger] = useState(0); 
 
   const callCooldown = useToggleCooldown(TOGGLE_COOLDOWN_MS);
@@ -157,7 +157,7 @@ export default function ClinicViewer() {
     };
   }, []);
 
-  const { questions, setQuestions, pendingQCount, globalExamTitle, isTimedRound: fetchedIsTimedRound, fetchQuestions } = useClinicDataFetch({
+  const { questions, pendingQCount, globalExamTitle, isTimedRound: fetchedIsTimedRound, fetchQuestions } = useClinicDataFetch({
     supabaseClient, studentInfo, params, forceUpdate,
     refs: { studentAnswers, studentDrawings, keypadAnswers, answerModes, qBoxStatus, totalQuestionsInRoundRef, hintState, correctSolvedCountRef, examAssignmentTotalsRef }
   });
@@ -207,7 +207,7 @@ export default function ClinicViewer() {
   const [isBatchGrading, setIsBatchGrading] = useState(false); 
 
   const [resultModal, setResultModal] = useState<any>(null);
-  const [timeUpModal, setTimeUpModal] = useState(false);
+  const [timeUpModal] = useState(false);
   const [sessionTimeUpModal, setSessionTimeUpModal] = useState(false);
   const [submitConfirmModal, setSubmitConfirmModal] = useState(false);
   const [submitResultModal, setSubmitResultModal] = useState(false);
@@ -269,67 +269,14 @@ export default function ClinicViewer() {
     forceUpdate();
   }, [questions, params]);
 
-  const questionsRef = useRef(questions);
-  useEffect(() => { questionsRef.current = questions; }, [questions]);
-
+  // 객관식 보기(Options) 수식 MathJax 렌더링 보장
   useEffect(() => {
-    if (!isStarted || questionsRef.current.length === 0) return;
-    
-    const currentQs = questionsRef.current;
-    const isHomework = !!currentQs[0]?.homework_id;
-    const tableName = isHomework ? 'student_homework_answer' : 'student_answer';
-    const channelId = `sv_sync_grading_${studentInfo.id}_${Date.now()}`;
-
-    const channel = supabaseClient.channel(channelId)
-      .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
-        const newData = payload.new as any;
-        if (!newData || String(newData.student_id) !== String(studentInfo.id)) return;
-        
-        const isMatch = isHomework 
-          ? String(newData.homework_id) === String(currentQs[0].homework_id)
-          : true; 
-          
-        if (isMatch) {
-          const targetQId = isHomework ? newData.tq_id : newData.question_id;
-          const idx = questionsRef.current.findIndex((q: any) => String(isHomework ? q.tq_id : q.question_id) === String(targetQId));
-          
-          if (idx !== -1) {
-             const code = newData.grading_code;
-             if (code) {
-                let isChanged = false;
-
-                if (recheckState.current[idx] === 'pending') {
-                   recheckState.current[idx] = null;
-                   isChanged = true;
-                }
-
-                if (['O', 'TO', 'RO'].includes(code)) {
-                   const expectedStatus = code === 'O' ? 'correct_blue' : (code === 'TO' ? 'correct_yellow' : 'retry_yellow');
-                   if (!['correct_blue', 'correct_yellow', 'retry_yellow'].includes(qBoxStatus.current[idx])) {
-                      qBoxStatus.current[idx] = expectedStatus;
-                      correctSolvedCountRef.current++;
-                      isChanged = true;
-                      setRecheckToast(`🎉 선생님이 ${idx + 1}번을 맞게 채점했어요!`);
-                      setTimeout(() => setRecheckToast(""), 4000);
-                   }
-                } else if (['X', 'TX', '☆', 'B'].includes(code)) {
-                   if (qBoxStatus.current[idx] !== 'wrong_red') {
-                      qBoxStatus.current[idx] = 'wrong_red';
-                      isChanged = true;
-                      setRecheckToast(`❌ 선생님이 ${idx + 1}번을 오답 처리했어요.`);
-                      setTimeout(() => setRecheckToast(""), 4000);
-                   }
-                }
-                
-                if (isChanged) forceUpdate();
-             }
-          }
-        }
-      })
-      .subscribe();
-
-    return () => { supabaseClient.removeChannel(channel); };
-  }, [isStarted, params, studentInfo.id, forceUpdate]);
+    if (!isStarted || !optionsRef.current) return;
+    const mj = (window as any).MathJax;
+    if (mj && mj.typesetPromise) {
+      mj.typesetPromise([optionsRef.current]).catch((err: any) => console.error("MathJax 보기 타이프셋 에러:", err));
+    }
+  }, [isStarted, currentQIndex, questions]);
 
   const initMathJax = () => {
     if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
@@ -474,7 +421,6 @@ export default function ClinicViewer() {
     setTimeout(() => { if ((window as any).MathJax) (window as any).MathJax.typesetPromise(); }, 100);
   };
 
-  // 🌟 [수정] 401 권한 버그 해결: 학생용 API는 토큰을 검증하지 않으므로 헤더에서 제거합니다.
   const gradeHandwrittenAnswerWithGemini = async (dataUrl: string, correct: string, qText: string): Promise<any> => {
     const res = await fetch('/api/clinic-grade', { 
       method: 'POST', 
@@ -486,7 +432,6 @@ export default function ClinicViewer() {
     return data;
   };
 
-  // 🌟 [수정] 학생용 API 헤더 복구
   const generateAiHint = async (qText: string): Promise<string> => {
     try {
       const res = await fetch('/api/clinic-hint', { 
@@ -730,7 +675,6 @@ export default function ClinicViewer() {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
       if (qItem.record_id) { await bumpIncorrectRecord(qItem.record_id, gotTaHint ? 'TX' : 'X', false); await appendToExistingIncorrectPrint(qItem); }
       if (!isTimedRound) {
-        // 🌟 [핵심 버그 수정 1] 개별 문제의 소속(qItem.examAssignmentId)을 먼저 찾습니다!
         const assignId = qItem.examAssignmentId || params.assignmentId;
         
         if (assignId) {
@@ -828,7 +772,6 @@ export default function ClinicViewer() {
     }
 
     if (!isTimedRound) {
-        // 🌟 [핵심 버그 수정 2] 개별 문제의 소속(qItem.examAssignmentId)을 먼저 찾습니다!
         const assignId = qItem.examAssignmentId || params.assignmentId;
         
         if (assignId) {
@@ -1261,7 +1204,7 @@ export default function ClinicViewer() {
                       <span className={`text-base font-bold transition-transform ${keypadCollapsed ? 'rotate-180' : ''}`}>◁</span>
                     </button>
                     <button onClick={toggleAnswerMode} className="text-lg md:text-xl font-bold text-brand bg-blue-50 px-8 py-3.5 rounded-xl border-[3px] border-blue-300 hover:bg-blue-100 shadow-sm transition-colors flex items-center gap-2">
-                      <span className="text-2xl md:text-3xl">✍️</span> 손글씨로 풀기
+                      <span className="text-2xl md:text-3xl">{curAnsMode === 'pen' ? '🔢' : '✍️'}</span> {curAnsMode === 'pen' ? '키패드로 풀기' : '손글씨로 풀기'}
                     </button>
                   </div>
                 </div>
@@ -1386,9 +1329,10 @@ export default function ClinicViewer() {
         autoLeaveSec={autoLeaveSec}
         correctSolvedCount={correctSolvedCountRef.current}
         totalQuestions={totalQuestionsInRoundRef.current}
-        unansweredCount={questions.filter((_, i) => !studentAnswers.current[i]).length}
+        unansweredCount={questions.filter((_, i) => !studentAnswers.current[i] || studentAnswers.current[i] === '미입력').length}
         logoutTarget={logoutTarget}
         onLeave={handleLeaveByTarget}
+        timeLimitMinutes={dynamicTimeLimitMin}
       />
     </div>
   );

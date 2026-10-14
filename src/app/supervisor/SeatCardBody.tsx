@@ -25,7 +25,6 @@ export default function SeatCardBody({
     const isSubmitted = student.status === 'submitted';
     const isOffline = student.status === 'offline';
     
-    // 🌟 포털 대기 상태 감지 (온라인 상태이면서 포털에 머무를 때)
     const isPortalIdle = student.status === 'idle' && (student.activity?.includes('포털') || !student.activity);
 
     const badgeBg = isOffline ? 'bg-slate-500 text-white' 
@@ -36,7 +35,6 @@ export default function SeatCardBody({
                   : isPortalIdle ? 'bg-indigo-100 text-indigo-700' 
                   : 'bg-emerald-100 text-emerald-700';
 
-    // 🌟 대기중일 때는 '온라인' 대신 확실하게 '대기중' 배지를 띄워줍니다
     const badgeText = isOffline ? '⚫ 오프라인' 
                     : isCall ? `🚨 ${Object.keys(student.calls || {}).length}` 
                     : student.status === 'hint' ? '💡 힌트' 
@@ -73,7 +71,6 @@ export default function SeatCardBody({
                 <div className="text-[10px] font-bold text-emerald-600 truncate leading-none mt-0.5">
                     {student.classes?.length > 0 ? student.classes[0] : '반 없음'}
                 </div>
-                {/* 🌟 텍스트 증발 버그 픽스: truncate 속성을 자식 span으로 이동시키고, flex 구조를 안전하게 개조했습니다 */}
                 <div className="text-[10px] font-bold text-indigo-600 flex items-center gap-1 mt-0.5 min-w-0">
                     <span className="truncate leading-none">{student.activity || '-'}</span>
                     {student.isTyping && <span className="shrink-0 animate-pulse leading-none">✍️</span>}

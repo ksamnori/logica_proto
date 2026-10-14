@@ -11,14 +11,10 @@ export const DEFAULT_CLINIC_DURATION_MS = 60 * 60 * 1000;
 export const ALERT_THRESHOLD_MS = 3 * 60 * 1000;
 export const LOG_AUTO_EXPIRE_MS = 5 * 60 * 1000;
 export const PENDING_GUARD_MS = 8000;
-// 학생 화면의 하트비트 주기(15초)보다 충분히 여유를 둔 타임아웃(45초) — 이 시간 동안
-// last_seen_at 갱신이 없으면 전원 종료/크래시 등으로 보고 비정상 종료 처리한다.
 export const HEARTBEAT_TIMEOUT_MS = 45 * 1000;
 
 // 한국 표준시(KST) 기준 날짜 문자열 구하기 (오전 6시 리셋)
 export const getKSTDateString = () => {
-    // 🌟 오전 6시 리셋을 위해 KST(UTC+9)에서 6시간을 빼줍니다.
-    // 즉, 새벽 5시 59분까지는 어제 날짜로 계산되어 리셋되지 않습니다.
     const kstAdjusted = new Date(Date.now() + 9 * 60 * 60 * 1000 - 6 * 60 * 60 * 1000);
     return kstAdjusted.toISOString().split('T')[0];
 };
@@ -39,7 +35,6 @@ export const formatShortAgo = (ms: number) => {
     return `${Math.floor(sec / 60)}분`;
 };
 
-// 시:분만 표시 (클리닉 이용 기록용) — 예: 5400000ms -> "1:30"
 export const formatHM = (ms: number) => {
     if (ms < 0 || isNaN(ms)) ms = 0;
     const totalMin = Math.floor(ms / 60000);
@@ -48,5 +43,4 @@ export const formatHM = (ms: number) => {
     return `${h}:${String(m).padStart(2, '0')}`;
 };
 
-// 시각(HH:MM) 표시 (클리닉 이용 기록의 시작/종료 시각용)
 export const formatClockTime = (ms: number) => new Date(ms).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });

@@ -1,7 +1,7 @@
 // src/app/supervisor/useSupervisorData.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabaseClient, CLINIC_ROOM, getKSTDateString, DEFAULT_CLINIC_DURATION_MS, LOG_AUTO_EXPIRE_MS, PENDING_GUARD_MS, HEARTBEAT_TIMEOUT_MS, formatDuration } from './supervisorUtils';
-import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStudent, END_REQUEST_COOLDOWN_MS, clearActiveCall, clearActiveRecheck, clearAway } from '@/lib/clinicSession';
+import { supabaseClient, CLINIC_ROOM, getKSTDateString, DEFAULT_CLINIC_DURATION_MS, LOG_AUTO_EXPIRE_MS, PENDING_GUARD_MS, HEARTBEAT_TIMEOUT_MS } from './supervisorUtils';
+import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStudent, END_REQUEST_COOLDOWN_MS, clearAway } from '@/lib/clinicSession';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
 import { Seat, SEAT_LAYOUT_UPDATED_EVENT, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
@@ -171,12 +171,9 @@ export function useSupervisorData() {
         const studentId = studentsRef.current[seat]?.studentId;
         const msg = { type: 'broadcast', event: 'ta_action', payload: { seat, studentId, action, ...extra, timestamp: Date.now() } };
         
-        // 🌟 웹소켓이 정상 연결되어 있을 때만 안전하게 전송 (경고 및 에러 원천 차단)
         if (channelRef.current.state === 'joined') {
             channelRef.current.send(msg);
         } else {
-            // 끊겨 있다면 무리하게 우회 전송하지 않고 조용히 재연결만 시도
-            // (핵심 데이터는 이미 DB에 업데이트되었으므로 학생 패드가 복구 시 자동 동기화됨)
             setReconnectTrigger(p => p + 1);
         }
     };
@@ -234,6 +231,12 @@ export function useSupervisorData() {
             
             const seat = Object.keys(studentsRef.current).find(s => studentsRef.current[s].studentId === studentId);
             if (seat) {
+                const sid = studentsRef.current[seat]?.sessionId;
+                if (sid) {
+                    const { data: sessData } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
+                    const newCalls = { ...(sessData?.active_calls || {}), REFRESH: Date.now() };
+                    await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+                }
                 sendToStudent(seat, 'force_refresh'); 
             }
             
@@ -681,7 +684,7 @@ export function useSupervisorData() {
 
                     if (action === 'update_activity') { 
                         st[activeSeat].activity = data.activity; 
-                        appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });
+                        appendLog('border-blue-400', 'bg-blue-50 text-blue-700', '활동갱신', `[${activeSeat}] ${data.name || st[activeSeat].name || '학생'} 상태 갱신`, data.activity, 'update_activity', { seat: activeSeat });
                     }
                     else if (action === 'typing') {
                         st[activeSeat].isTyping = true;
@@ -1035,18 +1038,35 @@ export function useSupervisorData() {
         const targetRecheck = st.rechecks?.[uid];
         const qNum = targetRecheck?.qNum;
 
-        if (verdict === 'correct') {
-           if (targetRecheck) {
-               if (targetRecheck.recordId) {
-                   await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
-               } else if (targetRecheck.tqId || targetRecheck.questionId) {
-                   const filterCol = targetRecheck.tqId ? 'tq_id' : 'question_id';
-                   const filterVal = targetRecheck.tqId ?? targetRecheck.questionId;
-                   await supabaseClient.from('student_incorrect_record').delete()
-                       .eq('student_id', st.studentId)
-                       .eq(filterCol, filterVal);
-               }
-           }
+        if (verdict === 'correct' && targetRecheck) {
+            if (targetRecheck.deferredWrite) {
+                const nowIso = new Date().toISOString();
+                if (targetRecheck.recordId) {
+                    await supabaseClient.from('student_incorrect_record').update({ status: 'O', resolved_at: nowIso }).eq('record_id', targetRecheck.recordId);
+                } else if (st.studentId && (targetRecheck.tqId || targetRecheck.questionId)) {
+                    const filterCol = targetRecheck.tqId ? 'tq_id' : 'question_id';
+                    const filterVal = targetRecheck.tqId ?? targetRecheck.questionId;
+                    await supabaseClient.from('student_incorrect_record').update({ status: 'O', resolved_at: nowIso }).eq('student_id', st.studentId).eq(filterCol, filterVal).is('resolved_at', null);
+                }
+                if (targetRecheck.examAssignmentId && targetRecheck.questionId && st.studentId) {
+                    await supabaseClient.from('student_answer').update({ is_correct: true, grading_code: 'O' }).eq('exam_assignment_id', targetRecheck.examAssignmentId).eq('student_id', st.studentId).eq('question_id', targetRecheck.questionId);
+                    const { data: rows } = await supabaseClient.from('student_answer').select('is_correct').eq('exam_assignment_id', targetRecheck.examAssignmentId).eq('student_id', st.studentId);
+                    if (rows && rows.length > 0) {
+                        const total = Math.round((rows.filter((r: any) => r.is_correct).length / rows.length) * 100);
+                        await supabaseClient.from('exam_assignment').update({ total_score: total }).eq('assignment_id', targetRecheck.examAssignmentId);
+                    }
+                }
+            } else {
+                if (targetRecheck.recordId) {
+                    await supabaseClient.from('student_incorrect_record').delete().eq('record_id', targetRecheck.recordId);
+                } else if (targetRecheck.tqId || targetRecheck.questionId) {
+                    const filterCol = targetRecheck.tqId ? 'tq_id' : 'question_id';
+                    const filterVal = targetRecheck.tqId ?? targetRecheck.questionId;
+                    await supabaseClient.from('student_incorrect_record').delete()
+                        .eq('student_id', st.studentId)
+                        .eq(filterCol, filterVal);
+                }
+            }
         }
 
         if (st.sessionId) {

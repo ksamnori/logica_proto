@@ -26,6 +26,7 @@ interface ViewerModalsProps {
   unansweredCount: number;
   logoutTarget: 'portal' | 'login';
   onLeave: (target: 'portal' | 'login') => void;
+  timeLimitMinutes?: number;
 }
 
 export function ViewerModals({
@@ -35,7 +36,8 @@ export function ViewerModals({
   submitConfirmModal, setSubmitConfirmModal, onSubmitConfirm,
   submitResultModal, pendingRecheckReview, requestRecheckForReviewItem,
   recheckToast, autoLeaveSec,
-  correctSolvedCount, totalQuestions, unansweredCount, logoutTarget, onLeave
+  correctSolvedCount, totalQuestions, unansweredCount, logoutTarget, onLeave,
+  timeLimitMinutes = 20
 }: ViewerModalsProps) {
   return (
     <>
@@ -101,7 +103,7 @@ export function ViewerModals({
           <div className="bg-white rounded-2xl shadow-2xl p-10 w-full max-w-sm text-center">
             <div className="text-6xl mb-4">⏰</div>
             <h3 className="text-2xl font-bold text-slate-800 mb-2">시간이 모두 지났습니다!</h3>
-            <p className="text-sm text-slate-500 font-bold mb-4">20분 제한 시간이 모두 지났어요.<br/>지금까지 입력한 답안이 제출됩니다.</p>
+            <p className="text-sm text-slate-500 font-bold mb-4">{timeLimitMinutes}분 제한 시간이 모두 지났어요.<br/>지금까지 입력한 답안이 제출됩니다.</p>
             <div className="bg-slate-50 border border-slate-200 rounded-xl py-3 mb-6">
               <p className="text-xs font-bold text-slate-400 mb-1">정답률</p>
               <p className="text-2xl font-bold text-brand">{correctSolvedCount}/{totalQuestions}</p>

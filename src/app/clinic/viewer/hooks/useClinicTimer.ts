@@ -24,7 +24,7 @@ export function useClinicTimer({
   const [clinicRemainingStr, setClinicRemainingStr] = useState("60:00");
   const [isClinicUrgent, setIsClinicUrgent] = useState(false);
   const [roundRemainingSec, setRoundRemainingSec] = useState(ROUND1_TIME_LIMIT_SECONDS);
-  const [isTimerInitialized, setIsTimerInitialized] = useState(false); // 🌟 동적 타이머 초기화 여부
+  const [isTimerInitialized, setIsTimerInitialized] = useState(false);
 
   useEffect(() => {
     // 1. 우측 상단 전체 세션 타이머
@@ -54,14 +54,13 @@ export function useClinicTimer({
     let roundTimer: NodeJS.Timeout | null = null;
 
     if (isStarted && isTimedRound && !timeIsUp) {
-      // 🌟 타이머 시작 직전, DataFetch 훅에서 세팅해 둔 시간 제한(3600 or 1200)을 불러옵니다.
       if (!isTimerInitialized) {
          const dynamicLimit = (typeof window !== 'undefined' && (window as any).__dynamicTimeLimit) 
                               ? (window as any).__dynamicTimeLimit 
                               : ROUND1_TIME_LIMIT_SECONDS;
          setRoundRemainingSec(dynamicLimit);
          setIsTimerInitialized(true);
-         return; // 다음 렌더링에 interval 등록
+         return () => { clearInterval(sessionTimer); };
       }
 
       roundTimer = setInterval(() => {

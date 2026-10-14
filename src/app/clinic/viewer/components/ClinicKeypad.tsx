@@ -52,7 +52,6 @@ export function ClinicKeypad({
       if (k === '/') label = '분수 ( / )';
     }
     return (
-      // 🌟 잘림 현상 방지를 위해 버튼 높이를 h-10 -> h-9 (md:h-11) 로 미세하게 축소
       <button key={k} onClick={() => pressKeypad(k)} className={`h-9 md:h-11 rounded-lg font-bold transition-colors shadow-sm border border-slate-200 ${btnClass}`}>
         {label}
       </button>
@@ -82,7 +81,6 @@ export function ClinicKeypad({
       </div>
       
       <div className={`flex flex-col flex-1 overflow-y-auto custom-scrollbar transition-all duration-300 ${keypadCollapsed ? 'max-h-0 opacity-0' : 'max-h-[800px] opacity-100'}`}>
-        {/* 🌟 pb-4 추가 및 max-h 완화로 밑부분이 잘리는 현상 방어 */}
         <div className="grid grid-cols-4 gap-1.5 pt-2 pb-4 flex-1">
           <button onClick={() => pressKeypad(' ')} className="col-span-4 py-1.5 rounded-lg font-bold bg-slate-100 text-slate-500 text-sm hover:bg-slate-200 transition-colors shadow-sm border border-slate-200">대분수 띄어쓰기 ( ␣ )</button>
           {['7','8','9','back','4','5','6','clear','1','2','3','-','0','.','/'].map(renderKeypadButton)}

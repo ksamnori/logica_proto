@@ -70,17 +70,21 @@ export default function LeftPanel({ data }: { data: any }) {
                             {Object.values(activeTAs).sort((a: any, b: any) => a.joined_at - b.joined_at).map((ta: any) => {
                                 const handlingInfo = ta.handling ? ta.handling.split('::') : null;
                                 const handlingSeat = handlingInfo ? handlingInfo[0] : null;
-                                const handlingTarget = handlingInfo ? handlingInfo[1] : null; // qNum 또는 uid
+                                const handlingTarget = handlingInfo ? handlingInfo[1] : null;
                                 
                                 const studentObj = handlingSeat ? activeStudents[handlingSeat] : null;
                                 
-                                // 🌟 [핵심 방어 로직] 
-                                // 조교가 '상담 중'이라고 주장해도, 실제 학생의 호출(calls)이나 재확인(rechecks) 큐에
-                                // 해당 항목이 실제로 살아있는지 팩트체크(Cross-check) 합니다. 우측에서 지우면 즉시 대기 중으로 바뀝니다.
                                 let isReallyHandling = false;
+                                let handlingDesc = '';
                                 if (studentObj && handlingTarget) {
-                                    if (studentObj.calls && studentObj.calls[handlingTarget] !== undefined) isReallyHandling = true;
-                                    if (studentObj.rechecks && studentObj.rechecks[handlingTarget] !== undefined) isReallyHandling = true;
+                                    if (studentObj.calls && studentObj.calls[handlingTarget] !== undefined) {
+                                        isReallyHandling = true;
+                                        handlingDesc = handlingTarget === 'general' ? '일반 호출 상담 중' : `${handlingTarget}번 문항 상담 중`;
+                                    } else if (studentObj.rechecks && studentObj.rechecks[handlingTarget] !== undefined) {
+                                        isReallyHandling = true;
+                                        const rqNum = studentObj.rechecks[handlingTarget]?.qNum;
+                                        handlingDesc = rqNum ? `${rqNum}번 재확인 중` : '재확인 상담 중';
+                                    }
                                 }
 
                                 return (
@@ -92,7 +96,7 @@ export default function LeftPanel({ data }: { data: any }) {
                                         {isReallyHandling ? (
                                             <div className="text-[11px] font-bold text-rose-600 mt-1.5 flex items-center gap-1">
                                                 <span className="w-1.5 h-1.5 rounded-full bg-rose-500 dot-live shrink-0"></span>
-                                                [{handlingSeat}] {studentObj?.name || '학생'} · {handlingTarget === 'general' ? '호출' : handlingTarget}번 상담 중
+                                                [{handlingSeat}] {studentObj?.name || '학생'} · {handlingDesc}
                                             </div>
                                         ) : (
                                             <div className="text-[11px] font-bold text-emerald-600 mt-1.5 flex items-center gap-1">

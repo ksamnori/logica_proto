@@ -22,26 +22,14 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   
   const isDrawing = useRef(false);
   const activePointerId = useRef<number | null>(null);
+  const hasUnsavedStrokeRef = useRef(false);
 
   const lastPos = useRef<{x: number, y: number} | null>(null);
   const lastMid = useRef<{x: number, y: number} | null>(null);
   
   const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const drawWritableHint = (ctx: CanvasRenderingContext2D, w: number, h: number) => {
-    ctx.save();
-    ctx.fillStyle = 'rgba(28,37,48,0.08)';
-    for (let x = 16; x < w; x += 32) {
-      for (let y = 16; y < h; y += 32) {
-        ctx.beginPath();
-        ctx.arc(x, y, 1, 0, Math.PI * 2);
-        ctx.fill();
-      }
-    }
-    ctx.restore();
-  };
-
-  const initCanvas = () => {
+  const initCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const dpr = window.devicePixelRatio || 1;
@@ -52,7 +40,6 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     canvas.width = Math.max(1, Math.round(rect.width * dpr));
     canvas.height = Math.max(1, Math.round(rect.height * dpr));
     
-    // 🌟 버그 수정 1: 특정 패드에서 배경이 까맣게 타버리는 현상을 막기 위해 desynchronized 옵션 제거
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
@@ -65,47 +52,63 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     ctx.lineWidth = isEraserMode ? currentPenWidth * ERASER_WIDTH_MULTIPLIER : currentPenWidth;
     ctx.globalCompositeOperation = isEraserMode ? 'destination-out' : 'source-over';
 
-    drawWritableHint(ctx, rect.width, rect.height);
-
     const saved = studentDrawings.current[qIndex];
     if (saved) {
       const img = new Image();
-      img.onload = () => ctx.drawImage(img, 0, 0, rect.width, rect.height);
+      img.onload = () => {
+        if (!ctxRef.current) return;
+        ctxRef.current.save();
+        ctxRef.current.globalCompositeOperation = 'source-over';
+        ctxRef.current.drawImage(img, 0, 0, rect.width, rect.height);
+        ctxRef.current.restore();
+      };
       img.src = saved;
     }
-  };
+  }, [qIndex, currentPenColor, currentPenWidth, isEraserMode, studentDrawings]);
 
-  const saveCanvasData = useCallback(() => {
-    if (canvasRef.current) {
-      // 🌟 버그 수정 2: 안드로이드 기기에서 webp 투명도를 검은색으로 저장해버리는 버그 방지를 위해 PNG로 변경
-      canvasRef.current.toBlob((blob) => {
-        if (!blob) return;
-        const reader = new FileReader();
-        reader.onloadend = () => {
-          const dataUrl = reader.result as string;
-          studentDrawings.current[qIndex] = dataUrl;
-          studentAnswers.current[qIndex] = dataUrl;
-          forceUpdate();
-        };
-        reader.readAsDataURL(blob);
-      }, 'image/png');
+  const saveCanvasData = useCallback((targetIdx: number = qIndex, syncFlush: boolean = false) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    if (syncFlush) {
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        studentDrawings.current[targetIdx] = dataUrl;
+        studentAnswers.current[targetIdx] = dataUrl;
+        hasUnsavedStrokeRef.current = false;
+        forceUpdate();
+      } catch (e) {}
+      return;
     }
+
+    canvas.toBlob((blob) => {
+      if (!blob) return;
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const dataUrl = reader.result as string;
+        studentDrawings.current[targetIdx] = dataUrl;
+        studentAnswers.current[targetIdx] = dataUrl;
+        hasUnsavedStrokeRef.current = false;
+        forceUpdate();
+      };
+      reader.readAsDataURL(blob);
+    }, 'image/png');
   }, [qIndex, studentDrawings, studentAnswers, forceUpdate]);
 
   useEffect(() => {
+    const currentIdx = qIndex;
     const timer = setTimeout(() => initCanvas(), 50);
-    return () => clearTimeout(timer);
-  }, [qIndex, clearTrigger]);
-
-  useEffect(() => {
     return () => {
+      clearTimeout(timer);
       if (saveTimeoutRef.current) {
         clearTimeout(saveTimeoutRef.current);
         saveTimeoutRef.current = null;
-        saveCanvasData();
+      }
+      if (hasUnsavedStrokeRef.current) {
+        saveCanvasData(currentIdx, true);
       }
     };
-  }, [saveCanvasData]);
+  }, [qIndex, clearTrigger]);
 
   useEffect(() => {
     if (ctxRef.current) {
@@ -119,8 +122,8 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   const getPos = (e: any, canvas: HTMLCanvasElement) => {
     const r = canvas.getBoundingClientRect();
     return { 
-      x: (e.clientX || e.touches?.[0]?.clientX) - r.left, 
-      y: (e.clientY || e.touches?.[0]?.clientY) - r.top 
+      x: (e.clientX ?? e.touches?.[0]?.clientX ?? 0) - r.left, 
+      y: (e.clientY ?? e.touches?.[0]?.clientY ?? 0) - r.top 
     };
   };
 
@@ -133,6 +136,7 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     if (isDrawing.current) return;
     
     isDrawing.current = true;
+    hasUnsavedStrokeRef.current = true;
     activePointerId.current = e.pointerId; 
     
     const canvas = canvasRef.current;
@@ -197,8 +201,9 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
     if (saveTimeoutRef.current) {
       clearTimeout(saveTimeoutRef.current);
     }
+    const targetIdx = qIndex;
     saveTimeoutRef.current = setTimeout(() => {
-      saveCanvasData();
+      saveCanvasData(targetIdx, false);
       saveTimeoutRef.current = null;
     }, 400); 
   };
@@ -206,6 +211,11 @@ export const ClinicCanvas: React.FC<ClinicCanvasProps> = ({
   return (
     <canvas
       ref={canvasRef}
+      style={{
+        backgroundImage: 'radial-gradient(rgba(28, 37, 48, 0.12) 1px, transparent 1px)',
+        backgroundSize: '32px 32px',
+        backgroundPosition: '16px 16px',
+      }}
       className="absolute inset-0 w-full h-full cursor-crosshair touch-none"
       onPointerDown={startDraw}
       onPointerMove={draw}

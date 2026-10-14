@@ -1,7 +1,5 @@
 // src/app/supervisor/SeatGrid.tsx
 import React, { useState, useEffect } from 'react';
-import { supabaseClient } from './supervisorUtils';
-import { clearActiveRecheck } from '@/lib/clinicSession';
 import SeatCanvas from '../clinic/_shared/SeatCanvas';
 import SeatCardBody from './SeatCardBody';
 import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
@@ -12,7 +10,7 @@ export default function SeatGrid({ data }: { data: any }) {
         forceCheckoutModal, setForceCheckoutModal, recheckModal, setRecheckModal, confirmForceCheckout,
         endRequestModal, setEndRequestModal, resolveEndRequest,
         reservationModal, setReservationModal, confirmReservation, cancelReservation,
-        handlePointerDown, adjustClinicTime, taAction, sendToStudent, removeLogsByTypeAndSeat,
+        handlePointerDown, adjustClinicTime, taAction, resolveRecheck,
         seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight,
     } = data;
 
@@ -51,37 +49,9 @@ export default function SeatGrid({ data }: { data: any }) {
         setReservationTime(`${String(resHour).padStart(2, '0')}:${String(Math.min(59, Math.max(0, num))).padStart(2, '0')}`);
     };
 
-    const resolveRecheckAsCorrect = async () => {
-        const seat = recheckModal.seat!;
-        const uid = recheckModal.uid!;
-        const st = activeStudents[seat];
-        const payload = st?.rechecks?.[uid];
-        const sid = st?.sessionId;
-
-        if (payload?.deferredWrite) {
-            const now = new Date().toISOString();
-            if (payload.recordId) {
-                await supabaseClient.from('student_incorrect_record').update({ status: 'O', resolved_at: now }).eq('record_id', payload.recordId);
-            } else if (st?.studentId && (payload.tqId || payload.questionId)) {
-                const filterCol = payload.tqId ? 'tq_id' : 'question_id';
-                const filterVal = payload.tqId ?? payload.questionId;
-                await supabaseClient.from('student_incorrect_record').update({ status: 'O', resolved_at: now }).eq('student_id', st.studentId).eq(filterCol, filterVal).is('resolved_at', null);
-            }
-            if (payload.examAssignmentId && payload.questionId && st?.studentId) {
-                await supabaseClient.from('student_answer').update({ is_correct: true, grading_code: 'O' }).eq('exam_assignment_id', payload.examAssignmentId).eq('student_id', st.studentId).eq('question_id', payload.questionId);
-                const { data: rows } = await supabaseClient.from('student_answer').select('is_correct').eq('exam_assignment_id', payload.examAssignmentId).eq('student_id', st.studentId);
-                if (rows && rows.length > 0) {
-                    const total = Math.round((rows.filter((r: any) => r.is_correct).length / rows.length) * 100);
-                    await supabaseClient.from('exam_assignment').update({ total_score: total }).eq('assignment_id', payload.examAssignmentId);
-                }
-            }
-        }
-
-        if (sid && uid) clearActiveRecheck(supabaseClient, sid, uid);
-        sendToStudent(seat, 'resolve_recheck', { uid, verdict: 'correct' });
-        removeLogsByTypeAndSeat('recheck', seat, Number(uid));
-        setRecheckModal({ isOpen: false, seat: null, uid: null });
-    };
+    const activeRecheckItem = recheckModal.isOpen && recheckModal.seat && recheckModal.uid
+        ? activeStudents[recheckModal.seat]?.rechecks?.[recheckModal.uid]
+        : null;
 
     return (
         <main className="flex-1 p-6 bg-slate-200 overflow-hidden relative flex items-center justify-center">
@@ -147,15 +117,12 @@ export default function SeatGrid({ data }: { data: any }) {
                         return (
                             <div data-seat={seat} style={outerStyle}>
                             <div onPointerDown={(e) => handlePointerDown(e, seat)} style={innerStyle}
-                                 // 🌟 핵심 방어 해제: 바깥 컨테이너의 overflow-hidden을 삭제하여 X버튼이 자유롭게 튀어나오게 합니다.
                                  className={`relative border ${isAway || isSubmitted ? 'border-2' : ''} rounded-xl p-1.5 flex flex-col justify-between shadow-sm cursor-grab active:cursor-grabbing transition-[background-color,border-color,box-shadow,opacity] duration-300 h-full ${cardClass} ${isDragging ? 'opacity-[0.85] ring-4 ring-indigo-500 ring-offset-1' : ''}`}>
                                 
-                                {/* 🌟 z-index를 최대로 끌어올려 무조건 맨 위에 위치시킵니다 */}
                                 <button onClick={(e) => { e.stopPropagation(); setForceCheckoutModal({ isOpen: true, seat }); }} title="강제 퇴실" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-[60] transition-transform hover:scale-125">
                                     <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
                                 </button>
                                 
-                                {/* 내부 컨텐츠 래퍼에만 overflow-hidden을 걸어 내용물이 카드를 벗어나지 않게 합니다 */}
                                 <div className="pointer-events-none overflow-hidden h-full w-full flex flex-col">
                                     <SeatCardBody
                                         seat={seat} student={student} now={now} isMounted={isMounted}
@@ -190,19 +157,27 @@ export default function SeatGrid({ data }: { data: any }) {
                 </div>
             )}
 
-            {/* AI 재확인 모달 */}
+            {/* AI 재확인 모달 — useSupervisorData.resolveRecheck와 완벽히 통합 */}
             {recheckModal.isOpen && (
                 <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-40 px-4">
                     <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
                         <div className="bg-indigo-600 text-white px-5 py-3 flex justify-between items-center">
-                            <span className="font-bold text-sm">🔄 AI 채점 재확인</span>
+                            <span className="font-bold text-sm">
+                                🔄 AI 채점 재확인 {activeRecheckItem?.qNum ? `(${activeRecheckItem.qNum}번 문항)` : ''}
+                            </span>
                             <button onClick={() => setRecheckModal({ isOpen: false, seat: null, uid: null })} className="text-white/80 hover:text-white">✕</button>
                         </div>
                         <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
-                            {activeStudents[recheckModal.seat!]?.rechecks?.[recheckModal.uid!]?.imageDataUrl ? (
+                            {activeRecheckItem?.correctAnswer && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3.5 py-2 flex items-center justify-between">
+                                    <span className="text-xs font-bold text-emerald-700">실제 정답</span>
+                                    <span className="text-sm font-bold text-emerald-900">{activeRecheckItem.correctAnswer}</span>
+                                </div>
+                            )}
+                            {activeRecheckItem?.imageDataUrl ? (
                                 <img 
-                                    className="w-full rounded-lg border border-slate-200" 
-                                    src={activeStudents[recheckModal.seat!]?.rechecks?.[recheckModal.uid!]?.imageDataUrl} 
+                                    className="w-full rounded-lg border border-slate-200 bg-white" 
+                                    src={activeRecheckItem.imageDataUrl} 
                                     alt="답안" 
                                 />
                             ) : (
@@ -210,10 +185,15 @@ export default function SeatGrid({ data }: { data: any }) {
                                     키패드로 입력된 정답입니다. (이미지 없음)
                                 </div>
                             )}
+                            {activeRecheckItem?.recognizedText && (
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2 text-xs text-slate-600">
+                                    <span className="font-bold text-slate-700">AI 인식 답안:</span> {activeRecheckItem.recognizedText}
+                                </div>
+                            )}
                         </div>
                         <div className="flex gap-2 p-4 border-t border-slate-100">
-                            <button onClick={() => { const sid = activeStudents[recheckModal.seat!]?.sessionId; if (sid && recheckModal.uid) clearActiveRecheck(supabaseClient, sid, recheckModal.uid); sendToStudent(recheckModal.seat!, 'resolve_recheck', { uid: recheckModal.uid, verdict: 'incorrect' }); removeLogsByTypeAndSeat('recheck', recheckModal.seat!, Number(recheckModal.uid)); setRecheckModal({ isOpen: false, seat: null, uid: null }); }} className="flex-1 bg-rose-50 text-rose-600 font-bold py-3 rounded-xl">❌ 오답</button>
-                            <button onClick={resolveRecheckAsCorrect} className="flex-1 bg-emerald-600 text-white font-bold py-3 rounded-xl">✅ 정답</button>
+                            <button onClick={() => resolveRecheck(recheckModal.seat!, recheckModal.uid!, 'incorrect')} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold py-3 rounded-xl transition-colors">❌ 오답</button>
+                            <button onClick={() => resolveRecheck(recheckModal.seat!, recheckModal.uid!, 'correct')} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-colors">✅ 정답</button>
                         </div>
                     </div>
                 </div>

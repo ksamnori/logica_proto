@@ -1,3 +1,4 @@
+// src/app/clinic/viewer/components/ClinicQuestionNav.tsx
 import React, { useRef } from 'react';
 import { BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
 
@@ -64,8 +65,8 @@ export function ClinicQuestionNav({
             
             let cls = '';
             if (isCalled) cls = isCurrent ? 'bg-red-600 border-red-600 text-white' : 'bg-red-100 border-red-300 text-red-700';
-            else if (isCurrent) cls = status ? `${statusPalette[status].solid} ring-2 ring-offset-2 ring-brand/50` : 'bg-brand border-brand text-white';
-            else if (status) cls = statusPalette[status].light;
+            else if (isCurrent) cls = status && statusPalette[status] ? `${statusPalette[status].solid} ring-2 ring-offset-2 ring-brand/50` : 'bg-brand border-brand text-white';
+            else if (status && statusPalette[status]) cls = statusPalette[status].light;
             else if (hasAnswer) cls = 'bg-slate-200 border-slate-300 text-slate-700';
             else cls = 'border-slate-200 text-slate-500 hover:bg-slate-50';
 
