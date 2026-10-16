@@ -47,7 +47,12 @@ export function useStep1Data() {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        const [resCat, resItem, resThk] = await Promise.all([fetch(URL_MASTER_CAT), fetch(URL_MASTER_ITEM), fetch(URL_THINKING_CAT)]);
+        const cb = `?t=${Date.now()}`;
+        const [resCat, resItem, resThk] = await Promise.all([
+          fetch(URL_MASTER_CAT + cb, { cache: "no-store" }), 
+          fetch(URL_MASTER_ITEM + cb, { cache: "no-store" }), 
+          fetch(URL_THINKING_CAT + cb, { cache: "no-store" })
+        ])
         const catData = await resCat.json();
         const itemData = await resItem.json();
         const thkData = await resThk.json();

@@ -4,7 +4,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import ProfileModal from "@/components/ProfileModal"; 
+import ProfileModal from "@/components/ProfileModal";
+import AdmissionAnalyticsPage from "@/app/(dashboard)/admission/analytics/page";
 
 export default function HQWorkspacePage() {
   const router = useRouter();
@@ -12,9 +13,14 @@ export default function HQWorkspacePage() {
   const [instId, setInstId] = useState("");
   const [instName, setInstName] = useState("");
   const [instPosition, setInstPosition] = useState(""); 
+  const [instRole, setInstRole] = useState("");
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  const [activeView, setActiveView] = useState<"list" | "room" | "new">("list");
+  // 🌟 좌측 메뉴 상태 ('chat': 기본 메신저 뷰, 'admission_analytics': 진단평가 분석 뷰)
+  const [activeMenu, setActiveMenu] = useState<"chat" | "admission_analytics">("chat");
+
+  // 🌟 페이지 진입 시 우측 탭 기본값을 "new"(조직도)로 설정
+  const [activeView, setActiveView] = useState<"list" | "room" | "new">("new");
   const [rooms, setRooms] = useState<any[]>([]);
   const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
   const [activeRoomName, setActiveRoomName] = useState("");
@@ -49,7 +55,46 @@ export default function HQWorkspacePage() {
     setInstId(id);
     setInstName(localStorage.getItem("logica_instructor_name") || "본사 직원");
     setInstPosition(localStorage.getItem("logica_instructor_position") || "직원");
+    setInstRole(localStorage.getItem("logica_instructor_role") || "");
+
+    // DB에서 최신 직책/권한 정보 확인
+    supabase
+      .from("instructor")
+      .select("role, position, chat_position")
+      .eq("instructor_id", id)
+      .maybeSingle()
+      .then(({ data }) => {
+        if (data) {
+          if (data.role) setInstRole(data.role);
+          if (data.position || data.chat_position) {
+            setInstPosition(data.position || data.chat_position);
+          }
+        }
+      });
   }, [router]);
+
+  // 🌟 '본사 관리자' 또는 'ADMIN' 권한 체크
+  const meInst = allInstructors.find(i => i.instructor_id === instId);
+  const effectiveRole = String(meInst?.role || instRole || "").toUpperCase().trim();
+  const effectivePos = String(meInst?.position || meInst?.chat_position || instPosition || "").trim();
+
+  const canAccessAnalytics =
+    effectiveRole === "ADMIN" ||
+    effectiveRole === "SUPER_ADMIN" ||
+    effectiveRole.includes("ADMIN") ||
+    effectiveRole.includes("본사 관리자") ||
+    effectiveRole.includes("본사관리자") ||
+    effectivePos.includes("본사 관리자") ||
+    effectivePos.includes("본사관리자") ||
+    effectivePos.toUpperCase().includes("ADMIN");
+
+  const handleClickAnalyticsMenu = () => {
+    if (!canAccessAnalytics) {
+      alert("⛔ '본사 관리자' 또는 'ADMIN' 권한이 있는 계정만 열 수 있습니다.");
+      return;
+    }
+    setActiveMenu("admission_analytics");
+  };
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, typingStaffName]);
 
@@ -118,8 +163,41 @@ export default function HQWorkspacePage() {
     } catch(e) {}
   };
 
+  const showNewChatView = async () => {
+    setActiveView("new"); setSearchKeyword(""); setSelectedInstIds([]);
+    try {
+      const safeTenantMap: Record<string, string> = {
+        '1ff4299c-d72b-4d99-97b0-45fee08e3b73': '대치 본원',
+        'd59395b0-8c9c-4dd3-9e25-ff569da98abc': '본사',
+        'e24e540f-ebdd-40eb-b20b-696c113def6d': '서초 가맹점'
+      };
+
+      try {
+        const { data: tenantData } = await supabase.from("academy_tenant").select("*");
+        if (tenantData) tenantData.forEach((t: any) => { safeTenantMap[String(t.tenant_id)] = t.name; });
+      } catch (e) {}
+
+      const { data: instData } = await supabase.from("instructor").select("*").eq("status", "재직").order("name");
+      
+      if (instData) {
+        const enrichedData = instData.map((inst: any) => ({ ...inst, academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' } }));
+        setAllInstructors(enrichedData);
+
+        const tSet = new Set<string>(); const dSet = new Set<string>();
+        enrichedData.forEach((inst: any) => {
+          const tName = (inst.academy_tenant.name || '소속 미지정').trim();
+          const dName = (inst.department || '부서 미지정').trim();
+          tSet.add(tName); dSet.add(`${tName}_${dName}`);
+        });
+        setExpandedTenants(Array.from(tSet)); setExpandedDepts(Array.from(dSet));
+      }
+    } catch(e) {}
+  };
+
   useEffect(() => {
     if (!instId) return;
+    // 🌟 페이지 진입 시 조직도 목록과 채팅방 안읽음 개수를 동시에 불러옵니다.
+    showNewChatView();
     loadRooms(); 
 
     const channelName = `hq_global_${instId}`;
@@ -153,37 +231,6 @@ export default function HQWorkspacePage() {
       if (activeChannelRef.current) supabase.removeChannel(activeChannelRef.current);
     };
   }, [instId]);
-
-  const showNewChatView = async () => {
-    setActiveView("new"); setSearchKeyword(""); setSelectedInstIds([]);
-    try {
-      const safeTenantMap: Record<string, string> = {
-        '1ff4299c-d72b-4d99-97b0-45fee08e3b73': '대치 본원',
-        'd59395b0-8c9c-4dd3-9e25-ff569da98abc': '본사',
-        'e24e540f-ebdd-40eb-b20b-696c113def6d': '서초 가맹점'
-      };
-
-      try {
-        const { data: tenantData } = await supabase.from("academy_tenant").select("*");
-        if (tenantData) tenantData.forEach((t: any) => { safeTenantMap[String(t.tenant_id)] = t.name; });
-      } catch (e) {}
-
-      const { data: instData } = await supabase.from("instructor").select("*").eq("status", "재직").order("name");
-      
-      if (instData) {
-        const enrichedData = instData.map((inst: any) => ({ ...inst, academy_tenant: { name: safeTenantMap[String(inst.tenant_id)] || '소속 미지정' } }));
-        setAllInstructors(enrichedData);
-
-        const tSet = new Set<string>(); const dSet = new Set<string>();
-        enrichedData.forEach((inst: any) => {
-          const tName = (inst.academy_tenant.name || '소속 미지정').trim();
-          const dName = (inst.department || '부서 미지정').trim();
-          tSet.add(tName); dSet.add(`${tName}_${dName}`);
-        });
-        setExpandedTenants(Array.from(tSet)); setExpandedDepts(Array.from(dSet));
-      }
-    } catch(e) {}
-  };
 
   const toggleInstSelection = (id: string) => setSelectedInstIds(prev => prev.includes(id) ? prev.filter(i => i !== id) : [...prev, id]);
 
@@ -253,6 +300,7 @@ export default function HQWorkspacePage() {
   };
 
   const openRoom = async (roomId: string, roomName: string) => {
+    setActiveMenu("chat");
     setActiveRoomId(roomId); setActiveRoomName(roomName); setActiveView("room"); setMessages([]);
     setUnreadCount(prev => Math.max(0, prev - (rooms.find((r: any) => r.room_id === roomId)?.unreadCount || 0)));
     setRooms(prev => prev.map((r: any) => r.room_id === roomId ? { ...r, unreadCount: 0 } : r));
@@ -336,7 +384,6 @@ export default function HQWorkspacePage() {
 
   if (!instId) return <div className="min-h-screen bg-slate-100 flex items-center justify-center font-bold text-slate-400">데이터 로딩 중...</div>;
 
-  const meInst = allInstructors.find(i => i.instructor_id === instId);
   const activeMyTenantName = (meInst?.academy_tenant?.name || '소속 미지정').trim();
   const activeMyDeptName = (meInst?.department || '부서 미지정').trim();
 
@@ -346,7 +393,8 @@ export default function HQWorkspacePage() {
       <header className="bg-gradient-to-r from-slate-900 to-slate-800 text-white px-4 sm:px-5 py-3 flex justify-between items-center shadow-md z-20 shrink-0 gap-2">
         <div className="flex items-center min-w-0">
           <div className="min-w-0">
-            <h1 className="text-[14px] sm:text-[16px] font-bold leading-tight truncate">천종현수학연구소 통합 메신저</h1>
+            {/* 🌟 좌상단 제목 변경 */}
+            <h1 className="text-[14px] sm:text-[16px] font-bold leading-tight truncate">천종현수학연구소 임시 포털</h1>
             <p className="text-xs sm:text-xs text-slate-400 mt-0.5 leading-tight truncate">전사 소통 채널 (B2B / 사내)</p>
           </div>
         </div>
@@ -369,162 +417,59 @@ export default function HQWorkspacePage() {
 
       <div className="flex-1 flex overflow-hidden">
         
-        {/* 좌측 사이드바 */}
-        <div className={`${activeRoomId ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-r border-slate-300 shrink-0 z-10 shadow-lg`}>
-          <div className="flex px-4 pt-4 pb-0 bg-slate-50 border-b border-slate-200 gap-2">
-            <button onClick={() => { showNewChatView(); setActiveRoomId(null); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView === "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-              조직도
-            </button>
-            <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView !== "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
-              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-xs px-2 py-0.5 rounded-full">{unreadCount}</span>}
+        {/* 🌟 1. 좌측 업무 메뉴 사이드바 */}
+        <aside className="w-[220px] bg-slate-900 text-slate-200 flex flex-col border-r border-slate-800 shrink-0 z-10 select-none">
+          <div className="p-4 border-b border-slate-800">
+            <button
+              onClick={() => setActiveMenu("chat")}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
+                activeMenu === "chat"
+                  ? "bg-slate-800 text-white shadow-sm border border-slate-700"
+                  : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200"
+              }`}
+            >
+              <span>💬</span>
+              <span>사내 메신저 화면</span>
             </button>
           </div>
 
-          {activeView === "new" ? (
-            <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
-              <div className="p-3 border-b border-slate-200 bg-white shrink-0">
-                <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="직원 또는 가맹점 검색" className="w-full bg-slate-100 rounded-lg px-4 py-2 text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            <div>
+              <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <span>🏫</span>
+                <span>학원 사업</span>
               </div>
-              <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 pb-20">
-                {Object.keys(orgTree).length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div> :
-                  Object.keys(orgTree).sort((a, b) => {
-                    const aTrim = a.trim();
-                    const bTrim = b.trim();
-                    if (activeMyTenantName && aTrim === activeMyTenantName) return -1;
-                    if (activeMyTenantName && bTrim === activeMyTenantName) return 1;
-                    if (aTrim === '본사') return -1;
-                    if (bTrim === '본사') return 1;
-                    return a.localeCompare(b);
-                  }).map(tenantName => {
-                    const isTenantExpanded = expandedTenants.includes(tenantName) || searchKeyword.length > 0;
-                    const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
-                    const isMyTenant = activeMyTenantName && tenantName.trim() === activeMyTenantName;
-
-                    return (
-                      <div key={tenantName} className="mb-2">
-                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200/80 hover:bg-slate-300/80 text-slate-800 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors shadow-sm">
-                          <span className="flex items-center">
-                            🏢 {tenantName} 
-                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded font-bold">내 지점</span>}
-                            <span className="text-xs font-normal ml-1">({tenantMembersCount}명)</span>
-                          </span>
-                          <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                        </button>
-                        {isTenantExpanded && (
-                          <div className="mt-2 ml-2 border-l-2 border-slate-200 pl-3 space-y-2">
-                            {Object.keys(orgTree[tenantName]).sort((a, b) => {
-                              const aTrim = a.trim();
-                              const bTrim = b.trim();
-                              if (isMyTenant && activeMyDeptName && aTrim === activeMyDeptName) return -1;
-                              if (isMyTenant && activeMyDeptName && bTrim === activeMyDeptName) return 1;
-                              return a.localeCompare(b);
-                            }).map(deptName => {
-                              const deptId = `${tenantName}_${deptName}`;
-                              const isDeptExpanded = expandedDepts.includes(deptId) || searchKeyword.length > 0;
-                              const deptMembers = orgTree[tenantName][deptName];
-                              const isMyDept = isMyTenant && activeMyDeptName && deptName.trim() === activeMyDeptName;
-
-                              return (
-                                <div key={deptId} className="mb-1">
-                                  <button onClick={() => toggleDept(deptId)} className="w-full bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[12px] flex justify-between items-center border border-slate-200 transition-colors shadow-sm">
-                                    <span className="flex items-center">
-                                      📁 {deptName} 
-                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded font-bold">내 부서</span>}
-                                      <span className="text-xs font-normal ml-1 text-slate-400">({deptMembers.length}명)</span>
-                                    </span>
-                                    <svg className={`w-3.5 h-3.5 text-slate-400 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
-                                  </button>
-                                  {isDeptExpanded && (
-                                    <div className="mt-1.5 space-y-1.5">
-                                      {/* 💡 [핵심 해결] 내 아이디를 무조건 0순위로 맨 위로 올리는 정렬 로직 추가! */}
-                                      {[...deptMembers].sort((a: any, b: any) => {
-                                        if (a.instructor_id === instId) return -1;
-                                        if (b.instructor_id === instId) return 1;
-                                        return a.name.localeCompare(b.name);
-                                      }).map((inst: any) => {
-                                        const isSelected = selectedInstIds.includes(inst.instructor_id);
-                                        const avatarUrl = getProfileImageUrl(inst.profile_image_url);
-                                        const isMe = inst.instructor_id === instId;
-
-                                        return (
-                                          <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-3 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-400'}`}>
-                                            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-800 border-slate-800 text-white' : 'border-slate-300'}`}>
-                                              {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
-                                            </div>
-                                            <div className="relative w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[13px] shrink-0 overflow-hidden">
-                                              <span className="absolute z-0">T</span>
-                                              {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
-                                            </div>
-                                            <div className="flex-1 flex flex-col">
-                                              <div className="font-bold text-slate-800 text-sm flex items-center">
-                                                {inst.name}
-                                                {isMe && <span className="ml-1.5 px-1.5 py-0.5 bg-brand text-white text-xs rounded font-bold">나</span>}
-                                              </div>
-                                              <div className="text-xs text-slate-500 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
-                                            </div>
-                                          </div>
-                                        )
-                                      })}
-                                    </div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })
-                }
-              </div>
-              <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-20">
-                <button onClick={handleStartGroupChat} disabled={selectedInstIds.length === 0} className={`w-full py-3.5 rounded-xl font-bold text-[14px] transition-colors shadow-sm ${selectedInstIds.length > 0 ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
-                  {selectedInstIds.length > 0 ? `${selectedInstIds.length}명과 메신저 시작` : '대화 상대를 선택하세요'}
+              <div className="space-y-1">
+                <button
+                  onClick={handleClickAnalyticsMenu}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
+                    activeMenu === "admission_analytics"
+                      ? "bg-brand text-white shadow-md"
+                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <span>📊</span>
+                    <span className="truncate">진단평가 분석</span>
+                  </span>
+                  {!canAccessAnalytics && (
+                    <span className="text-xs text-slate-500 shrink-0" title="본사 관리자 / ADMIN 전용">
+                      🔒
+                    </span>
+                  )}
                 </button>
               </div>
             </div>
-          ) : (
-            <div className="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-2">
-              {rooms.length === 0 ? (
-                 <div className="text-center py-20 flex flex-col items-center gap-3">
-                   <span className="text-slate-400 font-bold text-sm">진행중인 대화가 없습니다.</span>
-                   <button onClick={showNewChatView} className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-5 py-3 rounded-xl text-xs transition-colors shadow-sm">조직도에서 찾기</button>
-                 </div>
-              ) : (
-                rooms.map((r, idx) => {
-                  let previewText = r.latestMsg ? r.latestMsg.content : '대화 내역이 없습니다.';
-                  if (previewText.length > 25) previewText = previewText.substring(0, 25) + '...';
+          </div>
+        </aside>
 
-                  return (
-                    <div key={idx} onClick={() => openRoom(r.room_id, r.displayTitle)} className={`bg-white p-4 rounded-xl border shadow-sm transition-all flex items-center gap-3 cursor-pointer group ${activeRoomId === r.room_id ? 'border-slate-500 ring-1 ring-slate-500' : 'border-slate-200 hover:border-slate-400'}`}>
-                      <div className="relative shrink-0 w-12 h-12">
-                        <div className="relative w-full h-full bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-bold overflow-hidden">
-                          <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
-                          {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && <img src={r.displayAvatar} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
-                        </div>
-                        {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center z-20 shadow-sm">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
-                      </div>
-                      <div className="flex flex-col min-w-0 flex-1">
-                        <div className="flex justify-between items-center">
-                          <span className="font-bold text-slate-800 text-[14px] truncate">{r.displayTitle}</span>
-                          {r.latestMsg && <span className="text-xs font-bold text-slate-400 shrink-0">{new Date(r.latestMsg.created_at).toLocaleDateString('ko-KR', {month:'short', day:'numeric'})}</span>}
-                        </div>
-                        <div className="mt-1"><span className={`text-[12px] ${r.unreadCount > 0 ? 'text-slate-800 font-bold' : 'text-slate-500 font-medium'} truncate block`}>{previewText}</span></div>
-                      </div>
-                      <button onClick={(e) => deleteRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
-                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                      </button>
-                    </div>
-                  );
-                })
-              )}
+        {/* 🌟 2. 중앙 메인 영역 (진단평가 분석 페이지 또는 채팅 대화방) */}
+        <div className={`${!activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#eef2f6] relative min-w-0 overflow-hidden`}>
+          {activeMenu === "admission_analytics" ? (
+            <div className="flex-1 w-full h-full overflow-hidden relative">
+              <AdmissionAnalyticsPage />
             </div>
-          )}
-        </div>
-
-        {/* 우측 메인 채팅방 */}
-        <div className={`${!activeRoomId ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#eef2f6] relative`}>
-          {activeRoomId ? (
+          ) : activeRoomId ? (
             <>
               <div className="bg-white px-5 py-3.5 border-b border-slate-200 flex items-center gap-3 z-10 shrink-0 shadow-sm">
                 <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className="md:hidden p-2 text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-lg">
@@ -614,10 +559,163 @@ export default function HQWorkspacePage() {
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center text-slate-400">
               <div className="w-20 h-20 bg-slate-200/50 rounded-full flex items-center justify-center mb-4 text-4xl shadow-inner">💬</div>
-              <p className="font-bold text-[15px] text-slate-500">대화방을 선택하거나 새 메시지를 시작하세요.</p>
+              <p className="font-bold text-[15px] text-slate-500">우측 조직도에서 대화 상대를 선택하거나 좌측 메뉴를 선택하세요.</p>
             </div>
           )}
         </div>
+
+        {/* 🌟 3. 우측 사이드바 (기본 화면: 조직도) */}
+        <div className={`${activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-l border-slate-300 shrink-0 z-10 shadow-lg`}>
+          <div className="flex px-4 pt-4 pb-0 bg-slate-50 border-b border-slate-200 gap-2">
+            <button onClick={() => { showNewChatView(); setActiveRoomId(null); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView === "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+              조직도
+            </button>
+            <button onClick={() => { setActiveView("list"); setActiveRoomId(null); loadRooms(); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView !== "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
+              채팅 목록 {unreadCount > 0 && <span className="bg-rose-500 text-white text-xs px-2 py-0.5 rounded-full">{unreadCount}</span>}
+            </button>
+          </div>
+
+          {activeView === "new" ? (
+            <div className="flex-1 flex flex-col min-h-0 bg-slate-50 relative">
+              <div className="p-3 border-b border-slate-200 bg-white shrink-0">
+                <input type="text" value={searchKeyword} onChange={e => setSearchKeyword(e.target.value)} placeholder="직원 또는 가맹점 검색" className="w-full bg-slate-100 rounded-lg px-4 py-2 text-[13px] font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-slate-300" />
+              </div>
+              <div className="flex-1 overflow-y-auto custom-scroll p-4 space-y-3 pb-20">
+                {Object.keys(orgTree).length === 0 ? <div className="text-center py-10 text-slate-400 font-bold text-sm">검색 결과가 없습니다.</div> :
+                  Object.keys(orgTree).sort((a, b) => {
+                    const aTrim = a.trim();
+                    const bTrim = b.trim();
+                    if (activeMyTenantName && aTrim === activeMyTenantName) return -1;
+                    if (activeMyTenantName && bTrim === activeMyTenantName) return 1;
+                    if (aTrim === '본사') return -1;
+                    if (bTrim === '본사') return 1;
+                    return a.localeCompare(b);
+                  }).map(tenantName => {
+                    const isTenantExpanded = expandedTenants.includes(tenantName) || searchKeyword.length > 0;
+                    const tenantMembersCount = Object.values(orgTree[tenantName]).reduce((acc, curr) => acc + curr.length, 0);
+                    const isMyTenant = activeMyTenantName && tenantName.trim() === activeMyTenantName;
+
+                    return (
+                      <div key={tenantName} className="mb-2">
+                        <button onClick={() => toggleTenant(tenantName)} className="w-full bg-slate-200/80 hover:bg-slate-300/80 text-slate-800 px-4 py-3 rounded-xl font-bold text-[13px] flex justify-between items-center transition-colors shadow-sm">
+                          <span className="flex items-center">
+                            🏢 {tenantName} 
+                            {isMyTenant && <span className="ml-1.5 px-1.5 py-0.5 bg-blue-100 text-blue-600 text-xs rounded font-bold">내 지점</span>}
+                            <span className="text-xs font-normal ml-1">({tenantMembersCount}명)</span>
+                          </span>
+                          <svg className={`w-4 h-4 transform transition-transform ${isTenantExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                        </button>
+                        {isTenantExpanded && (
+                          <div className="mt-2 ml-2 border-l-2 border-slate-200 pl-3 space-y-2">
+                            {Object.keys(orgTree[tenantName]).sort((a, b) => {
+                              const aTrim = a.trim();
+                              const bTrim = b.trim();
+                              if (isMyTenant && activeMyDeptName && aTrim === activeMyDeptName) return -1;
+                              if (isMyTenant && activeMyDeptName && bTrim === activeMyDeptName) return 1;
+                              return a.localeCompare(b);
+                            }).map(deptName => {
+                              const deptId = `${tenantName}_${deptName}`;
+                              const isDeptExpanded = expandedDepts.includes(deptId) || searchKeyword.length > 0;
+                              const deptMembers = orgTree[tenantName][deptName];
+                              const isMyDept = isMyTenant && activeMyDeptName && deptName.trim() === activeMyDeptName;
+
+                              return (
+                                <div key={deptId} className="mb-1">
+                                  <button onClick={() => toggleDept(deptId)} className="w-full bg-white hover:bg-slate-50 text-slate-700 px-4 py-2.5 rounded-lg font-bold text-[12px] flex justify-between items-center border border-slate-200 transition-colors shadow-sm">
+                                    <span className="flex items-center">
+                                      📁 {deptName} 
+                                      {isMyDept && <span className="ml-1.5 px-1.5 py-0.5 bg-emerald-100 text-emerald-600 text-xs rounded font-bold">내 부서</span>}
+                                      <span className="text-xs font-normal ml-1 text-slate-400">({deptMembers.length}명)</span>
+                                    </span>
+                                    <svg className={`w-3.5 h-3.5 text-slate-400 transform transition-transform ${isDeptExpanded ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path></svg>
+                                  </button>
+                                  {isDeptExpanded && (
+                                    <div className="mt-1.5 space-y-1.5">
+                                      {[...deptMembers].sort((a: any, b: any) => {
+                                        if (a.instructor_id === instId) return -1;
+                                        if (b.instructor_id === instId) return 1;
+                                        return a.name.localeCompare(b.name);
+                                      }).map((inst: any) => {
+                                        const isSelected = selectedInstIds.includes(inst.instructor_id);
+                                        const avatarUrl = getProfileImageUrl(inst.profile_image_url);
+                                        const isMe = inst.instructor_id === instId;
+
+                                        return (
+                                          <div key={inst.instructor_id} onClick={() => toggleInstSelection(inst.instructor_id)} className={`bg-white p-3 rounded-lg border shadow-sm cursor-pointer transition-all flex items-center gap-3 ${isSelected ? 'border-slate-800 bg-slate-50' : 'border-slate-200 hover:border-slate-400'}`}>
+                                            <div className={`w-5 h-5 rounded flex items-center justify-center shrink-0 border ${isSelected ? 'bg-slate-800 border-slate-800 text-white' : 'border-slate-300'}`}>
+                                              {isSelected && <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" d="M5 13l4 4L19 7"></path></svg>}
+                                            </div>
+                                            <div className="relative w-10 h-10 bg-slate-200 rounded-full flex items-center justify-center text-slate-600 font-bold text-[13px] shrink-0 overflow-hidden">
+                                              <span className="absolute z-0">T</span>
+                                              {avatarUrl && <img src={avatarUrl} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                                            </div>
+                                            <div className="flex-1 flex flex-col">
+                                              <div className="font-bold text-slate-800 text-sm flex items-center">
+                                                {inst.name}
+                                                {isMe && <span className="ml-1.5 px-1.5 py-0.5 bg-brand text-white text-xs rounded font-bold">나</span>}
+                                              </div>
+                                              <div className="text-xs text-slate-500 font-bold mt-0.5">{inst.chat_position || inst.position || '직원'}</div>
+                                            </div>
+                                          </div>
+                                        )
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })
+                }
+              </div>
+              <div className="absolute bottom-0 left-0 right-0 p-4 bg-white border-t border-slate-200 shadow-[0_-5px_20px_rgba(0,0,0,0.05)] z-20">
+                <button onClick={handleStartGroupChat} disabled={selectedInstIds.length === 0} className={`w-full py-3.5 rounded-xl font-bold text-[14px] transition-colors shadow-sm ${selectedInstIds.length > 0 ? 'bg-slate-800 text-white hover:bg-slate-900' : 'bg-slate-200 text-slate-400 cursor-not-allowed'}`}>
+                  {selectedInstIds.length > 0 ? `${selectedInstIds.length}명과 메신저 시작` : '대화 상대를 선택하세요'}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto bg-slate-50 p-4 space-y-2">
+              {rooms.length === 0 ? (
+                 <div className="text-center py-20 flex flex-col items-center gap-3">
+                   <span className="text-slate-400 font-bold text-sm">진행중인 대화가 없습니다.</span>
+                   <button onClick={showNewChatView} className="bg-slate-800 hover:bg-slate-900 text-white font-bold px-5 py-3 rounded-xl text-xs transition-colors shadow-sm">조직도에서 찾기</button>
+                 </div>
+              ) : (
+                rooms.map((r, idx) => {
+                  let previewText = r.latestMsg ? r.latestMsg.content : '대화 내역이 없습니다.';
+                  if (previewText.length > 25) previewText = previewText.substring(0, 25) + '...';
+
+                  return (
+                    <div key={idx} onClick={() => openRoom(r.room_id, r.displayTitle)} className={`bg-white p-4 rounded-xl border shadow-sm transition-all flex items-center gap-3 cursor-pointer group ${activeRoomId === r.room_id && activeMenu === "chat" ? 'border-slate-500 ring-1 ring-slate-500' : 'border-slate-200 hover:border-slate-400'}`}>
+                      <div className="relative shrink-0 w-12 h-12">
+                        <div className="relative w-full h-full bg-slate-100 border border-slate-200 rounded-full flex justify-center items-center text-slate-500 font-bold overflow-hidden">
+                          <span className="absolute z-0">{r.internal_chat_room?.room_type === 'GROUP' ? '👥' : 'T'}</span>
+                          {r.internal_chat_room?.room_type !== 'GROUP' && r.displayAvatar && <img src={r.displayAvatar} alt="profile" className="absolute w-full h-full object-cover z-10" onError={(e) => { e.currentTarget.style.display = 'none'; }} />}
+                        </div>
+                        {r.unreadCount > 0 && <span className="absolute -top-1.5 -right-1.5 min-w-[22px] h-[22px] px-1.5 bg-rose-500 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center z-20 shadow-sm">{r.unreadCount > 99 ? '99+' : r.unreadCount}</span>}
+                      </div>
+                      <div className="flex flex-col min-w-0 flex-1">
+                        <div className="flex justify-between items-center">
+                          <span className="font-bold text-slate-800 text-[14px] truncate">{r.displayTitle}</span>
+                          {r.latestMsg && <span className="text-xs font-bold text-slate-400 shrink-0">{new Date(r.latestMsg.created_at).toLocaleDateString('ko-KR', {month:'short', day:'numeric'})}</span>}
+                        </div>
+                        <div className="mt-1"><span className={`text-[12px] ${r.unreadCount > 0 ? 'text-slate-800 font-bold' : 'text-slate-500 font-medium'} truncate block`}>{previewText}</span></div>
+                      </div>
+                      <button onClick={(e) => deleteRoom(r.room_id, e)} className="p-2 text-slate-300 hover:text-rose-500 opacity-0 group-hover:opacity-100 shrink-0 transition-opacity">
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          )}
+        </div>
+
       </div>
 
       <ProfileModal 

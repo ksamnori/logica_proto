@@ -10,6 +10,7 @@ interface ExamOption {
   exam_id: string;
   title: string;
   sub_title: string;
+  count?: number;
 }
 
 interface TenantOption {
@@ -17,16 +18,30 @@ interface TenantOption {
   name: string;
 }
 
+// 🌟 Supabase 기본 1,000건 제한을 넘어 모든 데이터를 끝까지 가져오는 헬퍼 함수
+async function fetchAllRows(buildQuery: (from: number, to: number) => any, pageSize = 1000) {
+  let all: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 export default function AdmissionAnalyticsPage() {
   const router = useRouter();
   
   const [isLoading, setIsLoading] = useState(true);
   
-  // 🌟 [신규] 지점 필터 상태
+  // 지점 필터 상태
   const [tenantList, setTenantList] = useState<TenantOption[]>([]);
   const [selectedTenantId, setSelectedTenantId] = useState<string>("all");
 
-  const [examList, setExamList] = useState<ExamOption[]>([]);
   const [selectedExamId, setSelectedExamId] = useState<string>("");
   const [excludeTest, setExcludeTest] = useState<boolean>(true);
   
@@ -36,8 +51,18 @@ export default function AdmissionAnalyticsPage() {
   const [modalQ, setModalQ] = useState<any>(null);
   const [modalStudent, setModalStudent] = useState<any>(null);
 
-  const [rawExamData, setRawExamData] = useState<any>(null);
-  const [examAssignments, setExamAssignments] = useState<any[]>([]);
+  // 🌟 전체 진단평가 통합 데이터 (일정 + 지원자 + 채점완료 시험지)
+  const [allEnrichedAssigns, setAllEnrichedAssigns] = useState<any[]>([]);
+  const [allSessions, setAllSessions] = useState<any[]>([]);
+  const [examMetaMap, setExamMetaMap] = useState<Record<string, { exam_id: string; title: string; sub_title: string }>>({});
+
+  // 선택된 시험지의 문항 및 학생 답안 상세 데이터
+  const [rawExamDetails, setRawExamDetails] = useState<{
+    examId: string;
+    answers: any[];
+    itemsData: any[];
+    qMap: Record<string, any>;
+  } | null>(null);
 
   const chartRef = useRef<HTMLCanvasElement>(null);
   const chartInstance = useRef<any>(null);
@@ -66,7 +91,7 @@ export default function AdmissionAnalyticsPage() {
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [modalQ, modalStudent, rawExamData, selectedDate, selectedTime]);
+  }, [modalQ, modalStudent, rawExamDetails, selectedDate, selectedTime]);
 
   const getCleanUrl = (url: string) => {
     if (!url || url === 'null') return '';
@@ -85,7 +110,7 @@ export default function AdmissionAnalyticsPage() {
     return t; 
   };
 
-  // 🌟 지점 목록 불러오기
+  // 1. 지점 목록 불러오기
   useEffect(() => {
     const fetchTenants = async () => {
       const { data } = await supabase.from('academy_tenant').select('tenant_id, name').eq('status', 'ACTIVE');
@@ -94,98 +119,281 @@ export default function AdmissionAnalyticsPage() {
     fetchTenants();
   }, []);
 
-  // 🌟 지점 선택 변경에 따른 기본 데이터(시험지 목록) 불러오기
+  // 🌟 2. 모든 진단평가 일정(admission_session), 지원자(admission_application), 채점 기록(exam_assignment) 통합 로드
   useEffect(() => {
-    const fetchBaseData = async () => {
+    const fetchAllAdmissionData = async () => {
+      setIsLoading(true);
       try {
-        let query = supabase
-          .from('exam_assignment')
-          .select('assignment_id, total_score, exam_id, student(name), exam_master!inner(title, sub_title, exam_type)')
-          .eq('status', '채점완료')
-          .eq('exam_master.exam_type', '입학테스트')
-          .limit(10000);
+        // (1) 모든 입학테스트 일정 로드 (admission/page.tsx와 동일한 기준)
+        const sessionsData = await fetchAllRows((from, to) =>
+          supabase
+            .from('admission_session')
+            .select('admission_session_id, title, test_date, start_time, exam_id, tenant_id, exam_master(exam_id, title, sub_title, major_grade, exam_type)')
+            .order('test_date', { ascending: false })
+            .range(from, to)
+        );
 
-        if (selectedTenantId !== "all") {
-          query = query.eq('tenant_id', selectedTenantId);
-        }
+        // (2) 모든 입학테스트 지원자 배정 내역 로드 (student_id <-> admission_session_id 연결용)
+        const appsData = await fetchAllRows((from, to) =>
+          supabase
+            .from('admission_application')
+            .select('application_id, admission_session_id, student_id, status, test_result')
+            .range(from, to)
+        );
 
-        const { data, error } = await query;
-        if (error) throw error;
-        
-        setExamAssignments(data || []);
+        // (3) 입학테스트 시험지 목록 확인
+        const { data: masterExams } = await supabase
+          .from('exam_master')
+          .select('exam_id, title, sub_title, exam_type')
+          .eq('exam_type', '입학테스트');
 
-        const uniqueMap = new Map<string, ExamOption>();
-        (data || []).forEach((a: any) => {
-          if (a.exam_id && !uniqueMap.has(a.exam_id)) {
-            const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-            uniqueMap.set(a.exam_id, {
-              exam_id: a.exam_id,
-              title: em?.title || '제목 없음',
-              sub_title: em?.sub_title || ''
-            });
+        const eMap: Record<string, { exam_id: string; title: string; sub_title: string }> = {};
+        (masterExams || []).forEach((m: any) => {
+          eMap[String(m.exam_id)] = { exam_id: String(m.exam_id), title: m.title || '제목 없음', sub_title: m.sub_title || '' };
+        });
+
+        const sessionMap = new Map<string, any>();
+        (sessionsData || []).forEach((s: any) => {
+          sessionMap.set(String(s.admission_session_id), s);
+          const em = Array.isArray(s.exam_master) ? s.exam_master[0] : s.exam_master;
+          if (s.exam_id && em && !eMap[String(s.exam_id)]) {
+            eMap[String(s.exam_id)] = {
+              exam_id: String(s.exam_id),
+              title: em.title || s.title || '제목 없음',
+              sub_title: em.sub_title || ''
+            };
           }
         });
 
-        const arr = Array.from(uniqueMap.values()).sort((a, b) => a.sub_title.localeCompare(b.sub_title));
-        setExamList(arr);
-        
-        // 지점을 바꿨을 때 선택한 시험지가 새 지점에도 있으면 유지, 없으면 첫 번째 시험지 자동 선택
-        setSelectedExamId(prev => {
-          if (arr.length === 0) return "";
-          if (arr.find(e => e.exam_id === prev)) return prev;
-          return arr[0].exam_id;
+        // 학생별 배정된 세션 매핑 (1순위: student_id + exam_id 일치, 2순위: student_id 일치)
+        const studentExamSessionMap = new Map<string, any>();
+        const studentFallbackSessionMap = new Map<string, any>();
+
+        (appsData || []).forEach((app: any) => {
+          const sess = sessionMap.get(String(app.admission_session_id));
+          if (!sess || !app.student_id) return;
+          if (sess.exam_id) {
+            studentExamSessionMap.set(`${app.student_id}_${sess.exam_id}`, sess);
+          }
+          if (!studentFallbackSessionMap.has(String(app.student_id))) {
+            studentFallbackSessionMap.set(String(app.student_id), sess);
+          }
         });
 
-      } catch (err) {
-        console.error("데이터 로드 실패:", err);
-      }
-    };
-    fetchBaseData();
-  }, [selectedTenantId]);
+        // (4) 채점완료/완료된 진단평가 exam_assignment 전체 로드
+        const targetExamIds = Object.keys(eMap);
+        let rawAssigns: any[] = [];
 
-  // 🌟 특정 지점 및 시험지에 대한 Raw 통계 데이터 불러오기
-  useEffect(() => {
-    const fetchRawStats = async () => {
-      if (!selectedExamId) {
-        setRawExamData(null);
-        setIsLoading(false);
-        return;
-      }
-      setIsLoading(true);
-      
-      setSelectedDate("all");
-      setSelectedTime("all");
-
-      try {
-        let query = supabase
-          .from('exam_assignment')
-          .select('assignment_id, total_score, student!inner(name, grade), admission_session(test_date, start_time), exam_session(test_date)')
-          .eq('exam_id', selectedExamId)
-          .eq('status', '채점완료')
-          .limit(10000);
-          
-        if (selectedTenantId !== "all") {
-          query = query.eq('tenant_id', selectedTenantId);
+        if (targetExamIds.length > 0) {
+          const chunkSize = 100;
+          for (let i = 0; i < targetExamIds.length; i += chunkSize) {
+            const chunk = targetExamIds.slice(i, i + chunkSize);
+            const rows = await fetchAllRows((from, to) =>
+              supabase
+                .from('exam_assignment')
+                .select('assignment_id, student_id, exam_id, admission_session_id, tenant_id, status, total_score, created_at, student(name, grade), exam_master(title, sub_title, exam_type)')
+                .in('exam_id', chunk)
+                .in('status', ['채점완료', '완료'])
+                .range(from, to)
+            );
+            rawAssigns = rawAssigns.concat(rows);
+          }
         }
 
-        const { data: assigns, error: aErr } = await query;
-        if (aErr) throw aErr;
-        const rawAssigns = assigns || [];
-        const assignIds = rawAssigns.map(a => a.assignment_id);
+        // 혹시 exam_id가 targetExamIds에 없더라도 admission_session_id가 직접 찍혀 있는 채점 데이터 추가 확보
+        const sessionAssignRows = await fetchAllRows((from, to) =>
+          supabase
+            .from('exam_assignment')
+            .select('assignment_id, student_id, exam_id, admission_session_id, tenant_id, status, total_score, created_at, student(name, grade), exam_master(title, sub_title, exam_type)')
+            .not('admission_session_id', 'is', null)
+            .in('status', ['채점완료', '완료'])
+            .range(from, to)
+        );
+
+        const assignById = new Map<string, any>();
+        [...rawAssigns, ...sessionAssignRows].forEach((a: any) => {
+          assignById.set(String(a.assignment_id), a);
+          const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+          if (a.exam_id && em && !eMap[String(a.exam_id)]) {
+            eMap[String(a.exam_id)] = {
+              exam_id: String(a.exam_id),
+              title: em.title || '제목 없음',
+              sub_title: em.sub_title || ''
+            };
+          }
+        });
+
+        // (5) 각 exam_assignment에 정확한 응시 일시(dStr, tStr) 및 지점(tenant_id) 결합
+        const enriched = Array.from(assignById.values()).map((a: any) => {
+          const matchedSession =
+            (a.admission_session_id ? sessionMap.get(String(a.admission_session_id)) : null) ||
+            studentExamSessionMap.get(`${a.student_id}_${a.exam_id}`) ||
+            studentFallbackSessionMap.get(String(a.student_id)) ||
+            null;
+
+          let dStr = '';
+          let tStr = '';
+
+          if (matchedSession && matchedSession.test_date) {
+            dStr = matchedSession.test_date || '';
+            tStr = matchedSession.start_time ? matchedSession.start_time.substring(0, 5) : '';
+          } else if (a.created_at) {
+            const dateObj = new Date(a.created_at);
+            const yyyy = dateObj.getFullYear();
+            const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
+            const dd = String(dateObj.getDate()).padStart(2, '0');
+            const hh = String(dateObj.getHours()).padStart(2, '0');
+            const min = String(dateObj.getMinutes()).padStart(2, '0');
+            dStr = `${yyyy}-${mm}-${dd}`;
+            tStr = `${hh}:${min}`;
+          }
+
+          const effectiveTenantId = a.tenant_id || matchedSession?.tenant_id || '';
+
+          return {
+            ...a,
+            _dStr: dStr,
+            _tStr: tStr,
+            _tenantId: effectiveTenantId,
+            _sessionTitle: matchedSession?.title || ''
+          };
+        });
+
+        setExamMetaMap(eMap);
+        setAllSessions(sessionsData || []);
+        setAllEnrichedAssigns(enriched);
+      } catch (err) {
+        console.error("진단평가 전체 데이터 로드 실패:", err);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAllAdmissionData();
+  }, []);
+
+  // 🌟 3. 지점 및 테스트 계정 제외 필터가 적용된 기본 데이터셋
+  const baseFilteredAssigns = useMemo(() => {
+    return allEnrichedAssigns.filter((a: any) => {
+      if (selectedTenantId !== "all" && String(a._tenantId) !== String(selectedTenantId)) {
+        return false;
+      }
+      if (excludeTest) {
+        const st = Array.isArray(a.student) ? a.student[0] : a.student;
+        const name = st?.name || '';
+        if (!name || name.includes('테스트') || name.toLowerCase().includes('test')) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [allEnrichedAssigns, selectedTenantId, excludeTest]);
+
+  // 🌟 4. 모든 응시 날짜 및 시간 목록 추출 (개설된 일정 + 실제 응시 데이터 통합)
+  const availableDates = useMemo(() => {
+    const dateSet = new Set<string>();
+    baseFilteredAssigns.forEach((a: any) => {
+      if (a._dStr) dateSet.add(a._dStr);
+    });
+    allSessions.forEach((s: any) => {
+      if (selectedTenantId === "all" || String(s.tenant_id) === String(selectedTenantId)) {
+        if (s.test_date) dateSet.add(s.test_date);
+      }
+    });
+    return Array.from(dateSet).filter(Boolean).sort((a, b) => b.localeCompare(a));
+  }, [baseFilteredAssigns, allSessions, selectedTenantId]);
+
+  const availableTimes = useMemo(() => {
+    const timeSet = new Set<string>();
+    baseFilteredAssigns.forEach((a: any) => {
+      if (selectedDate === "all" || a._dStr === selectedDate) {
+        if (a._tStr) timeSet.add(a._tStr);
+      }
+    });
+    allSessions.forEach((s: any) => {
+      if (selectedTenantId === "all" || String(s.tenant_id) === String(selectedTenantId)) {
+        if (selectedDate === "all" || s.test_date === selectedDate) {
+          if (s.start_time) timeSet.add(s.start_time.substring(0, 5));
+        }
+      }
+    });
+    return Array.from(timeSet).filter(Boolean).sort();
+  }, [baseFilteredAssigns, allSessions, selectedTenantId, selectedDate]);
+
+  // 🌟 5. 현재 날짜/시간 조건에 맞는 시험지 목록 및 응시 인원수 계산
+  const examList = useMemo(() => {
+    const dateFiltered = baseFilteredAssigns.filter((a: any) => {
+      if (selectedDate !== "all" && a._dStr !== selectedDate) return false;
+      if (selectedTime !== "all" && a._tStr !== selectedTime) return false;
+      return true;
+    });
+
+    const countByExam: Record<string, number> = {};
+    dateFiltered.forEach((a: any) => {
+      if (a.exam_id) {
+        countByExam[String(a.exam_id)] = (countByExam[String(a.exam_id)] || 0) + 1;
+      }
+    });
+
+    // 전체 기간에서 한 번이라도 응시된 시험지 + 현재 날짜에 응시된 시험지 표시
+    const totalCountByExam: Record<string, number> = {};
+    baseFilteredAssigns.forEach((a: any) => {
+      if (a.exam_id) {
+        totalCountByExam[String(a.exam_id)] = (totalCountByExam[String(a.exam_id)] || 0) + 1;
+      }
+    });
+
+    const options: ExamOption[] = Object.values(examMetaMap)
+      .filter(meta => (totalCountByExam[meta.exam_id] || 0) > 0)
+      .map(meta => ({
+        ...meta,
+        count: countByExam[meta.exam_id] || 0
+      }))
+      .sort((a, b) => a.sub_title.localeCompare(b.sub_title, 'ko', { numeric: true }));
+
+    // 만약 특정 날짜/시간을 골랐다면, 해당 일시에 응시생이 있는 시험지를 우선 보여주되 없으면 전체 표시
+    const activeOnDate = options.filter(o => (o.count || 0) > 0);
+    return selectedDate !== "all" && activeOnDate.length > 0 ? activeOnDate : options;
+  }, [baseFilteredAssigns, examMetaMap, selectedDate, selectedTime]);
+
+  // 선택된 시험지가 목록에 없거나 응시생이 0명일 때 자동으로 첫 번째 유효한 시험지 선택
+  useEffect(() => {
+    if (examList.length === 0) {
+      setSelectedExamId("");
+      return;
+    }
+    const currentExists = examList.find(e => e.exam_id === selectedExamId);
+    if (!currentExists) {
+      setSelectedExamId(examList[0].exam_id);
+    }
+  }, [examList, selectedExamId]);
+
+  // 🌟 6. 선택된 시험지(selectedExamId)에 대한 문항 정보 및 학생 답안 상세 로드
+  useEffect(() => {
+    const fetchExamDetails = async () => {
+      if (!selectedExamId) {
+        setRawExamDetails(null);
+        return;
+      }
+
+      setIsLoading(true);
+      try {
+        const targetAssigns = allEnrichedAssigns.filter(a => String(a.exam_id) === String(selectedExamId));
+        const assignIds = targetAssigns.map(a => a.assignment_id);
 
         let allAnswers: any[] = [];
         if (assignIds.length > 0) {
-          const chunkSize = 50; 
+          const chunkSize = 100;
           for (let i = 0; i < assignIds.length; i += chunkSize) {
             const chunk = assignIds.slice(i, i + chunkSize);
-            const { data: ansChunk, error: ansErr } = await supabase
-              .from('student_answer')
-              .select('exam_assignment_id, question_id, is_correct, earned_score, grading_code')
-              .in('exam_assignment_id', chunk)
-              .limit(10000);
-            
-            if (ansErr) console.error("답안 로드 오류:", ansErr);
-            if (ansChunk) allAnswers.push(...ansChunk);
+            const ansChunk = await fetchAllRows((from, to) =>
+              supabase
+                .from('student_answer')
+                .select('exam_assignment_id, question_id, is_correct, earned_score, grading_code')
+                .in('exam_assignment_id', chunk)
+                .range(from, to)
+            );
+            allAnswers = allAnswers.concat(ansChunk);
           }
         }
 
@@ -207,7 +415,7 @@ export default function AdmissionAnalyticsPage() {
         if (uuidIds.length > 0) {
           const { data: qDbData } = await supabase.from('question_db')
             .select('question_id, parent_question_id, question_number, sub_num, question, image_url, answer')
-            .in('question_id', uuidIds).limit(10000);
+            .in('question_id', uuidIds).limit(2000);
           if (qDbData) fetchedQuestions.push(...qDbData);
         }
         
@@ -217,30 +425,29 @@ export default function AdmissionAnalyticsPage() {
         if (missingUuids.length > 0) {
           const { data: tqUuidData } = await supabase.from('textbook_question')
             .select('question_id, parent_tq_id, question_number, question, answer')
-            .in('question_id', missingUuids).limit(10000);
+            .in('question_id', missingUuids).limit(2000);
           if (tqUuidData) fetchedQuestions.push(...tqUuidData);
         }
         
         if (numIds.length > 0) {
           const { data: numData } = await supabase.from('textbook_question')
             .select('tq_id, parent_tq_id, question_number, question, answer')
-            .in('tq_id', numIds).limit(10000);
+            .in('tq_id', numIds).limit(2000);
           if (numData) fetchedQuestions.push(...numData);
         }
 
-        const qMap: any = {};
+        const qMap: Record<string, any> = {};
         fetchedQuestions.forEach(q => {
           if (q.question_id) qMap[String(q.question_id)] = q;
           if (q.tq_id) qMap[String(q.tq_id)] = q;
         });
 
-        setRawExamData({
-          assigns: rawAssigns,
+        setRawExamDetails({
+          examId: selectedExamId,
           answers: allAnswers,
-          itemsData: itemsData,
-          qMap: qMap
+          itemsData,
+          qMap
         });
-
       } catch (err: any) {
         alert("데이터 연산 중 오류 발생: " + err.message);
       } finally {
@@ -248,58 +455,26 @@ export default function AdmissionAnalyticsPage() {
       }
     };
 
-    fetchRawStats();
-  }, [selectedExamId, selectedTenantId]);
+    fetchExamDetails();
+  }, [selectedExamId, allEnrichedAssigns]);
 
-  const extractDateTime = (a: any) => {
-    let dStr = '';
-    let tStr = '';
-    if (a.admission_session) {
-        dStr = a.admission_session.test_date || '';
-        tStr = a.admission_session.start_time?.substring(0, 5) || '';
-    } else if (a.exam_session && a.exam_session.test_date) {
-        const dateObj = new Date(a.exam_session.test_date);
-        const yyyy = dateObj.getFullYear();
-        const mm = String(dateObj.getMonth() + 1).padStart(2, '0');
-        const dd = String(dateObj.getDate()).padStart(2, '0');
-        const hh = String(dateObj.getHours()).padStart(2, '0');
-        const min = String(dateObj.getMinutes()).padStart(2, '0');
-        dStr = `${yyyy}-${mm}-${dd}`;
-        tStr = `${hh}:${min}`;
-    }
-    return { dStr, tStr };
-  };
-
+  // 🌟 7. 화면에 표시할 최종 통계 계산
   const reportStats = useMemo(() => {
-    if (!rawExamData) return { summary: null, questionStats: [], studentList: [], availableDates: [], availableTimes: [] };
-
-    const { assigns, answers, itemsData, qMap } = rawExamData;
-    let filteredAssigns = [...assigns];
-
-    if (excludeTest) {
-      filteredAssigns = filteredAssigns.filter((a: any) => {
-        const name = Array.isArray(a.student) ? a.student[0]?.name : a.student?.name;
-        return name && !name.includes('테스트') && !name.toLowerCase().includes('test');
-      });
+    if (!rawExamDetails || rawExamDetails.examId !== selectedExamId) {
+      return { summary: null, questionStats: [], studentList: [] };
     }
 
-    const availableDates = Array.from(
-      new Set(filteredAssigns.map((a: any) => extractDateTime(a).dStr))
-    ).filter(Boolean).sort((a: any, b: any) => b.localeCompare(a)); 
+    const { answers, itemsData, qMap } = rawExamDetails;
 
-    const availableTimes = Array.from(
-      new Set(
-        filteredAssigns
-          .filter((a: any) => selectedDate === "all" || extractDateTime(a).dStr === selectedDate)
-          .map((a: any) => extractDateTime(a).tStr)
-      )
-    ).filter(Boolean).sort();
+    let filteredAssigns = baseFilteredAssigns.filter(
+      (a: any) => String(a.exam_id) === String(selectedExamId)
+    );
 
     if (selectedDate !== "all") {
-      filteredAssigns = filteredAssigns.filter((a: any) => extractDateTime(a).dStr === selectedDate);
+      filteredAssigns = filteredAssigns.filter((a: any) => a._dStr === selectedDate);
     }
     if (selectedTime !== "all") {
-      filteredAssigns = filteredAssigns.filter((a: any) => extractDateTime(a).tStr === selectedTime);
+      filteredAssigns = filteredAssigns.filter((a: any) => a._tStr === selectedTime);
     }
 
     const activeAssignIds = new Set(filteredAssigns.map((a: any) => a.assignment_id));
@@ -394,15 +569,14 @@ export default function AdmissionAnalyticsPage() {
     const studentStatsList = filteredAssigns.map((a: any) => {
       const st = Array.isArray(a.student) ? a.student[0] : a.student;
       const myAnswers = answers.filter((ans: any) => ans.exam_assignment_id === a.assignment_id);
-      const { dStr, tStr } = extractDateTime(a);
 
       return {
         assignmentId: a.assignment_id,
         studentName: st?.name || "알 수 없음",
         grade: st?.grade || "-",
         totalScore: Number(a.total_score || 0),
-        dateStr: dStr || "-",
-        timeStr: tStr || "-",
+        dateStr: a._dStr || "-",
+        timeStr: a._tStr || "-",
         answers: myAnswers
       };
     }).sort((a: any, b: any) => b.totalScore - a.totalScore);
@@ -410,27 +584,27 @@ export default function AdmissionAnalyticsPage() {
     return {
       summary: { totalStudents, averageScore, highestScore },
       questionStats: questionStatsArray,
-      studentList: studentStatsList,
-      availableDates,
-      availableTimes
+      studentList: studentStatsList
     };
-  }, [rawExamData, excludeTest, selectedDate, selectedTime]);
+  }, [rawExamDetails, selectedExamId, baseFilteredAssigns, selectedDate, selectedTime]);
 
   const semesterStats = useMemo(() => {
     const map = new Map();
-    let filtered = examAssignments;
-    
-    if (excludeTest) {
-      filtered = filtered.filter((a: any) => {
-        const name = Array.isArray(a.student) ? a.student[0]?.name : a.student?.name;
-        return name && !name.includes('테스트') && !name.toLowerCase().includes('test');
-      });
+    let filtered = baseFilteredAssigns;
+
+    if (selectedDate !== "all") {
+      filtered = filtered.filter((a: any) => a._dStr === selectedDate);
+    }
+    if (selectedTime !== "all") {
+      filtered = filtered.filter((a: any) => a._tStr === selectedTime);
     }
 
     filtered.forEach((a: any) => {
+      const meta = examMetaMap[String(a.exam_id)];
       const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-      const match = em?.sub_title?.match(/\d+-\d+/);
-      const sem = match ? match[0] : em?.sub_title;
+      const subTitle = meta?.sub_title || em?.sub_title || '';
+      const match = subTitle.match(/\d+-\d+/);
+      const sem = match ? match[0] : subTitle;
       if (sem) {
         if (!map.has(sem)) map.set(sem, { sum: 0, count: 0 });
         map.get(sem).sum += Number(a.total_score || 0);
@@ -441,8 +615,8 @@ export default function AdmissionAnalyticsPage() {
     return Array.from(map.entries()).map(([sem, data]) => ({
       semester: sem,
       average: data.count > 0 ? Number((data.sum / data.count).toFixed(1)) : 0
-    })).sort((a, b) => a.semester.localeCompare(b.semester));
-  }, [examAssignments, excludeTest]);
+    })).sort((a, b) => a.semester.localeCompare(b.semester, 'ko', { numeric: true }));
+  }, [baseFilteredAssigns, examMetaMap, selectedDate, selectedTime]);
 
   useEffect(() => {
     if (!chartRef.current || semesterStats.length === 0) return;
@@ -451,6 +625,8 @@ export default function AdmissionAnalyticsPage() {
       chartInstance.current.destroy();
     }
 
+    const currentExamSub = examMetaMap[selectedExamId]?.sub_title || '';
+
     chartInstance.current = new Chart(chartRef.current, {
       type: 'bar',
       data: {
@@ -458,7 +634,7 @@ export default function AdmissionAnalyticsPage() {
         datasets: [{
           label: '학기 평균(점)',
           data: semesterStats.map(s => s.average),
-          backgroundColor: semesterStats.map(s => s.semester === (examList.find(e => e.exam_id === selectedExamId)?.sub_title || '') ? '#10b981' : '#cbd5e1'),
+          backgroundColor: semesterStats.map(s => currentExamSub.includes(s.semester) ? '#10b981' : '#cbd5e1'),
           hoverBackgroundColor: '#059669',
           borderRadius: 6,
           barThickness: 24,
@@ -481,29 +657,26 @@ export default function AdmissionAnalyticsPage() {
     return () => {
       if (chartInstance.current) chartInstance.current.destroy();
     };
-  }, [semesterStats, selectedExamId, examList]);
+  }, [semesterStats, selectedExamId, examMetaMap]);
 
   const midPoint = Math.ceil((reportStats?.questionStats?.length || 0) / 2);
   const leftStats = reportStats.questionStats.slice(0, midPoint);
   const rightStats = reportStats.questionStats.slice(midPoint);
   const splitStats = [leftStats, rightStats];
 
-  if (isLoading && examList.length === 0) {
-    return <div className="flex h-screen items-center justify-center font-bold text-slate-400">시스템 데이터 동기화 중...</div>;
+  if (isLoading && allEnrichedAssigns.length === 0) {
+    return <div className="flex h-full min-h-[400px] items-center justify-center font-bold text-slate-400">전체 진단평가 데이터 동기화 중...</div>;
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-[#f1f5f9] w-full">
+    <div className="flex h-full overflow-hidden bg-[#f1f5f9] w-full">
       <main className="flex-1 overflow-y-auto custom-scroll p-4 sm:p-8 relative">
         <div className="max-w-[1500px] w-full mx-auto relative pb-24 space-y-6">
           
           <div className="bg-brand text-white p-6 rounded-2xl shadow-md flex justify-between items-center no-print shrink-0 flex-wrap gap-4">
             <div>
-              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-sm mb-3 transition-colors bg-blue-900/40 px-3 py-1.5 rounded-lg border border-blue-800/50 w-fit shadow-sm">
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
-              </button>
               <h1 className="text-2xl font-bold tracking-tight">📊 입학 진단평가 본사 대시보드</h1>
-              <p className="text-blue-200 text-sm mt-1">지점 및 시험지별 합산 성취도를 분석합니다.</p>
+              <p className="text-blue-200 text-sm mt-1">지점, 응시 일시 및 시험지별 합산 성취도를 분석합니다.</p>
             </div>
             
             <div className="flex items-center gap-3 flex-wrap justify-end">
@@ -517,12 +690,16 @@ export default function AdmissionAnalyticsPage() {
                 <span className="text-sm font-bold text-blue-100">테스트 계정 제외</span>
               </label>
 
-              {/* 🌟 [신규] 지점 선택 필터 */}
+              {/* 조회 지점 필터 */}
               <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
                 <span className="pl-1 text-sm font-bold text-blue-200">조회 지점</span>
                 <select 
                   value={selectedTenantId} 
-                  onChange={(e) => setSelectedTenantId(e.target.value)}
+                  onChange={(e) => {
+                    setSelectedTenantId(e.target.value);
+                    setSelectedDate("all");
+                    setSelectedTime("all");
+                  }}
                   className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="all">🏢 전체 지점 합산</option>
@@ -532,6 +709,7 @@ export default function AdmissionAnalyticsPage() {
                 </select>
               </div>
 
+              {/* 응시 일시 필터 (전체 진단평가 일정 표시) */}
               <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
                 <span className="pl-1 text-sm font-bold text-blue-200">응시 일시</span>
                 <select 
@@ -539,8 +717,8 @@ export default function AdmissionAnalyticsPage() {
                   onChange={(e) => { setSelectedDate(e.target.value); setSelectedTime("all"); }}
                   className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
-                  <option value="all">전체 누적 날짜</option>
-                  {reportStats.availableDates?.map(date => (
+                  <option value="all">전체 누적 날짜 ({availableDates.length}일)</option>
+                  {availableDates.map(date => (
                     <option key={date} value={date}>{date}</option>
                   ))}
                 </select>
@@ -550,23 +728,24 @@ export default function AdmissionAnalyticsPage() {
                   className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   <option value="all">전체 시간</option>
-                  {reportStats.availableTimes?.map(time => (
+                  {availableTimes.map(time => (
                     <option key={time} value={time}>{time}</option>
                   ))}
                 </select>
               </div>
 
+              {/* 대상 시험지 필터 */}
               <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
                 <span className="pl-1 text-sm font-bold text-blue-200">대상 시험지</span>
                 <select 
                   value={selectedExamId} 
                   onChange={(e) => setSelectedExamId(e.target.value)}
-                  className="bg-white text-slate-800 font-bold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-48 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
+                  className="bg-white text-slate-800 font-bold text-sm px-4 py-2 rounded-md outline-none cursor-pointer w-56 truncate shadow-sm focus:ring-2 focus:ring-emerald-500"
                 >
                   {examList.length === 0 ? <option value="">조건에 맞는 시험지가 없습니다.</option> : null}
                   {examList.map(exam => (
                     <option key={exam.exam_id} value={exam.exam_id}>
-                      {exam.title} {exam.sub_title ? `[${exam.sub_title}]` : ''}
+                      {exam.title} {exam.sub_title ? `[${exam.sub_title}]` : ''} ({exam.count || 0}명)
                     </option>
                   ))}
                 </select>
@@ -605,7 +784,7 @@ export default function AdmissionAnalyticsPage() {
               {/* 2. 차트 영역 */}
               <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
                 <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex items-center justify-between">
-                  <h3 className="font-bold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (선택된 지점 기준)</h3>
+                  <h3 className="font-bold text-slate-800 text-[15px]">📊 전체 학기별 평균 추이 (선택된 조건 기준)</h3>
                   <span className="text-xs text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">현재 선택: 초록색</span>
                 </div>
                 <div className="w-full h-52 p-4 relative">
@@ -727,7 +906,7 @@ export default function AdmissionAnalyticsPage() {
           </div>
         </div>
 
-        {/* 👨‍🎓 [2] 학생별 상세 채점 결과 검증 모달 */}
+        {/* 학생별 상세 채점 결과 검증 모달 */}
         {modalStudent && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[60] flex items-center justify-center p-4 no-print animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
@@ -797,7 +976,7 @@ export default function AdmissionAnalyticsPage() {
           </div>
         )}
 
-        {/* 🔍 [1] 문항 상세 뷰 모달 (z-[70]으로 상단 배치) */}
+        {/* 문항 상세 뷰 모달 */}
         {modalQ && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[70] flex items-center justify-center p-4 no-print animate-in fade-in zoom-in duration-200">
             <div className="bg-white w-full max-w-2xl max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
