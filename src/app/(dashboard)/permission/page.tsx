@@ -173,36 +173,36 @@ export default function PermissionPage() {
   const thresholdTrackRef = useRef<HTMLDivElement>(null);
   const draggingThresholdRef = useRef<number | null>(null);
 
-  // 🌟 [추가됨] 마스터 채점 기준표 상태
+  // 🌟 마스터 채점 기준표 상태
   const [isGradingModalOpen, setIsGradingModalOpen] = useState(false);
   const [gradingCodes, setGradingCodes] = useState<any[]>([]);
   const [isSavingGrading, setIsSavingGrading] = useState(false);
 
-  // 기차처럼 밀어내는(Push) 방식의 슬라이더 로직
+  // 특정 인덱스의 기준점 변경 시 기차처럼 밀어내는(Push) 정렬 헬퍼
+  const updateThresholdAt = (idx: number, rawVal: number) => {
+    const pct = Math.max(0, Math.min(100, Math.round(rawVal)));
+    setThresholdBounds((prev: number[]) => {
+      const next = [...prev];
+      next[idx] = pct;
+      for (let i = idx - 1; i >= 0; i--) {
+        if (next[i] > next[i + 1]) next[i] = next[i + 1];
+      }
+      for (let i = idx + 1; i <= 4; i++) {
+        if (next[i] < next[i - 1]) next[i] = next[i - 1];
+      }
+      return next;
+    });
+  };
+
+  // 슬라이더 드래그 이벤트
   useEffect(() => {
     const handleMove = (e: MouseEvent | TouchEvent) => {
       if (draggingThresholdRef.current === null || !thresholdTrackRef.current) return;
 
       const rect = thresholdTrackRef.current.getBoundingClientRect();
       const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-      let pct = Math.round(((clientX - rect.left) / rect.width) * 100);
-      
-      pct = Math.max(0, Math.min(100, pct));
-      const idx = draggingThresholdRef.current;
-      
-      setThresholdBounds((prev: number[]) => {
-        const next = [...prev];
-        next[idx] = pct;
-        
-        for (let i = idx - 1; i >= 0; i--) {
-          if (next[i] > next[i + 1]) next[i] = next[i + 1];
-        }
-        for (let i = idx + 1; i <= 4; i++) {
-          if (next[i] < next[i - 1]) next[i] = next[i - 1];
-        }
-        
-        return next;
-      });
+      const pct = Math.round(((clientX - rect.left) / rect.width) * 100);
+      updateThresholdAt(draggingThresholdRef.current, pct);
     };
 
     const handleUp = () => { draggingThresholdRef.current = null; };
@@ -266,25 +266,27 @@ export default function PermissionPage() {
     setIsLoading(false);
   };
 
+  // 🌟 [보완] 중복 행이 있더라도 에러 없이 가장 최신 설정값을 안전하게 불러오도록 개선
   const loadThresholds = async (tId: string) => {
     const { data, error } = await supabase
       .from('class_thresholds')
       .select('horizon, titan, apex, master, ultimate') 
       .eq('tenant_id', tId)
-      .maybeSingle();
+      .order('updated_at', { ascending: false })
+      .limit(1);
 
-    if (!error && data) {
-      const h = data.horizon ?? 20;
-      const t = Math.max(h, data.titan ?? 40);
-      const a = Math.max(t, data.apex ?? 60);
-      const m = Math.max(a, data.master ?? 80);
-      const u = Math.max(m, data.ultimate ?? 95);
+    if (!error && data && data.length > 0) {
+      const row = data[0];
+      const h = Number(row.horizon ?? 20);
+      const t = Math.max(h, Number(row.titan ?? 40));
+      const a = Math.max(t, Number(row.apex ?? 60));
+      const m = Math.max(a, Number(row.master ?? 80));
+      const u = Math.max(m, Number(row.ultimate ?? 95));
       
       setThresholdBounds([h, t, a, m, u]);
     }
   };
 
-  // 🌟 [추가됨] 마스터 채점 코드 로드 함수
   const loadGradingCodes = async () => {
     const { data, error } = await supabase
       .from('master_grading_code')
@@ -360,30 +362,35 @@ export default function PermissionPage() {
     }
   };
 
+  // 🌟 [보완] maybeSingle() 대신 배열 조회를 사용하여 중복 행 존재 시에도 안전하게 업데이트 수행
   const handleSaveThresholds = async () => {
     if (!tenantId) return;
     setIsSavingThreshold(true);
     
     try {
-      const { data: existing } = await supabase
+      const { data: existingRows, error: checkErr } = await supabase
         .from('class_thresholds')
         .select('tenant_id')
         .eq('tenant_id', tenantId)
-        .maybeSingle();
+        .limit(1);
+
+      if (checkErr) throw checkErr;
+
+      const payload = {
+        horizon: Number(thresholdBounds[0]),
+        titan: Number(thresholdBounds[1]),
+        apex: Number(thresholdBounds[2]),
+        master: Number(thresholdBounds[3]),
+        ultimate: Number(thresholdBounds[4]),
+        updated_at: new Date().toISOString()
+      };
 
       let opError = null;
 
-      if (existing) {
+      if (existingRows && existingRows.length > 0) {
         const { error } = await supabase
           .from('class_thresholds')
-          .update({
-            horizon: thresholdBounds[0],
-            titan: thresholdBounds[1],
-            apex: thresholdBounds[2],
-            master: thresholdBounds[3],
-            ultimate: thresholdBounds[4], 
-            updated_at: new Date().toISOString()
-          })
+          .update(payload)
           .eq('tenant_id', tenantId);
         opError = error;
       } else {
@@ -391,11 +398,7 @@ export default function PermissionPage() {
           .from('class_thresholds')
           .insert({
             tenant_id: tenantId,
-            horizon: thresholdBounds[0],
-            titan: thresholdBounds[1],
-            apex: thresholdBounds[2],
-            master: thresholdBounds[3],
-            ultimate: thresholdBounds[4]
+            ...payload
           });
         opError = error;
       }
@@ -409,16 +412,22 @@ export default function PermissionPage() {
     }
   };
 
-  // 🌟 [추가됨] 마스터 채점 코드 저장 함수
+  // 🌟 [보완] 저장 시 가중치 수치를 숫자(float) 타입으로 정규화하여 저장
   const handleSaveGradingCodes = async () => {
     setIsSavingGrading(true);
     try {
-      // 배열 형태로 upsert (기본키인 code를 기준으로 업데이트 수행)
+      const sanitizedCodes = gradingCodes.map(c => ({
+        ...c,
+        score_ratio: Math.max(0, Math.min(1, parseFloat(c.score_ratio) || 0)),
+        admission_ratio: Math.max(0, Math.min(1, parseFloat(c.admission_ratio) || 0))
+      }));
+
       const { error } = await supabase
         .from('master_grading_code')
-        .upsert(gradingCodes);
+        .upsert(sanitizedCodes);
         
       if (error) throw error;
+      setGradingCodes(sanitizedCodes);
       alert("✅ 학원 전체 마스터 채점 기준(가중치)이 성공적으로 반영되었습니다!");
       setIsGradingModalOpen(false);
     } catch (e: any) {
@@ -469,9 +478,9 @@ export default function PermissionPage() {
             ))}
           </div>
 
-          {/* === 클래스 배정 기준 설정 슬라이더 === */}
+          {/* === 클래스 배정 기준 설정 슬라이더 & 직접 입력 === */}
           <div className="p-4 border-t border-slate-200 bg-slate-50 flex flex-col shrink-0">
-            <div className="flex justify-between items-center mb-7">
+            <div className="flex justify-between items-center mb-6">
               <span className="font-bold text-[13px] text-slate-800 flex items-center gap-1.5">🎯 반 배정 기준 설정</span>
               <button 
                 onClick={handleSaveThresholds}
@@ -482,55 +491,100 @@ export default function PermissionPage() {
               </button>
             </div>
             
-            <div className="relative w-full h-6 bg-slate-100 rounded-md flex select-none mb-6 shadow-inner" ref={thresholdTrackRef}>
-              <div className="bg-slate-300 rounded-l-md transition-all duration-100" style={{ width: `${thresholdBounds[0]}%` }}></div>
-              <div className="bg-emerald-300 transition-all duration-100" style={{ width: `${thresholdBounds[1]-thresholdBounds[0]}%` }}></div>
-              <div className="bg-sky-300 transition-all duration-100" style={{ width: `${thresholdBounds[2]-thresholdBounds[1]}%` }}></div>
-              <div className="bg-blue-500 transition-all duration-100" style={{ width: `${thresholdBounds[3]-thresholdBounds[2]}%` }}></div>
-              <div className="bg-indigo-500 transition-all duration-100" style={{ width: `${thresholdBounds[4]-thresholdBounds[3]}%` }}></div>
-              <div className="bg-rose-400 rounded-r-md transition-all duration-100" style={{ width: `${100-thresholdBounds[4]}%` }}></div>
-              
-              {[0, 1, 2, 3, 4].map((idx) => (
-                <div key={idx} onMouseDown={() => { draggingThresholdRef.current = idx; }} onTouchStart={() => { draggingThresholdRef.current = idx; }} 
-                     className="absolute top-1/2 -translate-y-1/2 -ml-[6px] w-[12px] h-[20px] bg-white border-2 border-brand rounded cursor-ew-resize flex items-center justify-center gap-[1px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
-                     style={{ left: `${thresholdBounds[idx]}%` }}>
-                  <div className="absolute -top-7 text-xs font-bold bg-slate-700 text-white px-1.5 py-0.5 rounded shadow whitespace-nowrap">
-                    {thresholdBounds[idx]}점
+            <div className="px-2">
+              <div className="relative w-full h-6 bg-slate-100 rounded-md flex select-none mb-7 shadow-inner" ref={thresholdTrackRef}>
+                <div className="bg-slate-300 rounded-l-md transition-all duration-100" style={{ width: `${thresholdBounds[0]}%` }}></div>
+                <div className="bg-emerald-300 transition-all duration-100" style={{ width: `${thresholdBounds[1]-thresholdBounds[0]}%` }}></div>
+                <div className="bg-sky-300 transition-all duration-100" style={{ width: `${thresholdBounds[2]-thresholdBounds[1]}%` }}></div>
+                <div className="bg-blue-500 transition-all duration-100" style={{ width: `${thresholdBounds[3]-thresholdBounds[2]}%` }}></div>
+                <div className="bg-indigo-500 transition-all duration-100" style={{ width: `${thresholdBounds[4]-thresholdBounds[3]}%` }}></div>
+                <div className="bg-rose-400 rounded-r-md transition-all duration-100" style={{ width: `${100-thresholdBounds[4]}%` }}></div>
+                
+                {[0, 1, 2, 3, 4].map((idx) => (
+                  <div key={idx} onMouseDown={() => { draggingThresholdRef.current = idx; }} onTouchStart={() => { draggingThresholdRef.current = idx; }} 
+                       className="absolute top-1/2 -translate-y-1/2 -ml-[6px] w-[12px] h-[20px] bg-white border-2 border-brand rounded cursor-ew-resize flex items-center justify-center gap-[1px] shadow-md hover:scale-110 hover:border-blue-500 transition-transform z-10 hover:z-20 active:z-20" 
+                       style={{ left: `${thresholdBounds[idx]}%` }}>
+                    <div className={`absolute ${idx % 2 === 0 ? '-top-6' : '-bottom-6'} text-[10px] font-bold bg-slate-700 text-white px-1 py-0.5 rounded shadow whitespace-nowrap`}>
+                      {thresholdBounds[idx]}
+                    </div>
+                    <div className="w-[1.5px] h-[8px] bg-slate-300"></div><div className="w-[1.5px] h-[8px] bg-slate-300"></div>
                   </div>
-                  <div className="w-[1.5px] h-[8px] bg-slate-300"></div><div className="w-[1.5px] h-[8px] bg-slate-300"></div>
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
             
-            <div className="grid grid-cols-2 gap-y-2 gap-x-1 text-xs font-bold">
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-slate-300 border border-slate-400 shadow-sm shrink-0"></span>
-                <span className="text-slate-600 truncate">Pre-Course <span className="font-medium text-xs">(~{thresholdBounds[0]})</span></span>
+            <div className="grid grid-cols-2 gap-y-2 gap-x-2 text-xs font-bold">
+              <div className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-sm bg-slate-300 border border-slate-400 shrink-0"></span>
+                  <span className="text-slate-600 truncate text-[11px]">Pre</span>
+                </div>
+                <span className="text-[11px] text-slate-400 font-medium">~{thresholdBounds[0]}점</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-emerald-300 border border-emerald-400 shadow-sm shrink-0"></span>
-                <span className="text-emerald-700 truncate">Horizon <span className="font-medium text-xs">({thresholdBounds[0]}~{thresholdBounds[1]})</span></span>
+
+              <div className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-sm bg-emerald-300 border border-emerald-400 shrink-0"></span>
+                  <span className="text-emerald-700 truncate text-[11px]">Horizon</span>
+                </div>
+                <input
+                  type="number" min={0} max={100} value={thresholdBounds[0]}
+                  onChange={(e) => updateThresholdAt(0, Number(e.target.value))}
+                  className="w-11 text-right text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:border-brand"
+                />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-sky-300 shadow-sm shrink-0"></span>
-                <span className="text-sky-700 truncate">Titan <span className="font-medium text-xs">({thresholdBounds[1]}~{thresholdBounds[2]})</span></span>
+
+              <div className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-sm bg-sky-300 shrink-0"></span>
+                  <span className="text-sky-700 truncate text-[11px]">Titan</span>
+                </div>
+                <input
+                  type="number" min={0} max={100} value={thresholdBounds[1]}
+                  onChange={(e) => updateThresholdAt(1, Number(e.target.value))}
+                  className="w-11 text-right text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:border-brand"
+                />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-blue-500 shadow-sm shrink-0"></span>
-                <span className="text-blue-700 truncate">Apex <span className="font-medium text-xs">({thresholdBounds[2]}~{thresholdBounds[3]})</span></span>
+
+              <div className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-sm bg-blue-500 shrink-0"></span>
+                  <span className="text-blue-700 truncate text-[11px]">Apex</span>
+                </div>
+                <input
+                  type="number" min={0} max={100} value={thresholdBounds[2]}
+                  onChange={(e) => updateThresholdAt(2, Number(e.target.value))}
+                  className="w-11 text-right text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:border-brand"
+                />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-indigo-500 shadow-sm shrink-0"></span>
-                <span className="text-indigo-700 truncate">Master <span className="font-medium text-xs">({thresholdBounds[3]}~{thresholdBounds[4]})</span></span>
+
+              <div className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-sm bg-indigo-500 shrink-0"></span>
+                  <span className="text-indigo-700 truncate text-[11px]">Master</span>
+                </div>
+                <input
+                  type="number" min={0} max={100} value={thresholdBounds[3]}
+                  onChange={(e) => updateThresholdAt(3, Number(e.target.value))}
+                  className="w-11 text-right text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:border-brand"
+                />
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-2.5 h-2.5 rounded-sm bg-rose-400 shadow-sm shrink-0"></span>
-                <span className="text-rose-600 truncate">Ultimate <span className="font-medium text-xs">({thresholdBounds[4]}~)</span></span>
+
+              <div className="flex items-center justify-between bg-white px-2 py-1 rounded border border-slate-200">
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <span className="w-2 h-2 rounded-sm bg-rose-400 shrink-0"></span>
+                  <span className="text-rose-600 truncate text-[11px]">Ultimate</span>
+                </div>
+                <input
+                  type="number" min={0} max={100} value={thresholdBounds[4]}
+                  onChange={(e) => updateThresholdAt(4, Number(e.target.value))}
+                  className="w-11 text-right text-[11px] font-bold text-slate-700 bg-slate-50 border border-slate-200 rounded px-1 py-0.5 focus:outline-none focus:border-brand"
+                />
               </div>
             </div>
           </div>
 
-          {/* 🌟 [추가됨] 마스터 채점 기준 관리 버튼 */}
+          {/* 🌟 마스터 채점 기준 관리 버튼 */}
           <div className="p-4 border-t border-slate-200 bg-white flex flex-col shrink-0">
             <div className="flex justify-between items-center mb-1.5">
               <span className="font-bold text-[13px] text-slate-800 flex items-center gap-1.5">⚖️ 마스터 채점 기준</span>
@@ -611,7 +665,7 @@ export default function PermissionPage() {
         </div>
       </div>
 
-      {/* 🌟 [추가됨] 마스터 채점 기준표 수정 모달 */}
+      {/* 🌟 마스터 채점 기준표 수정 모달 */}
       {isGradingModalOpen && (
         <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200">
@@ -658,7 +712,7 @@ export default function PermissionPage() {
                           value={code.score_ratio} 
                           onChange={(e) => {
                             const next = [...gradingCodes];
-                            next[idx].score_ratio = e.target.value;
+                            next[idx] = { ...next[idx], score_ratio: e.target.value };
                             setGradingCodes(next);
                           }}
                           className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all bg-white shadow-inner"
@@ -670,7 +724,7 @@ export default function PermissionPage() {
                           value={code.admission_ratio} 
                           onChange={(e) => {
                             const next = [...gradingCodes];
-                            next[idx].admission_ratio = e.target.value;
+                            next[idx] = { ...next[idx], admission_ratio: e.target.value };
                             setGradingCodes(next);
                           }}
                           className="w-full border border-slate-300 rounded-md px-3 py-1.5 text-[13px] font-bold text-center text-slate-700 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand transition-all bg-white shadow-inner"

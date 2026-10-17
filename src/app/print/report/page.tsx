@@ -6,6 +6,21 @@ import { useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import Chart from "chart.js/auto";
 
+// 🌟 통계 페이지(admission/analytics/page.tsx)와 동일하게 1,000건 제한을 넘어 모든 데이터를 가져오는 헬퍼 함수
+async function fetchAllRows(buildQuery: (from: number, to: number) => any, pageSize = 1000) {
+  let all: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery(from, from + pageSize - 1);
+    if (error) throw error;
+    if (!data || data.length === 0) break;
+    all = all.concat(data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 function PrintReportContent() {
   const searchParams = useSearchParams();
   const assignmentId = searchParams.get("assignment_id");
@@ -43,13 +58,32 @@ function PrintReportContent() {
   const fetchReportData = async () => {
     try {
       const { data: assign, error: aErr } = await supabase.from('exam_assignment')
-        .select('*, student(name), exam_master(title, sub_title)')
+        .select('*, student(name, tenant_id), exam_master(title, sub_title)')
         .eq('assignment_id', assignmentId)
         .single();
         
       if (aErr) throw new Error(`[기본 배정 정보 로드 실패]\n${aErr.message}`);
 
-      const tenantId = assign.tenant_id;
+      const studentObj = Array.isArray(assign.student) ? assign.student[0] : assign.student;
+      
+      // 🌟 admission_session에 저장된 tenant_id까지 확인하여 지점 ID 누락 완벽 방지
+      let sessionTenantId = null;
+      if (assign.admission_session_id) {
+        const { data: sessData } = await supabase
+          .from('admission_session')
+          .select('tenant_id')
+          .eq('admission_session_id', assign.admission_session_id)
+          .limit(1);
+        if (sessData && sessData.length > 0) {
+          sessionTenantId = sessData[0].tenant_id;
+        }
+      }
+
+      const tenantId =
+        assign.tenant_id ||
+        studentObj?.tenant_id ||
+        sessionTenantId ||
+        (typeof window !== "undefined" ? localStorage.getItem("logica_tenant_id") : null);
 
       const { data: reportSnap, error: snapErr } = await supabase.from('admission_test_report')
         .select('*')
@@ -60,17 +94,39 @@ function PrintReportContent() {
         throw new Error("저장된 분석 리포트가 없습니다. 이전 화면에서 [진단 리포트 생성하기]를 먼저 진행해주세요.");
       }
 
-      // 🌟 [수정] 5개의 커트라인 경계값 동적 적용 (기본값 세팅)
+      // 🌟 권한 관리(permission/page.tsx)에서 설정한 5개 커트라인 경계값 로드
       let tBounds = [20, 40, 60, 80, 95];
+      let thresholdRow: any = null;
+
       if (tenantId) {
-        const { data: thresholdData } = await supabase.from('class_thresholds')
-          .select('horizon, titan, apex, master, ultimate') // ultimate 추가
+        const { data: thresholdRows } = await supabase.from('class_thresholds')
+          .select('horizon, titan, apex, master, ultimate')
           .eq('tenant_id', tenantId)
-          .maybeSingle(); 
-          
-        if (thresholdData) {
-          tBounds = [thresholdData.horizon, thresholdData.titan, thresholdData.apex, thresholdData.master, thresholdData.ultimate || 95];
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (thresholdRows && thresholdRows.length > 0) {
+          thresholdRow = thresholdRows[0];
         }
+      }
+
+      // 만약 해당 지점 ID로 조회된 행이 없다면 테이블의 기본 설정 행을 폴백으로 참조
+      if (!thresholdRow) {
+        const { data: fallbackRows } = await supabase.from('class_thresholds')
+          .select('horizon, titan, apex, master, ultimate')
+          .order('updated_at', { ascending: false })
+          .limit(1);
+        if (fallbackRows && fallbackRows.length > 0) {
+          thresholdRow = fallbackRows[0];
+        }
+      }
+
+      if (thresholdRow) {
+        const h = Number(thresholdRow.horizon ?? 20);
+        const t = Math.max(h, Number(thresholdRow.titan ?? 40));
+        const a = Math.max(t, Number(thresholdRow.apex ?? 60));
+        const m = Math.max(a, Number(thresholdRow.master ?? 80));
+        const u = Math.max(m, Number(thresholdRow.ultimate ?? 95));
+        tBounds = [h, t, a, m, u];
       }
 
       const rawTitle = assign.exam_master?.title || '';
@@ -81,7 +137,7 @@ function PrintReportContent() {
       const examPaperId = assign.exam_id || assign.exam_paper_id;
       if (!examPaperId) throw new Error("시험지 ID를 찾을 수 없습니다.");
 
-      const studentName = Array.isArray(assign.student) ? assign.student[0]?.name : assign.student?.name || '알수없음';
+      const studentName = studentObj?.name || '알수없음';
       const reportDate = new Date(assign.created_at).toLocaleDateString('ko-KR');
 
       const { data: meta } = await supabase.from('admission_standard_meta')
@@ -199,25 +255,83 @@ function PrintReportContent() {
         correct_cnt 
       };
 
+      // 🌟 [핵심 수정] 통계 페이지(admission/analytics/page.tsx)와 동일한 조건으로 평균 계산
       let avgStats = { geo: 0, mea: 0, stat: 0, rule: 0, calc: 0, sense: 0, space: 0, logic: 0, know: 0, think: 0, persist: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, total: 0 };
+      let validSampleCount = 0;
       
-      let { data: allAssignments } = await supabase.from('exam_assignment').select('assignment_id').eq('exam_id', examPaperId);
-      if (!allAssignments) {
-        const res = await supabase.from('exam_assignment').select('assignment_id').eq('exam_paper_id', examPaperId);
-        allAssignments = res.data;
+      let rawAllAssignments = await fetchAllRows((from, to) =>
+        supabase
+          .from('exam_assignment')
+          .select('assignment_id, total_score, status, student(name)')
+          .eq('exam_id', examPaperId)
+          .in('status', ['채점완료', '완료'])
+          .range(from, to)
+      );
+
+      if (!rawAllAssignments || rawAllAssignments.length === 0) {
+        rawAllAssignments = await fetchAllRows((from, to) =>
+          supabase
+            .from('exam_assignment')
+            .select('assignment_id, total_score, status, student(name)')
+            .eq('exam_paper_id', examPaperId)
+            .in('status', ['채점완료', '완료'])
+            .range(from, to)
+        );
       }
-      
-      if (allAssignments && allAssignments.length > 0) {
-        const assignIds = allAssignments.map((a: any) => a.assignment_id);
-        const { data: allAnswers } = await supabase.from('student_answer')
-          .select('exam_assignment_id, question_id, earned_score')
-          .in('exam_assignment_id', assignIds)
-          .limit(10000);
-        
-        if (allAnswers && allAnswers.length > 0) {
-          const activeAssignIds = assignIds.filter(aId => allAnswers.some((ans: any) => ans.exam_assignment_id === aId));
-          
+
+      // 통계 페이지의 excludeTest = true 기본 조건과 동일하게 테스트 계정 제외
+      let validAssignments = (rawAllAssignments || []).filter((a: any) => {
+        const st = Array.isArray(a.student) ? a.student[0] : a.student;
+        const name = st?.name || '';
+        if (!name || name.includes('테스트') || name.toLowerCase().includes('test')) {
+          return false;
+        }
+        return true;
+      });
+
+      // 만약 테스트 계정만 존재하는 시험지라면 전체 완료 데이터를 사용
+      if (validAssignments.length === 0 && rawAllAssignments && rawAllAssignments.length > 0) {
+        validAssignments = rawAllAssignments;
+      }
+
+      if (validAssignments.length > 0) {
+        validSampleCount = validAssignments.length;
+        const assignIds = validAssignments.map((a: any) => a.assignment_id);
+
+        // 통계 페이지와 동일한 총점 평균 산출
+        const totalScoreSum = validAssignments.reduce((acc: number, cur: any) => acc + (Number(cur.total_score) || 0), 0);
+        const analyticsMatchedAvgTotal = parseFloat((totalScoreSum / validSampleCount).toFixed(1));
+
+        // 1,000건 제한 없이 모든 답안 로드 (청크 분할)
+        let allAnswers: any[] = [];
+        const chunkSize = 100;
+        for (let i = 0; i < assignIds.length; i += chunkSize) {
+          const chunk = assignIds.slice(i, i + chunkSize);
+          const ansChunk = await fetchAllRows((from, to) =>
+            supabase
+              .from('student_answer')
+              .select('exam_assignment_id, question_id, earned_score')
+              .in('exam_assignment_id', chunk)
+              .range(from, to)
+          );
+          allAnswers = allAnswers.concat(ansChunk);
+        }
+
+        if (allAnswers.length > 0) {
+          // 빠른 조회를 위해 학생별-문항별 득점 맵 구성
+          const ansByAssign = new Map<string, Map<string, number>>();
+          allAnswers.forEach((ans: any) => {
+            const aKey = String(ans.exam_assignment_id);
+            const qKey = String(ans.question_id);
+            if (!ansByAssign.has(aKey)) ansByAssign.set(aKey, new Map());
+            ansByAssign.get(aKey)!.set(qKey, parseFloat(ans.earned_score) || 0);
+          });
+
+          const activeAssignIds = assignIds.filter(aId => ansByAssign.has(String(aId)));
+          const activeCnt = activeAssignIds.length;
+
           activeAssignIds.forEach(aId => {
+            const studentMap = ansByAssign.get(String(aId))!;
             let sStat = { geo:0, mea:0, stat:0, rule:0, calc:0, sense:0, space:0, logic:0, know:0, think:0, persist:0, d1:0, d2:0, d3:0, d4:0, d5:0, total:0 };
             
             groups.forEach((g: any, index: number) => {
@@ -226,8 +340,7 @@ function PrintReportContent() {
               
               let groupEarned = 0;
               g.items.forEach((i: any) => {
-                const ans = allAnswers.find((x: any) => x.exam_assignment_id === aId && String(x.question_id) === String(i.question_id));
-                groupEarned += parseFloat(ans?.earned_score || 0);
+                groupEarned += studentMap.get(String(i.question_id)) || 0;
               });
 
               if (m) {
@@ -250,34 +363,52 @@ function PrintReportContent() {
               }
             });
             
-            for(let k in avgStats) (avgStats as any)[k] += (sStat as any)[k];
+            for (let k in avgStats) (avgStats as any)[k] += (sStat as any)[k];
           });
           
-          const cnt = activeAssignIds.length;
-          if (cnt > 0) {
-            for(let k in avgStats) (avgStats as any)[k] = parseFloat(((avgStats as any)[k] / cnt).toFixed(1));
+          if (activeCnt > 0) {
+            for (let k in avgStats) (avgStats as any)[k] = parseFloat(((avgStats as any)[k] / activeCnt).toFixed(1));
           }
+        }
+
+        // 최종 전체 평균 점수는 통계 대시보드의 평균 점수와 정확히 일치하도록 설정
+        if (analyticsMatchedAvgTotal > 0) {
+          avgStats.total = analyticsMatchedAvgTotal;
         }
       }
 
       const evalComment = reportSnap.final_comment || '분석된 종합 평가 결과가 없습니다.';
       const getPct = (earned: number, max: number) => (!max || max === 0) ? 0 : Math.round((earned / max) * 100);
       
-      const totalPct = getPct(stats.total, rBase.max_total_score); 
-      const avgPct = getPct(avgStats.total, rBase.max_total_score); 
+      const maxTotal = rBase.max_total_score > 0 ? rBase.max_total_score : 100;
+      const rawTotalScore = parseFloat(Number(stats.total || 0).toFixed(1));
+      const totalPct = (rawTotalScore / maxTotal) * 100;
+      const avgPct = (Number(avgStats.total || 0) / maxTotal) * 100;
 
-      const difficultyAdjustment = Math.max(-10, Math.min(10, (50 - avgPct) * 0.5));
-      const adjustedPct = Math.round(Math.min(100, Math.max(0, totalPct + difficultyAdjustment)));
+      // 🌟 [난이도 가중치 계산]
+      // 1. 기본 평균 난이도 가중치: 평균 50점 기준으로 ±10점 범위 내 보정
+      let difficultyAdjustment = Math.max(-10, Math.min(10, (50 - avgPct) * 0.5));
 
-      // 🌟 [수정] 6개 구간(Pre-Course ~ Ultimate) 완벽 적용 로직
-      const getUmathClass = (pct: number) => {
-        if (pct >= tBounds[4]) return `Ultimate<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(최상위 영재반)</span>`;
-        if (pct >= tBounds[3]) return `Master<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(심화 사고력반)</span>`;
-        if (pct >= tBounds[2]) return `Apex<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(응용 심화반)</span>`;
-        if (pct >= tBounds[1]) return `Titan<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(개념 응용반)</span>`;
-        if (pct >= tBounds[0]) return `Horizon<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(기초 탄탄반)</span>`;
+      // 2. 응시 표본이 5명 미만일 경우 소수 표본 왜곡 완화
+      const sampleReliability = validSampleCount > 0 ? Math.min(1, validSampleCount / 5) : 0;
+      difficultyAdjustment = difficultyAdjustment * sampleReliability;
+
+      // 3. 평균이 50점을 넘어 감점(음수 가중치)이 발생할 때, 고득점자가 만점 근처에서 억울하게 감점당하는 천장 효과 완화
+      if (difficultyAdjustment < 0 && totalPct > 50) {
+        const highScorerRelief = Math.max(0, (100 - totalPct) / 50);
+        difficultyAdjustment = difficultyAdjustment * highScorerRelief;
+      }
+
+      const adjustedPct = parseFloat(Math.min(100, Math.max(0, totalPct + difficultyAdjustment)).toFixed(1));
+
+      // 🌟 권한 관리(permission/page.tsx)에서 설정한 커트라인(tBounds)을 그대로 적용
+      const getUmathClass = (score: number) => {
+        if (score >= tBounds[4]) return `Ultimate<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(최상위 영재반)</span>`;
+        if (score >= tBounds[3]) return `Master<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(심화 사고력반)</span>`;
+        if (score >= tBounds[2]) return `Apex<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(응용 심화반)</span>`;
+        if (score >= tBounds[1]) return `Titan<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(개념 응용반)</span>`;
+        if (score >= tBounds[0]) return `Horizon<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(기초 탄탄반)</span>`;
         
-        // ✨ horizon 기준점 미만이면 모두 Pre-Course!
         return `Pre-Course<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(기초 집중 / 입학 대기)</span>`;
       };
 
@@ -299,7 +430,7 @@ function PrintReportContent() {
 
       setReportData({
         studentName, standardName, reportDate,
-        totalScore: parseFloat(stats.total.toFixed(1)), correctCount: stats.correct_cnt,
+        totalScore: rawTotalScore, correctCount: stats.correct_cnt,
         avgTotalScore: parseFloat(avgStats.total.toFixed(1)),
         recommendedClass,
         bestCat, worstCat, evalComment,
@@ -567,7 +698,6 @@ function PrintReportContent() {
               </section>
 
               <section className="grid grid-cols-12 gap-4 flex-1">
-                {/* 💡 [좌측 요약 패널 리모델링 완료] 외부 여백(padding)을 줄이고, 자식 요소들의 좌우 여백을 넓혔습니다. 글자 줄바꿈 및 잘림 완벽 방지! */}
                 <div className="col-span-3 bg-gradient-to-br from-[#1e493b] to-[#0f251d] text-white rounded-xl p-3.5 flex flex-col shadow-md relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-32 h-32 bg-white opacity-5 rounded-full -mr-10 -mt-10"></div>
                   
