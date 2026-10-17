@@ -66,7 +66,7 @@ function PrintReportContent() {
 
       const studentObj = Array.isArray(assign.student) ? assign.student[0] : assign.student;
       
-      // 🌟 admission_session에 저장된 tenant_id까지 확인하여 지점 ID 누락 완벽 방지
+      // admission_session에 저장된 tenant_id까지 확인하여 지점 ID 누락 방지
       let sessionTenantId = null;
       if (assign.admission_session_id) {
         const { data: sessData } = await supabase
@@ -109,7 +109,6 @@ function PrintReportContent() {
         }
       }
 
-      // 만약 해당 지점 ID로 조회된 행이 없다면 테이블의 기본 설정 행을 폴백으로 참조
       if (!thresholdRow) {
         const { data: fallbackRows } = await supabase.from('class_thresholds')
           .select('horizon, titan, apex, master, ultimate')
@@ -255,7 +254,7 @@ function PrintReportContent() {
         correct_cnt 
       };
 
-      // 🌟 [핵심 수정] 통계 페이지(admission/analytics/page.tsx)와 동일한 조건으로 평균 계산
+      // 🌟 통계 페이지(admission/analytics/page.tsx)와 동일한 조건으로 평균 계산
       let avgStats = { geo: 0, mea: 0, stat: 0, rule: 0, calc: 0, sense: 0, space: 0, logic: 0, know: 0, think: 0, persist: 0, d1: 0, d2: 0, d3: 0, d4: 0, d5: 0, total: 0 };
       let validSampleCount = 0;
       
@@ -289,7 +288,6 @@ function PrintReportContent() {
         return true;
       });
 
-      // 만약 테스트 계정만 존재하는 시험지라면 전체 완료 데이터를 사용
       if (validAssignments.length === 0 && rawAllAssignments && rawAllAssignments.length > 0) {
         validAssignments = rawAllAssignments;
       }
@@ -298,11 +296,9 @@ function PrintReportContent() {
         validSampleCount = validAssignments.length;
         const assignIds = validAssignments.map((a: any) => a.assignment_id);
 
-        // 통계 페이지와 동일한 총점 평균 산출
         const totalScoreSum = validAssignments.reduce((acc: number, cur: any) => acc + (Number(cur.total_score) || 0), 0);
         const analyticsMatchedAvgTotal = parseFloat((totalScoreSum / validSampleCount).toFixed(1));
 
-        // 1,000건 제한 없이 모든 답안 로드 (청크 분할)
         let allAnswers: any[] = [];
         const chunkSize = 100;
         for (let i = 0; i < assignIds.length; i += chunkSize) {
@@ -318,7 +314,6 @@ function PrintReportContent() {
         }
 
         if (allAnswers.length > 0) {
-          // 빠른 조회를 위해 학생별-문항별 득점 맵 구성
           const ansByAssign = new Map<string, Map<string, number>>();
           allAnswers.forEach((ans: any) => {
             const aKey = String(ans.exam_assignment_id);
@@ -371,7 +366,6 @@ function PrintReportContent() {
           }
         }
 
-        // 최종 전체 평균 점수는 통계 대시보드의 평균 점수와 정확히 일치하도록 설정
         if (analyticsMatchedAvgTotal > 0) {
           avgStats.total = analyticsMatchedAvgTotal;
         }
@@ -385,23 +379,27 @@ function PrintReportContent() {
       const totalPct = (rawTotalScore / maxTotal) * 100;
       const avgPct = (Number(avgStats.total || 0) / maxTotal) * 100;
 
-      // 🌟 [난이도 가중치 계산]
-      // 1. 기본 평균 난이도 가중치: 평균 50점 기준으로 ±10점 범위 내 보정
-      let difficultyAdjustment = Math.max(-10, Math.min(10, (50 - avgPct) * 0.5));
+      // 🌟 [타이트한 난이도 가중치 계산]
+      // 1. 기본 난이도 보정: 계수 0.25, 최대 한도 ±3점으로 타이트하게 제한 (예: 평균 40.8점일 때 기본 +2.3점)
+      const baseDifficultyAdj = Math.max(-3, Math.min(3, (50 - avgPct) * 0.25));
 
-      // 2. 응시 표본이 5명 미만일 경우 소수 표본 왜곡 완화
+      // 2. 응시 표본 신뢰도: 응시자가 5명 미만일 때는 인원 비율만큼만 적용
       const sampleReliability = validSampleCount > 0 ? Math.min(1, validSampleCount / 5) : 0;
-      difficultyAdjustment = difficultyAdjustment * sampleReliability;
 
-      // 3. 평균이 50점을 넘어 감점(음수 가중치)이 발생할 때, 고득점자가 만점 근처에서 억울하게 감점당하는 천장 효과 완화
-      if (difficultyAdjustment < 0 && totalPct > 50) {
-        const highScorerRelief = Math.max(0, (100 - totalPct) / 50);
-        difficultyAdjustment = difficultyAdjustment * highScorerRelief;
-      }
+      // 3. 성취도 비례 적용:
+      // - 어려운 시험(baseDifficultyAdj >= 0): 학생 본인의 득점률(totalPct / 100)에 비례해 가산점 부여
+      //   (40점 학생은 +2.3점의 40%인 +0.92점만 받고, 90점 학생은 90%인 +2.07점을 받음 -> 중하위권 과대 월반 방지)
+      // - 쉬운 시험(baseDifficultyAdj < 0): 고득점자일수록 만점 천장 효과로 억울하게 감점되지 않도록 (100 - totalPct) / 100 비례 감점
+      const scoreScaling = baseDifficultyAdj >= 0
+        ? (totalPct / 100)
+        : Math.max(0, (100 - totalPct) / 100);
 
-      const adjustedPct = parseFloat(Math.min(100, Math.max(0, totalPct + difficultyAdjustment)).toFixed(1));
+      const difficultyAdjustment = baseDifficultyAdj * sampleReliability * scoreScaling;
 
-      // 🌟 권한 관리(permission/page.tsx)에서 설정한 커트라인(tBounds)을 그대로 적용
+      // 반올림(Math.round)으로 인한 +0.5점 뻥튀기를 막기 위해 소수점 둘째 자리까지 정확한 수치로 비교
+      const adjustedPct = parseFloat(Math.min(100, Math.max(0, totalPct + difficultyAdjustment)).toFixed(2));
+
+      // 🌟 권한 관리(permission/page.tsx)에서 설정한 커트라인(tBounds)과 비교
       const getUmathClass = (score: number) => {
         if (score >= tBounds[4]) return `Ultimate<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(최상위 영재반)</span>`;
         if (score >= tBounds[3]) return `Master<br><span class="text-[11px] font-normal text-amber-100 mt-0.5 inline-block whitespace-nowrap">(심화 사고력반)</span>`;
