@@ -48,14 +48,17 @@ export default function StudentEditModal({
     parentName: "", 
     parentRel: "", 
     parentPhone: "", 
+    hasParentPw1: false,
     // 학부모 정보 2 (추가)
     parentName2: "",
     parentRel2: "", 
     parentPhone2: "", 
+    hasParentPw2: false,
     newClassId: ""
   });
   
   const [isSaving, setIsSaving] = useState(false);
+  const [resettingSlot, setResettingSlot] = useState<number | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [levelFilter, setLevelFilter] = useState("전체");
 
@@ -82,9 +85,11 @@ export default function StudentEditModal({
         parentName: parentObj?.name || "", 
         parentRel: parentObj?.relationship || "", 
         parentPhone: parentObj?.phone?.includes('unassigned') ? "" : (parentObj?.phone || ""), 
+        hasParentPw1: !!(parentObj?.password_hash && String(parentObj.password_hash).trim() !== ""),
         parentName2: parentObj?.name_2 || "",
         parentRel2: parentObj?.relationship_2 || "",
         parentPhone2: parentObj?.phone_2 || "",
+        hasParentPw2: !!(parentObj?.password_hash_2 && String(parentObj.password_hash_2).trim() !== ""),
         newClassId: ""
       });
       setLevelFilter("전체"); 
@@ -96,6 +101,61 @@ export default function StudentEditModal({
     if (v.length > 3 && v.length <= 7) return v.replace(/(\d{3})(\d+)/, '$1-$2');
     if (v.length > 7) return v.replace(/(\d{3})(\d{4})(\d+)/, '$1-$2-$3');
     return v;
+  };
+
+  // 학부모 번호별 개별 비밀번호 재설정(삭제) 함수
+  const resetParentPassword = async (slot: 1 | 2) => {
+    const targetPhone = slot === 1 ? editForm.parentPhone : editForm.parentPhone2;
+    const cleanPhone = toPhone(targetPhone);
+    const label = slot === 1 ? "학부모 1 (메인)" : "학부모 2 (추가)";
+    const targetColumn = slot === 1 ? "password_hash" : "password_hash_2";
+
+    if (!editForm.parentId && !cleanPhone) {
+      alert("연결된 학부모 정보나 입력된 연락처가 없습니다.");
+      return;
+    }
+
+    if (!confirm(`[${label}] 연락처의 비밀번호를 재설정(삭제)하시겠습니까?`)) return;
+
+    setResettingSlot(slot);
+    try {
+      // 1. 현재 학생과 연결된 parent_id의 해당 슬롯 비밀번호만 삭제
+      if (editForm.parentId) {
+        const { error } = await supabase
+          .from("parent")
+          .update({ [targetColumn]: null })
+          .eq("parent_id", editForm.parentId);
+        if (error) throw error;
+      }
+
+      // 2. 동일한 번호가 다른 행의 phone / phone_2 / phone_3에 등록된 경우 해당 컬럼의 비밀번호도 함께 삭제
+      if (cleanPhone) {
+        const variants = phoneVariants(cleanPhone);
+
+        const [res1, res2, res3] = await Promise.all([
+          supabase.from("parent").update({ password_hash: null }).in("phone", variants),
+          supabase.from("parent").update({ password_hash_2: null }).in("phone_2", variants),
+          supabase.from("parent").update({ password_hash_3: null }).in("phone_3", variants),
+        ]);
+
+        if (res1.error) throw res1.error;
+        if (res2.error) throw res2.error;
+        if (res3.error) throw res3.error;
+      }
+
+      // UI 상태 즉시 반영
+      setEditForm(prev => ({
+        ...prev,
+        ...(slot === 1 ? { hasParentPw1: false } : { hasParentPw2: false })
+      }));
+
+      alert(`[${label}] 비밀번호가 성공적으로 삭제(초기화)되었습니다.`);
+      onSuccess();
+    } catch (e: any) {
+      alert("비밀번호 재설정 실패: " + (e.message || "알 수 없는 오류"));
+    } finally {
+      setResettingSlot(null);
+    }
   };
 
   const submitEditStudent = async () => {
@@ -437,14 +497,31 @@ export default function StudentEditModal({
                   />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 mb-1">연락처 1 (메인)</label>
-                  <input 
-                    type="text" 
-                    value={editForm.parentPhone} 
-                    onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
-                    placeholder="010-0000-0000 (비워두면 unassigned로 보존)" 
-                  />
+                  <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
+                    <span>연락처 1 (메인)</span>
+                    {editForm.hasParentPw1 ? (
+                      <span className="text-[10px] text-blue-500 font-normal">비밀번호 설정됨</span>
+                    ) : (
+                      <span className="text-[10px] text-amber-500 font-normal">비밀번호 미설정</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={editForm.parentPhone} 
+                      onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} 
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                      placeholder="010-0000-0000 (비워두면 unassigned로 보존)" 
+                    />
+                    <button
+                      type="button"
+                      disabled={resettingSlot !== null || (!editForm.parentId && !editForm.parentPhone)}
+                      onClick={() => resetParentPassword(1)}
+                      className="shrink-0 px-3.5 py-2 bg-amber-50 text-amber-600 border border-amber-200 font-bold rounded-lg text-xs hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {resettingSlot === 1 ? "처리 중..." : "비밀번호 재설정"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
@@ -480,14 +557,31 @@ export default function StudentEditModal({
                   />
                 </div>
                 <div className="col-span-2">
-                  <label className="block text-xs font-bold text-slate-500 mb-1">연락처 2</label>
-                  <input 
-                    type="text" 
-                    value={editForm.parentPhone2} 
-                    onChange={e => setEditForm({...editForm, parentPhone2: formatPhone(e.target.value)})} 
-                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
-                    placeholder="010-0000-0000" 
-                  />
+                  <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
+                    <span>연락처 2</span>
+                    {editForm.hasParentPw2 ? (
+                      <span className="text-[10px] text-blue-500 font-normal">비밀번호 설정됨</span>
+                    ) : (
+                      <span className="text-[10px] text-amber-500 font-normal">비밀번호 미설정</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={editForm.parentPhone2} 
+                      onChange={e => setEditForm({...editForm, parentPhone2: formatPhone(e.target.value)})} 
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                      placeholder="010-0000-0000" 
+                    />
+                    <button
+                      type="button"
+                      disabled={resettingSlot !== null || (!editForm.parentId && !editForm.parentPhone2)}
+                      onClick={() => resetParentPassword(2)}
+                      className="shrink-0 px-3.5 py-2 bg-amber-50 text-amber-600 border border-amber-200 font-bold rounded-lg text-xs hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {resettingSlot === 2 ? "처리 중..." : "비밀번호 재설정"}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>
