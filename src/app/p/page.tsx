@@ -108,11 +108,19 @@ export default function ParentPortalPage() {
       const rawPhone = kakaoPhone.replace(/[^0-9]/g, ""); 
 
       try {
-        // 학부모 번호는 010-1234-5678 형식으로 저장되므로 두 형식 모두로 찾아봄
+        // 1차: RPC로 조회
         let { data: foundParentId } = await supabase.rpc('get_parent_by_phone', { phone_req: rawPhone });
         if (!foundParentId) {
           const hyphen = rawPhone.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3');
           if (hyphen !== rawPhone) ({ data: foundParentId } = await supabase.rpc('get_parent_by_phone', { phone_req: hyphen }));
+        }
+
+        // 2차: RPC가 phone_2, phone_3를 못 찾았을 경우 서버 액션(verifyParentPhone)으로 보조 조회
+        if (!foundParentId) {
+          const verifyRes = await verifyParentPhone(rawPhone);
+          if (verifyRes.success && verifyRes.parentId) {
+            foundParentId = verifyRes.parentId;
+          }
         }
         
         if (foundParentId) {
@@ -186,7 +194,8 @@ export default function ParentPortalPage() {
     if (!isAgreed) return alert("개인정보 수집 및 법정대리인 동의에 체크해주세요.");
     if (!setupPw.trim() || !parentId) return alert("사용할 비밀번호를 입력해주세요.");
     
-    const result = await setupParentAction(parentId, setupName, setupPw);
+    // ★ phoneInput을 4번째 인자로 전달하여 접속한 번호(phone / phone_2 / phone_3)에 맞는 슬롯에 비밀번호를 저장합니다.
+    const result = await setupParentAction(parentId, setupName, setupPw, phoneInput);
     if (result.success) {
       const token = await getParentAuthToken(parentId);
       sessionStorage.setItem("logica_parent_id", parentId);
@@ -253,26 +262,37 @@ export default function ParentPortalPage() {
         }
       );
 
-      const { data: pData, error: pError } = await authSupabase.from("parent").select("name, phone, phone_2").eq("parent_id", pid).single();
+      const { data: pData } = await authSupabase
+        .from("parent")
+        .select("name, name_2, name_3, phone, phone_2, phone_3")
+        .eq("parent_id", pid)
+        .single();
       
-      setInfoName(pData?.name || "");
+      setInfoName(pData?.name || pData?.name_2 || pData?.name_3 || "");
 
-      if (!pData?.phone && !pData?.phone_2) return;
+      if (!pData?.phone && !pData?.phone_2 && !pData?.phone_3) return;
 
       const orConditions: string[] = [];
-      [pData?.phone, pData?.phone_2].forEach(p => {
-        if (!p) return;
+      [pData?.phone, pData?.phone_2, pData?.phone_3].forEach(p => {
+        if (!p || p.includes("unassigned")) return;
         const raw = p.replace(/[^0-9]/g, "");
+        if (!raw) return;
         const fmt = raw.replace(/^(\d{0,3})(\d{0,4})(\d{0,4})$/g, (m: string, p1: string, p2: string, p3: string) => p1 + (p2 ? "-" + p2 : "") + (p3 ? "-" + p3 : ""));
-        orConditions.push(`phone.eq.${raw},phone.eq.${fmt},phone_2.eq.${raw},phone_2.eq.${fmt}`);
+        orConditions.push(
+          `phone.eq.${raw},phone.eq.${fmt},phone_2.eq.${raw},phone_2.eq.${fmt},phone_3.eq.${raw},phone_3.eq.${fmt}`
+        );
       });
 
-      const { data: allParents } = await authSupabase
-        .from("parent")
-        .select("parent_id")
-        .or(orConditions.join(","));
-
-      const pids = allParents?.map(p => p.parent_id) || [pid];
+      let pids = [pid];
+      if (orConditions.length > 0) {
+        const { data: allParents } = await authSupabase
+          .from("parent")
+          .select("parent_id")
+          .or(orConditions.join(","));
+        if (allParents && allParents.length > 0) {
+          pids = Array.from(new Set([pid, ...allParents.map(p => p.parent_id)]));
+        }
+      }
 
       const { data: sData, error } = await authSupabase
         .from("student")
