@@ -115,6 +115,7 @@ const PERMISSION_GROUPS = [
       { id: "/competency-mapper", label: "교과 역량 매핑 (유형별 역량 AI 매핑·검수)" },
       { id: "/book-upload", label: "교재 구조 (textbook) 일괄 업로드" },
       { id: "/qdb-upload", label: "문제 DB (question_db) 수동 업로드" },
+      { id: "/contest-db", label: "사고력·문장제 문제 DB (조회·AI 한글 번역)" },
     ]
   },
   {

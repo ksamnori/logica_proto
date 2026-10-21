@@ -117,7 +117,7 @@ export default function Sidebar() {
     if (path === '/ta-tools' && displayRole === 'TA') return true;
 
     // 조교(TA)는 팩토리 영역(DB 건드리는 메뉴) 원천 차단
-    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper'];
+    const factoryPaths = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper', '/contest-db'];
     if (factoryPaths.includes(path) && displayRole === 'TA') return false;
 
     // 🌟 그 외 모든 직급(파트강사 포함)은 오직 DB(권한 관리 페이지) 설정값에 따릅니다.
@@ -128,7 +128,7 @@ export default function Sidebar() {
   const MenuItem = ({ path, linkTo, label, desc, full = false }: { path: string, linkTo?: string, label: string, desc?: string, full?: boolean }) => {
     const active = pathname === (linkTo || path) || pathname.startsWith((linkTo || path) + "/");
     const disabled = !canAccess(path);
-    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper'].includes(path);
+    const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper', '/contest-db'].includes(path);
 
     const baseClass = `flex flex-col items-center justify-center px-2 py-2 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
 
@@ -205,7 +205,7 @@ export default function Sidebar() {
     exam: ['/exam-list', '/admission'],
     desk: ['/admin-dashboard', '/consultation', '/supervisor', '/billing', '/unpaid', '/shop-admin', '/print-center'],
     ta: ['/clinic/ta'],
-    factory: ['/factory-dashboard', '/pdf-parser', '/taxonomy-editor', '/twin-manager', '/mapper', '/competency-mapper', '/book-upload', '/qdb-upload'],
+    factory: ['/factory-dashboard', '/pdf-parser', '/taxonomy-editor', '/twin-manager', '/mapper', '/competency-mapper', '/book-upload', '/qdb-upload', '/contest-db'],
     owner: ['/seat-layout-editor', '/clinic-pad-registry', '/permission', '/instructor', '/academy-info'],
   };
   const sectionHasCurrent = (id: string) => (SECTION_PATHS[id] || []).some(p => pathname === p || pathname.startsWith(p + "/"));
@@ -305,7 +305,7 @@ export default function Sidebar() {
           <MenuItem path="/ta-tools" linkTo="/clinic/ta/pad" label="조교 전용 페이지로 이동" full />
         </>)}
 
-        {renderSection("factory", "LOGICA Factory", 8, <>
+        {renderSection("factory", "LOGICA Factory", 9, <>
           <MenuItem path="/factory-dashboard" label="DB 통계 대시보드" full />
           <MenuItem path="/pdf-parser" label="PDF 문항 추출기" full />
           <MenuItem path="/taxonomy-editor" label="문제 교정 및 쌍둥이/유사 생성" full />
@@ -314,6 +314,7 @@ export default function Sidebar() {
           <MenuItem path="/competency-mapper" label="교과 역량 매핑" full />
           <MenuItem path="/book-upload" label="교재 DB 업로드" />
           <MenuItem path="/qdb-upload" label="문제 DB 업로드" />
+          
         </>, "factory")}
 
         {/* 원장·최고관리자 전용: 해당 직급에게만 보임 */}

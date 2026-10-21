@@ -12,7 +12,8 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith('/supervisor') ||
     pathname.startsWith('/seat-layout-editor') ||
     pathname.startsWith('/home') || 
-    pathname.startsWith('/exam');
+    pathname.startsWith('/exam') ||
+    pathname.startsWith('/contest-db');
 
   if (isProtectedRoute) {
     // 💡 수정됨: page.tsx에서 저장하는 Supabase 쿠키 이름으로 매칭
