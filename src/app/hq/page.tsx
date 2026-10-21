@@ -6,6 +6,10 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import ProfileModal from "@/components/ProfileModal";
 import AdmissionAnalyticsPage from "@/app/(dashboard)/admission/analytics/page";
+import ContestDbPage from "@/app/(dashboard)/contest-db/page";
+import { fetchContestAccess } from "@/app/(dashboard)/contest-db/useContestDb";
+import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUtils";
+import HqPermissionPanel from "./HqPermissionPanel";
 
 export default function HQWorkspacePage() {
   const router = useRouter();
@@ -16,8 +20,13 @@ export default function HQWorkspacePage() {
   const [instRole, setInstRole] = useState("");
   const [isProfileOpen, setIsProfileOpen] = useState(false);
 
-  // 🌟 좌측 메뉴 상태 ('chat': 기본 메신저 뷰, 'admission_analytics': 진단평가 분석 뷰)
-  const [activeMenu, setActiveMenu] = useState<"chat" | "admission_analytics">("chat");
+  // 🌟 좌측 메뉴 상태 ('chat': 기본 메신저 뷰, 'admission_analytics': 진단평가 분석 뷰, 'contest_db': 문제 DB)
+  const [activeMenu, setActiveMenu] = useState<"chat" | "admission_analytics" | "contest_db" | "permissions">("chat");
+
+  // 🌟 문제 DB 열람 권한 (DB 허용 명단 contest_db_access 기준. 'word' = 문장제, 'all' = 전체, null = 없음)
+  const [contestAccess, setContestAccess] = useState<ContestAccessLevel>(null);
+  // 🌟 권한 관리자 여부 (DB 명단 hq_admins 기준. 메뉴 표시용이고, 실제 변경은 서버 API가 다시 확인)
+  const [isHqAdmin, setIsHqAdmin] = useState(false);
 
   // 🌟 페이지 진입 시 우측 탭 기본값을 "new"(조직도)로 설정
   const [activeView, setActiveView] = useState<"list" | "room" | "new">("new");
@@ -73,24 +82,37 @@ export default function HQWorkspacePage() {
       });
   }, [router]);
 
-  // 🌟 '본사 관리자' 또는 'ADMIN' 권한 체크
   const meInst = allInstructors.find(i => i.instructor_id === instId);
-  const effectiveRole = String(meInst?.role || instRole || "").toUpperCase().trim();
-  const effectivePos = String(meInst?.position || meInst?.chat_position || instPosition || "").trim();
 
-  const canAccessAnalytics =
-    effectiveRole === "ADMIN" ||
-    effectiveRole === "SUPER_ADMIN" ||
-    effectiveRole.includes("ADMIN") ||
-    effectiveRole.includes("본사 관리자") ||
-    effectiveRole.includes("본사관리자") ||
-    effectivePos.includes("본사 관리자") ||
-    effectivePos.includes("본사관리자") ||
-    effectivePos.toUpperCase().includes("ADMIN");
+  // 🌟 진단평가 분석 권한: DB 명단(hq_permissions) 기준. 권한 관리 메뉴에서 켜고 끔
+  //    (예전에는 역할·직책에 ADMIN/본사 관리자가 있으면 열렸지만, 출판사 직원이 전원 ADMIN 이라 명단으로 바꿈)
+  const [canAccessAnalytics, setCanAccessAnalytics] = useState(false);
+
+  /** 내 메뉴 권한들을 DB 명단에서 다시 불러옴 (권한 관리에서 본인 권한을 바꿨을 때도 호출) */
+  const refreshMyPermissions = () => {
+    fetchContestAccess().then(setContestAccess);
+    supabase.rpc("has_hq_permission", { p_permission: "admission_analytics" })
+      .then(({ data }) => setCanAccessAnalytics(data === true));
+  };
+
+  useEffect(() => {
+    if (!instId) return;
+    refreshMyPermissions();
+    supabase.rpc("is_hq_admin").then(({ data }) => setIsHqAdmin(data === true));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [instId]);
+
+  const handleClickContestMenu = () => {
+    if (!contestAccess) {
+      alert("⛔ 문제 DB 열람 권한이 등록된 계정만 열 수 있습니다.\n필요하면 최고관리자에게 권한 등록을 요청하세요.");
+      return;
+    }
+    setActiveMenu("contest_db");
+  };
 
   const handleClickAnalyticsMenu = () => {
     if (!canAccessAnalytics) {
-      alert("⛔ '본사 관리자' 또는 'ADMIN' 권한이 있는 계정만 열 수 있습니다.");
+      alert("⛔ 진단평가 분석 권한이 등록된 계정만 열 수 있습니다.\n필요하면 권한 관리자에게 요청하세요.");
       return;
     }
     setActiveMenu("admission_analytics");
@@ -453,21 +475,79 @@ export default function HQWorkspacePage() {
                     <span className="truncate">진단평가 분석</span>
                   </span>
                   {!canAccessAnalytics && (
-                    <span className="text-xs text-slate-500 shrink-0" title="본사 관리자 / ADMIN 전용">
+                    <span className="text-xs text-slate-500 shrink-0" title="진단평가 분석 권한 등록자 전용">
                       🔒
                     </span>
                   )}
                 </button>
               </div>
             </div>
+
+            <div>
+              <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                <span>📚</span>
+                <span>출판 사업</span>
+              </div>
+              <div className="space-y-1">
+                <button
+                  onClick={handleClickContestMenu}
+                  className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
+                    activeMenu === "contest_db"
+                      ? "bg-brand text-white shadow-md"
+                      : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                  }`}
+                >
+                  <span className="flex items-center gap-2 truncate">
+                    <span>📐</span>
+                    <span className="truncate">사고력·문장제 문제 DB</span>
+                  </span>
+                  {!contestAccess && (
+                    <span className="text-xs text-slate-500 shrink-0" title="문제 DB 열람 권한 등록자 전용">
+                      🔒
+                    </span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {isHqAdmin && (
+              <div>
+                <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
+                  <span>⚙️</span>
+                  <span>관리</span>
+                </div>
+                <div className="space-y-1">
+                  <button
+                    onClick={() => setActiveMenu("permissions")}
+                    className={`w-full flex items-center gap-2 px-3.5 py-2.5 rounded-xl font-bold text-[13px] transition-all ${
+                      activeMenu === "permissions"
+                        ? "bg-brand text-white shadow-md"
+                        : "text-slate-300 hover:bg-slate-800 hover:text-white"
+                    }`}
+                  >
+                    <span>🔐</span>
+                    <span className="truncate">권한 관리</span>
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </aside>
 
         {/* 🌟 2. 중앙 메인 영역 (진단평가 분석 페이지 또는 채팅 대화방) */}
         <div className={`${!activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} flex-1 flex-col bg-[#eef2f6] relative min-w-0 overflow-hidden`}>
-          {activeMenu === "admission_analytics" ? (
+          {activeMenu === "admission_analytics" && canAccessAnalytics ? (
             <div className="flex-1 w-full h-full overflow-hidden relative">
               <AdmissionAnalyticsPage />
+            </div>
+          ) : activeMenu === "contest_db" ? (
+            <div className="flex-1 w-full h-full overflow-hidden relative flex flex-col pt-4">
+              <ContestDbPage />
+            </div>
+          ) : activeMenu === "permissions" && isHqAdmin ? (
+            <div className="flex-1 w-full h-full overflow-hidden relative">
+              {/* 본인 권한을 바꾸면 좌측 메뉴 잠금 표시도 바로 갱신 */}
+              <HqPermissionPanel onChanged={refreshMyPermissions} />
             </div>
           ) : activeRoomId ? (
             <>
@@ -565,7 +645,8 @@ export default function HQWorkspacePage() {
         </div>
 
         {/* 🌟 3. 우측 사이드바 (기본 화면: 조직도) */}
-        <div className={`${activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-l border-slate-300 shrink-0 z-10 shadow-lg`}>
+        {/* 문제 DB·권한 관리 화면은 폭이 넓어야 해서 열려 있는 동안 조직도를 숨김 */}
+        <div className={`${activeMenu === "contest_db" || activeMenu === "permissions" ? 'hidden' : activeRoomId && activeMenu === "chat" ? 'hidden md:flex' : 'flex'} w-full md:w-[340px] flex-col bg-white border-l border-slate-300 shrink-0 z-10 shadow-lg`}>
           <div className="flex px-4 pt-4 pb-0 bg-slate-50 border-b border-slate-200 gap-2">
             <button onClick={() => { showNewChatView(); setActiveRoomId(null); }} className={`flex-1 py-2.5 text-[14px] font-bold border-b-2 transition-colors flex items-center justify-center gap-1.5 ${activeView === "new" ? "border-slate-800 text-slate-800" : "border-transparent text-slate-400 hover:text-slate-600"}`}>
               조직도

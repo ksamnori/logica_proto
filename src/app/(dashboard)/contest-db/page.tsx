@@ -1,27 +1,23 @@
 // src/app/(dashboard)/contest-db/page.tsx
 "use client";
 
-import React, { useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { supabase } from "@/lib/supabase";
-import { useContestDb } from "./useContestDb";
+import React, { memo, useEffect, useRef, useState } from "react";
+import { useContestDb, fetchContestAccess } from "./useContestDb";
 import {
   TOPIC_OPTIONS,
   KEYWORD_OPTIONS,
   DATASET_OPTIONS,
   NUMINA_SOURCES,
   QUESTION_TYPE_OPTIONS,
-  isContestSuperAdmin,
   EMPTY_FILTERS,
   SOLUTION_SPLIT,
   renderProblemText,
+  renderAnswer,
   previewLine,
   typesetMath,
   ensureMathJax,
   type ContestFilters,
 } from "./contestUtils";
-
-const MENU_PATH = "/contest-db";
 
 const KO_STATUS_OPTIONS: { value: ContestFilters["koStatus"]; label: string }[] = [
   { value: "", label: "전체" },
@@ -30,9 +26,8 @@ const KO_STATUS_OPTIONS: { value: ContestFilters["koStatus"]; label: string }[] 
 ];
 
 export default function WordProblemDbPage() {
-  const router = useRouter();
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [canSeeAll, setCanSeeAll] = useState(false);
   const db = useContestDb();
   const { filters, setFilters, detail } = db;
 
@@ -41,38 +36,21 @@ export default function WordProblemDbPage() {
   const [editProblemKo, setEditProblemKo] = useState("");
   const [editSolutionsKo, setEditSolutionsKo] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  const viewerRef = useRef<HTMLDivElement>(null);
+  // 수식 새로고침: 값을 바꾸면 문항 영역을 원문에서 다시 만들고 수식을 새로 그림
+  const [mathRefreshKey, setMathRefreshKey] = useState(0);
 
   // ---------------------------------------------------------
-  // 접근 권한 (Sidebar.canAccess 와 같은 기준. 서버 API도 같은 기준으로 다시 검사함)
+  // 접근 권한: DB 허용 명단(contest_db_access) 기준. 학원 화면·출판사 포털 공통
+  //  - 'word' = 사고력·문장제만, 'all' = 전체 문제 탭까지
+  //  - 화면 표시용일 뿐이고, 실제 조회 제한은 DB 정책과 서버 API가 같은 명단으로 다시 막음
   // ---------------------------------------------------------
   useEffect(() => {
-    const checkAccess = async () => {
-      const role = localStorage.getItem("logica_instructor_role") || "";
-      const pos = localStorage.getItem("logica_instructor_position") || "";
-      const tId = localStorage.getItem("logica_tenant_id") || "";
-      if (!role) {
-        router.replace("/");
-        return;
-      }
-      setIsSuperAdmin(isContestSuperAdmin(role, pos));
-      const isTeacherMode = role === "TEACHER";
-      const isSA = !isTeacherMode && (role === "SUPER_ADMIN" || pos.includes("최고관리자") || pos.includes("대장"));
-      const isPrin = !isTeacherMode && (role === "ADMIN" || pos.includes("원장"));
-      if (isSA || isPrin) return setIsAuthorized(true);
-      if (role === "TA" || role === "GUEST" || !tId) return setIsAuthorized(false);
-
-      const { data } = await supabase
-        .from("tenant_role_permissions")
-        .select("allowed_menus")
-        .eq("tenant_id", tId)
-        .eq("role_name", role)
-        .maybeSingle();
-      setIsAuthorized(Boolean(data?.allowed_menus?.includes(MENU_PATH)));
-    };
-    checkAccess();
+    fetchContestAccess().then((level) => {
+      setCanSeeAll(level === "all");
+      setIsAuthorized(level !== null);
+    });
     ensureMathJax();
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (isAuthorized) db.search(0);
@@ -85,10 +63,6 @@ export default function WordProblemDbPage() {
     setEditProblemKo(detail?.problem_ko || "");
     setEditSolutionsKo((detail?.solutions_ko || []).join(`\n\n${SOLUTION_SPLIT}\n\n`));
   }, [detail?.id, detail?.problem_ko, detail?.solutions_ko]);
-
-  useEffect(() => {
-    typesetMath(viewerRef.current);
-  }, [detail, isEditing, showEnglish]);
 
   // 좌우 화살표로 이전/다음 문항
   useEffect(() => {
@@ -151,8 +125,8 @@ export default function WordProblemDbPage() {
     return (
       <div className="flex-1 flex flex-col items-center justify-center gap-2 text-slate-500">
         <span className="text-3xl">🔒</span>
-        <p className="font-bold">사고력·문장제 문제 DB에 접근할 권한이 없습니다.</p>
-        <p className="text-sm">권한 관리 페이지에서 &apos;{MENU_PATH}&apos; 메뉴를 허용받아야 합니다.</p>
+        <p className="font-bold">문제 DB 열람 권한이 없는 계정입니다.</p>
+        <p className="text-sm">열람이 필요하면 최고관리자에게 권한 등록을 요청하세요.</p>
       </div>
     );
   }
@@ -165,34 +139,25 @@ export default function WordProblemDbPage() {
 
   return (
     <div className="flex flex-col h-full bg-slate-50 font-pretendard px-6 pb-6 overflow-hidden">
-      {/* 제목 + 일괄 번역 */}
-      <div className="flex items-end justify-between gap-4 mb-3">
+      {/* 탭 (오른쪽 위는 학원 공통 플로팅 버튼 자리라 비워 둠) */}
+      <div className="flex items-end gap-4 mb-3 pr-48">
         <div>
           <div className="flex items-center gap-1">
             <TabButton active={db.mode === "word"} onClick={() => db.mode !== "word" && db.switchMode("word")}>
               사고력·문장제
             </TabButton>
-            {isSuperAdmin && (
+            {canSeeAll && (
               <TabButton active={db.mode === "all"} onClick={() => db.mode !== "all" && db.switchMode("all")}>
-                전체 문제 <span className="ml-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">최고관리자</span>
+                전체 문제 <span className="ml-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-700">전체 열람</span>
               </TabButton>
             )}
           </div>
           <p className="text-xs text-slate-500 mt-1.5">
             {db.mode === "word"
               ? "초·중등 수준 문장제 약 15만 문항 · 영문 원본과 한국어 번역을 나란히 확인하고 수정합니다."
-              : "MathNet · NuminaMath-1.5 · Omni-MATH 전체 약 92만 문항 · 최고관리자만 조회할 수 있습니다."}
+              : "MathNet · NuminaMath-1.5 · Omni-MATH 전체 약 92만 문항 · 전체 열람 권한이 있는 계정만 조회할 수 있습니다."}
           </p>
         </div>
-        {db.batchProgress ? (
-          <button onClick={db.cancelBatch} className={`${btnCls} bg-rose-600 text-white hover:bg-rose-700 shrink-0`}>
-            일괄 번역 중단 ({db.batchProgress.done}/{db.batchProgress.total})
-          </button>
-        ) : (
-          <button onClick={db.translateBatch} disabled={!db.items.length} className={`${btnCls} bg-violet-600 text-white hover:bg-violet-700 shrink-0`}>
-            현재 목록 미번역 일괄 한글화
-          </button>
-        )}
       </div>
 
       {/* 필터 */}
@@ -247,6 +212,18 @@ export default function WordProblemDbPage() {
         />
         <button onClick={() => db.search(0)} className={`${btnCls} bg-blue-600 text-white hover:bg-blue-700`}>조회</button>
         <button onClick={resetFilters} className={`${btnCls} bg-slate-100 text-slate-600 hover:bg-slate-200`}>초기화</button>
+        {/* 우측 상단 플로팅 버튼에 가리지 않도록 일괄 번역은 필터 줄 오른쪽 끝에 둠 */}
+        <div className="ml-auto">
+          {db.batchProgress ? (
+            <button onClick={db.cancelBatch} className={`${btnCls} bg-rose-600 text-white hover:bg-rose-700`}>
+              일괄 번역 중단 ({db.batchProgress.done}/{db.batchProgress.total})
+            </button>
+          ) : (
+            <button onClick={db.translateBatch} disabled={!db.items.length} className={`${btnCls} bg-violet-600 text-white hover:bg-violet-700`}>
+              현재 목록 미번역 일괄 한글화
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex flex-1 min-h-0 gap-3">
@@ -288,13 +265,13 @@ export default function WordProblemDbPage() {
         </div>
 
         {/* 우측 본문 */}
-        <div ref={viewerRef} className="flex-1 min-w-0 overflow-y-auto">
+        <div className="flex-1 min-w-0 overflow-y-auto">
           {!detail ? (
             <div className="h-full flex items-center justify-center text-slate-400 font-bold">
               {db.isDetailLoading ? "문항 불러오는 중..." : "왼쪽에서 문항을 선택하세요."}
             </div>
           ) : (
-            <div className={`space-y-3 ${db.isDetailLoading ? "opacity-50" : ""}`}>
+            <div key={mathRefreshKey} className={`space-y-3 ${db.isDetailLoading ? "opacity-50" : ""}`}>
               {/* 도구 모음 */}
               <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
@@ -307,6 +284,13 @@ export default function WordProblemDbPage() {
                   <label className="flex items-center gap-1 text-xs font-bold text-slate-500 cursor-pointer">
                     <input type="checkbox" checked={showEnglish} onChange={(e) => setShowEnglish(e.target.checked)} /> 영문 함께 보기
                   </label>
+                  <button
+                    onClick={() => setMathRefreshKey((k) => k + 1)}
+                    className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-lg text-[13px] font-bold hover:bg-indigo-100 transition-colors"
+                    title="화면의 깨진 수식을 원문에서 다시 그립니다."
+                  >
+                    🔄 수식 새로고침
+                  </button>
                   <button onClick={() => setIsEditing((v) => !v)} className={`${btnCls} bg-slate-100 text-slate-600`}>{isEditing ? "편집 닫기" : "한글 직접 수정"}</button>
                   <button onClick={handleTranslate} disabled={isTranslating || !!db.batchProgress} className={`${btnCls} bg-emerald-600 text-white hover:bg-emerald-700`}>
                     {isTranslating ? "번역·저장 중..." : detail.has_ko ? "AI 재번역" : "AI 한글 번역"}
@@ -368,7 +352,7 @@ export default function WordProblemDbPage() {
               {/* 정답 */}
               <div className="bg-white rounded-xl border border-slate-200 border-l-4 border-l-indigo-500 shadow-sm px-4 py-3 text-[15px]">
                 <strong className="text-slate-600 text-sm mr-2">정답</strong>
-                {detail.final_answer ? <MathText inline html={`$${renderProblemText(detail.final_answer)}$`} /> : <span className="text-slate-400 text-sm">해설 참조</span>}
+                {detail.final_answer ? <MathText inline html={renderAnswer(detail.final_answer)} /> : <span className="text-slate-400 text-sm">해설 참조</span>}
               </div>
 
               {/* 해설 */}
@@ -445,7 +429,18 @@ function SmallBtn({ children, onClick, primary, disabled }: { children: React.Re
   );
 }
 
-function MathText({ html, inline }: { html: string; inline?: boolean }) {
-  const Tag = inline ? "span" : "div";
-  return <Tag className={`${inline ? "" : "text-[15px] leading-7 whitespace-pre-wrap break-words"} text-slate-800`} dangerouslySetInnerHTML={{ __html: html }} />;
-}
+/**
+ * 수식이 들어간 글 한 덩어리.
+ *  - 내용(html)이 바뀔 때만 다시 그리고(memo), 그릴 때마다 자기 영역만 MathJax로 렌더링
+ *  - 화면의 다른 부분이 바뀌어도 이미 렌더링된 수식을 건드리지 않아 원래 코드로 되돌아가지 않음
+ */
+const MathText = memo(function MathText({ html, inline }: { html: string; inline?: boolean }) {
+  const ref = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    typesetMath(ref.current);
+  }, [html]);
+  const className = `${inline ? "" : "text-[15px] leading-7 whitespace-pre-wrap break-words"} text-slate-800`;
+  return inline
+    ? <span ref={(el) => { ref.current = el; }} className={className} dangerouslySetInnerHTML={{ __html: html }} />
+    : <div ref={(el) => { ref.current = el; }} className={className} dangerouslySetInnerHTML={{ __html: html }} />;
+});

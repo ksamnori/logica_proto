@@ -53,12 +53,8 @@ export const EMPTY_FILTERS: ContestFilters = {
   dataset: "", competition: "", country: "", questionType: "", onlyFigure: false,
 };
 
-/** 최고관리자 판별 (화면 표시용. 실제 조회 제한은 DB 정책 is_contest_super_admin() 이 담당) */
-export function isContestSuperAdmin(role: string, position: string): boolean {
-  const r = (role || "").toUpperCase();
-  if (r === "SUPER_ADMIN") return true;
-  return r !== "TEACHER" && (position || "").includes("최고관리자");
-}
+/** 문제 DB 열람 권한 ('word' = 문장제만, 'all' = 전체, null = 없음). DB 허용 명단(contest_db_access)이 기준 */
+export type ContestAccessLevel = "word" | "all" | null;
 
 export const DATASET_OPTIONS = [
   { value: "NuminaMath-1.5", label: "NuminaMath-1.5" },
@@ -85,14 +81,129 @@ export const QUESTION_TYPE_OPTIONS = ["객관식", "단답/서술형", "단답+�
 const escapeHtml = (s: string) =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
-/** 본문을 안전하게 HTML로 바꾸고, 마크다운 이미지 ![](url) 만 <img>로 살림. 수식($...$)은 MathJax가 처리 */
+// ---------------------------------------------------------------------
+// 수식 전처리
+//  문제 데이터는 "$12짜리 연필" 같은 달러 금액과 진짜 수식($2x+3$)이 섞여 있고,
+//  해설에는 $ 없이 \boxed{12}, \frac{1}{2} 만 덩그러니 있는 경우도 많습니다.
+//  그대로 MathJax에 넘기면 금액 사이 문장이 통째로 수식이 되거나 코드가 그대로 보이므로,
+//  여기서 직접 "수식 / 일반 글"을 나눈 뒤
+//   - 수식은 모든 화면의 MathJax 설정이 공통으로 아는 \( \), \[ \] 로 감싸고
+//   - 일반 글의 $ 는 MathJax가 건드리지 않는 span 에 넣어 글자 그대로 보이게 합니다.
+// ---------------------------------------------------------------------
+type Segment = { kind: "text" | "inline" | "display"; value: string };
+
+/** $...$ 사이가 진짜 수식인지, 달러 금액 사이의 문장인지 판별 (Pandoc 규칙 + 문장 감지) */
+function looksLikeInlineMath(content: string, nextChar: string): boolean {
+  if (!content.trim()) return false;
+  if (/^\s|\s$/.test(content)) return false;        // "$12 and $" 처럼 $ 안쪽이 공백이면 금액
+  if (/^\d/.test(nextChar || "")) return false;       // "$5 ... $10" 의 두 번째 $ 뒤가 숫자
+  if (/\n\s*\n/.test(content)) return false;          // 문단을 넘어가면 수식 아님
+  if (/[\\^_{}]/.test(content)) return true;          // LaTeX 기호가 있으면 수식
+  if (/[가-힣]/.test(content)) return false;          // 한글 문장
+  if (/[A-Za-z]{3,}\s+[A-Za-z]{2,}/.test(content)) return false; // 영어 문장
+  return true;
+}
+
+function findUnescaped(src: string, token: string, from: number): number {
+  let i = src.indexOf(token, from);
+  while (i !== -1 && i > 0 && src[i - 1] === "\\") i = src.indexOf(token, i + 1);
+  return i;
+}
+
+export function splitMath(src: string): Segment[] {
+  const out: Segment[] = [];
+  let text = "";
+  const flush = () => { if (text) { out.push({ kind: "text", value: text }); text = ""; } };
+  let i = 0;
+  while (i < src.length) {
+    if (src.startsWith("\\$", i)) { text += "$"; i += 2; continue; }   // 이미 이스케이프된 달러
+    if (src.startsWith("$$", i)) {
+      const j = src.indexOf("$$", i + 2);
+      if (j > i + 2) { flush(); out.push({ kind: "display", value: src.slice(i + 2, j) }); i = j + 2; continue; }
+      text += "$$"; i += 2; continue;
+    }
+    if (src.startsWith("\\[", i) || src.startsWith("\\(", i)) {
+      const display = src[i + 1] === "[";
+      const j = src.indexOf(display ? "\\]" : "\\)", i + 2);
+      if (j !== -1) { flush(); out.push({ kind: display ? "display" : "inline", value: src.slice(i + 2, j) }); i = j + 2; continue; }
+    }
+    if (src[i] === "$") {
+      const j = findUnescaped(src, "$", i + 1);
+      if (j !== -1 && looksLikeInlineMath(src.slice(i + 1, j), src[j + 1])) {
+        flush(); out.push({ kind: "inline", value: src.slice(i + 1, j) }); i = j + 1; continue;
+      }
+      text += "$"; i += 1; continue;                                   // 금액 표시 달러
+    }
+    text += src[i]; i += 1;
+  }
+  flush();
+  return out;
+}
+
+// $ 없이 글 속에 들어 있는 LaTeX 명령 (해설의 \boxed{12} 등)
+const BARE_COMMANDS = new Set([
+  "frac", "dfrac", "tfrac", "sqrt", "boxed", "times", "div", "cdot", "pi", "le", "leq", "ge", "geq",
+  "neq", "approx", "circ", "angle", "triangle", "pm", "infty", "overline", "degree", "%",
+]);
+
+/** 글 속 LaTeX 명령을 찾아 \( \) 로 감쌀 구간을 돌려줌 (중괄호 짝을 끝까지 따라감) */
+function wrapBareCommands(text: string): Segment[] {
+  const out: Segment[] = [];
+  let last = 0;
+  const re = /\\([a-zA-Z]+|%)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (!BARE_COMMANDS.has(m[1])) continue;
+    let end = m.index + m[0].length;
+    if (text[end] === "[") { const close = text.indexOf("]", end); if (close !== -1) end = close + 1; }
+    while (text[end] === "{") {
+      let depth = 0, k = end;
+      for (; k < text.length; k++) {
+        if (text[k] === "{") depth++;
+        else if (text[k] === "}" && --depth === 0) break;
+      }
+      if (depth !== 0 || k >= text.length) break;
+      end = k + 1;
+    }
+    if (m.index > last) out.push({ kind: "text", value: text.slice(last, m.index) });
+    out.push({ kind: "inline", value: text.slice(m.index, end) });
+    last = end;
+    re.lastIndex = end;
+  }
+  if (last < text.length) out.push({ kind: "text", value: text.slice(last) });
+  return out;
+}
+
+const IMG_RE = /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g;
+const LITERAL_DOLLAR = '<span class="tex2jax_ignore">$</span>';
+
+function renderTextSegment(value: string): string {
+  return escapeHtml(value)
+    .replace(/\$/g, LITERAL_DOLLAR)
+    .replace(IMG_RE, (_m, url: string) =>
+      `<img src="${url.replace(/"/g, "&quot;")}" alt="그림" loading="lazy" class="my-3 max-w-[360px] max-h-[300px] rounded-lg border border-slate-200 bg-white p-1.5" />`);
+}
+
+/** 문제·해설 텍스트를 안전한 HTML로 바꾸고, 수식은 MathJax가 확실히 읽는 형태로 정리 */
 export function renderProblemText(text: string | null | undefined): string {
   if (!text) return "";
-  return escapeHtml(String(text)).replace(
-    /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g,
-    (_m, url: string) =>
-      `<img src="${url.replace(/"/g, "&quot;")}" alt="그림" loading="lazy" class="my-3 max-w-[360px] max-h-[300px] rounded-lg border border-slate-200 bg-white p-1.5" />`
-  );
+  return splitMath(String(text))
+    .flatMap((seg) => (seg.kind === "text" ? wrapBareCommands(seg.value) : [seg]))
+    .map((seg) => {
+      if (seg.kind === "text") return renderTextSegment(seg.value);
+      const body = escapeHtml(seg.value);
+      return seg.kind === "display" ? `\\[${body}\\]` : `\\(${body}\\)`;
+    })
+    .join("");
+}
+
+/** 정답 칸: 이미 수식 구분자가 있으면 그대로, 숫자·식이면 수식으로, 말로 된 답은 글자로 */
+export function renderAnswer(answer: string | null | undefined): string {
+  const a = String(answer || "").trim();
+  if (!a) return "";
+  if (/\$|\\\(|\\\[/.test(a)) return renderProblemText(a);
+  if (/[가-힣]/.test(a) || /[A-Za-z]{3,}\s+[A-Za-z]{2,}/.test(a)) return renderProblemText(a);
+  return `\\(${escapeHtml(a)}\\)`;
 }
 
 /** 목록에 보여줄 한 줄 미리보기 (수식 기호를 걷어 내고 앞부분만) */
@@ -139,14 +250,23 @@ export function ensureMathJax(): Promise<void> {
   return mathJaxLoading;
 }
 
-export async function typesetMath(el: HTMLElement | null) {
-  if (!el) return;
-  await ensureMathJax();
-  const mj = (window as any).MathJax;
-  try {
-    mj.typesetClear?.([el]);
-    await mj.typesetPromise([el]);
-  } catch {
-    /* 깨진 수식 하나 때문에 화면 전체가 멈추지 않도록 무시 */
-  }
+// MathJax 는 렌더링이 겹치면 일부만 바뀐 채 멈출 수 있어서, 요청을 한 줄로 세워 차례로 처리
+let typesetChain: Promise<void> = Promise.resolve();
+
+export function typesetMath(el: HTMLElement | null): Promise<void> {
+  if (!el) return Promise.resolve();
+  typesetChain = typesetChain
+    .then(() => ensureMathJax())
+    .then(async () => {
+      const mj = (window as any).MathJax;
+      if (!el.isConnected) return; // 그 사이 화면에서 사라진 영역은 건너뜀
+      try {
+        await mj.startup?.promise;
+        mj.typesetClear?.([el]);
+        await mj.typesetPromise([el]);
+      } catch (err) {
+        console.warn("MathJax 렌더링 오류:", err); // 깨진 수식 하나 때문에 화면 전체가 멈추지 않도록
+      }
+    });
+  return typesetChain;
 }

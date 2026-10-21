@@ -10,10 +10,21 @@ import {
   PAGE_SIZE,
   EMPTY_FILTERS,
   type ViewMode,
+  type ContestAccessLevel,
   type ContestFilters,
   type ContestListItem,
   type ContestProblem,
 } from "./contestUtils";
+
+/** 로그인한 사람의 문제 DB 열람 권한을 DB 허용 명단에서 조회 (학원·출판사 포털 공통) */
+export async function fetchContestAccess(): Promise<ContestAccessLevel> {
+  const { data, error } = await supabase.rpc("contest_access_level");
+  if (error) {
+    console.warn("문제 DB 권한 조회 실패:", error.message);
+    return null;
+  }
+  return data === "all" || data === "word" ? data : null;
+}
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();

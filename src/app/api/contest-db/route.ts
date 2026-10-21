@@ -1,6 +1,6 @@
 // src/app/api/contest-db/route.ts
 // 경시 문제 DB(pub_contest_problems)의 한국어 번역·수정 저장을 서버에서만 처리합니다.
-//  - 로그인 토큰 확인 → 강사 권한 확인(Sidebar 와 같은 기준) → service_role 로 DB 저장
+//  - 로그인 토큰 확인 → 문제 DB 허용 명단(contest_db_access) 확인 → service_role 로 DB 저장
 //  - AI 키(GEMINI_API_KEY)와 service_role 키는 브라우저로 나가지 않습니다.
 import { GoogleGenerativeAI, SchemaType } from "@google/generative-ai";
 import { NextRequest, NextResponse } from "next/server";
@@ -10,7 +10,6 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const TABLE = "pub_contest_problems";
-const MENU_PATH = "/contest-db";
 const MODEL_NAME = process.env.CONTEST_TRANSLATE_MODEL || "gemini-3.8-flash";
 
 const supabaseAdmin = createClient(
@@ -32,32 +31,6 @@ function extractToken(req: NextRequest): string | undefined {
     }
   }
   return token;
-}
-
-/** Sidebar.canAccess 와 같은 기준: 최고관리자·원장은 통과, 조교·게스트는 차단, 나머지는 권한 관리 설정에 따름 */
-async function canUseContestDb(userId: string): Promise<boolean> {
-  const { data: inst } = await supabaseAdmin
-    .from("instructor")
-    .select("role, position, tenant_id")
-    .eq("instructor_id", userId)
-    .maybeSingle();
-  if (!inst) return false;
-
-  const role = String(inst.role || "TEACHER").toUpperCase();
-  const pos = String(inst.position || "");
-  const isTeacherMode = role === "TEACHER";
-  const isSA = !isTeacherMode && (role === "SUPER_ADMIN" || pos.includes("최고관리자") || pos.includes("대장"));
-  const isPrin = !isTeacherMode && (role === "ADMIN" || pos.includes("원장"));
-  if (isSA || isPrin) return true;
-  if (role === "TA" || role === "GUEST" || !inst.tenant_id) return false;
-
-  const { data: perm } = await supabaseAdmin
-    .from("tenant_role_permissions")
-    .select("allowed_menus")
-    .eq("tenant_id", inst.tenant_id)
-    .eq("role_name", role)
-    .maybeSingle();
-  return Array.isArray(perm?.allowed_menus) && perm.allowed_menus.includes(MENU_PATH);
 }
 
 const SYSTEM_PROMPT = `당신은 대한민국 수학 교재 출판사의 수석 번역가입니다.
@@ -110,20 +83,20 @@ export async function POST(req: NextRequest) {
     const { data: { user }, error: authError } = await supabaseAdmin.auth.getUser(token);
     if (authError || !user) return fail("Unauthorized: 유효하지 않은 세션입니다.", 401);
 
-    // 2. 메뉴 권한 확인
-    if (!(await canUseContestDb(user.id))) return fail("경시 문제 DB 수정 권한이 없습니다.", 403);
-
-    const body = await req.json();
-    const id = String(body?.id || "");
-    if (!id) return fail("문항 id가 없습니다.");
-
-    // 문항은 "로그인한 사용자 본인 권한"으로 읽음 → DB 조회 정책(RLS)이 그대로 적용되어,
-    // 조회 페이지에서 숨긴 문항(고등 출처, 이후 K-8 밖 문항)은 번역·수정도 할 수 없음
+    // 2. 열람 권한 확인 (DB 허용 명단). 문항 조회도 이 사용자 권한으로 해서 DB 정책이 그대로 적용됨
     const supabaseAsUser = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL || "",
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
       { global: { headers: { Authorization: `Bearer ${token}` } }, auth: { persistSession: false } }
     );
+    const { data: level } = await supabaseAsUser.rpc("contest_access_level");
+    if (level !== "word" && level !== "all") return fail("문제 DB 열람 권한이 없는 계정입니다.", 403);
+
+    const body = await req.json();
+    const id = String(body?.id || "");
+    if (!id) return fail("문항 id가 없습니다.");
+
+    // 권한 밖의 문항('word' 권한자가 보낸 전체 문제 id 등)은 여기서 조회되지 않아 번역·수정도 불가
     const { data: row, error: rowError } = await supabaseAsUser
       .from(TABLE)
       .select("problem_en, solutions_en")
