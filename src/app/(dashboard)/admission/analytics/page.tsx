@@ -33,6 +33,20 @@ async function fetchAllRows(buildQuery: (from: number, to: number) => any, pageS
   return all;
 }
 
+// 🌟 학년(나이) 정규화: DB grade 표기("7세 반", "초1", "미입력" 등)를 분석용 라벨로 통일
+const GRADE_ORDER = ['6세', '7세', '초1', '초2', '초3', '초4', '초5', '초6', '중1', '중2', '중3', '고1', '미상'];
+const GRADE_AGE: Record<string, number> = { '6세': 6, '7세': 7, '초1': 8, '초2': 9, '초3': 10, '초4': 11, '초5': 12, '초6': 13, '중1': 14, '중2': 15, '중3': 16, '고1': 17 };
+const normGrade = (g: any): string => {
+  const s = String(g ?? '').replace(/\s/g, '');
+  if (!s) return '미상';
+  const age = s.match(/^([5-7])세/);
+  if (age) return `${age[1]}세`;
+  const sch = s.match(/^(초|중|고)([1-6])/);
+  if (sch) return `${sch[1]}${sch[2]}`;
+  return '미상';
+};
+const gradeLabel = (g: string) => (GRADE_AGE[g] && !g.endsWith('세') ? `${g} (${GRADE_AGE[g]}세)` : g);
+
 export default function AdmissionAnalyticsPage() {
   const router = useRouter();
   
@@ -46,8 +60,9 @@ export default function AdmissionAnalyticsPage() {
   const [excludeTest, setExcludeTest] = useState<boolean>(true);
   
   const [selectedDate, setSelectedDate] = useState<string>("all");
-  const [selectedTime, setSelectedTime] = useState<string>("all"); 
-  
+  const [selectedTime, setSelectedTime] = useState<string>("all");
+  const [selectedGrade, setSelectedGrade] = useState<string>("all");
+
   const [modalQ, setModalQ] = useState<any>(null);
   const [modalStudent, setModalStudent] = useState<any>(null);
 
@@ -272,8 +287,8 @@ export default function AdmissionAnalyticsPage() {
     fetchAllAdmissionData();
   }, []);
 
-  // 🌟 3. 지점 및 테스트 계정 제외 필터가 적용된 기본 데이터셋
-  const baseFilteredAssigns = useMemo(() => {
+  // 🌟 3. 지점 및 테스트 계정 제외 필터가 적용된 기본 데이터셋 (학년 필터 적용 전)
+  const preGradeAssigns = useMemo(() => {
     return allEnrichedAssigns.filter((a: any) => {
       if (selectedTenantId !== "all" && String(a._tenantId) !== String(selectedTenantId)) {
         return false;
@@ -288,6 +303,88 @@ export default function AdmissionAnalyticsPage() {
       return true;
     });
   }, [allEnrichedAssigns, selectedTenantId, excludeTest]);
+
+  // 🌟 3-1. 응시자 학년(나이) 필터까지 적용된 데이터셋
+  const baseFilteredAssigns = useMemo(() => {
+    if (selectedGrade === "all") return preGradeAssigns;
+    return preGradeAssigns.filter((a: any) => {
+      const st = Array.isArray(a.student) ? a.student[0] : a.student;
+      return normGrade(st?.grade) === selectedGrade;
+    });
+  }, [preGradeAssigns, selectedGrade]);
+
+  // 학년 드롭다운 목록 (실제 응시자에게 있는 학년만)
+  const gradeOptions = useMemo(() => {
+    const set = new Set<string>();
+    preGradeAssigns.forEach((a: any) => {
+      const st = Array.isArray(a.student) ? a.student[0] : a.student;
+      set.add(normGrade(st?.grade));
+    });
+    return Array.from(set).sort((a, b) => GRADE_ORDER.indexOf(a) - GRADE_ORDER.indexOf(b));
+  }, [preGradeAssigns]);
+
+  // 🌟 3-2. 선택된 시험지의 학년별 성적 분포 (학년 필터와 무관하게 전체 학년 비교)
+  const gradeBreakdown = useMemo(() => {
+    if (!selectedExamId) return [];
+    const map = new Map<string, number[]>();
+    preGradeAssigns.forEach((a: any) => {
+      if (String(a.exam_id) !== String(selectedExamId)) return;
+      if (selectedDate !== "all" && a._dStr !== selectedDate) return;
+      if (selectedTime !== "all" && a._tStr !== selectedTime) return;
+      const st = Array.isArray(a.student) ? a.student[0] : a.student;
+      const g = normGrade(st?.grade);
+      if (!map.has(g)) map.set(g, []);
+      map.get(g)!.push(Number(a.total_score) || 0);
+    });
+    return Array.from(map.entries())
+      .map(([grade, scores]) => ({
+        grade,
+        count: scores.length,
+        average: scores.reduce((s, v) => s + v, 0) / scores.length,
+        highest: Math.max(...scores),
+      }))
+      .sort((a, b) => GRADE_ORDER.indexOf(a.grade) - GRADE_ORDER.indexOf(b.grade));
+  }, [preGradeAssigns, selectedExamId, selectedDate, selectedTime]);
+
+  // 🌟 3-3. 시험지와 무관한 나이(학년) × 과정 성적표 (지점·날짜·테스트계정 필터만 적용)
+  const semOf = (a: any) => {
+    const meta = examMetaMap[String(a.exam_id)];
+    const em = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+    const sub = meta?.sub_title || em?.sub_title || '';
+    return sub.match(/\d+-\d+/)?.[0] || sub || '기타';
+  };
+  const gradeMatrix = useMemo(() => {
+    const cells = new Map<string, { sum: number; n: number }>();
+    const semSet = new Set<string>();
+    const gradeSet = new Set<string>();
+    preGradeAssigns.forEach((a: any) => {
+      if (selectedDate !== "all" && a._dStr !== selectedDate) return;
+      if (selectedTime !== "all" && a._tStr !== selectedTime) return;
+      const st = Array.isArray(a.student) ? a.student[0] : a.student;
+      const g = normGrade(st?.grade);
+      const sem = semOf(a);
+      semSet.add(sem); gradeSet.add(g);
+      for (const key of [`${g}|${sem}`, `${g}|*`]) {
+        const c = cells.get(key) || { sum: 0, n: 0 };
+        c.sum += Number(a.total_score) || 0; c.n += 1;
+        cells.set(key, c);
+      }
+    });
+    return {
+      sems: Array.from(semSet).sort((a, b) => a.localeCompare(b, 'ko', { numeric: true })),
+      grades: Array.from(gradeSet).sort((a, b) => GRADE_ORDER.indexOf(a) - GRADE_ORDER.indexOf(b)),
+      cells,
+    };
+  }, [preGradeAssigns, examMetaMap, selectedDate, selectedTime]);
+
+  // 행렬 셀 클릭 → 해당 학년 + 해당 과정 시험지로 이동
+  const jumpTo = (grade: string, sem: string | null) => {
+    setSelectedGrade(grade);
+    if (!sem) return;
+    const exam = (Object.values(examMetaMap) as { exam_id: string; title: string; sub_title: string }[]).find(m => (m.sub_title.match(/\d+-\d+/)?.[0] || m.sub_title) === sem
+      && preGradeAssigns.some((a: any) => String(a.exam_id) === m.exam_id));
+    if (exam) setSelectedExamId(exam.exam_id);
+  };
 
   // 🌟 4. 모든 응시 날짜 및 시간 목록 추출 (개설된 일정 + 실제 응시 데이터 통합)
   const availableDates = useMemo(() => {
@@ -734,6 +831,21 @@ export default function AdmissionAnalyticsPage() {
                 </select>
               </div>
 
+              {/* 응시자 학년(나이) 필터 */}
+              <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
+                <span className="pl-1 text-sm font-bold text-blue-200">응시자 학년</span>
+                <select
+                  value={selectedGrade}
+                  onChange={(e) => setSelectedGrade(e.target.value)}
+                  className="bg-white text-slate-800 font-bold text-sm px-3 py-2 rounded-md outline-none cursor-pointer shadow-sm focus:ring-2 focus:ring-emerald-500"
+                >
+                  <option value="all">전체 학년</option>
+                  {gradeOptions.map(g => (
+                    <option key={g} value={g}>{gradeLabel(g)}</option>
+                  ))}
+                </select>
+              </div>
+
               {/* 대상 시험지 필터 */}
               <div className="bg-blue-900/50 p-2 rounded-lg border border-blue-800 flex items-center gap-2 shadow-inner">
                 <span className="pl-1 text-sm font-bold text-blue-200">대상 시험지</span>
@@ -761,7 +873,7 @@ export default function AdmissionAnalyticsPage() {
               {/* 1. KPI 영역 */}
               <div className="grid grid-cols-3 gap-4 shrink-0">
                 <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col justify-center items-center relative overflow-hidden transition-transform hover:-translate-y-1">
-                  {(excludeTest || selectedDate !== "all") && <div className="absolute top-2 left-2 text-xs bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-200">필터 적용됨</div>}
+                  {(excludeTest || selectedDate !== "all" || selectedGrade !== "all") &&<div className="absolute top-2 left-2 text-xs bg-slate-100 text-slate-400 px-1.5 py-0.5 rounded font-bold border border-slate-200">필터 적용됨</div>}
                   <span className="text-slate-500 font-bold text-sm mb-1">조건 내 응시 인원</span>
                   <span className="text-3xl font-bold text-brand">
                     {isLoading ? "-" : reportStats.summary?.totalStudents || 0} <span className="text-lg font-bold text-slate-400">명</span>
@@ -779,6 +891,109 @@ export default function AdmissionAnalyticsPage() {
                     {isLoading ? "-" : reportStats.summary?.highestScore || 0} <span className="text-lg font-bold text-slate-400">점</span>
                   </span>
                 </div>
+              </div>
+
+              {/* 1-0. 시험 무관: 나이(학년) × 과정 성적표 */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
+                <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="font-bold text-slate-800 text-[15px]">🧒 나이(학년)별 전체 성적표 <span className="text-xs text-slate-400 font-bold">— 시험지 선택과 무관</span></h3>
+                  <span className="text-xs text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">평균점 (응시 인원) · 칸을 누르면 해당 학년·시험으로 이동</span>
+                </div>
+                {gradeMatrix.grades.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 font-bold text-sm">표시할 데이터가 없습니다.</div>
+                ) : (
+                  <div className="overflow-x-auto custom-scroll">
+                    <table className="w-full text-center border-collapse min-w-max">
+                      <thead className="bg-slate-100/40 text-slate-500 border-b border-slate-200">
+                        <tr>
+                          <th className="py-2 px-3 text-left font-bold text-xs sticky left-0 bg-slate-50">학년(나이)</th>
+                          {gradeMatrix.sems.map(sem => (
+                            <th key={sem} className="py-2 px-3 font-bold text-xs whitespace-nowrap">{sem}</th>
+                          ))}
+                          <th className="py-2 px-3 font-bold text-xs whitespace-nowrap bg-slate-100 border-l border-slate-200">전체 시험</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {gradeMatrix.grades.map(g => {
+                          const total = gradeMatrix.cells.get(`${g}|*`);
+                          return (
+                            <tr key={g} className={selectedGrade === g ? 'bg-emerald-50/60' : ''}>
+                              <td className="py-2 px-3 text-left font-bold text-slate-800 text-[13px] whitespace-nowrap sticky left-0 bg-white">{gradeLabel(g)}</td>
+                              {gradeMatrix.sems.map(sem => {
+                                const c = gradeMatrix.cells.get(`${g}|${sem}`);
+                                if (!c) return <td key={sem} className="py-2 px-3 text-slate-200 text-xs">·</td>;
+                                const avg = c.sum / c.n;
+                                const tone = avg >= 70 ? 'text-emerald-700 bg-emerald-50' : avg >= 40 ? 'text-amber-700 bg-amber-50' : 'text-rose-700 bg-rose-50';
+                                return (
+                                  <td key={sem} className="py-1.5 px-1.5">
+                                    <button onClick={() => jumpTo(g, sem)} className={`w-full rounded-md px-2 py-1 font-bold text-[13px] hover:ring-2 hover:ring-emerald-400 transition ${tone}`}>
+                                      {avg.toFixed(1)}<span className="text-[11px] font-medium opacity-60 ml-1">({c.n})</span>
+                                    </button>
+                                  </td>
+                                );
+                              })}
+                              <td className="py-1.5 px-1.5 bg-slate-50 border-l border-slate-200">
+                                {total && (
+                                  <button onClick={() => jumpTo(g, null)} className="w-full rounded-md px-2 py-1 font-bold text-[13px] text-slate-800 hover:ring-2 hover:ring-emerald-400 transition">
+                                    {(total.sum / total.n).toFixed(1)}<span className="text-[11px] font-medium text-slate-400 ml-1">({total.n})</span>
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+
+              {/* 1-1. 선택 시험지의 학년(나이)별 성적 */}
+              <div className="bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden shrink-0">
+                <div className="bg-slate-50 border-b border-slate-200 py-3 px-4 flex items-center justify-between">
+                  <h3 className="font-bold text-slate-800 text-[15px]">🎂 이 시험지의 응시자 학년별 성적</h3>
+                  <span className="text-xs text-slate-400 font-bold bg-white px-2 py-1 rounded border border-slate-200 shadow-sm">행을 누르면 해당 학년만 보기</span>
+                </div>
+                {gradeBreakdown.length === 0 ? (
+                  <div className="p-6 text-center text-slate-400 font-bold text-sm">표시할 데이터가 없습니다.</div>
+                ) : (
+                  <table className="w-full text-left border-collapse">
+                    <thead className="bg-slate-100/40 text-slate-500 border-b border-slate-200">
+                      <tr>
+                        <th className="py-2 px-4 font-bold text-xs">학년(나이)</th>
+                        <th className="py-2 px-3 text-right font-bold text-xs">응시</th>
+                        <th className="py-2 px-3 font-bold text-xs">평균 점수</th>
+                        <th className="py-2 px-4 text-right font-bold text-xs">최고점</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {gradeBreakdown.map(row => {
+                        const active = selectedGrade === row.grade;
+                        return (
+                          <tr
+                            key={row.grade}
+                            onClick={() => setSelectedGrade(active ? "all" : row.grade)}
+                            className={`cursor-pointer transition-colors ${active ? 'bg-emerald-50' : 'hover:bg-blue-50/50'}`}
+                          >
+                            <td className="py-2 px-4 font-bold text-slate-800 text-[13px] whitespace-nowrap">
+                              {gradeLabel(row.grade)}{active && <span className="ml-2 text-xs text-emerald-600">● 선택됨</span>}
+                            </td>
+                            <td className="py-2 px-3 text-right font-bold text-slate-500 text-[13px]">{row.count}명</td>
+                            <td className="py-2 px-3">
+                              <div className="flex items-center gap-2">
+                                <div className="w-full max-w-[180px] bg-slate-200 rounded-full h-[6px]">
+                                  <div className="bg-emerald-500 h-[6px] rounded-full" style={{ width: `${Math.min(row.average, 100)}%` }}></div>
+                                </div>
+                                <span className="font-bold text-slate-800 text-[13px] w-12 text-right">{row.average.toFixed(1)}</span>
+                              </div>
+                            </td>
+                            <td className="py-2 px-4 text-right font-bold text-rose-500 text-[13px]">{row.highest}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                )}
               </div>
 
               {/* 2. 차트 영역 */}
@@ -884,6 +1099,7 @@ export default function AdmissionAnalyticsPage() {
                           <div className="flex flex-col min-w-0">
                             <div className="flex items-center gap-2">
                               <span className="font-bold text-slate-800 truncate text-[15px] group-hover:text-emerald-700 transition-colors">{st.studentName}</span>
+                              <span className="text-xs font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 whitespace-nowrap">{gradeLabel(normGrade(st.grade))}</span>
                             </div>
                             <div className="flex items-center gap-1.5 mt-1.5">
                               <span className="text-xs text-slate-500 font-bold bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200/60 shadow-sm whitespace-nowrap">
