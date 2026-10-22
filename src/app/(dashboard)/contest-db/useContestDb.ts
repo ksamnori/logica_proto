@@ -5,7 +5,6 @@ import { useCallback, useRef, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import {
   CONTEST_TABLE,
-  WORD_PROBLEM_SOURCE,
   LIST_COLUMNS,
   PAGE_SIZE,
   EMPTY_FILTERS,
@@ -91,31 +90,38 @@ export function useContestDb() {
     setListMessage("조회 중...");
 
     // count 옵션은 전체 스캔을 유발하므로 쓰지 않고, 51개를 받아 다음 페이지 유무만 판단
-    let query = supabase.from(CONTEST_TABLE).select(LIST_COLUMNS);
+    const from = pageNo * PAGE_SIZE;
+    let data: unknown[] | null = null;
+    let error: { message: string } | null = null;
+
     if (m === "word") {
-      query = query.eq("competition", WORD_PROBLEM_SOURCE);
+      // 문장제 탭: DB 함수(search_word_problems)로 조회.
+      // 키워드·단원 조건이 있을 때 GIN 인덱스로 맞는 문항만 먼저 모은 뒤 정렬하도록 강제해서 빠름
+      ({ data, error } = await supabase.rpc("search_word_problems", {
+        p_keyword: f.keyword || null,
+        p_topic: f.topic || null,
+        p_has_ko: f.koStatus ? f.koStatus === "true" : null,
+        p_text: f.text || null,
+        p_offset: from,
+        p_limit: PAGE_SIZE + 1,
+      }));
     } else {
-      // 전체 문제 탭: DB 정책상 최고관리자가 아니면 문장제만 돌아옴
+      // 전체 문제 탭: 정렬하면 조건에 맞는 수십만 행을 모두 정렬해야 해서 정렬 없이 앞에서부터 읽음
+      let query = supabase.from(CONTEST_TABLE).select(LIST_COLUMNS);
       if (f.dataset) query = query.eq("source_dataset", f.dataset);
       if (f.competition) query = query.eq("competition", f.competition);
       if (f.country) query = query.eq("country", f.country);
       if (f.questionType) query = query.eq("question_type_ko", f.questionType);
       if (f.onlyFigure) query = query.eq("has_figure", true);
+      if (f.koStatus) query = query.eq("has_ko", f.koStatus === "true");
+      if (f.topic) query = query.contains("topics_ko", JSON.stringify([f.topic]));
+      if (f.keyword) query = query.contains("keywords_ko", JSON.stringify([f.keyword]));
+      if (f.text) {
+        const isHangul = /[가-힣]/.test(f.text);
+        query = query.ilike(isHangul ? "problem_ko" : "problem_en", `%${f.text}%`);
+      }
+      ({ data, error } = await query.range(from, from + PAGE_SIZE));
     }
-    if (f.koStatus) query = query.eq("has_ko", f.koStatus === "true");
-    if (f.topic) query = query.contains("topics_ko", JSON.stringify([f.topic]));
-    if (f.keyword) query = query.contains("keywords_ko", JSON.stringify([f.keyword]));
-    if (f.text) {
-      // 한글이면 한국어 문제에서, 아니면 영문 문제에서 찾음 (범위가 15만 문항이라 감당 가능)
-      const isHangul = /[가-힣]/.test(f.text);
-      query = query.ilike(isHangul ? "problem_ko" : "problem_en", `%${f.text}%`);
-    }
-
-    const from = pageNo * PAGE_SIZE;
-    // 문장제 탭은 전용 인덱스(idx_pub_orca) 덕분에 id 순 정렬이 빠름.
-    // 전체 문제 탭은 정렬하면 조건에 맞는 수십만 행을 모두 정렬해야 해서 정렬 없이 앞에서부터 읽음
-    if (m === "word") query = query.order("id");
-    const { data, error } = await query.range(from, from + PAGE_SIZE);
     setIsListLoading(false);
 
     if (error) {

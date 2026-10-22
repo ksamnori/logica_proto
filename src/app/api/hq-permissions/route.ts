@@ -19,6 +19,9 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 );
 
+// 본사(출판사) 테넌트 id. academy_tenant 조회가 실패했을 때만 쓰는 예비값 (원래는 tenant_type = 'HQ' 로 판별)
+const FALLBACK_HQ_TENANT_IDS = ["d59395b0-8c9c-4dd3-9e25-ff569da98abc"];
+
 // academy_tenant 조회가 실패해도 이름이 나오도록 (hq/page.tsx 와 같은 기본값)
 const FALLBACK_TENANT_NAMES: Record<string, string> = {
   "1ff4299c-d72b-4d99-97b0-45fee08e3b73": "대치 본원",
@@ -71,7 +74,7 @@ export async function GET(req: NextRequest) {
         .eq("status", "재직")
         .order("name"),
       supabaseAdmin.from("contest_db_access").select("instructor_id, access_level, granted_at, granted_by"),
-      supabaseAdmin.from("academy_tenant").select("tenant_id, name"),
+      supabaseAdmin.from("academy_tenant").select("tenant_id, name, tenant_type"),
       supabaseAdmin.from("hq_permissions").select("instructor_id, permission"),
     ]);
     if (staffRes.error) return fail(staffRes.error.message, 500);
@@ -84,7 +87,11 @@ export async function GET(req: NextRequest) {
     });
 
     const tenantNames: Record<string, string> = { ...FALLBACK_TENANT_NAMES };
-    (tenantRes.data || []).forEach((t: any) => { tenantNames[String(t.tenant_id)] = t.name; });
+    const hqTenantIds = new Set<string>(tenantRes.data ? [] : FALLBACK_HQ_TENANT_IDS);
+    (tenantRes.data || []).forEach((t: any) => {
+      tenantNames[String(t.tenant_id)] = t.name;
+      if (String(t.tenant_type || "").toUpperCase() === "HQ") hqTenantIds.add(String(t.tenant_id));
+    });
 
     const access: Record<string, { level: string; granted_at: string; granted_by: string | null }> = {};
     (accessRes.data || []).forEach((a: any) => {
@@ -97,6 +104,7 @@ export async function GET(req: NextRequest) {
       position: s.position || s.chat_position || "",
       department: (s.department || "부서 미지정").trim(),
       tenant_name: tenantNames[String(s.tenant_id)] || "소속 미지정",
+      is_hq: hqTenantIds.has(String(s.tenant_id)),
       contest_access: access[String(s.instructor_id)]?.level || null,
       granted_at: access[String(s.instructor_id)]?.granted_at || null,
       permissions: permsById[String(s.instructor_id)] || [],

@@ -13,12 +13,11 @@ interface StaffRow {
   position: string;
   department: string;
   tenant_name: string;
+  is_hq: boolean;          // 소속 테넌트의 tenant_type 이 'HQ' (본사·출판사) 인지
   contest_access: AccessLevel;
   granted_at: string | null;
   permissions: string[];   // 켜기/끄기형 메뉴 권한 (예: 'admission_analytics')
 }
-
-const HQ_TENANT_NAME = "본사";
 
 async function authHeaders(): Promise<Record<string, string>> {
   const { data: { session } } = await supabase.auth.getSession();
@@ -33,7 +32,8 @@ export default function HqPermissionPanel({ onChanged }: { onChanged?: () => voi
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
   const [savingId, setSavingId] = useState<string | null>(null);
-  const [scope, setScope] = useState<"hq" | "all">("hq");
+  // 'hq' = 본사(HQ 테넌트) 직원, 'branch' = 그 외 테넌트(학원 본원·가맹점) 직원
+  const [scope, setScope] = useState<"hq" | "branch">("hq");
   const [keyword, setKeyword] = useState("");
 
   const load = useCallback(async () => {
@@ -111,20 +111,23 @@ export default function HqPermissionPanel({ onChanged }: { onChanged?: () => voi
   const groups = useMemo(() => {
     const kw = keyword.trim();
     const filtered = staff.filter((s) =>
-      (scope === "all" || s.tenant_name === HQ_TENANT_NAME) &&
+      (scope === "hq" ? s.is_hq : !s.is_hq) &&
       (!kw || s.name.includes(kw) || s.department.includes(kw) || s.position.includes(kw))
     );
     const map = new Map<string, StaffRow[]>();
     filtered.forEach((s) => {
-      const key = scope === "all" ? `${s.tenant_name} · ${s.department}` : s.department;
+      const key = scope === "branch" ? `${s.tenant_name} · ${s.department}` : s.department;
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(s);
     });
     return Array.from(map.entries()).sort(([a], [b]) => a.localeCompare(b));
   }, [staff, scope, keyword]);
 
+  const hqCount = useMemo(() => staff.filter((s) => s.is_hq).length, [staff]);
+  const branchCount = staff.length - hqCount;
+
   const counts = useMemo(() => {
-    const inScope = staff.filter((s) => scope === "all" || s.tenant_name === HQ_TENANT_NAME);
+    const inScope = staff.filter((s) => (scope === "hq" ? s.is_hq : !s.is_hq));
     return {
       total: inScope.length,
       analytics: inScope.filter((s) => s.permissions.includes("admission_analytics")).length,
@@ -152,7 +155,7 @@ export default function HqPermissionPanel({ onChanged }: { onChanged?: () => voi
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm px-4 py-3 mb-3 flex flex-wrap items-center gap-2">
         <div className="flex rounded-lg bg-slate-100 p-0.5">
-          {([["hq", "출판사(본사) 직원"], ["all", "전체 지점 직원"]] as const).map(([v, label]) => (
+          {([["hq", `본사 직원 (${hqCount})`], ["branch", `학원·지점 직원 (${branchCount})`]] as const).map(([v, label]) => (
             <button key={v} onClick={() => setScope(v)}
               className={`px-3 py-1 rounded-md text-[13px] font-bold ${scope === v ? "bg-white text-slate-800 shadow-sm" : "text-slate-500"}`}>
               {label}
