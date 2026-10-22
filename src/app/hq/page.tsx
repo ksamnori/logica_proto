@@ -7,7 +7,7 @@ import { supabase } from "@/lib/supabase";
 import ProfileModal from "@/components/ProfileModal";
 import AdmissionAnalyticsPage from "@/app/(dashboard)/admission/analytics/page";
 import ContestDbPage from "@/app/(dashboard)/contest-db/page";
-import { fetchContestAccess } from "@/app/(dashboard)/contest-db/useContestDb";
+import { fetchContestAccess, hasSupabaseSession } from "@/app/(dashboard)/contest-db/useContestDb";
 import type { ContestAccessLevel } from "@/app/(dashboard)/contest-db/contestUtils";
 import HqPermissionPanel from "./HqPermissionPanel";
 
@@ -87,18 +87,29 @@ export default function HQWorkspacePage() {
   // 🌟 진단평가 분석 권한: DB 명단(hq_permissions) 기준. 권한 관리 메뉴에서 켜고 끔
   //    (예전에는 역할·직책에 ADMIN/본사 관리자가 있으면 열렸지만, 출판사 직원이 전원 ADMIN 이라 명단으로 바꿈)
   const [canAccessAnalytics, setCanAccessAnalytics] = useState(false);
+  // 포털은 localStorage 로 로그인 상태를 유지하지만, 메뉴 권한 확인에는 Supabase 로그인 세션이 필요함
+  const [sessionExpired, setSessionExpired] = useState(false);
 
   /** 내 메뉴 권한들을 DB 명단에서 다시 불러옴 (권한 관리에서 본인 권한을 바꿨을 때도 호출) */
-  const refreshMyPermissions = () => {
+  const refreshMyPermissions = async () => {
+    // 로그인 세션이 끊긴 상태에서 권한 함수를 부르면 비로그인 요청이 되어 DB 오류 로그만 쌓이므로 먼저 확인
+    if (!(await hasSupabaseSession())) {
+      setContestAccess(null);
+      setCanAccessAnalytics(false);
+      setIsHqAdmin(false);
+      setSessionExpired(true);
+      return;
+    }
+    setSessionExpired(false);
     fetchContestAccess().then(setContestAccess);
     supabase.rpc("has_hq_permission", { p_permission: "admission_analytics" })
       .then(({ data }) => setCanAccessAnalytics(data === true));
+    supabase.rpc("is_hq_admin").then(({ data }) => setIsHqAdmin(data === true));
   };
 
   useEffect(() => {
     if (!instId) return;
     refreshMyPermissions();
-    supabase.rpc("is_hq_admin").then(({ data }) => setIsHqAdmin(data === true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instId]);
 
@@ -456,6 +467,14 @@ export default function HQWorkspacePage() {
           </div>
 
           <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            {sessionExpired && (
+              <div className="rounded-xl bg-amber-500/10 border border-amber-500/30 px-3 py-2.5 text-[12px] text-amber-200 leading-relaxed">
+                로그인 정보가 만료되어 메뉴 권한을 확인하지 못했습니다.
+                <button onClick={() => { localStorage.clear(); router.push('/hq-login'); }} className="block mt-1.5 font-bold text-amber-100 underline">
+                  다시 로그인하기
+                </button>
+              </div>
+            )}
             <div>
               <div className="px-3 mb-2 text-[11px] font-bold text-slate-400 uppercase tracking-wider flex items-center gap-1.5">
                 <span>🏫</span>

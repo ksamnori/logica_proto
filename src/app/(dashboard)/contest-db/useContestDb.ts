@@ -16,7 +16,17 @@ import {
 } from "./contestUtils";
 
 /** 로그인한 사람의 문제 DB 열람 권한을 DB 허용 명단에서 조회 (학원·출판사 포털 공통) */
+/**
+ * 지금 Supabase 로그인 세션이 살아 있는지 (만료됐으면 getSession 이 자동으로 갱신을 시도함).
+ * 세션 없이 권한 함수를 부르면 비로그인(anon) 요청이 되어 DB 로그에 권한 오류가 쌓이므로 먼저 확인.
+ */
+export async function hasSupabaseSession(): Promise<boolean> {
+  const { data: { session } } = await supabase.auth.getSession();
+  return Boolean(session?.access_token);
+}
+
 export async function fetchContestAccess(): Promise<ContestAccessLevel> {
+  if (!(await hasSupabaseSession())) return null;
   const { data, error } = await supabase.rpc("contest_access_level");
   if (error) {
     console.warn("문제 DB 권한 조회 실패:", error.message);
