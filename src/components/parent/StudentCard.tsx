@@ -3,6 +3,8 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { useRouter } from "next/navigation";
+
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
 /**
@@ -194,7 +196,7 @@ function buildExamQuestionScoreMap(
 
   return { scoreByQuestionId, groupCount, groups };
 }
-import { useRouter } from "next/navigation";
+
 
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];

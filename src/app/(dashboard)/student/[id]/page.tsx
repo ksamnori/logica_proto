@@ -4,6 +4,12 @@
 import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import StudentEditModal from "@/components/student/StudentEditModal";
+import ConsultModal from "@/components/student/ConsultModal";
+import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
+import { deleteConsultLog as deleteConsultLogAction } from "@/app/actions/consultation";
+import { deleteStudentCompletely } from "@/app/actions/consultation";
+
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
 /**
@@ -195,11 +201,7 @@ function buildExamQuestionScoreMap(
 
   return { scoreByQuestionId, groupCount, groups };
 }
-import StudentEditModal from "@/components/student/StudentEditModal";
-import ConsultModal from "@/components/student/ConsultModal";
-import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
-import { deleteConsultLog as deleteConsultLogAction } from "@/app/actions/consultation";
-import { deleteStudentCompletely } from "@/app/actions/consultation";
+
 
 // ---------------------------------------------------------
 // 1. 공통 유틸리티 함수

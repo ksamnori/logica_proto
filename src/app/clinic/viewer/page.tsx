@@ -3,6 +3,32 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { createClient } from "@supabase/supabase-js";
+import { setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway, checkAndBumpToggleCooldown } from "@/lib/clinicSession";
+import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from "@/hooks/useToggleCooldown";
+import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
+import { spendPoints } from "@/app/actions/shopPoints";
+import { BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
+import PointBadge from "@/components/clinic/PointBadge";
+
+import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
+import { useClinicTimer } from "./hooks/useClinicTimer";
+import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
+import { useClinicRealtime } from "./hooks/useClinicRealtime";
+
+import { ClinicCanvas } from "./components/ClinicCanvas";
+import { ClinicKeypad } from "./components/ClinicKeypad";
+import { ClinicQuestionNav } from "./components/ClinicQuestionNav";
+import { QuestionDisplay } from "./components/QuestionDisplay";
+import { ViewerModals } from "./components/ViewerModals";
+import { HintRevealBox } from "./components/HintRevealBox"; 
+
+import {
+  SUPABASE_URL, SUPABASE_ANON_KEY,
+  PEN_COLORS, formatMathTextForWeb,
+  saveHintState, keypadAnswersMatch, isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion
+} from "./utils";
+
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
 /**
@@ -194,31 +220,7 @@ function buildExamQuestionScoreMap(
 
   return { scoreByQuestionId, groupCount, groups };
 }
-import { createClient } from "@supabase/supabase-js";
-import { setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway, checkAndBumpToggleCooldown } from "@/lib/clinicSession";
-import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from "@/hooks/useToggleCooldown";
-import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
-import { spendPoints } from "@/app/actions/shopPoints";
-import { BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
-import PointBadge from "@/components/clinic/PointBadge";
 
-import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
-import { useClinicTimer } from "./hooks/useClinicTimer";
-import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
-import { useClinicRealtime } from "./hooks/useClinicRealtime";
-
-import { ClinicCanvas } from "./components/ClinicCanvas";
-import { ClinicKeypad } from "./components/ClinicKeypad";
-import { ClinicQuestionNav } from "./components/ClinicQuestionNav";
-import { QuestionDisplay } from "./components/QuestionDisplay";
-import { ViewerModals } from "./components/ViewerModals";
-import { HintRevealBox } from "./components/HintRevealBox"; 
-
-import {
-  SUPABASE_URL, SUPABASE_ANON_KEY,
-  PEN_COLORS, formatMathTextForWeb,
-  saveHintState, keypadAnswersMatch, isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion
-} from "./utils";
 
 const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 

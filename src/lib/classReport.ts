@@ -4,6 +4,12 @@
 // - 학생 기록은 개인 리포트와 같은 규칙: 채점된 시험·과제 문항, 입학테스트·진단평가 제외, 문항별 마지막 기록
 // - 비교 대상: 반 이름 앞 두 글자(수준·학년, 예: T32MW1 → "T3")가 같은 다른 진행 중인 반의 학생 평균. 없으면 비교 없이 출력
 import { supabase } from "@/lib/supabase";
+import {
+  COMPETENCIES, COGNITIVE_LEVELS, FINAL_OK, EXCLUDED_EXAM_TYPES, MIN_COMP_ITEMS, PRE_TEST_STATUS,
+  kstDate, ymOf, shiftYm, ymLabel, lastDay, monthStartUtcIso, weekOfMonth, unwrap,
+  selectIn, selectInPaged, diffNum, gradeOf, pct, avg,
+} from "@/lib/monthlyReport";
+
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
 /**
@@ -195,11 +201,7 @@ function buildExamQuestionScoreMap(
 
   return { scoreByQuestionId, groupCount, groups };
 }
-import {
-  COMPETENCIES, COGNITIVE_LEVELS, FINAL_OK, EXCLUDED_EXAM_TYPES, MIN_COMP_ITEMS, PRE_TEST_STATUS,
-  kstDate, ymOf, shiftYm, ymLabel, lastDay, monthStartUtcIso, weekOfMonth, unwrap,
-  selectIn, selectInPaged, diffNum, gradeOf, pct, avg,
-} from "@/lib/monthlyReport";
+
 
 const isDummy = (name: any) => /테스트|선생님/.test(String(name || "").replace(/\s/g, ""));
 const MIN_UNIT_STUDENT_ITEMS = 3; // 단원에서 학생별 판정에 필요한 최소 문항 수
@@ -497,10 +499,10 @@ async function loadClassWeekly(ids: string[], ym: string): Promise<ClassReport["
   }).filter((a: any) => String(a.day).slice(0, 7) === ym);
   if (list.length === 0) return empty;
 
-  const examIds = Array.from(new Set(list.map((a: any) => String(a.exam_id))));
+  const examIds: string[] = Array.from(new Set<string>(list.map((a: any) => String(a.exam_id))));
   const [answers, examItemsRaw, gcRes] = await Promise.all([
     selectInPaged("student_answer", "exam_assignment_id, question_id, attempt_number, grading_code, updated_at", "exam_assignment_id", list.map((a: any) => a.assignment_id), q => q.order("answer_id")),
-    selectInPaged("exam_item", "exam_id, question_id, sort_order, assigned_score", "exam_id", examIds),
+    selectInPaged("exam_item", "exam_id, question_id, sort_order, assigned_score", "exam_id", examIds, q => q.order("sort_order")),
     supabase.from("master_grading_code").select("code, description, is_correct, score_ratio, admission_ratio")
   ]);
 

@@ -243,7 +243,7 @@ export async function selectIn(table: string, select: string, col: string, value
   return out;
 }
 
-export async function selectInPaged(table: string, select: string, col: string, values: string[], extra: (q: any) => any) {
+export async function selectInPaged(table: string, select: string, col: string, values: (string | number)[], extra: (q: any) => any = (q: any) => q) {
   const out: any[] = [];
   for (const part of chunk(values, 100)) {
     for (let from = 0; ; from += 1000) {
