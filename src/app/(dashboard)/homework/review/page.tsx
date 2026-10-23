@@ -4,6 +4,197 @@
 import React, { useEffect, useState, useRef, Suspense, memo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
 
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
@@ -154,6 +345,8 @@ function HomeworkReviewContent() {
   
   const [groups, setGroups] = useState<any[]>([]);
   const [gradingMap, setGradingMap] = useState<Record<any, GradeCode | null>>({});
+  const [gradingCodeMeta, setGradingCodeMeta] = useState<Record<string, any>>({});
+  const gradingCodeMetaRef = useRef<Record<string, any>>({});
   
   const [studentInputMap, setStudentInputMap] = useState<Record<any, string | null>>({});
   
@@ -238,19 +431,26 @@ function HomeworkReviewContent() {
   const loadHomeworkData = async () => {
     setIsLoading(true);
     try {
+      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio');
+      const metaMap: Record<string, any> = {};
+      gcData?.forEach((row: any) => { if (row.code) metaMap[row.code] = row; });
+      setGradingCodeMeta(metaMap);
+      gradingCodeMetaRef.current = metaMap;
+
       if (isExamHw && assignmentId) {
         const [ { data: stuData }, { data: aData }, { data: ansData } ] = await Promise.all([
           supabase.from('student').select('name, grade').eq('student_id', studentId).single(),
           supabase.from('exam_assignment').select('*, exam_master(*), class(name)').eq('assignment_id', assignmentId).single(),
-          supabase.from('student_answer').select('question_id, grading_code, student_input').eq('exam_assignment_id', assignmentId)
+          supabase.from('student_answer').select('answer_id, question_id, grading_code, student_input, earned_score').eq('exam_assignment_id', assignmentId)
         ]);
 
         const em = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
+        const isAdm = Boolean(em?.exam_type && (em.exam_type.includes('입학테스트') || em.exam_type.includes('진단평가')));
         setStudentInfo(stuData);
         setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: em.exam_type || '학습지' }, exam_type: em.exam_type });
         setHwResult({ status: aData.status, hw_result_id: aData.assignment_id }); 
         
-        const { data: items } = await supabase.from('exam_item').select('question_id, sort_order').eq('exam_id', em.exam_id).order('sort_order');
+        const { data: items } = await supabase.from('exam_item').select('question_id, sort_order, assigned_score').eq('exam_id', em.exam_id).order('sort_order');
         const qIds = items?.map(i => i.question_id) || [];
         
         let qs: any[] = [];
@@ -260,14 +460,11 @@ function HomeworkReviewContent() {
         }
         
         const sortedQs = items?.map(item => {
-          const q = qs.find(q => q.question_id === item.question_id);
-          return q ? { ...q, tq_id: q.question_id } : null; 
+          const q = qs.find(q => String(q.question_id) === String(item.question_id));
+          return q ? { ...q, tq_id: q.question_id, item_assigned_score: item.assigned_score } : null; 
         }).filter(Boolean) || [];
 
-        let userMergedTextQuestions: any[][] = [];
-        if (em.layout_settings?.userMergedTextQuestions) {
-            userMergedTextQuestions = em.layout_settings.userMergedTextQuestions;
-        }
+        const userMergedTextQuestions = extractMergedQuestionGroups(em.layout_settings);
 
         const customGroupMap = new Map<string, string>();
         userMergedTextQuestions.forEach((arr, idx) => {
@@ -276,14 +473,25 @@ function HomeworkReviewContent() {
         });
 
         const groupMap = new Map(); const builtGroups: any[] = [];
-        sortedQs.forEach(q => {
+        sortedQs.forEach((q: any) => {
             let gId = customGroupMap.get(String(q.question_id));
-            if (!gId) gId = `single_${q.question_id}_${Math.random()}`; 
+            let isMerged = !!gId;
+            if (!gId) {
+              const parsed = parseQNum(q.question_number);
+              const pageKey = String(q.page_number || q.final_printed_page || q.detected_page_num || '');
+              const bookKey = String(q.book_name || q.pdf_source || '');
+              if (parsed.paren > 0 && parsed.main !== 99999) {
+                gId = `paren_group_${bookKey}_${pageKey}_${parsed.main}_${parsed.dash}`;
+                isMerged = true;
+              } else {
+                gId = `single_${q.question_id}_${Math.random()}`;
+              }
+            }
             
             if (!groupMap.has(gId)) { 
               const newG = { 
                  id: gId, items: [], 
-                 is_merged_text: !!customGroupMap.get(String(q.question_id)) 
+                 is_merged_text: isMerged 
               }; 
               groupMap.set(gId, newG); 
               builtGroups.push(newG); 
@@ -291,11 +499,17 @@ function HomeworkReviewContent() {
             groupMap.get(gId).items.push(q);
         });
 
+        const baseGroupScore = 100 / (builtGroups.length || 1);
         let mainNum = 1;
         builtGroups.forEach(g => {
             g.displayNum = mainNum++;
+            if (g.items.length <= 1) g.is_merged_text = false;
+            const explicitMax = Math.max(...g.items.map((i: any) => parseFloat(i.item_assigned_score) || 0));
+            const groupMaxScore = (isAdm && explicitMax > 0) ? explicitMax : baseGroupScore;
+            const subScore = groupMaxScore / (g.items.length || 1);
             g.items.forEach((item: any, i: number) => {
                  item.displayQNum = g.items.length > 1 ? `${g.displayNum}. (${i + 1})` : `${g.displayNum}`;
+                 item.assigned_score = subScore;
             });
         });
         
@@ -311,6 +525,38 @@ function HomeworkReviewContent() {
         
         setGradingMap(initialGrading);
         setStudentInputMap(initialInputMap);
+
+        // 기존에 잘못 계산되어 저장된 earned_score 및 total_score 자동 보정
+        const flatBuilt = builtGroups.reduce((acc: any[], g: any) => acc.concat(g.items), []);
+        let expectedTotal = 0;
+        let gradedCnt = 0;
+        const staleAnswerUpdates: { answer_id: any; earned_score: number; is_correct: boolean }[] = [];
+
+        flatBuilt.forEach((q: any) => {
+          const code = initialGrading[q.tq_id];
+          if (code) {
+            gradedCnt++;
+            const { newEarned, isCorrectEq } = calcScoreRatio(code, q.assigned_score, metaMap, isAdm);
+            expectedTotal += newEarned;
+            const dbAns = ansData?.find((a: any) => String(a.question_id) === String(q.tq_id));
+            if (dbAns && dbAns.answer_id && Math.abs((Number(dbAns.earned_score) || 0) - newEarned) > 0.001) {
+              staleAnswerUpdates.push({ answer_id: dbAns.answer_id, earned_score: newEarned, is_correct: isCorrectEq });
+            }
+          }
+        });
+
+        const roundedExpectedTotal = roundScore(expectedTotal);
+        if (staleAnswerUpdates.length > 0) {
+          Promise.all(
+            staleAnswerUpdates.map(u =>
+              supabase.from('student_answer').update({ earned_score: u.earned_score, is_correct: u.is_correct }).eq('answer_id', u.answer_id)
+            )
+          ).catch(() => {});
+        }
+        if (gradedCnt > 0 && Math.abs((Number(aData.total_score) || 0) - roundedExpectedTotal) > 0.01) {
+          supabase.from('exam_assignment').update({ total_score: roundedExpectedTotal }).eq('assignment_id', assignmentId).then(() => {});
+        }
+
         setIsLoading(false);
         return;
       }
@@ -319,7 +565,7 @@ function HomeworkReviewContent() {
         supabase.from('student').select('name, grade').eq('student_id', studentId).single(),
         supabase.from('homework_assignment').select('*, textbook(title), class(name)').eq('homework_id', homeworkId).single(),
         supabase.from('student_homework_result').select('*').eq('homework_id', homeworkId).eq('student_id', studentId).maybeSingle(),
-        supabase.from('student_homework_answer').select('tq_id, grading_code, student_input').eq('homework_id', homeworkId).eq('student_id', studentId)
+        supabase.from('student_homework_answer').select('hw_answer_id, tq_id, grading_code, student_input, earned_score').eq('homework_id', homeworkId).eq('student_id', studentId)
       ]);
 
       setStudentInfo(stuData);
@@ -352,11 +598,45 @@ function HomeworkReviewContent() {
             return qA.orig.localeCompare(qB.orig, undefined, { numeric: true });
           });
           
+          const groupMap = new Map<string, any>();
           const builtGroups: any[] = [];
-          tqs?.forEach((tq: any, idx: number) => {
+          tqs?.forEach((tq: any) => {
               const q = tq.question_db || {};
-              const item = { ...q, tq_id: tq.tq_id, question: tq.question || q.question, answer: tq.answer || q.answer, page_number: tq.page_number || q.page_number, displayQNum: String(idx + 1) };
-              builtGroups.push({ id: `single_${tq.tq_id}`, is_merged_text: false, items: [item] });
+              const pageNum = tq.page_number || q.page_number || q.final_printed_page || q.detected_page_num || '';
+              const qNumStr = tq.question_number || q.question_number;
+              const parsed = parseQNum(qNumStr);
+              const item = { ...q, tq_id: tq.tq_id, question: tq.question || q.question, answer: tq.answer || q.answer, page_number: pageNum, question_number: qNumStr };
+
+              let gId = '';
+              let isMerged = false;
+              if (tq.parent_tq_id) {
+                gId = `parent_tq_${tq.parent_tq_id}`;
+                isMerged = true;
+              } else if (parsed.paren > 0 && parsed.main !== 99999) {
+                gId = `paren_tq_${pageNum}_${parsed.main}_${parsed.dash}`;
+                isMerged = true;
+              } else {
+                gId = `single_${tq.tq_id}`;
+              }
+
+              if (!groupMap.has(gId)) {
+                const newG = { id: gId, is_merged_text: isMerged, items: [] as any[] };
+                groupMap.set(gId, newG);
+                builtGroups.push(newG);
+              }
+              groupMap.get(gId)!.items.push(item);
+          });
+
+          const baseGroupScore = 100 / (builtGroups.length || 1);
+          let mainNum = 1;
+          builtGroups.forEach(g => {
+            g.displayNum = mainNum++;
+            if (g.items.length <= 1) g.is_merged_text = false;
+            const subScore = baseGroupScore / (g.items.length || 1);
+            g.items.forEach((item: any, i: number) => {
+              item.displayQNum = g.items.length > 1 ? `${g.displayNum}. (${i + 1})` : `${g.displayNum}`;
+              item.assigned_score = subScore;
+            });
           });
           
           setGroups(builtGroups);
@@ -392,25 +672,31 @@ function HomeworkReviewContent() {
   const updateHomeworkResult = async (newMap: Record<any, GradeCode | null>) => {
     let correctCount = 0; 
     let gradedCount = 0;
+    let totalScoreSum = 0;
     const incorrectIds: any[] = [];
     const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
+    const totalGroups = groups.length || 1;
+    const defaultScore = 100 / (flatQuestions.length || 1);
+    const isAdm = Boolean(homeworkInfo?.exam_type && (homeworkInfo.exam_type.includes('입학테스트') || homeworkInfo.exam_type.includes('진단평가')));
     
     flatQuestions.forEach((q: any) => {
       const m = newMap[q.tq_id];
       if (m) {
         gradedCount++;
-        if (['O', 'TO', 'RO'].includes(m as string)) correctCount++;
+        const assignedScore = q.assigned_score ?? (100 / totalGroups);
+        const { newEarned, isCorrectEq } = calcScoreRatio(m, assignedScore || defaultScore, gradingCodeMetaRef.current, isAdm);
+        totalScoreSum += newEarned;
+        if (['O', 'TO', 'RO'].includes(m as string) || isCorrectEq) correctCount++;
         if (['X', 'TX', '☆', 'B'].includes(m as string)) incorrectIds.push(q.tq_id);
       }
     });
 
-    const totalQ = flatQuestions.length || 1;
     let newStatus = '미제출';
     if (gradedCount > 0) newStatus = '진행중';
     if (gradedCount === flatQuestions.length && flatQuestions.length > 0) newStatus = '채점완료';
 
     if (isExamHw && assignmentId) {
-      const calculatedScore = Math.round((correctCount / totalQ) * 100);
+      const calculatedScore = roundScore(totalScoreSum);
       await supabase.from('exam_assignment').update({ 
         status: newStatus,
         total_score: calculatedScore 
@@ -447,12 +733,15 @@ function HomeworkReviewContent() {
     setSaveStatus("저장 중...");
 
     try {
-      const isCorrect = nextMark ? ['O', 'TO', 'RO'].includes(nextMark) : false;
-      const isIncorrect = nextMark ? ['X', 'TX', '☆', 'B'].includes(nextMark) : false;
-      
       const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
       const totalQ = flatQuestions.length || 1;
-      const earnedScore = isCorrect ? (100 / totalQ) : 0;
+      const targetQ = flatQuestions.find((q: any) => String(q.tq_id) === String(tqId));
+      const assignedScore = targetQ?.assigned_score ?? (100 / totalQ);
+      const isAdm = Boolean(homeworkInfo?.exam_type && (homeworkInfo.exam_type.includes('입학테스트') || homeworkInfo.exam_type.includes('진단평가')));
+
+      const { newEarned: earnedScore, isCorrectEq } = calcScoreRatio(nextMark, assignedScore, gradingCodeMetaRef.current, isAdm);
+      const isCorrect = nextMark ? (['O', 'TO', 'RO'].includes(nextMark) || isCorrectEq) : false;
+      const isIncorrect = nextMark ? ['X', 'TX', '☆', 'B'].includes(nextMark) : false;
 
       const dynamicSourceType = isExamHw ? (homeworkInfo?.exam_type || '시험지') : '교재과제';
 
@@ -483,9 +772,9 @@ function HomeworkReviewContent() {
         ]);
 
         if (existingA) {
-          await supabase.from('student_homework_answer').update({ grading_code: nextMark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 }).eq('hw_answer_id', existingA.hw_answer_id);
+          await supabase.from('student_homework_answer').update({ grading_code: nextMark, is_correct: isCorrect, earned_score: earnedScore }).eq('hw_answer_id', existingA.hw_answer_id);
         } else if (nextMark) {
-          await supabase.from('student_homework_answer').insert({ homework_id: Number(homeworkId), student_id: studentId, tq_id: tqId, grading_code: nextMark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
+          await supabase.from('student_homework_answer').insert({ homework_id: Number(homeworkId), student_id: studentId, tq_id: tqId, grading_code: nextMark, is_correct: isCorrect, earned_score: earnedScore });
         }
 
         if (isIncorrect) {
@@ -524,10 +813,9 @@ function HomeworkReviewContent() {
 
       const isCorrect = ['O', 'TO', 'RO'].includes(mark);
       const isIncorrect = ['X', 'TX', '☆', 'B'].includes(mark);
+      const isAdm = Boolean(homeworkInfo?.exam_type && (homeworkInfo.exam_type.includes('입학테스트') || homeworkInfo.exam_type.includes('진단평가')));
       
       const totalQ = flatQuestions.length || 1;
-      const earnedScore = isCorrect ? (100 / totalQ) : 0;
-
       const dynamicSourceType = isExamHw ? (homeworkInfo?.exam_type || '시험지') : '교재과제';
 
       if (isExamHw && assignmentId) {
@@ -540,15 +828,19 @@ function HomeworkReviewContent() {
         const incInserts: any[] = []; const incUpdates: any[] = [];
 
         targets.forEach((q: any) => {
-          const exA = existingAns?.find(a => a.question_id === q.tq_id);
-          if (exA) ansUpdates.push({ answer_id: exA.answer_id, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
-          else ansInserts.push({ exam_assignment_id: assignmentId, student_id: studentId, question_id: q.tq_id, grading_code: mark, is_correct: isCorrect, earned_score: earnedScore });
+          const qAssigned = q.assigned_score ?? (100 / totalQ);
+          const { newEarned: earnedScore, isCorrectEq } = calcScoreRatio(mark, qAssigned, gradingCodeMetaRef.current, isAdm);
+          const itemCorrect = isCorrect || isCorrectEq;
 
-          const exI = existingInc?.find(i => i.question_id === q.tq_id);
+          const exA = existingAns?.find(a => String(a.question_id) === String(q.tq_id));
+          if (exA) ansUpdates.push({ answer_id: exA.answer_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
+          else ansInserts.push({ exam_assignment_id: assignmentId, student_id: studentId, question_id: q.tq_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
+
+          const exI = existingInc?.find(i => String(i.question_id) === String(q.tq_id));
           if (isIncorrect) {
             if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
             else incInserts.push({ student_id: studentId, question_id: q.tq_id, source_type: dynamicSourceType, status: mark });
-          } else if (isCorrect && exI) {
+          } else if (itemCorrect && exI) {
             incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
           }
         });
@@ -569,15 +861,19 @@ function HomeworkReviewContent() {
         const incInserts: any[] = []; const incUpdates: any[] = [];
 
         targets.forEach((q: any) => {
-          const exA = existingAns?.find(a => a.tq_id === q.tq_id);
-          if (exA) ansUpdates.push({ hw_answer_id: exA.hw_answer_id, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
-          else ansInserts.push({ homework_id: Number(homeworkId), student_id: studentId, tq_id: q.tq_id, grading_code: mark, is_correct: isCorrect, earned_score: isCorrect ? 1 : 0 });
+          const qAssigned = q.assigned_score ?? (100 / totalQ);
+          const { newEarned: earnedScore, isCorrectEq } = calcScoreRatio(mark, qAssigned, gradingCodeMetaRef.current, false);
+          const itemCorrect = isCorrect || isCorrectEq;
 
-          const exI = existingInc?.find(i => i.tq_id === q.tq_id);
+          const exA = existingAns?.find(a => String(a.tq_id) === String(q.tq_id));
+          if (exA) ansUpdates.push({ hw_answer_id: exA.hw_answer_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
+          else ansInserts.push({ homework_id: Number(homeworkId), student_id: studentId, tq_id: q.tq_id, grading_code: mark, is_correct: itemCorrect, earned_score: earnedScore });
+
+          const exI = existingInc?.find(i => String(i.tq_id) === String(q.tq_id));
           if (isIncorrect) {
             if (exI) incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: null, source_type: dynamicSourceType });
             else incInserts.push({ student_id: studentId, tq_id: q.tq_id, source_type: dynamicSourceType, status: mark });
-          } else if (isCorrect && exI) {
+          } else if (itemCorrect && exI) {
             incUpdates.push({ record_id: exI.record_id, status: mark, resolved_at: new Date().toISOString(), source_type: dynamicSourceType });
           }
         });
@@ -605,6 +901,14 @@ function HomeworkReviewContent() {
   const flatQuestions = groups.reduce((acc, g) => acc.concat(g.items), []);
   const totalQ = flatQuestions.length;
   const gradedQ = Object.values(gradingMap).filter(v => v !== null).length;
+  const isAdmExam = Boolean(homeworkInfo?.exam_type && (homeworkInfo.exam_type.includes('입학테스트') || homeworkInfo.exam_type.includes('진단평가')));
+  const liveScoreSum = flatQuestions.reduce((acc: number, q: any) => {
+    const m = gradingMap[q.tq_id];
+    if (!m) return acc;
+    const qAssigned = q.assigned_score ?? (100 / (totalQ || 1));
+    return acc + calcScoreRatio(m, qAssigned, gradingCodeMeta, isAdmExam).newEarned;
+  }, 0);
+  const liveScore = roundScore(liveScoreSum);
 
   return (
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden font-pretendard">
@@ -625,12 +929,16 @@ function HomeworkReviewContent() {
           </div>
         </div>
         
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
           {saveStatus && (
             <div className={`px-4 py-1.5 rounded-full text-sm font-bold shadow-sm transition-all ${saveStatus.includes('✅') ? 'bg-emerald-100 text-emerald-700 border border-emerald-200' : saveStatus.includes('❌') ? 'bg-rose-100 text-rose-700 border border-rose-200' : 'bg-amber-100 text-amber-700 border border-amber-200 animate-pulse'}`}>
               {saveStatus}
             </div>
           )}
+          <div className="text-right bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200">
+            <div className="text-xs font-bold text-emerald-600 mb-0.5">현재 실시간 총점</div>
+            <div className="font-bold text-lg text-emerald-700 leading-none">{liveScore}점</div>
+          </div>
           <div className="text-right mr-2 bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
             <div className="text-xs font-bold text-slate-500 mb-0.5">채점 완료 진행률</div>
             <div className="font-bold text-lg text-brand leading-none">{gradedQ} / {totalQ}</div>
@@ -639,7 +947,7 @@ function HomeworkReviewContent() {
       </header>
 
       <div className="bg-slate-50 border-b border-slate-200 px-6 py-3 shrink-0 flex justify-between items-center shadow-inner">
-        <span className="text-xs font-bold text-slate-500">항목명: <span className="text-slate-800">{homeworkInfo?.textbook?.title || '-'}</span></span>
+        <span className="text-xs font-bold text-slate-500">항목명: <span className="text-slate-800">{homeworkInfo?.textbook?.title || '-'}</span> <span className="ml-2 text-slate-400">(총 {groups.length}문항 / 세부 {totalQ}문항)</span></span>
         <div className="flex gap-2">
           <button onClick={handleRefreshMathJax} className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-200 rounded text-xs font-bold hover:bg-indigo-100 transition-colors shadow-sm">
             🔄 수식 새로고침
@@ -691,6 +999,11 @@ function HomeworkReviewContent() {
                           <span className="text-brand font-bold text-[18px] whitespace-nowrap leading-none">{q.displayQNum}</span>
                           
                           <div className="flex flex-col items-center gap-0.5 w-full mt-1">
+                            {q.assigned_score !== undefined && (
+                              <span className="text-[11px] font-bold text-emerald-700 bg-emerald-50 px-1 py-0.5 rounded border border-emerald-200 truncate w-full text-center" title="문항 배점">
+                                {roundScore(q.assigned_score)}점
+                              </span>
+                            )}
                             <span className="text-xs font-bold text-slate-400 bg-slate-100 px-1 py-0.5 rounded border border-slate-200 truncate w-full text-center" title="출처 페이지">
                               {q.page_number || q.final_printed_page || q.detected_page_num || '-'}p
                             </span>

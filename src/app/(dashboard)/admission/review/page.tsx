@@ -4,6 +4,197 @@
 import React, { useEffect, useState, useRef, Suspense, memo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
 
 interface GradeButtonProps {
   code: string;
@@ -62,7 +253,6 @@ function ReviewContent() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isDeletingReport, setIsDeletingReport] = useState(false);
   
-  // 🌟 [추가] 리포트 권한 상태 관리
   const [hasReportAuth, setHasReportAuth] = useState(false);
 
   const [modalQ, setModalQ] = useState<any>(null);
@@ -72,7 +262,6 @@ function ReviewContent() {
 
   const mathJaxRef = useRef(false);
 
-  // 🌟 [추가] 사용자의 리포트 관리 권한 확인
   useEffect(() => {
     const checkReportAuth = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
@@ -91,7 +280,6 @@ function ReviewContent() {
           .eq('role_name', role)
           .single();
           
-        // 권한 배열에 우리가 추가한 action_manage_admission_report가 있는지 확인
         if (data && data.allowed_menus.includes("action_manage_admission_report")) {
           setHasReportAuth(true);
         }
@@ -119,7 +307,7 @@ function ReviewContent() {
       }
     }, 100);
     return () => clearTimeout(timer);
-  }, [resultData, modalQ, modalWrongLog, pendingUpdates]); // 👈 pendingUpdates 추가 
+  }, [resultData, modalQ, modalWrongLog, pendingUpdates]);
 
   useEffect(() => {
     if (isHomeworkMode) {
@@ -135,7 +323,7 @@ function ReviewContent() {
         tempTotal += currentScore;
       });
     });
-    setTotalScore(parseFloat(tempTotal.toFixed(1)));
+    setTotalScore(roundScore(tempTotal));
   }, [resultData, pendingUpdates, isHomeworkMode]);
 
   const loadMathJax = () => {
@@ -178,36 +366,6 @@ function ReviewContent() {
     return validUrl;
   };
 
-  const calcScoreRatio = (code: string, assignedScore: number, metaMap: any, isAdmission: boolean = false) => {
-    let meta = metaMap[code]; let ratio = 0; let isCorrectEq = false;
-    
-    if (meta) {
-      const targetRatio = (isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null) 
-                          ? meta.admission_ratio 
-                          : meta.score_ratio;
-                          
-      ratio = parseFloat(targetRatio) || 0; 
-      if (ratio > 1) ratio = ratio / 100;
-      
-      if (isAdmission) {
-        isCorrectEq = ratio > 0;
-      } else {
-        isCorrectEq = meta.is_correct === true || String(meta.is_correct).toLowerCase() === 'true';
-      }
-    } else {
-      if (['O', 'a', 'b', 'c'].includes(code)) { ratio = 1.0; isCorrectEq = true; }
-      else if (code === 'TO') { ratio = 0.8; isCorrectEq = true; }
-      else if (code === 'q') { ratio = 0.5; isCorrectEq = false; }
-      else { ratio = 0.0; isCorrectEq = false; }
-
-      if (isAdmission) {
-        ratio = ['O', 'a', 'b', 'c', 'TO'].includes(code) ? 1.0 : 0.0;
-        isCorrectEq = ratio > 0;
-      }
-    }
-    return { newEarned: assignedScore * ratio, isCorrectEq };
-  };
-
   const loadHomeworkResults = async () => {
     try {
       const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio');
@@ -239,8 +397,6 @@ function ReviewContent() {
         try { tqIds = (typeof hwData.target_questions === 'string' ? JSON.parse(hwData.target_questions) : hwData.target_questions).map(Number); } catch(e){}
       }
       if (tqIds.length === 0) throw new Error("과제 문항이 없습니다.");
-
-      const baseScore = 100 / tqIds.length;
       
       const chunkSize = 150;
       let tqData: any[] = [];
@@ -288,12 +444,14 @@ function ReviewContent() {
         const gId = tq.parent_tq_id ? `group_parent_${tq.parent_tq_id}` : `group_q_${qNum}`;
 
         if (!groupMap.has(gId)) { const newG = { id: gId, sort_order: idx, items: [] }; groupMap.set(gId, newG); groups.push(newG); }
-        groupMap.get(gId).items.push({ sort_order: idx, assigned_score: baseScore, question: q, answer: ans, question_id: q.question_id, tq_id: tq.tq_id });
+        groupMap.get(gId).items.push({ sort_order: idx, assigned_score: 0, question: q, answer: ans, question_id: q.question_id, tq_id: tq.tq_id });
       });
+
+      const baseScore = 100 / (groups.length || 1);
 
       groups.forEach((g: any) => {
         g.sort_order = Math.min(...g.items.map((i: any) => i.sort_order));
-        const subScore = baseScore / g.items.length;
+        const subScore = baseScore / (g.items.length || 1);
         
         g.items.forEach((i: any) => {
           i.assigned_score = subScore;
@@ -324,16 +482,17 @@ function ReviewContent() {
       const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
       setGradingCodeMeta(meta);
 
-      const { data: aData, error: aErr } = await supabase.from('exam_assignment').select('*, exam_master(title, sub_title, exam_type), student(name)').eq('assignment_id', assignmentId).single();
+      const { data: aData, error: aErr } = await supabase.from('exam_assignment').select('*, exam_master(title, sub_title, exam_type, layout_settings), student(name)').eq('assignment_id', assignmentId).single();
       if (aErr) throw aErr;
 
       const epId = aData.exam_id || aData.exam_paper_id;
       if (!epId) throw new Error("시험지 ID를 찾을 수 없습니다.");
       
       const sId = aData.student_id;
-      const exType = aData.exam_master?.exam_type || '';
-      const exTitle = aData.exam_master?.title || '문제지';
-      const matchTag = (aData.exam_master?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
+      const exMaster = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
+      const exType = exMaster?.exam_type || '';
+      const exTitle = exMaster?.title || '문제지';
+      const matchTag = (exMaster?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
       const stdName = matchTag ? matchTag[0] : '';
       
       setContextIds({ studentId: sId, examPaperId: epId, standardName: stdName });
@@ -400,6 +559,13 @@ function ReviewContent() {
       });
       answers = Array.from(dedupMap.values());
 
+      const userMergedTextQuestions = extractMergedQuestionGroups(exMaster?.layout_settings);
+      const customGroupMap = new Map<string, string>();
+      userMergedTextQuestions.forEach((arr, idx) => {
+        const gId = `custom_group_${idx}`;
+        arr.forEach(qid => customGroupMap.set(String(qid), gId));
+      });
+
       const groupMap = new Map(); const groups: any[] = [];
       const newWrongLogMap: any = {};
       const initialPending: any = {};
@@ -412,16 +578,19 @@ function ReviewContent() {
         const wLog = parseWrongLog(ans.wrong_attempts_log);
         if (wLog.length > 0) newWrongLogMap[ans.answer_id] = wLog;
 
-        const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : q.question_id;
-        let gId = `group_q_${baseNum}`;
-        const parentId = q.parent_question_id || q.parent_tq_id;
-        if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') gId = `group_parent_${parentId}`;
+        let gId = customGroupMap.get(String(item.question_id)) || '';
+        if (!gId) {
+          const baseNum = String(q.question_number || '').match(/\d+/) ? String(q.question_number).match(/\d+/)?.[0] : q.question_id;
+          gId = `group_q_${baseNum}`;
+          const parentId = q.parent_question_id || q.parent_tq_id;
+          if (parentId && String(parentId) !== 'null' && String(parentId).trim() !== '') gId = `group_parent_${parentId}`;
+        }
 
         if (!groupMap.has(gId)) { const newG = { id: gId, sort_order: item.sort_order, items: [] }; groupMap.set(gId, newG); groups.push(newG); }
         groupMap.get(gId).items.push({ sort_order: item.sort_order, assigned_score: item.assigned_score, question: q, answer: ans, question_id: item.question_id, tq_id: q.tq_id });
       });
 
-      const baseScorePerQuestion = 100 / groups.length;
+      const baseScorePerQuestion = 100 / (groups.length || 1);
       let metaScores: any = {};
       if (exType === '입학테스트' && stdName) {
         const { data: mData } = await supabase.from('admission_standard_meta').select('question_number, assigned_score').eq('standard_name', stdName);
@@ -448,7 +617,7 @@ function ReviewContent() {
         if (!maxScore || isNaN(maxScore) || maxScore === 0) {
           maxScore = baseScorePerQuestion;
         }
-        const subScore = maxScore / g.items.length;
+        const subScore = maxScore / (g.items.length || 1);
 
         g.items.forEach((i: any) => {
           i.assigned_score = subScore;
@@ -635,7 +804,7 @@ function ReviewContent() {
         });
 
         let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
-        const finalScore = parseFloat(tempT.toFixed(1));
+        const finalScore = roundScore(tempT);
 
         let { error: uErr } = await supabase.from('exam_assignment').update({ total_score: finalScore, status: '채점완료' }).eq('assignment_id', parseInt(assignmentId as string));
         if (uErr) throw new Error("시험지 총점 업데이트 실패: " + uErr.message);
@@ -701,7 +870,7 @@ function ReviewContent() {
         }
       });
       let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
-      const finalScore = parseFloat(tempT.toFixed(1));
+      const finalScore = roundScore(tempT);
 
       const { data: metaData } = await supabase.from('admission_standard_meta').select('*').eq('standard_name', contextIds.standardName);
       if (!metaData || metaData.length === 0) throw new Error(`[${contextIds.standardName}] 기준표가 없습니다.`);
@@ -831,7 +1000,6 @@ function ReviewContent() {
               <p className="text-blue-200 text-sm mt-1">{headerInfo.subtitle}</p>
             </div>
             <div className="text-right flex items-center gap-4">
-              {/* 🌟 [권한적용] 상단 열기 버튼 */}
               {hasReportAuth && showReportBtn && (
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
@@ -917,7 +1085,7 @@ function ReviewContent() {
                               )}
                             </div>
                           </td>
-                          <td className="p-3 text-center font-bold text-slate-500 bg-slate-50/50 text-xs">{parseFloat(Number(row.assigned_score).toFixed(1))}점</td>
+                          <td className="p-3 text-center font-bold text-slate-500 bg-slate-50/50 text-xs">{roundScore(row.assigned_score)}점</td>
                           <td className="p-3 text-center">{markHtml}</td>
                           <td className="p-3 text-left pl-4">
                             <div className="flex flex-col gap-1.5 min-w-[240px] max-w-[320px]">
@@ -961,7 +1129,6 @@ function ReviewContent() {
               <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                 {isSaving ? "저장 중... ⏳" : "1️⃣ 채점 내역 DB 저장 및 오답노트 전송"}
               </button>
-              {/* 🌟 [권한적용] 하단 생성/열람/삭제 버튼들 */}
               {hasReportAuth && headerInfo.type === '입학테스트' && (
                 <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                   {isGeneratingReport ? "리포트 생성 중... ⏳" : "2️⃣ 진단 리포트 생성하기 🪄"}

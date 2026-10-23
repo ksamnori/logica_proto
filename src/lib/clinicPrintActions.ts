@@ -77,7 +77,7 @@ export const generateIncorrectPrint = async (
 
                 const newTotal = maxSortOrder + newQIds.length;
                 await supabaseClient.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
-                const newScore = Math.round(100 / newTotal);
+                const newScore = Math.round((100 / newTotal) * 100) / 100;
                 await supabaseClient.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
             }
             merged = true;
@@ -93,7 +93,7 @@ export const generateIncorrectPrint = async (
             if (!instId) return;
 
             const { data: ex } = await supabaseClient.from('exam_master').insert({ title, exam_type: '오답프린트', instructor_id: instId, total_questions: uIds.length }).select().single();
-            const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round(100 / uIds.length) }));
+            const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round((100 / uIds.length) * 100) / 100 }));
             await supabaseClient.from('exam_item').insert(items);
             await supabaseClient.from('exam_assignment').insert({ exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시' });
         }
@@ -158,7 +158,7 @@ export const generateOverduePrint = async (
 
                 const newTotal = maxSortOrder + newQIds.length;
                 await supabaseClient.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
-                const newScore = Math.round(100 / newTotal);
+                const newScore = Math.round((100 / newTotal) * 100) / 100;
                 await supabaseClient.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
             }
             merged = true;
@@ -179,7 +179,7 @@ export const generateOverduePrint = async (
                 title, exam_type: '미완료과제', instructor_id: instId, 
                 total_questions: uIds.length, tenant_id: tenantId 
             }).select().single();
-            const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round(100 / uIds.length) }));
+            const items = uIds.map((qid, i) => ({ exam_id: ex.exam_id, question_id: qid, sort_order: i + 1, assigned_score: Math.round((100 / uIds.length) * 100) / 100 }));
             await supabaseClient.from('exam_item').insert(items);
             await supabaseClient.from('exam_assignment').insert({ 
                 exam_id: ex.exam_id, student_id: studentInfo.id, status: '미응시', 

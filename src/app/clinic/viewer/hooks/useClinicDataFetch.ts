@@ -2,6 +2,197 @@
 import { useState, useCallback } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { resolvePendingHomeworkQuestions } from '@/lib/clinicHomework';
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
 import { formatMathTextForWeb, getCleanUrl, safeParseOptions, combineDbHints, textbookHintFields, hydrateHintState } from '../utils';
 
 interface UseClinicDataFetchProps {
@@ -192,11 +383,12 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
     try {
       let matchedExamId = null; let matchedTitle = null; let matchedAssignId = assignId;
       let displayLabel = '시험';
+      let matchedMaster: any = null;
 
       // 1. 지정된 assignmentId가 있으면 우선 조회
       if (matchedAssignId) {
         const { data } = await supabaseClient.from('exam_assignment')
-          .select('exam_id, exam_master(title, exam_type)')
+          .select('exam_id, exam_master(title, exam_type, layout_settings, total_questions)')
           .eq('assignment_id', matchedAssignId)
           .eq('student_id', sId)
           .maybeSingle();
@@ -204,6 +396,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         if (data && data.exam_id) {
           matchedExamId = data.exam_id;
           const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+          matchedMaster = master;
           matchedTitle = master?.title;
           displayLabel = master?.exam_type || '시험';
         }
@@ -213,7 +406,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       if (!matchedExamId) {
         const { data: cData } = await supabaseClient.from('class').select('class_id').eq('name', cls).maybeSingle();
         let query = supabaseClient.from('exam_assignment')
-          .select('assignment_id, exam_id, exam_master!inner(title, exam_type)')
+          .select('assignment_id, exam_id, exam_master!inner(title, exam_type, layout_settings, total_questions)')
           .eq('student_id', sId)
           .not('exam_master.exam_type', 'in', '("과제", "과제프린트", "오답프린트", "오답", "오답유사", "과제오답유사", "미완료과제")')
           .not('status', 'in', '("제출완료", "채점완료", "완료", "최종완료")');
@@ -226,12 +419,13 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           matchedAssignId = String(data.assignment_id);
           matchedExamId = data.exam_id;
           const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+          matchedMaster = master;
           matchedTitle = master?.title;
           displayLabel = master?.exam_type || '시험';
         } else {
           // 정규 테스트가 없으면 배정된 오답유사/과제오답유사 시험지가 있는지 확인
           let simQuery = supabaseClient.from('exam_assignment')
-            .select('assignment_id, exam_id, exam_master!inner(title, exam_type)')
+            .select('assignment_id, exam_id, exam_master!inner(title, exam_type, layout_settings, total_questions)')
             .eq('student_id', sId)
             .in('exam_master.exam_type', ['오답유사', '과제오답유사'])
             .not('status', 'in', '("제출완료", "채점완료", "완료", "최종완료")');
@@ -243,6 +437,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
             matchedAssignId = String(simData.assignment_id);
             matchedExamId = simData.exam_id;
             const master: any = Array.isArray(simData.exam_master) ? simData.exam_master[0] : simData.exam_master;
+            matchedMaster = master;
             matchedTitle = master?.title;
             displayLabel = master?.exam_type || '과제오답유사';
           }
@@ -263,11 +458,21 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
       if (validItems.length === 0) { setPendingQCount(`이번 주 ${displayLabel}: 문제 없음`); setQuestions([]); return; }
 
+      const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(
+        validItems,
+        matchedMaster?.layout_settings,
+        displayLabel,
+        validItems.length
+      );
+      const defaultItemScore = 100 / (groupCount || validItems.length || 1);
+
       const mapped = validItems.map((it:any, i:number) => {
         const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
+        const qId = it.question_db.question_id;
         return {
-          index: i, uid: 'rq' + i + '_' + Date.now(), question_id: it.question_db.question_id, record_id: null,
+          index: i, uid: 'rq' + i + '_' + Date.now(), question_id: qId, record_id: null,
           examAssignmentId: matchedAssignId,
+          assigned_score: scoreByQuestionId.get(String(qId)) ?? defaultItemScore,
           source: matchedTitle || `이번 주 ${displayLabel}`, questionText: formatMathTextForWeb(it.question_db.question),
           imageUrl: getCleanUrl(it.question_db.image_url), options: safeParseOptions(it.question_db.options),
           answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
@@ -304,7 +509,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
   const fetchAssignedExamQuestions = async (assignId: string) => {
     if (!assignId) return { rows: [], title: null };
-    const { data } = await supabaseClient.from('exam_assignment').select('exam_id, exam_master(title, exam_type)').eq('assignment_id', assignId).maybeSingle();
+    const { data } = await supabaseClient.from('exam_assignment').select('exam_id, exam_master(title, exam_type, layout_settings, total_questions)').eq('assignment_id', assignId).maybeSingle();
     if (!data?.exam_id) return { rows: [], title: null };
 
     const { data: items } = await supabaseClient.from('exam_item').select('*, question_db(*)').eq('exam_id', data.exam_id).order('sort_order', { ascending: true });
@@ -313,11 +518,20 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
     const master: any = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
     const title = master?.title || null;
     const bookType = master?.exam_type === '오답프린트' ? '오답' : '기타';
+    const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(
+      validItems,
+      master?.layout_settings,
+      master?.exam_type,
+      validItems.length
+    );
+    const defaultItemScore = 100 / (groupCount || validItems.length || 1);
     
     const rows = validItems.map((it: any) => {
       const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
+      const qId = it.question_db.question_id;
       return {
-        examAssignmentId: assignId, question_id: it.question_db.question_id,
+        examAssignmentId: assignId, question_id: qId,
+        assigned_score: scoreByQuestionId.get(String(qId)) ?? defaultItemScore,
         bookId: Number(assignId), bookType, bookTitle: title || '배정된 과제',
         source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
         imageUrl: getCleanUrl(it.question_db.image_url), options: safeParseOptions(it.question_db.options),

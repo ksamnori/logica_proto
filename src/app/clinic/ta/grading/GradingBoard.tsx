@@ -3,6 +3,197 @@
 
 import React, { useEffect, useState, useRef, memo } from "react";
 import { supabase } from "@/lib/supabase";
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -217,23 +408,9 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
     return validUrl;
   };
 
-  const calcScoreRatio = (code: string | null, assignedScore: number, metaMap: any) => {
-    if (!code) return { newEarned: 0, isCorrectEq: false };
-    let meta = metaMap[code]; let ratio = 0; let isCorrectEq = false;
-    if (meta) {
-      ratio = parseFloat(meta.score_ratio) || 0; if (ratio > 1) ratio = ratio / 100;
-      isCorrectEq = meta.is_correct === true || String(meta.is_correct).toLowerCase() === 'true';
-    } else {
-      if (['O', 'RO'].includes(code)) { ratio = 1.0; isCorrectEq = true; }
-      else if (code === 'TO') { ratio = 0.8; isCorrectEq = true; }
-      else { ratio = 0.0; isCorrectEq = false; }
-    }
-    return { newEarned: (Number(assignedScore) || 0) * ratio, isCorrectEq };
-  };
-
   const loadMatrixHomework = async () => {
     try {
-      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio');
+      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio');
       const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
       setGradingCodeMeta(meta);
 
@@ -388,7 +565,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
   const loadMatrixExam = async () => {
     try {
-      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio');
+      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio');
       const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
       setGradingCodeMeta(meta);
 
@@ -479,10 +656,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       const qMap: any = {}; fetchedQuestions.forEach(q => qMap[q.question_id] = q);
 
-      let userMergedTextQuestions: any[][] = [];
-      if (m?.layout_settings?.userMergedTextQuestions) {
-          userMergedTextQuestions = m.layout_settings.userMergedTextQuestions;
-      }
+      const userMergedTextQuestions = extractMergedQuestionGroups(m?.layout_settings);
 
       const customGroupMap = new Map<string, string>();
       userMergedTextQuestions.forEach((arr, idx) => {
@@ -490,20 +664,42 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           arr.forEach(qid => customGroupMap.set(String(qid), gId));
       });
 
+      // 먼저 대문항(그룹) 목록과 각 그룹의 서브문항 개수를 산출합니다.
+      const groupSizes = new Map<string, number>();
+      const orderedGroupIds: string[] = [];
+      const qidToGroupId = new Map<string, string>();
+
+      unionQids.forEach((qid, idx) => {
+        let gId = customGroupMap.get(String(qid));
+        if (!gId) gId = `single_${qid}_${idx}`;
+        qidToGroupId.set(String(qid), gId);
+        if (!groupSizes.has(gId)) {
+          groupSizes.set(gId, 0);
+          orderedGroupIds.push(gId);
+        }
+        groupSizes.set(gId, (groupSizes.get(gId) || 0) + 1);
+      });
+
+      const totalGroups = orderedGroupIds.length || 1;
+      const baseGroupScore = 100 / totalGroups;
+      const isAdmExam = exType.includes('입학테스트') || exType.includes('진단평가');
+
       let mainNum = 0; let currentGroupId: string | null = null; let subNum = 1;
 
-      const rows = unionQids.map((qid, index) => {
+      const rows = unionQids.map((qid) => {
         const q = qMap[qid] || {};
-        let gId = customGroupMap.get(String(qid));
-        if (!gId) gId = `single_${qid}_${Math.random()}`;
+        const gId = qidToGroupId.get(String(qid)) || `single_${qid}`;
+        const groupSize = groupSizes.get(gId) || 1;
 
         if (gId !== currentGroupId) { mainNum++; currentGroupId = gId; subNum = 1; } 
         else { subNum++; }
 
-        const isMerged = gId.startsWith('custom_group_');
+        const isMerged = gId.startsWith('custom_group_') && groupSize > 1;
         const displayNum = isMerged ? `${mainNum}. (${subNum})` : `${mainNum}`;
         const pageInfo = q.page_number || q.final_printed_page || q.detected_page_num || null;
-        const assignedScore = qScoreMap.get(qid) || (100 / unionQids.length);
+        const explicitGroupScore = Number(qScoreMap.get(qid)) || 0;
+        const groupMaxScore = (isAdmExam && explicitGroupScore > 0) ? explicitGroupScore : baseGroupScore;
+        const assignedScore = groupMaxScore / groupSize;
 
         return {
           id: qid,
@@ -522,6 +718,8 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const cellMap = new Map();
       cols.forEach((s: any) => {
         let studentQNum = 1;
+        let calcColScore = 0;
+        let gradedCnt = 0;
         const studentExamQSet = examToQMap.get(s.exam_id) || new Set();
 
         rows.forEach(r => {
@@ -534,6 +732,11 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
           }
 
           const existingAns = answers?.find(a => String(a.student_id) === String(s.id) && String(a.question_id) === String(r.id));
+          const code = existingAns?.grading_code || null;
+          if (code) {
+            gradedCnt++;
+            calcColScore += calcScoreRatio(code, r.assignedScore, meta, isAdmExam).newEarned;
+          }
           
           cellMap.set(key, {
             isBlocked: false,
@@ -543,12 +746,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
             studentId: s.id,
             qId: r.id,
             tqId: null,
-            currentCode: existingAns?.grading_code || null,
+            currentCode: code,
             assignedScore: r.assignedScore,
             studentInput: existingAns?.student_input,
             wrongLog: parseWrongLog(existingAns?.wrong_attempts_log)
           });
         });
+
+        if (gradedCnt > 0) {
+          s.totalScore = roundScore(calcColScore);
+        }
       });
 
       setMatrixData({ cols, rows, cellMap });
@@ -623,6 +830,21 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
             if (res.data) successIds.push(...res.data.map(d => `${d.student_id}_${d.question_id}`));
           });
         }
+
+        // 실시간으로 exam_assignment.total_score도 갱신합니다.
+        const affectedAssignIds = Array.from(new Set(payloads.map(p => p.assignment_id).filter(Boolean)));
+        for (const aId of affectedAssignIds) {
+          const { data: upAns } = await supabase.from('student_answer').select('question_id, earned_score').eq('exam_assignment_id', aId);
+          const dedupScoreMap = new Map();
+          upAns?.forEach((a: any) => {
+            const k = String(a.question_id);
+            const ex = dedupScoreMap.get(k);
+            if (!ex || Number(a.earned_score || 0) > Number(ex.earned_score || 0)) dedupScoreMap.set(k, a);
+          });
+          let tempT = 0;
+          dedupScoreMap.forEach((a: any) => { tempT += (Number(a.earned_score) || 0); });
+          await supabase.from('exam_assignment').update({ total_score: roundScore(tempT) }).eq('assignment_id', aId);
+        }
       }
 
       if (successIds.length > 0) {
@@ -644,10 +866,11 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
     const isCanceling = cell.currentCode === code;
     const nextCode = isCanceling ? null : code;
+    const isAdm = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
 
     const { newEarned, isCorrectEq } = isCanceling 
       ? { newEarned: 0, isCorrectEq: false } 
-      : calcScoreRatio(nextCode, cell.assignedScore, gradingCodeMeta);
+      : calcScoreRatio(nextCode, cell.assignedScore, gradingCodeMeta, isAdm);
     
     setMatrixData(prev => {
       const newMap = new Map(prev.cellMap);
@@ -675,13 +898,14 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
   const markCol = (studentId: string, code: string) => {
     const payloads: any[] = [];
     const newMap = new Map(matrixData.cellMap);
+    const isAdm = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
     
     matrixData.rows.forEach(r => {
       const key = `${studentId}_${r.id}`;
       const cell = newMap.get(key);
       if (!cell || cell.isBlocked) return;
       
-      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
+      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta, isAdm);
       newMap.set(key, { ...cell, currentCode: code });
       
       payloads.push({
@@ -708,13 +932,14 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
   const markRow = (questionId: string, code: string) => {
     const payloads: any[] = [];
     const newMap = new Map(matrixData.cellMap);
+    const isAdm = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
 
     matrixData.cols.forEach(c => {
       const key = `${c.id}_${questionId}`;
       const cell = newMap.get(key);
       if (!cell || cell.isBlocked) return;
       
-      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta);
+      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta, isAdm);
       newMap.set(key, { ...cell, currentCode: code });
 
       payloads.push({
@@ -776,10 +1001,16 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         }
       } else {
         for (const statusKey of Array.from(studentStatuses)) {
-          const [assignId, stId] = statusKey.split('_');
+          const [assignId] = statusKey.split('_');
           const { data: upAns } = await supabase.from('student_answer').select('question_id, earned_score').eq('exam_assignment_id', assignId);
-          let tempT = 0; upAns?.forEach(a => tempT += (Number(a.earned_score) || 0));
-          await supabase.from('exam_assignment').update({ total_score: tempT, status: '채점완료' }).eq('assignment_id', assignId);
+          const dedupScoreMap = new Map();
+          upAns?.forEach((a: any) => {
+            const k = String(a.question_id);
+            const ex = dedupScoreMap.get(k);
+            if (!ex || Number(a.earned_score || 0) > Number(ex.earned_score || 0)) dedupScoreMap.set(k, a);
+          });
+          let tempT = 0; dedupScoreMap.forEach((a: any) => tempT += (Number(a.earned_score) || 0));
+          await supabase.from('exam_assignment').update({ total_score: roundScore(tempT), status: '채점완료' }).eq('assignment_id', assignId);
         }
       }
 
@@ -852,7 +1083,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
         }
       });
       let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
-      const finalScore = parseFloat(tempT.toFixed(1));
+      const finalScore = roundScore(tempT);
 
       const { data: metaData } = await supabase.from('admission_standard_meta').select('*').eq('standard_name', standardName);
       if (!metaData || metaData.length === 0) throw new Error(`[${standardName}] 기준표가 없습니다.`);
@@ -936,6 +1167,23 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
   };
 
   const pendingCount = Object.keys(pendingUpdates).length;
+  const isAdmExamType = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
+
+  const getColLiveScore = (studentId: string, fallbackScore: number) => {
+    let sum = 0;
+    let graded = 0;
+    matrixData.rows.forEach(r => {
+      const key = `${studentId}_${r.id}`;
+      const cell = matrixData.cellMap.get(key);
+      if (!cell || cell.isBlocked) return;
+      const code = pendingUpdates[key]?.grading_code !== undefined ? pendingUpdates[key].grading_code : cell.currentCode;
+      if (code) {
+        graded++;
+        sum += calcScoreRatio(code, cell.assignedScore, gradingCodeMeta, isAdmExamType).newEarned;
+      }
+    });
+    return graded > 0 ? roundScore(sum) : roundScore(fallbackScore || 0);
+  };
 
   return (
     <div className="flex flex-col h-full overflow-hidden bg-slate-50 w-full font-pretendard">
@@ -973,7 +1221,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                     
                     {!isHomeworkMode && (
                       <div className="text-xs text-slate-500 font-bold mt-0.5 mb-1 bg-white border border-slate-200 rounded px-1 w-max mx-auto">
-                        총점: <span className="text-emerald-600">{c.totalScore}</span>
+                        총점: <span className="text-emerald-600">{getColLiveScore(c.id, c.totalScore)}</span>
                       </div>
                     )}
 

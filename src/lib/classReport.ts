@@ -4,6 +4,197 @@
 // - 학생 기록은 개인 리포트와 같은 규칙: 채점된 시험·과제 문항, 입학테스트·진단평가 제외, 문항별 마지막 기록
 // - 비교 대상: 반 이름 앞 두 글자(수준·학년, 예: T32MW1 → "T3")가 같은 다른 진행 중인 반의 학생 평균. 없으면 비교 없이 출력
 import { supabase } from "@/lib/supabase";
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
 import {
   COMPETENCIES, COGNITIVE_LEVELS, FINAL_OK, EXCLUDED_EXAM_TYPES, MIN_COMP_ITEMS, PRE_TEST_STATUS,
   kstDate, ymOf, shiftYm, ymLabel, lastDay, monthStartUtcIso, weekOfMonth, unwrap,
@@ -297,7 +488,7 @@ export async function buildClassReport(classId: string, ym: string, onStep?: (t:
 // 반 학생들의 그 달 주간테스트: 시험지별 반 평균·최고·최저와 학생별 점수표
 async function loadClassWeekly(ids: string[], ym: string): Promise<ClassReport["weekly"]> {
   const empty = { tests: [], matrix: {} };
-  const asg = await selectInPaged("exam_assignment", "assignment_id, exam_id, student_id, status, created_at, exam_master!inner(title, total_questions, exam_type, exam_date)", "student_id", ids,
+  const asg = await selectInPaged("exam_assignment", "assignment_id, exam_id, student_id, status, created_at, exam_master!inner(title, total_questions, exam_type, exam_date, layout_settings)", "student_id", ids,
     q => q.eq("exam_master.exam_type", "주간테스트").gte("created_at", monthStartUtcIso(shiftYm(ym, -1))).lt("created_at", monthStartUtcIso(shiftYm(ym, 2))).order("assignment_id"));
   const list = asg.filter((a: any) => !PRE_TEST_STATUS.includes(a.status)).map((a: any) => {
     const em = unwrap(a.exam_master) || {};
@@ -306,7 +497,36 @@ async function loadClassWeekly(ids: string[], ym: string): Promise<ClassReport["
   }).filter((a: any) => String(a.day).slice(0, 7) === ym);
   if (list.length === 0) return empty;
 
-  const answers = await selectInPaged("student_answer", "exam_assignment_id, question_id, attempt_number, grading_code, updated_at", "exam_assignment_id", list.map((a: any) => a.assignment_id), q => q.order("answer_id"));
+  const examIds = Array.from(new Set(list.map((a: any) => String(a.exam_id))));
+  const [answers, examItemsRaw, gcRes] = await Promise.all([
+    selectInPaged("student_answer", "exam_assignment_id, question_id, attempt_number, grading_code, updated_at", "exam_assignment_id", list.map((a: any) => a.assignment_id), q => q.order("answer_id")),
+    selectInPaged("exam_item", "exam_id, question_id, sort_order, assigned_score", "exam_id", examIds),
+    supabase.from("master_grading_code").select("code, description, is_correct, score_ratio, admission_ratio")
+  ]);
+
+  const gcMeta: Record<string, any> = {};
+  gcRes.data?.forEach((row: any) => { if (row.code) gcMeta[row.code] = row; });
+
+  const itemsByExam = new Map<string, any[]>();
+  examItemsRaw.forEach((it: any) => {
+    const k = String(it.exam_id);
+    if (!itemsByExam.has(k)) itemsByExam.set(k, []);
+    itemsByExam.get(k)!.push(it);
+  });
+
+  const examScoreCfg = new Map<string, { scoreByQuestionId: Map<string, number>; defaultScore: number }>();
+  list.forEach((a: any) => {
+    const eid = String(a.exam_id);
+    if (!examScoreCfg.has(eid)) {
+      const items = itemsByExam.get(eid) || [];
+      const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(items, a.em?.layout_settings, a.em?.exam_type, a.em?.total_questions || 1);
+      examScoreCfg.set(eid, {
+        scoreByQuestionId,
+        defaultScore: 100 / (groupCount || a.em?.total_questions || 1)
+      });
+    }
+  });
+
   const last = new Map<string, any>();
   answers.forEach((a: any) => {
     if (a.grading_code == null) return;
@@ -325,16 +545,22 @@ async function loadClassWeekly(ids: string[], ym: string): Promise<ClassReport["
     const t = perTest.get(key)!; t.enrolled++;
     const rows = byAsg.get(a.assignment_id) || [];
     if (rows.length === 0) return; // 채점 전
-    const total = t.totalQ || rows.length || 1;
-    const o = rows.filter(r => String(r.grading_code).trim() === "O").length;
-    const f = rows.filter(r => FINAL_OK.includes(String(r.grading_code).trim())).length;
-    const sc = { first: Math.round((o / total) * 100), final: Math.round((f / total) * 100) };
+    const cfg = examScoreCfg.get(key);
+    let firstSum = 0;
+    let finalSum = 0;
+    rows.forEach((r: any) => {
+      const g = String(r.grading_code).trim();
+      const qScore = cfg?.scoreByQuestionId.get(String(r.question_id)) ?? cfg?.defaultScore ?? 5;
+      if (g === "O") firstSum += qScore;
+      finalSum += calcScoreRatio(g, qScore, gcMeta, false).newEarned;
+    });
+    const sc = { first: roundScore(firstSum), final: roundScore(finalSum) };
     t.scores.push(sc);
     (matrix[a.student_id] ||= {})[key] = sc;
   });
   const tests = Array.from(perTest.entries()).filter(([, t]) => t.scores.length > 0).map(([key, t]) => ({
     key, title: t.title, date: t.date, totalQ: t.totalQ, taken: t.scores.length, enrolled: t.enrolled,
-    avgFirst: Math.round(avg(t.scores.map(s => s.first))), avgFinal: Math.round(avg(t.scores.map(s => s.final))),
+    avgFirst: roundScore(avg(t.scores.map(s => s.first))), avgFinal: roundScore(avg(t.scores.map(s => s.final))),
     max: Math.max(...t.scores.map(s => s.first)), min: Math.min(...t.scores.map(s => s.first)),
   })).sort((a, b) => a.date.localeCompare(b.date));
   return { tests, matrix };

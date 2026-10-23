@@ -3,7 +3,198 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
-import { supabase } from "@/lib/supabase"; 
+import { supabase } from "@/lib/supabase";
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
 import StudentEditModal from "@/components/student/StudentEditModal";
 import ConsultModal from "@/components/student/ConsultModal";
 import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
@@ -318,7 +509,7 @@ export default function StudentDetailPage() {
   const loadExamResults = async () => {
     try {
       const { data: assignments, error } = await supabase.from("exam_assignment")
-        .select("assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type)")
+        .select("assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type, layout_settings)")
         .eq("student_id", studentId)
         .order("created_at", { ascending: false });
 
@@ -339,10 +530,47 @@ export default function StudentDetailPage() {
 
       const examIds = Array.from(new Set(validAssignments.map((a: any) => a.exam_id)));
 
-      const { data: allAssignmentsForExams } = await supabase.from("exam_assignment")
-        .select("assignment_id, exam_id")
-        .in("exam_id", examIds)
-        .not("status", "in", '("응시전","미응시","예정","대기")');
+      const [{ data: allAssignmentsForExams }, { data: examItems }, { data: gcData }] = await Promise.all([
+        supabase.from("exam_assignment")
+          .select("assignment_id, exam_id")
+          .in("exam_id", examIds)
+          .not("status", "in", '("응시전","미응시","예정","대기")'),
+        supabase.from("exam_item")
+          .select("exam_id, question_id, sort_order, assigned_score")
+          .in("exam_id", examIds)
+          .order("sort_order"),
+        supabase.from("master_grading_code")
+          .select("code, description, is_correct, score_ratio, admission_ratio")
+      ]);
+
+      const gcMeta: Record<string, any> = {};
+      gcData?.forEach((row: any) => { if (row.code) gcMeta[row.code] = row; });
+
+      const itemsByExam = new Map<string, any[]>();
+      examItems?.forEach((it: any) => {
+        const k = String(it.exam_id);
+        if (!itemsByExam.has(k)) itemsByExam.set(k, []);
+        itemsByExam.get(k)!.push(it);
+      });
+
+      const examScoreConfigMap = new Map<string, { scoreByQuestionId: Map<string, number>; defaultScore: number }>();
+      validAssignments.forEach((a: any) => {
+        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
+        const k = String(a.exam_id);
+        if (!examScoreConfigMap.has(k)) {
+          const items = itemsByExam.get(k) || [];
+          const { scoreByQuestionId, groupCount } = buildExamQuestionScoreMap(
+            items,
+            master?.layout_settings,
+            master?.exam_type,
+            master?.total_questions || 1
+          );
+          examScoreConfigMap.set(k, {
+            scoreByQuestionId,
+            defaultScore: 100 / (groupCount || master?.total_questions || 1)
+          });
+        }
+      });
 
       const allAssignIds = (allAssignmentsForExams || []).map(a => a.assignment_id);
 
@@ -350,38 +578,57 @@ export default function StudentDetailPage() {
       for (let i = 0; i < allAssignIds.length; i += 200) {
         const chunk = allAssignIds.slice(i, i + 200);
         const { data: chunkAnswers } = await supabase.from("student_answer")
-          .select("exam_assignment_id, grading_code")
+          .select("exam_assignment_id, question_id, grading_code, earned_score")
           .in("exam_assignment_id", chunk);
         if (chunkAnswers) allAnswers = [...allAnswers, ...chunkAnswers];
       }
 
-      const examTotalQMap = new Map();
-      validAssignments.forEach((a: any) => {
-        const master = Array.isArray(a.exam_master) ? a.exam_master[0] : a.exam_master;
-        examTotalQMap.set(a.exam_id, master?.total_questions || 1);
+      const dedupAnsMap = new Map<string, any>();
+      allAnswers.forEach(ans => {
+        if (!ans.grading_code) return;
+        const k = `${ans.exam_assignment_id}_${ans.question_id}`;
+        const ex = dedupAnsMap.get(k);
+        if (!ex || Number(ans.earned_score || 0) >= Number(ex.earned_score || 0)) {
+          dedupAnsMap.set(k, ans);
+        }
       });
 
-      const assignCounts: Record<string, { o: number, ro: number, to: number, totalAns: number, x: number }> = {};
-      allAnswers.forEach(ans => {
-         if(!assignCounts[ans.exam_assignment_id]) {
-           assignCounts[ans.exam_assignment_id] = { o:0, ro:0, to:0, totalAns:0, x:0 };
-         }
-         const c = assignCounts[ans.exam_assignment_id];
-         c.totalAns++;
-         if (ans.grading_code === 'O') c.o++;
-         else if (ans.grading_code === 'RO') c.ro++;
-         else if (ans.grading_code === 'TO') c.to++;
-         else if (['X', 'TX'].includes(ans.grading_code)) c.x++;
+      const assignToExamMap = new Map<any, string>();
+      (allAssignmentsForExams || []).forEach(a => assignToExamMap.set(a.assignment_id, String(a.exam_id)));
+      validAssignments.forEach((a: any) => assignToExamMap.set(a.assignment_id, String(a.exam_id)));
+
+      const assignCounts: Record<string, { o: number, ro: number, to: number, totalAns: number, x: number, initScore: number, finScore: number }> = {};
+      dedupAnsMap.forEach(ans => {
+        const aId = ans.exam_assignment_id;
+        if (!assignCounts[aId]) {
+          assignCounts[aId] = { o:0, ro:0, to:0, totalAns:0, x:0, initScore:0, finScore:0 };
+        }
+        const c = assignCounts[aId];
+        c.totalAns++;
+        const exId = assignToExamMap.get(aId) || '';
+        const cfg = examScoreConfigMap.get(exId);
+        const qScore = cfg?.scoreByQuestionId.get(String(ans.question_id)) ?? cfg?.defaultScore ?? 5;
+
+        if (ans.grading_code === 'O') {
+          c.o++;
+          c.initScore += qScore;
+        } else if (ans.grading_code === 'RO') {
+          c.ro++;
+        } else if (ans.grading_code === 'TO') {
+          c.to++;
+        } else if (['X', 'TX'].includes(ans.grading_code)) {
+          c.x++;
+        }
+        c.finScore += calcScoreRatio(ans.grading_code, qScore, gcMeta, false).newEarned;
       });
 
       const examScoreMap = new Map();
       (allAssignmentsForExams || []).forEach(a => {
-         const counts = assignCounts[a.assignment_id] || { o:0, ro:0, to:0, totalAns:0, x:0 };
-         let totalQ = examTotalQMap.get(a.exam_id) || counts.totalAns || 1;
-         if (totalQ === 0) totalQ = 1;
+         const counts = assignCounts[a.assignment_id];
+         if (!counts || counts.totalAns === 0) return;
 
-         const initScore = (counts.o / totalQ) * 100;
-         const finScore = ((counts.o + counts.ro + counts.to) / totalQ) * 100;
+         const initScore = roundScore(counts.initScore);
+         const finScore = roundScore(counts.finScore);
 
          if(!examScoreMap.has(a.exam_id)) examScoreMap.set(a.exam_id, { initSum: 0, finSum: 0, count: 0 });
          const avgData = examScoreMap.get(a.exam_id);
@@ -391,15 +638,14 @@ export default function StudentDetailPage() {
       });
 
       const results = validAssignments.map((a: any) => {
-        const counts = assignCounts[a.assignment_id] || { o:0, ro:0, to:0, totalAns:0, x:0 };
-        let totalQ = examTotalQMap.get(a.exam_id) || counts.totalAns || 1;
+        const counts = assignCounts[a.assignment_id] || { o:0, ro:0, to:0, totalAns:0, x:0, initScore:0, finScore:0 };
         
-        const originalScore = Math.round((counts.o / totalQ) * 100);
-        const finalScore = Math.round(((counts.o + counts.ro + counts.to) / totalQ) * 100);
+        const originalScore = roundScore(counts.initScore);
+        const finalScore = counts.totalAns > 0 ? roundScore(counts.finScore) : roundScore(a.total_score || 0);
         
         const avgData = examScoreMap.get(a.exam_id);
-        const classInitAvg = avgData && avgData.count > 0 ? Math.round(avgData.initSum / avgData.count) : 0;
-        const classFinAvg = avgData && avgData.count > 0 ? Math.round(avgData.finSum / avgData.count) : 0;
+        const classInitAvg = avgData && avgData.count > 0 ? roundScore(avgData.initSum / avgData.count) : 0;
+        const classFinAvg = avgData && avgData.count > 0 ? roundScore(avgData.finSum / avgData.count) : 0;
 
         return {
           assignment_id: a.assignment_id,
@@ -1384,8 +1630,8 @@ function ExamTab({ examResults, schoolExams, categoryAnalysis, setIsSchoolExamMo
                        <div className="flex justify-between items-start">
                           <div className="flex flex-col gap-1.5 overflow-hidden pr-2 pt-1"><div className="text-[13px] font-bold text-slate-700 truncate group-hover:text-blue-600 transition-colors" title={ex.title}>{ex.title}</div><div className="text-xs text-slate-400 font-bold">{ex.created_at ? new Date(ex.created_at).toLocaleDateString() : '-'}</div></div>
                           <div className="flex flex-col gap-0.5 shrink-0">
-                             <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors"><span className="text-xs font-bold text-slate-500 w-10 text-left">내 점수</span><span className="text-[13px] font-bold text-brand w-9 text-right">{initial}점</span><span className="text-slate-300 text-xs w-6 text-center">➔</span><span className="text-[13px] font-bold text-blue-600 w-9 text-right">{final}점</span></div>
-                             <div className="flex items-center px-2 py-0.5"><span className="text-xs font-bold text-slate-500 w-10 text-left">반 평균</span><span className="text-xs font-bold text-slate-600 w-9 text-right">{ex.class_init_avg}점</span><span className="text-slate-300 text-xs w-6 text-center">➔</span><span className="text-xs font-bold text-emerald-600 w-9 text-right">{ex.class_fin_avg}점</span></div>
+                             <div className="flex items-center bg-slate-50 px-2 py-1 rounded-md border border-slate-100 group-hover:bg-blue-50 group-hover:border-blue-100 transition-colors"><span className="text-xs font-bold text-slate-500 w-10 text-left">내 점수</span><span className="text-[13px] font-bold text-brand min-w-[38px] text-right whitespace-nowrap">{initial}점</span><span className="text-slate-300 text-xs w-6 text-center">➔</span><span className="text-[13px] font-bold text-blue-600 min-w-[38px] text-right whitespace-nowrap">{final}점</span></div>
+                             <div className="flex items-center px-2 py-0.5"><span className="text-xs font-bold text-slate-500 w-10 text-left">반 평균</span><span className="text-xs font-bold text-slate-600 min-w-[38px] text-right whitespace-nowrap">{ex.class_init_avg}점</span><span className="text-slate-300 text-xs w-6 text-center">➔</span><span className="text-xs font-bold text-emerald-600 min-w-[38px] text-right whitespace-nowrap">{ex.class_fin_avg}점</span></div>
                           </div>
                        </div>
                        <div className="flex flex-wrap gap-1 mt-auto">
