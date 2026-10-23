@@ -6,6 +6,14 @@ import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
 import { Seat, SEAT_LAYOUT_UPDATED_EVENT, DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 const PERSIST_UNTIL_RESOLVED_TYPES = ['call', 'away', 'recheck', 'end_request'];
 
 export function useSupervisorData() {
@@ -251,11 +259,12 @@ export function useSupervisorData() {
         if (!isAuthorized) return;
         
         const fetchAllStudents = async () => {
-            const { data } = await supabaseClient.from('student').select('student_id, name, enrollment(class(name, code))');
+            const { data } = await supabaseClient.from('student').select('student_id, name, enrollment(status, end_date, class(name, code))');
             if (data) {
                 const grouped: Record<string, { label: string; students: any[] }> = {};
                 data.forEach((s: any) => {
-                    const classEntries = s.enrollment?.map((e: any) => e.class).filter(Boolean) || [];
+                    const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    const classEntries = activeEnrolls.map((e: any) => e.class).filter(Boolean) || [];
                     const classes = classEntries.map((c: any) => c.name);
                     const firstClass = classEntries[0];
                     const cLabel = firstClass ? firstClass.name : '반 미배정';
@@ -286,9 +295,11 @@ export function useSupervisorData() {
                 }
                 if (!effectiveSeat) continue;
 
-                const { data: sData } = await supabaseClient.from('student').select('name, enrollment(class(name))').eq('student_id', sess.student_id).single();
+                const { data: sData } = await supabaseClient.from('student').select('name, enrollment(status, end_date, class(name))').eq('student_id', sess.student_id).single();
                 const metaName = sData?.name || '학생';
-                const metaClasses = sData?.enrollment?.map((e: any) => e.class?.name).filter(Boolean) || ['반 미배정'];
+                const activeEnrolls = (sData?.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                const metaClasses = activeEnrolls.map((e: any) => e.class?.name).filter(Boolean);
+                if (metaClasses.length === 0) metaClasses.push('반 미배정');
 
                 if (!newStudents[effectiveSeat]) {
                     newStudents[effectiveSeat] = {
@@ -423,10 +434,12 @@ export function useSupervisorData() {
                     current[targetSeat] = { ...current[oldSeat], clinicDurationMs: dbRecord.duration_ms, sessionId: dbRecord.id };
                     delete current[oldSeat]; isModified = true;
                 } else if (!oldSeat && !current[targetSeat]) {
-                    const { data: sData } = await supabaseClient.from('student').select('name, enrollment(class(name))').eq('student_id', dbRecord.student_id).single();
+                    const { data: sData } = await supabaseClient.from('student').select('name, enrollment(status, end_date, class(name))').eq('student_id', dbRecord.student_id).single();
                     const entryName = sData?.name || '학생';
+                    const activeEnrolls = (sData?.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    const activeClassNames = activeEnrolls.map((e: any) => e.class?.name).filter(Boolean);
                     current[targetSeat] = {
-                        name: entryName, classes: sData?.enrollment?.map((e: any) => e.class?.name).filter(Boolean) || ['반 미배정'],
+                        name: entryName, classes: activeClassNames.length > 0 ? activeClassNames : ['반 미배정'],
                         status: 'idle', studentId: dbRecord.student_id, sessionId: dbRecord.id, firstSeenAt: new Date(dbRecord.started_at).getTime() || Date.now(),
                         clinicDurationMs: dbRecord.duration_ms || DEFAULT_CLINIC_DURATION_MS,
                         sessionNo: dbRecord.session_no || 1,

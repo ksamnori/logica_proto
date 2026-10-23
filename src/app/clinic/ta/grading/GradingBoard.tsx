@@ -4,6 +4,15 @@
 import React, { useEffect, useState, useRef, memo } from "react";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const GRADE_CODES: { code: string; title: string }[] = [
   { code: 'O', title: '정답' },
   { code: 'X', title: '오답' },
@@ -247,8 +256,9 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
 
       if (gradeAll) {
         if (baseHw.class_id) {
-          const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseHw.class_id);
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date, student(status)').eq('class_id', baseHw.class_id);
           const classStudentIds = enrolls?.filter((e: any) => {
+            if (isEndedEnrollment(e)) return false;
             const s = Array.isArray(e.student) ? e.student[0] : e.student;
             return s?.status === '재원';
           }).map(e => e.student_id) || [];
@@ -407,9 +417,10 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       let allAssigns = allAssignsRaw || [];
 
       if (gradeAll && baseEx.class_id) {
-        const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseEx.class_id);
+        const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date, student(status)').eq('class_id', baseEx.class_id);
         const currentEnrolledIds = new Set(
           enrolls?.filter((e: any) => {
+            if (isEndedEnrollment(e)) return false;
             const s = Array.isArray(e.student) ? e.student[0] : e.student;
             return s?.status === '재원';
           }).map(e => String(e.student_id))

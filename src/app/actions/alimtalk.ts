@@ -554,14 +554,16 @@ export async function kioskAttendance(studentId: string) {
 
     const { data: stu, error: sErr } = await supabaseAdmin
       .from("student")
-      .select("student_id, name, tenant_id, enrollment(enrollment_id, class(class_id))")
+      .select("student_id, name, tenant_id, enrollment(enrollment_id, status, end_date, class(class_id))")
       .eq("student_id", studentId)
       .maybeSingle();
 
     if (sErr) throw sErr;
     if (!stu) return { success: false, message: "학생을 찾을 수 없습니다." };
 
-    const enr: any = Array.isArray(stu.enrollment) ? stu.enrollment[0] : stu.enrollment;
+    const enrollArr = Array.isArray(stu.enrollment) ? stu.enrollment : (stu.enrollment ? [stu.enrollment] : []);
+    const activeEnrolls = enrollArr.filter((e: any) => !["수강종료", "종료", "퇴원", "취소"].includes(String(e?.status || "").trim()) && !e?.end_date);
+    const enr: any = activeEnrolls[0] || null;
     const enrollmentId = enr?.enrollment_id ?? null;
     const classId = enr?.class?.class_id ?? null;
 

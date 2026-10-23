@@ -5,6 +5,14 @@ import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강', '메이크업/보강', '기타'];
 
 interface StudentInfo {
@@ -127,11 +135,13 @@ export default function HomeworkPage() {
       const allStudents: StudentInfo[] = [];
 
       const { data: enrollments } = await supabase.from('enrollment')
-        .select('class_id, student_id, student(name, status)')
+        .select('class_id, student_id, status, end_date, student(name, status)')
         .in('class_id', classIds);
 
       enrollments?.forEach((e: any) => {
-        if (e.student && e.student.status === '재원') {
+        if (isEndedEnrollment(e)) return;
+        const stu = Array.isArray(e.student) ? e.student[0] : e.student;
+        if (stu && stu.status === '재원') {
           if (!studentsByClass[e.class_id]) studentsByClass[e.class_id] = [];
           const studentName = Array.isArray(e.student) ? e.student[0]?.name : e.student.name;
           const studentObj = { 

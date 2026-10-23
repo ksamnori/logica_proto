@@ -18,6 +18,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 // 💡 헬퍼 함수: 상담 유형에 따른 테마 컬러 클래스 반환
 const getConsultBadgeColor = (type: string, isAdmission: boolean = false) => {
   if (isAdmission) return 'bg-amber-50 text-amber-700 border-amber-200';
@@ -92,7 +101,7 @@ export default function ConsultationManagementPage() {
     // 💡 학생과 묶인 상담 기록, 그리고 입학 상담 데이터까지 가져옵니다.
     let stQuery = supabase.from("student").select(`
       student_id, name, parent(name, phone),
-      enrollment(class_id, class(name, instructor(name))),
+      enrollment(class_id, status, end_date, class(name, instructor(name))),
       consultation_log(*, instructor(name)),
       admission_application(application_id, counseling_memo, test_result, created_at)
     `).eq("status", "재원");
@@ -107,7 +116,9 @@ export default function ConsultationManagementPage() {
       const now = Date.now();
       const mapped = stData.map((st: any) => {
         const parentInfo = unwrap(st.parent);
-        const mainEnroll = unwrap(st.enrollment);
+        const enrollList = Array.isArray(st.enrollment) ? st.enrollment : (st.enrollment ? [st.enrollment] : []);
+        const activeEnrolls = enrollList.filter((e: any) => !isEndedEnrollment(e));
+        const mainEnroll = activeEnrolls[0];
         const classObj = unwrap(mainEnroll?.class);
         
         const className = classObj?.name || "미배정";

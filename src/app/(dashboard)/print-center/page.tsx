@@ -16,6 +16,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 export default function PrintCenterPage() {
   const [activeDoc, setActiveDoc] = useState<"student" | "instructor" | "ledger" | "receipt">("student");
   const [tenantInfo, setTenantInfo] = useState<TenantInfo | null>(null);
@@ -39,7 +48,7 @@ export default function PrintCenterPage() {
         if (tenant) setTenantInfo(tenant);
       }
 
-      let stuQuery = supabase.from("student").select("*, enrollment(start_date, class(name, tuition_fee))").in("status", ["재원", "휴원"]).order("name");
+      let stuQuery = supabase.from("student").select("*, enrollment(start_date, end_date, status, class(name, tuition_fee))").in("status", ["재원", "휴원"]).order("name");
       if (tId) stuQuery = stuQuery.eq("tenant_id", tId);
       const { data: stuData } = await stuQuery;
       setStudents(stuData || []);
@@ -174,7 +183,8 @@ export default function PrintCenterPage() {
                       </thead>
                       <tbody>
                         {students.map((s, idx) => {
-                          const enroll = unwrap(s.enrollment);
+                          const enrollList = Array.isArray(s.enrollment) ? s.enrollment : (s.enrollment ? [s.enrollment] : []);
+                          const enroll = enrollList.find((e: any) => !isEndedEnrollment(e)) || null;
                           const cName = unwrap(enroll?.class)?.name || "-";
                           return (
                             <tr key={s.student_id}>

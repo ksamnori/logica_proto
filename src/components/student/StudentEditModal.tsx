@@ -1,7 +1,7 @@
 // src/components/student/StudentEditModal.tsx
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { formatPhone as toPhone, normalizeGrade, phoneVariants, GRADE_OPTIONS } from "@/lib/normalize";
 import { hashPin } from "@/app/actions/studentAuth"; 
@@ -20,6 +20,14 @@ interface StudentEditModalProps {
 const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
+};
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
 };
 
 const LEVEL_FILTERS = ["전체", "Ultimate", "Master", "Apex", "Titan", "Horizon", "특강", "메이크업/보강"];
@@ -57,10 +65,16 @@ export default function StudentEditModal({
     newClassId: ""
   });
   
+  const [assignStatus, setAssignStatus] = useState("수강중");
   const [isSaving, setIsSaving] = useState(false);
   const [resettingSlot, setResettingSlot] = useState<number | null>(null);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [levelFilter, setLevelFilter] = useState("전체");
+
+  // 현재 소속된(수강중/예약) 수강반만 필터링 (수강종료 제외)
+  const activeEnrollments = useMemo(() => {
+    return (enrollments || []).filter((e: any) => !isEndedEnrollment(e));
+  }, [enrollments]);
 
   useEffect(() => {
     const role = localStorage.getItem("logica_instructor_role") || "";
@@ -92,6 +106,7 @@ export default function StudentEditModal({
         hasParentPw2: !!(parentObj?.password_hash_2 && String(parentObj.password_hash_2).trim() !== ""),
         newClassId: ""
       });
+      setAssignStatus("수강중");
       setLevelFilter("전체"); 
     }
   }, [isOpen, student]);
@@ -261,6 +276,9 @@ export default function StudentEditModal({
         
       if (studentUpdateError) throw studentUpdateError;
 
+      // 퇴원 또는 휴원 처리 시 진행 중인 수강반도 수강종료 처리할지 여부와 무관하게 새로고침 신호 전달
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+
       alert("학생 및 학부모 정보가 성공적으로 수정되었습니다.");
       onSuccess();
       onClose();
@@ -278,24 +296,80 @@ export default function StudentEditModal({
 
   const addEnrollment = async () => {
     if (!editForm.newClassId) return alert("추가할 수강반을 선택해주세요.");
-    const existing = enrollments.find(e => e.class_id.toString() === editForm.newClassId);
-    if (existing) return alert("이미 해당 수강반에 배정되어 있습니다.");
+    const existingActive = activeEnrollments.find(e => String(e.class_id) === String(editForm.newClassId));
+    if (existingActive) return alert("이미 해당 수강반에 배정되어 있습니다.");
+
+    const today = new Date().toISOString().split('T')[0];
 
     try {
-      const { error } = await supabase.from("enrollment").insert({ 
-        student_id: studentId, 
-        class_id: editForm.newClassId, 
-        start_date: new Date().toISOString().split('T')[0], 
-        status: "예약" 
-      });
+      const existingEnded = (enrollments || []).find(
+        e => String(e.class_id) === String(editForm.newClassId) && isEndedEnrollment(e)
+      );
+
+      if (existingEnded) {
+        const { error } = await supabase
+          .from("enrollment")
+          .update({
+            status: assignStatus,
+            end_date: null,
+            start_date: today
+          })
+          .eq("enrollment_id", existingEnded.enrollment_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("enrollment").insert({ 
+          student_id: studentId, 
+          class_id: editForm.newClassId, 
+          start_date: today, 
+          status: assignStatus 
+        });
+        if (error) throw error;
+      }
       
-      if (error) throw error;
-      
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
       alert("수강반 배정이 추가되었습니다.");
       setEditForm({ ...editForm, newClassId: "" });
       onSuccess();
     } catch (e: any) { 
       alert("배정 추가 실패: " + e.message); 
+    }
+  };
+
+  const changeEnrollmentStatus = async (enrollId: string, newStatus: string) => {
+    if (!confirm(`해당 수강반 상태를 '${newStatus}'(으)로 변경하시겠습니까?`)) return;
+    try {
+      const { error } = await supabase
+        .from("enrollment")
+        .update({ status: newStatus, end_date: null })
+        .eq("enrollment_id", enrollId);
+      if (error) throw error;
+
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      onSuccess();
+    } catch (e: any) {
+      alert("상태 변경 실패: " + e.message);
+    }
+  };
+
+  const endEnrollment = async (enrollId: string) => {
+    if (!confirm("해당 수강반에서 제외(수강종료)하시겠습니까?\n(출결 등 과거 수강 기록은 보존되며, 상태가 '수강종료'로 변경됩니다.)")) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const { error } = await supabase
+        .from("enrollment")
+        .update({
+          status: "수강종료",
+          end_date: today
+        })
+        .eq("enrollment_id", enrollId);
+      if (error) throw error;
+
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      alert("수강종료 처리되었습니다.");
+      onSuccess();
+    } catch (e: any) {
+      alert("❌ 수강종료 처리 실패: " + e.message);
     }
   };
 
@@ -307,6 +381,7 @@ export default function StudentEditModal({
       const { error: parentError } = await supabase.from("enrollment").delete().eq("enrollment_id", enrollId);
       if (parentError) throw parentError;
 
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
       alert("관련 테스트 데이터까지 모두 강제 삭제되었습니다.");
       onSuccess();
     } catch (e: any) {
@@ -325,6 +400,7 @@ export default function StudentEditModal({
       const res = await deleteStudentCompletely(studentId);
       if (!res.success) throw new Error(res.message);
 
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
       alert(`🎉 [${editForm.name}] 학생의 모든 데이터가 완벽하게 삭제되었습니다.`);
       onSuccess();
       onClose();
@@ -422,15 +498,33 @@ export default function StudentEditModal({
               <div className="col-span-2 bg-blue-50/50 p-4 rounded-lg border border-blue-100 mt-2">
                 <label className="block text-xs font-bold text-slate-600 mb-2">현재 소속된 수강반</label>
                 <ul className="mb-4 space-y-2">
-                  {enrollments.length === 0 ? (
+                  {activeEnrollments.length === 0 ? (
                     <li className="text-xs text-slate-400 font-bold bg-white px-3 py-2 rounded-lg border border-slate-200">배정된 수강반이 없습니다.</li>
                   ) : (
-                    enrollments.map(e => (
-                      <li key={e.enrollment_id} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm">
-                        <span className="text-sm font-bold text-[#002864]">{e.class?.name || '미배정'}</span>
-                        <button type="button" onClick={() => removeEnrollment(e.enrollment_id)} className="px-2.5 py-1 bg-rose-50 text-rose-500 rounded hover:bg-rose-100 transition-colors text-xs font-bold border border-rose-100">제외(강제삭제)</button>
-                      </li>
-                    ))
+                    activeEnrollments.map(e => {
+                      const stat = e.status || "수강중";
+                      return (
+                        <li key={e.enrollment_id} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {stat === "예약" ? (
+                              <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-xs font-bold border shrink-0">예약</span>
+                            ) : (
+                              <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-xs font-bold border shrink-0">수강중</span>
+                            )}
+                            <span className="text-sm font-bold text-[#002864] truncate">{unwrap(e.class)?.name || '미배정'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {stat === "예약" ? (
+                              <button type="button" onClick={() => changeEnrollmentStatus(e.enrollment_id, "수강중")} className="px-2.5 py-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors text-xs font-bold border border-indigo-200">수강 전환</button>
+                            ) : (
+                              <button type="button" onClick={() => changeEnrollmentStatus(e.enrollment_id, "예약")} className="px-2.5 py-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 transition-colors text-xs font-bold border border-amber-200">예약 전환</button>
+                            )}
+                            <button type="button" onClick={() => endEnrollment(e.enrollment_id)} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors text-xs font-bold border border-slate-300">반에서 제외(수강종료)</button>
+                            <button type="button" onClick={() => removeEnrollment(e.enrollment_id)} className="px-2.5 py-1 bg-rose-50 text-rose-500 rounded hover:bg-rose-100 transition-colors text-xs font-bold border border-rose-100">강제삭제</button>
+                          </div>
+                        </li>
+                      );
+                    })
                   )}
                 </ul>
                 
@@ -456,6 +550,10 @@ export default function StudentEditModal({
                         </option>
                       );
                     })}
+                  </select>
+                  <select value={assignStatus} onChange={e => setAssignStatus(e.target.value)} className="shrink-0 bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#002864]">
+                    <option value="수강중">수강중</option>
+                    <option value="예약">예약</option>
                   </select>
                   <button type="button" onClick={addEnrollment} className="shrink-0 px-4 py-2 bg-[#002864] text-white font-bold rounded-lg text-xs hover:bg-blue-900 transition-colors">추가</button>
                 </div>

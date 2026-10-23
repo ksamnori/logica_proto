@@ -10,6 +10,14 @@ import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
 import { getKioskDeviceId } from "@/lib/kioskDevice";
 import { autoAttendOnPadLogin } from "@/app/actions/studentAuth";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 const getSupabaseClient = () => {
@@ -143,7 +151,7 @@ export default function StudentKioskLogin() {
       if (!latestAtt || latestAtt.check_out_time) {
         const { data: stuData } = await supabaseClient
           .from('student')
-          .select('name, parent(name, phone), enrollment(enrollment_id, class(class_id))')
+          .select('name, parent(name, phone), enrollment(enrollment_id, status, end_date, class(class_id))')
           .eq('student_id', studentId)
           .single();
 
@@ -152,8 +160,10 @@ export default function StudentKioskLogin() {
         const parentObj = Array.isArray(stuData.parent) ? stuData.parent[0] : stuData.parent;
         const parentPhone = parentObj?.phone;
         const parentName = (parentObj?.name && parentObj.name !== '미입력') ? parentObj.name : stuData.name;
-        const enrollmentId = stuData.enrollment && stuData.enrollment.length > 0 ? (stuData.enrollment as any)[0].enrollment_id : null;
-        const classId = stuData.enrollment && stuData.enrollment.length > 0 && (stuData.enrollment as any)[0].class ? (stuData.enrollment as any)[0].class.class_id : null;
+        const activeEnrolls = ((stuData.enrollment as any[]) || []).filter((e: any) => !isEndedEnrollment(e));
+        const targetEnroll = activeEnrolls[0] || null;
+        const enrollmentId = targetEnroll?.enrollment_id || null;
+        const classId = targetEnroll?.class?.class_id || null;
 
         await supabaseClient.from('attendance').insert({
           student_id: studentId,

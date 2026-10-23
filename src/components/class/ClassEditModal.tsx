@@ -7,6 +7,14 @@ import ClassWeekCalendar from "./ClassWeekCalendar";
 
 const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 interface ClassEditModalProps {
   isOpen: boolean;
   classItem: any;
@@ -79,17 +87,26 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const fetchClassStudents = async (classId: string) => {
     const { data: enrollData } = await supabase
       .from("enrollment")
-      .select("student_id")
-      .eq("class_id", classId)
-      .neq("status", "수강종료"); 
+      .select("enrollment_id, student_id, status, end_date")
+      .eq("class_id", classId);
 
-    const enrollIds = enrollData?.map(e => e.student_id) || [];
+    // end_date가 존재하는데 status가 '수강종료'가 아닌 데이터가 있다면 DB 자동 보정
+    const inconsistentIds = (enrollData || [])
+      .filter((e: any) => e.end_date && e.status !== "수강종료")
+      .map((e: any) => e.enrollment_id)
+      .filter(Boolean);
+    if (inconsistentIds.length > 0) {
+      await supabase.from("enrollment").update({ status: "수강종료" }).in("enrollment_id", inconsistentIds);
+    }
+
+    const activeEnrolls = (enrollData || []).filter((e: any) => !isEndedEnrollment(e));
+    const enrollIds = Array.from(new Set(activeEnrolls.map(e => e.student_id)));
     if (enrollIds.length === 0) { setClassStudents([]); return; }
     
-    // 🌟 목록에 '예약'/'수강중' 여부를 띄워주기 위해 enrollment의 status를 같이 호출
+    // 🌟 목록에 '예약'/'수강중' 여부를 띄워주기 위해 enrollment의 status, end_date를 같이 호출
     const { data } = await supabase
       .from("student")
-      .select("*, parent(phone), enrollment(class_id, status, class(name))")
+      .select("*, parent(phone), enrollment(enrollment_id, class_id, status, end_date, class(name))")
       .in("student_id", enrollIds);
       
     setClassStudents(data || []);
@@ -158,16 +175,24 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
 
     if (!selected) return alert("검색 목록에서 학생을 정확히 선택해주세요.");
 
-    const { data: existing } = await supabase.from("enrollment").select("enrollment_id, status").match({ student_id: selected.student_id, class_id: modalData.class_id });
+    const { data: existing } = await supabase
+      .from("enrollment")
+      .select("enrollment_id, status, end_date")
+      .match({ student_id: selected.student_id, class_id: modalData.class_id });
     
     if (existing && existing.length > 0) {
-       const prevEnroll = existing[0];
-       if (prevEnroll.status !== '수강종료') {
-           return alert(`이미 이 반에 ${prevEnroll.status} 상태인 학생입니다.`);
+       const activePrev = existing.find((e: any) => !isEndedEnrollment(e));
+       if (activePrev) {
+           return alert(`이미 이 반에 ${activePrev.status || '수강중'} 상태인 학생입니다.`);
        } else {
+           const prevEnroll = existing[0];
            // 🌟 수강종료였던 학생을 다시 살릴 때 선택한 상태(수강중 or 예약)로 업데이트
-           const { error } = await supabase.from("enrollment").update({ status: assignStatus, end_date: null, start_date: new Date().toISOString().split("T")[0] }).eq('enrollment_id', prevEnroll.enrollment_id);
+           const { error } = await supabase
+             .from("enrollment")
+             .update({ status: assignStatus, end_date: null, start_date: new Date().toISOString().split("T")[0] })
+             .eq('enrollment_id', prevEnroll.enrollment_id);
            if (error) return alert("재배정 실패: " + error.message);
+           localStorage.setItem("logica_refresh_signal", Date.now().toString());
            setSearchKeyword(""); fetchClassStudents(modalData.class_id); onSuccess(); return;
        }
     }
@@ -178,6 +203,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       return alert("배정 실패: " + error.message);
     }
 
+    localStorage.setItem("logica_refresh_signal", Date.now().toString());
     setSearchKeyword(""); fetchClassStudents(modalData.class_id);
     onSuccess(); 
   };
@@ -188,13 +214,14 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
 
     const { error } = await supabase
       .from("enrollment")
-      .update({ status: newStatus })
+      .update({ status: newStatus, end_date: null })
       .match({ student_id: studentId, class_id: modalData.class_id });
 
     if (error) {
       return alert("상태 변경 처리 실패: " + error.message);
     }
     
+    localStorage.setItem("logica_refresh_signal", Date.now().toString());
     fetchClassStudents(modalData.class_id);
     onSuccess();
   };
@@ -216,6 +243,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
       return alert("수강 종료 처리 실패: " + error.message);
     }
     
+    localStorage.setItem("logica_refresh_signal", Date.now().toString());
     fetchClassStudents(modalData.class_id);
     onSuccess();
   };
@@ -512,8 +540,9 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
                   <tr><td colSpan={5} className="py-6 text-center text-slate-400 font-bold">배정된 학생이 없습니다.</td></tr>
                 ) : (
                   classStudents.map(s => {
-                    const uniqueClasses = Array.from(new Set(s.enrollment?.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
-                    const classEnroll = s.enrollment?.find((en: any) => en.class_id === modalData.class_id);
+                    const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    const uniqueClasses = Array.from(new Set(activeEnrolls.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
+                    const classEnroll = activeEnrolls.find((en: any) => en.class_id === modalData.class_id);
                     const stat = classEnroll?.status || '수강중';
                     
                     return (

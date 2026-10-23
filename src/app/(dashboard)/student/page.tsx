@@ -11,6 +11,14 @@ const ensureArray = (obj: any) => {
   return Array.isArray(obj) ? obj : [obj];
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 const getGradeOrder = (grade: any) => {
   if (!grade) return 999;
   if (typeof grade === 'string' && grade.includes('세')) return 0;
@@ -84,7 +92,7 @@ export default function StudentPage() {
 
       let stuQuery = supabase
         .from("student")
-        .select("*, parent(phone), enrollment(class(name, level_name, instructor_id, status, instructor(name))), exam_assignment(status, created_at, admission_session_id)")
+        .select("*, parent(phone), enrollment(enrollment_id, status, start_date, end_date, class(class_id, name, level_name, instructor_id, status, instructor(name))), exam_assignment(status, created_at, admission_session_id)")
         .order("created_at", { ascending: false })
         .limit(2000); 
       
@@ -102,7 +110,7 @@ export default function StudentPage() {
         } else {
           const myStudents = allStuData.filter((student: any) => {
             const enrolls = ensureArray(student.enrollment);
-            return enrolls.some((e: any) => unwrap(e.class)?.instructor_id === myId);
+            return enrolls.some((e: any) => !isEndedEnrollment(e) && unwrap(e.class)?.instructor_id === myId);
           });
           setStudents(myStudents);
         }
@@ -141,8 +149,9 @@ export default function StudentPage() {
     return students.filter(s => s.status !== '입학테스트').map(s => {
       const enrolls = ensureArray(s.enrollment);
       const activeEnrollments = enrolls.filter((e: any) => {
+        if (isEndedEnrollment(e)) return false;
         const cls = unwrap(e.class);
-        return cls && cls.status !== '예정';
+        return cls && cls.status !== '예정' && cls.status !== '종료' && cls.status !== '폐강';
       });
       const classes = activeEnrollments.map((e: any) => unwrap(e.class));
       
@@ -304,8 +313,8 @@ export default function StudentPage() {
 
                     const isNew = (s.displayStatus === "재원" || s.displayStatus === "대기") && isNewStudent(s.created_at);
                     
-                    const classNames: string[] = s.classes.map((c: any) => c.name).filter(Boolean);
-                    const instNames: string[] = Array.from(new Set(s.classes.map((c: any) => c.instructor?.name).filter(Boolean))) as string[];
+                    const classNames: string[] = Array.from(new Set(s.classes.map((c: any) => c?.name).filter(Boolean))) as string[];
+                    const instNames: string[] = Array.from(new Set(s.classes.map((c: any) => c?.instructor?.name).filter(Boolean))) as string[];
                     const parentPhone = unwrap(s.parent)?.phone || "-";
 
                     return (

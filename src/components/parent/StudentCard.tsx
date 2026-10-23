@@ -10,6 +10,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -232,7 +241,7 @@ export default function StudentCard({ student }: { student: any }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [student?.student_id]);
 
-  const activeEnrollment = student.enrollment?.find((e: any) => (!e.end_date || new Date(e.end_date) >= new Date()) && unwrap(e.class)?.name);
+  const activeEnrollment = student.enrollment?.find((e: any) => !isEndedEnrollment(e) && unwrap(e.class)?.name);
   const currentClass = activeEnrollment ? unwrap(activeEnrollment.class) : null;
   const className = currentClass?.name || "소속 반 없음";
   const classId = currentClass?.class_id;

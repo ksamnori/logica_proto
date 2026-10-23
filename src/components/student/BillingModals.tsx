@@ -4,6 +4,14 @@
 import React, { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 // === 청구서 발행 모달 ===
 export function BillingModal({ isOpen, studentId, enrollments, allClasses, onClose, onSuccess }: any) {
   const [billForm, setBillForm] = useState({ month: "", dueDate: "", classId: "", amount: "" });
@@ -73,7 +81,7 @@ export function BillingModal({ isOpen, studentId, enrollments, allClasses, onClo
               setBillForm({...billForm, classId: cId, amount: cInfo ? cInfo.tuition_fee?.toString()||"0" : ""});
             }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-brand focus:outline-none focus:border-emerald-500">
               <option value="">청구할 반을 선택하세요</option>
-              {enrollments.map((e: any) => {
+              {(enrollments || []).filter((e: any) => !isEndedEnrollment(e)).map((e: any) => {
                 const cInfo = allClasses.find((c: any) => c.class_id === e.class_id);
                 return cInfo ? <option key={cInfo.class_id} value={cInfo.class_id}>{cInfo.name} (기본: {cInfo.tuition_fee?.toLocaleString()||0}원)</option> : null;
               })}

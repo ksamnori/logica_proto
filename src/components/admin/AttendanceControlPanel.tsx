@@ -9,6 +9,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const getKSTDateStr = (offsetDays = 0) => {
   const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
   return kstAdjusted.toISOString().split('T')[0];
@@ -99,7 +108,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
 
     let stQuery = supabase.from("student").select(`
       student_id, name, status, parent(name, phone), 
-      enrollment(enrollment_id, class_id, class(name, instructor(name)))
+      enrollment(enrollment_id, class_id, status, end_date, class(name, instructor(name)))
     `).eq("status", "재원").limit(10000);
     
     if (tId && tId !== 'hq') stQuery = stQuery.eq("tenant_id", tId);
@@ -130,7 +139,7 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
     
     if (classId !== "all") {
       targetStudents = stRes.data.filter(st => 
-        st.enrollment && st.enrollment.some((e: any) => String(e.class_id) === String(classId))
+        st.enrollment && st.enrollment.some((e: any) => !isEndedEnrollment(e) && String(e.class_id) === String(classId))
       );
     }
 
@@ -146,9 +155,10 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
       
       const parentInfo = unwrap(st.parent);
       
-      let mainEnroll = st.enrollment && st.enrollment.length > 0 ? st.enrollment[0] : null;
-      if (classId !== "all" && st.enrollment) {
-         mainEnroll = st.enrollment.find((e:any) => String(e.class_id) === String(classId)) || mainEnroll;
+      const activeEnrolls = (st.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+      let mainEnroll = activeEnrolls.length > 0 ? activeEnrolls[0] : null;
+      if (classId !== "all" && activeEnrolls.length > 0) {
+         mainEnroll = activeEnrolls.find((e:any) => String(e.class_id) === String(classId)) || mainEnroll;
       }
 
       const className = mainEnroll?.class ? unwrap(mainEnroll.class)?.name : "미배정";

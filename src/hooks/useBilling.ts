@@ -2,6 +2,15 @@
 import { useState, useEffect } from "react";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 export function useBilling() {
   const [filterMonth, setFilterMonth] = useState("");
   const [filterClass, setFilterClass] = useState("all");
@@ -43,7 +52,7 @@ export function useBilling() {
       const [billsRes, notiRes, enrollRes] = await Promise.all([
         supabase.from("academy_billing").select("*, student!inner(name, phone, parent_id, parent(phone)), class!inner(name, tuition_fee)").eq("billing_month", filterMonth),
         supabase.from("notification_log").select("message_content").eq("noti_type", "BILLING_ALERT").gte("created_at", startDate).lt("created_at", endDate),
-        supabase.from("enrollment").select("student_id, class_id, class!inner(name, tuition_fee), student!inner(name, status, phone, parent_id, parent(phone))").eq("student.status", "재원").gt("class.tuition_fee", 0)
+        supabase.from("enrollment").select("student_id, class_id, status, end_date, class!inner(name, tuition_fee), student!inner(name, status, phone, parent_id, parent(phone))").eq("student.status", "재원").gt("class.tuition_fee", 0)
       ]);
 
       const sentBillIds = (notiRes.data || []).map(n => {
@@ -75,7 +84,7 @@ export function useBilling() {
         });
       });
 
-      enrollRes.data?.forEach((e: any) => {
+      (enrollRes.data || []).filter((e: any) => !isEndedEnrollment(e)).forEach((e: any) => {
         const key = `${e.student_id}_${e.class_id}`;
         if (!billMap.has(key)) {
           if (filterClass !== "all" && e.class_id !== filterClass) return;

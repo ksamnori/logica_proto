@@ -3,6 +3,15 @@
 
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "@/lib/supabase";
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 import GradingBoard from "./GradingBoard";
 import TaTopBar from "../TaTopBar";
 import { useTaEntry } from "../TaEntryGate";
@@ -158,11 +167,12 @@ export default function TaGradingPage() {
       if (!classes || classes.length === 0) { setGroupedClasses([]); setIsLoading(false); return; }
 
       const classIds = classes.map(c => c.class_id);
-      const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, student(name, status)').in('class_id', classIds);
+      const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, status, end_date, student(name, status)').in('class_id', classIds);
 
       const studentClassMap = new Map<string, { classId: string; className: string }[]>();
       const namesMap: Record<string, string> = {};
       enrollments?.forEach((e: any) => {
+        if (isEndedEnrollment(e)) return;
         const sObj = Array.isArray(e.student) ? e.student[0] : e.student;
         if (!sObj || sObj.status !== '재원') return;
         namesMap[e.student_id] = sObj.name;
@@ -392,9 +402,9 @@ export default function TaGradingPage() {
           
           const { data: assigns } = await supabase.from('exam_assignment').select('student_id').in('exam_id', masterIds).eq('class_id', baseEx.class_id);
           
-          const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseEx.class_id);
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date, student(status)').eq('class_id', baseEx.class_id);
           const currentEnrolledIds = new Set(
-            enrolls?.filter((e: any) => (Array.isArray(e.student) ? e.student[0] : e.student)?.status === '재원').map(e => String(e.student_id))
+            enrolls?.filter((e: any) => !isEndedEnrollment(e) && (Array.isArray(e.student) ? e.student[0] : e.student)?.status === '재원').map(e => String(e.student_id))
           );
           
           const validStudentIds = new Set(
@@ -409,9 +419,9 @@ export default function TaGradingPage() {
         if (baseHw && baseHw.class_id) {
           const { data: hws } = await supabase.from('homework_assignment').select('target_student_id').eq('homework_title', baseHw.homework_title).eq('class_id', baseHw.class_id);
           
-          const { data: enrolls } = await supabase.from('enrollment').select('student_id, student(status)').eq('class_id', baseHw.class_id);
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date, student(status)').eq('class_id', baseHw.class_id);
           const currentEnrolledIds = new Set(
-            enrolls?.filter((e: any) => (Array.isArray(e.student) ? e.student[0] : e.student)?.status === '재원').map(e => String(e.student_id))
+            enrolls?.filter((e: any) => !isEndedEnrollment(e) && (Array.isArray(e.student) ? e.student[0] : e.student)?.status === '재원').map(e => String(e.student_id))
           );
           
           const hasGlobal = hws?.some(h => !h.target_student_id);

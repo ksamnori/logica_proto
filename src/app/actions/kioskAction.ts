@@ -9,25 +9,33 @@ const supabaseAdmin = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || ""
 );
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 export async function searchStudentsByLast4(code: string, tenantId: string) {
   try {
     let studentQuery = supabaseAdmin
       .from('student')
-      .select('student_id, name, grade, phone, parent(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
+      .select('student_id, name, grade, phone, parent(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, status, end_date, class(class_id, name))')
       .eq('status', '재원')
       .like('phone', `%${code}%`);
     if (tenantId) studentQuery = studentQuery.eq('tenant_id', tenantId);
     
     let parentQuery = supabaseAdmin
       .from('student')
-      .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
+      .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, status, end_date, class(class_id, name))')
       .eq('status', '재원')
       .like('parent.phone', `%${code}%`);
     if (tenantId) parentQuery = parentQuery.eq('tenant_id', tenantId);
 
     let parentQuery2 = supabaseAdmin
       .from('student')
-      .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, class(class_id, name))')
+      .select('student_id, name, grade, phone, parent!inner(name, phone, relationship, name_2, phone_2, relationship_2), enrollment(enrollment_id, status, end_date, class(class_id, name))')
       .eq('status', '재원')
       .like('parent.phone_2', `%${code}%`);
     if (tenantId) parentQuery2 = parentQuery2.eq('tenant_id', tenantId);
@@ -65,7 +73,8 @@ export async function searchStudentsByLast4(code: string, tenantId: string) {
       const isParentMatch = pPhoneCleaned.endsWith(code) || pPhone2Cleaned.endsWith(code);
 
       if (isStudentMatch || isParentMatch) {
-        uniqueMap.set(item.student_id, item);
+        const activeEnrolls = (item.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+        uniqueMap.set(item.student_id, { ...item, enrollment: activeEnrolls });
       }
     });
 

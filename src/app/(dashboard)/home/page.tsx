@@ -9,6 +9,14 @@ import { queueAttendanceNotice, queueAttendanceNoticeBulk, addToQueue, sendQueue
 
 import LessonLogModal from "@/components/dashboard/LessonLogModal";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 const getKSTDateStr = (offsetDays = 0) => {
   const now = new Date();
   const utc = now.getTime() + (now.getTimezoneOffset() * 60000);
@@ -148,8 +156,8 @@ export default function TeacherDashboardPage() {
   const fetchMyQueue = async () => {
     if (myClasses.length === 0) return;
     const classIds = myClasses.map(c => c.class_id);
-    const { data: enrolls } = await supabase.from('enrollment').select('student_id').in('class_id', classIds);
-    const sIds = enrolls?.map(e => e.student_id) || [];
+    const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date').in('class_id', classIds);
+    const sIds = (enrolls || []).filter((e: any) => !isEndedEnrollment(e)).map((e: any) => e.student_id);
     
     if (sIds.length === 0) {
       setMyQueue([]);
@@ -290,8 +298,9 @@ export default function TeacherDashboardPage() {
     const cIds = classIds?.filter((c: any) => c.status !== "종료" && c.status !== "폐강").map((c: any) => c.class_id) || [];
     
     if (cIds.length > 0) {
-      const { data: enrolls } = await supabase.from("enrollment").select("student_id").in("class_id", cIds);
-      const sIds = enrolls ? Array.from(new Set(enrolls.map((e: any) => e.student_id))) : [];
+      const { data: enrolls } = await supabase.from("enrollment").select("student_id, status, end_date").in("class_id", cIds);
+      const activeEnrolls = (enrolls || []).filter((e: any) => !isEndedEnrollment(e));
+      const sIds = Array.from(new Set(activeEnrolls.map((e: any) => e.student_id)));
 
       if (sIds.length > 0) {
         const safeStudentIds = sIds.slice(0, 200); 
@@ -365,10 +374,12 @@ export default function TeacherDashboardPage() {
   const fetchClassDetails = async (classId: string) => {
     const { data: enrollData } = await supabase
       .from("enrollment")
-      .select("student_id")
+      .select("student_id, status, end_date")
       .eq("class_id", classId);
 
-    const allTargetIds = enrollData?.map((e: any) => e.student_id) || [];
+    const allTargetIds = Array.from(new Set(
+      (enrollData || []).filter((e: any) => !isEndedEnrollment(e)).map((e: any) => e.student_id)
+    ));
 
     if (allTargetIds.length === 0) {
       setStudents([]);
@@ -379,7 +390,7 @@ export default function TeacherDashboardPage() {
 
     const { data: classStudents } = await supabase
       .from("student")
-      .select("*, parent(*), enrollment(class(name)), consultation_log(created_at)")
+      .select("*, parent(*), enrollment(status, end_date, class(name)), consultation_log(created_at)")
       .eq("status", "재원")
       .in("student_id", allTargetIds);
     
@@ -538,11 +549,13 @@ export default function TeacherDashboardPage() {
     const yesterday = getKSTDateStr(-1);
 
     const [ { data: enrollData }, { data: clinicData } ] = await Promise.all([
-      supabase.from("enrollment").select("student_id").eq("class_id", classId),
+      supabase.from("enrollment").select("student_id, status, end_date").eq("class_id", classId),
       supabase.from("clinic_session_state").select("student_id, ended_at, started_at, last_seen_at, session_date").in("session_date", [today, yesterday])
     ]);
 
-    const allTargetIds = enrollData?.map((e: any) => e.student_id) || [];
+    const allTargetIds = Array.from(new Set(
+      (enrollData || []).filter((e: any) => !isEndedEnrollment(e)).map((e: any) => e.student_id)
+    ));
 
     if (allTargetIds.length === 0) {
       setAttStudents([]);
@@ -852,7 +865,8 @@ export default function TeacherDashboardPage() {
       if (student.att_id) {
         await supabase.from("attendance").update(payload).eq("attendance_id", student.att_id);
       } else {
-        const { data: fallback } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", student.id).eq("class_id", selectedClassId).maybeSingle();
+        const { data: fbRows } = await supabase.from("enrollment").select("enrollment_id, status, end_date").eq("student_id", student.id).eq("class_id", selectedClassId);
+        const fallback = (fbRows || []).find((e: any) => !isEndedEnrollment(e)) || fbRows?.[0];
         await supabase.from("attendance").insert({
           student_id: student.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
         });
@@ -955,7 +969,8 @@ export default function TeacherDashboardPage() {
         if (manualModalData.att_id) {
           await supabase.from("attendance").update(payload).eq("attendance_id", manualModalData.att_id);
         } else {
-          const { data: fallback } = await supabase.from("enrollment").select("enrollment_id").eq("student_id", manualModalData.id).eq("class_id", selectedClassId).maybeSingle();
+          const { data: fbRows } = await supabase.from("enrollment").select("enrollment_id, status, end_date").eq("student_id", manualModalData.id).eq("class_id", selectedClassId);
+          const fallback = (fbRows || []).find((e: any) => !isEndedEnrollment(e)) || fbRows?.[0];
           await supabase.from("attendance").insert({
             student_id: manualModalData.id, class_id: selectedClassId, enrollment_id: fallback?.enrollment_id || null, attendance_date: today, ...payload
           });
@@ -1258,7 +1273,8 @@ export default function TeacherDashboardPage() {
                       const gradeText = formatGrade(s.grade);
                       const studentContact = s.phone || s.student_contact || "-";
                       const parentContact = s.parent?.phone || s.parent?.parent_contact || "-";
-                      const classNames = s.enrollment?.map((e: any) => e.class?.name).filter(Boolean).join(", ") || "반 미배정";
+                      const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                      const classNames = Array.from(new Set(activeEnrolls.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "반 미배정";
 
                       let consultHtml = <span className="text-xs font-bold text-slate-300">기록없음</span>;
                       if (s.consultation_log && s.consultation_log.length > 0) {

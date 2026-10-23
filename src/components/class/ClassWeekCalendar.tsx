@@ -11,6 +11,15 @@ import {
 
 const DAY_LABELS = ["일", "월", "화", "수", "목", "금", "토"];
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 interface ClassWeekCalendarProps {
   classId: string;
   className: string;
@@ -202,9 +211,9 @@ export default function ClassWeekCalendar({ classId, className, canEdit, schedul
       const instId = cls?.instructor_id;
       if (!instId) return;
 
-      const { data: enrolled } = await supabase.from("enrollment").select("student(parent_id)").eq("class_id", classId);
+      const { data: enrolled } = await supabase.from("enrollment").select("status, end_date, student(parent_id)").eq("class_id", classId);
       const parentIds = new Set<string>();
-      (enrolled || []).forEach((e: any) => { 
+      (enrolled || []).filter((e: any) => !isEndedEnrollment(e)).forEach((e: any) => { 
         const st = Array.isArray(e.student) ? e.student[0] : e.student;
         if (st?.parent_id) parentIds.add(st.parent_id); 
       });

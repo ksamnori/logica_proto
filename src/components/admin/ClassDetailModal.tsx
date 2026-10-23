@@ -3,6 +3,15 @@
 
 import React from "react";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 interface ClassDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -93,7 +102,8 @@ export default function ClassDetailModal({ isOpen, onClose, classModalData, clas
                   <tr><td colSpan={3} className="py-6 text-center text-slate-400 font-bold">배정된 학생이 없습니다.</td></tr>
                 ) : (
                   classStudents.map(s => {
-                    const uniqueClasses = Array.from(new Set(s.enrollment?.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
+                    const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    const uniqueClasses = Array.from(new Set(activeEnrolls.map((e: any) => e.class?.name).filter(Boolean))).join(", ") || "-";
                     return (
                       <tr key={s.student_id}>
                         <td className="py-2.5 px-4 font-bold text-brand">{s.name}</td>

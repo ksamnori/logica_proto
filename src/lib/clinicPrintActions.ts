@@ -1,5 +1,14 @@
 import { SupabaseClient } from '@supabase/supabase-js';
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
 
 export const generateIncorrectPrint = async (
@@ -75,7 +84,8 @@ export const generateIncorrectPrint = async (
         }
 
         if (!merged) {
-            const { data: cls } = await supabaseClient.from('enrollment').select('class(instructor_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
+            const { data: clsRows } = await supabaseClient.from('enrollment').select('status, end_date, class(instructor_id)').eq('student_id', studentInfo.id);
+            const cls = (clsRows || []).find((e: any) => !isEndedEnrollment(e)) || clsRows?.[0];
             const classData: any = cls?.class;
             let instId = Array.isArray(classData) ? classData[0]?.instructor_id : classData?.instructor_id;
             
@@ -155,7 +165,8 @@ export const generateOverduePrint = async (
         }
 
         if (!merged) {
-            const { data: cls } = await supabaseClient.from('enrollment').select('class_id, class(instructor_id, tenant_id)').eq('student_id', studentInfo.id).limit(1).maybeSingle();
+            const { data: clsRows } = await supabaseClient.from('enrollment').select('class_id, status, end_date, class(instructor_id, tenant_id)').eq('student_id', studentInfo.id);
+            const cls = (clsRows || []).find((e: any) => !isEndedEnrollment(e)) || clsRows?.[0];
             const classData: any = Array.isArray(cls?.class) ? cls?.class[0] : cls?.class;
             let instId = classData?.instructor_id;
             const tenantId = classData?.tenant_id || null;

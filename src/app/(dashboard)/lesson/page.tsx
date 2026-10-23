@@ -14,6 +14,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -159,13 +168,14 @@ export default function LessonPage() {
 
       const { data: enrollRows, error: enErr } = await supabase
         .from('enrollment')
-        .select('student_id, student(name, status)')
+        .select('student_id, status, end_date, student(name, status)')
         .eq('class_id', classId)
         .eq('status', '수강중');
       if (enErr) throw enErr;
 
       const studentNameMap = new Map<string, string>();
       (enrollRows || []).forEach((r: any) => {
+        if (isEndedEnrollment(r)) return;
         const stu = unwrap(r.student);
         if (stu && stu.status === '재원') studentNameMap.set(r.student_id, stu.name || '알수없음');
       });
@@ -325,7 +335,7 @@ export default function LessonPage() {
 
     let query = supabase
       .from("class")
-      .select("*, instructor(name), enrollment(student_id, student(name, status)), class_schedule(*)")
+      .select("*, instructor(name), enrollment(student_id, status, end_date, student(name, status)), class_schedule(*)")
       .eq("tenant_id", validTenantId)
       .order("name");
     
@@ -348,7 +358,7 @@ export default function LessonPage() {
       }
 
       const currentClassStudents: StudentBasicInfo[] = (cls.enrollment || [])
-        .filter((e: any) => unwrap(e.student)?.status === '재원')
+        .filter((e: any) => !isEndedEnrollment(e) && unwrap(e.student)?.status === '재원')
         .map((e: any) => ({
             id: e.student_id,
             name: unwrap(e.student)?.name || '알수없음'
@@ -777,7 +787,7 @@ export default function LessonPage() {
     if (!selectedClass) return;
     
     const currentClassStudents = (selectedClass.enrollment || [])
-      .filter((e: any) => unwrap(e.student)?.status === '재원')
+      .filter((e: any) => !isEndedEnrollment(e) && unwrap(e.student)?.status === '재원')
       .map((e: any) => ({
         id: e.student_id,
         name: unwrap(e.student)?.name || '알수없음'
@@ -805,7 +815,7 @@ export default function LessonPage() {
     return null; 
   }
 
-  const currentClassStudentCount = selectedClass ? new Set((selectedClass.enrollment || []).filter((e:any) => unwrap(e.student)?.status === '재원').map((e: any) => e.student_id)).size : 0;
+  const currentClassStudentCount = selectedClass ? new Set((selectedClass.enrollment || []).filter((e:any) => !isEndedEnrollment(e) && unwrap(e.student)?.status === '재원').map((e: any) => e.student_id)).size : 0;
 
   return (
     <div className="flex flex-col h-full bg-slate-50 p-4 sm:p-8 gap-5 overflow-hidden relative font-pretendard">
@@ -916,7 +926,7 @@ export default function LessonPage() {
                       </h3>
                       <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
                         {groupItems.map((c: any) => {
-                          const studentCount = new Set((c.enrollment || []).filter((e:any) => unwrap(e.student)?.status === '재원').map((e: any) => e.student_id)).size;
+                          const studentCount = new Set((c.enrollment || []).filter((e:any) => !isEndedEnrollment(e) && unwrap(e.student)?.status === '재원').map((e: any) => e.student_id)).size;
                           const instructorName = c.instructor?.name || "미정";
                           let scheduleHtml = <span className="text-slate-400 text-xs">-</span>;
                           

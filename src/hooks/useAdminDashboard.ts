@@ -2,6 +2,15 @@
 import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 export function useAdminDashboard() {
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "관리자" });
   const [todayString, setTodayString] = useState("데이터를 불러오는 중입니다...");
@@ -113,9 +122,10 @@ export function useAdminDashboard() {
       let myStudents = new Set();
       let newCnt = 0, leftCnt = 0;
 
+      const activeEnrolls = (enrolls || []).filter(e => !isEndedEnrollment(e));
       (students || []).forEach(s => {
-        // 🌟 수정됨: s.class_id 참조 제거, 오로지 enrolls만 바라보게 수정[cite: 6].
-        let belongs = enrolls?.some(e => e.student_id === s.student_id && classIds.includes(e.class_id));
+        // 🌟 수정됨: s.class_id 참조 제거, 오로지 activeEnrolls만 바라보게 수정[cite: 6].
+        let belongs = activeEnrolls.some(e => e.student_id === s.student_id && classIds.includes(e.class_id));
         
         if (belongs) {
           if (s.status === '재원') {
@@ -133,10 +143,11 @@ export function useAdminDashboard() {
     let lvCounts: any = { 'Ultimate': 0, 'Master': 0, 'Apex': 0, 'Titan': 0, 'Horizon': 0, '기타': 0 };
     
     // 레벨은 '고유 학생'을 기준으로 세팅합니다.
+    const activeEnrollsAll = (enrolls || []).filter(e => !isEndedEnrollment(e));
     const activeStudents = students?.filter(s => s.status === '재원') || [];
     activeStudents.forEach(stu => {
       // 🌟 수정됨: 학생의 주 클래스를 enrollment를 통해 찾습니다[cite: 6].
-      const stuEnroll = enrolls?.find(e => e.student_id === stu.student_id);
+      const stuEnroll = activeEnrollsAll.find(e => e.student_id === stu.student_id);
       const mainClass = classes?.find(c => c.class_id === stuEnroll?.class_id);
       
       const lv = mainClass?.level_name || '기타';
@@ -148,7 +159,7 @@ export function useAdminDashboard() {
       let sCount = 0;
       (students || []).forEach(s => {
         // 🌟 수정됨: s.class_id 참조 제거[cite: 6].
-        if (enrolls?.some(e => e.student_id === s.student_id && e.class_id === c.class_id)) sCount++;
+        if (s.status === '재원' && activeEnrollsAll.some(e => e.student_id === s.student_id && e.class_id === c.class_id)) sCount++;
       });
       const capacity = 12, vacancy = capacity - sCount, fillRate = Math.min(100, Math.round((sCount / capacity) * 100));
       return { ...c, sCount, capacity, vacancy, fillRate };

@@ -22,6 +22,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -177,7 +186,7 @@ export default function ProgressPage() {
         { data: extraData }
       ] = await Promise.all([
         supabase.from("class_textbook").select("book_id, textbook(title, book_type)").eq("class_id", classId),
-        supabase.from("enrollment").select("student_id, student(name, status)").eq("class_id", classId),
+        supabase.from("enrollment").select("student_id, status, end_date, student(name, status)").eq("class_id", classId),
         supabase.from("class").select("class_schedule(day_of_week)").eq("class_id", classId).maybeSingle(),
         supabase.from("class_holiday").select("holiday_date").eq("class_id", classId),
         supabase.from("class_extra_session").select("session_date").eq("class_id", classId)
@@ -206,9 +215,10 @@ export default function ProgressPage() {
       const sMap = new Map();
       // 🌟 기존 directStudents 매핑 로직 제거
       enrolls?.forEach((e: any) => {
-        if (e.student && e.student.status === '재원') {
-          const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student.name;
-          sMap.set(e.student_id, sName);
+        if (isEndedEnrollment(e)) return;
+        const stu = Array.isArray(e.student) ? e.student[0] : e.student;
+        if (stu && stu.status === '재원') {
+          sMap.set(e.student_id, stu.name);
         }
       });
 

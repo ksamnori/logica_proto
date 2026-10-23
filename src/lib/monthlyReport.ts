@@ -250,8 +250,9 @@ export async function buildMonthlyReport(studentId: string, ym: string, onStep?:
   if (stuErr || !stu) throw new Error("학생 정보를 찾을 수 없습니다.");
 
   // 지금 수강 중인 반 이름 (표지용)
-  const { data: enr } = await supabase.from("enrollment").select("class(name)").eq("student_id", studentId).eq("status", "수강중");
-  const classNames = Array.from(new Set((enr || []).map((e: any) => unwrap(e.class)?.name).filter(Boolean))) as string[];
+  const { data: enr } = await supabase.from("enrollment").select("status, end_date, class(name)").eq("student_id", studentId).eq("status", "수강중");
+  const activeEnr = (enr || []).filter((e: any) => !e.end_date && e.status !== "수강종료");
+  const classNames = Array.from(new Set(activeEnr.map((e: any) => unwrap(e.class)?.name).filter(Boolean))) as string[];
 
   // 비교 대상: 같은 학원·같은 학년 재원생 (본인 포함)
   const { data: peers } = await supabase.from("student").select("student_id").eq("tenant_id", stu.tenant_id).eq("grade", stu.grade).eq("status", "재원");

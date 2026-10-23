@@ -4,6 +4,14 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { StudentInfo, ClassInfo, TabType } from "../types";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 export const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '특강', '메이크업/보강', '기타'];
 
 export const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
@@ -78,9 +86,10 @@ export function useLearningFetch() {
       const processedStudentIds = new Set<string>();
       const studentClassMap = new Map<string, string[]>();
 
-      const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, student(name, status)').in('class_id', classIds);
+      const { data: enrollments } = await supabase.from('enrollment').select('class_id, student_id, status, end_date, student(name, status)').in('class_id', classIds);
 
       enrollments?.forEach((e: any) => {
+        if (isEndedEnrollment(e)) return;
         const studentObj = Array.isArray(e.student) ? e.student[0] : e.student;
         if (studentObj && studentObj.status === '재원') {
           if (!studentClassMap.has(e.student_id)) studentClassMap.set(e.student_id, []);

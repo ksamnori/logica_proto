@@ -3,7 +3,16 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
-import { createClient } from "@supabase/supabase-js"; // ★ 추가됨
+import { createClient } from "@supabase/supabase-js";
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+ // ★ 추가됨
 
 const getProfileImageUrl = (path: string | null | undefined) => {
   if (!path || path.trim() === "") return null;
@@ -111,14 +120,14 @@ export default function ChatWidget({ parentId, authToken }: { parentId: string, 
   const loadAvailableStaff = async () => {
     try {
       // 🌟 수정됨: authSupabase 사용
-      const { data: sData } = await authSupabase.from("student").select("tenant_id, enrollment(class(instructor_id))").eq("parent_id", parentId);
+      const { data: sData } = await authSupabase.from("student").select("tenant_id, enrollment(status, end_date, class(instructor_id))").eq("parent_id", parentId);
       
       let instructorIds = new Set<string>();
       let tenantIds = new Set<string>(); 
 
       sData?.forEach((s: any) => { 
         if (s.tenant_id) tenantIds.add(s.tenant_id);
-        s.enrollment?.forEach((e: any) => { 
+        (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e)).forEach((e: any) => { 
           if (e.class?.instructor_id) instructorIds.add(e.class.instructor_id); 
         }); 
       });

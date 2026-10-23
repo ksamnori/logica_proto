@@ -75,7 +75,7 @@ export interface StudentRecord {
   name: string;
   parent_id: string;
   parent?: { phone: string } | { phone: string }[]; 
-  enrollment?: { class?: { name: string } }[] | { class?: { name: string } };
+  enrollment?: { status?: string; end_date?: string | null; class?: { name: string } }[] | { status?: string; end_date?: string | null; class?: { name: string } };
 }
 
 export interface RealtimePayload {
@@ -96,6 +96,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   if (Array.isArray(obj)) return obj[0];
   return obj || undefined;
 };
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 
 export default function FloatingChat({ instId: propInstId, onMicClick }: { instId?: string; onMicClick?: () => void }) {
   
@@ -585,7 +594,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
 
   const showNewChatView = async () => {
     setActiveChatView("new"); setSearchKeyword(""); setExpandedClasses([]);
-    const { data } = await supabase.from("student").select("student_id, name, parent_id, parent(phone), enrollment(class(name))").not("parent_id", "is", null).eq("status", "재원");
+    const { data } = await supabase.from("student").select("student_id, name, parent_id, parent(phone), enrollment(status, end_date, class(name))").not("parent_id", "is", null).eq("status", "재원");
     
     setNewChatParents((data as unknown as StudentRecord[]) || []);
   };
@@ -1020,7 +1029,7 @@ export default function FloatingChat({ instId: propInstId, onMicClick }: { instI
   filteredParents.forEach((s: StudentRecord) => {
     let classes: string[] = [];
     const enrollments = s.enrollment ? (Array.isArray(s.enrollment) ? s.enrollment : [s.enrollment]) : [];
-    enrollments.forEach((e: { class?: { name: string } }) => { 
+    enrollments.filter((e: any) => !isEndedEnrollment(e)).forEach((e: { class?: { name: string } }) => { 
       const cName = unwrap(e.class)?.name;
       if (cName) classes.push(cName); 
     });

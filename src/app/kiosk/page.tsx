@@ -99,16 +99,25 @@ export default function KioskPage() {
     return () => clearInterval(timer);
   }, []);
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
   const getClassName = (student: any) => {
-    if (student.enrollment && student.enrollment.length > 0 && student.enrollment[0].class) {
-      return student.enrollment[0].class.name;
+    const activeEnrolls = (student.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+    if (activeEnrolls.length > 0 && activeEnrolls[0].class) {
+      return activeEnrolls[0].class.name;
     }
     return '반 미배정';
   };
 
   const getClassId = (student: any) => {
-    if (student.enrollment && student.enrollment.length > 0 && student.enrollment[0].class) {
-      return student.enrollment[0].class.class_id;
+    const activeEnrolls = (student.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+    if (activeEnrolls.length > 0 && activeEnrolls[0].class) {
+      return activeEnrolls[0].class.class_id;
     }
     return null;
   };

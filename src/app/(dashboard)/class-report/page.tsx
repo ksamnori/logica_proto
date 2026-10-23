@@ -8,6 +8,14 @@ import { useRouter } from "next/navigation";
 // 🌟 [추가 포인트] 분리한 모달 컴포넌트 임포트
 import LessonLogModal from "@/components/dashboard/LessonLogModal";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 type ReportTabType = 'LOG' | 'ALL' | 'EXAM' | 'HW' | 'OVERDUE' | 'PRINT' | 'SIMILAR';
 
 interface ClassInfo {
@@ -395,10 +403,11 @@ export default function ClassReportPage() {
 
         const { data: enrolls } = await supabase
           .from('enrollment')
-          .select('student_id, student(name, status)')
+          .select('student_id, status, end_date, student(name, status)')
           .eq('class_id', selectedClassId);
 
         enrolls?.forEach((e: any) => {
+          if (isEndedEnrollment(e)) return;
           const s = Array.isArray(e.student) ? e.student[0] : e.student;
           if (s?.status === '재원') {
             rowsMap.set(e.student_id, {
@@ -916,11 +925,14 @@ export default function ClassReportPage() {
   const [classStudents, setClassStudents] = useState<any[]>([]);
   useEffect(() => {
     if (selectedClassId) {
-      supabase.from("enrollment").select("student(student_id, name)").eq("class_id", selectedClassId)
+      supabase.from("enrollment").select("status, end_date, student(student_id, name, status)").eq("class_id", selectedClassId)
         .then(({ data }) => {
           if (data) {
-             const stds = data.map((d: any) => Array.isArray(d.student) ? d.student[0] : d.student).filter(Boolean);
-             setClassStudents(stds.sort((a,b) => a.name.localeCompare(b.name)));
+             const stds = data
+               .filter((d: any) => !isEndedEnrollment(d))
+               .map((d: any) => Array.isArray(d.student) ? d.student[0] : d.student)
+               .filter((s: any) => s && s.status !== '퇴원' && s.status !== '휴원');
+             setClassStudents(stds.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '')));
           }
         });
     }

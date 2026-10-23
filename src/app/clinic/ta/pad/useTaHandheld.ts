@@ -10,6 +10,14 @@ const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 const CLINIC_ROOM = "logica-clinic-room";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 export const formatSeat = (seat: string | number) => String(seat);
 
 const SEAT_POLL_INTERVAL_MS = 3000;
@@ -245,10 +253,10 @@ export function useTaHandheld() {
     if (studentIds.length > 0) {
       const [{ data: students }, { data: enrollments }] = await Promise.all([
         supabaseClient.from('student').select('student_id, name').in('student_id', studentIds),
-        supabaseClient.from('enrollment').select('student_id, class(name)').in('student_id', studentIds),
+        supabaseClient.from('enrollment').select('student_id, status, end_date, class(name)').in('student_id', studentIds),
       ]);
       (students || []).forEach((s: any) => { nameMap[s.student_id] = s.name; });
-      (enrollments || []).forEach((e: any) => {
+      (enrollments || []).filter((e: any) => !isEndedEnrollment(e)).forEach((e: any) => {
         const cn = e.class?.name;
         if (!cn) return;
         if (!classMap[e.student_id]) classMap[e.student_id] = [];

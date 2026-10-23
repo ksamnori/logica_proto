@@ -11,6 +11,14 @@ import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { processIncompleteHomeworks, generateIncorrectClinic } from '@/app/actions/clinicActions';
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -222,8 +230,11 @@ export default function StudentPortal() {
 
             let classes: string[] = [];
             try {
-                const { data } = await supabaseClient.from('student').select('enrollment(class(name))').eq('student_id', sid).single();
-                if (data?.enrollment) classes = Array.from(new Set(data.enrollment.map((e: any) => e.class?.name).filter(Boolean)));
+                const { data } = await supabaseClient.from('student').select('enrollment(status, end_date, class(name))').eq('student_id', sid).single();
+                if (data?.enrollment) {
+                    const activeEnrolls = (data.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    classes = Array.from(new Set(activeEnrolls.map((e: any) => e.class?.name).filter(Boolean)));
+                }
             } catch (e) {}
             if (classes.length === 0) classes = ['반 미배정'];
             setStudentInfo({ id: sid, name: sname, phone: localStorage.getItem('logica_student_phone') || '', classes });

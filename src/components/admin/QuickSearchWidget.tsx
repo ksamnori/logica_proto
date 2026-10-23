@@ -9,6 +9,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 interface QuickSearchWidgetProps {
   allStudentsData: any[];
 }
@@ -49,7 +58,7 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
   const availableClasses = useMemo(() => {
     const classSet = new Set<string>();
     allStudentsData.forEach(s => {
-      const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+      const activeEnrolls = s.enrollment?.filter((e:any) => !isEndedEnrollment(e)) || [];
       activeEnrolls.forEach((e:any) => {
         const cName = unwrap(e.class)?.name;
         if (cName) classSet.add(cName);
@@ -70,7 +79,7 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
       if (searchStatusFilter !== 'all' && s.status !== searchStatusFilter) return false;
       if (searchGradeFilter !== 'all' && s.grade !== searchGradeFilter) return false;
       
-      const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+      const activeEnrolls = s.enrollment?.filter((e:any) => !isEndedEnrollment(e)) || [];
       const classNames = activeEnrolls.map((e:any) => unwrap(e.class)?.name).filter(Boolean);
       
       if (searchClassFilter !== 'all' && !classNames.includes(searchClassFilter)) return false;
@@ -146,7 +155,7 @@ export default function QuickSearchWidget({ allStudentsData }: QuickSearchWidget
                 <tr><td colSpan={5} className="py-8 text-center text-slate-400 font-bold">조건에 맞는 학생이 없습니다.</td></tr>
               ) : (
                 filteredSearchData.map(s => {
-                  const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+                  const activeEnrolls = s.enrollment?.filter((e:any) => !isEndedEnrollment(e)) || [];
                   const cNames = activeEnrolls.map((e:any)=>unwrap(e.class)?.name).filter(Boolean).join(", ") || "-";
                   
                   const schoolGradeStr = `${s.school||'-'} ${s.grade||''}`.trim();

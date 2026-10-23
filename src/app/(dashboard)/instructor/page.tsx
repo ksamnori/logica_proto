@@ -5,6 +5,15 @@ import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 export default function InstructorManagementPage() {
   const router = useRouter();
 
@@ -153,11 +162,12 @@ export default function InstructorManagementPage() {
       let overallAvgScore = 0;
       let recentDropouts = 0;
 
+      const activeEnrolls = (allEnrolls || []).filter((e: any) => !isEndedEnrollment(e));
       if (classIds.length > 0) {
         let myAllStudents: any[] = [];
         (allStudents || []).forEach(s => {
           const belongsToInst = classIds.includes(s.class_id) || 
-                                (allEnrolls || []).some(e => e.student_id === s.student_id && classIds.includes(e.class_id));
+                                activeEnrolls.some(e => e.student_id === s.student_id && classIds.includes(e.class_id));
           if (belongsToInst) {
             myAllStudents.push(s);
           }
@@ -253,13 +263,13 @@ export default function InstructorManagementPage() {
           const cId = c.class_id;
           
           let sCount = 0;
-          (allEnrolls || []).forEach(e => {
+          activeEnrolls.forEach(e => {
             if (e.class_id === cId && activeStudentIdSet.has(e.student_id)) {
               sCount++;
             }
           });
           activeStudentsList.forEach(s => {
-            if (s.class_id === cId && !(allEnrolls || []).some(e => e.student_id === s.student_id && e.class_id === cId)) {
+            if (s.class_id === cId && !activeEnrolls.some(e => e.student_id === s.student_id && e.class_id === cId)) {
               sCount++;
             }
           });

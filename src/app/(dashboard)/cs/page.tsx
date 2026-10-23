@@ -4,6 +4,15 @@
 import { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
 import CSModal from "@/components/cs/CSModal";
 
 export default function CSBoardPage() {
@@ -126,8 +135,9 @@ export default function CSBoardPage() {
       if (!isAdmin) {
         const { data: myClasses } = await supabase.from("class").select("class_id").eq("instructor_id", instId);
         const myClassIds = myClasses ? myClasses.map(c => c.class_id) : [];
-        const { data: enrolls } = await supabase.from("enrollment").select("student_id").in("class_id", myClassIds);
-        const myStudentIds = enrolls ? Array.from(new Set(enrolls.map(e => e.student_id))) : [];
+        const { data: enrolls } = await supabase.from("enrollment").select("student_id, status, end_date").in("class_id", myClassIds);
+        const activeEnrolls = (enrolls || []).filter((e: any) => !isEndedEnrollment(e));
+        const myStudentIds = Array.from(new Set(activeEnrolls.map(e => e.student_id)));
 
         let orStr = `processed_instructor_id.eq.${instId},author_id.eq.${instId}`;
         if (myStudentIds.length > 0) orStr += `,student_id.in.(${myStudentIds.join(',')})`;

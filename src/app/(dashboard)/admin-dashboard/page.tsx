@@ -18,6 +18,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const getKSTDateStr = (offsetDays = 0) => {
   const kstAdjusted = new Date(Date.now() + (9 * 3600000) - (6 * 3600000) + (offsetDays * 86400000));
   return kstAdjusted.toISOString().split('T')[0];
@@ -346,6 +355,7 @@ export default function AdminDashboardPage() {
             name,
             enrollment(
               status,
+              end_date,
               class(name, instructor(name))
             )
           )
@@ -360,7 +370,8 @@ export default function AdminDashboardPage() {
       const mappedConsults = (data || []).map((log: any) => {
         const studentData = unwrap(log.student);
         const enrolls = Array.isArray(studentData?.enrollment) ? studentData.enrollment : (studentData?.enrollment ? [studentData.enrollment] : []);
-        const activeEnroll = enrolls.find((e: any) => e.status === '수강중') || enrolls[0];
+        const validEnrolls = enrolls.filter((e: any) => !isEndedEnrollment(e));
+        const activeEnroll = validEnrolls.find((e: any) => e.status === '수강중') || validEnrolls[0];
         const classObj = unwrap(activeEnroll?.class);
 
         return {
@@ -598,8 +609,9 @@ export default function AdminDashboardPage() {
       let myStudents = new Set();
       let newCnt = 0, leftCnt = 0;
 
+      const activeEnrolls = (enrolls || []).filter((e: any) => !isEndedEnrollment(e));
       (students || []).forEach((s: any) => {
-        let belongs = classIds.includes(s.class_id) || (enrolls?.some((e: any) => e.student_id === s.student_id && classIds.includes(e.class_id)));
+        let belongs = classIds.includes(s.class_id) || activeEnrolls.some((e: any) => e.student_id === s.student_id && classIds.includes(e.class_id));
         if (belongs) {
           if (s.status === '재원') {
             myStudents.add(s.student_id);
@@ -634,9 +646,10 @@ export default function AdminDashboardPage() {
       (students || []).filter((s: any) => s.status === '재원').map((s: any) => s.student_id)
     );
 
+    const activeEnrolls = (enrolls || []).filter((e: any) => !isEndedEnrollment(e));
     const cStats = (classes || []).map((c: any) => {
       let sCount = 0;
-      (enrolls || []).forEach((e: any) => {
+      activeEnrolls.forEach((e: any) => {
         if (e.class_id === c.class_id && activeStudentIds.has(e.student_id)) {
           sCount++;
         }
@@ -668,11 +681,13 @@ export default function AdminDashboardPage() {
     setClassSchedules(schedules);
     setIsClassModalOpen(true);
 
-    const { data: enrollData } = await supabase.from("enrollment").select("student_id").eq("class_id", classItem.class_id);
-    const enrollIds = enrollData?.map((e: any) => e.student_id) || [];
+    const { data: enrollData } = await supabase.from("enrollment").select("student_id, status, end_date").eq("class_id", classItem.class_id);
+    const enrollIds = Array.from(new Set(
+      (enrollData || []).filter((e: any) => !isEndedEnrollment(e)).map((e: any) => e.student_id)
+    ));
     if (enrollIds.length === 0) { setClassStudents([]); return; }
     
-    const { data } = await supabase.from("student").select("*, parent(name, phone), enrollment(class(name))").in("student_id", enrollIds);
+    const { data } = await supabase.from("student").select("*, parent(name, phone), enrollment(status, end_date, class(name))").in("student_id", enrollIds);
     setClassStudents(data || []);
   };
 
@@ -766,7 +781,7 @@ export default function AdminDashboardPage() {
     let targets = allStudentsData.filter((s: any) => s.status === '재원');
     if (bulkTarget !== 'all') {
       targets = targets.filter((s: any) => {
-        const activeEnrolls = s.enrollment?.filter((e:any) => !e.end_date || e.status === '수강중') || [];
+        const activeEnrolls = s.enrollment?.filter((e:any) => !isEndedEnrollment(e)) || [];
         return activeEnrolls.some((e:any) => unwrap(e.class)?.class_id === bulkTarget);
       });
     }

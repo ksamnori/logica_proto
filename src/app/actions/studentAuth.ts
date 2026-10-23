@@ -16,18 +16,27 @@ const supabaseAdmin = createClient(
 
 const SECRET_KEY = new TextEncoder().encode(process.env.SESSION_SECRET_KEY || "fallback-secret-key");
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 export async function searchStudentsByDigits(code: string) {
   if (!code || code.length !== 4) return { success: false, data: [] };
 
   try {
     const { data: studentMatch } = await supabaseAdmin
       .from("student")
-      .select("student_id, name, grade, phone, parent(phone), enrollment(class(name))")
+      .select("student_id, name, grade, phone, parent(phone), enrollment(status, end_date, class(name))")
       .like("phone", `%${code}%`);
 
     const { data: parentMatch } = await supabaseAdmin
       .from("student")
-      .select("student_id, name, grade, phone, parent!inner(phone), enrollment(class(name))")
+      .select("student_id, name, grade, phone, parent!inner(phone), enrollment(status, end_date, class(name))")
       .like("parent.phone", `%${code}%`);
 
     const merged = [...(studentMatch || []), ...(parentMatch || [])];
@@ -56,6 +65,7 @@ export async function searchStudentsByDigits(code: string) {
 
       if (isStudentMatch || isParentMatch) {
         const classNames = (item.enrollment || [])
+          .filter((e: any) => !isEndedEnrollment(e))
           .map((e: any) => e.class?.name)
           .filter(Boolean);
 
@@ -230,7 +240,7 @@ export async function autoAttendOnPadLogin(studentId: string) {
       .select(`
         student_id, name, tenant_id,
         parent(name, phone, relationship, name_2, phone_2, relationship_2),
-        enrollment(enrollment_id, class(class_id))
+        enrollment(enrollment_id, status, end_date, class(class_id))
       `)
       .eq("student_id", studentId)
       .maybeSingle();
@@ -255,7 +265,8 @@ export async function autoAttendOnPadLogin(studentId: string) {
       return { success: true, attended: false, queued: 0, message: "이미 등원 상태입니다." };
     }
 
-    const enr: any = Array.isArray(stu.enrollment) ? stu.enrollment[0] : stu.enrollment;
+    const enrollArr = Array.isArray(stu.enrollment) ? stu.enrollment : (stu.enrollment ? [stu.enrollment] : []);
+    const enr: any = enrollArr.find((e: any) => !isEndedEnrollment(e)) || null;
     const enrollmentId = enr?.enrollment_id ?? null;
     const classId = enr?.class?.class_id ?? null;
 

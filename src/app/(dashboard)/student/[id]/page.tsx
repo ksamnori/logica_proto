@@ -18,6 +18,15 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const safeParseIds = (raw: any): number[] => {
   if (!raw) return [];
   try {
@@ -174,9 +183,26 @@ export default function StudentDetailPage() {
       const { data: enrollData } = await supabase.from("enrollment")
         .select("enrollment_id, class_id, start_date, end_date, status, class(name)")
         .eq("student_id", studentId).order("start_date", { ascending: false });
-      
-      setEnrollments(enrollData || []);
-      if (enrollData && enrollData.length > 0) loadProgressData(enrollData.map(e => e.class_id));
+
+      const inconsistentIds = (enrollData || [])
+        .filter((e: any) => e.end_date && e.status !== "수강종료" && e.enrollment_id)
+        .map((e: any) => e.enrollment_id);
+      if (inconsistentIds.length > 0) {
+        await supabase.from("enrollment").update({ status: "수강종료" }).in("enrollment_id", inconsistentIds);
+      }
+
+      const normalizedEnrolls = (enrollData || []).map((e: any) =>
+        e.end_date && e.status !== "수강종료" ? { ...e, status: "수강종료" } : e
+      );
+      setEnrollments(normalizedEnrolls);
+      if (normalizedEnrolls.length > 0) {
+        const activeClassIds = new Set(
+          normalizedEnrolls.filter((e: any) => !isEndedEnrollment(e)).map((e: any) => e.class_id)
+        );
+        loadProgressData(normalizedEnrolls.map((e: any) => e.class_id), activeClassIds);
+      } else {
+        setProgressBooks([]);
+      }
     } catch (error) { console.error("로딩 에러:", error); }
   };
 
@@ -213,10 +239,14 @@ export default function StudentDetailPage() {
     setAttendances(data || []);
   };
 
-  const loadProgressData = async (classIds: string[]) => {
-    if (classIds.length === 0) return;
-    const { data: cbData } = await supabase.from('class_textbook').select('*, textbook(*), class(name)').in('class_id', classIds);
-    if (!cbData || cbData.length === 0) return;
+  const loadProgressData = async (classIds: string[], activeClassIds?: Set<string>) => {
+    if (classIds.length === 0) { setProgressBooks([]); return; }
+    const { data: cbDataRaw } = await supabase.from('class_textbook').select('*, textbook(*), class(name)').in('class_id', classIds);
+    const cbData = (cbDataRaw || []).filter((cb: any) => {
+      if (cb.status === '완료') return true;
+      return !activeClassIds || activeClassIds.has(cb.class_id);
+    });
+    if (!cbData || cbData.length === 0) { setProgressBooks([]); return; }
 
     const bookIds = cbData.map((cb: any) => cb.book_id);
     // 🌟 [버그 픽스] 여러 교재 문항을 함께 조회하므로 1000행 제한 우회
@@ -576,7 +606,13 @@ export default function StudentDetailPage() {
     try {
       const tId = localStorage.getItem("logica_tenant_id");
       await supabase.from("student").update({ status: "재원", updated_at: new Date().toISOString() }).eq("student_id", studentId);
-      await supabase.from("enrollment").insert({ student_id: studentId, class_id: reEnrollForm.classId, start_date: reEnrollForm.startDate, status: "수강중", tenant_id: tId });
+      const existing = enrollments.find((en: any) => String(en.class_id) === String(reEnrollForm.classId));
+      if (existing) {
+        await supabase.from("enrollment").update({ start_date: reEnrollForm.startDate, end_date: null, status: "수강중" }).eq("enrollment_id", existing.enrollment_id);
+      } else {
+        await supabase.from("enrollment").insert({ student_id: studentId, class_id: reEnrollForm.classId, start_date: reEnrollForm.startDate, status: "수강중", tenant_id: tId });
+      }
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
       alert("재등록 처리 완료"); setIsReEnrollModalOpen(false); loadInitialData(); 
     } catch (err) { alert("실패"); } finally { setIsSubmittingReEnroll(false); }
   };
@@ -605,9 +641,10 @@ export default function StudentDetailPage() {
   const saveAttendance = async () => {
     if (!selectedDate) return;
     try {
-      const { data: enrolls } = await supabase.from('enrollment').select('enrollment_id, class_id').eq('student_id', studentId).order('created_at', { ascending: false }).limit(1);
-      const enrollId = enrolls?.[0]?.enrollment_id;
-      const classId = enrolls?.[0]?.class_id || student?.class_id;
+      const { data: enrolls } = await supabase.from('enrollment').select('enrollment_id, class_id, status, end_date').eq('student_id', studentId).order('created_at', { ascending: false });
+      const targetEnroll = (enrolls || []).find((en: any) => !isEndedEnrollment(en)) || enrolls?.[0];
+      const enrollId = targetEnroll?.enrollment_id;
+      const classId = targetEnroll?.class_id || student?.class_id;
       if (!enrollId) return alert("수강 이력이 없습니다.");
       const payload = { student_id: studentId, class_id: classId, enrollment_id: enrollId, attendance_date: selectedDate, status: attendForm.status, check_in_time: toIsoString(attendForm.checkIn, selectedDate), check_out_time: toIsoString(attendForm.checkOut, selectedDate), remark: attendForm.remark };
       if (attendForm.id) await supabase.from('attendance').update(payload).eq('attendance_id', attendForm.id);
@@ -639,7 +676,8 @@ export default function StudentDetailPage() {
   };
 
   const getEnrolledClassNames = () => {
-    const allEnrolledClassNames = Array.from(new Set(enrollments.map((e: any) => unwrap(e.class as any)?.name).filter(Boolean)));
+    const activeEnrolls = enrollments.filter((e: any) => !isEndedEnrollment(e));
+    const allEnrolledClassNames = Array.from(new Set(activeEnrolls.map((e: any) => unwrap(e.class as any)?.name).filter(Boolean)));
     return allEnrolledClassNames.length > 0 ? allEnrolledClassNames.join(", ") : "미배정";
   };
 
@@ -926,12 +964,12 @@ function InfoTab({ student, enrollments, consultLogs, setActiveTab, calendarBloc
               let badgeText = '수강중';
               let badgeColorClass = 'bg-emerald-50 text-emerald-600 border-emerald-200';
               
-              if (en.status === '예약') {
-                badgeText = '예약중';
-                badgeColorClass = 'bg-amber-50 text-amber-600 border-amber-200';
-              } else if (en.status === '수강종료' || en.end_date) {
+              if (isEndedEnrollment(en)) {
                 badgeText = '수강종료';
                 badgeColorClass = 'bg-slate-100 text-slate-500 border-slate-200';
+              } else if (en.status === '예약') {
+                badgeText = '예약중';
+                badgeColorClass = 'bg-amber-50 text-amber-600 border-amber-200';
               }
 
               return (

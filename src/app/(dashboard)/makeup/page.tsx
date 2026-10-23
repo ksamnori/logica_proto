@@ -5,6 +5,15 @@ import { useEffect, useState, useMemo, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 // 분리된 모달 컴포넌트 임포트
 import MakeupModal from "@/components/makeup/MakeupModal";
 
@@ -110,6 +119,7 @@ export default function MakeupPage() {
             grade, 
             enrollment(
               status,
+              end_date,
               class(*)
             )
           )
@@ -128,6 +138,7 @@ export default function MakeupPage() {
           grade, 
           enrollment(
             status,
+            end_date,
             class(*)
           )
         `)
@@ -154,7 +165,7 @@ export default function MakeupPage() {
         // 모달에서 기존 로직이 깨지지 않도록, enrollment 안의 클래스 이름을 찾아 1차원 데이터로 매핑
         const mappedStudents = stuRes.data.map((s: any) => {
           const enrolls = Array.isArray(s.enrollment) ? s.enrollment : [];
-          const active = enrolls.find((e: any) => !['퇴원', '종료', '취소'].includes(e.status)) || enrolls[0];
+          const active = enrolls.find((e: any) => !isEndedEnrollment(e));
           const cName = active?.class?.class_name || active?.class?.name || '반 미배정';
           return { ...s, class_name: cName };
         });
@@ -191,7 +202,7 @@ export default function MakeupPage() {
     if (!modalClassId) return students;
     const inClass = students.filter((s: any) => {
       const enrolls = Array.isArray(s.enrollment) ? s.enrollment : [];
-      return enrolls.some((e: any) => e?.class?.class_id === modalClassId && e.status === '수강중');
+      return enrolls.some((e: any) => e?.class?.class_id === modalClassId && !isEndedEnrollment(e));
     });
     return inClass.length > 0 ? inClass : students;
   }, [students, modalClassId]);
@@ -333,7 +344,7 @@ export default function MakeupPage() {
                   else if (m.status === '취소') statusClass = 'bg-rose-100 text-rose-700';
 
                   const enrolls = Array.isArray(m.student?.enrollment) ? m.student.enrollment : [];
-                  const active = enrolls.find((e: any) => !['퇴원', '종료', '취소'].includes(e.status)) || enrolls[0];
+                  const active = enrolls.find((e: any) => !isEndedEnrollment(e));
                   const className = active?.class?.class_name || active?.class?.name || '반 미배정';
 
                   return (

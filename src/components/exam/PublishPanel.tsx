@@ -5,6 +5,15 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 interface ClassInfo {
   class_id: string;
   name: string;
@@ -82,7 +91,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
       const pos = localStorage.getItem('logica_instructor_position') || '';
       const isAdmin = ['SUPER_ADMIN', 'ADMIN', 'MANAGER', 'PRINCIPAL'].includes(role.toUpperCase()) || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장');
 
-      let classQuery = supabase.from('class').select('class_id, name, enrollment(student_id)');
+      let classQuery = supabase.from('class').select('class_id, name, enrollment(student_id, status, end_date, student(status))');
       if (!isAdmin) classQuery = classQuery.eq('instructor_id', instId);
 
       const { data: classesData, error } = await classQuery;
@@ -105,7 +114,12 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
       });
 
       const classesWithCount = cls.map(c => {
-        const studentCount = new Set((c.enrollment || []).map((e: any) => e.student_id)).size;
+        const activeEnrolls = (c.enrollment || []).filter((e: any) => {
+          if (isEndedEnrollment(e)) return false;
+          const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
+          return sStatus !== '퇴원' && sStatus !== '휴원';
+        });
+        const studentCount = new Set(activeEnrolls.map((e: any) => e.student_id)).size;
         return { ...c, studentCount };
       });
 
@@ -124,12 +138,15 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
     try {
         const [ { data: directStudents }, { data: enrolls } ] = await Promise.all([
             supabase.from('student').select('student_id, name, status').eq('class_id', classObj.class_id),
-            supabase.from('enrollment').select('student_id, student(name, status)').eq('class_id', classObj.class_id)
+            supabase.from('enrollment').select('student_id, status, end_date, student(name, status)').eq('class_id', classObj.class_id)
         ]);
 
         const studentMap = new Map();
         if (directStudents) directStudents.forEach((s:any) => studentMap.set(s.student_id, s));
-        if (enrolls) enrolls.forEach((e:any) => { if(e.student) studentMap.set(e.student_id, { student_id: e.student_id, name: e.student.name, status: e.student.status }) });
+        if (enrolls) enrolls.filter((e:any) => !isEndedEnrollment(e)).forEach((e:any) => {
+          const stu = Array.isArray(e.student) ? e.student[0] : e.student;
+          if (stu) studentMap.set(e.student_id, { student_id: e.student_id, name: stu.name, status: stu.status });
+        });
 
         const studentsList = Array.from(studentMap.values());
         setClassStudentsMap(prev => ({ ...prev, [classObj.class_id]: studentsList }));

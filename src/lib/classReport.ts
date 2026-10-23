@@ -57,9 +57,9 @@ export async function buildClassReport(classId: string, ym: string, onStep?: (t:
   if (cErr || !cls) throw new Error("반 정보를 찾을 수 없습니다.");
 
   const { data: enr } = await supabase.from("enrollment")
-    .select("student_id, status, student(student_id, name, grade, school, status)")
+    .select("student_id, status, end_date, student(student_id, name, grade, school, status)")
     .eq("class_id", classId).eq("status", "수강중");
-  const roster = (enr || []).map((e: any) => unwrap(e.student)).filter((s: any) => s && s.status === "재원" && !isDummy(s.name));
+  const roster = (enr || []).filter((e: any) => !e.end_date && e.status !== "수강종료").map((e: any) => unwrap(e.student)).filter((s: any) => s && s.status === "재원" && !isDummy(s.name));
   const rosterMap = new Map<string, any>(roster.map((s: any) => [s.student_id, s]));
   const ids = Array.from(rosterMap.keys());
   if (ids.length === 0) throw new Error("이 반에 수강 중인 재원생이 없습니다.");
@@ -75,9 +75,9 @@ export async function buildClassReport(classId: string, ym: string, onStep?: (t:
     const others = (sameCls || []).filter((c: any) => String(c.name || "").trim().slice(0, 2) === prefix);
     if (others.length) {
       const { data: oEnr } = await supabase.from("enrollment")
-        .select("class_id, student(student_id, name, status)")
+        .select("class_id, status, end_date, student(student_id, name, status)")
         .in("class_id", others.map((c: any) => c.class_id)).eq("status", "수강중");
-      const okStu = (oEnr || []).map((e: any) => ({ cid: e.class_id, s: unwrap(e.student) }))
+      const okStu = (oEnr || []).filter((e: any) => !e.end_date && e.status !== "수강종료").map((e: any) => ({ cid: e.class_id, s: unwrap(e.student) }))
         .filter((x: any) => x.s && x.s.status === "재원" && !isDummy(x.s.name) && !rosterMap.has(x.s.student_id));
       peerIds = Array.from(new Set(okStu.map((x: any) => x.s.student_id)));
       const withStu = new Set(okStu.map((x: any) => x.cid));

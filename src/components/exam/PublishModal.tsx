@@ -4,6 +4,15 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 interface PublishModalProps {
   isOpen: boolean;
   examId: string;
@@ -84,7 +93,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
 
       const activeStudents = studentsData || [];
       const cls = classesData || [];
-      const enrolls = enrollsData || [];
+      const enrolls = (enrollsData || []).filter((e: any) => !isEndedEnrollment(e));
 
       const classNameMap = new Map();
       cls.forEach(c => classNameMap.set(c.class_id, c.name));

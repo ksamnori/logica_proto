@@ -10,6 +10,15 @@ import InstructorHistoryModal from "@/components/class/InstructorHistoryModal";
 
 const DAYS = ['월', '화', '수', '목', '금', '토'];
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
 const WD_START_HOUR = 14; 
 const END_HOUR = 22; 
 const ROW_COUNT = END_HOUR - WD_START_HOUR; 
@@ -143,10 +152,23 @@ export default function ClassPage() {
     
     const { data, error } = await supabase
       .from("class")
-      .select("*, instructor(name, position), enrollment(student_id, status, student(name, status)), class_schedule(*)")
+      .select("*, instructor(name, position), enrollment(enrollment_id, student_id, status, end_date, student(name, status)), class_schedule(*)")
       .eq("tenant_id", tenantId);
 
-    if (!error && data) setClasses(data);
+    if (!error && data) {
+      const inconsistentIds: string[] = [];
+      data.forEach((c: any) => {
+        (c.enrollment || []).forEach((e: any) => {
+          if (e.end_date && e.status !== "수강종료" && e.enrollment_id) {
+            inconsistentIds.push(e.enrollment_id);
+          }
+        });
+      });
+      if (inconsistentIds.length > 0) {
+        supabase.from("enrollment").update({ status: "수강종료" }).in("enrollment_id", inconsistentIds).then();
+      }
+      setClasses(data);
+    }
     setIsLoading(false);
   };
 
@@ -171,7 +193,7 @@ export default function ClassPage() {
 
       let filteredEnrollment = (c.enrollment || []).filter((e: any) => {
         const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
-        if (e.status === '수강종료' || sStatus === '휴원' || sStatus === '퇴원') return false;
+        if (isEndedEnrollment(e) || sStatus === '휴원' || sStatus === '퇴원') return false;
         if (hideTest) {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
           if (sName && sName.includes('테스트')) return false;
@@ -265,7 +287,7 @@ export default function ClassPage() {
     result = result.map(c => {
       const filteredEnrollment = (c.enrollment || []).filter((e: any) => {
         const sStatus = Array.isArray(e.student) ? e.student[0]?.status : e.student?.status;
-        if (e.status === '수강종료' || sStatus === '휴원' || sStatus === '퇴원') return false;
+        if (isEndedEnrollment(e) || sStatus === '휴원' || sStatus === '퇴원') return false;
         if (hideTest) {
           const sName = Array.isArray(e.student) ? e.student[0]?.name : e.student?.name;
           if (sName && sName.includes('테스트')) return false;
