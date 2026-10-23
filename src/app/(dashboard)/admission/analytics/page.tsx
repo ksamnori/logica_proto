@@ -607,12 +607,13 @@ export default function AdmissionAnalyticsPage() {
 
     groups.forEach(g => {
       g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
-      g.items.sort((a:any, b:any) => {
-        const subA = a.sub_num || 0;
-        const subB = b.sub_num || 0;
-        if (a.question_id === a.parentId || subA === 0) return -1;
-        if (b.question_id === b.parentId || subB === 0) return 1;
-        return subA - subB;
+      g.items.sort((a: any, b: any) => {
+        if (a.question_id && b.parentId && String(a.question_id) === String(b.parentId) && a.question_id !== b.question_id) return -1;
+        if (b.question_id && a.parentId && String(b.question_id) === String(a.parentId) && a.question_id !== b.question_id) return 1;
+        const subA = parseInt(String(a.sub_num || 0), 10) || 0;
+        const subB = parseInt(String(b.sub_num || 0), 10) || 0;
+        if (subA > 0 && subB > 0 && subA !== subB) return subA - subB;
+        return String(a.question_number || "").localeCompare(String(b.question_number || ""), "ko", { numeric: true });
       });
     });
     groups.sort((a, b) => a.sort_order - b.sort_order);

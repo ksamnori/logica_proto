@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, extractParentIds } from "./examUtils";
+import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, extractParentIds, compareSubQuestions, compareQuestionsBySource } from "./examUtils";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
 const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
@@ -165,11 +165,9 @@ export function useExamData() {
         restoredGroups.sort((a, b) => a.sort_order - b.sort_order);
         
         restoredGroups.forEach((g: any) => {
-          g.items.sort((a: any, b: any) => {
-              if (a.question_id === a.parent_question_id || a.sub_num === 0) return -1;
-              if (b.question_id === b.parent_question_id || b.sub_num === 0) return 1;
-              return (a.sub_num || 0) - (b.sub_num || 0);
-          });
+          if (g.items && g.items.length > 1) {
+            g.items.sort(compareSubQuestions);
+          }
         });
 
         if (restoredGroups.length === 0) throw new Error('복원할 문항을 찾을 수 없습니다.');
@@ -263,11 +261,9 @@ export function useExamData() {
 
         let allGroups = Array.from(groupMap.values());
         allGroups.forEach((g: any) => {
-          g.items.sort((a: any, b: any) => {
-              if (a.question_id === a.parent_question_id || a.sub_num === 0) return -1;
-              if (b.question_id === b.parent_question_id || b.sub_num === 0) return 1;
-              return (a.sub_num || 0) - (b.sub_num || 0);
-          });
+          if (g.items && g.items.length > 1) {
+            g.items.sort(compareSubQuestions);
+          }
         });
         allGroups.sort((a, b) => a.sort_order - b.sort_order);
 
@@ -388,11 +384,9 @@ export function useExamData() {
 
       let allGroups = Array.from(groupMap.values());
       allGroups.forEach(g => {
-        g.items.sort((a: any, b: any) => {
-            if (a.question_id === a.parent_question_id || a.sub_num === 0) return -1;
-            if (b.question_id === b.parent_question_id || b.sub_num === 0) return 1;
-            return (a.sub_num || 0) - (b.sub_num || 0);
-        });
+        if (g.items && g.items.length > 1) {
+          g.items.sort(compareSubQuestions);
+        }
       });
 
       let selectedGroups: any[] = [];
@@ -439,15 +433,7 @@ export function useExamData() {
       await fetchDepthMappings(allItems);
       await fetchParentSources(allItems);
 
-      selectedGroups.sort((a, b) => {
-        const repA = a.items[0]; const repB = b.items[0];
-        const srcA = repA.pdf_source || repA.source_book_name || repA.raw_source_tags || '';
-        const srcB = repB.pdf_source || repB.source_book_name || repB.raw_source_tags || '';
-        if (srcA !== srcB) return srcA.localeCompare(srcB);
-        const numA = parseInt(String(repA.question_number || '0').replace(/[^0-9]/g, ''), 10) || 0;
-        const numB = parseInt(String(repB.question_number || '0').replace(/[^0-9]/g, ''), 10) || 0;
-        return numA - numB;
-      });
+      selectedGroups.sort((a, b) => compareQuestionsBySource(a.items[0], b.items[0]));
       setQuestions(selectedGroups);
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };

@@ -15,7 +15,7 @@ import {
   formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml
 } from "@/utils/examRenderUtils";
 
-import { processGroupText } from "../step2/examUtils";
+import { processGroupText, compareSubQuestions } from "../step2/examUtils";
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
@@ -309,7 +309,14 @@ export default function ExamViewerPage() {
         });
 
         const groups = Array.from(groupMap.values());
-        groups.forEach((g: any, idx: number) => { g.sort_order = idx + 1; g.displayNum = idx + 1; });
+        groups.forEach((g: any, idx: number) => {
+          if (g.questions && g.questions.length > 1) {
+            g.questions.sort(compareSubQuestions);
+            g.repQ = g.questions[0];
+          }
+          g.sort_order = idx + 1;
+          g.displayNum = idx + 1;
+        });
 
         await Promise.all([
           document.fonts.load("400 17px 'NanumSquare'"),
@@ -501,6 +508,10 @@ export default function ExamViewerPage() {
 
         const groups = Array.from(groupMap.values());
         groups.forEach((g: any, idx: number) => {
+           if (g.questions && g.questions.length > 1) {
+             g.questions.sort(compareSubQuestions);
+             g.repQ = g.questions[0];
+           }
            g.sort_order = idx + 1;
            g.displayNum = idx + 1;
         });
@@ -625,6 +636,10 @@ export default function ExamViewerPage() {
             }).filter(Boolean);
 
             if (items.length > 0) {
+                const isMergedGroup = items.some((it: any) => customGroupMap.get(getRealId(String(it.question_id)))) || items.length > 1;
+                if (items.length > 1) {
+                    items.sort(compareSubQuestions);
+                }
                 const firstQid = items[0].question_id;
                 groups.push({
                     id: `group_${gIdx}_${firstQid}`,
@@ -632,7 +647,7 @@ export default function ExamViewerPage() {
                     repQ: items[0],
                     sort_order: gIdx + 1,
                     displayNum: gIdx + 1,
-                    is_merged_text: !!customGroupMap.get(getRealId(String(firstQid)))
+                    is_merged_text: isMergedGroup
                 });
             }
         });
@@ -1277,12 +1292,12 @@ export default function ExamViewerPage() {
       const flatQIds = examStateRef.current?.groups.reduce((acc: string[], g: any) => acc.concat(g.questions.map((q: any) => getRealId(q.question_id))), []) || [];
       
       let userMergedTextQuestions: string[][] = [];
-      if (sessionStorage.getItem('examUserMergedTextQuestions')) {
-         userMergedTextQuestions = JSON.parse(sessionStorage.getItem('examUserMergedTextQuestions') || '[]');
-      } else if (examStateRef.current?.groups) {
+      if (examStateRef.current?.groups) {
          userMergedTextQuestions = examStateRef.current.groups
-            .filter((g: any) => g.is_merged_text)
-            .map((g: any) => g.questions.map((q: any) => getRealId(q.question_id)));
+            .filter((g: any) => g.is_merged_text && g.questions && g.questions.length > 0)
+            .map((g: any) => [...g.questions].sort(compareSubQuestions).map((q: any) => getRealId(q.question_id)));
+      } else if (sessionStorage.getItem('examUserMergedTextQuestions')) {
+         userMergedTextQuestions = JSON.parse(sessionStorage.getItem('examUserMergedTextQuestions') || '[]');
       }
 
       const finalLayoutSettings = { 

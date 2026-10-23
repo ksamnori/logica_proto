@@ -41,6 +41,7 @@ export default function TaxonomyEditorPage() {
   } = useTaxonomy() as any; 
 
   const [bookFilter, setBookFilter] = React.useState("");
+  const [questionTextFilter, setQuestionTextFilter] = React.useState("");
   const filteredWorkbooks = React.useMemo(() => {
     if (!bookFilter.trim()) return workbooks;
     const lowerKw = bookFilter.toLowerCase().replace(/\s+/g, '');
@@ -73,8 +74,21 @@ export default function TaxonomyEditorPage() {
     }
 
     groups.sort((a, b) => a.repIndex - b.repIndex);
-    return groups;
-  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions]);
+    const kw = questionTextFilter.trim().toLowerCase();
+    if (!kw) return groups;
+    return groups.filter((group: any) => {
+      const family = [group.root, ...(group.descendants || [])];
+      return family.some((item: any) => {
+        const qText = String(item.question || item.text_question || "").toLowerCase();
+        const ans = String(item.answer || "").toLowerCase();
+        const qNum = String(formatQNum(item.question_number, item.sub_num) || "").toLowerCase();
+        const page = String(item.final_printed_page || item.detected_page_num || "").toLowerCase();
+        const book = String(item.source_book_name || item.book_name || "").toLowerCase();
+        const tax = String(item.taxonomy_id || "").toLowerCase();
+        return qText.includes(kw) || ans.includes(kw) || qNum.includes(kw) || page.includes(kw) || book.includes(kw) || tax.includes(kw);
+      });
+    });
+  }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions, questionTextFilter]);
 
   const renderImageBox = (label: string, fieldKey: string, boxFieldKey: string | null, colorTheme: 'indigo' | 'emerald') => {
     const rawValue = editForm[fieldKey as keyof typeof editForm] as string;
@@ -456,11 +470,33 @@ export default function TaxonomyEditorPage() {
         
         {/* 좌측: 문제 리스트 */}
         <div className="w-[400px] bg-white border border-slate-200 rounded-2xl shadow-sm flex flex-col overflow-hidden shrink-0">
-          <div className="p-3 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center shrink-0">
-            <h2 className="font-bold text-slate-800 text-sm">📋 전체 문항 리스트 ({questions.length}개)</h2>
-            <button onClick={createNewQuestion} disabled={!selectedBook || isLoading || !perms.add} className={`text-xs text-white px-2.5 py-1.5 rounded font-bold shadow-sm flex items-center gap-1 transition-colors ${perms.add ? 'bg-brand hover:bg-blue-800' : 'bg-slate-300 cursor-not-allowed'}`} title={!perms.add ? "새 문항 추가 권한이 없습니다." : ""}>
-              <span>➕</span> 새 문항 추가
-            </button>
+          <div className="p-3 bg-slate-100/80 border-b border-slate-200 flex flex-col gap-2 shrink-0">
+            <div className="flex justify-between items-center">
+              <h2 className="font-bold text-slate-800 text-sm">
+                📋 전체 문항 리스트 ({questionTextFilter.trim() ? `${renderGroups.length}/${questions.length}` : `${questions.length}`}개)
+              </h2>
+              <button onClick={createNewQuestion} disabled={!selectedBook || isLoading || !perms.add} className={`text-xs text-white px-2.5 py-1.5 rounded font-bold shadow-sm flex items-center gap-1 transition-colors ${perms.add ? 'bg-brand hover:bg-blue-800' : 'bg-slate-300 cursor-not-allowed'}`} title={!perms.add ? "새 문항 추가 권한이 없습니다." : ""}>
+                <span>➕</span> 새 문항 추가
+              </button>
+            </div>
+            <div className="relative">
+              <input
+                type="text"
+                value={questionTextFilter}
+                onChange={(e) => setQuestionTextFilter(e.target.value)}
+                placeholder="🔍 문제 텍스트, 정답, 번호, 페이지 검색..."
+                className="w-full px-3 py-1.5 pr-8 bg-white border border-slate-300 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-brand focus:ring-1 focus:ring-brand shadow-sm"
+              />
+              {questionTextFilter && (
+                <button
+                  onClick={() => setQuestionTextFilter("")}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                  title="검색어 지우기"
+                >
+                  ✕
+                </button>
+              )}
+            </div>
           </div>
           <div className="flex-1 overflow-y-auto p-3 custom-scroll bg-slate-50/50">
             {questions.length === 0 ? (

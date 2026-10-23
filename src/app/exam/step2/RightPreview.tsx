@@ -27,6 +27,7 @@ export default function RightPreview({ examData }: { examData: any }) {
   const [previewBadge, setPreviewBadge] = useState<string | null>(null);
 
   const [hideSubNumber, setHideSubNumber] = useState(false);
+  const [previewSearch, setPreviewSearch] = useState("");
 
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
   const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
@@ -396,9 +397,52 @@ export default function RightPreview({ examData }: { examData: any }) {
         </div>
       </div>
 
+      <div className="bg-white/95 border-b border-slate-200 px-6 py-2.5 shrink-0 flex items-center gap-3">
+        <div className="relative flex-1">
+          <input
+            type="text"
+            value={previewSearch}
+            onChange={(e) => setPreviewSearch(e.target.value)}
+            placeholder="🔍 문제 텍스트, 정답, 해설, 출처 교재, 페이지, 단원/유형 검색..."
+            className="w-full px-3.5 py-2 pr-8 bg-slate-50 border border-slate-200 rounded-lg text-sm font-bold text-slate-700 outline-none focus:bg-white focus:border-brand focus:ring-1 focus:ring-brand transition-all"
+          />
+          {previewSearch && (
+            <button
+              onClick={() => setPreviewSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+              title="검색어 지우기"
+            >
+              ✕
+            </button>
+          )}
+        </div>
+        {previewSearch.trim() && (
+          <span className="text-xs font-bold text-brand shrink-0">
+            검색 결과 표시 중
+          </span>
+        )}
+      </div>
+
       <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pb-32 space-y-6 scroll-smooth" id="right-problem-list">
         {isLoading ? <div className="text-center font-bold text-slate-500 mt-20 flex flex-col items-center"><svg className="animate-spin h-12 w-12 text-[#002864] mb-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle><path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg><p>DB에서 문제를 추출 중입니다...</p></div> : 
-         questions.map((g: any, idx: number) => {
+         questions.map((g: any, idx: number) => ({ g, idx })).filter(({ g, idx }: { g: any; idx: number }) => {
+           const kw = previewSearch.trim().toLowerCase();
+           if (!kw) return true;
+           const repQ = g.items[0];
+           const d6 = String(getDepth6Name(repQ, depth6Map) || "").toLowerCase();
+           const tName = String(getTypeName(repQ) || "").toLowerCase();
+           const numStr = `${idx + 1}번`;
+           const itemMatch = g.items.some((q: any) => {
+             const txt = String(q.question || q.text_question || "").toLowerCase();
+             const ans = String(q.answer || "").toLowerCase();
+             const exp = String(q.explanation || q.solution || "").toLowerCase();
+             const bk = String(q.source_book_name || q.book_name || q.pdf_source || "").toLowerCase();
+             const pg = String(q.final_printed_page || q.detected_page_num || "").toLowerCase();
+             const qn = String(q.question_number || "").toLowerCase();
+             return txt.includes(kw) || ans.includes(kw) || exp.includes(kw) || bk.includes(kw) || pg.includes(kw) || qn.includes(kw);
+           });
+           return itemMatch || d6.includes(kw) || tName.includes(kw) || numStr.includes(kw);
+         }).map(({ g, idx }: { g: any; idx: number }) => {
            const qNum = idx + 1;
            const repQ = g.items[0];
            const isThk = isThinking(repQ);

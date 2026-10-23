@@ -9,6 +9,108 @@ import { supabase } from "@/lib/supabase";
 /**
  * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
  */
+
+const parseLeadingSubMarkerInline = (rem: string): number => {
+  if (!rem) return 0;
+  const s = rem.trim();
+  const mParenNum = s.match(/^\(\s*(\d+)\s*\)/);
+  if (mParenNum) return parseInt(mParenNum[1], 10) || 0;
+  const mCircle = s.match(/^([①②③④⑤⑥⑦⑧⑨⑩])/);
+  if (mCircle) return "①②③④⑤⑥⑦⑧⑨⑩".indexOf(mCircle[1]) + 1;
+  const mKor = s.match(/^\(\s*([가나다라마바사아자차카타파하])\s*\)/);
+  if (mKor) return "가나다라마바사아자차카타파하".indexOf(mKor[1]) + 1;
+  const mBracket = s.match(/^\[\s*(\d+)\s*\]/);
+  if (mBracket) return parseInt(mBracket[1], 10) || 0;
+  return 0;
+};
+
+const extractStandaloneSubMarkerInline = (rawText: string): number => {
+  if (!rawText) return 0;
+  const clean = String(rawText)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+  const direct = parseLeadingSubMarkerInline(clean);
+  if (direct > 0) return direct;
+  const mAfterPrompt = clean.match(
+    /(?:\n|(?:답하세요|답하시오|구하세요|구하시오|고르세요|고르시오|쓰세요|쓰시오|나타내시오|나타내세요)[\.\:\s]*)\s*(?:\(\s*(\d+)\s*\)|([①②③④⑤⑥⑦⑧⑨⑩])|\(\s*([가나다라마바사아자차카타파하])\s*\))/
+  );
+  if (mAfterPrompt) {
+    if (mAfterPrompt[1]) return parseInt(mAfterPrompt[1], 10) || 0;
+    if (mAfterPrompt[2]) return "①②③④⑤⑥⑦⑧⑨⑩".indexOf(mAfterPrompt[2]) + 1;
+    if (mAfterPrompt[3]) return "가나다라마바사아자차카타파하".indexOf(mAfterPrompt[3]) + 1;
+  }
+  return 0;
+};
+
+const compareSubQuestionsInline = (a: any, b: any): number => {
+  if (!a || !b) return 0;
+  const idA = String(a.question_id || "").trim();
+  const idB = String(b.question_id || "").trim();
+  const parentA = String(a.parent_question_id || "").trim();
+  const parentB = String(b.parent_question_id || "").trim();
+  if (idA && parentB && idA === parentB && idA !== idB) return -1;
+  if (idB && parentA && idB === parentA && idA !== idB) return 1;
+
+  const cleanA = String(a.question || a.text_question || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+  const cleanB = String(b.question || b.text_question || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+
+  let k = 0;
+  while (k < cleanA.length && k < cleanB.length && cleanA[k] === cleanB[k]) k++;
+  while (k > 0 && /[\(\[\{0-9가-하①-⑩\s]/.test(cleanA[k - 1])) k--;
+
+  const markerA = parseLeadingSubMarkerInline(cleanA.slice(k).trim()) || extractStandaloneSubMarkerInline(cleanA);
+  const markerB = parseLeadingSubMarkerInline(cleanB.slice(k).trim()) || extractStandaloneSubMarkerInline(cleanB);
+  if (markerA > 0 && markerB > 0 && markerA !== markerB) {
+    return markerA - markerB;
+  }
+
+  const subA = parseInt(String(a.sub_num ?? "0"), 10) || 0;
+  const subB = parseInt(String(b.sub_num ?? "0"), 10) || 0;
+  if (subA > 0 && subB > 0 && subA !== subB) {
+    return subA - subB;
+  }
+
+  const pageA = parseInt(String(a.page_number || a.final_printed_page || a.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
+  const pageB = parseInt(String(b.page_number || b.final_printed_page || b.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
+  if (pageA > 0 && pageB > 0 && pageA !== pageB) {
+    return pageA - pageB;
+  }
+
+  const parseNum = (numStr: any) => {
+    if (!numStr) return { main: 99999, dash: 0, paren: 0, orig: "" };
+    const s = String(numStr).trim();
+    const mMain = s.match(/^(\d+)/);
+    if (!mMain) return { main: 99999, dash: 0, paren: 0, orig: s };
+    const main = parseInt(mMain[1], 10);
+    const noParen = s.replace(/\(\d+\)/g, "");
+    const mDash = noParen.match(/-(\d+)/);
+    const dash = mDash ? parseInt(mDash[1], 10) : 0;
+    const mParen = s.match(/\((\d+)\)/);
+    const paren = mParen ? parseInt(mParen[1], 10) : 0;
+    return { main, dash, paren, orig: s };
+  };
+  const qA = parseNum(a.question_number);
+  const qB = parseNum(b.question_number);
+  if (qA.main !== qB.main) return qA.main - qB.main;
+  if (qA.dash !== qB.dash) return qA.dash - qB.dash;
+  if (qA.paren !== qB.paren) return qA.paren - qB.paren;
+  if (qA.orig !== qB.orig) return qA.orig.localeCompare(qB.orig, "ko", { numeric: true });
+  return 0;
+};
+
 function roundScore(val: number): number {
   const num = Number(val);
   if (!Number.isFinite(num)) return 0;
@@ -599,12 +701,9 @@ function ReviewContent() {
 
       groups.forEach((g: any, index: number) => {
         g.sort_order = Math.min(...g.items.map((i:any) => i.sort_order));
-        g.items.sort((a:any, b:any) => {
-          const subA = a.question.sub_num || 0; const subB = b.question.sub_num || 0;
-          if (a.question.question_id === a.question.parent_question_id || subA === 0) return -1;
-          if (b.question.question_id === b.question.parent_question_id || subB === 0) return 1;
-          return subA - subB;
-        });
+        if (g.items && g.items.length > 1) {
+          g.items.sort((a: any, b: any) => compareSubQuestionsInline(a.question, b.question));
+        }
 
         const qNumStr = String(g.items[0]?.question?.question_number || '');
         const match = qNumStr.match(/\d+/);

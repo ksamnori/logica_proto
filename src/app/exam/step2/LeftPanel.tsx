@@ -1,7 +1,7 @@
 // src/app/exam/step2/LeftPanel.tsx
 import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, formatText, getCleanUrl, renderParentRelations } from "./examUtils";
+import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, formatText, getCleanUrl, renderParentRelations, compareSubQuestions, compareQuestionsBySource } from "./examUtils";
 
 const parseId = (id: string) => {
   if (!id) return null;
@@ -116,11 +116,16 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const [currentAddD1, setCurrentAddD1] = useState<string>('중학교');
   const [currentAddD2, setCurrentAddD2] = useState<string>('');
 
-  // 🌟 [추가] 새 문제 검색용 필터 상태
+  // 🌟 문제 목록 텍스트 검색 필터 상태
+  const [questionListSearch, setQuestionListSearch] = useState("");
+
+  // 🌟 새 문제 검색용 필터 상태
   const [addBookName1, setAddBookName1] = useState("");
   const [addBookName2, setAddBookName2] = useState("");
   const [addPageStart, setAddPageStart] = useState("");
   const [addPageEnd, setAddPageEnd] = useState("");
+  const [addQuestionText, setAddQuestionText] = useState("");
+  const [searchResultFilter, setSearchResultFilter] = useState("");
 
   useEffect(() => {
     if (addMasterData) {
@@ -151,6 +156,66 @@ export default function LeftPanel({ examData }: { examData: any }) {
     return Object.keys(counts).map(k => ({ label: k, count: counts[k], pct: Math.round((counts[k] / total) * 100), hPct: Math.round((counts[k] / maxCount) * 100) }));
   }, [questions]);
 
+  const filteredQuestionEntries = useMemo(() => {
+    const kw = questionListSearch.trim().toLowerCase();
+    return questions
+      .map((g: any, idx: number) => ({ g, idx }))
+      .filter(({ g, idx }: { g: any; idx: number }) => {
+        if (!kw) return true;
+        const repQ = g.items[0];
+        const diff = (repQ.difficulty || getDiffLabelByRate(repQ.solving_probability)).trim();
+        const typeName = getTypeName(repQ);
+        const depth5Name = getDepth5Name(repQ, depth5Map);
+        const depth6Name = getDepth6Name(repQ, depth6Map);
+        const numStr = `${idx + 1}번`;
+        const itemsMatch = g.items.some((q: any) => {
+          const text = String(q.question || q.text_question || "").toLowerCase();
+          const ans = String(q.answer || "").toLowerCase();
+          const book = String(q.source_book_name || q.book_name || q.pdf_source || "").toLowerCase();
+          const page = String(q.final_printed_page || q.detected_page_num || q.page_number || "").toLowerCase();
+          const qNum = String(q.question_number || "").toLowerCase();
+          return (
+            text.includes(kw) ||
+            ans.includes(kw) ||
+            book.includes(kw) ||
+            page.includes(kw) ||
+            qNum.includes(kw)
+          );
+        });
+        return (
+          itemsMatch ||
+          diff.toLowerCase().includes(kw) ||
+          typeName.toLowerCase().includes(kw) ||
+          depth5Name.toLowerCase().includes(kw) ||
+          depth6Name.toLowerCase().includes(kw) ||
+          numStr.includes(kw)
+        );
+      });
+  }, [questions, questionListSearch, depth5Map, depth6Map]);
+
+  const filteredNewSearchResults = useMemo(() => {
+    const kw = searchResultFilter.trim().toLowerCase();
+    if (!kw) return newSearchResults;
+    return newSearchResults.filter((q: any) => {
+      const text = String(q.question || q.text_question || "").toLowerCase();
+      const ans = String(q.answer || "").toLowerCase();
+      const book = String(q.source_book_name || q.book_name || q.pdf_source || "").toLowerCase();
+      const page = String(q.final_printed_page || q.detected_page_num || "").toLowerCase();
+      const qNum = String(q.question_number || "").toLowerCase();
+      const d6 = String(getDepth6Name(q, depth6Map) || "").toLowerCase();
+      const typeName = String(getTypeName(q) || "").toLowerCase();
+      return (
+        text.includes(kw) ||
+        ans.includes(kw) ||
+        book.includes(kw) ||
+        page.includes(kw) ||
+        qNum.includes(kw) ||
+        d6.includes(kw) ||
+        typeName.includes(kw)
+      );
+    });
+  }, [newSearchResults, searchResultFilter, depth6Map]);
+
   const toggleCheck = (id: string, checked: boolean) => setCheckedIds((prev: any) => { const next = new Set(prev); checked ? next.add(id) : next.delete(id); return next; });
   const toggleAllChecks = (checked: boolean) => setCheckedIds(checked ? new Set(questions.map((q: any) => q.id)) : new Set());
   const moveSelectedToTop = () => { if(checkedIds.size > 0) setQuestions([...questions.filter((q: any) => checkedIds.has(q.id)), ...questions.filter((q: any) => !checkedIds.has(q.id))]); };
@@ -159,25 +224,10 @@ export default function LeftPanel({ examData }: { examData: any }) {
 
   const sortBySource = () => {
     setQuestions((prevQs: any[]) => {
-      const getBook = (q: any) => q.source_book_name || q.book_name || q.pdf_source || '';
-      const getPage = (q: any) => parseInt(String(q.page_number || q.final_printed_page || q.detected_page_num || '0').replace(/[^0-9]/g, ''), 10) || 0;
-      const getNum = (q: any) => parseInt(String(q.question_number || '0').replace(/[^0-9]/g, ''), 10) || 0;
-
-      const sortedQs = [...prevQs].sort((a, b) => {
-        const qA = a.items[0];
-        const qB = b.items[0];
-        
-        const bookA = getBook(qA);
-        const bookB = getBook(qB);
-        if (bookA !== bookB) return bookA.localeCompare(bookB);
-        
-        const pageA = getPage(qA);
-        const pageB = getPage(qB);
-        if (pageA !== pageB) return pageA - pageB;
-        
-        return getNum(qA) - getNum(qB);
-      });
-      
+      const sortedQs = prevQs.map((g: any) => ({
+        ...g,
+        items: g.items.length > 1 ? [...g.items].sort(compareSubQuestions) : g.items
+      })).sort((a, b) => compareQuestionsBySource(a.items[0], b.items[0]));
       return sortedQs;
     });
   };
@@ -193,7 +243,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
       const selectedGroups = newQs.filter(g => checkedIds.has(g.id));
       const unselectedGroups = newQs.filter(g => !checkedIds.has(g.id));
       
-      const allMergedItems = selectedGroups.reduce((acc: any[], g: any) => acc.concat(g.items), []);
+      const allMergedItems = selectedGroups
+        .reduce((acc: any[], g: any) => acc.concat(g.items), [])
+        .sort(compareSubQuestions);
       const mergedGroup = {
         id: `merged_${Date.now()}_${allMergedItems[0].question_id}`,
         is_merged_text: true, 
@@ -211,24 +263,10 @@ export default function LeftPanel({ examData }: { examData: any }) {
     if (!confirm("페이지 순으로 정렬한 뒤, 공통 지문(8글자 이상)을 가진 서브 문항들을 자동으로 병합하시겠습니까?")) return;
     
     setQuestions((prevQs: any[]) => {
-      const getBook = (q: any) => q.source_book_name || q.book_name || q.pdf_source || '';
-      const getPage = (q: any) => parseInt(String(q.page_number || q.final_printed_page || q.detected_page_num || '0').replace(/[^0-9]/g, ''), 10) || 0;
-      const getNum = (q: any) => parseInt(String(q.question_number || '0').replace(/[^0-9]/g, ''), 10) || 0;
-
-      let sortedQs = [...prevQs].sort((a, b) => {
-        const qA = a.items[0];
-        const qB = b.items[0];
-        
-        const bookA = getBook(qA);
-        const bookB = getBook(qB);
-        if (bookA !== bookB) return bookA.localeCompare(bookB);
-        
-        const pageA = getPage(qA);
-        const pageB = getPage(qB);
-        if (pageA !== pageB) return pageA - pageB;
-        
-        return getNum(qA) - getNum(qB);
-      });
+      let sortedQs = prevQs.map((g: any) => ({
+        ...g,
+        items: g.items.length > 1 ? [...g.items].sort(compareSubQuestions) : [...g.items]
+      })).sort((a, b) => compareQuestionsBySource(a.items[0], b.items[0]));
 
       const result: any[] = [];
       let i = 0;
@@ -273,6 +311,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
         }
         
         if (currentGroup.items.length > 1) {
+          currentGroup.items.sort(compareSubQuestions);
           currentGroup.is_merged_text = true;
         }
         
@@ -296,6 +335,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
     
     setShowAddResults(true); 
     setIsSearchingNew(true);
+    setSearchResultFilter("");
     
     try {
       let allSearched: any[] = [];
@@ -308,6 +348,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
         // 🌟 2. 검색 교재명 필터 적용 (두 단어 모두 포함)
         if (addBookName1.trim()) query = query.ilike("book_name", `%${addBookName1.trim()}%`);
         if (addBookName2.trim()) query = query.ilike("book_name", `%${addBookName2.trim()}%`);
+        if (addQuestionText.trim()) query = query.ilike("question", `%${addQuestionText.trim()}%`);
 
         const { data, error } = await query.limit(1000); // 넉넉하게 불러온 뒤 페이지 필터 적용
         
@@ -414,11 +455,39 @@ export default function LeftPanel({ examData }: { examData: any }) {
           </div>
           <div className="relative flex-1 bg-slate-50 min-h-0">
             <div className="absolute inset-0 overflow-y-auto custom-scrollbar flex flex-col pb-6">
-              <div className="sticky top-0 bg-slate-50/95 backdrop-blur-sm px-5 py-3 border-b border-slate-200 z-20 shadow-sm flex flex-col gap-3 shrink-0">
+              <div className="sticky top-0 bg-slate-50/95 backdrop-blur-sm px-5 py-3 border-b border-slate-200 z-20 shadow-sm flex flex-col gap-2.5 shrink-0">
                 <div className="flex justify-between items-center">
-                  <h4 className="font-bold text-slate-700 text-sm">문제 목록 및 순서</h4>
+                  <h4 className="font-bold text-slate-700 text-sm">
+                    문제 목록 및 순서
+                    {questionListSearch.trim() && (
+                      <span className="ml-1.5 text-xs font-bold text-brand">
+                        ({filteredQuestionEntries.length}/{questions.length})
+                      </span>
+                    )}
+                  </h4>
                   <span className="text-xs font-bold text-blue-500 bg-blue-100 border border-blue-200 px-2 py-1 rounded">✋ 드래그하거나 선택하여 이동</span>
                 </div>
+
+                {/* 🌟 문제 리스트 텍스트 검색 필터칸 */}
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={questionListSearch}
+                    onChange={(e) => setQuestionListSearch(e.target.value)}
+                    placeholder="🔍 문제 텍스트, 단원/유형, 출처 교재, 페이지, 난이도 검색..."
+                    className="w-full px-3 py-1.5 pr-8 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:border-brand focus:ring-1 focus:ring-brand shadow-sm"
+                  />
+                  {questionListSearch && (
+                    <button
+                      onClick={() => setQuestionListSearch("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                      title="검색어 지우기"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
+
                 <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm overflow-x-auto no-scrollbar">
                   <label className="flex items-center space-x-2 px-1 cursor-pointer shrink-0">
                     <input type="checkbox" checked={questions.length > 0 && checkedIds.size === questions.length} onChange={(e) => toggleAllChecks(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer" />
@@ -437,60 +506,66 @@ export default function LeftPanel({ examData }: { examData: any }) {
                 </div>
               </div>
               <ul className="p-4 space-y-2">
-                {questions.map((g: any, idx: number) => {
-                  const repQ = g.items[0];
-                  const diff = (repQ.difficulty || getDiffLabelByRate(repQ.solving_probability)).trim();
-                  const typeName = getTypeName(repQ) + (g.items.length > 1 ? ` 외 ${g.items.length-1}` : '');
-                  const depth5Name = getDepth5Name(repQ, depth5Map); 
-                  let diffColor = "border-blue-500 text-blue-600";
-                  if(diff === '최하') diffColor = "border-slate-400 text-slate-500";
-                  else if(diff === '하') diffColor = "border-sky-400 text-sky-500";
-                  else if(diff === '상') diffColor = "border-indigo-500 text-indigo-600";
-                  else if(diff === '최상') diffColor = "border-rose-500 text-rose-600";
+                {filteredQuestionEntries.length === 0 ? (
+                  <li className="text-center py-8 text-xs font-bold text-slate-400">
+                    검색 조건에 맞는 문항이 없습니다.
+                  </li>
+                ) : (
+                  filteredQuestionEntries.map(({ g, idx }: { g: any; idx: number }) => {
+                    const repQ = g.items[0];
+                    const diff = (repQ.difficulty || getDiffLabelByRate(repQ.solving_probability)).trim();
+                    const typeName = getTypeName(repQ) + (g.items.length > 1 ? ` 외 ${g.items.length-1}` : '');
+                    const depth5Name = getDepth5Name(repQ, depth5Map); 
+                    let diffColor = "border-blue-500 text-blue-600";
+                    if(diff === '최하') diffColor = "border-slate-400 text-slate-500";
+                    else if(diff === '하') diffColor = "border-sky-400 text-sky-500";
+                    else if(diff === '상') diffColor = "border-indigo-500 text-indigo-600";
+                    else if(diff === '최상') diffColor = "border-rose-500 text-rose-600";
 
-                  return (
-                    <li key={g.id} 
-                        draggable 
-                        onDragStart={(e) => handleDragStart(e, idx)} 
-                        onDragOver={handleDragOver} 
-                        onDrop={(e) => handleDrop(e, idx)}
-                        onClick={() => toggleCheck(g.id, !checkedIds.has(g.id))}
-                        className={`flex items-center justify-between bg-white hover:bg-blue-50 p-2.5 rounded-xl border transition-all shadow-sm cursor-pointer select-none ${draggedIdx === idx ? 'opacity-50 border-blue-400' : 'border-slate-200'}`}>
-                      <div className="flex items-center space-x-2 w-[55%] pointer-events-none">
-                        
-                        <input type="checkbox" checked={checkedIds.has(g.id)} readOnly className="w-4 h-4 rounded border-slate-300 accent-brand shrink-0" />
-                        
-                        <div className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-100 rounded cursor-grab pointer-events-auto" 
-                             title="드래그하여 순서 변경"
-                             onClick={(e) => e.stopPropagation()}>
-                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                    return (
+                      <li key={g.id} 
+                          draggable 
+                          onDragStart={(e) => handleDragStart(e, idx)} 
+                          onDragOver={handleDragOver} 
+                          onDrop={(e) => handleDrop(e, idx)}
+                          onClick={() => toggleCheck(g.id, !checkedIds.has(g.id))}
+                          className={`flex items-center justify-between bg-white hover:bg-blue-50 p-2.5 rounded-xl border transition-all shadow-sm cursor-pointer select-none ${draggedIdx === idx ? 'opacity-50 border-blue-400' : 'border-slate-200'}`}>
+                        <div className="flex items-center space-x-2 w-[55%] pointer-events-none">
+                          
+                          <input type="checkbox" checked={checkedIds.has(g.id)} readOnly className="w-4 h-4 rounded border-slate-300 accent-brand shrink-0" />
+                          
+                          <div className="p-1 text-slate-300 hover:text-blue-500 hover:bg-blue-100 rounded cursor-grab pointer-events-auto" 
+                               title="드래그하여 순서 변경"
+                               onClick={(e) => e.stopPropagation()}>
+                             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+                          </div>
+                          
+                          <span className="font-bold text-brand text-[15px] w-5 text-center cursor-pointer hover:underline pointer-events-auto" 
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }}>
+                            {idx + 1}
+                          </span>
+                          
+                          <div className="flex items-center space-x-1.5 overflow-hidden pointer-events-none">
+                            <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap">{typeName}</span>
+                            <span className={`text-[12px] font-bold px-1 border-l-2 ${diffColor}`}>{diff}</span>
+                          </div>
                         </div>
                         
-                        <span className="font-bold text-brand text-[15px] w-5 text-center cursor-pointer hover:underline pointer-events-auto" 
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                              }}>
-                          {idx + 1}
-                        </span>
-                        
-                        <div className="flex items-center space-x-1.5 overflow-hidden pointer-events-none">
-                          <span className="text-xs bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold border border-slate-200 whitespace-nowrap">{typeName}</span>
-                          <span className={`text-[12px] font-bold px-1 border-l-2 ${diffColor}`}>{diff}</span>
+                        <div className="text-[12px] text-slate-600 font-bold truncate w-[45%] text-right cursor-pointer hover:underline pointer-events-auto" 
+                             title={depth5Name} 
+                             onClick={(e) => {
+                               e.stopPropagation();
+                               document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                             }}>
+                          {depth5Name}
                         </div>
-                      </div>
-                      
-                      <div className="text-[12px] text-slate-600 font-bold truncate w-[45%] text-right cursor-pointer hover:underline pointer-events-auto" 
-                           title={depth5Name} 
-                           onClick={(e) => {
-                             e.stopPropagation();
-                             document.getElementById(`problem-card-${idx}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                           }}>
-                        {depth5Name}
-                      </div>
-                    </li>
-                  );
-                })}
+                      </li>
+                    );
+                  })
+                )}
               </ul>
             </div>
           </div>
@@ -510,8 +585,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
                 <button onClick={searchNewQuestions} className="px-5 py-2.5 bg-brand text-white text-sm font-bold rounded-lg shadow-sm hover:bg-blue-900 transition-colors">문항 검색하기</button>
               </div>
 
-              {/* 🌟 1. 검색 필터 UI 패널 추가 */}
-              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 shadow-inner">
+              {/* 🌟 1. 검색 필터 UI 패널 */}
+              <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 shadow-inner space-y-3">
                 <div className="grid grid-cols-2 gap-6">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2">교재명 키워드 필터</label>
@@ -519,12 +594,12 @@ export default function LeftPanel({ examData }: { examData: any }) {
                       <input 
                         type="text" placeholder="단어 1 (예: 쎈)" 
                         value={addBookName1} onChange={(e) => setAddBookName1(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand bg-white" 
                       />
                       <input 
                         type="text" placeholder="단어 2 (옵션)" 
                         value={addBookName2} onChange={(e) => setAddBookName2(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand bg-white" 
                       />
                     </div>
                   </div>
@@ -534,16 +609,36 @@ export default function LeftPanel({ examData }: { examData: any }) {
                       <input 
                         type="number" placeholder="시작" min="1"
                         value={addPageStart} onChange={(e) => setAddPageStart(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand text-center" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand text-center bg-white" 
                       />
                       <span className="text-slate-400 font-bold">~</span>
                       <input 
                         type="number" placeholder="끝" min="1"
                         value={addPageEnd} onChange={(e) => setAddPageEnd(e.target.value)} 
-                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand text-center" 
+                        className="w-full px-3 py-1.5 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand text-center bg-white" 
                       />
                       <span className="text-slate-500 font-bold text-sm shrink-0">p</span>
                     </div>
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">문제 텍스트 키워드 필터</label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      placeholder="🔍 문제 지문 내 포함된 텍스트로 검색 (옵션)..."
+                      value={addQuestionText}
+                      onChange={(e) => setAddQuestionText(e.target.value)}
+                      className="w-full px-3 py-1.5 pr-8 border border-slate-300 rounded text-sm font-bold focus:outline-none focus:border-brand bg-white"
+                    />
+                    {addQuestionText && (
+                      <button
+                        onClick={() => setAddQuestionText("")}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                      >
+                        ✕
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -585,15 +680,41 @@ export default function LeftPanel({ examData }: { examData: any }) {
             </div>
           ) : (
             <div className="flex-1 flex flex-col overflow-hidden min-h-0">
-              <div className="px-6 py-4 bg-white border-b border-slate-200 flex justify-between items-center shrink-0 shadow-sm">
-                <div><h3 className="font-bold text-lg flex items-center gap-2">📑 문항 검색 결과 <span className="text-brand bg-blue-50 px-2 py-0.5 rounded text-sm">{newSearchResults.length}</span></h3></div>
-                <button onClick={() => setShowAddResults(false)} className="px-4 py-2 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg border border-slate-300 hover:bg-slate-200 transition-colors">⟵ 다시 선택</button>
+              <div className="px-6 py-4 bg-white border-b border-slate-200 flex flex-col gap-3 shrink-0 shadow-sm">
+                <div className="flex justify-between items-center">
+                  <div>
+                    <h3 className="font-bold text-lg flex items-center gap-2">
+                      📑 문항 검색 결과
+                      <span className="text-brand bg-blue-50 px-2 py-0.5 rounded text-sm">
+                        {searchResultFilter.trim() ? `${filteredNewSearchResults.length} / ${newSearchResults.length}` : newSearchResults.length}
+                      </span>
+                    </h3>
+                  </div>
+                  <button onClick={() => setShowAddResults(false)} className="px-4 py-2 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg border border-slate-300 hover:bg-slate-200 transition-colors">⟵ 다시 선택</button>
+                </div>
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={searchResultFilter}
+                    onChange={(e) => setSearchResultFilter(e.target.value)}
+                    placeholder="🔍 검색된 문제 리스트 내 텍스트, 출처, 유형 필터..."
+                    className="w-full px-3 py-1.5 pr-8 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:bg-white focus:border-brand focus:ring-1 focus:ring-brand"
+                  />
+                  {searchResultFilter && (
+                    <button
+                      onClick={() => setSearchResultFilter("")}
+                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                    >
+                      ✕
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="relative flex-1 bg-slate-50 min-h-0">
                 <div className="absolute inset-0 overflow-y-auto custom-scrollbar p-6 space-y-4">
                   {isSearchingNew ? <div className="text-center py-20 font-bold text-slate-400">문제를 검색 중입니다...</div> :
-                   newSearchResults.length === 0 ? <div className="text-center py-10 font-bold text-slate-400">조건에 맞는 새로운 문항이 없습니다.</div> :
-                   newSearchResults.map((q: any) => {
+                   filteredNewSearchResults.length === 0 ? <div className="text-center py-10 font-bold text-slate-400">조건에 맞는 새로운 문항이 없습니다.</div> :
+                   filteredNewSearchResults.map((q: any) => {
                      const d = q.difficulty || getDiffLabelByRate(q.solving_probability);
                      const d6 = getDepth6Name(q, depth6Map);
                      let diffColor = "text-blue-500 bg-blue-50 border-blue-100";

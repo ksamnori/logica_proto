@@ -21,6 +21,7 @@ export default function ExamListPage() {
   const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>('ALL');
   const [filterGrade, setFilterGrade] = useState("ALL");
   const [filterCreator, setFilterCreator] = useState("ALL");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [publishModal, setPublishModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
   const [gradingModal, setGradingModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
@@ -276,13 +277,33 @@ export default function ExamListPage() {
       const instructor = Array.isArray(exam.instructor) ? exam.instructor[0] : exam.instructor;
       const creatorName = instructor?.name || '시스템 선생님';
       const matchCreator = filterCreator === 'ALL' || creatorName === filterCreator;
+
+      const q = searchQuery.trim().toLowerCase();
+      let matchSearch = true;
+      if (q) {
+        const titleStr = String(exam.title || '').toLowerCase();
+        const subTitleStr = String(exam.sub_title || '').toLowerCase();
+        const scopeStartStr = String(exam.scope_start || '').toLowerCase();
+        const scopeEndStr = String(exam.scope_end || '').toLowerCase();
+        const gradeStr = String(exam.major_grade || '').toLowerCase();
+        const typeLower = String(typeStr).toLowerCase();
+        const creatorLower = String(creatorName).toLowerCase();
+        matchSearch =
+          titleStr.includes(q) ||
+          subTitleStr.includes(q) ||
+          scopeStartStr.includes(q) ||
+          scopeEndStr.includes(q) ||
+          gradeStr.includes(q) ||
+          typeLower.includes(q) ||
+          creatorLower.includes(q);
+      }
       
-      return matchMainTab && matchGrade && matchCreator;
+      return matchMainTab && matchGrade && matchCreator && matchSearch;
     });
-  }, [exams, mainTab, filterGrade, filterCreator]);
+  }, [exams, mainTab, filterGrade, filterCreator, searchQuery]);
 
   const resetFilters = () => {
-    setMainTab("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL");
+    setMainTab("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL"); setSearchQuery("");
   };
 
   const deleteExam = async (examId: string, examType: string, assignCount: number) => {
@@ -417,7 +438,27 @@ export default function ExamListPage() {
           </button>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <div className="relative w-64 sm:w-72">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400 pointer-events-none">🔍</span>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="문제지 제목, 부제목, 범위, 출제자 검색..."
+              className="w-full pl-9 pr-8 py-2 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand bg-white shadow-inner"
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery("")}
+                className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-slate-400 hover:text-rose-500 font-bold text-xs"
+                title="검색어 지우기"
+              >
+                ✕
+              </button>
+            )}
+          </div>
           <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">학년 전체</option>
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g as string}</option>)}
