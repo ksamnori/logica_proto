@@ -1,0 +1,146 @@
+// src/app/student/shop/page.tsx
+"use client";
+
+import React, { useEffect, useState, useCallback } from 'react';
+import { useRouter } from 'next/navigation';
+import { supabase } from '@/lib/supabase';
+import { listProducts, purchaseProduct, ShopProduct } from '@/app/actions/shopProducts';
+import { getPointBalance } from '@/app/actions/shopPoints';
+import PointBadge from '@/components/clinic/PointBadge';
+
+export default function StudentShopPage() {
+  const router = useRouter();
+  const [studentInfo, setStudentInfo] = useState({ id: '', name: '', tenantId: '' });
+  const [products, setProducts] = useState<ShopProduct[]>([]);
+  const [points, setPoints] = useState<number | null>(null);
+  const [confirmTarget, setConfirmTarget] = useState<ShopProduct | null>(null);
+  const [purchasing, setPurchasing] = useState(false);
+  const [toast, setToast] = useState('');
+
+  // 🌟 tenantId를 받아서 상품을 로드하도록 수정
+  const loadProducts = useCallback((tId: string) => {
+    if (!tId) return;
+    listProducts(tId).then(setProducts).catch(err => console.error('상품 조회 중 오류:', err));
+  }, []);
+
+  useEffect(() => {
+    const sId = localStorage.getItem('logica_student_id');
+    const sName = localStorage.getItem('logica_student_name');
+    const sTenantId = localStorage.getItem('logica_tenant_id') || 'hq'; // 🌟 로컬스토리지에서 지점 정보 획득
+
+    if (!sId || !sName) { router.push('/student/login'); return; }
+    
+    setStudentInfo({ id: sId, name: sName, tenantId: sTenantId });
+    loadProducts(sTenantId);
+    getPointBalance(sId).then(setPoints).catch(err => console.error('포인트 조회 중 오류:', err));
+  }, [router, loadProducts]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const t = setTimeout(() => setToast(''), 2500);
+    return () => clearTimeout(t);
+  }, [toast]);
+
+  // 🌟 내 지점 상품만 실시간 동기화하도록 필터 적용
+  useEffect(() => {
+    if (!studentInfo.tenantId) return;
+    const channel = supabase.channel(`shop_product_student_sync_${studentInfo.tenantId}`)
+      .on(
+        'postgres_changes', 
+        { event: '*', schema: 'public', table: 'shop_product', filter: `tenant_id=eq.${studentInfo.tenantId}` }, 
+        () => loadProducts(studentInfo.tenantId)
+      )
+      .subscribe();
+    return () => { supabase.removeChannel(channel); };
+  }, [studentInfo.tenantId, loadProducts]);
+
+  const confirmPurchase = async () => {
+    if (!confirmTarget || purchasing || !studentInfo.tenantId) return;
+    setPurchasing(true);
+    try {
+      // 🌟 [수정] 서버 액션에 tenantId 전달
+      const result = await purchaseProduct(studentInfo.tenantId, studentInfo.id, studentInfo.name, confirmTarget.id);
+      
+      if (result.success) {
+        setPoints(await getPointBalance(studentInfo.id));
+        loadProducts(studentInfo.tenantId); 
+        setToast(`🎉 [${confirmTarget.name}] 구매 완료!`);
+      } else {
+        setToast(result.message || '구매에 실패했습니다.');
+      }
+    } finally {
+      setPurchasing(false);
+      setConfirmTarget(null);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-100 font-['Pretendard']">
+      <nav className="bg-white px-8 py-4 flex justify-between items-center border-b border-slate-200 sticky top-0 z-20 shadow-sm">
+        <div className="flex items-center gap-4">
+          <button onClick={() => router.push('/student/portal')} className="text-slate-400 hover:text-slate-700 font-bold text-sm">← 포탈로</button>
+          <h1 className="text-lg font-bold text-brand">🛒 포인트 상점</h1>
+        </div>
+        <PointBadge points={points} className="bg-amber-50 border-amber-200 text-amber-600" />
+      </nav>
+
+      <main className="max-w-[1200px] mx-auto p-6 md:p-8">
+        {products.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-slate-200 p-16 text-center text-slate-400 font-bold">
+            아직 등록된 상품이 없습니다. 선생님이 상품을 추가할 때까지 기다려주세요!
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
+            {products.map(p => {
+              const soldOut = p.stock !== null && p.stock <= 0;
+              const affordable = points !== null && points >= p.price;
+              const canBuy = affordable && !soldOut;
+              return (
+                <div key={p.id} className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                  <div className="aspect-square bg-slate-100 flex items-center justify-center overflow-hidden relative">
+                    {p.imageDataUrl ? <img src={p.imageDataUrl} className="w-full h-full object-cover" /> : <span className="text-4xl">🎁</span>}
+                    {soldOut && (
+                      <div className="absolute inset-0 bg-slate-900/50 flex items-center justify-center">
+                        <span className="text-white font-bold text-sm">품절</span>
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-4 flex flex-col flex-1">
+                    <h3 className="font-bold text-slate-800 text-sm truncate">{p.name}</h3>
+                    {p.description && <p className="text-xs text-slate-400 mt-1 line-clamp-2 flex-1">{p.description}</p>}
+                    {p.stock !== null && !soldOut && <p className="text-xs text-slate-400 mt-1">재고 {p.stock}개</p>}
+                    <div className="flex items-center justify-between mt-3">
+                      <span className="font-bold text-amber-600 font-lexend">{p.price.toLocaleString()} P</span>
+                      <button onClick={() => setConfirmTarget(p)} disabled={!canBuy} className="bg-brand hover:bg-blue-900 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white text-xs font-bold px-3 py-2 rounded-lg transition-colors">
+                        {soldOut ? '품절' : affordable ? '구매하기' : points !== null ? `${(p.price - points).toLocaleString()}P 부족` : '포인트 부족'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {confirmTarget && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 px-6">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm text-center shadow-2xl">
+            <p className="font-bold text-slate-800 mb-1">[{confirmTarget.name}]</p>
+            <p className="text-sm text-slate-500 mb-2">{confirmTarget.price.toLocaleString()} P를 사용해서 구매할까요?</p>
+            <div className="flex gap-2 mt-3">
+              <button onClick={() => setConfirmTarget(null)} disabled={purchasing} className="flex-1 py-2.5 rounded-xl border border-slate-200 text-slate-500 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50">취소</button>
+              <button onClick={confirmPurchase} disabled={purchasing} className="flex-1 py-2.5 rounded-xl bg-brand text-white text-sm font-semibold shadow-md hover:bg-blue-900 disabled:opacity-50">{purchasing ? '처리 중...' : '구매 확정'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {toast && (
+        <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-sm font-bold px-5 py-3 rounded-full shadow-2xl z-50 animate-[fadeIn_0.2s_ease-out]">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}

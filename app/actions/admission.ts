@@ -1,0 +1,156 @@
+// src/app/actions/admission.ts
+"use server";
+
+import { createClient } from "@supabase/supabase-js";
+import { cookies } from "next/headers";
+import { revalidatePath } from "next/cache"; // 🌟 [추가] Next.js 캐시 초기화를 위한 함수 임포트
+
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+
+const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey, {
+  auth: { autoRefreshToken: false, persistSession: false }
+});
+
+// 🌟 [핵심 변경] 직관적인 쿠키 읽기로 통일!
+async function getTenantId() {
+  const cookieStore = await cookies();
+  return cookieStore.get("logica_tenant_id")?.value;
+}
+
+// 🌟 프론트엔드에서 명시적으로 tenantId를 넘겨줄 수 있도록 파라미터(clientTenantId) 추가
+export async function assignStudents(sessionId: string, examId: string | null, studentIds: string[], clientTenantId?: string) {
+  const tenantId = clientTenantId || await getTenantId();
+  if (!tenantId) return { success: false, message: "소속 지점 정보(쿠키)가 없습니다. 다시 로그인해주세요." };
+
+  try {
+    const { data: sessionData } = await supabaseAdmin
+      .from('admission_session')
+      .select('tenant_id')
+      .eq('admission_session_id', sessionId)
+      .single();
+
+    if (!sessionData || sessionData.tenant_id !== tenantId) {
+      throw new Error("접근 권한이 없는 일정이거나 잘못된 요청입니다.");
+    }
+
+    const appData = studentIds.map(id => ({ admission_session_id: sessionId, student_id: id, status: '예약완료' }));
+    const { error: appError } = await supabaseAdmin.from('admission_application').insert(appData);
+    if (appError) throw new Error(`[입학 배정 에러] ${appError.message}`);
+
+    if (examId && examId !== 'null' && examId !== '') {
+      // 💡 [중요] exam_assignment에 tenant_id 값을 필수로 포함하여 Insert
+      const shadowData = studentIds.map(id => ({ 
+        student_id: id, 
+        admission_session_id: sessionId, 
+        exam_id: examId, 
+        status: '미응시',
+        tenant_id: tenantId 
+      }));
+      const { error: shadowError } = await supabaseAdmin.from('exam_assignment').insert(shadowData);
+      if (shadowError) throw new Error(`[시험지 연결 에러] ${shadowError.message}`);
+    }
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}
+
+export async function unassignStudentAction(studentId: string, sessionId: string) {
+  const tenantId = await getTenantId();
+  if (!tenantId) return { success: false, message: "인증이 만료되었습니다. 다시 로그인해주세요." };
+
+  try {
+    const { data: sessionData } = await supabaseAdmin.from('admission_session').select('tenant_id').eq('admission_session_id', sessionId).single();
+    if (!sessionData || sessionData.tenant_id !== tenantId) throw new Error("권한이 없습니다.");
+
+    const { data: assignments, error: fetchErr } = await supabaseAdmin.from('exam_assignment').select('assignment_id').eq('student_id', studentId).eq('admission_session_id', sessionId);
+    if (fetchErr) throw new Error(fetchErr.message);
+    
+    if (assignments && assignments.length > 0) {
+      for (let a of assignments) {
+        await supabaseAdmin.from('student_answer').delete().eq('exam_assignment_id', a.assignment_id);
+        await supabaseAdmin.from('student_exam_result').delete().eq('assignment_id', a.assignment_id);
+        const { error: delAssignErr } = await supabaseAdmin.from('exam_assignment').delete().eq('assignment_id', a.assignment_id);
+        if (delAssignErr) throw new Error(delAssignErr.message);
+      }
+    }
+    const { error: delAppErr } = await supabaseAdmin.from('admission_application').delete().eq('admission_session_id', sessionId).eq('student_id', studentId);
+    if (delAppErr) throw new Error(delAppErr.message);
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}
+
+// 🌟 상담 결과 업데이트 로직 (검증 로직 추가 및 자동 승급 조건 변경)
+export async function updateCounselingResult(appId: string, studentId: string, result: string, memo: string) {
+  const tenantId = await getTenantId();
+  if (!tenantId) return { success: false, message: "권한이 없습니다. 다시 로그인해주세요." };
+
+  try {
+    // 💡 .select()를 추가하여 실제 업데이트가 성공적으로 발생했는지 확인합니다.
+    const { data: updatedData, error: upAppErr } = await supabaseAdmin
+      .from('admission_application')
+      .update({ test_result: result, counseling_memo: memo })
+      .eq('application_id', appId)
+      .select();
+      
+    if (upAppErr) throw new Error(upAppErr.message);
+
+    // 💡 업데이트된 행이 없다면 appId가 잘못되었거나 매칭되는 데이터가 없는 것입니다.
+    if (!updatedData || updatedData.length === 0) {
+      throw new Error("업데이트할 대상을 찾지 못했습니다. 올바른 데이터를 선택했는지 확인해주세요.");
+    }
+
+    // 💡 '합격' -> '수강 등록'으로 프론트엔드 파이프라인과 일치시켰습니다.
+    if (result === '수강 등록') {
+      const { data: stuData } = await supabaseAdmin.from('student').select('tenant_id').eq('student_id', studentId).single();
+      if (stuData && stuData.tenant_id === tenantId) {
+        const { error: upStErr } = await supabaseAdmin.from('student').update({ status: '재원' }).eq('student_id', studentId);
+        if (upStErr) throw new Error(upStErr.message);
+      }
+    }
+    
+    // 🌟 [핵심 해결책] DB 업데이트가 성공한 직후, 라우터 캐시를 날려버립니다.
+    // 이렇게 하면 프론트엔드가 아까 받아둔 과거 데이터를 버리고 최신 상태('결과 통보', '수강 등록' 등)를 서버에서 다시 그려옵니다.
+    revalidatePath('/', 'layout');
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}
+
+// 🌟 프론트엔드에서 넘겨준 파라미터(clientTenantId)를 처리
+export async function forceAssignExamAction(studentId: string, sessionId: string, examId: string, clientTenantId?: string) {
+  const tenantId = clientTenantId || await getTenantId();
+  if (!tenantId) return { success: false, message: "권한이 없습니다. 다시 로그인해주세요." };
+
+  try {
+    const { data: sessionData } = await supabaseAdmin.from('admission_session').select('tenant_id').eq('admission_session_id', sessionId).single();
+    if (!sessionData || sessionData.tenant_id !== tenantId) throw new Error("권한이 없습니다.");
+
+    const { data: existing, error: fetchErr } = await supabaseAdmin.from('exam_assignment').select('assignment_id').eq('student_id', studentId).eq('exam_id', examId);
+    if (fetchErr) throw new Error(fetchErr.message);
+
+    if (existing && existing.length > 0) {
+      const { error: upErr } = await supabaseAdmin.from('exam_assignment').update({ admission_session_id: sessionId }).eq('assignment_id', existing[0].assignment_id);
+      if (upErr) throw new Error(upErr.message);
+    } else {
+      // 💡 [중요] 새로 시험지를 매핑(Insert)할 때 tenant_id 필수 추가
+      const { error: insErr } = await supabaseAdmin.from('exam_assignment').insert([{ 
+        student_id: studentId, 
+        admission_session_id: sessionId, 
+        exam_id: examId, 
+        status: '미응시',
+        tenant_id: tenantId 
+      }]);
+      if (insErr) throw new Error(insErr.message);
+    }
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, message: error.message };
+  }
+}

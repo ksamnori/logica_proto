@@ -1,0 +1,701 @@
+// src/components/student/StudentEditModal.tsx
+"use client";
+
+import React, { useState, useEffect, useMemo } from "react";
+import { supabase } from "@/lib/supabase";
+import { formatPhone as toPhone, normalizeGrade, phoneVariants, GRADE_OPTIONS } from "@/lib/normalize";
+import { hashPin } from "@/app/actions/studentAuth"; 
+import { deleteStudentCompletely } from "@/app/actions/consultation";
+
+interface StudentEditModalProps {
+  isOpen: boolean;
+  studentId: string;
+  student: any;
+  enrollments: any[];
+  allClasses: any[];
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+const LEVEL_FILTERS = ["전체", "Ultimate", "Master", "Apex", "Titan", "Horizon", "특강", "메이크업/보강"];
+
+export default function StudentEditModal({ 
+  isOpen, 
+  studentId, 
+  student, 
+  enrollments, 
+  allClasses, 
+  onClose, 
+  onSuccess 
+}: StudentEditModalProps) {
+  
+  const [editForm, setEditForm] = useState({
+    name: "", 
+    gender: "", 
+    status: "재원", 
+    school: "", 
+    grade: "", 
+    phone: "",
+    passwordHash: "",
+    hasPin: false,
+    parentId: "", 
+    // 학부모 정보 1 (메인)
+    parentName: "", 
+    parentRel: "", 
+    parentPhone: "", 
+    hasParentPw1: false,
+    // 학부모 정보 2 (추가)
+    parentName2: "",
+    parentRel2: "", 
+    parentPhone2: "", 
+    hasParentPw2: false,
+    newClassId: ""
+  });
+  
+  const [assignStatus, setAssignStatus] = useState("수강중");
+  const [isSaving, setIsSaving] = useState(false);
+  const [resettingSlot, setResettingSlot] = useState<number | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [levelFilter, setLevelFilter] = useState("전체");
+
+  // 현재 소속된(수강중/예약) 수강반만 필터링 (수강종료 제외)
+  const activeEnrollments = useMemo(() => {
+    return (enrollments || []).filter((e: any) => !isEndedEnrollment(e));
+  }, [enrollments]);
+
+  useEffect(() => {
+    const role = localStorage.getItem("logica_instructor_role") || "";
+    const position = localStorage.getItem("logica_instructor_position") || "";
+    const adminFlag = ["SUPER_ADMIN", "ADMIN"].includes(role.toUpperCase()) || 
+                      ["최고관리자", "대장", "원장"].some(p => position.includes(p));
+    setIsSuperAdmin(adminFlag);
+
+    if (isOpen && student) {
+      const parentObj = unwrap(student.parent);
+
+      setEditForm({
+        name: student.name || "", 
+        gender: student.gender || "", 
+        status: student.status || "재원", 
+        school: student.school || "", 
+        grade: normalizeGrade(student.grade, student.school) || "", 
+        phone: student.phone || "",
+        passwordHash: "", 
+        hasPin: !!(student.password_hash && String(student.password_hash).trim() !== ""),
+        parentId: student.parent_id || parentObj?.parent_id || "", 
+        parentName: parentObj?.name || "", 
+        parentRel: parentObj?.relationship || "", 
+        parentPhone: parentObj?.phone?.includes('unassigned') ? "" : (parentObj?.phone || ""), 
+        hasParentPw1: !!(parentObj?.password_hash && String(parentObj.password_hash).trim() !== ""),
+        parentName2: parentObj?.name_2 || "",
+        parentRel2: parentObj?.relationship_2 || "",
+        parentPhone2: parentObj?.phone_2 || "",
+        hasParentPw2: !!(parentObj?.password_hash_2 && String(parentObj.password_hash_2).trim() !== ""),
+        newClassId: ""
+      });
+      setAssignStatus("수강중");
+      setLevelFilter("전체"); 
+    }
+  }, [isOpen, student]);
+
+  const formatPhone = (val: string) => {
+    let v = val.replace(/[^0-9]/g, '');
+    if (v.length > 3 && v.length <= 7) return v.replace(/(\d{3})(\d+)/, '$1-$2');
+    if (v.length > 7) return v.replace(/(\d{3})(\d{4})(\d+)/, '$1-$2-$3');
+    return v;
+  };
+
+  // 학부모 번호별 개별 비밀번호 재설정(삭제) 함수
+  const resetParentPassword = async (slot: 1 | 2) => {
+    const targetPhone = slot === 1 ? editForm.parentPhone : editForm.parentPhone2;
+    const cleanPhone = toPhone(targetPhone);
+    const label = slot === 1 ? "학부모 1 (메인)" : "학부모 2 (추가)";
+    const targetColumn = slot === 1 ? "password_hash" : "password_hash_2";
+
+    if (!editForm.parentId && !cleanPhone) {
+      alert("연결된 학부모 정보나 입력된 연락처가 없습니다.");
+      return;
+    }
+
+    if (!confirm(`[${label}] 연락처의 비밀번호를 재설정(삭제)하시겠습니까?`)) return;
+
+    setResettingSlot(slot);
+    try {
+      // 1. 현재 학생과 연결된 parent_id의 해당 슬롯 비밀번호만 삭제
+      if (editForm.parentId) {
+        const { error } = await supabase
+          .from("parent")
+          .update({ [targetColumn]: null })
+          .eq("parent_id", editForm.parentId);
+        if (error) throw error;
+      }
+
+      // 2. 동일한 번호가 다른 행의 phone / phone_2 / phone_3에 등록된 경우 해당 컬럼의 비밀번호도 함께 삭제
+      if (cleanPhone) {
+        const variants = phoneVariants(cleanPhone);
+
+        const [res1, res2, res3] = await Promise.all([
+          supabase.from("parent").update({ password_hash: null }).in("phone", variants),
+          supabase.from("parent").update({ password_hash_2: null }).in("phone_2", variants),
+          supabase.from("parent").update({ password_hash_3: null }).in("phone_3", variants),
+        ]);
+
+        if (res1.error) throw res1.error;
+        if (res2.error) throw res2.error;
+        if (res3.error) throw res3.error;
+      }
+
+      // UI 상태 즉시 반영
+      setEditForm(prev => ({
+        ...prev,
+        ...(slot === 1 ? { hasParentPw1: false } : { hasParentPw2: false })
+      }));
+
+      alert(`[${label}] 비밀번호가 성공적으로 삭제(초기화)되었습니다.`);
+      onSuccess();
+    } catch (e: any) {
+      alert("비밀번호 재설정 실패: " + (e.message || "알 수 없는 오류"));
+    } finally {
+      setResettingSlot(null);
+    }
+  };
+
+  const submitEditStudent = async () => {
+    if (editForm.passwordHash && editForm.passwordHash.length !== 4) {
+      alert("비밀번호(PIN)는 숫자 4자리로 설정해주세요.");
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      let finalParentId = editForm.parentId || null;
+      const inputPhone = toPhone(editForm.parentPhone);
+      const inputName = editForm.parentName.trim();
+      const inputRel = editForm.parentRel.trim();
+
+      const inputName2 = editForm.parentName2.trim() || null;
+      const inputPhone2 = toPhone(editForm.parentPhone2) || null;
+      const inputRel2 = editForm.parentRel2.trim() || null;
+
+      const parentPayloadBase = {
+        name: inputName,
+        relationship: inputRel,
+        name_2: inputName2,
+        relationship_2: inputRel2,
+        phone_2: inputPhone2
+      };
+
+      // 학부모 정보 1, 2가 모두 비어있는 경우
+      if (!inputPhone && !inputName && !inputRel && !inputName2 && !inputPhone2 && !inputRel2) {
+        finalParentId = null;
+      } else {
+        if (inputPhone) {
+          const { data: existingParent } = await supabase
+            .from("parent")
+            .select("parent_id")
+            .in("phone", phoneVariants(inputPhone))
+            .limit(1)
+            .maybeSingle();
+
+          if (existingParent) {
+            finalParentId = existingParent.parent_id;
+            const { error: pUpdateErr } = await supabase
+              .from("parent")
+              .update(parentPayloadBase)
+              .eq("parent_id", finalParentId);
+            if (pUpdateErr) throw pUpdateErr;
+          } else if (finalParentId) {
+            const { error: pUpdateErr } = await supabase
+              .from("parent")
+              .update({ phone: inputPhone, ...parentPayloadBase })
+              .eq("parent_id", finalParentId);
+            if (pUpdateErr) throw pUpdateErr;
+          } else {
+            const { data: newParent, error: pInsertErr } = await supabase
+              .from("parent")
+              .insert({ phone: inputPhone, ...parentPayloadBase })
+              .select()
+              .single();
+            if (pInsertErr) throw pInsertErr;
+            finalParentId = newParent.parent_id;
+          }
+        } else {
+          // 대표 전화번호가 비어있는 경우
+          if (finalParentId) {
+            const { error: pUpdateErr } = await supabase
+              .from("parent")
+              .update(parentPayloadBase)
+              .eq("parent_id", finalParentId);
+            if (pUpdateErr) throw pUpdateErr;
+          } else {
+            const dummyPhone = `unassigned_${Date.now()}`;
+            const { data: newParent, error: pInsertErr } = await supabase
+              .from("parent")
+              .insert({ phone: dummyPhone, ...parentPayloadBase })
+              .select()
+              .single();
+            if (pInsertErr) throw pInsertErr;
+            finalParentId = newParent.parent_id;
+          }
+        }
+      }
+
+      const studentUpdates: any = {
+        name: editForm.name, 
+        gender: editForm.gender || null, 
+        status: editForm.status, 
+        school: editForm.school, 
+        grade: normalizeGrade(editForm.grade, editForm.school), 
+        phone: toPhone(editForm.phone) || null,
+        // 빈칸이면 기존 PIN 유지 (아래에서 조건부로 추가)
+        parent_id: finalParentId
+      };
+
+      // 🌟 PIN 칸에 입력이 있을 때만 변경. 빈칸이면 기존 PIN 그대로 유지됩니다.
+      if (editForm.passwordHash) {
+        studentUpdates.password_hash = await hashPin(editForm.passwordHash);
+      }
+
+      const { error: studentUpdateError } = await supabase
+        .from("student")
+        .update(studentUpdates)
+        .eq("student_id", studentId);
+        
+      if (studentUpdateError) throw studentUpdateError;
+
+      // 퇴원 또는 휴원 처리 시 진행 중인 수강반도 수강종료 처리할지 여부와 무관하게 새로고침 신호 전달
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+
+      alert("학생 및 학부모 정보가 성공적으로 수정되었습니다.");
+      onSuccess();
+      onClose();
+    } catch (e: any) { 
+      const errMsg = e.message || e.details || JSON.stringify(e) || "알 수 없는 에러";
+      if (errMsg.includes("unique constraint") || e.code === "23505") {
+        alert("저장 실패: 입력하신 메인 학부모 연락처가 이미 다른 학부모의 번호로 등록되어 있습니다.");
+      } else {
+        alert("정보 저장 실패: " + errMsg); 
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const addEnrollment = async () => {
+    if (!editForm.newClassId) return alert("추가할 수강반을 선택해주세요.");
+    const existingActive = activeEnrollments.find(e => String(e.class_id) === String(editForm.newClassId));
+    if (existingActive) return alert("이미 해당 수강반에 배정되어 있습니다.");
+
+    const today = new Date().toISOString().split('T')[0];
+
+    try {
+      const existingEnded = (enrollments || []).find(
+        e => String(e.class_id) === String(editForm.newClassId) && isEndedEnrollment(e)
+      );
+
+      if (existingEnded) {
+        const { error } = await supabase
+          .from("enrollment")
+          .update({
+            status: assignStatus,
+            end_date: null,
+            start_date: today
+          })
+          .eq("enrollment_id", existingEnded.enrollment_id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from("enrollment").insert({ 
+          student_id: studentId, 
+          class_id: editForm.newClassId, 
+          start_date: today, 
+          status: assignStatus 
+        });
+        if (error) throw error;
+      }
+      
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      alert("수강반 배정이 추가되었습니다.");
+      setEditForm({ ...editForm, newClassId: "" });
+      onSuccess();
+    } catch (e: any) { 
+      alert("배정 추가 실패: " + e.message); 
+    }
+  };
+
+  const changeEnrollmentStatus = async (enrollId: string, newStatus: string) => {
+    if (!confirm(`해당 수강반 상태를 '${newStatus}'(으)로 변경하시겠습니까?`)) return;
+    try {
+      const { error } = await supabase
+        .from("enrollment")
+        .update({ status: newStatus, end_date: null })
+        .eq("enrollment_id", enrollId);
+      if (error) throw error;
+
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      onSuccess();
+    } catch (e: any) {
+      alert("상태 변경 실패: " + e.message);
+    }
+  };
+
+  const endEnrollment = async (enrollId: string) => {
+    if (!confirm("해당 수강반에서 제외(수강종료)하시겠습니까?\n(출결 등 과거 수강 기록은 보존되며, 상태가 '수강종료'로 변경됩니다.)")) return;
+
+    const today = new Date().toISOString().split('T')[0];
+    try {
+      const { error } = await supabase
+        .from("enrollment")
+        .update({
+          status: "수강종료",
+          end_date: today
+        })
+        .eq("enrollment_id", enrollId);
+      if (error) throw error;
+
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      alert("수강종료 처리되었습니다.");
+      onSuccess();
+    } catch (e: any) {
+      alert("❌ 수강종료 처리 실패: " + e.message);
+    }
+  };
+
+  const removeEnrollment = async (enrollId: string) => {
+    if (!confirm("⚠️ [경고] 해당 수강반 배정 기록과 연결된 모든 출석 기록(테스트 데이터)이 강제 삭제됩니다.\n정말로 진행하시겠습니까?")) return;
+    
+    try {
+      await supabase.from("attendance").delete().eq("enrollment_id", enrollId);
+      const { error: parentError } = await supabase.from("enrollment").delete().eq("enrollment_id", enrollId);
+      if (parentError) throw parentError;
+
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      alert("관련 테스트 데이터까지 모두 강제 삭제되었습니다.");
+      onSuccess();
+    } catch (e: any) {
+      alert("❌ 강제 삭제 실패: " + e.message);
+    }
+  };
+
+  const deleteStudent = async () => {
+    if (!confirm(`[🚨 초강력 경고]\n정말 [${editForm.name}] 학생을 영구 삭제하시겠습니까?\n\n이 작업은 절대 되돌릴 수 없으며, 학생의 출석, 성적, 오답노트, 상담 내역 등 모든 연관 데이터가 흔적도 없이 연쇄 파괴됩니다.`)) return;
+
+    setIsSaving(true);
+    try {
+      await supabase.from("attendance").delete().eq("student_id", studentId);
+      await supabase.from("enrollment").delete().eq("student_id", studentId);
+
+      const res = await deleteStudentCompletely(studentId);
+      if (!res.success) throw new Error(res.message);
+
+      localStorage.setItem("logica_refresh_signal", Date.now().toString());
+      alert(`🎉 [${editForm.name}] 학생의 모든 데이터가 완벽하게 삭제되었습니다.`);
+      onSuccess();
+      onClose();
+    } catch (e: any) {
+      alert(`❌ 학생 영구 삭제 실패:\n${e.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const filteredClasses = allClasses.filter(c => {
+    if (levelFilter === "전체") return true;
+    
+    const upperName = (c.code || c.name || '').toUpperCase();
+    const targetStr = `${c.level_name || ''} ${upperName}`.toUpperCase();
+    
+    if (levelFilter === "Ultimate") return targetStr.includes("ULTIMATE") || targetStr.includes("U반") || c.level_name?.toUpperCase() === "U";
+    if (levelFilter === "Master") return targetStr.includes("MASTER") || targetStr.includes("M반") || c.level_name?.toUpperCase() === "M";
+    if (levelFilter === "Apex") return targetStr.includes("APEX") || targetStr.includes("A반") || c.level_name?.toUpperCase() === "A";
+    if (levelFilter === "Titan") return targetStr.includes("TITAN") || targetStr.includes("T반") || c.level_name?.toUpperCase() === "T";
+    if (levelFilter === "Horizon") return targetStr.includes("HORIZON") || targetStr.includes("H반") || c.level_name?.toUpperCase() === "H";
+    
+    if (levelFilter === "특강") return upperName.startsWith("SS") || upperName.startsWith("WS") || targetStr.includes("특강");
+    if (levelFilter === "메이크업/보강") return upperName.startsWith("MU") || upperName.startsWith("LE") || targetStr.includes("메이크업") || targetStr.includes("보강");
+    
+    return targetStr.includes(levelFilter.toUpperCase());
+  });
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex justify-center items-center z-50 p-4 font-pretendard">
+      <div className="bg-white w-full max-w-2xl rounded-2xl shadow-2xl flex flex-col max-h-[90vh] animate-[fadeIn_0.2s_ease-out]">
+        
+        <div className="bg-[#002864] p-5 text-white flex justify-between items-center shrink-0 rounded-t-2xl">
+          <h3 className="text-lg font-extrabold">학생 정보 수정</h3>
+          <button onClick={onClose} className="text-white hover:text-rose-400 transition-colors">
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+            </svg>
+          </button>
+        </div>
+        
+        <div className="p-6 overflow-y-auto custom-scroll flex-1 space-y-6 bg-slate-50">
+          
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+            <h4 className="font-bold text-sm text-[#0ea5e9] mb-4 border-b border-slate-100 pb-2">기본 정보</h4>
+            <div className="grid grid-cols-2 gap-4">
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">이름</label>
+                <input type="text" value={editForm.name} onChange={e => setEditForm({...editForm, name: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">성별</label>
+                <select value={editForm.gender} onChange={e => setEditForm({...editForm, gender: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]">
+                  <option value="">선택 안 함</option><option value="남학생">남학생</option><option value="여학생">여학생</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">상태</label>
+                <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]">
+                  <option value="재원">재원</option><option value="휴원">휴원</option><option value="퇴원">퇴원</option><option value="입학테스트">입학테스트</option>
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">학년</label>
+                <select value={editForm.grade} onChange={e => setEditForm({...editForm, grade: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]">
+                  {editForm.grade && !(GRADE_OPTIONS as readonly string[]).includes(editForm.grade) && <option value={editForm.grade}>{editForm.grade} (확인 필요)</option>}
+                  {GRADE_OPTIONS.map(g => <option key={g} value={g}>{g}</option>)}
+                </select>
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">학교</label>
+                <input type="text" value={editForm.school} onChange={e => setEditForm({...editForm, school: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+              </div>
+              
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">학생 연락처</label>
+                <input type="text" value={editForm.phone} onChange={e => setEditForm({...editForm, phone: formatPhone(e.target.value)})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
+                  비밀번호 (PIN 4자리)
+                  {editForm.hasPin ? <span className="text-[10px] text-blue-500 font-normal">설정됨</span> : <span className="text-[10px] text-amber-500 font-normal">미설정</span>}
+                </label>
+                <input type="text" maxLength={4} placeholder={editForm.hasPin ? "변경하려면 새 4자리 입력" : "미설정 (0000으로 자동 로그인됨)"} value={editForm.passwordHash} onChange={e => { const onlyNums = e.target.value.replace(/[^0-9]/g, ''); setEditForm({...editForm, passwordHash: onlyNums}); }} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864] placeholder:text-slate-300 placeholder:font-normal" />
+              </div>
+              
+              <div className="col-span-2 bg-blue-50/50 p-4 rounded-lg border border-blue-100 mt-2">
+                <label className="block text-xs font-bold text-slate-600 mb-2">현재 소속된 수강반</label>
+                <ul className="mb-4 space-y-2">
+                  {activeEnrollments.length === 0 ? (
+                    <li className="text-xs text-slate-400 font-bold bg-white px-3 py-2 rounded-lg border border-slate-200">배정된 수강반이 없습니다.</li>
+                  ) : (
+                    activeEnrollments.map(e => {
+                      const stat = e.status || "수강중";
+                      return (
+                        <li key={e.enrollment_id} className="flex justify-between items-center bg-white px-3 py-2 rounded-lg border border-slate-200 shadow-sm gap-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            {stat === "예약" ? (
+                              <span className="bg-amber-50 text-amber-600 border-amber-200 px-2 py-0.5 rounded text-xs font-bold border shrink-0">예약</span>
+                            ) : (
+                              <span className="bg-emerald-50 text-emerald-600 border-emerald-200 px-2 py-0.5 rounded text-xs font-bold border shrink-0">수강중</span>
+                            )}
+                            <span className="text-sm font-bold text-[#002864] truncate">{unwrap(e.class)?.name || '미배정'}</span>
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            {stat === "예약" ? (
+                              <button type="button" onClick={() => changeEnrollmentStatus(e.enrollment_id, "수강중")} className="px-2.5 py-1 bg-indigo-50 text-indigo-600 rounded hover:bg-indigo-100 transition-colors text-xs font-bold border border-indigo-200">수강 전환</button>
+                            ) : (
+                              <button type="button" onClick={() => changeEnrollmentStatus(e.enrollment_id, "예약")} className="px-2.5 py-1 bg-amber-50 text-amber-600 rounded hover:bg-amber-100 transition-colors text-xs font-bold border border-amber-200">예약 전환</button>
+                            )}
+                            <button type="button" onClick={() => endEnrollment(e.enrollment_id)} className="px-2.5 py-1 bg-slate-100 text-slate-600 rounded hover:bg-slate-200 transition-colors text-xs font-bold border border-slate-300">반에서 제외(수강종료)</button>
+                            <button type="button" onClick={() => removeEnrollment(e.enrollment_id)} className="px-2.5 py-1 bg-rose-50 text-rose-500 rounded hover:bg-rose-100 transition-colors text-xs font-bold border border-rose-100">강제삭제</button>
+                          </div>
+                        </li>
+                      );
+                    })
+                  )}
+                </ul>
+                
+                <label className="block text-xs font-bold text-slate-600 mb-2 border-t border-blue-200 pt-3">새 수강반 배정 추가</label>
+                
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {LEVEL_FILTERS.map(lvl => (
+                    <button key={lvl} type="button" onClick={() => { setLevelFilter(lvl); setEditForm({...editForm, newClassId: ""}); }} className={`px-2.5 py-1 text-[11px] font-bold rounded border transition-colors ${levelFilter === lvl ? 'bg-[#002864] text-white border-[#002864]' : 'bg-white text-slate-500 border-slate-200 hover:bg-slate-100'}`}>{lvl}</button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <select value={editForm.newClassId} onChange={e => setEditForm({...editForm, newClassId: e.target.value})} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-[#002864] focus:outline-none focus:border-[#002864]">
+                    <option value="">{filteredClasses.length === 0 ? "해당 레벨의 반이 없습니다" : "반 선택"}</option>
+                    {filteredClasses.map(c => {
+                      const fullCode = c.code || c.name || '';
+                      const displayName = fullCode.replace(/\d{4}$/, '').trim();
+                      const instName = c.instructor?.name || '미정';
+                      
+                      return (
+                        <option key={c.class_id} value={c.class_id.toString()}>
+                          {displayName} ({instName})
+                        </option>
+                      );
+                    })}
+                  </select>
+                  <select value={assignStatus} onChange={e => setAssignStatus(e.target.value)} className="shrink-0 bg-white border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 focus:outline-none focus:border-[#002864]">
+                    <option value="수강중">수강중</option>
+                    <option value="예약">예약</option>
+                  </select>
+                  <button type="button" onClick={addEnrollment} className="shrink-0 px-4 py-2 bg-[#002864] text-white font-bold rounded-lg text-xs hover:bg-blue-900 transition-colors">추가</button>
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          {/* 학부모 정보 섹션 */}
+          <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-6">
+            {/* 학부모 1 (대표) */}
+            <div>
+              <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-sm text-emerald-600 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
+                  학부모 정보 1 (대표/알림 수신 기준)
+                </h4>
+                <span className="text-[11px] font-semibold text-slate-400">메인 식별 번호</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">성함 1</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentName} 
+                    onChange={e => setEditForm({...editForm, parentName: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 홍길동"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">관계 1</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentRel} 
+                    onChange={e => setEditForm({...editForm, parentRel: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 모, 부"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
+                    <span>연락처 1 (메인)</span>
+                    {editForm.hasParentPw1 ? (
+                      <span className="text-[10px] text-blue-500 font-normal">비밀번호 설정됨</span>
+                    ) : (
+                      <span className="text-[10px] text-amber-500 font-normal">비밀번호 미설정</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={editForm.parentPhone} 
+                      onChange={e => setEditForm({...editForm, parentPhone: formatPhone(e.target.value)})} 
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                      placeholder="010-0000-0000 (비워두면 unassigned로 보존)" 
+                    />
+                    <button
+                      type="button"
+                      disabled={resettingSlot !== null || (!editForm.parentId && !editForm.parentPhone)}
+                      onClick={() => resetParentPassword(1)}
+                      className="shrink-0 px-3.5 py-2 bg-amber-50 text-amber-600 border border-amber-200 font-bold rounded-lg text-xs hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {resettingSlot === 1 ? "처리 중..." : "비밀번호 재설정"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* 학부모 2 (서브) */}
+            <div className="pt-2 border-t border-dashed border-slate-200">
+              <div className="flex items-center justify-between mb-3 border-b border-slate-100 pb-2">
+                <h4 className="font-bold text-sm text-slate-700 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-slate-400"></span>
+                  학부모 정보 2 (추가 연락처)
+                </h4>
+                <span className="text-[11px] font-semibold text-slate-400">비상/참조용</span>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">성함 2</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentName2} 
+                    onChange={e => setEditForm({...editForm, parentName2: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 김영희"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1">관계 2</label>
+                  <input 
+                    type="text" 
+                    value={editForm.parentRel2} 
+                    onChange={e => setEditForm({...editForm, parentRel2: e.target.value})} 
+                    className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                    placeholder="예: 부, 모"
+                  />
+                </div>
+                <div className="col-span-2">
+                  <label className="block text-xs font-bold text-slate-500 mb-1 flex items-center justify-between">
+                    <span>연락처 2</span>
+                    {editForm.hasParentPw2 ? (
+                      <span className="text-[10px] text-blue-500 font-normal">비밀번호 설정됨</span>
+                    ) : (
+                      <span className="text-[10px] text-amber-500 font-normal">비밀번호 미설정</span>
+                    )}
+                  </label>
+                  <div className="flex gap-2">
+                    <input 
+                      type="text" 
+                      value={editForm.parentPhone2} 
+                      onChange={e => setEditForm({...editForm, parentPhone2: formatPhone(e.target.value)})} 
+                      className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:border-[#002864]" 
+                      placeholder="010-0000-0000" 
+                    />
+                    <button
+                      type="button"
+                      disabled={resettingSlot !== null || (!editForm.parentId && !editForm.parentPhone2)}
+                      onClick={() => resetParentPassword(2)}
+                      className="shrink-0 px-3.5 py-2 bg-amber-50 text-amber-600 border border-amber-200 font-bold rounded-lg text-xs hover:bg-amber-100 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {resettingSlot === 2 ? "처리 중..." : "비밀번호 재설정"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+        
+        <div className="p-5 bg-white border-t border-slate-200 flex justify-between gap-3 shrink-0 rounded-b-2xl">
+          {isSuperAdmin ? <button onClick={deleteStudent} disabled={isSaving} className="px-5 py-2 bg-rose-50 text-rose-500 font-bold rounded-lg hover:bg-rose-600 hover:text-white transition-colors border border-rose-200 hover:border-transparent disabled:opacity-50">학생 영구 삭제</button> : <div></div>}
+          <div className="flex gap-3">
+            <button onClick={onClose} className="px-5 py-2 bg-slate-100 text-slate-600 font-bold rounded-lg hover:bg-slate-200 transition-colors">닫기</button>
+            <button onClick={submitEditStudent} disabled={isSaving} className="px-5 py-2 bg-[#002864] text-white font-bold rounded-lg shadow-sm hover:bg-blue-900 transition-colors disabled:opacity-50">저장하기</button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  );
+}

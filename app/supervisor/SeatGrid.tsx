@@ -1,0 +1,261 @@
+// src/app/supervisor/SeatGrid.tsx
+import React, { useState, useEffect } from 'react';
+import SeatCanvas from '../clinic/_shared/SeatCanvas';
+import SeatCardBody from './SeatCardBody';
+import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
+
+export default function SeatGrid({ data }: { data: any }) {
+    const {
+        now, isMounted, activeStudents, draggedSeat, draggedListStudent, selectedSeatForMove,
+        forceCheckoutModal, setForceCheckoutModal, recheckModal, setRecheckModal, confirmForceCheckout,
+        endRequestModal, setEndRequestModal, resolveEndRequest,
+        reservationModal, setReservationModal, confirmReservation, cancelReservation,
+        handlePointerDown, adjustClinicTime, taAction, resolveRecheck,
+        seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight,
+    } = data;
+
+    const cw = canvasWidth || DEFAULT_CANVAS_W;
+    const ch = canvasHeight || DEFAULT_CANVAS_H;
+    const CARD_W = seatWidth || DEFAULT_SEAT_CARD_W;
+    const CARD_H = seatHeight || DEFAULT_SEAT_CARD_H;
+    const GAP = 10;
+    const RENDER_W = Math.max(20, CARD_W - GAP);
+    const RENDER_H = Math.max(20, CARD_H - GAP);
+
+    const getCurrentTimeStr = () => {
+        const now = new Date();
+        return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    };
+    const [reservationTime, setReservationTime] = useState(getCurrentTimeStr);
+    useEffect(() => { if (reservationModal.isOpen) setReservationTime(getCurrentTimeStr()); }, [reservationModal.isOpen]);
+
+    const [resHour, resMinute] = reservationTime.split(':').map(Number);
+    const shiftHour = (delta: number) => {
+        const next = ((resHour + delta) % 24 + 24) % 24;
+        setReservationTime(`${String(next).padStart(2, '0')}:${String(resMinute).padStart(2, '0')}`);
+    };
+    const shiftMinute = (delta: number) => {
+        const next = ((resMinute + delta) % 60 + 60) % 60;
+        setReservationTime(`${String(resHour).padStart(2, '0')}:${String(next).padStart(2, '0')}`);
+    };
+    const handleHourWheel = (e: React.WheelEvent) => { e.preventDefault(); shiftHour(e.deltaY < 0 ? 1 : -1); };
+    const handleMinuteWheel = (e: React.WheelEvent) => { e.preventDefault(); shiftMinute(e.deltaY < 0 ? 1 : -1); };
+    const typeHour = (raw: string) => {
+        const num = raw === '' ? 0 : parseInt(raw.replace(/\D/g, '').slice(-2) || '0', 10);
+        setReservationTime(`${String(Math.min(23, Math.max(0, num))).padStart(2, '0')}:${String(resMinute).padStart(2, '0')}`);
+    };
+    const typeMinute = (raw: string) => {
+        const num = raw === '' ? 0 : parseInt(raw.replace(/\D/g, '').slice(-2) || '0', 10);
+        setReservationTime(`${String(resHour).padStart(2, '0')}:${String(Math.min(59, Math.max(0, num))).padStart(2, '0')}`);
+    };
+
+    const activeRecheckItem = recheckModal.isOpen && recheckModal.seat && recheckModal.uid
+        ? activeStudents[recheckModal.seat]?.rechecks?.[recheckModal.uid]
+        : null;
+
+    return (
+        <main className="flex-1 p-6 bg-slate-200 overflow-hidden relative flex items-center justify-center">
+            <div className="absolute inset-6 flex items-center justify-center">
+                <div className="w-full h-full max-w-full max-h-full flex items-center justify-center" style={{ aspectRatio: `${cw} / ${ch}` }}>
+                <SeatCanvas
+                    seats={seatObjs || []}
+                    canvasWidth={cw}
+                    canvasHeight={ch}
+                    renderSeat={(seatObj, scale) => {
+                        const seat = String(seatObj.number);
+                        const student = activeStudents[seat];
+                        const outerStyle = { width: RENDER_W * scale, height: RENDER_H * scale } as const;
+                        const innerStyle = { width: RENDER_W, height: RENDER_H, transform: `scale(${scale})`, transformOrigin: 'top left', willChange: 'transform', backfaceVisibility: 'hidden' } as const;
+                        
+                        if (!student) {
+                            const isHighlighted = !!((draggedSeat || draggedListStudent) && selectedSeatForMove !== seat);
+                            return (
+                                <div data-seat={seat} style={outerStyle}>
+                                    <div style={innerStyle} className={`w-full h-full rounded-2xl flex items-center justify-center border-2 border-dashed transition-all shadow-sm ${isHighlighted ? 'border-indigo-400 bg-indigo-50' : 'border-slate-300 bg-slate-100 opacity-60 hover:opacity-100'}`}>
+                                        <span className="text-[40px] font-bold text-slate-300 pointer-events-none">{seat}</span>
+                                    </div>
+                                </div>
+                            );
+                        }
+
+                        if (student.type === 'reserved') {
+                            return (
+                                <div data-seat={seat} style={outerStyle}>
+                                <div onPointerDown={(e) => handlePointerDown(e, seat)} style={innerStyle}
+                                     className="relative border-2 border-dashed border-slate-300 bg-slate-100 opacity-80 rounded-xl p-1.5 flex flex-col justify-center cursor-grab active:cursor-grabbing h-full">
+                                    <button onClick={(e) => { e.stopPropagation(); if (window.confirm(`${student.name} 학생의 예약을 취소하시겠습니까?`)) cancelReservation(seat); }} title="예약 취소" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-slate-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-[60] transition-transform hover:scale-125">
+                                        <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                    </button>
+                                    <div className="pointer-events-none overflow-hidden h-full flex flex-col justify-center">
+                                        <div className="flex items-center justify-between gap-1 mb-0.5 shrink-0">
+                                            <div className="flex items-center gap-1 min-w-0">
+                                                <span className="shrink-0 bg-slate-500 text-white text-[9px] font-bold w-3.5 h-3.5 flex items-center justify-center rounded leading-none">{seat}</span>
+                                                <span className="font-bold text-slate-700 text-[12px] truncate leading-tight" title={student.name}>{student.name}</span>
+                                            </div>
+                                            <span className="shrink-0 text-[8px] font-bold px-1 py-px rounded bg-slate-400 text-white leading-none">🕒 예약</span>
+                                        </div>
+                                        <div className="text-[9px] font-bold text-slate-400 truncate mb-0.5 leading-none shrink-0">{student.classes?.length > 0 ? student.classes[0] : '반 없음'}</div>
+                                        <div className="text-[10px] font-bold text-indigo-500 mt-0.5 leading-tight shrink-0">⏰ {new Date(student.reservedFor).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false })} 예약</div>
+                                    </div>
+                                </div>
+                                </div>
+                            );
+                        }
+
+                        const isCall = student.status === 'call';
+                        const isHint = student.status === 'hint';
+                        const isAway = student.status === 'away';
+                        const isSubmitted = student.status === 'submitted';
+                        const isDragging = draggedSeat === seat;
+
+                        const cardClass = isCall ? 'status-help bg-white'
+                                        : isHint ? 'hint-flash bg-white border-slate-200'
+                                        : isAway ? 'bg-amber-50 border-amber-400'
+                                        : isSubmitted ? 'bg-blue-50 border-blue-400'
+                                        : 'bg-white border-slate-200 hover:shadow-md hover:border-slate-300';
+
+                        return (
+                            <div data-seat={seat} style={outerStyle}>
+                            <div onPointerDown={(e) => handlePointerDown(e, seat)} style={innerStyle}
+                                 className={`relative border ${isAway || isSubmitted ? 'border-2' : ''} rounded-xl p-1.5 flex flex-col justify-between shadow-sm cursor-grab active:cursor-grabbing transition-[background-color,border-color,box-shadow,opacity] duration-300 h-full ${cardClass} ${isDragging ? 'opacity-[0.85] ring-4 ring-indigo-500 ring-offset-1' : ''}`}>
+                                
+                                <button onClick={(e) => { e.stopPropagation(); setForceCheckoutModal({ isOpen: true, seat }); }} title="강제 퇴실" className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-rose-500 hover:bg-rose-600 text-white rounded-full flex items-center justify-center shadow-md border-2 border-white z-[60] transition-transform hover:scale-125">
+                                    <svg className="w-2.5 h-2.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" strokeWidth="4"><path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
+                                </button>
+                                
+                                <div className="pointer-events-none overflow-hidden h-full w-full flex flex-col">
+                                    <SeatCardBody
+                                        seat={seat} student={student} now={now} isMounted={isMounted}
+                                        onClearAway={() => taAction(seat, 'clear_away')}
+                                        onConfirmCheckout={() => taAction(seat, 'confirm_checkout')}
+                                        onOpenEndRequest={() => setEndRequestModal({ isOpen: true, seat })}
+                                        onAdjustTime={(delta) => adjustClinicTime(seat, delta)}
+                                        onForceReset={() => taAction(seat, 'force_reset')}
+                                        onForceRefresh={() => taAction(seat, 'force_refresh')}
+                                    />
+                                </div>
+                            </div>
+                            </div>
+                        );
+                    }}
+                />
+                </div>
+            </div>
+
+            {/* 강제 퇴실 모달 */}
+            {forceCheckoutModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] text-center">
+                        <div className="text-4xl mb-3">🚪</div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">강제 퇴실 확인</h3>
+                        <p className="text-sm text-slate-600 mb-6"><span className="font-bold text-rose-600">{activeStudents[forceCheckoutModal.seat!]?.name}</span> 학생을 퇴실시키겠습니까?</p>
+                        <div className="flex gap-2">
+                            <button onClick={() => setForceCheckoutModal({ isOpen: false, seat: null })} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg">취소</button>
+                            <button onClick={confirmForceCheckout} className="flex-1 bg-rose-600 text-white font-bold py-3 rounded-lg">강제 퇴실</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* AI 재확인 모달 — useSupervisorData.resolveRecheck와 완벽히 통합 */}
+            {recheckModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-40 px-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
+                        <div className="bg-indigo-600 text-white px-5 py-3 flex justify-between items-center">
+                            <span className="font-bold text-sm">
+                                🔄 AI 채점 재확인 {activeRecheckItem?.qNum ? `(${activeRecheckItem.qNum}번 문항)` : ''}
+                            </span>
+                            <button onClick={() => setRecheckModal({ isOpen: false, seat: null, uid: null })} className="text-white/80 hover:text-white">✕</button>
+                        </div>
+                        <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto">
+                            {activeRecheckItem?.correctAnswer && (
+                                <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3.5 py-2 flex items-center justify-between">
+                                    <span className="text-xs font-bold text-emerald-700">실제 정답</span>
+                                    <span className="text-sm font-bold text-emerald-900">{activeRecheckItem.correctAnswer}</span>
+                                </div>
+                            )}
+                            {activeRecheckItem?.imageDataUrl ? (
+                                <img 
+                                    className="w-full rounded-lg border border-slate-200 bg-white" 
+                                    src={activeRecheckItem.imageDataUrl} 
+                                    alt="답안" 
+                                />
+                            ) : (
+                                <div className="text-center text-sm font-bold text-slate-400 py-8 bg-slate-50 rounded-lg border border-slate-200">
+                                    키패드로 입력된 정답입니다. (이미지 없음)
+                                </div>
+                            )}
+                            {activeRecheckItem?.recognizedText && (
+                                <div className="bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2 text-xs text-slate-600">
+                                    <span className="font-bold text-slate-700">AI 인식 답안:</span> {activeRecheckItem.recognizedText}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex gap-2 p-4 border-t border-slate-100">
+                            <button onClick={() => resolveRecheck(recheckModal.seat!, recheckModal.uid!, 'incorrect')} className="flex-1 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold py-3 rounded-xl transition-colors">❌ 오답</button>
+                            <button onClick={() => resolveRecheck(recheckModal.seat!, recheckModal.uid!, 'correct')} className="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl transition-colors">✅ 정답</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 클리닉 종료 요청 승인/거부 모달 */}
+            {endRequestModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] text-center">
+                        <div className="text-4xl mb-3">🚪</div>
+                        <h3 className="text-lg font-bold text-slate-800 mb-2">클리닉 종료 요청</h3>
+                        <p className="text-sm text-slate-600 mb-6"><span className="font-bold text-rose-600">{activeStudents[endRequestModal.seat!]?.name}</span> 학생이 클리닉 종료를 요청했습니다. 승인하면 지금 이 시점이 이용시간 종료로 기록됩니다.</p>
+                        <div className="flex gap-2">
+                            <button onClick={() => resolveEndRequest(false)} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg">거부 (5분 쿨타임)</button>
+                            <button onClick={() => resolveEndRequest(true)} className="flex-1 bg-rose-600 text-white font-bold py-3 rounded-lg">승인 (종료)</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {/* 예약 시간 입력 모달 */}
+            {reservationModal.isOpen && (
+                <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 backdrop-blur-sm">
+                    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px]">
+                        <div className="text-center mb-4">
+                            <div className="text-4xl mb-2">🕒</div>
+                            <h3 className="text-lg font-bold text-slate-800">예약 시간 입력</h3>
+                            <p className="text-sm text-slate-500 mt-1"><span className="font-bold text-indigo-600">{reservationModal.student?.name}</span> 학생을 [{reservationModal.seat}] 자리에 예약합니다.</p>
+                        </div>
+                        <div className="flex items-center justify-center gap-4 mb-4 bg-slate-50 border border-slate-200 rounded-xl py-4">
+                            <div className="flex flex-col items-center gap-0.5">
+                                <button onClick={() => shiftHour(1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▲</button>
+                                <input
+                                    type="text" inputMode="numeric" value={String(resHour).padStart(2, '0')}
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => typeHour(e.target.value)}
+                                    onWheel={handleHourWheel}
+                                    className="w-14 text-center text-3xl font-bold text-slate-800 font-lexend tabular-nums cursor-ns-resize bg-transparent border-none outline-none rounded-lg hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-colors"
+                                />
+                                <button onClick={() => shiftHour(-1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▼</button>
+                            </div>
+                            <div className="text-3xl font-bold text-slate-300">:</div>
+                            <div className="flex flex-col items-center gap-0.5">
+                                <button onClick={() => shiftMinute(1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▲</button>
+                                <input
+                                    type="text" inputMode="numeric" value={String(resMinute).padStart(2, '0')}
+                                    onFocus={(e) => e.target.select()}
+                                    onChange={(e) => typeMinute(e.target.value)}
+                                    onWheel={handleMinuteWheel}
+                                    className="w-14 text-center text-3xl font-bold text-slate-800 font-lexend tabular-nums cursor-ns-resize bg-transparent border-none outline-none rounded-lg hover:bg-white focus:bg-white focus:ring-2 focus:ring-indigo-200 transition-colors"
+                                />
+                                <button onClick={() => shiftMinute(-1)} className="text-slate-300 hover:text-indigo-600 leading-none text-xs transition-colors">▼</button>
+                            </div>
+                        </div>
+                        <p className="text-[11px] text-slate-400 text-center mb-4">예약 시간 + 10분 안에 로그인하지 않으면 예약이 자동 취소됩니다.</p>
+                        <div className="flex gap-2">
+                            <button onClick={() => setReservationModal({ isOpen: false, seat: null, student: null })} className="flex-1 bg-slate-100 text-slate-600 font-bold py-3 rounded-lg">취소</button>
+                            <button onClick={() => confirmReservation(reservationTime)} className="flex-1 bg-indigo-600 text-white font-bold py-3 rounded-lg">예약하기</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+        </main>
+    );
+}

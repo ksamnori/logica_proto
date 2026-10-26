@@ -1,0 +1,1533 @@
+// src/app/clinic/ta/grading/GradingBoard.tsx
+"use client";
+
+import React, { useEffect, useState, useRef, memo } from "react";
+import { supabase } from "@/lib/supabase";
+// 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
+
+/**
+ * 소수점 첫째 자리까지 반올림 (예: 97.5 -> 97.5, 100.0 -> 100)
+ */
+
+const parseLeadingSubMarkerInline = (rem: string): number => {
+  if (!rem) return 0;
+  const s = rem.trim();
+  const mParenNum = s.match(/^\(\s*(\d+)\s*\)/);
+  if (mParenNum) return parseInt(mParenNum[1], 10) || 0;
+  const mCircle = s.match(/^([①②③④⑤⑥⑦⑧⑨⑩])/);
+  if (mCircle) return "①②③④⑤⑥⑦⑧⑨⑩".indexOf(mCircle[1]) + 1;
+  const mKor = s.match(/^\(\s*([가나다라마바사아자차카타파하])\s*\)/);
+  if (mKor) return "가나다라마바사아자차카타파하".indexOf(mKor[1]) + 1;
+  const mBracket = s.match(/^\[\s*(\d+)\s*\]/);
+  if (mBracket) return parseInt(mBracket[1], 10) || 0;
+  return 0;
+};
+
+const extractStandaloneSubMarkerInline = (rawText: string): number => {
+  if (!rawText) return 0;
+  const clean = String(rawText)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+  const direct = parseLeadingSubMarkerInline(clean);
+  if (direct > 0) return direct;
+  const mAfterPrompt = clean.match(
+    /(?:\n|(?:답하세요|답하시오|구하세요|구하시오|고르세요|고르시오|쓰세요|쓰시오|나타내시오|나타내세요)[\.\:\s]*)\s*(?:\(\s*(\d+)\s*\)|([①②③④⑤⑥⑦⑧⑨⑩])|\(\s*([가나다라마바사아자차카타파하])\s*\))/
+  );
+  if (mAfterPrompt) {
+    if (mAfterPrompt[1]) return parseInt(mAfterPrompt[1], 10) || 0;
+    if (mAfterPrompt[2]) return "①②③④⑤⑥⑦⑧⑨⑩".indexOf(mAfterPrompt[2]) + 1;
+    if (mAfterPrompt[3]) return "가나다라마바사아자차카타파하".indexOf(mAfterPrompt[3]) + 1;
+  }
+  return 0;
+};
+
+const compareSubQuestionsInline = (a: any, b: any): number => {
+  if (!a || !b) return 0;
+  const idA = String(a.question_id || "").trim();
+  const idB = String(b.question_id || "").trim();
+  const parentA = String(a.parent_question_id || a.parentId || "").trim();
+  const parentB = String(b.parent_question_id || b.parentId || "").trim();
+  if (idA && parentB && idA === parentB && idA !== idB) return -1;
+  if (idB && parentA && idB === parentA && idA !== idB) return 1;
+
+  const cleanA = String(a.question || a.text_question || a.questionContent || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+  const cleanB = String(b.question || b.text_question || b.questionContent || "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+
+  let k = 0;
+  while (k < cleanA.length && k < cleanB.length && cleanA[k] === cleanB[k]) k++;
+  while (k > 0 && /[\(\[\{0-9가-하①-⑩\s]/.test(cleanA[k - 1])) k--;
+
+  const markerA = parseLeadingSubMarkerInline(cleanA.slice(k).trim()) || extractStandaloneSubMarkerInline(cleanA);
+  const markerB = parseLeadingSubMarkerInline(cleanB.slice(k).trim()) || extractStandaloneSubMarkerInline(cleanB);
+  if (markerA > 0 && markerB > 0 && markerA !== markerB) {
+    return markerA - markerB;
+  }
+
+  const subA = parseInt(String(a.sub_num ?? "0"), 10) || 0;
+  const subB = parseInt(String(b.sub_num ?? "0"), 10) || 0;
+  if (subA > 0 && subB > 0 && subA !== subB) {
+    return subA - subB;
+  }
+
+  const pageA = parseInt(String(a.page_number || a.final_printed_page || a.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
+  const pageB = parseInt(String(b.page_number || b.final_printed_page || b.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
+  if (pageA > 0 && pageB > 0 && pageA !== pageB) {
+    return pageA - pageB;
+  }
+
+  const parseNum = (numStr: any) => {
+    if (!numStr) return { main: 99999, dash: 0, paren: 0, orig: "" };
+    const s = String(numStr).trim();
+    const mMain = s.match(/^(\d+)/);
+    if (!mMain) return { main: 99999, dash: 0, paren: 0, orig: s };
+    const main = parseInt(mMain[1], 10);
+    const noParen = s.replace(/\(\d+\)/g, "");
+    const mDash = noParen.match(/-(\d+)/);
+    const dash = mDash ? parseInt(mDash[1], 10) : 0;
+    const mParen = s.match(/\((\d+)\)/);
+    const paren = mParen ? parseInt(mParen[1], 10) : 0;
+    return { main, dash, paren, orig: s };
+  };
+  const qA = parseNum(a.question_number);
+  const qB = parseNum(b.question_number);
+  if (qA.main !== qB.main) return qA.main - qB.main;
+  if (qA.dash !== qB.dash) return qA.dash - qB.dash;
+  if (qA.paren !== qB.paren) return qA.paren - qB.paren;
+  if (qA.orig !== qB.orig) return qA.orig.localeCompare(qB.orig, "ko", { numeric: true });
+  return 0;
+};
+
+function roundScore(val: number): number {
+  const num = Number(val);
+  if (!Number.isFinite(num)) return 0;
+  return Math.round((num + Number.EPSILON) * 10) / 10;
+}
+
+/**
+ * 채점 기호(O, TO, RO, X, TX 등)와 문항 배점(assignedScore), 마스터 채점 기준(metaMap)을 바탕으로
+ * 획득 점수(newEarned), 정답 여부(isCorrectEq), 적용 비율(ratio)을 계산합니다.
+ */
+function calcScoreRatio(
+  code: string | null | undefined,
+  assignedScore: number,
+  metaMap?: Record<string, any>,
+  isAdmission: boolean = false
+): { newEarned: number; isCorrectEq: boolean; ratio: number } {
+  if (!code) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+  const c = String(code).trim();
+  if (!c) return { newEarned: 0, isCorrectEq: false, ratio: 0 };
+
+  const meta = metaMap?.[c];
+  let ratio = 0;
+  let isCorrectEq = false;
+
+  if (meta) {
+    const rawRatio =
+      isAdmission && meta.admission_ratio !== undefined && meta.admission_ratio !== null
+        ? meta.admission_ratio
+        : meta.score_ratio;
+    ratio = parseFloat(rawRatio);
+    if (isNaN(ratio)) ratio = 0;
+    if (ratio > 1) ratio = ratio / 100;
+
+    if (isAdmission) {
+      isCorrectEq = ratio > 0;
+    } else {
+      isCorrectEq =
+        meta.is_correct === true ||
+        String(meta.is_correct).toLowerCase() === "true" ||
+        ["O", "TO", "RO", "a", "b", "c"].includes(c);
+    }
+  } else {
+    if (["O", "a", "b", "c"].includes(c)) {
+      ratio = 1.0;
+      isCorrectEq = true;
+    } else if (c === "TO" || c === "RO") {
+      ratio = isAdmission && c === "TO" ? 1.0 : 0.8;
+      isCorrectEq = isAdmission ? ratio > 0 : true;
+    } else if (c === "q") {
+      ratio = isAdmission ? 0.0 : 0.5;
+      isCorrectEq = false;
+    } else {
+      ratio = 0.0;
+      isCorrectEq = false;
+    }
+  }
+
+  const base = Number(assignedScore) || 0;
+  const newEarned = Math.round((base * ratio + Number.EPSILON) * 1000) / 1000;
+  return { newEarned, isCorrectEq, ratio };
+}
+
+/**
+ * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
+ */
+function extractMergedQuestionGroups(layoutSettings: any): string[][] {
+  if (!layoutSettings) return [];
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return [];
+    }
+  }
+  if (Array.isArray(s?.userMergedTextQuestions)) {
+    return s.userMergedTextQuestions
+      .filter((arr: any) => Array.isArray(arr) && arr.length > 0)
+      .map((arr: any[]) => arr.map((id: any) => String(id)));
+  }
+  return [];
+}
+
+/**
+ * 시험 문항 목록(items)과 layout_settings(userMergedTextQuestions)를 기반으로
+ * 대문항(그룹)당 배점을 먼저 구한 뒤(예: 20대문항이면 대문항당 5점),
+ * 그룹 내 서브문항 개수로 나눈 세부 배점(예: 서브문항 2개면 각 2.5점) 맵을 반환합니다.
+ */
+function buildExamQuestionScoreMap(
+  items: { question_id: any; sort_order?: number; assigned_score?: any }[],
+  layoutSettings?: any,
+  examType?: string,
+  totalQuestionsFallback?: number
+): {
+  scoreByQuestionId: Map<string, number>;
+  groupCount: number;
+  groups: { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }[];
+} {
+  const mergedArrays = extractMergedQuestionGroups(layoutSettings);
+  const customGroupMap = new Map<string, string>();
+  const customGroupSizeMap = new Map<string, number>();
+
+  mergedArrays.forEach((arr, idx) => {
+    const gId = `custom_group_${idx}`;
+    customGroupSizeMap.set(gId, arr.length);
+    arr.forEach((qid) => customGroupMap.set(String(qid), gId));
+  });
+
+  const scoreByQuestionId = new Map<string, number>();
+
+  if (!items || items.length === 0) {
+    const flatCount = totalQuestionsFallback || 1;
+    const extraSubItems = mergedArrays.reduce(
+      (acc, arr) => acc + Math.max(0, arr.length - 1),
+      0
+    );
+    const groupCount = Math.max(1, flatCount - extraSubItems);
+    const baseGroupScore = 100 / groupCount;
+
+    mergedArrays.forEach((arr) => {
+      const subScore = baseGroupScore / (arr.length || 1);
+      arr.forEach((qid) => scoreByQuestionId.set(String(qid), subScore));
+    });
+
+    return { scoreByQuestionId, groupCount, groups: [] };
+  }
+
+  const sortedItems = [...items].sort(
+    (a, b) => (Number(a.sort_order) || 0) - (Number(b.sort_order) || 0)
+  );
+
+  const groupMap = new Map<
+    string,
+    { id: string; is_merged_text: boolean; items: any[]; groupScore: number; subScore: number }
+  >();
+  const groups: {
+    id: string;
+    is_merged_text: boolean;
+    items: any[];
+    groupScore: number;
+    subScore: number;
+  }[] = [];
+
+  sortedItems.forEach((item, idx) => {
+    const qidStr = String(item.question_id);
+    const customGId = customGroupMap.get(qidStr);
+    const gId = customGId || `single_${qidStr}_${idx}`;
+
+    if (!groupMap.has(gId)) {
+      const newG = {
+        id: gId,
+        is_merged_text: !!customGId,
+        items: [] as any[],
+        groupScore: 0,
+        subScore: 0,
+      };
+      groupMap.set(gId, newG);
+      groups.push(newG);
+    }
+    groupMap.get(gId)!.items.push(item);
+  });
+
+  const groupCount = groups.length || 1;
+  const baseGroupScore = 100 / groupCount;
+  const isAdmissionExam = Boolean(
+    examType && (examType.includes("입학테스트") || examType.includes("진단평가"))
+  );
+
+  groups.forEach((g) => {
+    const explicitMax = Math.max(
+      ...g.items.map((i: any) => parseFloat(i.assigned_score) || 0)
+    );
+    const groupMaxScore =
+      isAdmissionExam && explicitMax > 0 ? explicitMax : baseGroupScore;
+    const subScore = groupMaxScore / (g.items.length || 1);
+
+    g.groupScore = groupMaxScore;
+    g.subScore = subScore;
+
+    g.items.forEach((item: any) => {
+      scoreByQuestionId.set(String(item.question_id), subScore);
+    });
+  });
+
+  return { scoreByQuestionId, groupCount, groups };
+}
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+
+const GRADE_CODES: { code: string; title: string }[] = [
+  { code: 'O', title: '정답' },
+  { code: 'X', title: '오답' },
+  { code: 'TX', title: '힌트 후 오답' },
+  { code: 'TO', title: '힌트 후 정답' },
+  { code: 'RO', title: '도움 없이 재도전하여 정답' },
+  { code: '☆', title: '별표 (질문)' },
+  { code: 'B', title: '빈칸 (미응시)' },
+];
+
+const CIRCLED_DIGITS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩'];
+
+const safeParseIds = (raw: any): number[] => {
+  if (!raw) return [];
+  try {
+    let val = raw;
+    if (typeof val === 'string') {
+      if (val === "null" || val.trim() === "") return [];
+      val = JSON.parse(val);
+    }
+    if (Array.isArray(val)) return val.map(Number);
+  } catch (err) {
+    return [];
+  }
+  return [];
+};
+
+const parseWrongLog = (raw: any) => {
+  if (!raw) return [];
+  let log = raw;
+  if (typeof log === 'string') { try { log = JSON.parse(log); } catch (e) { return []; } }
+  return Array.isArray(log) ? log : [];
+};
+
+const getKstDateStr = (iso: string) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const kst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return kst.toISOString().split('T')[0];
+};
+
+interface GradeButtonProps {
+  code: string;
+  currentCode: string | null;
+  onClick: () => void;
+}
+
+const GradeButton = memo(({ code, currentCode, onClick }: GradeButtonProps) => {
+  let bgClass = "bg-white text-slate-500 hover:bg-slate-100";
+  let checkedClass = "text-white shadow-inner";
+
+  if (code === 'O') checkedClass += " bg-emerald-500";
+  else if (code === 'TO') checkedClass += " bg-teal-500"; 
+  else if (code === 'RO') checkedClass += " bg-blue-500"; 
+  else if (code === 'X') checkedClass += " bg-rose-500";
+  else if (code === 'TX' || code === '☆') checkedClass += " bg-orange-500"; 
+  else if (code === 'B') checkedClass += " bg-slate-400"; 
+  else checkedClass += " bg-blue-400";
+
+  const isChecked = currentCode === code;
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex justify-center items-center text-xs font-bold h-[28px] w-full transition-colors ${isChecked ? checkedClass : bgClass}`}
+    >
+      {code}
+    </button>
+  );
+});
+GradeButton.displayName = "GradeButton";
+
+interface GradingBoardProps {
+  mode: 'exam' | 'homework';
+  assignmentId?: string;
+  homeworkId?: string;
+  studentId?: string;
+  gradeAll?: boolean; 
+  onBack: () => void;
+  onDirtyChange?: (dirty: boolean) => void;
+}
+
+export default function GradingBoard({ mode, assignmentId, homeworkId, studentId: studentIdParam, gradeAll = false, onBack, onDirtyChange }: GradingBoardProps) {
+  const isHomeworkMode = mode === 'homework';
+
+  const [headerInfo, setHeaderInfo] = useState({ title: "📝 상세 채점표", subtitle: "데이터 불러오는 중...", type: "" });
+  const [standardName, setStandardName] = useState<string>("");
+  
+  const [matrixData, setMatrixData] = useState<{
+    cols: any[];
+    rows: any[];
+    cellMap: Map<string, any>;
+  }>({ cols: [], rows: [], cellMap: new Map() });
+
+  const [pendingUpdates, setPendingUpdates] = useState<{ [key: string]: any }>({});
+  const [gradingCodeMeta, setGradingCodeMeta] = useState<any>({});
+
+  const [isSaving, setIsSaving] = useState(false);
+  const [processingReportId, setProcessingReportId] = useState<string | null>(null);
+  
+  const [modalQ, setModalQ] = useState<any>(null);
+  const [modalWrongLog, setModalWrongLog] = useState<any[] | null>(null);
+  const [modalImg, setModalImg] = useState<string | null>(null);
+
+  const mathJaxRef = useRef(false);
+
+  useEffect(() => {
+    loadMathJax();
+    if (isHomeworkMode) loadMatrixHomework();
+    else if (assignmentId) loadMatrixExam();
+    else { alert("잘못된 접근입니다."); onBack(); }
+  }, [assignmentId, homeworkId]);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (typeof window !== "undefined" && (window as any).MathJax && (window as any).MathJax.typesetPromise) {
+        (window as any).MathJax.typesetPromise().catch(() => {});
+      }
+    }, 100);
+    return () => clearTimeout(timer);
+  }, [matrixData, modalQ, modalWrongLog]);
+
+  useEffect(() => {
+    onDirtyChange?.(Object.keys(pendingUpdates).length > 0);
+  }, [pendingUpdates]);
+
+  useEffect(() => {
+    if (matrixData.cols.length === 0) return;
+
+    const tableName = isHomeworkMode ? 'student_homework_answer' : 'student_answer';
+    const channelId = `grading_realtime_${tableName}_${assignmentId || homeworkId}`;
+    
+    const channel = supabase.channel(channelId)
+      .on('postgres_changes', { event: '*', schema: 'public', table: tableName }, (payload) => {
+        const newData = payload.new as any;
+        if (!newData) return;
+
+        setMatrixData(prev => {
+          const newMap = new Map(prev.cellMap);
+          for (const [key, cell] of newMap.entries()) {
+            const isMatch = isHomeworkMode
+              ? (String(cell.homeworkId) === String(newData.homework_id) && String(cell.studentId) === String(newData.student_id) && String(cell.tqId) === String(newData.tq_id))
+              : (String(cell.assignmentId) === String(newData.exam_assignment_id) && String(cell.studentId) === String(newData.student_id) && String(cell.qId) === String(newData.question_id));
+
+            if (isMatch) {
+              newMap.set(key, {
+                ...cell,
+                answerId: newData.hw_answer_id || newData.answer_id || cell.answerId,
+                studentInput: newData.student_input,
+                wrongLog: parseWrongLog(newData.wrong_attempts_log),
+                currentCode: newData.grading_code || cell.currentCode
+              });
+              break; 
+            }
+          }
+          return { ...prev, cellMap: newMap };
+        });
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [matrixData.cols, isHomeworkMode, assignmentId, homeworkId]);
+
+  const loadMathJax = () => {
+    if (!document.getElementById("MathJax-script") && !mathJaxRef.current) {
+      mathJaxRef.current = true;
+      (window as any).MathJax = {
+        tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]], processEscapes: true },
+        chtml: { displayAlign: 'left', displayIndent: '0em' },
+        svg: { fontCache: 'global' }
+      };
+      const script = document.createElement("script");
+      script.id = "MathJax-script";
+      script.src = "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js";
+      script.async = true;
+      document.head.appendChild(script);
+    }
+  };
+
+  const formatMathTextForWeb = (text: string) => {
+    if (!text) return "";
+    let t = String(text).replace(/<br\s*\/?>/gi, '__LOGICA_BR_PLACEHOLDER__');
+    t = t.replace(/</g, ' &lt; ').replace(/>/g, ' &gt; ');
+    t = t.replace(/__LOGICA_BR_PLACEHOLDER__/g, '<br>');
+    t = t.replace(/<br>\s*,\s*<br>/g, ', ').replace(/<br>\s*,/g, ', ').replace(/,\s*<br>/g, ', ');
+    while (/\\text\s*\{\s*\\text\s*\{/.test(t)) { t = t.replace(/\\text\s*\{\s*\\text\s*\{([^{}]+)\}\s*\}/g, '\\text{$1}'); }
+    t = t.replace(/\\text\s*\{([^{}]*[가-힣]+[^{}]*)\}/g, '$1');
+    t = t.replace(/\\bigcirc/g, '\\circ').replace(/\^{?[○◯]}?/g, '^{\\circ}').replace(/([0-9]+)\s*[○◯]/g, '$1^{\\circ}');
+    t = t.replace(/[◀◁]\s*\|?\s*[▶▷]/g, '□').replace(/◁\|▷/g, '□').replace(/◀\|▶/g, '□');
+    t = t.replace(/\\overset\s*\{\s*([^}]+)\s*\}\s*\{\s*\\square\s*\}/g, ' $1 ').replace(/\\overset\s*\{\s*([^}]+)\s*\}\s*\{\s*□\s*\}/g, ' $1 ');
+    return t;
+  };
+
+  const getCleanUrl = (url: string) => {
+    if (!url || url === 'null') return '';
+    let validUrl = url;
+    if (typeof validUrl === 'string' && validUrl.trim().startsWith('[')) { try { validUrl = JSON.parse(validUrl)[0]; } catch(e) {} }
+    if (validUrl && validUrl !== 'null' && !validUrl.startsWith('http') && !validUrl.startsWith('data:image')) {
+      validUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/question_images/${validUrl}`;
+    }
+    return validUrl;
+  };
+
+  const loadMatrixHomework = async () => {
+    try {
+      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio');
+      const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
+      setGradingCodeMeta(meta);
+
+      const { data: baseHw } = await supabase.from('homework_assignment').select('*, class(name)').eq('homework_id', homeworkId).single();
+      if (!baseHw) { alert("과제 기준 데이터를 찾을 수 없습니다."); onBack(); return; }
+
+      const cleanTitle = (baseHw.homework_title || '').replace(/\[시스템\]\s*/g, '');
+      setHeaderInfo({ title: `📚 ${cleanTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseHw.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: '과제' });
+
+      let hwQ = supabase.from('homework_assignment').select('*').eq('homework_title', baseHw.homework_title);
+      if (baseHw.class_id) hwQ = hwQ.eq('class_id', baseHw.class_id);
+      else hwQ = hwQ.is('class_id', null);
+      
+      const { data: allHwsRaw } = await hwQ;
+      const allHws = allHwsRaw || []; 
+      const hwIdsToFetchStatus = allHws.map((h: any) => h.homework_id);
+      const { data: hwResults } = await supabase.from('student_homework_result').select('homework_id, student_id, status, completed_tq_ids').in('homework_id', hwIdsToFetchStatus);
+
+      let validStudentIds: string[] = [];
+
+      if (gradeAll) {
+        if (baseHw.class_id) {
+          const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date, student(status)').eq('class_id', baseHw.class_id);
+          const classStudentIds = enrolls?.filter((e: any) => {
+            if (isEndedEnrollment(e)) return false;
+            const s = Array.isArray(e.student) ? e.student[0] : e.student;
+            return s?.status === '재원';
+          }).map(e => e.student_id) || [];
+
+          classStudentIds.forEach(sId => {
+            let studentHws = allHws.filter((h: any) => String(h.target_student_id) === String(sId));
+            const globalHw = allHws.find((h: any) => !h.target_student_id);
+            let targetHw = studentHws.length > 0 ? studentHws[0] : globalHw;
+            if (String(sId) === String(baseHw.target_student_id)) targetHw = baseHw;
+
+            if (targetHw) {
+              validStudentIds.push(sId);
+            }
+          });
+        } else {
+          if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
+        }
+      } else {
+        if (baseHw.target_student_id) validStudentIds.push(baseHw.target_student_id);
+        else if (studentIdParam) validStudentIds.push(studentIdParam);
+      }
+
+      if (validStudentIds.length === 0) { alert("채점할 대상 학생이 없습니다."); onBack(); return; }
+
+      const { data: targetStudents } = await supabase.from('student').select('student_id, name, status').in('student_id', validStudentIds);
+
+      let cols = (targetStudents || [])
+        .filter(s => s.status === '재원')
+        .map(s => ({ id: s.student_id, name: s.name || '알수없음' }))
+        .sort((a,b) => a.name.localeCompare(b.name));
+      
+      if (!gradeAll && studentIdParam) cols = cols.filter(c => String(c.id) === String(studentIdParam));
+      if (cols.length === 0) { alert("대상 학생 데이터가 없습니다."); onBack(); return; }
+
+      const studentHwMap = new Map();
+      const globalHw = allHws.find((h: any) => !h.target_student_id);
+      
+      cols.forEach(s => {
+        let studentHws = allHws.filter((h: any) => String(h.target_student_id) === String(s.id));
+        if (studentHws.length === 0 && globalHw) { studentHwMap.set(s.id, globalHw); return; }
+        studentHws.sort((a, b) => b.homework_id - a.homework_id); 
+        let selectedHw = studentHws[0];
+        if (String(s.id) === String(baseHw.target_student_id)) { selectedHw = baseHw; } 
+        if (selectedHw) studentHwMap.set(s.id, selectedHw);
+      });
+
+      const allTqIds = new Set<number>();
+      cols.forEach(s => {
+        const hw = studentHwMap.get(s.id);
+        if (!hw) return;
+        let tqs = safeParseIds(hw.target_questions);
+        tqs.forEach((id: number) => {
+          allTqIds.add(id);
+        });
+      });
+
+      if (allTqIds.size === 0) { alert("이 과제에 배정된 문항이 없습니다."); onBack(); return; }
+
+      const tqList = Array.from(allTqIds);
+      let tqData: any[] = [];
+      for (let i = 0; i < tqList.length; i += 150) {
+        const chunk = tqList.slice(i, i + 150);
+        const { data } = await supabase.from('textbook_question').select('*, question_db(*)').in('tq_id', chunk);
+        if (data) tqData = [...tqData, ...data];
+      }
+
+      tqData.sort((a, b) => {
+        if ((a.page_number || 0) !== (b.page_number || 0)) return (a.page_number || 0) - (b.page_number || 0);
+        return String(a.question_number || '').localeCompare(String(b.question_number || ''), undefined, { numeric: true });
+      });
+
+      const rows = tqData.map((tq: any, index: number) => {
+        const q = tq.question_db || {};
+        return {
+          id: tq.tq_id,
+          qId: q.question_id,
+          displayNum: `${index + 1}`,
+          pageNum: tq.page_number || q.page_number || q.final_printed_page || q.detected_page_num || null,
+          qNumber: q.question_number || tq.question_number || null,
+          answer: tq.answer || q.answer,
+          fullQuestion: { displayQNum: `${index + 1}`, items: [{ question: { ...q, question: tq.question || q.question, answer: tq.answer || q.answer } }] },
+          assignedScore: 100 / (tqData.length || 1)
+        };
+      });
+
+      const activeHwIds = Array.from(new Set(cols.map(s => studentHwMap.get(s.id)?.homework_id).filter(Boolean)));
+      const { data: answers } = await supabase.from('student_homework_answer').select('*').in('homework_id', activeHwIds);
+      
+      const cellMap = new Map();
+      cols.forEach(s => {
+        const hw = studentHwMap.get(s.id);
+        if (!hw) return;
+        const hwTargetSet = new Set(safeParseIds(hw.target_questions));
+
+        let studentQNum = 1;
+
+        rows.forEach(r => {
+          const key = `${s.id}_${r.id}`;
+          
+          if (!hwTargetSet.has(r.id)) {
+            cellMap.set(key, { isBlocked: true });
+            return;
+          }
+          
+          const existingAns = answers?.find(a => String(a.student_id) === String(s.id) && String(a.homework_id) === String(hw.homework_id) && String(a.tq_id) === String(r.id));
+          
+          cellMap.set(key, {
+            isBlocked: false,
+            studentQNum: studentQNum++, 
+            answerId: existingAns?.hw_answer_id || null,
+            homeworkId: hw.homework_id,
+            studentId: s.id,
+            tqId: r.id,
+            qId: r.qId,
+            currentCode: existingAns?.grading_code || null,
+            assignedScore: r.assignedScore,
+            studentInput: existingAns?.student_input,
+            wrongLog: parseWrongLog(existingAns?.wrong_attempts_log)
+          });
+        });
+      });
+
+      setMatrixData({ cols, rows, cellMap });
+      setPendingUpdates({});
+    } catch (e: any) { alert(`데이터 로드 실패: ${e.message}`); onBack(); }
+  };
+
+  const loadMatrixExam = async () => {
+    try {
+      const { data: gcData } = await supabase.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio');
+      const meta: any = {}; gcData?.forEach(row => { if (row.code) meta[row.code] = row; });
+      setGradingCodeMeta(meta);
+
+      const { data: baseEx } = await supabase.from('exam_assignment').select('*, exam_master(*), class(name)').eq('assignment_id', assignmentId).single();
+      if (!baseEx) { alert("시험 기준 데이터를 찾을 수 없습니다."); onBack(); return; }
+
+      const m = Array.isArray(baseEx.exam_master) ? baseEx.exam_master[0] : baseEx.exam_master;
+      const exTitle = m?.title || '문제지';
+      const exType = m?.exam_type || '';
+      
+      const matchTag = (m?.sub_title || '').match(/\d+-\d+/) || exTitle.match(/\d+-\d+/);
+      const stdName = matchTag ? matchTag[0] : '';
+      setStandardName(stdName);
+
+      const cleanTitle = exTitle.replace(/\[시스템\]\s*/g, '');
+      setHeaderInfo({ title: `📝 ${cleanTitle} ${gradeAll ? '일괄 채점' : '개별 채점'}`, subtitle: `[${baseEx.class?.name || '반 미지정'}] 스프레드시트 뷰`, type: exType });
+
+      const { data: masters } = await supabase.from('exam_master').select('exam_id').eq('title', exTitle);
+      const masterIds = masters?.map(x => x.exam_id) || [];
+
+      let assignQuery = supabase.from('exam_assignment').select('*, student(name)').in('exam_id', masterIds);
+      if (baseEx.class_id) assignQuery = assignQuery.eq('class_id', baseEx.class_id);
+      else assignQuery = assignQuery.is('class_id', null);
+
+      const { data: allAssignsRaw } = await assignQuery;
+      let allAssigns = allAssignsRaw || [];
+
+      if (gradeAll && baseEx.class_id) {
+        const { data: enrolls } = await supabase.from('enrollment').select('student_id, status, end_date, student(status)').eq('class_id', baseEx.class_id);
+        const currentEnrolledIds = new Set(
+          enrolls?.filter((e: any) => {
+            if (isEndedEnrollment(e)) return false;
+            const s = Array.isArray(e.student) ? e.student[0] : e.student;
+            return s?.status === '재원';
+          }).map(e => String(e.student_id))
+        );
+        allAssigns = allAssigns.filter((a: any) => currentEnrolledIds.has(String(a.student_id)));
+      }
+
+      let colsTemp = allAssigns.map((a: any) => {
+        const sObj = Array.isArray(a.student) ? a.student[0] : a.student;
+        return {
+          id: a.student_id, name: sObj?.name || '알수없음', assignmentId: a.assignment_id,
+          exam_id: a.exam_id, status: a.status, testStatus: a.test_status,
+          totalScore: a.total_score || 0, hasReport: false
+        };
+      });
+
+      const uniqueCols = new Map();
+      colsTemp.sort((a, b) => b.assignmentId - a.assignmentId).forEach(c => uniqueCols.set(c.id, c));
+      let cols = Array.from(uniqueCols.values()).sort((a: any, b: any) => a.name.localeCompare(b.name));
+      
+      if (!gradeAll && studentIdParam) cols = cols.filter((c: any) => String(c.id) === String(studentIdParam));
+      if (cols.length === 0) { alert("채점할 대상 학생 데이터가 없습니다."); onBack(); return; }
+
+      if (exType === '입학테스트') {
+        const assignIds = cols.map((c: any) => c.assignmentId);
+        const { data: reports } = await supabase.from('admission_test_report').select('assignment_id').in('assignment_id', assignIds);
+        const reportedIds = new Set(reports?.map(r => r.assignment_id));
+        cols.forEach((c: any) => { c.hasReport = reportedIds.has(c.assignmentId); });
+      }
+
+      const activeExamIds = Array.from(new Set(cols.map((c: any) => c.exam_id)));
+      const { data: items } = await supabase.from('exam_item').select('exam_id, question_id, sort_order, assigned_score').in('exam_id', activeExamIds);
+      if (!items || items.length === 0) { alert("시험에 포함된 문항이 없습니다."); onBack(); return; }
+
+      const examToQMap = new Map<string, Set<string>>();
+      const qSortMap = new Map<string, number>();
+      const qScoreMap = new Map<string, number>();
+
+      items.forEach(i => {
+         if (!examToQMap.has(i.exam_id)) examToQMap.set(i.exam_id, new Set());
+         examToQMap.get(i.exam_id)!.add(String(i.question_id));
+         
+         const exist = qSortMap.get(String(i.question_id));
+         if (!exist || i.sort_order < exist) qSortMap.set(String(i.question_id), i.sort_order);
+         if (!qScoreMap.has(String(i.question_id))) qScoreMap.set(String(i.question_id), i.assigned_score);
+      });
+
+      const unionQids = Array.from(qSortMap.keys()).sort((a, b) => (qSortMap.get(a) || 0) - (qSortMap.get(b) || 0));
+
+      let fetchedQuestions: any[] = [];
+      for (let i = 0; i < unionQids.length; i += 150) {
+        const chunk = unionQids.slice(i, i + 150);
+        const { data } = await supabase.from('question_db').select('*').in('question_id', chunk);
+        if(data) fetchedQuestions = [...fetchedQuestions, ...data];
+      }
+
+      const qMap: any = {}; fetchedQuestions.forEach(q => qMap[q.question_id] = q);
+
+      const userMergedTextQuestions = extractMergedQuestionGroups(m?.layout_settings);
+
+      const customGroupMap = new Map<string, string>();
+      userMergedTextQuestions.forEach((arr, idx) => {
+          const gId = `custom_group_${idx}`;
+          arr.forEach(qid => customGroupMap.set(String(qid), gId));
+      });
+
+      // 먼저 대문항(그룹) 목록과 각 그룹의 서브문항 개수를 산출합니다.
+      const groupSizes = new Map<string, number>();
+      const orderedGroupIds: string[] = [];
+      const qidToGroupId = new Map<string, string>();
+
+      const groupItemsMap = new Map<string, string[]>();
+      unionQids.forEach((qid, idx) => {
+        let gId = customGroupMap.get(String(qid));
+        if (!gId) gId = `single_${qid}_${idx}`;
+        qidToGroupId.set(String(qid), gId);
+        if (!groupSizes.has(gId)) {
+          groupSizes.set(gId, 0);
+          orderedGroupIds.push(gId);
+          groupItemsMap.set(gId, []);
+        }
+        groupSizes.set(gId, (groupSizes.get(gId) || 0) + 1);
+        groupItemsMap.get(gId)!.push(String(qid));
+      });
+
+      const sortedUnionQids: string[] = [];
+      orderedGroupIds.forEach((gId) => {
+        const qidsInGroup = groupItemsMap.get(gId) || [];
+        if (qidsInGroup.length > 1) {
+          qidsInGroup.sort((idA, idB) => compareSubQuestionsInline(qMap[idA], qMap[idB]));
+        }
+        sortedUnionQids.push(...qidsInGroup);
+      });
+
+      const totalGroups = orderedGroupIds.length || 1;
+      const baseGroupScore = 100 / totalGroups;
+      const isAdmExam = exType.includes('입학테스트') || exType.includes('진단평가');
+
+      let mainNum = 0; let currentGroupId: string | null = null; let subNum = 1;
+
+      const rows = sortedUnionQids.map((qid) => {
+        const q = qMap[qid] || {};
+        const gId = qidToGroupId.get(String(qid)) || `single_${qid}`;
+        const groupSize = groupSizes.get(gId) || 1;
+
+        if (gId !== currentGroupId) { mainNum++; currentGroupId = gId; subNum = 1; } 
+        else { subNum++; }
+
+        const isMerged = gId.startsWith('custom_group_') && groupSize > 1;
+        const displayNum = isMerged ? `${mainNum}. (${subNum})` : `${mainNum}`;
+        const pageInfo = q.page_number || q.final_printed_page || q.detected_page_num || null;
+        const explicitGroupScore = Number(qScoreMap.get(qid)) || 0;
+        const groupMaxScore = (isAdmExam && explicitGroupScore > 0) ? explicitGroupScore : baseGroupScore;
+        const assignedScore = groupMaxScore / groupSize;
+
+        return {
+          id: qid,
+          displayNum,
+          pageNum: pageInfo,
+          qNumber: q.question_number || null,
+          answer: q.answer,
+          fullQuestion: { displayQNum: displayNum, items: [{ question: q }] },
+          assignedScore: assignedScore
+        };
+      });
+
+      const assignIdsToFetch = cols.map((c: any) => c.assignmentId);
+      const { data: answers } = await supabase.from('student_answer').select('*').in('exam_assignment_id', assignIdsToFetch);
+
+      const cellMap = new Map();
+      cols.forEach((s: any) => {
+        let studentQNum = 1;
+        let calcColScore = 0;
+        let gradedCnt = 0;
+        const studentExamQSet = examToQMap.get(s.exam_id) || new Set();
+
+        rows.forEach(r => {
+          const key = `${s.id}_${r.id}`;
+          const isBlocked = !studentExamQSet.has(r.id);
+          
+          if (isBlocked) {
+            cellMap.set(key, { isBlocked: true });
+            return;
+          }
+
+          const existingAns = answers?.find(a => String(a.student_id) === String(s.id) && String(a.question_id) === String(r.id));
+          const code = existingAns?.grading_code || null;
+          if (code) {
+            gradedCnt++;
+            calcColScore += calcScoreRatio(code, r.assignedScore, meta, isAdmExam).newEarned;
+          }
+          
+          cellMap.set(key, {
+            isBlocked: false,
+            studentQNum: studentQNum++, 
+            answerId: existingAns?.answer_id || null,
+            assignmentId: s.assignmentId,
+            studentId: s.id,
+            qId: r.id,
+            tqId: null,
+            currentCode: code,
+            assignedScore: r.assignedScore,
+            studentInput: existingAns?.student_input,
+            wrongLog: parseWrongLog(existingAns?.wrong_attempts_log)
+          });
+        });
+
+        if (gradedCnt > 0) {
+          s.totalScore = roundScore(calcColScore);
+        }
+      });
+
+      setMatrixData({ cols, rows, cellMap });
+      setPendingUpdates({});
+    } catch (error: any) { alert(`데이터 로드 실패: ${error.message}`); onBack(); }
+  };
+
+  const fireInstantSave = async (payloads: any[]) => {
+    if (payloads.length === 0) return;
+    try {
+      let successIds: string[] = [];
+      
+      if (isHomeworkMode) {
+        const inserts = payloads.filter(p => !p.answer_id).map(p => ({
+          homework_id: p.homework_id, student_id: p.student_id, tq_id: p.tq_id, grading_code: p.grading_code, is_correct: p.is_correct, earned_score: p.earned_score
+        }));
+        const updates = payloads.filter(p => p.answer_id).map(p => ({
+          hw_answer_id: p.answer_id, grading_code: p.grading_code, is_correct: p.is_correct, earned_score: p.earned_score
+        }));
+        
+        if (inserts.length > 0) {
+          const { data, error } = await supabase.from('student_homework_answer').insert(inserts).select();
+          if (error) throw error;
+          if (data) {
+            successIds.push(...data.map(d => `${d.student_id}_${d.tq_id}`));
+            setMatrixData(prev => {
+              const m = new Map(prev.cellMap);
+              data.forEach(d => {
+                const key = `${d.student_id}_${d.tq_id}`;
+                const c = m.get(key);
+                if (c) m.set(key, { ...c, answerId: d.hw_answer_id });
+              });
+              return { ...prev, cellMap: m };
+            });
+          }
+        }
+        if (updates.length > 0) {
+          const results = await Promise.all(updates.map(u => supabase.from('student_homework_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('hw_answer_id', u.hw_answer_id).select()));
+          results.forEach(res => {
+            if (res.error) console.warn("DB Update Warning:", res.error);
+            if (res.data) successIds.push(...res.data.map(d => `${d.student_id}_${d.tq_id}`));
+          });
+        }
+      } else {
+        const inserts = payloads.filter(p => !p.answer_id).map(p => ({
+          exam_assignment_id: p.assignment_id, student_id: p.student_id, question_id: p.q_id, grading_code: p.grading_code, is_correct: p.is_correct, earned_score: p.earned_score
+        }));
+        const updates = payloads.filter(p => p.answer_id).map(p => ({
+          answer_id: p.answer_id, grading_code: p.grading_code, is_correct: p.is_correct, earned_score: p.earned_score
+        }));
+        
+        if (inserts.length > 0) {
+          const { data, error } = await supabase.from('student_answer').insert(inserts).select();
+          if (error) throw error;
+          if (data) {
+            successIds.push(...data.map(d => `${d.student_id}_${d.question_id}`));
+            setMatrixData(prev => {
+              const m = new Map(prev.cellMap);
+              data.forEach(d => {
+                const key = `${d.student_id}_${d.question_id}`;
+                const c = m.get(key);
+                if (c) m.set(key, { ...c, answerId: d.answer_id });
+              });
+              return { ...prev, cellMap: m };
+            });
+          }
+        }
+        if (updates.length > 0) {
+          const results = await Promise.all(updates.map(u => supabase.from('student_answer').update({ grading_code: u.grading_code, is_correct: u.is_correct, earned_score: u.earned_score }).eq('answer_id', u.answer_id).select()));
+          results.forEach(res => {
+            if (res.error) console.warn("DB Update Warning:", res.error);
+            if (res.data) successIds.push(...res.data.map(d => `${d.student_id}_${d.question_id}`));
+          });
+        }
+
+        // 실시간으로 exam_assignment.total_score도 갱신합니다.
+        const affectedAssignIds = Array.from(new Set(payloads.map(p => p.assignment_id).filter(Boolean)));
+        for (const aId of affectedAssignIds) {
+          const { data: upAns } = await supabase.from('student_answer').select('question_id, earned_score').eq('exam_assignment_id', aId);
+          const dedupScoreMap = new Map();
+          upAns?.forEach((a: any) => {
+            const k = String(a.question_id);
+            const ex = dedupScoreMap.get(k);
+            if (!ex || Number(a.earned_score || 0) > Number(ex.earned_score || 0)) dedupScoreMap.set(k, a);
+          });
+          let tempT = 0;
+          dedupScoreMap.forEach((a: any) => { tempT += (Number(a.earned_score) || 0); });
+          await supabase.from('exam_assignment').update({ total_score: roundScore(tempT) }).eq('assignment_id', aId);
+        }
+      }
+
+      if (successIds.length > 0) {
+        setPendingUpdates(prev => {
+          const next = { ...prev };
+          successIds.forEach(id => delete next[id]);
+          return next;
+        });
+      }
+    } catch (err) {
+      console.error("Instant save failed:", err);
+    }
+  };
+
+  const handleMatrixGrade = (sId: string, rowId: string, code: string) => {
+    const key = `${sId}_${rowId}`;
+    const cell = matrixData.cellMap.get(key);
+    if (!cell || cell.isBlocked) return;
+
+    const isCanceling = cell.currentCode === code;
+    const nextCode = isCanceling ? null : code;
+    const isAdm = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
+
+    const { newEarned, isCorrectEq } = isCanceling 
+      ? { newEarned: 0, isCorrectEq: false } 
+      : calcScoreRatio(nextCode, cell.assignedScore, gradingCodeMeta, isAdm);
+    
+    setMatrixData(prev => {
+      const newMap = new Map(prev.cellMap);
+      newMap.set(key, { ...cell, currentCode: nextCode });
+      return { ...prev, cellMap: newMap };
+    });
+
+    const payload = {
+      type: isHomeworkMode ? 'hw' : 'exam',
+      answer_id: cell.answerId,
+      homework_id: cell.homeworkId,
+      assignment_id: cell.assignmentId,
+      student_id: sId,
+      q_id: cell.qId,
+      tq_id: cell.tqId,
+      grading_code: nextCode,
+      is_correct: isCorrectEq,
+      earned_score: newEarned
+    };
+
+    setPendingUpdates(prev => ({ ...prev, [key]: payload }));
+    fireInstantSave([payload]); 
+  };
+
+  const markCol = (studentId: string, code: string) => {
+    const payloads: any[] = [];
+    const newMap = new Map(matrixData.cellMap);
+    const isAdm = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
+    
+    matrixData.rows.forEach(r => {
+      const key = `${studentId}_${r.id}`;
+      const cell = newMap.get(key);
+      if (!cell || cell.isBlocked) return;
+      
+      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta, isAdm);
+      newMap.set(key, { ...cell, currentCode: code });
+      
+      payloads.push({
+        type: isHomeworkMode ? 'hw' : 'exam',
+        answer_id: cell.answerId, homework_id: cell.homeworkId, assignment_id: cell.assignmentId,
+        student_id: studentId, q_id: cell.qId, tq_id: cell.tqId,
+        grading_code: code, is_correct: isCorrectEq, earned_score: newEarned
+      });
+    });
+
+    if (payloads.length === 0) return;
+
+    setMatrixData(prev => ({ ...prev, cellMap: newMap }));
+    
+    setPendingUpdates(prev => {
+      const next = { ...prev };
+      payloads.forEach(p => { next[`${p.student_id}_${isHomeworkMode ? p.tq_id : p.q_id}`] = p; });
+      return next;
+    });
+
+    fireInstantSave(payloads); 
+  };
+
+  const markRow = (questionId: string, code: string) => {
+    const payloads: any[] = [];
+    const newMap = new Map(matrixData.cellMap);
+    const isAdm = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
+
+    matrixData.cols.forEach(c => {
+      const key = `${c.id}_${questionId}`;
+      const cell = newMap.get(key);
+      if (!cell || cell.isBlocked) return;
+      
+      const { newEarned, isCorrectEq } = calcScoreRatio(code, cell.assignedScore, gradingCodeMeta, isAdm);
+      newMap.set(key, { ...cell, currentCode: code });
+
+      payloads.push({
+        type: isHomeworkMode ? 'hw' : 'exam',
+        answer_id: cell.answerId, homework_id: cell.homeworkId, assignment_id: cell.assignmentId,
+        student_id: c.id, q_id: cell.qId, tq_id: cell.tqId,
+        grading_code: code, is_correct: isCorrectEq, earned_score: newEarned
+      });
+    });
+
+    if (payloads.length === 0) return;
+
+    setMatrixData(prev => ({ ...prev, cellMap: newMap }));
+
+    setPendingUpdates(prev => {
+      const next = { ...prev };
+      payloads.forEach(p => { next[`${p.student_id}_${isHomeworkMode ? p.tq_id : p.q_id}`] = p; });
+      return next;
+    });
+
+    fireInstantSave(payloads);
+  };
+
+  const saveMatrixGrades = async () => {
+    if (Object.keys(pendingUpdates).length > 0) return alert("현재 백그라운드 저장 중인 항목이 있습니다. 잠시 후 다시 시도해주세요.");
+    if (!confirm("현재 DB에 실시간 저장되어 있습니다.\n\n최종 마감을 위해 오답노트를 발급하고 패널을 닫으시겠습니까?")) return;
+
+    setIsSaving(true);
+    try {
+      const studentStatuses = new Set<string>();
+
+      matrixData.cols.forEach(c => {
+        matrixData.rows.forEach(r => {
+          const key = `${c.id}_${r.id}`;
+          const cell = matrixData.cellMap.get(key);
+          if (cell && !cell.isBlocked && cell.currentCode) {
+            if (isHomeworkMode) studentStatuses.add(`${cell.homeworkId}_${cell.studentId}`);
+            else studentStatuses.add(`${cell.assignmentId}_${cell.studentId}`);
+          }
+        });
+      });
+
+      if (isHomeworkMode) {
+        for (const statusKey of Array.from(studentStatuses)) {
+          const [hwId, stId] = statusKey.split('_');
+          
+          const resolvedCodeByTqId = new Map<number, string>();
+          matrixData.rows.forEach(r => {
+             const key = `${stId}_${r.id}`;
+             const cell = matrixData.cellMap.get(key);
+             if (cell && !cell.isBlocked && String(cell.homeworkId) === String(hwId)) {
+                if (r.id != null) resolvedCodeByTqId.set(Number(r.id), cell.currentCode || null);
+             }
+          });
+          
+          const allTqIds = Array.from(resolvedCodeByTqId.keys());
+          const completedTqIds = allTqIds.filter(id => ['O', 'TO', 'RO'].includes(resolvedCodeByTqId.get(id) || ''));
+          await supabase.from('student_homework_result').update({ completed_tq_ids: completedTqIds, status: '채점완료' }).eq('homework_id', hwId).eq('student_id', stId);
+        }
+      } else {
+        for (const statusKey of Array.from(studentStatuses)) {
+          const [assignId] = statusKey.split('_');
+          const { data: upAns } = await supabase.from('student_answer').select('question_id, earned_score').eq('exam_assignment_id', assignId);
+          const dedupScoreMap = new Map();
+          upAns?.forEach((a: any) => {
+            const k = String(a.question_id);
+            const ex = dedupScoreMap.get(k);
+            if (!ex || Number(a.earned_score || 0) > Number(ex.earned_score || 0)) dedupScoreMap.set(k, a);
+          });
+          let tempT = 0; dedupScoreMap.forEach((a: any) => tempT += (Number(a.earned_score) || 0));
+          await supabase.from('exam_assignment').update({ total_score: roundScore(tempT), status: '채점완료' }).eq('assignment_id', assignId);
+        }
+      }
+
+      const uniqueStudents = Array.from(new Set(Array.from(studentStatuses).map(s => s.split('_')[1])));
+      for (const stId of uniqueStudents) {
+        const { data: exInc } = await supabase.from('student_incorrect_record').select('*').eq('student_id', stId);
+        
+        const incInserts: any[] = [];
+        const incUpdates: any[] = [];
+
+        matrixData.rows.forEach(r => {
+          const key = `${stId}_${r.id}`;
+          const cell = matrixData.cellMap.get(key);
+          if (!cell || cell.isBlocked || !cell.currentCode) return;
+
+          const hadWrong = cell?.wrongLog && cell.wrongLog.length > 0;
+          const isFullyCorrect = ['O', 'TO', 'RO'].includes(cell.currentCode) && !hadWrong;
+
+          const targetQId = isHomeworkMode ? cell.tqId : cell.qId;
+          const matchField = isHomeworkMode ? 'tq_id' : 'question_id';
+
+          const match = exInc?.find(e => String(e[matchField]) === String(targetQId));
+          
+          const dynamicSourceType = headerInfo.type || (isHomeworkMode ? '과제' : '시험지');
+
+          const p = { 
+            student_id: stId, 
+            [matchField]: targetQId, 
+            source_type: dynamicSourceType, 
+            status: cell.currentCode, 
+            resolved_at: isFullyCorrect ? new Date().toISOString() : null 
+          };
+          
+          if (match) {
+            const newRetryCount = isFullyCorrect ? match.retry_count : (match.retry_count || 0) + 1;
+            incUpdates.push({ record_id: match.record_id, ...p, retry_count: newRetryCount });
+          } else {
+            incInserts.push(p);
+          }
+        });
+
+        if (incInserts.length > 0) await supabase.from('student_incorrect_record').insert(incInserts);
+        if (incUpdates.length > 0) await Promise.all(incUpdates.map(u => supabase.from('student_incorrect_record').update({ status: u.status, resolved_at: u.resolved_at, source_type: u.source_type, retry_count: u.retry_count }).eq('record_id', u.record_id)));
+      }
+
+      alert("🎉 완료 상태 갱신 및 오답노트 발급이 처리되었습니다!");
+      onBack();
+
+    } catch (err: any) {
+      console.error("상태 갱신 오류:", err);
+      alert(`❌ 오류:\n${err.message}`);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const triggerReportGeneration = async (sId: string, assignId: string) => {
+    const hasUnsaved = Object.keys(pendingUpdates).some(k => pendingUpdates[k].student_id === sId);
+    if (hasUnsaved) return alert("⚠️ 해당 학생의 실시간 데이터가 저장 중입니다. 잠시 후 다시 시도하세요.");
+    
+    setProcessingReportId(sId);
+    try {
+      const { data: upAns } = await supabase.from('student_answer').select('question_id, earned_score').eq('exam_assignment_id', assignId);
+      const dedupScoreMap = new Map();
+      upAns?.forEach((a:any) => {
+        const key = String(a.question_id);
+        const existing = dedupScoreMap.get(key);
+        if (!existing || Number(a.earned_score || 0) > Number(existing.earned_score || 0)) {
+          dedupScoreMap.set(key, a);
+        }
+      });
+      let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
+      const finalScore = roundScore(tempT);
+
+      const { data: metaData } = await supabase.from('admission_standard_meta').select('*').eq('standard_name', standardName);
+      if (!metaData || metaData.length === 0) throw new Error(`[${standardName}] 기준표가 없습니다.`);
+
+      let sGeo=0, sMea=0, sStat=0, sRule=0, sCalc=0;
+      let sCalcSense=0, sSpatial=0, sLogic=0;
+      let sThink=0, sPersist=0, sKnow=0;
+      let maxThink=0, maxPersist=0, maxKnow=0;
+      let sD1=0, sD2=0, sD3=0, sD4=0, sD5=0;
+
+      matrixData.rows.forEach((r, idx) => {
+        const qNumStr = String(r.fullQuestion.items[0]?.question?.question_number || '');
+        const match = qNumStr.match(/\d+/);
+        const lNum = match ? parseInt(match[0], 10) : (idx + 1);
+
+        let meta = metaData.find(m => m.question_number === lNum) || { difficulty_level: 3, math_category: '수와 연산' } as any;
+
+        const cell = matrixData.cellMap.get(`${sId}_${r.id}`);
+        if (!cell || cell.isBlocked) return;
+
+        const ansRecord = upAns?.find(a => String(a.question_id) === String(r.id));
+        const earned = parseFloat(ansRecord?.earned_score) || 0;
+        const assigned = parseFloat(cell.assignedScore) || 0;
+        const diff = meta.difficulty_level || 3;
+
+        if (diff===1) sD1+=earned; else if(diff===2) sD2+=earned; else if(diff===3) sD3+=earned; else if(diff===4) sD4+=earned; else if(diff===5) sD5+=earned;
+        const cat = meta.math_category;
+        if (cat==='도형') sGeo+=earned; else if(cat==='측정') sMea+=earned; else if(cat==='확률과 통계') sStat+=earned; else if(cat==='규칙과 논리' || cat==='규칙성') sRule+=earned; else if(cat==='수와 연산') sCalc+=earned;
+
+        if(meta.is_calc_sense) sCalcSense+=earned; if(meta.is_spatial_perception) sSpatial+=earned; if(meta.is_logical_reasoning) sLogic+=earned;
+        if(meta.is_thinking_ability) { sThink+=earned; maxThink+=assigned; }
+        if(meta.is_task_persistence) { sPersist+=earned; maxPersist+=assigned; }
+        if(meta.is_background_knowledge) { sKnow+=earned; maxKnow+=assigned; }
+      });
+
+      const getLv = (e: number, m: number) => { if (m===0) return '중'; const p = (e/m)*100; if(p>=70) return '상'; if(p>=50) return '중'; return '하'; };
+      const lvThink = getLv(sThink, maxThink); const lvPersist = getLv(sPersist, maxPersist); const lvKnow = getLv(sKnow, maxKnow);
+
+      const { data: cmtData } = await supabase.from('admission_eval_comment').select('comment_text').eq('thinking_level', lvThink).eq('persistence_level', lvPersist).eq('knowledge_level', lvKnow).maybeSingle();
+
+      const payload: any = {
+        assignment_id: assignId,
+        student_id: sId,
+        exam_id: matrixData.rows[0]?.fullQuestion.items[0]?.question?.exam_id || null, 
+        total_score: finalScore,
+        score_geometry: sGeo, score_measure: sMea, score_stat: sStat, score_rule: sRule, score_calc: sCalc,
+        score_calc_sense: sCalcSense, score_spatial_percep: sSpatial, score_logical_reason: sLogic,
+        score_thinking: sThink, score_persistence: sPersist, score_knowledge: sKnow,
+        score_diff_1: sD1, score_diff_2: sD2, score_diff_3: sD3, score_diff_4: sD4, score_diff_5: sD5,
+        level_thinking: lvThink, level_persistence: lvPersist, level_knowledge: lvKnow,
+        final_comment: cmtData ? cmtData.comment_text : '분석 코멘트 없음'
+      };
+
+      await supabase.from('admission_test_report').delete().eq('assignment_id', assignId);
+      const { error: repErr } = await supabase.from('admission_test_report').insert([payload]);
+      if (repErr) throw new Error(repErr.message);
+
+      alert("✅ 진단 리포트가 성공적으로 생성되었습니다.");
+      loadMatrixExam(); 
+    } catch(e: any) {
+      console.error(e);
+      alert("❌ 리포트 생성 오류:\n" + e.message);
+    } finally {
+      setProcessingReportId(null);
+    }
+  };
+
+  const handleDeleteReport = async (sId: string, assignId: string) => {
+    if (!confirm("⚠️ 정말 이 진단 리포트를 삭제하시겠습니까?")) return;
+    setProcessingReportId(sId);
+    try {
+      const { error } = await supabase.from('admission_test_report').delete().eq('assignment_id', assignId);
+      if (error) throw new Error(error.message);
+      alert("🗑️ 진단 리포트가 파기되었습니다.");
+      loadMatrixExam();
+    } catch (e: any) {
+      alert("❌ 리포트 삭제 오류:\n" + e.message);
+    } finally {
+      setProcessingReportId(null);
+    }
+  };
+
+  const pendingCount = Object.keys(pendingUpdates).length;
+  const isAdmExamType = headerInfo.type.includes('입학테스트') || headerInfo.type.includes('진단평가');
+
+  const getColLiveScore = (studentId: string, fallbackScore: number) => {
+    let sum = 0;
+    let graded = 0;
+    matrixData.rows.forEach(r => {
+      const key = `${studentId}_${r.id}`;
+      const cell = matrixData.cellMap.get(key);
+      if (!cell || cell.isBlocked) return;
+      const code = pendingUpdates[key]?.grading_code !== undefined ? pendingUpdates[key].grading_code : cell.currentCode;
+      if (code) {
+        graded++;
+        sum += calcScoreRatio(code, cell.assignedScore, gradingCodeMeta, isAdmExamType).newEarned;
+      }
+    });
+    return graded > 0 ? roundScore(sum) : roundScore(fallbackScore || 0);
+  };
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden bg-slate-50 w-full font-pretendard">
+      <div className="shrink-0 bg-white border-b border-slate-200 px-4 py-3 flex items-center justify-between shadow-sm">
+        <div>
+          <h2 className="text-[14px] font-bold text-brand flex items-center gap-1.5">{headerInfo.title}</h2>
+          <p className="text-xs font-bold text-slate-500 mt-0.5">{headerInfo.subtitle}</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <span className={`text-xs font-bold whitespace-nowrap ${pendingCount > 0 ? 'text-orange-500 animate-pulse' : 'text-slate-400'}`}>
+            {pendingCount > 0 ? '실시간 저장 중...' : '모두 저장됨'}
+          </span>
+          <button onClick={saveMatrixGrades} disabled={isSaving || pendingCount > 0} className="text-xs font-bold bg-brand hover:bg-blue-900 text-white rounded-lg px-4 py-2 shadow-sm transition-colors disabled:opacity-50">
+            {isSaving ? "처리 중..." : "💾 최종 완료 및 마감"}
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-auto custom-scroll relative bg-slate-100/50">
+        {matrixData.cols.length === 0 ? (
+          <div className="flex items-center justify-center h-full text-slate-400 font-bold text-sm">데이터를 불러오는 중입니다...</div>
+        ) : (
+          <table className="w-max bg-white">
+            <thead className="sticky top-0 z-20 shadow-sm">
+              <tr>
+                <th className="sticky left-0 z-30 bg-slate-200 p-2 min-w-[150px] w-[150px] border-r border-b text-center align-middle shadow-[2px_0_5px_rgba(0,0,0,0.02)]">
+                  <div className="flex justify-between items-end px-1">
+                    <span className="text-xs font-bold text-slate-500">문항 ⬇</span>
+                    <span className="text-xs font-bold text-slate-500">학생 ➔</span>
+                  </div>
+                </th>
+                {matrixData.cols.map(c => (
+                  <th key={c.id} className="p-2 min-w-[140px] w-[140px] border-r border-b bg-slate-100 text-center align-top relative group">
+                    <div className="font-bold text-[12px] text-brand truncate" title={c.name}>{c.name}</div>
+                    
+                    {!isHomeworkMode && (
+                      <div className="text-xs text-slate-500 font-bold mt-0.5 mb-1 bg-white border border-slate-200 rounded px-1 w-max mx-auto">
+                        총점: <span className="text-emerald-600">{getColLiveScore(c.id, c.totalScore)}</span>
+                      </div>
+                    )}
+
+                    {headerInfo.type === '입학테스트' && (
+                      <div className="mt-1 flex flex-col gap-1 mb-2">
+                        {c.hasReport ? (
+                          <div className="flex items-center justify-center gap-1">
+                            <button onClick={() => window.open(`/print/report?assignment_id=${c.assignmentId}&t=${Date.now()}`, '_blank')} className="text-xs font-bold bg-emerald-50 text-emerald-600 border border-emerald-200 rounded px-1.5 py-0.5 hover:bg-emerald-100">열기</button>
+                            <button onClick={() => handleDeleteReport(c.id, c.assignmentId)} disabled={processingReportId === c.id} className="text-xs font-bold bg-rose-50 text-rose-500 border border-rose-200 rounded px-1.5 py-0.5 hover:bg-rose-100 disabled:opacity-50">삭제</button>
+                          </div>
+                        ) : (
+                          <button onClick={() => triggerReportGeneration(c.id, c.assignmentId)} disabled={processingReportId === c.id} className="text-xs font-bold bg-blue-50 text-blue-600 border border-blue-200 rounded px-2 py-0.5 mx-auto hover:bg-blue-100 disabled:opacity-50">
+                            {processingReportId === c.id ? "생성 중.." : "리포트 발급"}
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="flex mt-2">
+                      <button onClick={()=>markCol(c.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-xs font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
+                      <button onClick={()=>markCol(c.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-xs font-bold hover:bg-rose-100 transition-colors">전체 X</button>
+                    </div>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {matrixData.rows.map((r, idx) => (
+                <tr key={r.id} className={`hover:bg-blue-50/50 transition-colors ${idx % 2 === 0 ? 'bg-white' : 'bg-slate-50/30'}`}>
+                  <td className="sticky left-0 z-10 bg-white p-1.5 border-r border-b shadow-[2px_0_5px_rgba(0,0,0,0.02)] align-middle min-w-[150px] w-[150px]">
+                    <div className="flex justify-between items-center mb-1 border-b border-slate-100 pb-1 px-0.5">
+                      <div className="flex items-center gap-1 min-w-0">
+                        <span className="text-[12px] font-bold text-brand shrink-0">
+                          {r.displayNum}{r.displayNum.includes('(') ? '' : '번'}
+                        </span>
+                        <div className="flex items-center text-xs font-bold text-slate-400 bg-slate-50 px-1 py-0.5 rounded border border-slate-200 truncate leading-none mt-0.5">
+                          <span title="출처 페이지">{r.pageNum ? `${r.pageNum}p` : '-p'}</span>
+                          {r.qNumber && (
+                            <>
+                              <span className="text-slate-300 mx-1">|</span>
+                              <span title="실제 문제 번호">#{r.qNumber}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <button onClick={()=>setModalQ(r.fullQuestion)} className="text-xs text-slate-400 hover:text-blue-500 font-bold px-0.5 transition-colors shrink-0" title="상세 보기">🔍</button>
+                    </div>
+                    
+                    <div 
+                      onClick={()=>setModalQ(r.fullQuestion)}
+                      className="text-xs text-blue-700 font-bold bg-blue-50/50 hover:bg-blue-100 px-1 py-1 rounded border border-blue-100 mb-1 cursor-pointer transition-colors text-center overflow-hidden line-clamp-1 break-all" 
+                      title="클릭하여 문제/정답 전체 보기"
+                      dangerouslySetInnerHTML={{__html: formatMathTextForWeb(r.answer || "-")}} 
+                    />
+                    
+                    <div className="flex mt-auto">
+                      <button onClick={()=>markRow(r.id, 'O')} className="flex-1 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 border-r-0 rounded-l text-xs font-bold hover:bg-emerald-100 transition-colors">전체 O</button>
+                      <button onClick={()=>markRow(r.id, 'X')} className="flex-1 py-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-r text-xs font-bold hover:bg-rose-100 transition-colors">전체 X</button>
+                    </div>
+                  </td>
+                  
+                  {matrixData.cols.map(c => {
+                    const key = `${c.id}_${r.id}`;
+                    const cell = matrixData.cellMap.get(key);
+                    
+                    if (!cell || cell.isBlocked) {
+                      return <td key={key} className="border-r border-b bg-slate-200 opacity-20 pointer-events-none" />;
+                    }
+
+                    const currentCode = pendingUpdates[key]?.grading_code !== undefined ? pendingUpdates[key].grading_code : cell.currentCode;
+                    const hasInput = cell.studentInput && cell.studentInput !== '미입력';
+                    
+                    const cleanInputUrl = getCleanUrl(cell.studentInput);
+                    const isImg = hasInput && (
+                      String(cell.studentInput).startsWith('data:image') ||
+                      /\.(jpeg|jpg|gif|png|svg|webp)$/i.test(String(cell.studentInput)) ||
+                      /^[\w-]+\.[\w]+$/.test(String(cell.studentInput)) ||
+                      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(cell.studentInput))
+                    );
+                    
+                    return (
+                      <td key={key} className="p-2 border-r border-b transition-colors align-middle relative">
+                        <div className="flex items-center justify-between mb-1 px-1 h-[16px]">
+                           <div className="flex items-center gap-1 min-w-0 shrink-0">
+                             <span className="shrink-0 flex items-center justify-center min-w-[14px] h-[14px] px-1 rounded bg-indigo-50 border border-indigo-200 text-indigo-700 text-xs font-bold" title="학생 화면에서의 문제 번호">
+                               {cell.studentQNum}
+                             </span>
+                             <div className="text-xs text-slate-500 font-semibold truncate max-w-[45px] cursor-help" title={!isImg && hasInput ? cell.studentInput : ''}>
+                               {isImg ? (
+                                 <span onClick={() => setModalImg(cleanInputUrl || cell.studentInput)} className="text-blue-500 underline cursor-zoom-in">이미지 보기</span>
+                               ) : hasInput ? (
+                                 <span dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(cell.studentInput) }} />
+                               ) : (
+                                 <span className="text-slate-300">미입력</span>
+                               )}
+                             </div>
+                           </div>
+                           {cell.wrongLog?.length > 0 && (
+                             <button onClick={() => setModalWrongLog(cell.wrongLog)} className="text-[8px] bg-rose-100 hover:bg-rose-500 text-rose-600 hover:text-white transition-colors font-bold px-1.5 py-0.5 rounded-full shrink-0 leading-none">
+                               오답 {cell.wrongLog.length}
+                             </button>
+                           )}
+                        </div>
+
+                        <div className="grid grid-cols-4 gap-px bg-slate-300 border border-slate-300 rounded overflow-hidden w-full max-w-[120px] mx-auto shadow-sm">
+                          {GRADE_CODES.map(({code}) => (
+                            <GradeButton
+                              key={code} code={code}
+                              currentCode={currentCode}
+                              onClick={() => handleMatrixGrade(c.id, r.id, code)}
+                            />
+                          ))}
+                          <div className="flex items-center justify-center h-[28px] bg-slate-200 shadow-inner" />
+                        </div>
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      {modalQ && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-3xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="bg-brand p-4 text-white flex justify-between items-center shrink-0">
+              <h2 className="font-bold text-lg flex items-center gap-2"><span>🔍</span> {modalQ.displayQNum || modalQ.items?.[0]?.question?.question_number}번 문항 상세</h2>
+              <button onClick={() => setModalQ(null)} className="text-white hover:text-rose-400 font-bold text-2xl leading-none">&times;</button>
+            </div>
+            <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-6">
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
+                <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.items?.[0]?.question?.question || '-').replace(/\n/g, '<br>') }} />
+                {getCleanUrl(modalQ.items?.[0]?.question?.image_url) && <img src={getCleanUrl(modalQ.items[0].question.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
+              </div>
+              <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
+                <h3 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>
+                <div className="math-text text-blue-700 font-bold text-lg whitespace-pre-wrap" dangerouslySetInnerHTML={{ __html: `$ ${formatMathTextForWeb(modalQ.items?.[0]?.question?.answer || '-')} $` }} />
+              </div>
+            </div>
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
+              <button onClick={() => setModalQ(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalWrongLog && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-lg max-h-[85vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+            <div className="bg-rose-600 p-4 text-white flex justify-between items-center shrink-0">
+              <h2 className="font-bold text-lg flex items-center gap-2"><span>📝</span> 이전 오답 기록</h2>
+              <button onClick={() => setModalWrongLog(null)} className="text-white hover:text-rose-200 font-bold text-2xl leading-none">&times;</button>
+            </div>
+            <div className="p-6 overflow-y-auto custom-scroll flex-1 bg-slate-50 space-y-3">
+              {modalWrongLog.map((entry, i) => {
+                const when = entry.at ? new Date(entry.at).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
+                
+                const cleanInputUrl = getCleanUrl(entry.input);
+                const isImgLog = entry.input && (
+                  String(entry.input).startsWith('data:image') ||
+                  /\.(jpeg|jpg|gif|png|svg|webp)$/i.test(String(entry.input)) ||
+                  /^[\w-]+\.[\w]+$/.test(String(entry.input)) ||
+                      /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(String(entry.input))
+                );
+
+                return (
+                  <div key={i} className="bg-white rounded-xl border border-slate-200 p-4 shadow-sm">
+                    <p className="text-xs font-bold text-slate-400">시도 {i + 1}{when ? ' · ' + when : ''}</p>
+                    {isImgLog ? (
+                      <img src={cleanInputUrl || entry.input} className="max-w-full rounded-lg border border-slate-200 shadow-sm mt-2" alt="wrong_answer" />
+                    ) : (
+                      <p dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(entry.input || '') }} className="math-text text-slate-700 font-bold mt-1 whitespace-pre-wrap" />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="p-4 bg-white border-t border-slate-200 flex justify-end shrink-0">
+              <button onClick={() => setModalWrongLog(null)} className="px-6 py-2 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-lg shadow-sm">닫기</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {modalImg && (
+        <div className="fixed inset-0 bg-slate-900/70 z-50 flex items-center justify-center p-6 cursor-zoom-out" onClick={() => setModalImg(null)}>
+          <img src={modalImg} className="max-w-full max-h-full rounded-lg shadow-2xl bg-white" alt="answer_zoom" />
+        </div>
+      )}
+    </div>
+  );
+}
