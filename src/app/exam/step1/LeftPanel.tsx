@@ -11,7 +11,7 @@ export const getAllIds = (node: any) => {
       Object.values(n.children).forEach(traverse);
     } else {
       for (const k in n) {
-        if (k !== 'itemId' && k !== 'categoryId' && typeof n[k] === 'object') traverse(n[k]);
+        if (k !== 'itemId' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && typeof n[k] === 'object') traverse(n[k]);
       }
     }
   };
@@ -46,7 +46,7 @@ const getRepresentativeId = (n: any): string => {
     }
   }
   for (const k in n) {
-    if (k !== 'itemId' && k !== 'categoryId' && typeof n[k] === 'object') {
+    if (k !== 'itemId' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && typeof n[k] === 'object') {
       const id = getRepresentativeId(n[k]);
       if (id) return id;
     }
@@ -55,6 +55,10 @@ const getRepresentativeId = (n: any): string => {
 };
 
 const compareNodes = (aKey: string, aNode: any, bKey: string, bNode: any) => {
+  if (aNode?.sortOrder !== undefined && bNode?.sortOrder !== undefined && aNode.sortOrder !== bNode.sortOrder) {
+    return aNode.sortOrder - bNode.sortOrder;
+  }
+
   const idA = getRepresentativeId(aNode) || aKey;
   const idB = getRepresentativeId(bNode) || bKey;
 
@@ -80,7 +84,7 @@ const sortD1 = (a: string, b: string) => {
 };
 
 const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem, toggleFolder }: any) => {
-  const [isOpen, setIsOpen] = useState(depth <= 4);
+  const [isOpen, setIsOpen] = useState<boolean>(node?.defaultOpen ?? (depth <= 4));
 
   // 상위에서 데이터 트리를 제대로 구성해 주므로 명시적인 node.children만 체크하면 됩니다.
   if (node.children) {
@@ -121,7 +125,7 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
 
 export default function LeftPanel({ step1Data }: { step1Data: any }) {
   const {
-    isLoading, masterData, thinkingData, currentMode, currentD1, setCurrentD1, currentD2, setCurrentD2,
+    isLoading, masterData, thinkingData, testData, currentMode, currentD1, setCurrentD1, currentD2, setCurrentD2,
     currentTestGroup, updateTestGroup, 
     selectedItemIds, setSelectedItemIds, searchKeyword, setSearchKeyword, searchResults,
     switchMainTab, toggleItem, toggleFolder
@@ -139,7 +143,8 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
       if (['주간테스트', '중간테스트', '분기테스트'].includes(currentTestGroup)) {
          targetData = masterData[currentD1]?.[currentD2];
       } else {
-         targetData = (TEST_DATA as any)[currentTestGroup];
+         const activeTestData = testData || TEST_DATA;
+         targetData = activeTestData[currentTestGroup];
       }
     }
 
@@ -152,7 +157,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
         ))}
       </div>
     );
-  }, [isLoading, masterData, thinkingData, currentMode, currentD1, currentD2, currentTestGroup, selectedItemIds]);
+  }, [isLoading, masterData, thinkingData, testData, currentMode, currentD1, currentD2, currentTestGroup, selectedItemIds]);
 
   return (
     <section className="w-[50%] bg-white border-r border-slate-200 flex flex-col shadow-sm z-10 min-h-0">
@@ -183,7 +188,7 @@ export default function LeftPanel({ step1Data }: { step1Data: any }) {
 
       {searchKeyword.trim() !== "" ? (
         <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/50">
-          <div className="text-sm font-bold text-brand mb-3 px-1">검 결과 {searchKeyword.trim().length >= 2 && `(${searchResults.length}건)`}</div>
+          <div className="text-sm font-bold text-brand mb-3 px-1">검색 결과 {searchKeyword.trim().length >= 2 && `(${searchResults.length}건)`}</div>
           {searchKeyword.trim().length < 2 ? (
             <div className="text-center py-10 text-slate-400 font-bold">✌️ 원활한 검색을 위해 2글자 이상 입력해 주세요.</div>
           ) : searchResults.length === 0 ? (

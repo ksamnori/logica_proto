@@ -41,12 +41,89 @@ export default function TaxonomyEditorPage() {
   } = useTaxonomy() as any; 
 
   const [bookFilter, setBookFilter] = React.useState("");
+  const [gradeFilter, setGradeFilter] = React.useState<string>("ALL");
+  const [typeFilter, setTypeFilter] = React.useState<string>("ALL");
+  const [isBookPickerOpen, setIsBookPickerOpen] = React.useState(false);
+  const [pickerLimit, setPickerLimit] = React.useState(80);
+  const [autoFetchOnSelect, setAutoFetchOnSelect] = React.useState(true);
+  const [recentBooks, setRecentBooks] = React.useState<string[]>([]);
   const [questionTextFilter, setQuestionTextFilter] = React.useState("");
+  const pickerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("logica_taxonomy_recent_books") || "[]");
+      if (Array.isArray(saved)) {
+        setRecentBooks(saved.filter((b: any) => typeof b === "string" && !b.includes("입학테스트") && !b.includes("진단평가")).slice(0, 6));
+      }
+    } catch (e) {}
+  }, []);
+
+  React.useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target as Node)) {
+        setIsBookPickerOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const recordRecentBook = (bookName: string) => {
+    if (!bookName || bookName.includes("입학테스트") || bookName.includes("진단평가")) return;
+    setRecentBooks((prev) => {
+      const next = [bookName, ...prev.filter((b) => b !== bookName)].slice(0, 6);
+      try {
+        localStorage.setItem("logica_taxonomy_recent_books", JSON.stringify(next));
+      } catch (e) {}
+      return next;
+    });
+  };
+
+  const detectBookGrade = (name: string): string => {
+    const s = String(name || "");
+    if (/(?:초등?\s*1|초1|(?:^|[^0-9])1-[12](?:[^0-9]|$)|1학년|E1)/i.test(s) && !s.includes("중")) return "초1";
+    if (/(?:초등?\s*2|초2|(?:^|[^0-9])2-[12](?:[^0-9]|$)|2학년|E2)/i.test(s) && !s.includes("중")) return "초2";
+    if (/(?:초등?\s*3|초3|(?:^|[^0-9])3-[12](?:[^0-9]|$)|3학년|E3)/i.test(s) && !s.includes("중")) return "초3";
+    if (/(?:초등?\s*4|초4|(?:^|[^0-9])4-[12](?:[^0-9]|$)|4학년|E4)/i.test(s)) return "초4";
+    if (/(?:초등?\s*5|초5|(?:^|[^0-9])5-[12](?:[^0-9]|$)|5학년|E5)/i.test(s)) return "초5";
+    if (/(?:초등?\s*6|초6|(?:^|[^0-9])6-[12](?:[^0-9]|$)|6학년|E6)/i.test(s)) return "초6";
+    if (/(?:중등?\s*1|중1|(?:^|[^0-9])7-[12](?:[^0-9]|$)|M1)/i.test(s)) return "중1";
+    if (/(?:중등?\s*2|중2|(?:^|[^0-9])8-[12](?:[^0-9]|$)|M2)/i.test(s)) return "중2";
+    if (/(?:중등?\s*3|중3|(?:^|[^0-9])9-[12](?:[^0-9]|$)|M3)/i.test(s)) return "중3";
+    if (/(?:고등|고1|고2|고3|수학\s*\(?(?:상|하)\)?|수1|수2|미적분|확률과\s*통계|기하|H[123])/i.test(s)) return "고등";
+    return "기타";
+  };
+
+  const detectBookType = (name: string): "TWIN" | "SIMILAR" | "TEST" | "MAIN" => {
+    const s = String(name || "");
+    if (s.includes("쌍둥이") || /TWIN/i.test(s)) return "TWIN";
+    if (s.includes("유사") || /SIMILAR/i.test(s)) return "SIMILAR";
+    if (s.includes("주간테스트") || s.includes("중간테스트") || s.includes("분기테스트") || s.includes("단원테스트") || s.includes("평가")) return "TEST";
+    return "MAIN";
+  };
+
   const filteredWorkbooks = React.useMemo(() => {
-    if (!bookFilter.trim()) return workbooks;
-    const lowerKw = bookFilter.toLowerCase().replace(/\s+/g, '');
-    return workbooks.filter((b: string) => b.toLowerCase().replace(/\s+/g, '').includes(lowerKw));
-  }, [workbooks, bookFilter]);
+    const lowerKw = bookFilter.trim().toLowerCase().replace(/\s+/g, "");
+    return (workbooks || []).filter((b: string) => {
+      if (!b || b.includes("입학테스트") || b.includes("진단평가")) return false;
+      if (gradeFilter !== "ALL" && detectBookGrade(b) !== gradeFilter) return false;
+      if (typeFilter !== "ALL" && detectBookType(b) !== typeFilter) return false;
+      if (lowerKw && !b.toLowerCase().replace(/\s+/g, "").includes(lowerKw)) return false;
+      return true;
+    });
+  }, [workbooks, bookFilter, gradeFilter, typeFilter]);
+
+  const handleSelectBookFast = (bookName: string, shouldFetch: boolean = autoFetchOnSelect) => {
+    setSelectedBook(bookName);
+    setIsBookPickerOpen(false);
+    if (bookName) {
+      recordRecentBook(bookName);
+      if (shouldFetch) {
+        fetchQuestions(bookName);
+      }
+    }
+  };
 
   const renderGroups = React.useMemo(() => {
     if (!selectedBook) return [];
@@ -58,7 +135,7 @@ export default function TaxonomyEditorPage() {
       const descendants = getDescendants(String(root.question_id).trim().toLowerCase());
       const family = [root, ...descendants];
       
-      const currentBookItems = family.filter((item: any) => item.source_book_name === selectedBook);
+      const currentBookItems = family.filter((item: any) => item.source_book_name === selectedBook || item.book_name === selectedBook);
 
       if (currentBookItems.length > 0) {
         const sortedCurrent = [...currentBookItems].sort((a, b) => {
@@ -432,38 +509,225 @@ export default function TaxonomyEditorPage() {
         </div>
       </div>
 
-      <div className="bg-white px-6 py-4 border border-slate-200 rounded-xl flex items-end gap-4 mb-4 shrink-0 shadow-sm">
-        <div className="flex flex-col gap-1.5 flex-1 max-w-2xl">
-          <span className="text-xs font-bold text-slate-500">마스터 DB 전체 교재 검색 및 선택:</span>
-          <div className="flex items-center gap-2">
-            
-            <div className="relative w-56 shrink-0">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔍</span>
-              <input
-                type="text"
-                placeholder="학년/학기/키워드 (ex: 중1)"
-                value={bookFilter}
-                onChange={(e) => setBookFilter(e.target.value)}
-                className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm font-bold outline-none focus:ring-2 focus:ring-brand transition-all bg-white shadow-sm"
-              />
-              {bookFilter && (
-                <button onClick={() => setBookFilter("")} className="absolute inset-y-0 right-0 flex items-center pr-2 text-slate-400 hover:text-rose-500">✕</button>
-              )}
-            </div>
+      <div className="bg-white px-6 py-3.5 border border-slate-200 rounded-xl flex flex-col gap-2.5 mb-4 shrink-0 shadow-sm">
+        {/* 1단: 원클릭 학년 필터 + 교재 유형 필터 + 최근 작업 교재 */}
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[11px] font-bold text-slate-400 mr-1">학년 빠른필터:</span>
+            {[
+              { id: "ALL", label: "전체" },
+              { id: "초1", label: "초1" },
+              { id: "초2", label: "초2" },
+              { id: "초3", label: "초3" },
+              { id: "초4", label: "초4" },
+              { id: "초5", label: "초5" },
+              { id: "초6", label: "초6" },
+              { id: "중1", label: "중1" },
+              { id: "중2", label: "중2" },
+              { id: "중3", label: "중3" },
+              { id: "고등", label: "고등" },
+              { id: "기타", label: "기타" },
+            ].map((g) => (
+              <button
+                key={g.id}
+                type="button"
+                onClick={() => { setGradeFilter(g.id); setPickerLimit(80); }}
+                className={`px-2 py-1 rounded-md text-xs font-bold transition-all ${
+                  gradeFilter === g.id
+                    ? "bg-brand text-white shadow-sm"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {g.label}
+              </button>
+            ))}
+          </div>
 
-            <select value={selectedBook} onChange={(e) => setSelectedBook(e.target.value)} className="flex-1 min-w-0 px-3 py-2 border border-slate-300 rounded-lg font-bold text-brand bg-slate-50 text-sm shadow-sm outline-none focus:ring-2 focus:ring-brand cursor-pointer">
-              <option value="">교재를 선택하세요... ({filteredWorkbooks.length}건)</option>
-              {filteredWorkbooks.map((b: string) => <option key={b} value={b}>{b}</option>)}
-            </select>
-            
-            <button onClick={handleRenameBook} disabled={!selectedBook || isLoading} className="whitespace-nowrap shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg shadow-sm border border-slate-300 transition-colors disabled:opacity-50" title="선택한 문제지 덩어리의 이름을 통째로 변경합니다.">
-              ✏️ 이름 일괄 변경
-            </button>
+          <div className="flex flex-wrap items-center gap-1">
+            <span className="text-[11px] font-bold text-slate-400 mr-1">교재 유형:</span>
+            {[
+              { id: "ALL", label: "전체 유형" },
+              { id: "MAIN", label: "📘 본교재/일반" },
+              { id: "TWIN", label: "👯 쌍둥이" },
+              { id: "SIMILAR", label: "💡 유사" },
+              { id: "TEST", label: "📝 테스트" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => { setTypeFilter(t.id); setPickerLimit(80); }}
+                className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
+                  typeFilter === t.id
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
-        <button onClick={fetchQuestions} disabled={!selectedBook || isLoading} className="px-6 py-2 bg-brand hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm disabled:opacity-50 transition-colors whitespace-nowrap shrink-0">
-          조회하기
-        </button>
+
+        {/* 최근 작업 교재 퀵바 (있을 때만 표시) */}
+        {recentBooks.length > 0 && (
+          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <span className="text-[11px] font-bold text-slate-400 shrink-0">🕒 최근 교재:</span>
+            {recentBooks.map((rb) => (
+              <button
+                key={rb}
+                type="button"
+                onClick={() => handleSelectBookFast(rb, true)}
+                className={`px-2.5 py-1 rounded-full text-xs font-bold border transition-all shrink-0 max-w-[240px] truncate ${
+                  selectedBook === rb
+                    ? "bg-blue-50 border-brand text-brand shadow-sm"
+                    : "bg-slate-50 border-slate-200 text-slate-600 hover:bg-slate-100"
+                }`}
+                title={`${rb} 즉시 조회`}
+              >
+                {rb}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* 2단: 키워드 검색 + 지연 없는 커스텀 교재 선택창 + 버튼 */}
+        <div className="flex items-center gap-3">
+          <div className="relative w-64 shrink-0">
+            <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">🔍</span>
+            <input
+              type="text"
+              placeholder="교재 키워드 검색 (예: 디딤돌, 쎈)"
+              value={bookFilter}
+              onChange={(e) => { setBookFilter(e.target.value); setPickerLimit(80); setIsBookPickerOpen(true); }}
+              onFocus={() => setIsBookPickerOpen(true)}
+              className="w-full pl-9 pr-7 py-2 border border-slate-300 rounded-lg text-sm font-bold outline-none focus:ring-2 focus:ring-brand transition-all bg-white shadow-sm"
+            />
+            {bookFilter && (
+              <button onClick={() => setBookFilter("")} className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-slate-400 hover:text-rose-500 font-bold">✕</button>
+            )}
+          </div>
+
+          {/* 커스텀 고속 교재 선택 드롭다운 (수백 개 옵션을 한번에 렌더링하지 않아 클릭 즉시 열림) */}
+          <div ref={pickerRef} className="relative flex-1 min-w-0 max-w-xl">
+            <button
+              type="button"
+              onClick={() => { setPickerLimit(80); setIsBookPickerOpen((v) => !v); }}
+              className="w-full px-3.5 py-2 border border-slate-300 rounded-lg font-bold text-left bg-slate-50 hover:bg-white text-sm shadow-sm outline-none focus:ring-2 focus:ring-brand flex items-center justify-between gap-2 transition-colors"
+            >
+              <span className={`truncate ${selectedBook ? "text-brand" : "text-slate-500"}`}>
+                {selectedBook || `교재를 선택하세요... (조건 일치: ${filteredWorkbooks.length}건)`}
+              </span>
+              <span className="flex items-center gap-1.5 shrink-0">
+                <span className="text-[11px] bg-blue-50 text-brand border border-blue-200 px-1.5 py-0.5 rounded font-bold">
+                  {filteredWorkbooks.length}건
+                </span>
+                <span className="text-slate-400 text-xs">{isBookPickerOpen ? "▲" : "▼"}</span>
+              </span>
+            </button>
+
+            {isBookPickerOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-xl shadow-2xl z-50 overflow-hidden flex flex-col max-h-[380px]">
+                <div className="px-3.5 py-2 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs font-bold text-slate-500 shrink-0">
+                  <span>
+                    조건 일치 교재 <strong className="text-brand">{filteredWorkbooks.length}</strong>건
+                    {(gradeFilter !== "ALL" || typeFilter !== "ALL" || bookFilter.trim()) && (
+                      <button
+                        type="button"
+                        onClick={() => { setGradeFilter("ALL"); setTypeFilter("ALL"); setBookFilter(""); }}
+                        className="ml-2 text-rose-500 hover:underline"
+                      >
+                        필터 초기화
+                      </button>
+                    )}
+                  </span>
+                  <label className="flex items-center gap-1.5 cursor-pointer select-none text-slate-600">
+                    <input
+                      type="checkbox"
+                      checked={autoFetchOnSelect}
+                      onChange={(e) => setAutoFetchOnSelect(e.target.checked)}
+                      className="w-3.5 h-3.5 accent-brand rounded cursor-pointer"
+                    />
+                    <span>선택 시 바로 조회</span>
+                  </label>
+                </div>
+
+                <div className="overflow-y-auto flex-1 divide-y divide-slate-100 custom-scroll">
+                  {filteredWorkbooks.length === 0 ? (
+                    <div className="py-10 text-center text-slate-400 font-bold text-sm">
+                      선택한 필터 조건에 맞는 교재가 없습니다.
+                    </div>
+                  ) : (
+                    <>
+                      {filteredWorkbooks.slice(0, pickerLimit).map((b: string) => {
+                        const bGrade = detectBookGrade(b);
+                        const bType = detectBookType(b);
+                        const isSel = selectedBook === b;
+                        return (
+                          <button
+                            key={b}
+                            type="button"
+                            onClick={() => handleSelectBookFast(b, autoFetchOnSelect)}
+                            className={`w-full px-3.5 py-2.5 text-left text-sm font-bold flex items-center justify-between gap-2 transition-colors ${
+                              isSel ? "bg-blue-50 text-brand" : "hover:bg-slate-50 text-slate-700"
+                            }`}
+                          >
+                            <span className="truncate">{b}</span>
+                            <span className="flex items-center gap-1 shrink-0">
+                              {bGrade !== "기타" && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                  {bGrade}
+                                </span>
+                              )}
+                              {bType === "TWIN" && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-fuchsia-50 text-fuchsia-700 border border-fuchsia-200">
+                                  쌍둥이
+                                </span>
+                              )}
+                              {bType === "SIMILAR" && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200">
+                                  유사
+                                </span>
+                              )}
+                              {bType === "TEST" && (
+                                <span className="text-[10px] px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                  테스트
+                                </span>
+                              )}
+                            </span>
+                          </button>
+                        );
+                      })}
+                      {filteredWorkbooks.length > pickerLimit && (
+                        <button
+                          type="button"
+                          onClick={() => setPickerLimit((prev) => prev + 100)}
+                          className="w-full py-2.5 text-center text-xs font-bold text-brand bg-blue-50/60 hover:bg-blue-100/70 transition-colors"
+                        >
+                          👇 교재 더보기 ({filteredWorkbooks.length - pickerLimit}건 남음)
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          <button onClick={handleRenameBook} disabled={!selectedBook || isLoading} className="whitespace-nowrap shrink-0 px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg shadow-sm border border-slate-300 transition-colors disabled:opacity-50" title="선택한 문제지 덩어리의 이름을 통째로 변경합니다.">
+            ✏️ 이름 일괄 변경
+          </button>
+
+          <button
+            onClick={() => {
+              if (selectedBook) recordRecentBook(selectedBook);
+              fetchQuestions();
+            }}
+            disabled={!selectedBook || isLoading}
+            className="px-6 py-2 bg-brand hover:bg-blue-900 text-white font-bold rounded-lg shadow-sm disabled:opacity-50 transition-colors whitespace-nowrap shrink-0"
+          >
+            조회하기
+          </button>
+        </div>
       </div>
 
       <div className="flex-1 flex gap-4 overflow-hidden min-h-0">
@@ -505,7 +769,7 @@ export default function TaxonomyEditorPage() {
               <div className="flex flex-col gap-3">
                 {renderGroups.map((group: any, gIdx: number) => {
                   const { root, descendants } = group;
-                  const isRootCurrent = root.source_book_name === selectedBook;
+                  const isRootCurrent = root.source_book_name === selectedBook || root.book_name === selectedBook;
 
                   return (
                     <div key={`group-${root.question_id}-${gIdx}`} className="flex flex-col relative">
@@ -583,7 +847,7 @@ export default function TaxonomyEditorPage() {
                           )}
                           
                           {descendants.map((desc: any) => {
-                            const isDescCurrent = desc.source_book_name === selectedBook;
+                            const isDescCurrent = desc.source_book_name === selectedBook || desc.book_name === selectedBook;
                             return (
                               <div 
                                 id={`q-list-${desc.question_id}`} 

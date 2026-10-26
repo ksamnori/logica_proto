@@ -358,3 +358,132 @@ export const compareQuestionsBySource = (a: any, b: any): number => {
 
   return compareSubQuestions(a, b);
 };
+
+export const getDiagnosticMainScore = (gIdx: number): number => {
+  const idx = Math.max(0, Math.min(29, gIdx));
+  return [2, 3, 4, 5][
+    idx < 4 ? 0 : idx < 13 ? 1 : idx < 20 ? 2 : idx === 20 ? 3 : idx < 23 ? 0 : idx < 25 ? 1 : idx < 28 ? 2 : 3
+  ];
+};
+
+export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDiagnosticMode: boolean = false): boolean => {
+  if (!lastItem || !nextItem) return false;
+
+  const pid1 = String(lastItem.parent_question_id || "").trim();
+  const pid2 = String(nextItem.parent_question_id || "").trim();
+  const qid1 = String(lastItem.question_id || "").trim();
+  const qid2 = String(nextItem.question_id || "").trim();
+
+  if (pid1 && pid1 !== "null" && pid1 === pid2) return true;
+  if (qid1 && pid2 && pid2 !== "null" && qid1 === pid2) return true;
+  if (qid2 && pid1 && pid1 !== "null" && qid2 === pid1) return true;
+
+  const gid1 = String(lastItem.group_id || "").trim();
+  const gid2 = String(nextItem.group_id || "").trim();
+  if (gid1 && gid1 !== "null" && gid1 === gid2) return true;
+
+  const book1 = String(lastItem.source_book_name || lastItem.book_name || lastItem.pdf_source || "").trim();
+  const book2 = String(nextItem.source_book_name || nextItem.book_name || nextItem.pdf_source || "").trim();
+  if (!isDiagnosticMode && book1 && book2 && book1 !== book2) return false;
+
+  const page1 = parseInt(String(lastItem.page_number || lastItem.final_printed_page || lastItem.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
+  const page2 = parseInt(String(nextItem.page_number || nextItem.final_printed_page || nextItem.detected_page_num || "0").replace(/[^0-9]/g, ""), 10) || 0;
+  const samePage = page1 === page2 || page1 === 0 || page2 === 0;
+
+  const num1 = parseQuestionNumberParts(lastItem.question_number);
+  const num2 = parseQuestionNumberParts(nextItem.question_number);
+  if (samePage && num1.main !== 99999 && num1.main === num2.main) {
+    return true;
+  }
+  if (
+    isDiagnosticMode &&
+    num1.main !== 99999 &&
+    num1.main === num2.main &&
+    (samePage || num1.dash > 0 || num2.dash > 0 || num1.paren > 0 || num2.paren > 0)
+  ) {
+    return true;
+  }
+
+  const sub1 = parseInt(String(lastItem.sub_num ?? "0"), 10) || 0;
+  const sub2 = parseInt(String(nextItem.sub_num ?? "0"), 10) || 0;
+  if (samePage && sub2 > 1 && (sub2 === sub1 + 1 || sub1 >= 1)) {
+    return true;
+  }
+
+  const text1 = String(lastItem.question || lastItem.text_question || "");
+  const text2 = String(nextItem.question || nextItem.text_question || "");
+  const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
+
+  const clean1 = text1.replace(removeNumberingRegex, "$1");
+  const clean2 = text2.replace(removeNumberingRegex, "$1");
+
+  let k = 0;
+  while (k < clean1.length && k < clean2.length && clean1[k] === clean2[k]) k++;
+  const commonPrefix = clean1.substring(0, k);
+  const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
+
+  if (samePage && textOnlyCommon.length >= 6) {
+    return true;
+  }
+
+  if (samePage) {
+    const [m1, m2] = extractSubMarkerBetween(text1, text2);
+    if (m1 >= 1 && m2 === m1 + 1) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+export const buildMergedQuestionGroups = (rawQuestions: any[], isDiagnosticMode: boolean = false, preserveOrder: boolean = false): any[] => {
+  if (!rawQuestions || rawQuestions.length === 0) return [];
+  const sorted = preserveOrder ? [...rawQuestions] : [...rawQuestions].sort(compareQuestionsBySource);
+
+  const result: any[] = [];
+  let i = 0;
+
+  while (i < sorted.length) {
+    const firstQ = sorted[i];
+    const currentItems: any[] = [firstQ];
+    let j = i + 1;
+
+    while (j < sorted.length) {
+      const lastItem = currentItems[currentItems.length - 1];
+      const nextItem = sorted[j];
+      const matchesAnyInGroup =
+        shouldMergeAdjacentQuestions(lastItem, nextItem, isDiagnosticMode) ||
+        shouldMergeAdjacentQuestions(currentItems[0], nextItem, isDiagnosticMode);
+
+      if (matchesAnyInGroup) {
+        currentItems.push(nextItem);
+        j++;
+      } else {
+        break;
+      }
+    }
+
+    if (currentItems.length > 1) {
+      currentItems.sort(compareSubQuestions);
+      result.push({
+        id: `merged_${Date.now()}_${i}_${currentItems[0].question_id}`,
+        is_group: true,
+        is_merged_text: true,
+        items: currentItems,
+        sort_order: i + 1,
+      });
+    } else {
+      result.push({
+        id: `single_${firstQ.question_id}_${i}_${Math.random()}`,
+        is_group: false,
+        is_merged_text: false,
+        items: currentItems,
+        sort_order: i + 1,
+      });
+    }
+
+    i = j;
+  }
+
+  return result;
+};

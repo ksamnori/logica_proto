@@ -1,7 +1,7 @@
 // src/app/exam/step2/RightPreview.tsx
 import React, { useState, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, isThinking, processGroupText } from "./examUtils";
+import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore } from "./examUtils";
 
 // 🌟 [핵심 수정] 배율이 없을 때 100%로 늘어나서 '거인증'이 생기는 것을 막기 위해 기본값을 'auto'로 변경
 const getBoxWidth = (box: any) => {
@@ -468,8 +468,11 @@ export default function RightPreview({ examData }: { examData: any }) {
            else if (diffLabel === '상') diffColor = "text-indigo-500 bg-indigo-50 border-indigo-100";
            else if (diffLabel === '최상') diffColor = "text-rose-500 bg-rose-50 border-rose-100";
 
-           const isGroupMerged = g.is_merged_text && g.items.length > 1;
+           const isGroupMerged = g.items.length > 1;
            const { common, remainders } = isGroupMerged ? processGroupText(g.items) : { common: "", remainders: [] };
+           const isDiagPreview = typeof window !== "undefined" && (sessionStorage.getItem("testCategory") === "진단평가" || sessionStorage.getItem("testCategory") === "입학테스트" || sessionStorage.getItem("examType") === "입학테스트");
+           const mainScoreVal = isDiagPreview ? getDiagnosticMainScore(idx) : Math.round((100 / (questions.length || 1)) * 10) / 10;
+           const subScoreVal = Math.round((mainScoreVal / (g.items.length || 1)) * 100) / 100;
 
            return (
              <div key={g.id} id={`problem-card-${idx}`} 
@@ -483,7 +486,8 @@ export default function RightPreview({ examData }: { examData: any }) {
                className={cardClass}
              >
                <div className="w-[64px] flex flex-col items-center py-5 shrink-0 gap-1.5 border-r border-slate-200 relative pointer-events-none" style={{ backgroundColor: isDragOverTarget ? 'transparent' : '#f8fafc' }}>
-                 <span className="font-lexend font-black text-[22px] text-slate-800 mb-2 mt-2">{qNum}</span>
+                 <span className="font-lexend font-black text-[22px] text-slate-800 mb-1 mt-2">{qNum}</span>
+                 <span className="text-[11px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded w-[48px] text-center tracking-tighter mb-0.5" title="대문항 총 배점">{mainScoreVal}점</span>
                  <span className={`text-[11px] font-bold border px-1 py-0.5 rounded w-[45px] text-center tracking-tighter ${diffColor}`}>{diffLabel}</span>
                  {isThk && <span className="text-[10px] font-bold text-indigo-500 bg-white border border-indigo-200 px-1 py-0.5 rounded w-[45px] text-center tracking-tighter">사고력</span>}
                  <span className="text-[11px] font-bold text-slate-500 bg-white border border-slate-200 px-1 py-0.5 rounded w-[45px] text-center tracking-tighter">{rateVal}</span>
@@ -525,6 +529,11 @@ export default function RightPreview({ examData }: { examData: any }) {
                                {q.final_printed_page || q.detected_page_num ? ` p.${String(q.final_printed_page || q.detected_page_num).replace(/p/gi, '').trim()}` : ''}
                                {q.question_number ? ` ${String(q.question_number).replace(/번/g, '').trim()}${q.sub_num && String(q.sub_num) !== '0' ? `-${q.sub_num}` : ''}번` : ''}
                              </span>
+                             {g.items.length > 1 && (
+                               <span className="ml-1.5 bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-[2px] rounded text-[10px] font-extrabold leading-none">
+                                 서브문항 ({subIdx + 1}) · 배점 {subScoreVal}점 (1/{g.items.length})
+                               </span>
+                             )}
                            </div>
                          </div>
                          

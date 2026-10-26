@@ -89,7 +89,7 @@ export default function ViewerSidebar({
                           <select value={isAdmissionLock ? '입학테스트' : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-700 bg-white focus:outline-none focus:border-brand ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
                               <option value="basic1">기본1 (좌측 여백 활용)</option>
                               <option value="basic2">기본2 (슬림 헤더, 하단 라벨)</option>
-                              {isAdmissionLock && <option value="입학테스트">입학테스트 전용</option>}
+                              {isAdmissionLock && <option value="입학테스트">진단평가 (입학테스트) 전용</option>}
                           </select>
                       </div>
                       <div className={isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}>
@@ -170,7 +170,7 @@ export default function ViewerSidebar({
                               <option value="주간테스트">주간테스트</option>
                               <option value="중간평가">중간평가</option>
                               <option value="분기평가">분기평가</option>
-                              <option value="입학테스트">입학테스트</option>
+                              <option value="입학테스트">진단평가 (입학테스트)</option>
                           </select>
                       </div>
                       {layoutType === '주간테스트' && (

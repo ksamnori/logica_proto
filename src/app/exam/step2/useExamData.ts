@@ -2,7 +2,8 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, extractParentIds, compareSubQuestions, compareQuestionsBySource } from "./examUtils";
+import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups } from "./examUtils";
+import { DIAGNOSTIC_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester } from "../step1/useStep1Data";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
 const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
@@ -263,9 +264,13 @@ export function useExamData() {
         allGroups.forEach((g: any) => {
           if (g.items && g.items.length > 1) {
             g.items.sort(compareSubQuestions);
+            g.is_merged_text = true;
           }
         });
         allGroups.sort((a, b) => a.sort_order - b.sort_order);
+        if (userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+          allGroups = buildMergedQuestionGroups(orderedQuestions, false, true);
+        }
 
         const allItems = allGroups.reduce((acc, g) => acc.concat(g.items), []);
         await fetchDepthMappings(allItems);
@@ -306,21 +311,82 @@ export function useExamData() {
     try {
       let allData: any[] = [];
       const searchIds = new Set<string>();
-      selectedItemIdsArray.forEach((id: string) => {
+      const diagSelections: { sem: (typeof DIAGNOSTIC_SEMESTERS)[number]; quarterKey: string | null }[] = [];
+      const isDiagnosticMode = examMode === "test" && (testCategory === "진단평가" || testCategory === "입학테스트");
+
+      selectedItemIdsArray.forEach((rawId: string) => {
+        const id = String(rawId || "");
+        if (id.includes("__QTR__")) {
+          const [baseSrc, qtrKey] = id.split("__QTR__");
+          const sem = DIAGNOSTIC_SEMESTERS.find((s) => s.baseSource === baseSrc);
+          if (sem) {
+            diagSelections.push({ sem, quarterKey: qtrKey || null });
+          } else {
+            searchIds.add(baseSrc);
+          }
+          return;
+        }
+
+        if (isDiagnosticMode) {
+          const sem = DIAGNOSTIC_SEMESTERS.find((s) => s.baseSource === id);
+          if (sem) {
+            diagSelections.push({ sem, quarterKey: null });
+            return;
+          }
+        }
+
         searchIds.add(id);
-        if (id.includes('-')) {
-          const parts = id.split('-');
-          if (parts.length > 2) searchIds.add(parts.slice(0, -1).join('-'));
+        if (examMode !== "test" && id.includes("-")) {
+          const parts = id.split("-");
+          if (parts.length > 2) searchIds.add(parts.slice(0, -1).join("-"));
         }
       });
-      
+
+      // 🌟 1) 진단평가 모드일 때: Step 1에서 전달된 정확한 question_id 목록 또는 진단평가 전용 페이지네이션 쿼리로 조회
+      // (기존처럼 "4-1" 같은 학기 코드를 일반 ilike 검색에 넣으면 일반 교재 수천 건이 먼저 조회되어 1000건 제한에 걸려 진단평가 문항이 누락되던 문제 완벽 해결)
+      if (isDiagnosticMode || diagSelections.length > 0) {
+        let preMatchedQIds: string[] = [];
+        try {
+          preMatchedQIds = JSON.parse(sessionStorage.getItem("diagnosticQuestionIds") || "[]");
+        } catch (e) {}
+
+        if (Array.isArray(preMatchedQIds) && preMatchedQIds.length > 0) {
+          for (let i = 0; i < preMatchedQIds.length; i += 100) {
+            const idChunk = preMatchedQIds.slice(i, i + 100);
+            const { data, error } = await supabase
+              .from("question_db")
+              .select("*")
+              .in("question_id", idChunk);
+            if (error) throw error;
+            if (data) allData = allData.concat(data);
+          }
+        } else {
+          let from = 0;
+          const step = 1000;
+          while (true) {
+            const { data, error } = await supabase
+              .from("question_db")
+              .select("*")
+              .or("pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%")
+              .order("question_id", { ascending: true })
+              .range(from, from + step - 1);
+            if (error) throw error;
+            if (!data || data.length === 0) break;
+            allData = allData.concat(data);
+            if (data.length < step) break;
+            from += step;
+          }
+        }
+      }
+
+      // 🌟 2) 일반/사고력/기타 테스트 검색
       const chunk = Array.from(searchIds);
       for (let i = 0; i < chunk.length; i += 100) {
         const currentChunk = chunk.slice(i, i + 100);
         let orQueryStr = `item_id.in.(${currentChunk.join(',')}),taxonomy_id.in.(${currentChunk.join(',')}),thk_taxonomy_id.in.(${currentChunk.join(',')})`;
 
         if (examMode === "test") {
-          const pdfQueries = currentChunk.map(kw => `pdf_source.ilike.%${kw}%`).join(',');
+          const pdfQueries = currentChunk.map(kw => `pdf_source.ilike.%${kw}%,source_book_name.ilike.%${kw}%,book_name.ilike.%${kw}%`).join(',');
           orQueryStr = `${orQueryStr},${pdfQueries}`;
         }
 
@@ -331,21 +397,37 @@ export function useExamData() {
             finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
         }
 
-        if (bookName1) finalQuery = finalQuery.ilike("book_name", `%${bookName1}%`);
-        if (bookName2) finalQuery = finalQuery.ilike("book_name", `%${bookName2}%`);
+        if (bookName1 && !isDiagnosticMode) finalQuery = finalQuery.ilike("book_name", `%${bookName1}%`);
+        if (bookName2 && !isDiagnosticMode) finalQuery = finalQuery.ilike("book_name", `%${bookName2}%`);
 
         const { data, error } = await finalQuery.limit(2000);
         if (error) throw error;
         if (data) allData = allData.concat(data);
       }
 
-      const isPageFilterActive = pageStart !== "" || pageEnd !== "";
+      // 중복 문항 제거
+      const uniqueDataMap = new Map<string, any>();
+      allData.forEach((q: any) => {
+        if (q && q.question_id) uniqueDataMap.set(String(q.question_id), q);
+      });
+      allData = Array.from(uniqueDataMap.values());
+
+      const isPageFilterActive = !isDiagnosticMode && (pageStart !== "" || pageEnd !== "");
       const minPage = pageStart ? parseInt(pageStart, 10) : 0;
       const maxPage = pageEnd ? parseInt(pageEnd, 10) : 999999;
 
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
+
+        if (diagSelections.length > 0) {
+          const matchesDiag = diagSelections.some(({ sem, quarterKey }) => {
+            if (!matchDiagnosticSemester(q, sem)) return false;
+            if (!quarterKey) return true;
+            return getDiagnosticQuarterInfo(q.created_at).key === quarterKey;
+          });
+          if (!matchesDiag) return false;
+        }
         
         if (examMode !== "test") {
           const pt = String(q.problem_type || '').toUpperCase();
@@ -375,23 +457,12 @@ export function useExamData() {
         return router.push("/exam/step1");
       }
 
-      let groupMap = new Map();
-      filteredData.forEach(q => {
-        let gId = `single_${q.question_id}_${Math.random()}`;
-        if (!groupMap.has(gId)) groupMap.set(gId, { id: gId, items: [] });
-        groupMap.get(gId).items.push(q);
-      });
-
-      let allGroups = Array.from(groupMap.values());
-      allGroups.forEach(g => {
-        if (g.items && g.items.length > 1) {
-          g.items.sort(compareSubQuestions);
-        }
-      });
+      // 🌟 서브문항 자동 병합: 동일 문항 번호(예: 15-1, 15-2, 15(1), 15(2)), 부모-자식 ID, 공통 지문, 연속 서브 번호((1),(2))를 하나의 대문항 그룹으로 묶어 30문제로 정확히 구성
+      let allGroups = buildMergedQuestionGroups(filteredData, isDiagnosticMode);
 
       let selectedGroups: any[] = [];
-      if (examMode === 'test' && testCategory === '입학테스트') {
-        selectedGroups = allGroups.slice(0, qCountReq);
+      if (examMode === 'test' && (testCategory === '진단평가' || testCategory === '입학테스트')) {
+        selectedGroups = diagSelections.length > 0 ? allGroups : allGroups.slice(0, qCountReq);
       } else {
         const diffPool: Record<string, any[]> = { '최하': [], '하': [], '중': [], '상': [], '최상': [] };
         allGroups.forEach(g => {
@@ -576,7 +647,7 @@ export function useExamData() {
     
     // 💡 질문 리스트(questions) 안에 있는 모든 문항 ID들을 배열로 추출하여 세션에 구워줍니다.
     const allQuestionIds = questions.map(g => {
-        if (g.is_merged_text) {
+        if (g.is_merged_text || (g.items && g.items.length > 1)) {
            // 병합 문항은 배열 형태로 묶어줍니다.
            return g.items.map((i: any) => i.question_id);
         }
@@ -588,7 +659,7 @@ export function useExamData() {
     sessionStorage.setItem("qCount", String(questions.length));
     
     const userMergedTextQuestions = questions
-      .filter(g => g.is_merged_text)
+      .filter(g => g.is_merged_text || (g.items && g.items.length > 1))
       .map(g => g.items.map((i: any) => i.question_id));
     sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(userMergedTextQuestions));
 

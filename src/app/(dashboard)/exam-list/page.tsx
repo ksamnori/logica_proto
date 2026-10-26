@@ -19,6 +19,7 @@ export default function ExamListPage() {
   const [isLoading, setIsLoading] = useState(true);
 
   const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>('ALL');
+  const [filterLevel, setFilterLevel] = useState("ALL");
   const [filterGrade, setFilterGrade] = useState("ALL");
   const [filterCreator, setFilterCreator] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
@@ -249,13 +250,126 @@ export default function ExamListPage() {
     printWin.document.close();
   };
 
-  const uniqueGrades = useMemo(() => Array.from(new Set(exams.map(e => e.major_grade).filter(Boolean))).sort(), [exams]);
+  const uniqueGrades = useMemo(() => {
+    const standardGrades = [
+      "초등 1-1", "초등 1-2", "초등 2-1", "초등 2-2", "초등 3-1", "초등 3-2",
+      "초등 4-1", "초등 4-2", "초등 5-1", "초등 5-2", "초등 6-1", "초등 6-2",
+      "중등 1-1", "중등 1-2", "중등 2-1", "중등 2-2", "중등 3-1", "중등 3-2",
+    ];
+    const fromExams = (exams.map((e) => e.major_grade).filter(Boolean) as string[]).filter(
+      (g) => !g.startsWith("고등") && !g.startsWith("고")
+    );
+    const merged = Array.from(new Set([...standardGrades, ...fromExams]));
+    const getWeight = (g: string) => {
+      if (g.startsWith("초등")) return 1;
+      if (g.startsWith("중등")) return 2;
+      return 9;
+    };
+    return merged.sort((a, b) => {
+      const wA = getWeight(a);
+      const wB = getWeight(b);
+      if (wA !== wB) return wA - wB;
+      return a.localeCompare(b, "ko", { numeric: true });
+    });
+  }, [exams]);
+
+  const detectExamLevels = (exam: any): Set<string> => {
+    const found = new Set<string>();
+    let combined = `${exam.title || ""} ${exam.sub_title || ""}`;
+    if (!combined.trim()) return found;
+
+    const fullNames: [RegExp, string][] = [
+      [/ultimate/gi, "Ultimate"],
+      [/master/gi, "Master"],
+      [/apex/gi, "Apex"],
+      [/titan/gi, "Titan"],
+      [/horizon/gi, "Horizon"],
+    ];
+
+    fullNames.forEach(([regex, levelName]) => {
+      if (regex.test(combined)) {
+        found.add(levelName);
+        combined = combined.replace(regex, " ");
+      }
+    });
+
+    // 영단어 일부가 아닌 독립/레벨 약어(예: 52U, 5-2M, [A], T반, H레벨, UM 등)에서 U, M, A, T, H 추출
+    const codeRegex = /(?:^|[^a-zA-Z])([UMATH]{1,5})(?:[^a-zA-Z]|$)/gi;
+    let match: RegExpExecArray | null;
+    while ((match = codeRegex.exec(combined)) !== null) {
+      const token = match[1].toUpperCase();
+      if (token.includes("U")) found.add("Ultimate");
+      if (token.includes("M")) found.add("Master");
+      if (token.includes("A")) found.add("Apex");
+      if (token.includes("T")) found.add("Titan");
+      if (token.includes("H")) found.add("Horizon");
+    }
+
+    return found;
+  };
+
+  const matchesLevelFilter = (exam: any, selectedLevel: string): boolean => {
+    if (selectedLevel === "ALL") return true;
+    const levels = detectExamLevels(exam);
+    if (selectedLevel === "기타") {
+      return levels.size === 0;
+    }
+    return levels.has(selectedLevel);
+  };
+
   const uniqueCreators = useMemo(() => {
     return Array.from(new Set(exams.map(e => {
       const instructor = Array.isArray(e.instructor) ? e.instructor[0] : e.instructor;
       return instructor?.name || '시스템 선생님';
     }))).sort();
   }, [exams]);
+
+  const matchesGradeAndSubTitle = (exam: any, selectedGrade: string): boolean => {
+    if (selectedGrade === "ALL") return true;
+    if (exam.major_grade === selectedGrade || exam.target_grade === selectedGrade) return true;
+
+    const sub = String(exam.sub_title || "").trim();
+    if (!sub) return false;
+    if (sub.includes(selectedGrade)) return true;
+
+    const m = selectedGrade.match(/(초등|중등|고등)?\s*(\d+)\s*-\s*(\d+)/);
+    if (!m) return sub.includes(selectedGrade);
+
+    const school = m[1] || "";
+    const g = m[2];
+    const s = m[3];
+    const dashToken = `${g}-${s}`;     // 예: "5-2"
+    const compactToken = `${g}${s}`;   // 예: "52"
+
+    // 학교급이 명시된 부제목에서 다른 학교급(초/중/고)과 혼동되는 경우 방지
+    if (school === "초등" && (sub.includes("중") || sub.includes("고")) && !sub.includes("초")) {
+      return false;
+    }
+    if (school === "중등" && (sub.includes("초") || sub.includes("고")) && !sub.includes("중")) {
+      return false;
+    }
+    if (school === "고등" && (sub.includes("초") || sub.includes("중")) && !sub.includes("고")) {
+      return false;
+    }
+
+    if (
+      sub.includes(dashToken) ||
+      sub.includes(compactToken) ||
+      sub.includes(`${g}학년 ${s}학기`) ||
+      sub.includes(`${g}학년${s}학기`)
+    ) {
+      return true;
+    }
+
+    if (school === "중등") {
+      const midNum = Number(g) + 6;
+      if (sub.includes(`${midNum}-${s}`) || sub.includes(`${midNum}${s}`)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
 
   const filteredExams = useMemo(() => {
     return exams.filter(exam => {
@@ -272,7 +386,8 @@ export default function ExamListPage() {
         matchMainTab = ['오답유사', '과제오답유사'].includes(typeStr);
       }
 
-      const matchGrade = filterGrade === 'ALL' || exam.major_grade === filterGrade;
+      const matchLevel = matchesLevelFilter(exam, filterLevel);
+      const matchGrade = matchesGradeAndSubTitle(exam, filterGrade);
       
       const instructor = Array.isArray(exam.instructor) ? exam.instructor[0] : exam.instructor;
       const creatorName = instructor?.name || '시스템 선생님';
@@ -298,12 +413,12 @@ export default function ExamListPage() {
           creatorLower.includes(q);
       }
       
-      return matchMainTab && matchGrade && matchCreator && matchSearch;
+      return matchMainTab && matchLevel && matchGrade && matchCreator && matchSearch;
     });
-  }, [exams, mainTab, filterGrade, filterCreator, searchQuery]);
+  }, [exams, mainTab, filterLevel, filterGrade, filterCreator, searchQuery]);
 
   const resetFilters = () => {
-    setMainTab("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL"); setSearchQuery("");
+    setMainTab("ALL"); setFilterLevel("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL"); setSearchQuery("");
   };
 
   const deleteExam = async (examId: string, examType: string, assignCount: number) => {
@@ -459,6 +574,15 @@ export default function ExamListPage() {
               </button>
             )}
           </div>
+          <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
+            <option value="ALL">레벨 전체</option>
+            <option value="Ultimate">Ultimate</option>
+            <option value="Master">Master</option>
+            <option value="Apex">Apex</option>
+            <option value="Titan">Titan</option>
+            <option value="Horizon">Horizon</option>
+            <option value="기타">기타</option>
+          </select>
           <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">학년 전체</option>
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g as string}</option>)}

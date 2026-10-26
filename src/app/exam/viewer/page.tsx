@@ -15,7 +15,7 @@ import {
   formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml
 } from "@/utils/examRenderUtils";
 
-import { processGroupText, compareSubQuestions } from "../step2/examUtils";
+import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups } from "../step2/examUtils";
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
@@ -506,15 +506,29 @@ export default function ExamViewerPage() {
            groupMap.get(gId).questions.push(q);
         });
 
-        const groups = Array.from(groupMap.values());
-        groups.forEach((g: any, idx: number) => {
-           if (g.questions && g.questions.length > 1) {
-             g.questions.sort(compareSubQuestions);
-             g.repQ = g.questions[0];
-           }
-           g.sort_order = idx + 1;
-           g.displayNum = idx + 1;
-        });
+        let groups = Array.from(groupMap.values());
+        if (userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+          const isDiag = lType === "입학테스트" || lType === "진단평가";
+          const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, isDiag, true);
+          groups = mergedBuilt.map((mg: any, idx: number) => ({
+            id: mg.id,
+            questions: mg.items,
+            repQ: mg.items[0],
+            is_merged_text: mg.is_merged_text,
+            sort_order: idx + 1,
+            displayNum: idx + 1,
+          }));
+        } else {
+          groups.forEach((g: any, idx: number) => {
+             if (g.questions && g.questions.length > 1) {
+               g.questions.sort(compareSubQuestions);
+               g.repQ = g.questions[0];
+               g.is_merged_text = true;
+             }
+             g.sort_order = idx + 1;
+             g.displayNum = idx + 1;
+          });
+        }
 
         let initialCol = 2, initialSplit = 4, initialTitleMode = 'all', initialTmpl = 'basic1';
         let cNum = '#175b6a', cTit = '#002864', cLin = '#94a3b8', eDate = '';
@@ -817,7 +831,7 @@ export default function ExamViewerPage() {
             subHtml += `<div class="w-full min-w-0 math-protect mb-3"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
         }
 
-        const finalScore = g.questions[0].assigned_score;
+        const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
         g.questions.forEach((q: any, sIdx: number) => {
             let safeImgUrl = String(q.image_url || '').trim();
             let safeImg2Url = String(q.image_2_url || '').trim();
@@ -1024,7 +1038,7 @@ export default function ExamViewerPage() {
                     subHtml += `<div class="w-full min-w-0 math-protect mb-3"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
                 }
 
-                const finalScore = g.questions[0].assigned_score;
+                const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
                 g.questions.forEach((q: any, sIdx: number) => {
                     let safeImgUrl = String(q.image_url || '').trim();
                     let safeImg2Url = String(q.image_2_url || '').trim();
@@ -1294,7 +1308,7 @@ export default function ExamViewerPage() {
       let userMergedTextQuestions: string[][] = [];
       if (examStateRef.current?.groups) {
          userMergedTextQuestions = examStateRef.current.groups
-            .filter((g: any) => g.is_merged_text && g.questions && g.questions.length > 0)
+            .filter((g: any) => (g.is_merged_text || (g.questions && g.questions.length > 1)) && g.questions && g.questions.length > 0)
             .map((g: any) => [...g.questions].sort(compareSubQuestions).map((q: any) => getRealId(q.question_id)));
       } else if (sessionStorage.getItem('examUserMergedTextQuestions')) {
          userMergedTextQuestions = JSON.parse(sessionStorage.getItem('examUserMergedTextQuestions') || '[]');

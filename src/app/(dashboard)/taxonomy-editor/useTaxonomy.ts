@@ -4,6 +4,20 @@ import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { taxSort, generateUUID, sortQuestionsList, fetchAllRows, getCleanUrl } from "./taxonomyUtils";
 
+
+export const isExcludedDiagnosticBookName = (name?: any): boolean => {
+  if (!name || typeof name !== "string") return false;
+  return name.includes("입학테스트") || name.includes("진단평가");
+};
+
+export const isExcludedDiagnosticQuestionRow = (q: any): boolean => {
+  if (!q) return false;
+  return (
+    isExcludedDiagnosticBookName(q.source_book_name) ||
+    isExcludedDiagnosticBookName(q.book_name)
+  );
+};
+
 export function useTaxonomy() {
   const router = useRouter();
 
@@ -132,13 +146,75 @@ export function useTaxonomy() {
 
   const loadWorkbooks = async () => {
     try {
+      const CACHE_KEY = "logica_taxonomy_workbooks_v2";
+      try {
+        const cached = sessionStorage.getItem(CACHE_KEY);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setWorkbooks(parsed.filter((b: string) => b && !isExcludedDiagnosticBookName(b)));
+          }
+        }
+      } catch (e) {}
+
+      // 1단계: 가벼운 textbook 테이블 먼저 즉시 로드하여 드롭다운 대기시간 제거
       const tbData = await fetchAllRows('textbook', 'title');
-      const qbData = await fetchAllRows('question_db', 'source_book_name');
-      const titles = tbData.map(t => t.title);
-      const sources = qbData.map(q => q.source_book_name);
-      
-      const uniqueList = Array.from(new Set([...titles, ...sources])).filter(Boolean).sort(taxSort);
+      const titles = (tbData || [])
+        .map((t: any) => t.title)
+        .filter((t: any) => t && !isExcludedDiagnosticBookName(t));
+
+      if (titles.length > 0) {
+        setWorkbooks((prev) => {
+          const merged = Array.from(new Set([...prev, ...titles])).filter((b) => b && !isExcludedDiagnosticBookName(b)).sort(taxSort);
+          return merged as string[];
+        });
+      }
+
+      // 2단계: question_db에서 입학테스트/진단평가 제외하고 병렬 배치로 빠르게 source_book_name, book_name 수집
+      const qbNames = new Set<string>();
+      const step = 1000;
+      const batchPages = 5;
+      let pageIdx = 0;
+      let keepGoing = true;
+
+      while (keepGoing) {
+        const promises = [];
+        for (let b = 0; b < batchPages; b++) {
+          const start = (pageIdx + b) * step;
+          promises.push(
+            supabase
+              .from("question_db")
+              .select("source_book_name, book_name")
+              .order("question_id", { ascending: true })
+              .range(start, start + step - 1)
+          );
+        }
+        const results = await Promise.all(promises);
+        for (const res of results) {
+          const rows = res.data || [];
+          rows.forEach((q: any) => {
+            if (isExcludedDiagnosticQuestionRow(q)) return;
+            if (q.source_book_name && !isExcludedDiagnosticBookName(q.source_book_name)) {
+              qbNames.add(String(q.source_book_name).trim());
+            }
+            if (q.book_name && !isExcludedDiagnosticBookName(q.book_name)) {
+              qbNames.add(String(q.book_name).trim());
+            }
+          });
+          if (rows.length < step) {
+            keepGoing = false;
+          }
+        }
+        pageIdx += batchPages;
+      }
+
+      const uniqueList = Array.from(new Set([...titles, ...Array.from(qbNames)]))
+        .filter((b) => b && !isExcludedDiagnosticBookName(b))
+        .sort(taxSort);
       setWorkbooks(uniqueList as string[]);
+      try {
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify(uniqueList));
+      } catch (e) {}
     } catch (e) { console.error(e); }
   };
 
@@ -153,7 +229,7 @@ export function useTaxonomy() {
       const { error: qErr } = await supabase.from('question_db').update({ source_book_name: newName.trim() }).eq('source_book_name', selectedBook);
       if (qErr) throw qErr;
 
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', selectedBook).maybeSingle();
+      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', targetBook).maybeSingle();
       if (tb) await supabase.from('textbook').update({ title: newName.trim() }).eq('book_id', tb.book_id);
 
       alert(`✅ '${newName.trim()}'(으)로 이름이 통째로 변경되었습니다!`);
@@ -164,16 +240,35 @@ export function useTaxonomy() {
     } catch (err: any) { alert("이름 변경 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
-  const fetchQuestions = async () => {
-    if (!selectedBook) return;
+  const fetchQuestions = async (bookOverride?: any) => {
+    const targetBook = typeof bookOverride === "string" ? bookOverride : selectedBook;
+    if (!targetBook) return;
+    if (isExcludedDiagnosticBookName(targetBook)) {
+      setQuestions([]);
+      setSelectedQuestion(null);
+      return;
+    }
+    if (typeof bookOverride === "string" && bookOverride !== selectedBook) {
+      setSelectedBook(bookOverride);
+    }
     setIsLoading(true);
     try {
       const qidSet = new Set<string>();
 
       let from1 = 0;
       while(true) {
-         const {data} = await supabase.from("question_db").select("question_id").eq("source_book_name", selectedBook).range(from1, from1+999);
-         if (data) data.forEach(d => qidSet.add(String(d.question_id).trim()));
+         const {data} = await supabase
+           .from("question_db")
+           .select("question_id, source_book_name, book_name")
+           .or(`source_book_name.eq."${targetBook}",book_name.eq."${targetBook}"`)
+           .range(from1, from1+999);
+         if (data) {
+           data.forEach((d: any) => {
+             if (!isExcludedDiagnosticQuestionRow(d)) {
+               qidSet.add(String(d.question_id).trim());
+             }
+           });
+         }
          if (!data || data.length < 1000) break;
          from1 += 1000;
       }
@@ -236,7 +331,11 @@ export function useTaxonomy() {
       }
 
       const finalMap = new Map();
-      fetchedQuestions.forEach(q => finalMap.set(q.question_id, q));
+      fetchedQuestions.forEach((q: any) => {
+        if (!isExcludedDiagnosticQuestionRow(q)) {
+          finalMap.set(q.question_id, q);
+        }
+      });
       const finalQuestions = Array.from(finalMap.values());
 
       setQuestions(sortQuestionsList(finalQuestions));
