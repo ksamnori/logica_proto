@@ -695,7 +695,7 @@ function ReviewContent() {
       const baseScorePerQuestion = 100 / (groups.length || 1);
       let metaScores: any = {};
       if (exType === '입학테스트' && stdName) {
-        const { data: mData } = await supabase.from('admission_standard_meta').select('question_number, assigned_score').eq('standard_name', stdName);
+        const { data: mData } = await supabase.from('admission_standard_meta_2610').select('question_number, assigned_score').eq('standard_name', stdName);
         mData?.forEach(m => { if (m.question_number) metaScores[m.question_number] = m.assigned_score; });
       }
 
@@ -971,7 +971,7 @@ function ReviewContent() {
       let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
       const finalScore = roundScore(tempT);
 
-      const { data: metaData } = await supabase.from('admission_standard_meta').select('*').eq('standard_name', contextIds.standardName);
+      const { data: metaData } = await supabase.from('admission_standard_meta_2610').select('*').eq('standard_name', contextIds.standardName);
       if (!metaData || metaData.length === 0) throw new Error(`[${contextIds.standardName}] 기준표가 없습니다.`);
 
       let sGeo=0, sMea=0, sStat=0, sRule=0, sCalc=0;

@@ -229,7 +229,7 @@ export function useTaxonomy() {
       const { error: qErr } = await supabase.from('question_db').update({ source_book_name: newName.trim() }).eq('source_book_name', selectedBook);
       if (qErr) throw qErr;
 
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', targetBook).maybeSingle();
+      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', selectedBook).maybeSingle();
       if (tb) await supabase.from('textbook').update({ title: newName.trim() }).eq('book_id', tb.book_id);
 
       alert(`✅ '${newName.trim()}'(으)로 이름이 통째로 변경되었습니다!`);
@@ -273,7 +273,7 @@ export function useTaxonomy() {
          from1 += 1000;
       }
 
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', selectedBook).maybeSingle();
+      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', targetBook).maybeSingle();
       if (tb) {
          let from2 = 0;
          while(true) {

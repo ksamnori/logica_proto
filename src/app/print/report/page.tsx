@@ -139,10 +139,11 @@ function PrintReportContent() {
       const studentName = studentObj?.name || '알수없음';
       const reportDate = new Date(assign.created_at).toLocaleDateString('ko-KR');
 
-      const { data: meta } = await supabase.from('admission_standard_meta')
+      const { data: meta } = await supabase.from('admission_standard_meta_2610')
         .select('*')
         .eq('standard_name', standardName);
 
+      const { data: baselineRow } = await supabase.from('admission_standard_baseline_2610').select('*').eq('standard_name', standardName).maybeSingle();
       let rBase = { max_geometry:0, max_measure:0, max_stat:0, max_rule:0, max_calc:0, max_calc_sense:0, max_spatial:0, max_logic:0, max_knowledge:0, max_thinking:0, max_persistence:0, max_diff_1:0, max_diff_2:0, max_diff_3:0, max_diff_4:0, max_diff_5:0, max_total_score:0 };
       const mData: any = {};
       
@@ -167,6 +168,13 @@ function PrintReportContent() {
           
           const d = m.difficulty_level;
           if(d===1) rBase.max_diff_1 += s; else if(d===2) rBase.max_diff_2 += s; else if(d===3) rBase.max_diff_3 += s; else if(d===4) rBase.max_diff_4 += s; else if(d===5) rBase.max_diff_5 += s;
+        });
+      }
+      if (baselineRow) {
+        (Object.keys(rBase) as (keyof typeof rBase)[]).forEach((k) => {
+          if (baselineRow[k] !== undefined && baselineRow[k] !== null && Number(baselineRow[k]) > 0) {
+            rBase[k] = parseFloat(baselineRow[k]) || rBase[k];
+          }
         });
       }
 

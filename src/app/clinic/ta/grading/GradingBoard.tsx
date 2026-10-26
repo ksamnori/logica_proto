@@ -1199,7 +1199,7 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
       const finalScore = roundScore(tempT);
 
-      const { data: metaData } = await supabase.from('admission_standard_meta').select('*').eq('standard_name', standardName);
+      const { data: metaData } = await supabase.from('admission_standard_meta_2610').select('*').eq('standard_name', standardName);
       if (!metaData || metaData.length === 0) throw new Error(`[${standardName}] 기준표가 없습니다.`);
 
       let sGeo=0, sMea=0, sStat=0, sRule=0, sCalc=0;
