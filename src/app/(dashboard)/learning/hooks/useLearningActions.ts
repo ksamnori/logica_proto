@@ -696,7 +696,10 @@ export function useLearningActions({
       sessionStorage.setItem('examType', examType || '오답프린트');
       
       if (masterData?.layout_settings?.userMergedTextQuestions) {
-         sessionStorage.setItem('examUserMergedTextQuestions', 'examHiddenImageQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
+         sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
+      }
+      if (masterData?.layout_settings?.hiddenImageQuestions) {
+         sessionStorage.setItem('examHiddenImageQuestions', JSON.stringify(masterData.layout_settings.hiddenImageQuestions));
       }
 
       sessionStorage.setItem('editOriginalType', 'exam');
