@@ -170,6 +170,7 @@ export default function ViewerSidebar({
                               <option value="주간테스트">주간테스트</option>
                               <option value="중간평가">중간평가</option>
                               <option value="분기평가">분기평가</option>
+                              <option value="단원평가">단원평가</option>
                               <option value="입학테스트">진단평가 (입학테스트)</option>
                           </select>
                       </div>

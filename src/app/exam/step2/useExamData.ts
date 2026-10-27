@@ -238,11 +238,22 @@ export function useExamData() {
           sessionStorage.removeItem('editExamId');
         }
 
-        const { data: examData } = await supabase.from('exam_master').select('title, layout_settings').eq('exam_id', loadExamId).single();
-        if (examData && examData.title) {
-            const isDuplicate = !!(duplicateUrlId || duplicateSessionId);
-            const titleToSet = isDuplicate ? `${examData.title} (복제본)` : examData.title;
-            sessionStorage.setItem('examTitle', titleToSet);
+        const { data: examData } = await supabase.from('exam_master').select('title, exam_type, layout_settings').eq('exam_id', loadExamId).single();
+        sessionStorage.removeItem('examMode');
+        sessionStorage.removeItem('testCategory');
+        sessionStorage.removeItem('testSourceFilter');
+        sessionStorage.removeItem('diagnosticQuestionIds');
+        if (examData) {
+            if (examData.title) {
+                const isDuplicate = !!(duplicateUrlId || duplicateSessionId);
+                const titleToSet = isDuplicate ? `${examData.title} (복제본)` : examData.title;
+                sessionStorage.setItem('examTitle', titleToSet);
+            }
+            if (examData.exam_type) {
+                sessionStorage.setItem('examType', examData.exam_type);
+            } else {
+                sessionStorage.setItem('examType', '선택없음');
+            }
         }
 
         let userMergedTextQuestions: any[][] = [];
@@ -309,8 +320,9 @@ export function useExamData() {
           }
         });
         allGroups.sort((a, b) => a.sort_order - b.sort_order);
-        if (userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
-          allGroups = buildMergedQuestionGroups(orderedQuestions, false, true);
+        const isLoadedDiag = examData?.exam_type === '입학테스트' || examData?.exam_type === '진단평가';
+        if (isLoadedDiag && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+          allGroups = buildMergedQuestionGroups(orderedQuestions, true, true);
         }
 
         const allItems = allGroups.reduce((acc, g) => acc.concat(g.items), []);

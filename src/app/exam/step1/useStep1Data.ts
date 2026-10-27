@@ -387,6 +387,14 @@ export function useStep1Data() {
       }
       if (currentTestGroup === '진단평가' || currentTestGroup === '입학테스트') {
         sessionStorage.setItem("examType", "입학테스트");
+      } else if (currentTestGroup === '주간테스트') {
+        sessionStorage.setItem("examType", "주간테스트");
+      } else if (currentTestGroup === '중간테스트') {
+        sessionStorage.setItem("examType", "중간평가");
+      } else if (currentTestGroup === '분기테스트') {
+        sessionStorage.setItem("examType", "분기평가");
+      } else if (currentTestGroup === '단원테스트') {
+        sessionStorage.setItem("examType", "단원평가");
       } else {
         sessionStorage.removeItem("examType");
       }

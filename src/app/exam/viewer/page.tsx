@@ -733,9 +733,9 @@ export default function ExamViewerPage() {
         });
 
         let groups = Array.from(groupMap.values());
-        if (userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
-          const isDiag = lType === "입학테스트" || lType === "진단평가";
-          const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, isDiag, true);
+        const isDiag = lType === "입학테스트" || lType === "진단평가";
+        if (isDiag && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+          const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, true, true);
           groups = mergedBuilt.map((mg: any, idx: number) => ({
             id: mg.id,
             questions: mg.items,
@@ -848,6 +848,8 @@ export default function ExamViewerPage() {
             }
         } else {
             const sessionExamType = sessionStorage.getItem('examType');
+            const sessionExamMode = sessionStorage.getItem('examMode');
+            const sessionTestCategory = sessionStorage.getItem('testCategory');
             const isClinic = sessionStorage.getItem('isClinicMode') === 'true';
             
             if (sessionExamType === '오답유사' || isClinic) {
@@ -855,12 +857,26 @@ export default function ExamViewerPage() {
                 if (title === '새로운 테스트' || !title) title = '오답 유사 클리닉';
             } else if (sessionExamType) {
                 lType = sessionExamType;
+            } else if (sessionExamMode === 'test' && sessionTestCategory) {
+                if (sessionTestCategory === '주간테스트') lType = '주간테스트';
+                else if (sessionTestCategory === '중간테스트' || sessionTestCategory === '중간평가') lType = '중간평가';
+                else if (sessionTestCategory === '분기테스트' || sessionTestCategory === '분기평가') lType = '분기평가';
+                else if (sessionTestCategory === '단원테스트' || sessionTestCategory === '단원평가') lType = '단원평가';
+                else if (sessionTestCategory === '진단평가' || sessionTestCategory === '입학테스트') lType = '입학테스트';
+                else lType = '선택없음';
             } else {
+                lType = '선택없음';
                 try {
                     const step1Data = JSON.parse(sessionStorage.getItem('exam_step1_data') || '{}');
                     if (step1Data.examType === 'print') lType = '오답프린트';
                     else if (step1Data.examType === 'homework') lType = '과제프린트';
                 } catch(e) {}
+            }
+
+            if (lType === '주간테스트' && (title === '새로운 테스트' || !title)) {
+                title = getISOWeekKST(new Date(testDate + 'T00:00:00Z')) + '주차 평가';
+            } else if (['중간평가', '분기평가', '단원평가'].includes(lType) && (title === '새로운 테스트' || !title)) {
+                title = lType;
             }
         }
 
@@ -933,8 +949,15 @@ export default function ExamViewerPage() {
           } catch (e) {}
         }
 
-        const testCategorySession = sessionStorage.getItem('testCategory');
-        const isDiagExam = lType === '입학테스트' || lType === '진단평가' || testCategorySession === '진단평가' || testCategorySession === '입학테스트';
+        let isDiagExam = lType === '입학테스트' || lType === '진단평가';
+        // 진단평가는 반드시 30문항일 때만 진단평가 전용 양식으로 잠금 처리하고, 문항 수가 다르면(이전 세션 잔여값 등) 선택없음으로 폴백
+        if (isDiagExam && groups.length !== 30) {
+          isDiagExam = false;
+          lType = '선택없음';
+          if (title === '진단평가' || title === '입학테스트') {
+            title = '새로운 테스트';
+          }
+        }
         if (isDiagExam) {
           lType = '입학테스트';
           if (!title || title === '새로운 테스트' || title === '시험지') {
@@ -1692,7 +1715,7 @@ export default function ExamViewerPage() {
       setSavedExamId(examId); 
       
       const keysToRemove = [
-        'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'majorGrade', 'avgDifficulty', 'scopeStart', 'scopeEnd',
+        'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds', 'majorGrade', 'avgDifficulty', 'scopeStart', 'scopeEnd',
         'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
         'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
         'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds', 'isClinicMode'

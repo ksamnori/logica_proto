@@ -200,10 +200,10 @@ export default function ExamListPage() {
       });
 
       let groupedList: { items: any[] }[] = [];
-      if (userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
-        const lType = masterRow?.exam_type || '';
-        const isDiag = lType === '입학테스트' || lType === '진단평가';
-        const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, isDiag, true);
+      const lType = masterRow?.exam_type || '';
+      const isDiag = lType === '입학테스트' || lType === '진단평가';
+      if (isDiag && userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+        const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, true, true);
         groupedList = mergedBuilt.map((mg: any) => ({ items: mg.items || [] }));
       } else {
         const groupMap = new Map<string, { items: any[] }>();
@@ -568,7 +568,7 @@ export default function ExamListPage() {
 
   const clearSessionStorageForExam = () => {
     const keysToRemove = [
-      'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
+      'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'examMode', 'testCategory', 'testSourceFilter', 'diagnosticQuestionIds',
       'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
       'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
       'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
