@@ -509,7 +509,7 @@ export const splitTrailingSubNumberText = (
   if (!s) return { isTrailingSubNum: false, introText: "", subMarkerText: "" };
 
   // 끝에 위치한 서브문항 번호 패턴: (1), (2), [1], ①~⑮, (가)~(하), 1) 등 (뒤에 줄바꿈/빈 태그만 있는 경우 포함)
-  const trailingRegex = /^(.*?)((?:\(\s*(?:\d+|[가-하]|[ㄱ-ㅎ]|[a-zA-Z])\s*\)|\[\s*\d+\s*\]|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|(?:^|\s|<br\s*\/?>|>)(?:\d+\s*\)))\.?)(?:\s*<br\s*\/?>|\s*<\/p>|\s*<\/div>|\s)*$/is;
+  const trailingRegex = /^([\s\S]*?)((?:\(\s*(?:\d+|[가-하]|[ㄱ-ㅎ]|[a-zA-Z])\s*\)|\[\s*\d+\s*\]|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|(?:^|\s|<br\s*\/?>|>)(?:\d+\s*\)))\.?)(?:\s*<br\s*\/?>|\s*<\/p>|\s*<\/div>|\s)*$/i;
   const m = s.match(trailingRegex);
   if (!m) {
     return { isTrailingSubNum: false, introText: s, subMarkerText: "" };
@@ -519,7 +519,7 @@ export const splitTrailingSubNumberText = (
   let marker = (m[2] || "").trim();
 
   // marker 앞에 붙은 <br> 이나 > 정리
-  const brMatch = marker.match(/^((?:<br\s*\/?>|\s)+)(.*)$/i);
+  const brMatch = marker.match(/^((?:<br\s*\/?>|\s)+)([\s\S]*)$/i);
   if (brMatch) {
     marker = brMatch[2].trim();
   }
