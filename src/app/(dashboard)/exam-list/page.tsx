@@ -9,6 +9,7 @@ import { supabase } from "@/lib/supabase";
 // 분리된 모달 컴포넌트 임포트
 import PublishModal from "@/components/exam/PublishModal";
 import GradingModal from "@/components/exam/GradingModal";
+import { compareSubQuestions, buildMergedQuestionGroups, getCleanUrl } from "@/app/exam/step2/examUtils";
 
 export default function ExamListPage() {
   const router = useRouter();
@@ -29,7 +30,15 @@ export default function ExamListPage() {
 
   // 🌟 [정답지 조회 모달 상태]
   const [answerModal, setAnswerModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
-  const [answerData, setAnswerData] = useState<{ num: number; answer: string }[]>([]);
+  const [answerData, setAnswerData] = useState<{
+    num: number;
+    subItems: {
+      subIndex: number;
+      answer: string;
+      answerImg1: string;
+      answerImg2: string;
+    }[];
+  }[]>([]);
   const [isLoadingAnswers, setIsLoadingAnswers] = useState(false);
 
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
@@ -146,21 +155,95 @@ export default function ExamListPage() {
     setIsLoadingAnswers(true);
     setAnswerData([]);
     try {
-      const { data, error } = await supabase
-        .from('exam_item')
-        .select('sort_order, question_db(answer)')
-        .eq('exam_id', examId)
-        .order('sort_order', { ascending: true });
-      
+      const [{ data: masterRow }, { data: examItems, error }] = await Promise.all([
+        supabase
+          .from('exam_master')
+          .select('exam_type, layout_settings')
+          .eq('exam_id', examId)
+          .maybeSingle(),
+        supabase
+          .from('exam_item')
+          .select('question_id, sort_order, question_db(question_id, parent_question_id, question, answer, answer_image_url, answer_image_2_url, question_number, sub_num, pdf_source, source_book_name, book_name, final_printed_page, detected_page_num)')
+          .eq('exam_id', examId)
+          .order('sort_order', { ascending: true }),
+      ]);
+
       if (error) throw error;
 
-      const formatted = (data || []).map((item, idx) => {
-        const qdb: any = Array.isArray(item.question_db) ? item.question_db[0] : item.question_db;
+      const orderedQuestions = (examItems || [])
+        .map((item: any) => {
+          const qdb: any = Array.isArray(item.question_db) ? item.question_db[0] : item.question_db;
+          if (!qdb) return null;
+          return {
+            ...qdb,
+            question_id: qdb.question_id || item.question_id,
+            sort_order: item.sort_order,
+          };
+        })
+        .filter(Boolean);
+
+      let userMergedTextQuestions: any[][] = [];
+      const rawSettings = masterRow?.layout_settings;
+      if (rawSettings) {
+        const parsed = typeof rawSettings === 'string'
+          ? (() => { try { return JSON.parse(rawSettings); } catch (e) { return null; } })()
+          : rawSettings;
+        if (Array.isArray(parsed?.userMergedTextQuestions)) {
+          userMergedTextQuestions = parsed.userMergedTextQuestions;
+        }
+      }
+
+      const customGroupMap = new Map<string, string>();
+      userMergedTextQuestions.forEach((arr: any[], idx: number) => {
+        const gId = `custom_group_${idx}`;
+        (arr || []).forEach((qid: any) => customGroupMap.set(String(qid).replace(/_added_\d+$/, ''), gId));
+      });
+
+      let groupedList: { items: any[] }[] = [];
+      if (userMergedTextQuestions.length === 0 && orderedQuestions.length > 0) {
+        const lType = masterRow?.exam_type || '';
+        const isDiag = lType === '입학테스트' || lType === '진단평가';
+        const mergedBuilt = buildMergedQuestionGroups(orderedQuestions, isDiag, true);
+        groupedList = mergedBuilt.map((mg: any) => ({ items: mg.items || [] }));
+      } else {
+        const groupMap = new Map<string, { items: any[] }>();
+        orderedQuestions.forEach((q: any) => {
+          const realQId = String(q.question_id).replace(/_added_\d+$/, '');
+          let gId = customGroupMap.get(realQId);
+          if (!gId) gId = `single_${q.question_id}_${Math.random()}`;
+          if (!groupMap.has(gId)) groupMap.set(gId, { items: [] });
+          groupMap.get(gId)!.items.push(q);
+        });
+        groupedList = Array.from(groupMap.values());
+        groupedList.forEach((g) => {
+          if (g.items.length > 1) g.items.sort(compareSubQuestions);
+        });
+      }
+
+      const formatted = groupedList.map((g, idx) => {
+        const subItems = (g.items || []).map((q: any, sIdx: number) => {
+          const rawAns = q?.answer !== null && q?.answer !== undefined && String(q.answer).trim() !== '' && String(q.answer).trim().toLowerCase() !== 'null'
+            ? String(q.answer).trim()
+            : '';
+          const img1 = q?.answer_image_url && String(q.answer_image_url) !== 'null' && String(q.answer_image_url).trim() !== ''
+            ? getCleanUrl(String(q.answer_image_url).trim())
+            : '';
+          const img2 = q?.answer_image_2_url && String(q.answer_image_2_url) !== 'null' && String(q.answer_image_2_url).trim() !== ''
+            ? getCleanUrl(String(q.answer_image_2_url).trim())
+            : '';
+          return {
+            subIndex: sIdx + 1,
+            answer: rawAns,
+            answerImg1: img1,
+            answerImg2: img2,
+          };
+        });
         return {
           num: idx + 1,
-          answer: qdb?.answer || '정답 없음'
+          subItems,
         };
       });
+
       setAnswerData(formatted);
     } catch (err: any) {
       alert('정답 데이터를 불러오는 데 실패했습니다.');
@@ -204,14 +287,31 @@ export default function ExamListPage() {
       return;
     }
     
-    const content = answerData.map(item => `
-      <div style="border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; text-align: center; break-inside: avoid; background-color: #fff; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+    const content = answerData.map(item => {
+      const isMulti = item.subItems.length > 1;
+      const subsHtml = item.subItems.map(sub => {
+        const prefixHtml = isMulti ? `<span style="color:#475569; font-weight:800; margin-right:6px;">(${sub.subIndex})</span>` : '';
+        const ansHtml = sub.answer
+          ? `$${formatMathTextForWeb(sub.answer)}$`
+          : (sub.answerImg1 || sub.answerImg2 ? '' : '<span style="color:#94a3b8; font-size:13px;">정답 없음</span>');
+        const img1Html = sub.answerImg1
+          ? `<div style="margin-top:4px;"><a href="${sub.answerImg1}" target="_blank" rel="noopener noreferrer" style="font-size:11px; color:#059669; font-weight:bold; text-decoration:underline;">🖼️ 해답 이미지 보기</a><div style="margin-top:4px;"><img src="${sub.answerImg1}" style="max-width:100%; max-height:120px; object-fit:contain; border-radius:4px; border:1px solid #e2e8f0;" /></div></div>`
+          : '';
+        const img2Html = sub.answerImg2
+          ? `<div style="margin-top:4px;"><a href="${sub.answerImg2}" target="_blank" rel="noopener noreferrer" style="font-size:11px; color:#059669; font-weight:bold; text-decoration:underline;">🖼️ 해답 이미지 2 보기</a><div style="margin-top:4px;"><img src="${sub.answerImg2}" style="max-width:100%; max-height:120px; object-fit:contain; border-radius:4px; border:1px solid #e2e8f0;" /></div></div>`
+          : '';
+        return `<div style="margin-bottom:${isMulti ? '6px' : '0'}; text-align:${isMulti ? 'left' : 'center'}; width:100%;">${prefixHtml}${ansHtml}${img1Html}${img2Html}</div>`;
+      }).join('');
+
+      return `
+      <div style="border: 1px solid #cbd5e1; padding: 12px; border-radius: 8px; text-align: center; break-inside: avoid; background-color: #fff; overflow: hidden; display: flex; flex-direction: column; align-items: center; justify-content: flex-start;">
         <div style="font-size: 13px; font-weight: bold; color: #002864; background: #eff6ff; padding: 3px 10px; border-radius: 12px; display: inline-block; margin-bottom: 8px; flex-shrink: 0;">${item.num}번</div>
         <div style="font-size: 15px; font-weight: bold; color: #334155; word-break: break-all; white-space: normal; line-height: 1.5; width: 100%; overflow-x: auto;">
-          $${formatMathTextForWeb(item.answer) || '-'}$
+          ${subsHtml}
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     printWin.document.write(`
       <html>
@@ -771,18 +871,81 @@ export default function ExamListPage() {
                 <div className="text-center py-10 text-slate-400 font-bold">등록된 정답이 없습니다.</div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                  {answerData.map(item => (
-                    <div key={item.num} className="bg-white border border-slate-200 pt-4 pb-2 px-2 rounded-xl shadow-sm flex flex-col items-center justify-center text-center overflow-hidden">
-                      <span className="text-xs font-bold text-brand bg-blue-50 px-2.5 py-0.5 rounded-full mb-2 shadow-sm shrink-0">{item.num}번</span>
-                      {/* 🌟 텍스트 오버플로우 방지용 내부 스크롤 박스 */}
-                      <div className="w-full overflow-x-auto custom-scroll pb-1">
-                        <div 
-                          className="math-text text-[14px] font-bold text-slate-700 break-all whitespace-normal leading-relaxed px-1 mx-auto" 
-                          dangerouslySetInnerHTML={{ __html: `$${formatMathTextForWeb(item.answer) || '-'}$` }} 
-                        />
+                  {answerData.map(item => {
+                    const isMulti = item.subItems.length > 1;
+                    return (
+                      <div key={item.num} className="bg-white border border-slate-200 pt-4 pb-3 px-3 rounded-xl shadow-sm flex flex-col items-center justify-start text-center overflow-hidden">
+                        <span className="text-xs font-bold text-brand bg-blue-50 px-2.5 py-0.5 rounded-full mb-2.5 shadow-sm shrink-0">
+                          {item.num}번{isMulti ? ` (${item.subItems.length})` : ''}
+                        </span>
+                        {/* 🌟 서브문항별 정답 및 해답 이미지 링크 표시 */}
+                        <div className="w-full overflow-x-auto custom-scroll pb-1 flex flex-col gap-2">
+                          {item.subItems.map((sub) => {
+                            const hasText = Boolean(sub.answer);
+                            const hasImg = Boolean(sub.answerImg1 || sub.answerImg2);
+                            return (
+                              <div
+                                key={sub.subIndex}
+                                className={`w-full flex flex-col ${isMulti ? 'items-start text-left border-b border-dashed border-slate-100 last:border-b-0 pb-1.5 last:pb-0' : 'items-center text-center'}`}
+                              >
+                                <div className="flex items-start gap-1.5 w-full">
+                                  {isMulti && (
+                                    <span className="text-[12px] font-extrabold text-slate-500 shrink-0 mt-0.5">
+                                      ({sub.subIndex})
+                                    </span>
+                                  )}
+                                  {hasText ? (
+                                    <div
+                                      className="math-text text-[14px] font-bold text-slate-700 break-all whitespace-normal leading-relaxed px-0.5 flex-1"
+                                      dangerouslySetInnerHTML={{ __html: `$${formatMathTextForWeb(sub.answer)}$` }}
+                                    />
+                                  ) : !hasImg ? (
+                                    <span className="text-xs font-bold text-slate-400">정답 없음</span>
+                                  ) : null}
+                                </div>
+                                {hasImg && (
+                                  <div className={`flex flex-col gap-1.5 mt-1 w-full ${isMulti ? 'pl-5 items-start' : 'items-center'}`}>
+                                    {sub.answerImg1 && (
+                                      <a
+                                        href={sub.answerImg1}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex flex-col items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-[11px] font-extrabold transition-colors"
+                                        title="클릭하여 원본 해답 이미지 새 창으로 열기"
+                                      >
+                                        <span>🖼️ {sub.answerImg2 ? '해답 이미지 1 보기 ↗' : '해답 이미지 보기 ↗'}</span>
+                                        <img
+                                          src={sub.answerImg1}
+                                          alt="해답 이미지"
+                                          className="max-h-20 max-w-full object-contain rounded bg-white border border-emerald-100 p-0.5"
+                                        />
+                                      </a>
+                                    )}
+                                    {sub.answerImg2 && (
+                                      <a
+                                        href={sub.answerImg2}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        className="inline-flex flex-col items-center gap-1 px-2 py-1 rounded-md bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 text-emerald-700 text-[11px] font-extrabold transition-colors"
+                                        title="클릭하여 원본 해답 이미지 2 새 창으로 열기"
+                                      >
+                                        <span>🖼️ 해답 이미지 2 보기 ↗</span>
+                                        <img
+                                          src={sub.answerImg2}
+                                          alt="해답 이미지 2"
+                                          className="max-h-20 max-w-full object-contain rounded bg-white border border-emerald-100 p-0.5"
+                                        />
+                                      </a>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
