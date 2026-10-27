@@ -25,6 +25,35 @@ export function useExamData() {
 
   const [leftTab, setLeftTab] = useState<"list" | "add">("list");
   const [checkedIds, setCheckedIds] = useState<Set<string>>(new Set());
+  const [hiddenImageIds, setHiddenImageIds] = useState<Set<string>>(new Set());
+
+  const normalizeHiddenKey = (raw: any): string => {
+    const s = String(raw || "");
+    const m = s.match(/^(.*?)__img([12])$/);
+    if (m) return `${m[1].replace(/_added_\d+$/, "")}__img${m[2]}`;
+    return s.replace(/_added_\d+$/, "");
+  };
+
+  const toggleHideImage = (questionId: string, slot: 1 | 2 = 1) => {
+    const realId = String(questionId).replace(/_added_\d+$/, "");
+    const key = `${realId}__img${slot}`;
+    const otherSlot = slot === 1 ? 2 : 1;
+    const otherKey = `${realId}__img${otherSlot}`;
+    setHiddenImageIds((prev) => {
+      const next = new Set(prev);
+      // 레거시 단일 키(realId)가 있던 경우 두 슬롯이 모두 숨겨진 것으로 간주하고 개별 키로 전환
+      if (next.has(realId)) {
+        next.delete(realId);
+        next.add(otherKey);
+      } else if (next.has(key)) {
+        next.delete(key);
+      } else {
+        next.add(key);
+      }
+      sessionStorage.setItem("examHiddenImageQuestions", JSON.stringify(Array.from(next)));
+      return next;
+    });
+  };
   const [draggedIdx, setDraggedIdx] = useState<number | null>(null);
 
   const [addMasterData, setAddMasterData] = useState<any>(null);
@@ -125,6 +154,10 @@ export function useExamData() {
         const byId = new Map(allData.map(q => [String(q.question_id), q]));
 
         const mergedTextQuestions = JSON.parse(sessionStorage.getItem('examUserMergedTextQuestions') || '[]');
+        try {
+          const savedHidden = JSON.parse(sessionStorage.getItem('examHiddenImageQuestions') || '[]');
+          if (Array.isArray(savedHidden)) setHiddenImageIds(new Set(savedHidden.map(normalizeHiddenKey)));
+        } catch (e) {}
         const customGroupMap = new Map<string, string>();
         mergedTextQuestions.forEach((arr: any[], idx: number) => {
            const gId = `restored_custom_group_${idx}`;
@@ -213,8 +246,16 @@ export function useExamData() {
         }
 
         let userMergedTextQuestions: any[][] = [];
-        if (examData?.layout_settings?.userMergedTextQuestions) {
-            userMergedTextQuestions = examData.layout_settings.userMergedTextQuestions;
+        const parsedLayout = typeof examData?.layout_settings === "string"
+          ? (() => { try { return JSON.parse(examData.layout_settings); } catch (e) { return null; } })()
+          : examData?.layout_settings;
+        if (parsedLayout?.userMergedTextQuestions) {
+            userMergedTextQuestions = parsedLayout.userMergedTextQuestions;
+        }
+        if (Array.isArray(parsedLayout?.hiddenImageQuestions)) {
+            const cleanedHidden = parsedLayout.hiddenImageQuestions.map(normalizeHiddenKey);
+            setHiddenImageIds(new Set(cleanedHidden));
+            sessionStorage.setItem("examHiddenImageQuestions", JSON.stringify(cleanedHidden));
         }
 
         const customGroupMap = new Map<string, string>();
@@ -662,6 +703,7 @@ export function useExamData() {
       .filter(g => g.is_merged_text || (g.items && g.items.length > 1))
       .map(g => g.items.map((i: any) => i.question_id));
     sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(userMergedTextQuestions));
+    sessionStorage.setItem('examHiddenImageQuestions', JSON.stringify(Array.from(hiddenImageIds)));
 
     sessionStorage.setItem("restoreExamQuestions", "1"); 
     
@@ -686,6 +728,20 @@ export function useExamData() {
           gradeStr = `${schoolName} ${grade}-${semester}`;
         }
       }
+
+      if (!gradeStr) {
+        const srcText = `${q.taxonomy_name || ''} ${q.source_book_name || ''} ${q.book_name || ''} ${q.pdf_source || ''}`;
+        const mMid = srcText.match(/중(?:등)?\s*([1-3]-[1-2])/);
+        if (mMid) gradeStr = `중등 ${mMid[1]}`;
+        else {
+          const mMid7 = srcText.match(/(?:^|[^0-9])7-([1-2])(?:[^0-9]|$)/);
+          if (mMid7) gradeStr = `중등 1-${mMid7[1]}`;
+          else {
+            const mElem = srcText.match(/([1-6]-[1-2])/);
+            if (mElem) gradeStr = `초등 ${mElem[1]}`;
+          }
+        }
+      }
       
       if (gradeStr) {
         gradeCount[gradeStr] = (gradeCount[gradeStr] || 0) + 1;
@@ -701,7 +757,14 @@ export function useExamData() {
       }
     }
     
+    const existingSubTitle = sessionStorage.getItem("examSubTitle");
+    if (existingSubTitle && maxGrade === "공통 과정") {
+      maxGrade = existingSubTitle;
+    }
     sessionStorage.setItem('majorGrade', maxGrade);
+    if (!existingSubTitle && maxGrade && maxGrade !== "공통 과정") {
+      sessionStorage.setItem("examSubTitle", maxGrade);
+    }
 
     const diffCount: Record<string, number> = {};
     questions.forEach(g => {
@@ -729,7 +792,7 @@ export function useExamData() {
   return {
     router, questions, setQuestions, isLoading, showAnswer, setShowAnswer,
     depth5Map, depth6Map, parentSourceMap,
-    leftTab, setLeftTab, checkedIds, setCheckedIds, draggedIdx, setDraggedIdx,
+    leftTab, setLeftTab, checkedIds, setCheckedIds, hiddenImageIds, setHiddenImageIds, toggleHideImage, draggedIdx, setDraggedIdx,
     addMasterData, addSelectedCatIds, setAddSelectedCatIds, newSearchResults, setNewSearchResults,
     isSearchingNew, setIsSearchingNew, showAddResults, setShowAddResults,
     twinViewOpen, setTwinViewOpen, twinTarget, setTwinTarget, twinPoolTwins, setTwinPoolTwins,

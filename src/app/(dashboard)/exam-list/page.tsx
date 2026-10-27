@@ -401,7 +401,8 @@ export default function ExamListPage() {
         const scopeStartStr = String(exam.scope_start || '').toLowerCase();
         const scopeEndStr = String(exam.scope_end || '').toLowerCase();
         const gradeStr = String(exam.major_grade || '').toLowerCase();
-        const typeLower = String(typeStr).toLowerCase();
+        const displayTypeForSearch = typeStr === '입학테스트' ? '진단평가 입학테스트' : typeStr;
+        const typeLower = String(displayTypeForSearch).toLowerCase();
         const creatorLower = String(creatorName).toLowerCase();
         matchSearch =
           titleStr.includes(q) ||
@@ -469,7 +470,7 @@ export default function ExamListPage() {
     const keysToRemove = [
       'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
       'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
-      'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
+      'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
       'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
       'isClinicMode'
     ];
@@ -623,7 +624,19 @@ export default function ExamListPage() {
                 filteredExams.map(exam => {
                   const instructor = Array.isArray(exam.instructor) ? exam.instructor[0] : exam.instructor;
                   const creatorName = instructor?.name ? `${instructor.name} 선생님` : '시스템 선생님';
-                  const targetGrade = exam.major_grade || '공통 과정';
+                  const deriveGradeFromExam = (ex: any): string => {
+                    if (ex.major_grade && ex.major_grade !== '공통 과정') return ex.major_grade;
+                    if (ex.target_grade && ex.target_grade !== '공통 과정') return ex.target_grade;
+                    const src = `${ex.sub_title || ''} ${ex.title || ''}`;
+                    const mMid = src.match(/중(?:등)?\s*([1-3]-[1-2])/);
+                    if (mMid) return `중등 ${mMid[1]}`;
+                    const mElem = src.match(/(?:초(?:등)?\s*)?([1-6]-[1-2])/);
+                    if (mElem) return `초등 ${mElem[1]}`;
+                    const mElem2 = src.match(/초(?:등)?\s*([1-6])([1-2])(?:[^0-9]|$)/);
+                    if (mElem2) return `초등 ${mElem2[1]}-${mElem2[2]}`;
+                    return ex.major_grade || '공통 과정';
+                  };
+                  const targetGrade = deriveGradeFromExam(exam);
                   const diff = exam.avg_difficulty || '중';
                   
                   let scope = '전 범위';
@@ -638,6 +651,7 @@ export default function ExamListPage() {
 
                   let typeColorClass = "bg-slate-100 text-slate-600 border-slate-200";
                   const typeStr = exam.exam_type || '평가';
+                  const displayTypeStr = typeStr === '입학테스트' ? '진단평가' : typeStr;
                   
                   if (!['과제', '과제프린트', '오답프린트', '오답', '오답유사', '과제오답유사'].includes(typeStr)) {
                     typeColorClass = "bg-blue-50 text-blue-600 border-blue-200";
@@ -653,7 +667,7 @@ export default function ExamListPage() {
                     <tr key={exam.exam_id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
                       <td className="py-4 px-5 text-center"><span className="font-bold text-slate-600 text-sm">{targetGrade}</span></td>
                       <td className="py-4 px-5 text-center">
-                        <span className={`px-2.5 py-1 rounded text-xs font-bold shadow-sm border ${typeColorClass}`}>{typeStr}</span>
+                        <span className={`px-2.5 py-1 rounded text-xs font-bold shadow-sm border ${typeColorClass}`}>{displayTypeStr}</span>
                       </td>
                       <td className="py-4 px-5">
                         <div className="flex items-center gap-2 mb-1 min-w-0">

@@ -367,6 +367,7 @@ export function useStep1Data() {
     sessionStorage.removeItem("examSubTitle");
     sessionStorage.removeItem("editExamId");
     sessionStorage.removeItem("duplicateExamId");
+    sessionStorage.removeItem("examHiddenImageQuestions");
 
     const finalDistributions = isSettingsDisabled 
       ? [10, 20, 40, 20, 10] 
@@ -398,16 +399,27 @@ export function useStep1Data() {
     const selectedArr = Array.from(selectedItemIds);
     sessionStorage.setItem("selectedItemIds", JSON.stringify(selectedArr));
 
-    // 진단평가 선택 시 해당 버전(분기)의 정확한 question_id 목록을 함께 전달하여 누락/튕김 원천 방지
+    // 진단평가 선택 시 해당 버전(분기)의 정확한 question_id 목록과 학년/학기(예: 초등 5-2)를 함께 전달
     if (currentMode === "test" && (currentTestGroup === "진단평가" || currentTestGroup === "입학테스트")) {
       const diagQIds = new Set<string>();
+      const diagBadges = new Set<string>();
       selectedArr.forEach((itemId) => {
         const mapped = diagQuestionIdsMap[itemId];
         if (Array.isArray(mapped)) {
           mapped.forEach((qid) => diagQIds.add(String(qid)));
         }
+        const baseSrc = String(itemId).split("__QTR__")[0];
+        const sem = DIAGNOSTIC_SEMESTERS.find((s) => s.baseSource === baseSrc);
+        if (sem) {
+          const badgeLabel = sem.isMiddle ? `중등 1-${sem.gradeCode.split("-")[1]}` : `초등 ${sem.gradeCode}`;
+          diagBadges.add(badgeLabel);
+        }
       });
       sessionStorage.setItem("diagnosticQuestionIds", JSON.stringify(Array.from(diagQIds)));
+      if (diagBadges.size > 0) {
+        sessionStorage.setItem("examSubTitle", Array.from(diagBadges)[0]);
+      }
+      sessionStorage.setItem("examTitle", "진단평가");
     } else {
       sessionStorage.removeItem("diagnosticQuestionIds");
     }

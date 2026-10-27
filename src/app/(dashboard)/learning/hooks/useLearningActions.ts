@@ -38,7 +38,7 @@ const purgeOldSession = () => {
   const keysToRemove = [
     'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
     'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
-    'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
+    'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
     'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
     'bulkPrintData' 
   ];
@@ -696,7 +696,7 @@ export function useLearningActions({
       sessionStorage.setItem('examType', examType || '오답프린트');
       
       if (masterData?.layout_settings?.userMergedTextQuestions) {
-         sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
+         sessionStorage.setItem('examUserMergedTextQuestions', 'examHiddenImageQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
       }
 
       sessionStorage.setItem('editOriginalType', 'exam');

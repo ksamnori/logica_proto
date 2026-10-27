@@ -15,7 +15,7 @@ import {
   formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml
 } from "@/utils/examRenderUtils";
 
-import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups } from "../step2/examUtils";
+import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups, isSubNumberOnlyText, splitTrailingSubNumberText, getDiffLabelByRate, getDepth5Name } from "../step2/examUtils";
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
@@ -38,6 +38,206 @@ const safeParseIds = (raw: any): number[] => {
 };
 
 const getRealId = (id: string) => String(id).replace(/_added_\d+$/, '');
+const normalizeHiddenImgKey = (raw: any): string => {
+  const s = String(raw || '');
+  const m = s.match(/^(.*?)__img([12])$/);
+  if (m) return `${getRealId(m[1])}__img${m[2]}`;
+  return getRealId(s);
+};
+
+// 🌟 진단평가 문항/제목에서 학년·학기(예: "초등 5-2", "중등 1-1") 자동 추출 헬퍼
+const extractDiagnosticBadge = (questionsList: any[], fallbackTitle: string = ""): string => {
+  const sources: string[] = [];
+  if (fallbackTitle) sources.push(fallbackTitle);
+  (questionsList || []).forEach((q: any) => {
+    if (!q) return;
+    if (q.pdf_source) sources.push(String(q.pdf_source));
+    if (q.source_book_name) sources.push(String(q.source_book_name));
+    if (q.book_name) sources.push(String(q.book_name));
+  });
+  for (const s of sources) {
+    const mMid = s.match(/중(?:등)?\s*([1-3]-[1-2])/);
+    if (mMid) return `중등 ${mMid[1]}`;
+    const mMid7 = s.match(/(?:^|[^0-9])7-([1-2])(?:[^0-9]|$)/);
+    if (mMid7) return `중등 1-${mMid7[1]}`;
+    const mElem = s.match(/([1-6]-[1-2])/);
+    if (mElem) return `초등 ${mElem[1]}`;
+  }
+  return "";
+};
+
+// 🌟 시험지 저장 시 학년(major_grade), 평균 난이도(avg_difficulty), 단원 범위(scope_start, scope_end)를 계산하는 헬퍼
+const computeExamSummaryMeta = (
+  groups: any[],
+  displayBadge: string,
+  examTitle: string,
+  weeklyTargetGrade: string
+) => {
+  const gradeCount: Record<string, number> = {};
+  const diffCount: Record<string, number> = {};
+  const repQuestions: any[] = [];
+
+  (groups || []).forEach((g: any) => {
+    const q = g?.questions?.[0] || g?.items?.[0] || g?.repQ;
+    if (!q) return;
+    repQuestions.push(q);
+
+    const taxId = String(q.taxonomy_id || q.item_id || "").trim().toUpperCase();
+    let gradeStr = "";
+    if (taxId.length >= 3) {
+      const schoolType = taxId[0];
+      const grade = taxId[1];
+      const semester = taxId[2];
+      let schoolName = "";
+      if (schoolType === "E") schoolName = "초등";
+      else if (schoolType === "M") schoolName = "중등";
+      else if (schoolType === "H") schoolName = "고등";
+      if (schoolName && !isNaN(Number(grade)) && !isNaN(Number(semester))) {
+        gradeStr = `${schoolName} ${grade}-${semester}`;
+      }
+    }
+    if (!gradeStr) {
+      gradeStr = extractDiagnosticBadge([q], "");
+    }
+    if (gradeStr) {
+      gradeCount[gradeStr] = (gradeCount[gradeStr] || 0) + 1;
+    }
+
+    const diff = String(q.difficulty || getDiffLabelByRate(q.solving_probability) || "중").trim();
+    if (diff) {
+      diffCount[diff] = (diffCount[diff] || 0) + 1;
+    }
+  });
+
+  // 1) major_grade 결정: 1순위 문항 다수 학년 -> 2순위 sessionStorage.majorGrade -> 3순위 displayBadge/examTitle에서 학년 추출 -> 4순위 weeklyTargetGrade -> 기본값 "공통 과정"
+  let majorGrade = "";
+  let maxGradeCnt = 0;
+  for (const [gr, cnt] of Object.entries(gradeCount)) {
+    if (cnt > maxGradeCnt) {
+      maxGradeCnt = cnt;
+      majorGrade = gr;
+    }
+  }
+  if (!majorGrade) {
+    const sessionGrade = typeof window !== "undefined" ? (sessionStorage.getItem("majorGrade") || "") : "";
+    if (sessionGrade && sessionGrade !== "공통 과정") {
+      majorGrade = sessionGrade;
+    }
+  }
+  if (!majorGrade) {
+    const badgeExtracted = extractDiagnosticBadge([], `${displayBadge || ""} ${examTitle || ""}`);
+    if (badgeExtracted) {
+      majorGrade = badgeExtracted;
+    } else if (displayBadge && displayBadge.trim() && displayBadge.trim() !== "공통 과정") {
+      majorGrade = displayBadge.trim();
+    } else if (weeklyTargetGrade && weeklyTargetGrade.trim()) {
+      majorGrade = weeklyTargetGrade.trim();
+    }
+  }
+  if (!majorGrade) majorGrade = "공통 과정";
+
+  // 2) avg_difficulty 결정
+  let avgDifficulty = typeof window !== "undefined" ? (sessionStorage.getItem("avgDifficulty") || "") : "";
+  if (!avgDifficulty) {
+    let maxDiffCnt = 0;
+    for (const [df, cnt] of Object.entries(diffCount)) {
+      if (cnt > maxDiffCnt) {
+        maxDiffCnt = cnt;
+        avgDifficulty = df;
+      }
+    }
+  }
+  if (!avgDifficulty) avgDifficulty = "중";
+
+  // 3) scope_start, scope_end 결정
+  let scopeStart = typeof window !== "undefined" ? (sessionStorage.getItem("scopeStart") || "") : "";
+  let scopeEnd = typeof window !== "undefined" ? (sessionStorage.getItem("scopeEnd") || "") : "";
+  if ((!scopeStart || scopeStart === "분류 없음") && repQuestions.length > 0) {
+    const sorted = [...repQuestions].sort((a, b) =>
+      String(a.taxonomy_name || "").localeCompare(String(b.taxonomy_name || ""))
+    );
+    const s1 = getDepth5Name(sorted[0], {});
+    const s2 = getDepth5Name(sorted[sorted.length - 1], {});
+    if (s1 && s1 !== "분류 없음") scopeStart = s1;
+    if (s2 && s2 !== "분류 없음") scopeEnd = s2;
+  }
+
+  return {
+    major_grade: majorGrade,
+    avg_difficulty: avgDifficulty,
+    scope_start: scopeStart || null,
+    scope_end: scopeEnd || null,
+  };
+};
+
+// 🌟 문항(또는 서브문항) 1개의 HTML 블록 생성
+// - 이미지 숨김 여부 반영
+// - 텍스트 뒤에 서브문항 번호((1), (2) 등)가 오고 그 뒤에 다른 텍스트가 없으면 이미지를 번호 우측에 나란히 배치
+// - 진단평가(isAdmissionMode=true)일 때는 상하 폭 제한(max-height: 250px)을 해제하고 좌우 폭에 맞춰 출력
+const buildSubQuestionItemHtml = (
+  q: any,
+  sIdx: number,
+  textToRender: string,
+  hiddenImgSet?: Set<string>,
+  isAdmissionMode: boolean = false
+) => {
+  const realQId = getRealId(String(q.question_id || ""));
+  const isImg1Hidden = Boolean(hiddenImgSet && (hiddenImgSet.has(`${realQId}__img1`) || hiddenImgSet.has(realQId)));
+  const isImg2Hidden = Boolean(hiddenImgSet && (hiddenImgSet.has(`${realQId}__img2`) || hiddenImgSet.has(realQId)));
+
+  const safeImgUrl = !isImg1Hidden ? String(q.image_url || "").trim() : "";
+  const safeImg2Url = !isImg2Hidden ? String(q.image_2_url || "").trim() : "";
+  const validImg1 = Boolean(safeImgUrl && safeImgUrl !== "undefined" && safeImgUrl !== "null");
+  const validImg2 = Boolean(safeImg2Url && safeImg2Url !== "undefined" && safeImg2Url !== "null");
+  const hasAnyImg = validImg1 || validImg2;
+
+  const splitSub = hasAnyImg
+    ? splitTrailingSubNumberText(textToRender)
+    : { isTrailingSubNum: false, introText: textToRender, subMarkerText: "" };
+
+  const isTrailingSubNum = splitSub.isTrailingSubNum;
+  const topMarginClass = sIdx > 0 ? (isTrailingSubNum ? "mt-8" : "mt-16") : "";
+  const maxHeightStyle = isAdmissionMode ? "" : " max-height: 250px;";
+
+  if (isTrailingSubNum) {
+    const introHtml = splitSub.introText
+      ? `<div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify mb-3">${formatQText(splitSub.introText)}</div>`
+      : "";
+
+    // 🌟 이미지 1과 이미지 2가 모두 있는 서브문항이면:
+    // 이미지 1은 공통 그림이므로 상단 중앙에 먼저 배치하고, 서브문항 번호((1))는 이미지 2의 좌측에 나란히 배치!
+    if (validImg1 && validImg2) {
+      const w1 = getBoxWidth(q.image_box);
+      const w2 = getBoxWidth(q.image_2_box);
+      const commonImg1Html = `<div class="w-full flex justify-center mt-2 mb-4"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w1};${maxHeightStyle}"></div>`;
+      const inlineImg2Html = `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w2};${maxHeightStyle}"></div>`;
+      return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}${commonImg1Html}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImg2Html}</div></div></div>`;
+    }
+
+    let inlineImgs = "";
+    if (validImg1) {
+      const w = getBoxWidth(q.image_box);
+      inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+    }
+    if (validImg2) {
+      const w = getBoxWidth(q.image_2_box);
+      inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+    }
+    return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImgs}</div></div></div>`;
+  }
+
+  let imgHtml = "";
+  if (validImg1) {
+    const w = getBoxWidth(q.image_box);
+    imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+  }
+  if (validImg2) {
+    const w = getBoxWidth(q.image_2_box);
+    imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+  }
+
+  return `<div class="w-full min-w-0 math-protect ${topMarginClass}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+};
 
 // 🌟 [핵심 변경] 이중/삼중으로 꼬인 JSON 문자열도 끝까지 파고들어 width(%)를 기필코 찾아내는 초강력 파서
 const getBoxWidth = (box: any) => {
@@ -69,6 +269,7 @@ export default function ExamViewerPage() {
   const zoomDelayTimerRef = useRef<any>(null);
 
   const examStateRef = useRef<any>(null);
+  const hiddenImageSetRef = useRef<Set<string>>(new Set());
   const currentScaleRef = useRef(1);
   const hasUnsavedChangesRef = useRef<boolean>(false);
   const isNewExamRef = useRef<boolean>(false);
@@ -283,6 +484,13 @@ export default function ExamViewerPage() {
             if (s.lineColor) cLin = s.lineColor;
             if (s.examDate) eDate = s.examDate;
             if (s.userMergedTextQuestions) userMergedTextQuestions = s.userMergedTextQuestions;
+            if (Array.isArray(s.hiddenImageQuestions)) {
+              hiddenImageSetRef.current = new Set(s.hiddenImageQuestions.map(normalizeHiddenImgKey));
+            } else {
+              hiddenImageSetRef.current = new Set();
+            }
+          } else {
+            hiddenImageSetRef.current = new Set();
           }
 
           const { data: examItems } = await supabase.from('exam_item').select('*').eq('exam_id', item.exam_id).order('sort_order');
@@ -371,10 +579,28 @@ export default function ExamViewerPage() {
           for (let j = 0; j < targetCols.length; j += 2) pages.push({ left: targetCols[j], right: targetCols[j+1] || [] });
         }
 
+        const isBulkDiag = lType === '입학테스트' || lType === '진단평가';
+        if (isBulkDiag && (!badge || badge === '공통 과정')) {
+          badge = extractDiagnosticBadge(orderedQuestions, title) || badge;
+        }
+
         pages.forEach((pageCols, pIdx) => {
           const showTitle = !(initialTitleMode === 'first' && pIdx > 0);
-          const hHtml = buildHeaderHtml(badge, title, showTitle, initialTmpl, eDate);
-          const fHtml = buildFooterHtml(badge, pIdx, pages.length, title, initialTmpl, eDate);
+          const hHtml = isBulkDiag ? `
+            <div class="flex justify-between items-end border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
+                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>진단평가</h1>'">
+                <div class="mb-1"><div class="flex flex-col items-end gap-1">${eDate ? `<div class="text-[13px] font-bold text-slate-500">${formatExamDate(eDate)}</div>` : ''}${badge ? `<div class="text-slate-700 font-bold text-[14px] px-3 py-1 rounded-[4px] border border-slate-400 bg-white leading-tight">${badge}</div>` : ''}</div></div>
+            </div>` : buildHeaderHtml(badge, title, showTitle, initialTmpl, eDate);
+          const fHtml = isBulkDiag ? `
+            <div class="border-t-[2px] border-slate-400 pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20">
+                <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
+                <div class="absolute left-0 right-0 bottom-0 flex justify-center items-baseline gap-6 pb-[1px] pointer-events-none">
+                    <div class="w-[150px] text-right text-[14px] font-semibold text-slate-800 whitespace-nowrap">${badge}</div>
+                    <div class="text-[18px] text-slate-900 font-semibold whitespace-nowrap text-center tracking-wide">${pIdx + 1} / ${pages.length}</div>
+                    <div class="w-[150px] text-left text-[14px] font-semibold text-slate-800 whitespace-nowrap">진단평가</div>
+                </div>
+                <img src="${LOGO_FOOTER_RIGHT_URL}" class="h-[22px] object-contain absolute right-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-bold text-[#006699] text-sm absolute right-0 bottom-0\\'>천종현수학연구소</span>'">
+            </div>` : buildFooterHtml(badge, pIdx, pages.length, title, initialTmpl, eDate);
           
           let rHtml = '';
           if (pageCols.right === null) {
@@ -382,9 +608,9 @@ export default function ExamViewerPage() {
             const lines = Array.from({ length: Math.ceil((h || 1587)/28) + 1 }).map(() => `<div style="height: 28px; border-bottom: 1px solid #e2e8f0; box-sizing: border-box;"></div>`).join('');
             rHtml = `<div class="w-full h-full min-w-0 flex flex-col pl-6" style="border-left: 1px dashed #cbd5e1; overflow: hidden;"><div class="text-[13px] font-bold text-slate-400 mb-2 tracking-widest">풀 이</div><div class="flex-1" style="overflow: hidden;">${lines}</div></div>`;
           } else {
-            rHtml = generateLocalColHtml(pageCols.right, cNum);
+            rHtml = generateLocalColHtml(pageCols.right, cNum, isBulkDiag);
           }
-          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="exam-grid-admission pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum)}${rHtml}</div>${fHtml}</div>`;
+          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="exam-grid-admission pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum, isBulkDiag)}${rHtml}</div>${fHtml}</div>`;
         });
 
         if (pages.length % 2 !== 0) {
@@ -543,12 +769,27 @@ export default function ExamViewerPage() {
           if (s.titleColor) cTit = s.titleColor;
           if (s.lineColor) cLin = s.lineColor;
           if (s.examDate) eDate = s.examDate;
+          if (Array.isArray(s.hiddenImageQuestions)) {
+            hiddenImageSetRef.current = new Set(s.hiddenImageQuestions.map(normalizeHiddenImgKey));
+          } else {
+            hiddenImageSetRef.current = new Set();
+          }
+        } else {
+          hiddenImageSetRef.current = new Set();
+        }
+
+        const isDiagExam = lType === '입학테스트' || lType === '진단평가';
+        if (isDiagExam) {
+          lType = '입학테스트';
+          if (!badge || badge === '공통 과정') {
+            badge = extractDiagnosticBadge(orderedQuestions, title) || badge;
+          }
         }
 
         setExamTitle(title);
         setDisplayBadge(badge);
         setLayoutType(lType);
-        setIsAdmissionLock(lType === '입학테스트');
+        setIsAdmissionLock(isDiagExam);
         if (wWeek) setTestWeek(wWeek);
         if (wGrade) setWeeklyTargetGrade(wGrade);
 
@@ -564,7 +805,7 @@ export default function ExamViewerPage() {
           document.fonts.load("700 17px 'NanumSquare'"),
           document.fonts.load("normal 42px 'CJU_Medium'")
         ]).catch(() => {}).finally(() => {
-          if (lType === '입학테스트') renderAdmissionTestPages();
+          if (isDiagExam) renderAdmissionTestPages();
           else remeasureAndRender(initialCol, initialSplit, initialTitleMode, initialTmpl, eDate, title, badge);
         });
 
@@ -679,12 +920,38 @@ export default function ExamViewerPage() {
           if (s.titleColor) cTit = s.titleColor;
           if (s.lineColor) cLin = s.lineColor;
           if (s.examDate) eDate = s.examDate;
+          if (Array.isArray(s.hiddenImageQuestions)) {
+            hiddenImageSetRef.current = new Set(s.hiddenImageQuestions.map(normalizeHiddenImgKey));
+          }
+        }
+        if (sessionStorage.getItem('examHiddenImageQuestions')) {
+          try {
+            const parsedHidden = JSON.parse(sessionStorage.getItem('examHiddenImageQuestions') || '[]');
+            if (Array.isArray(parsedHidden)) {
+              hiddenImageSetRef.current = new Set(parsedHidden.map(normalizeHiddenImgKey));
+            }
+          } catch (e) {}
+        }
+
+        const testCategorySession = sessionStorage.getItem('testCategory');
+        const isDiagExam = lType === '입학테스트' || lType === '진단평가' || testCategorySession === '진단평가' || testCategorySession === '입학테스트';
+        if (isDiagExam) {
+          lType = '입학테스트';
+          if (!title || title === '새로운 테스트' || title === '시험지') {
+            title = '진단평가';
+          }
+          if (!badge || badge === '공통 과정') {
+            const majorGradeSession = sessionStorage.getItem('majorGrade') || '';
+            badge = (majorGradeSession && majorGradeSession !== '공통 과정')
+              ? majorGradeSession
+              : (extractDiagnosticBadge(questions || [], title) || badge);
+          }
         }
 
         setExamTitle(title);
         setDisplayBadge(badge);
         setLayoutType(lType);
-        setIsAdmissionLock(lType === '입학테스트');
+        setIsAdmissionLock(isDiagExam);
         if (wWeek) setTestWeek(wWeek);
         if (wGrade) setWeeklyTargetGrade(wGrade);
 
@@ -700,7 +967,7 @@ export default function ExamViewerPage() {
           document.fonts.load("700 17px 'NanumSquare'"),
           document.fonts.load("normal 42px 'CJU_Medium'")
         ]).catch(() => {}).finally(() => {
-          if (lType === '입학테스트') renderAdmissionTestPages();
+          if (isDiagExam) renderAdmissionTestPages();
           else remeasureAndRender(initialCol, initialSplit, initialTitleMode, initialTmpl, eDate, title, badge);
         });
 
@@ -745,24 +1012,8 @@ export default function ExamViewerPage() {
         }
 
         g.questions.forEach((q: any, sIdx: number) => {
-            let safeImgUrl = String(q.image_url || '').trim();
-            let safeImg2Url = String(q.image_2_url || '').trim();
-            let imgHtml = '';
-            
-            // 🌟 [핵심 변경] 거인증 완벽 해결 (auto 및 파서 적용), 높이 250px 제한
-            if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-                const w = getBoxWidth(q.image_box);
-                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
-            }
-            if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
-                const w = getBoxWidth(q.image_2_box);
-                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
-            }
-            
-            const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
-            
-            subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmissionLock);
         });
 
         wrap.innerHTML = `<div class="flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
@@ -818,7 +1069,7 @@ export default function ExamViewerPage() {
     return columns;
   };
 
-  const generateLocalColHtml = (cGroups: any[], numColorStr: string = 'var(--color-num)') => {
+  const generateLocalColHtml = (cGroups: any[], numColorStr: string = 'var(--color-num)', isAdmCol: boolean = isAdmissionLock) => {
     if (!cGroups || cGroups.length === 0) return `<div class="flex flex-col flex-1 w-full min-w-0"></div>`;
     let cHtml = '<div class="flex flex-col flex-1 w-full min-w-0 gap-[15mm]">';
     
@@ -833,24 +1084,8 @@ export default function ExamViewerPage() {
 
         const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
         g.questions.forEach((q: any, sIdx: number) => {
-            let safeImgUrl = String(q.image_url || '').trim();
-            let safeImg2Url = String(q.image_2_url || '').trim();
-            let imgHtml = '';
-            
-            // 🌟 [핵심 변경] 거인증 완벽 해결 (auto 및 파서 적용), 높이 250px 제한
-            if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-                const w = getBoxWidth(q.image_box);
-                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
-            }
-            if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
-                const w = getBoxWidth(q.image_2_box);
-                imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
-            }
-            
-            const prefix = ''; 
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
-            
-            subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol);
         });
         const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
         
@@ -982,7 +1217,7 @@ export default function ExamViewerPage() {
     (window as any).__examRenderReady = true;
   };
 
-  const renderAdmissionTestPages = async () => {
+  const renderAdmissionTestPages = async (eDateOverride?: string) => {
     if (!examStateRef.current || !examContainerRef.current) return;
     (window as any).__examRenderReady = false;
     const { groups, examTitle, displayBadge } = examStateRef.current;
@@ -1005,22 +1240,23 @@ export default function ExamViewerPage() {
     let finalHtml = '';
 
     pages.forEach((pageCols, pIdx) => {
-        const courseBadge = displayBadge ? `<div class="text-slate-700 font-bold text-[14px] px-3 py-1.5 rounded-md shadow-sm bg-slate-200">${displayBadge}</div>` : '';
-        const dateHtml = examDate ? `<div class="text-[13px] font-bold text-slate-500">${formatExamDate(examDate)}</div>` : '';
+        const courseBadge = displayBadge ? `<div class="text-slate-700 font-bold text-[14px] px-3 py-1 rounded-[4px] border border-slate-400 bg-white leading-tight">${displayBadge}</div>` : '';
+        const effectiveDate = eDateOverride !== undefined ? eDateOverride : examDate;
+        const dateHtml = effectiveDate ? `<div class="text-[13px] font-bold text-slate-500">${formatExamDate(effectiveDate)}</div>` : '';
         const topRightStack = (dateHtml || courseBadge) ? `<div class="flex flex-col items-end gap-1">${dateHtml}${courseBadge}</div>` : '';
         const hHtml = `
-            <div class="flex justify-between items-start border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
-                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>입학테스트</h1>'">
-                <div class="mt-7">${topRightStack}</div>
+            <div class="flex justify-between items-end border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
+                <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>진단평가</h1>'">
+                <div class="mb-1">${topRightStack}</div>
             </div>`;
 
         const fHtml = `
             <div class="border-t-[2px] border-slate-400 pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20">
                 <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
-                <div class="absolute left-0 right-0 bottom-0 flex justify-center items-center pb-[1px] pointer-events-none">
-                    <div class="w-[150px] text-right pr-4 text-[14px] font-bold text-slate-600">${displayBadge}</div>
-                    <div class="text-[14px] text-slate-400 font-bold whitespace-nowrap text-center tracking-widest">${pIdx + 1} / ${pages.length}</div>
-                    <div class="w-[150px] text-left pl-4 text-[14px] font-bold text-slate-600">입학테스트</div>
+                <div class="absolute left-0 right-0 bottom-0 flex justify-center items-baseline gap-6 pb-[1px] pointer-events-none">
+                    <div class="w-[150px] text-right text-[14px] font-semibold text-slate-800 whitespace-nowrap">${displayBadge}</div>
+                    <div class="text-[18px] text-slate-900 font-semibold whitespace-nowrap text-center tracking-wide">${pIdx + 1} / ${pages.length}</div>
+                    <div class="w-[150px] text-left text-[14px] font-semibold text-slate-800 whitespace-nowrap">진단평가</div>
                 </div>
                 <img src="${LOGO_FOOTER_RIGHT_URL}" class="h-[22px] object-contain absolute right-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-bold text-[#006699] text-sm absolute right-0 bottom-0\\'>천종현수학연구소</span>'">
             </div>`;
@@ -1040,24 +1276,8 @@ export default function ExamViewerPage() {
 
                 const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
                 g.questions.forEach((q: any, sIdx: number) => {
-                    let safeImgUrl = String(q.image_url || '').trim();
-                    let safeImg2Url = String(q.image_2_url || '').trim();
-                    let imgHtml = '';
-                    
-                    // 🌟 [핵심 변경] 거인증 완벽 해결 (auto 및 파서 적용), 높이 250px 제한
-                    if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-                        const w = getBoxWidth(q.image_box);
-                        imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
-                    }
-                    if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
-                        const w = getBoxWidth(q.image_2_box);
-                        imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w}; max-height: 250px;"></div>`;
-                    }
-                    
-                    const prefix = ''; 
                     const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
-                    
-                    subHtml += `<div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-16' : ''}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+                    subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, true);
                 });
                 
                 const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
@@ -1089,7 +1309,7 @@ export default function ExamViewerPage() {
     
     setTotalPages(pages.length);
     updatePreviewViewport();
-    (window as any).__examRenderReady = false;
+    (window as any).__examRenderReady = true;
   };
 
   const updatePreviewViewport = (zf: number = zoomFactor) => {
@@ -1246,9 +1466,24 @@ export default function ExamViewerPage() {
     if (field === 'titleMode') { setTitleMode(val); remeasureAndRender(columns, splits, val, template, examDate, examTitle, displayBadge); }
     if (field === 'template') { setTemplate(val); remeasureAndRender(columns, splits, titleMode, val, examDate, examTitle, displayBadge); }
     
-    if (field === 'examTitle') { setExamTitle(val); if(layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, examDate, val, displayBadge); else renderAdmissionTestPages(); }
-    if (field === 'displayBadge') { setDisplayBadge(val); if(layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, examDate, examTitle, val); else renderAdmissionTestPages(); }
-    if (field === 'examDate') { setExamDate(val); if(layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, val, examTitle, displayBadge); else renderAdmissionTestPages(); }
+    if (field === 'examTitle') {
+      setExamTitle(val);
+      if (examStateRef.current) examStateRef.current.examTitle = val;
+      if (layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, examDate, val, displayBadge);
+      else renderAdmissionTestPages();
+    }
+    if (field === 'displayBadge') {
+      setDisplayBadge(val);
+      if (examStateRef.current) examStateRef.current.displayBadge = val;
+      if (layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, examDate, examTitle, val);
+      else renderAdmissionTestPages();
+    }
+    if (field === 'examDate') {
+      setExamDate(val);
+      if (examStateRef.current) examStateRef.current.examDate = val;
+      if (layoutType !== '입학테스트') remeasureAndRender(columns, splits, titleMode, template, val, examTitle, displayBadge);
+      else renderAdmissionTestPages(val);
+    }
     
     if (field === 'layoutType') {
       setLayoutType(val);
@@ -1314,16 +1549,24 @@ export default function ExamViewerPage() {
          userMergedTextQuestions = JSON.parse(sessionStorage.getItem('examUserMergedTextQuestions') || '[]');
       }
 
+      const hiddenImageQuestions = Array.from(hiddenImageSetRef.current || []);
       const finalLayoutSettings = { 
          column: columns, split: splits, titleMode, numberColor: colorNum, 
          titleColor: colorTitle, lineColor: colorLine, examDate: examDate || null, 
-         template, userMergedTextQuestions 
+         template, userMergedTextQuestions, hiddenImageQuestions 
       };
 
       const isWeeklyTest = layoutType === '주간테스트';
       const weeklyFields = isWeeklyTest && weeklyTargetGrade 
         ? { test_week: testWeek, target_grade: weeklyTargetGrade } 
         : { test_week: null, target_grade: null };
+
+      const summaryMetaFields = computeExamSummaryMeta(
+        examStateRef.current?.groups || [],
+        displayBadge,
+        examTitle,
+        weeklyTargetGrade
+      );
 
       const editOriginalType = sessionStorage.getItem('editOriginalType');
       const editOriginalId = sessionStorage.getItem('editOriginalId');
@@ -1363,7 +1606,8 @@ export default function ExamViewerPage() {
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
             layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
-            ...weeklyFields
+            ...weeklyFields,
+            ...summaryMetaFields
           }).eq('exam_id', targetExamIdToRebuild);
           if (rebuildErr) throw new Error(`문제지 갱신 실패: ${rebuildErr.message}`);
           examId = targetExamIdToRebuild;
@@ -1373,7 +1617,8 @@ export default function ExamViewerPage() {
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: flatQIds.length, instructor_id: instId,
             layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
-            ...weeklyFields
+            ...weeklyFields,
+            ...summaryMetaFields
           }).select().single();
           if (insertErr || !data) throw new Error(`새 문제지 생성 실패: ${insertErr?.message || '알 수 없는 오류'}`);
           examId = data.exam_id;
@@ -1392,7 +1637,7 @@ export default function ExamViewerPage() {
         const { error: itemsErr } = await supabase.from('exam_item').insert(items);
         if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
       } else {
-        const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트', layout_settings: finalLayoutSettings, ...weeklyFields }).eq('exam_id', examId);
+        const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트', layout_settings: finalLayoutSettings, ...weeklyFields, ...summaryMetaFields }).eq('exam_id', examId);
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
 
@@ -1447,9 +1692,9 @@ export default function ExamViewerPage() {
       setSavedExamId(examId); 
       
       const keysToRemove = [
-        'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
+        'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType', 'majorGrade', 'avgDifficulty', 'scopeStart', 'scopeEnd',
         'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
-        'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
+        'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
         'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds', 'isClinicMode'
       ];
       keysToRemove.forEach(k => sessionStorage.removeItem(k));

@@ -1,7 +1,7 @@
 // src/app/exam/step2/RightPreview.tsx
 import React, { useState, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore } from "./examUtils";
+import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore, isSubNumberOnlyText, splitTrailingSubNumberText } from "./examUtils";
 
 // 🌟 [핵심 수정] 배율이 없을 때 100%로 늘어나서 '거인증'이 생기는 것을 막기 위해 기본값을 'auto'로 변경
 const getBoxWidth = (box: any) => {
@@ -17,6 +17,7 @@ export default function RightPreview({ examData }: { examData: any }) {
     router, questions, setQuestions, isLoading, showAnswer, setShowAnswer,
     depth6Map, editingId, setEditingId, editForm, setEditForm,
     handleDragStart, handleDragOver, handleDrop, openTwinSearch, goToStep3,
+    hiddenImageIds, toggleHideImage,
     draggedIdx, setDraggedIdx,
     isClinicMode, isRestoredMode
   } = examData;
@@ -515,6 +516,20 @@ export default function RightPreview({ examData }: { examData: any }) {
 
                    const isTwin = q.problem_type === '쌍둥이' || q.derivation_type === 'TWIN' || q.derivation_type === '쌍둥이';
                    const isSimilar = q.problem_type === '유사' || q.derivation_type === '유사';
+                   const realQId = String(q.question_id).replace(/_added_\d+$/, '');
+                   const hasImg1 = Boolean(q.image_url && String(q.image_url).trim() !== '' && String(q.image_url) !== 'null' && String(q.image_url) !== 'undefined');
+                   const hasImg2 = Boolean(q.image_2_url && String(q.image_2_url).trim() !== '' && String(q.image_2_url) !== 'null' && String(q.image_2_url) !== 'undefined');
+                   const bothImgsExist = hasImg1 && hasImg2;
+                   const isImg1Hidden = Boolean(hiddenImageIds && (hiddenImageIds.has(`${realQId}__img1`) || hiddenImageIds.has(realQId)));
+                   const isImg2Hidden = Boolean(hiddenImageIds && (hiddenImageIds.has(`${realQId}__img2`) || hiddenImageIds.has(realQId)));
+                   const showImg1 = hasImg1 && !isImg1Hidden;
+                   const showImg2 = hasImg2 && !isImg2Hidden;
+                   const hasVisibleImg = showImg1 || showImg2;
+
+                   const splitSubInfo = hasVisibleImg
+                     ? splitTrailingSubNumberText(textToRender)
+                     : { isTrailingSubNum: false, introText: textToRender, subMarkerText: "" };
+                   const isNumberOnlySub = splitSubInfo.isTrailingSubNum;
 
                    return (
                      <div key={q.question_id} className={`relative ${subIdx < g.items.length - 1 ? 'mb-8 pb-8 border-b-2 border-dashed border-slate-200' : ''}`}>
@@ -538,6 +553,32 @@ export default function RightPreview({ examData }: { examData: any }) {
                          </div>
                          
                          <div className="flex gap-1.5 shrink-0 z-10 relative ml-2" onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} draggable>
+                           {hasImg1 && (
+                             <button
+                               onClick={() => toggleHideImage && toggleHideImage(q.question_id, 1)}
+                               className={`px-2 py-1 text-[11px] font-bold rounded border shadow-sm transition-colors flex items-center gap-1 ${
+                                 isImg1Hidden
+                                   ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100'
+                                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-indigo-600'
+                               }`}
+                               title={isImg1Hidden ? `클릭하면 숨겨진 ${bothImgsExist ? '이미지 1을' : '이미지를'} 다시 표시합니다` : `클릭하면 원본 DB에서 삭제하지 않고 이번 시험지에서만 ${bothImgsExist ? '이미지 1을' : '이미지를'} 숨깁니다`}
+                             >
+                               {isImg1Hidden ? (bothImgsExist ? '👁️ 이미지 1 표시' : '👁️ 이미지 표시') : (bothImgsExist ? '🙈 이미지 1 숨김' : '🙈 이미지 숨김')}
+                             </button>
+                           )}
+                           {hasImg2 && (
+                             <button
+                               onClick={() => toggleHideImage && toggleHideImage(q.question_id, 2)}
+                               className={`px-2 py-1 text-[11px] font-bold rounded border shadow-sm transition-colors flex items-center gap-1 ${
+                                 isImg2Hidden
+                                   ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100'
+                                   : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50 hover:text-indigo-600'
+                               }`}
+                               title={isImg2Hidden ? `클릭하면 숨겨진 ${bothImgsExist ? '이미지 2를' : '이미지를'} 다시 표시합니다` : `클릭하면 원본 DB에서 삭제하지 않고 이번 시험지에서만 ${bothImgsExist ? '이미지 2를' : '이미지를'} 숨깁니다`}
+                             >
+                               {isImg2Hidden ? (bothImgsExist ? '👁️ 이미지 2 표시' : '👁️ 이미지 표시') : (bothImgsExist ? '🙈 이미지 2 숨김' : '🙈 이미지 숨김')}
+                             </button>
+                           )}
                            {isGroupMerged && subIdx === 0 && (
                              <button onClick={() => unmergeGroup(g.id)} className="p-1.5 text-slate-400 hover:text-indigo-600 bg-white border border-slate-200 rounded shadow-sm" title="병합 해제">
                                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244"></path></svg>
@@ -552,26 +593,72 @@ export default function RightPreview({ examData }: { examData: any }) {
                          <>
                            <div className="flex gap-1.5 items-start mt-0">
                              <div className="flex-1 space-y-3">
-                               {textToRender && <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(textToRender) }} />}
-                               
-                               {/* 🌟 [핵심 변경] 거인증 해결! width: auto 기본 적용 및 설정된 width % 반영 */}
-                               {(q.image_url || q.image_2_url) && (
-                                 <div className="mt-4 flex flex-col gap-4 w-full items-center">
-                                   {q.image_url && (
-                                     <div className="w-full flex justify-center">
-                                       <img src={getCleanUrl(q.image_url)} 
-                                            className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
-                                            style={{ width: getBoxWidth(q.image_box), maxHeight: '400px' }} alt="" draggable="false" />
+                               {((hasImg1 && isImg1Hidden) || (hasImg2 && isImg2Hidden)) && (
+                                 <div className="flex flex-wrap gap-2">
+                                   {hasImg1 && isImg1Hidden && (
+                                     <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 border border-dashed border-slate-300 rounded-lg text-xs font-bold text-slate-500">
+                                       <span>🙈 {bothImgsExist ? '이미지 1' : '이미지'} 숨김 처리됨 (Step 3 미노출)</span>
                                      </div>
                                    )}
-                                   {q.image_2_url && (
-                                     <div className="w-full flex justify-center">
-                                       <img src={getCleanUrl(q.image_2_url)} 
-                                            className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
-                                            style={{ width: getBoxWidth(q.image_2_box), maxHeight: '400px' }} alt="" draggable="false" />
+                                   {hasImg2 && isImg2Hidden && (
+                                     <div className="inline-flex items-center gap-2 px-3 py-1 bg-slate-100 border border-dashed border-slate-300 rounded-lg text-xs font-bold text-slate-500">
+                                       <span>🙈 {bothImgsExist ? '이미지 2' : '이미지'} 숨김 처리됨 (Step 3 미노출)</span>
                                      </div>
                                    )}
                                  </div>
+                               )}
+                               {isNumberOnlySub ? (
+                                 <div className="flex flex-col gap-3 w-full">
+                                   {splitSubInfo.introText && (
+                                     <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(splitSubInfo.introText) }} />
+                                   )}
+                                   {showImg1 && showImg2 && (
+                                     <div className="w-full flex justify-center my-1">
+                                       <img src={getCleanUrl(q.image_url)} 
+                                            className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
+                                            style={{ width: getBoxWidth(q.image_box), maxHeight: isDiagPreview ? 'none' : '400px' }} alt="" draggable="false" />
+                                     </div>
+                                   )}
+                                   <div className="flex items-start gap-3 w-full mt-1">
+                                     <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[1.6] tracking-wide shrink-0 pointer-events-none pt-0.5" dangerouslySetInnerHTML={{ __html: formatText(splitSubInfo.subMarkerText) }} />
+                                     <div className="flex-1 min-w-0 flex flex-col gap-3 items-start">
+                                       {showImg1 && !showImg2 && (
+                                         <img src={getCleanUrl(q.image_url)} 
+                                              className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
+                                              style={{ width: getBoxWidth(q.image_box), maxHeight: isDiagPreview ? 'none' : '400px' }} alt="" draggable="false" />
+                                       )}
+                                       {showImg2 && (
+                                         <img src={getCleanUrl(q.image_2_url)} 
+                                              className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
+                                              style={{ width: getBoxWidth(q.image_2_box), maxHeight: isDiagPreview ? 'none' : '400px' }} alt="" draggable="false" />
+                                       )}
+                                     </div>
+                                   </div>
+                                 </div>
+                               ) : (
+                                 <>
+                                   {textToRender && <div className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none" dangerouslySetInnerHTML={{ __html: formatText(textToRender) }} />}
+                                   
+                                   {/* 🌟 [핵심 변경] 거인증 해결! width: auto 기본 적용 및 설정된 width % 반영 */}
+                                   {hasVisibleImg && (
+                                     <div className="mt-4 flex flex-col gap-4 w-full items-center">
+                                       {showImg1 && (
+                                         <div className="w-full flex justify-center">
+                                           <img src={getCleanUrl(q.image_url)} 
+                                                className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
+                                                style={{ width: getBoxWidth(q.image_box), maxHeight: isDiagPreview ? 'none' : '400px' }} alt="" draggable="false" />
+                                         </div>
+                                       )}
+                                       {showImg2 && (
+                                         <div className="w-full flex justify-center">
+                                           <img src={getCleanUrl(q.image_2_url)} 
+                                                className="max-w-full object-contain mix-blend-multiply rounded border border-slate-200 pointer-events-none" 
+                                                style={{ width: getBoxWidth(q.image_2_box), maxHeight: isDiagPreview ? 'none' : '400px' }} alt="" draggable="false" />
+                                         </div>
+                                       )}
+                                     </div>
+                                   )}
+                                 </>
                                )}
                                
                                {q.options && q.options !== 'null' && typeof q.options === 'string' && (

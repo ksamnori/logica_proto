@@ -487,3 +487,54 @@ export const buildMergedQuestionGroups = (rawQuestions: any[], isDiagnosticMode:
 
   return result;
 };
+
+
+// 🌟 서브문항 텍스트가 "(1)", "(2)", "①", "[1]", "(가)" 등 번호만 있고 본문 텍스트가 없는지 판별
+export const isSubNumberOnlyText = (rawText: any): boolean => {
+  if (!rawText) return false;
+  const plain = String(rawText)
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+  if (!plain) return false;
+  return /^(?:\(\s*(?:\d+|[가-하]|[ㄱ-ㅎ]|[a-zA-Z])\s*\)|\[\s*\d+\s*\]|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|\d+\s*\))\.?$/.test(plain);
+};
+
+// 🌟 서브문항 텍스트가 "(1)", "(2)" 등 번호만 있거나, 앞선 지문 뒤에 "(1)" 번호로 끝나고 그 뒤에 이어지는 텍스트가 없는 경우 분리
+export const splitTrailingSubNumberText = (
+  rawText: any
+): { isTrailingSubNum: boolean; introText: string; subMarkerText: string } => {
+  if (!rawText) return { isTrailingSubNum: false, introText: "", subMarkerText: "" };
+  const s = String(rawText).trim();
+  if (!s) return { isTrailingSubNum: false, introText: "", subMarkerText: "" };
+
+  // 끝에 위치한 서브문항 번호 패턴: (1), (2), [1], ①~⑮, (가)~(하), 1) 등 (뒤에 줄바꿈/빈 태그만 있는 경우 포함)
+  const trailingRegex = /^(.*?)((?:\(\s*(?:\d+|[가-하]|[ㄱ-ㅎ]|[a-zA-Z])\s*\)|\[\s*\d+\s*\]|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|(?:^|\s|<br\s*\/?>|>)(?:\d+\s*\)))\.?)(?:\s*<br\s*\/?>|\s*<\/p>|\s*<\/div>|\s)*$/is;
+  const m = s.match(trailingRegex);
+  if (!m) {
+    return { isTrailingSubNum: false, introText: s, subMarkerText: "" };
+  }
+
+  let intro = (m[1] || "").trim();
+  let marker = (m[2] || "").trim();
+
+  // marker 앞에 붙은 <br> 이나 > 정리
+  const brMatch = marker.match(/^((?:<br\s*\/?>|\s)+)(.*)$/i);
+  if (brMatch) {
+    marker = brMatch[2].trim();
+  }
+  if (marker.startsWith(">")) {
+    intro += ">";
+    marker = marker.slice(1).trim();
+  }
+
+  // intro 끝에 불필요하게 반복된 <br> 태그 제거
+  intro = intro.replace(/(?:\s*<br\s*\/?>\s*)+$/gi, "").trim();
+  const plainIntro = intro.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
+
+  return {
+    isTrailingSubNum: true,
+    introText: plainIntro ? intro : "",
+    subMarkerText: marker,
+  };
+};

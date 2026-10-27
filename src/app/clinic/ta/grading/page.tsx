@@ -83,7 +83,7 @@ const purgeOldSession = () => {
   const keysToRemove = [
     'restoreExamQuestions', 'examQuestions', 'examTitle', 'examSubTitle', 'examType',
     'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
-    'examUserMergedTextQuestions', 'clinicTargetStudentId', 'clinicTargetClassId',
+    'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId',
     'editHomeworkId', 'editExamId', 'duplicateExamId'
   ];
   keysToRemove.forEach(k => sessionStorage.removeItem(k));
@@ -544,7 +544,7 @@ export default function TaGradingPage() {
       sessionStorage.setItem('examType', examType || '오답프린트');
       
       if (masterData?.layout_settings?.userMergedTextQuestions) {
-         sessionStorage.setItem('examUserMergedTextQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
+         sessionStorage.setItem('examUserMergedTextQuestions', 'examHiddenImageQuestions', JSON.stringify(masterData.layout_settings.userMergedTextQuestions));
       }
 
       sessionStorage.setItem('editOriginalType', 'exam');
