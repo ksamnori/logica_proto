@@ -22,6 +22,8 @@ export default function QuestionDBUploadPage() {
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
   
   const [isDragOver, setIsDragOver] = useState(false);
+  // 🌟 기존 ID 문항에 대해 분류/난이도 메타만 부분 업데이트할지 여부 (기본값: true로 켜두어 이미지/정답 증발 방지)
+  const [onlyUpdateTaxonomyForExisting, setOnlyUpdateTaxonomyForExisting] = useState(true);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -185,28 +187,85 @@ export default function QuestionDBUploadPage() {
       let updateCount = 0;
       let insertCount = 0;
 
-      const questionsToUpsert = fileData.map((q) => {
-        if (existingIdSet.has(q.question_id)) updateCount++;
-        else insertCount++;
+      const safeJsonb = (val: any) => {
+          if (!val) return null;
+          if (typeof val === 'string') {
+              try { return JSON.parse(val); } catch(e) { return null; }
+          }
+          return typeof val === 'object' ? val : null;
+      };
 
-        const safeJsonb = (val: any) => {
-            if (!val) return null;
-            if (typeof val === 'string') {
-                try { return JSON.parse(val); } catch(e) { return null; }
-            }
-            return typeof val === 'object' ? val : null;
-        };
+      const safeBoolean = (val: any, defaultVal: boolean) => {
+          if (val === true || val === 'true') return true;
+          if (val === false || val === 'false') return false;
+          return defaultVal;
+      };
 
-        const safeBoolean = (val: any, defaultVal: boolean) => {
-            if (val === true || val === 'true') return true;
-            if (val === false || val === 'false') return false;
-            return defaultVal;
-        };
+      const safeInteger = (val: any, defaultVal: number | null = null) => {
+          const parsed = parseInt(val, 10);
+          return isNaN(parsed) ? defaultVal : parsed;
+      };
 
-        const safeInteger = (val: any, defaultVal: number | null = null) => {
-            const parsed = parseInt(val, 10);
-            return isNaN(parsed) ? defaultVal : parsed;
-        };
+      // 🌟 [핵심] 이미 DB에 존재하는 question_id이고 분류 메타 전용 업데이트 모드가 켜져 있으면
+      // 기존 이미지/정답/문제텍스트는 전혀 건드리지 않고 8개 분류·난이도 컬럼만 안전하게 UPDATE 합니다.
+      const existingItemsToPatch: any[] = [];
+      const newItemsToInsert: any[] = [];
+
+      fileData.forEach((q) => {
+        if (!q.question_id) return;
+        if (existingIdSet.has(q.question_id)) {
+          updateCount++;
+          if (onlyUpdateTaxonomyForExisting) {
+            existingItemsToPatch.push(q);
+            return;
+          }
+        } else {
+          insertCount++;
+        }
+        newItemsToInsert.push(q);
+      });
+
+      if (onlyUpdateTaxonomyForExisting && existingItemsToPatch.length > 0) {
+        addLog(`🛠️ 기존 문항 ${existingItemsToPatch.length}건: 이미지·정답·본문은 보존하고 분류/난이도 8개 항목만 부분 업데이트 시작...`);
+        let patchedCount = 0;
+        const patchBatchSize = 25;
+
+        for (let i = 0; i < existingItemsToPatch.length; i += patchBatchSize) {
+          const batch = existingItemsToPatch.slice(i, i + patchBatchSize);
+          await Promise.all(
+            batch.map(async (q) => {
+              const patchPayload: Record<string, any> = {
+                taxonomy_id: q.taxonomy_id ?? null,
+                taxonomy_name: q.taxonomy_name ?? null,
+                thk_taxonomy_id: q.thk_taxonomy_id ?? null,
+                thk_taxonomy_name: q.thk_taxonomy_name ?? null,
+                difficulty: mapDifficulty(q.difficulty),
+                solving_probability: safeInteger(q.solving_probability),
+                cognitive_level: q.cognitive_level ?? null,
+                problem_type: q.problem_type ?? null,
+                updated_at: new Date().toISOString(),
+              };
+
+              const { error: patchErr } = await supabase
+                .from('question_db')
+                .update(patchPayload)
+                .eq('question_id', q.question_id);
+
+              if (patchErr) {
+                throw new Error(`문항 부분 업데이트 오류 (${q.question_id}): ${patchErr.message}`);
+              }
+            })
+          );
+          patchedCount += batch.length;
+          const totalWork = existingItemsToPatch.length + newItemsToInsert.length;
+          setUploadProgress(Math.round((patchedCount / (totalWork || 1)) * 100));
+          addLog(`⏳ 기존 문항 분류 메타 업데이트: ${patchedCount} / ${existingItemsToPatch.length} 완료...`);
+        }
+      }
+
+      const questionsToUpsert = newItemsToInsert.map((q) => {
+
+
 
         return {
           question_id: q.question_id,
@@ -289,8 +348,9 @@ export default function QuestionDBUploadPage() {
         addLog(`⏳ DB ${processedCount} / ${questionsToUpsert.length} 문항 안전하게 Upsert 처리 완료...`);
       }
 
+      const totalProcessed = (onlyUpdateTaxonomyForExisting ? existingItemsToPatch.length : 0) + processedCount;
       addLog(`🎉 모든 동기화 작업 최종 완료!`);
-      alert(`✅ 문제은행 처리 및 이미지 업로드가 완료되었습니다!\n\n[처리 문항]\n총 ${processedCount}개 (신규 ${insertCount} / 업데이트 ${updateCount})\n\n[이미지]\n총 ${imageFiles.length}개 안전하게 덮어쓰기 완료\n\n적용된 교재명: ${finalBookName}`);
+      alert(`✅ 문제은행 처리 및 이미지 업로드가 완료되었습니다!\n\n[처리 문항]\n총 ${totalProcessed}개 (신규 ${insertCount} / 업데이트 ${updateCount}${onlyUpdateTaxonomyForExisting && updateCount > 0 ? ' - 분류·난이도 8개 항목만 부분 업데이트' : ''})\n\n[이미지]\n총 ${imageFiles.length}개 안전하게 덮어쓰기 완료\n\n적용된 교재명: ${finalBookName}`);
 
       setFileData(null);
       setFileName("");
@@ -334,6 +394,17 @@ export default function QuestionDBUploadPage() {
               <li>JSON 파일의 <code>question_id</code>가 이미 존재하면 <b>내용만 업데이트</b> 됩니다.</li>
               <li>마찬가지로 첨부된 이미지도 동일한 이름이 있으면 <b>안전하게 최신 파일로 덮어쓰기</b> 됩니다.</li>
             </ul>
+            <label className="mt-3 pt-3 border-t border-blue-200 flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={onlyUpdateTaxonomyForExisting}
+                onChange={(e) => setOnlyUpdateTaxonomyForExisting(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              />
+              <span className="text-xs text-slate-800 font-bold leading-relaxed">
+                🔒 이미 존재하는 <code className="text-indigo-700">question_id</code>는 기존 이미지·정답·문제 텍스트를 유지하고 <span className="text-indigo-700 underline">분류/난이도 8개 항목(taxonomy_id, taxonomy_name, thk_taxonomy_id, thk_taxonomy_name, difficulty, solving_probability, cognitive_level, problem_type)만 업데이트</span>하기
+              </span>
+            </label>
           </div>
 
           <div className="grid grid-cols-2 gap-4">

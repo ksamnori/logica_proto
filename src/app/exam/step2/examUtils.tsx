@@ -47,9 +47,15 @@ export const smartSplitTaxonomy = (pathStr: string) => {
 
 // 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다.
 export const getDepth5Name = (q: any, depth5Map: Record<string, string>) => {
-  const iId = q.item_id ? String(q.item_id).trim().toUpperCase() : null;
+  const tId = q?.taxonomy_id ? String(q.taxonomy_id).trim().toUpperCase() : null;
+  const iId = q?.item_id ? String(q.item_id).trim().toUpperCase() : null;
+  if (tId && depth5Map[tId]) return depth5Map[tId];
   if (iId && depth5Map[iId]) return depth5Map[iId];
-  if (q.taxonomy_name) {
+  if (tId && tId.includes("-")) {
+    const parentCat = tId.split("-").slice(0, -1).join("-");
+    if (depth5Map[parentCat]) return depth5Map[parentCat];
+  }
+  if (q?.taxonomy_name) {
     const parts = smartSplitTaxonomy(q.taxonomy_name);
     return parts.length >= 5 ? parts[4] : parts[parts.length - 1];
   }
@@ -58,9 +64,15 @@ export const getDepth5Name = (q: any, depth5Map: Record<string, string>) => {
 
 // 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다.
 export const getDepth6Name = (q: any, depth6Map: Record<string, string>) => {
-  const iId = q.item_id ? String(q.item_id).trim().toUpperCase() : null;
+  const tId = q?.taxonomy_id ? String(q.taxonomy_id).trim().toUpperCase() : null;
+  const iId = q?.item_id ? String(q.item_id).trim().toUpperCase() : null;
+  if (tId && depth6Map[tId]) return depth6Map[tId];
   if (iId && depth6Map[iId]) return depth6Map[iId];
-  if (q.taxonomy_name) {
+  if (tId && tId.includes("-")) {
+    const parentCat = tId.split("-").slice(0, -1).join("-");
+    if (depth6Map[parentCat]) return depth6Map[parentCat];
+  }
+  if (q?.taxonomy_name) {
     const parts = smartSplitTaxonomy(q.taxonomy_name);
     return parts.length >= 6 ? parts[5] : parts[parts.length - 1];
   }

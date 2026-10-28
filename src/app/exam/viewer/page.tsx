@@ -15,7 +15,7 @@ import {
   formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml
 } from "@/utils/examRenderUtils";
 
-import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups, isSubNumberOnlyText, splitTrailingSubNumberText, getDiffLabelByRate, getDepth5Name } from "../step2/examUtils";
+import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups, isSubNumberOnlyText, splitTrailingSubNumberText, getDiffLabelByRate, getDepth5Name, getDepth6Name } from "../step2/examUtils";
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
@@ -58,16 +58,21 @@ const extractDiagnosticBadge = (questionsList: any[], fallbackTitle: string = ""
   for (const s of sources) {
     const mMid = s.match(/중(?:등)?\s*([1-3]-[1-2])/);
     if (mMid) return `중등 ${mMid[1]}`;
+    const mMidCompact = s.match(/중(?:등)?\s*([1-3])([1-2])(?:[^0-9]|$)/);
+    if (mMidCompact) return `중등 ${mMidCompact[1]}-${mMidCompact[2]}`;
     const mMid7 = s.match(/(?:^|[^0-9])7-([1-2])(?:[^0-9]|$)/);
     if (mMid7) return `중등 1-${mMid7[1]}`;
     const mElem = s.match(/([1-6]-[1-2])/);
     if (mElem) return `초등 ${mElem[1]}`;
+    const mLevelCompact = s.match(/(?:^|[^0-9A-Za-z])(?:[UMATHumath]|초(?:등)?)\s*([1-6])([1-2])(?:[^0-9]|$)/);
+    if (mLevelCompact) return `초등 ${mLevelCompact[1]}-${mLevelCompact[2]}`;
   }
   return "";
 };
 
-// 🌟 시험지 저장 시 학년(major_grade), 평균 난이도(avg_difficulty), 단원 범위(scope_start, scope_end)를 계산하는 헬퍼
-const computeExamSummaryMeta = (
+// 🌟 시험지 저장 시 모든 문항의 taxonomy_id를 기반으로 주요 학년·학기(major_grade)와
+// 순서상 첫 taxonomy_id의 depth6 ~ 마지막 taxonomy_id의 depth6 범위(scope_start, scope_end)를 계산하는 헬퍼
+const computeExamSummaryMeta = async (
   groups: any[],
   displayBadge: string,
   examTitle: string,
@@ -75,13 +80,92 @@ const computeExamSummaryMeta = (
 ) => {
   const gradeCount: Record<string, number> = {};
   const diffCount: Record<string, number> = {};
-  const repQuestions: any[] = [];
+  const allQuestions: any[] = [];
 
   (groups || []).forEach((g: any) => {
-    const q = g?.questions?.[0] || g?.items?.[0] || g?.repQ;
-    if (!q) return;
-    repQuestions.push(q);
+    const qList = g?.questions || g?.items || (g?.repQ ? [g.repQ] : []);
+    (qList || []).forEach((q: any) => {
+      if (q) allQuestions.push(q);
+    });
+  });
 
+  // 1) taxonomy_id -> master_item / master_category 조회로 depth6 및 학년·학기 확보
+  const rawTaxIds = Array.from(
+    new Set(
+      allQuestions
+        .flatMap((q: any) => [q?.taxonomy_id, q?.item_id])
+        .map((id: any) => (id ? String(id).trim().toUpperCase() : ""))
+        .filter((id: string) => id && id !== "NULL" && id !== "UNDEFINED" && id !== "미분류")
+    )
+  );
+
+  const d6ByTaxId: Record<string, string> = {};
+  const gradeByTaxId: Record<string, string> = {};
+
+  if (rawTaxIds.length > 0) {
+    try {
+      const catIdByTaxId = new Map<string, string>();
+      const catIdsToFetch = new Set<string>();
+
+      for (let i = 0; i < rawTaxIds.length; i += 100) {
+        const chunk = rawTaxIds.slice(i, i + 100);
+        const { data: mItems } = await supabase
+          .from("master_item")
+          .select("item_id, category_id")
+          .in("item_id", chunk);
+        if (mItems) {
+          mItems.forEach((row: any) => {
+            const iId = String(row.item_id || "").trim().toUpperCase();
+            if (row.category_id) {
+              const cId = String(row.category_id).trim().toUpperCase();
+              catIdByTaxId.set(iId, cId);
+              catIdsToFetch.add(cId);
+            }
+          });
+        }
+        chunk.forEach((tid) => {
+          if (!catIdByTaxId.has(tid)) {
+            const parts = tid.split("-");
+            if (parts.length >= 6) {
+              const parentCat = parts.slice(0, -1).join("-");
+              catIdByTaxId.set(tid, parentCat);
+              catIdsToFetch.add(parentCat);
+            }
+            catIdsToFetch.add(tid);
+          }
+        });
+      }
+
+      const catIdsArr = Array.from(catIdsToFetch);
+      const catMap = new Map<string, any>();
+      for (let i = 0; i < catIdsArr.length; i += 100) {
+        const chunk = catIdsArr.slice(i, i + 100);
+        const { data: mCats } = await supabase
+          .from("master_category")
+          .select("category_id, depth2, depth3, depth5, depth6")
+          .in("category_id", chunk);
+        if (mCats) {
+          mCats.forEach((c: any) => {
+            catMap.set(String(c.category_id || "").trim().toUpperCase(), c);
+          });
+        }
+      }
+
+      rawTaxIds.forEach((tid) => {
+        const cId = catIdByTaxId.get(tid) || tid;
+        const cat = catMap.get(cId) || catMap.get(tid);
+        if (cat) {
+          const d6 = cat.depth6 || cat.depth5 || "";
+          if (d6) d6ByTaxId[tid] = d6;
+          const d23 = `${cat.depth2 || ""} ${cat.depth3 || ""}`;
+          const gExtracted = extractDiagnosticBadge([], d23);
+          if (gExtracted) gradeByTaxId[tid] = gExtracted;
+        }
+      });
+    } catch (e) {}
+  }
+
+  allQuestions.forEach((q: any) => {
     const taxId = String(q.taxonomy_id || q.item_id || "").trim().toUpperCase();
     let gradeStr = "";
     if (taxId.length >= 3) {
@@ -96,6 +180,9 @@ const computeExamSummaryMeta = (
         gradeStr = `${schoolName} ${grade}-${semester}`;
       }
     }
+    if (!gradeStr && taxId && gradeByTaxId[taxId]) {
+      gradeStr = gradeByTaxId[taxId];
+    }
     if (!gradeStr) {
       gradeStr = extractDiagnosticBadge([q], "");
     }
@@ -109,7 +196,7 @@ const computeExamSummaryMeta = (
     }
   });
 
-  // 1) major_grade 결정: 1순위 문항 다수 학년 -> 2순위 sessionStorage.majorGrade -> 3순위 displayBadge/examTitle에서 학년 추출 -> 4순위 weeklyTargetGrade -> 기본값 "공통 과정"
+  // 1) major_grade 결정: 1순위 문항 taxonomy_id 다수 학년·학기 -> 2순위 displayBadge/examTitle 학년 추출 -> 3순위 sessionStorage.majorGrade -> 4순위 weeklyTargetGrade
   let majorGrade = "";
   let maxGradeCnt = 0;
   for (const [gr, cnt] of Object.entries(gradeCount)) {
@@ -119,47 +206,67 @@ const computeExamSummaryMeta = (
     }
   }
   if (!majorGrade) {
+    const badgeExtracted = extractDiagnosticBadge([], `${displayBadge || ""} ${examTitle || ""}`);
+    if (badgeExtracted) {
+      majorGrade = badgeExtracted;
+    }
+  }
+  if (!majorGrade) {
     const sessionGrade = typeof window !== "undefined" ? (sessionStorage.getItem("majorGrade") || "") : "";
     if (sessionGrade && sessionGrade !== "공통 과정") {
       majorGrade = sessionGrade;
     }
   }
-  if (!majorGrade) {
-    const badgeExtracted = extractDiagnosticBadge([], `${displayBadge || ""} ${examTitle || ""}`);
-    if (badgeExtracted) {
-      majorGrade = badgeExtracted;
-    } else if (displayBadge && displayBadge.trim() && displayBadge.trim() !== "공통 과정") {
-      majorGrade = displayBadge.trim();
-    } else if (weeklyTargetGrade && weeklyTargetGrade.trim()) {
-      majorGrade = weeklyTargetGrade.trim();
-    }
+  if (!majorGrade && weeklyTargetGrade && weeklyTargetGrade.trim()) {
+    const wExtracted = extractDiagnosticBadge([], weeklyTargetGrade.trim());
+    majorGrade = wExtracted || weeklyTargetGrade.trim();
   }
   if (!majorGrade) majorGrade = "공통 과정";
 
   // 2) avg_difficulty 결정
-  let avgDifficulty = typeof window !== "undefined" ? (sessionStorage.getItem("avgDifficulty") || "") : "";
-  if (!avgDifficulty) {
-    let maxDiffCnt = 0;
-    for (const [df, cnt] of Object.entries(diffCount)) {
-      if (cnt > maxDiffCnt) {
-        maxDiffCnt = cnt;
-        avgDifficulty = df;
-      }
+  let avgDifficulty = "";
+  let maxDiffCnt = 0;
+  for (const [df, cnt] of Object.entries(diffCount)) {
+    if (cnt > maxDiffCnt) {
+      maxDiffCnt = cnt;
+      avgDifficulty = df;
     }
   }
-  if (!avgDifficulty) avgDifficulty = "중";
+  if (!avgDifficulty) {
+    avgDifficulty = (typeof window !== "undefined" ? sessionStorage.getItem("avgDifficulty") : "") || "중";
+  }
 
-  // 3) scope_start, scope_end 결정
-  let scopeStart = typeof window !== "undefined" ? (sessionStorage.getItem("scopeStart") || "") : "";
-  let scopeEnd = typeof window !== "undefined" ? (sessionStorage.getItem("scopeEnd") || "") : "";
-  if ((!scopeStart || scopeStart === "분류 없음") && repQuestions.length > 0) {
-    const sorted = [...repQuestions].sort((a, b) =>
-      String(a.taxonomy_name || "").localeCompare(String(b.taxonomy_name || ""))
-    );
-    const s1 = getDepth5Name(sorted[0], {});
-    const s2 = getDepth5Name(sorted[sorted.length - 1], {});
-    if (s1 && s1 !== "분류 없음") scopeStart = s1;
-    if (s2 && s2 !== "분류 없음") scopeEnd = s2;
+  // 3) scope_start, scope_end 결정: 모든 문항의 taxonomy_id를 순서대로 정렬하여 제일 앞 taxonomy_id의 depth6 ~ 제일 뒤 taxonomy_id의 depth6 산출
+  let scopeStart = "";
+  let scopeEnd = "";
+  const questionsWithTax = allQuestions.filter((q: any) => q && (q.taxonomy_id || q.item_id || q.taxonomy_name));
+  if (questionsWithTax.length > 0) {
+    const sortedByTaxId = [...questionsWithTax].sort((a, b) => {
+      const t1 = String(a.taxonomy_id || a.item_id || a.taxonomy_name || "").trim().toUpperCase();
+      const t2 = String(b.taxonomy_id || b.item_id || b.taxonomy_name || "").trim().toUpperCase();
+      return t1.localeCompare(t2, "ko", { numeric: true });
+    });
+
+    const resolveD6 = (q: any): string => {
+      const tid = String(q?.taxonomy_id || q?.item_id || "").trim().toUpperCase();
+      if (tid && d6ByTaxId[tid]) return d6ByTaxId[tid];
+      const d6 = getDepth6Name(q, d6ByTaxId);
+      if (d6 && d6 !== "유형 분류 없음") return d6;
+      return "";
+    };
+
+    const d6List = sortedByTaxId.map(resolveD6).filter(Boolean);
+    if (d6List.length > 0) {
+      scopeStart = d6List[0];
+      scopeEnd = d6List[d6List.length - 1];
+    }
+  }
+
+  if (!scopeStart) {
+    const sStart = typeof window !== "undefined" ? (sessionStorage.getItem("scopeStart") || "") : "";
+    const sEnd = typeof window !== "undefined" ? (sessionStorage.getItem("scopeEnd") || "") : "";
+    if (sStart && sStart !== "분류 없음" && sStart !== "유형 분류 없음") scopeStart = sStart;
+    if (sEnd && sEnd !== "분류 없음" && sEnd !== "유형 분류 없음") scopeEnd = sEnd;
   }
 
   return {
@@ -1584,7 +1691,7 @@ export default function ExamViewerPage() {
         ? { test_week: testWeek, target_grade: weeklyTargetGrade } 
         : { test_week: null, target_grade: null };
 
-      const summaryMetaFields = computeExamSummaryMeta(
+      const summaryMetaFields = await computeExamSummaryMeta(
         examStateRef.current?.groups || [],
         displayBadge,
         examTitle,

@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups } from "./examUtils";
+import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups } from "./examUtils";
 import { DIAGNOSTIC_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester } from "../step1/useStep1Data";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
@@ -80,26 +80,85 @@ export function useExamData() {
   }, []);
 
   const fetchDepthMappings = async (items: any[]) => {
-    const itemIds = [...new Set(items.map(q => q.item_id).filter(Boolean))];
-    if (itemIds.length === 0) return;
+    const rawTaxIds = [...new Set(
+      items
+        .flatMap((q: any) => [q?.taxonomy_id, q?.item_id])
+        .map((id: any) => (id ? String(id).trim().toUpperCase() : ""))
+        .filter((id: string) => id && id !== "NULL" && id !== "UNDEFINED" && id !== "미분류")
+    )];
+    if (rawTaxIds.length === 0) return;
+
     try {
-      for (let i = 0; i < itemIds.length; i += 100) {
-        const chunk = itemIds.slice(i, i + 100);
-        const { data } = await supabase.from('master_item').select('item_id, depth5, depth6').in('item_id', chunk);
-        if (data) {
-          setDepth5Map(prev => {
-            const next = { ...prev };
-            data.forEach(row => { if (row.depth5) next[row.item_id] = row.depth5; });
-            return next;
+      const catIdByTaxId = new Map<string, string>();
+      const catIdsToFetch = new Set<string>();
+
+      for (let i = 0; i < rawTaxIds.length; i += 100) {
+        const chunk = rawTaxIds.slice(i, i + 100);
+        const { data: mItems } = await supabase
+          .from('master_item')
+          .select('item_id, category_id, depth5, depth6')
+          .in('item_id', chunk);
+
+        if (mItems) {
+          mItems.forEach((row: any) => {
+            const iId = String(row.item_id || "").trim().toUpperCase();
+            if (row.category_id) {
+              const cId = String(row.category_id).trim().toUpperCase();
+              catIdByTaxId.set(iId, cId);
+              catIdsToFetch.add(cId);
+            }
           });
-          setDepth6Map(prev => {
-            const next = { ...prev };
-            data.forEach(row => { if (row.depth6) next[row.item_id] = row.depth6; });
-            return next;
+        }
+
+        // taxonomy_id가 item_id(6세그먼트: E314-01-01-92-04-001) 형태이면 앞 5세그먼트(E314-01-01-92-04)도 category_id 후보로 추가
+        chunk.forEach((tid) => {
+          if (!catIdByTaxId.has(tid)) {
+            const parts = tid.split("-");
+            if (parts.length >= 6) {
+              const parentCat = parts.slice(0, -1).join("-");
+              catIdByTaxId.set(tid, parentCat);
+              catIdsToFetch.add(parentCat);
+            }
+            catIdsToFetch.add(tid);
+          }
+        });
+      }
+
+      const catIdsArr = Array.from(catIdsToFetch);
+      const catMap = new Map<string, { depth5?: string; depth6?: string }>();
+      for (let i = 0; i < catIdsArr.length; i += 100) {
+        const chunk = catIdsArr.slice(i, i + 100);
+        const { data: mCats } = await supabase
+          .from('master_category')
+          .select('category_id, depth5, depth6')
+          .in('category_id', chunk);
+        if (mCats) {
+          mCats.forEach((c: any) => {
+            const cId = String(c.category_id || "").trim().toUpperCase();
+            catMap.set(cId, { depth5: c.depth5, depth6: c.depth6 });
           });
         }
       }
-    } catch(e) {}
+
+      const nextD5: Record<string, string> = {};
+      const nextD6: Record<string, string> = {};
+      rawTaxIds.forEach((tid) => {
+        const directCat = catMap.get(tid);
+        const mappedCatId = catIdByTaxId.get(tid);
+        const parentCat = mappedCatId ? catMap.get(mappedCatId) : undefined;
+        const d5 = directCat?.depth5 || parentCat?.depth5 || "";
+        const d6 = directCat?.depth6 || parentCat?.depth6 || "";
+        if (d5) nextD5[tid] = d5;
+        if (d6) nextD6[tid] = d6;
+      });
+
+      if (Object.keys(nextD5).length > 0) {
+        setDepth5Map((prev) => ({ ...prev, ...nextD5 }));
+      }
+      if (Object.keys(nextD6).length > 0) {
+        setDepth6Map((prev) => ({ ...prev, ...nextD6 }));
+      }
+    } catch (e) {}
   };
 
   const fetchParentSources = async (questionsArray: any[]) => {
@@ -791,12 +850,22 @@ export function useExamData() {
     }
     sessionStorage.setItem('avgDifficulty', maxDiff);
 
-    const sorted = [...questions].sort((a, b) => {
-      const s1 = a.items[0].taxonomy_name || ''; const s2 = b.items[0].taxonomy_name || '';
-      return s1.localeCompare(s2);
+    const allQsForScope = questions
+      .flatMap((g: any) => g.items || [])
+      .filter((q: any) => q && (q.taxonomy_id || q.item_id || q.taxonomy_name));
+
+    const sortedByTaxId = (allQsForScope.length > 0 ? [...allQsForScope] : questions.map((g: any) => g.items[0])).sort((a, b) => {
+      const t1 = String(a?.taxonomy_id || a?.item_id || a?.taxonomy_name || '').trim();
+      const t2 = String(b?.taxonomy_id || b?.item_id || b?.taxonomy_name || '').trim();
+      return t1.localeCompare(t2, 'ko', { numeric: true });
     });
-    sessionStorage.setItem('scopeStart', getDepth5Name(sorted[0].items[0], depth5Map));
-    sessionStorage.setItem('scopeEnd', getDepth5Name(sorted[sorted.length-1].items[0], depth5Map));
+
+    const firstQ = sortedByTaxId[0] || questions[0]?.items?.[0];
+    const lastQ = sortedByTaxId[sortedByTaxId.length - 1] || questions[questions.length - 1]?.items?.[0];
+    const startD6 = firstQ ? getDepth6Name(firstQ, depth6Map) : '';
+    const endD6 = lastQ ? getDepth6Name(lastQ, depth6Map) : '';
+    sessionStorage.setItem('scopeStart', startD6 && startD6 !== '유형 분류 없음' ? startD6 : '');
+    sessionStorage.setItem('scopeEnd', endD6 && endD6 !== '유형 분류 없음' ? endD6 : '');
 
     router.push("/exam/viewer"); 
   };

@@ -1148,7 +1148,7 @@ export default function ClinicViewer() {
 
     return (
       <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-50 font-pretendard">
-        <div className="bg-white rounded-[2rem] shadow-2xl p-10 w-full max-w-2xl text-center animate-[fadeIn_0.3s_ease-out]">
+        <div className="bg-white rounded-4xl shadow-2xl p-10 w-full max-w-2xl text-center animate-[fadeIn_0.3s_ease-out]">
           <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-10 mx-auto mb-6 object-contain" />
           <h2 className="text-3xl font-bold text-brand tracking-tighter mb-4">학습 클리닉</h2>
           <p className="text-base text-slate-500 font-bold mb-8">
@@ -1202,7 +1202,7 @@ export default function ClinicViewer() {
   return (
     <div className="bg-slate-100 h-screen flex flex-col font-pretendard select-none">
       {(isSubmitting || isBatchGrading) && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-[9999] flex items-center justify-center px-4 animate-[fadeIn_0.2s_ease-out]">
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-[2px] z-9999 flex items-center justify-center px-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white rounded-2xl shadow-2xl p-6 md:p-8 flex flex-col items-center max-w-sm w-full text-center">
             <div className="w-12 h-12 border-4 border-blue-100 border-t-brand rounded-full animate-spin mb-4 shadow-sm"></div>
             <h2 className="text-lg md:text-xl font-bold text-slate-800 mb-2 tracking-tight">답안을 꼼꼼히 채점 중입니다</h2>
@@ -1212,7 +1212,7 @@ export default function ClinicViewer() {
       )}
 
       {isLoggingOut && (
-        <div className="fixed inset-0 bg-slate-900/85 z-[9999] flex flex-col items-center justify-center text-white text-center px-8 backdrop-blur-md animate-[fadeIn_0.2s_ease-out]">
+        <div className="fixed inset-0 bg-slate-900/85 z-9999 flex flex-col items-center justify-center text-white text-center px-8 backdrop-blur-md animate-[fadeIn_0.2s_ease-out]">
           <span className="text-7xl mb-4 animate-bounce">👋</span>
           <div className="font-lexend tracking-tight font-bold text-3xl">안전하게 나가는 중입니다...</div>
           <div className="text-base mt-4 text-slate-300">잠시 후 자동으로 이동합니다.</div>
@@ -1220,7 +1220,7 @@ export default function ClinicViewer() {
       )}
 
       {editorLocked && (
-        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[999] flex items-center justify-center px-6">
+        <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-999 flex items-center justify-center px-6">
           <div className="bg-white rounded-3xl shadow-2xl p-10 text-center max-w-sm">
             <div className="text-5xl mb-4">🔒</div>
             <h3 className="text-xl font-bold text-slate-800 mb-2">좌석 배치 수정 중입니다</h3>
@@ -1318,7 +1318,7 @@ export default function ClinicViewer() {
               <div className="flex-1 relative overflow-hidden">
                 <div className={`h-full overflow-y-auto custom-scrollbar p-8 md:p-10 ${!isTimedRound ? 'pb-32' : ''}`}>
                   <div className="relative min-h-full">
-                    <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-[2.0] lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-30' : ''}`}>
+                    <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-loose lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-30' : ''}`}>
                       <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} />
                     </div>
                     {isSubjective && curAnsMode === 'pen' && (
@@ -1363,7 +1363,7 @@ export default function ClinicViewer() {
                     <button onClick={handleAwayToggle} disabled={awayCooldown.isActive || (!myAwayActive && Object.values(callState.current).some(v=>v))} className={`shrink-0 border text-base font-bold py-3 px-6 rounded-xl shadow-sm transition-colors ${myAwayActive ? 'bg-amber-500 border-amber-500 text-white' : 'bg-white border-slate-300 hover:bg-slate-100 text-slate-600 disabled:opacity-40 disabled:cursor-not-allowed'}`}>{awayCooldown.isActive ? `⏳ ${Math.ceil(awayCooldown.remainingMs / 1000)}초` : myAwayActive ? '↩️ 자리 복귀' : '🚶 화장실 다녀오기'}</button>
                   </div>
                   {q.hasHint !== false && hintState.current[currentQIndex]?.revealed && (
-                    <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-[300px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                    <div className={`overflow-hidden transition-all duration-300 ${hintPanelExpanded ? 'max-h-75 opacity-100' : 'max-h-0 opacity-0'}`}>
                       <HintRevealBox revealedText={hintState.current[currentQIndex].hintText} />
                     </div>
                   )}

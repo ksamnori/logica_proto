@@ -730,18 +730,22 @@ export default function ExamListPage() {
                     const src = `${ex.sub_title || ''} ${ex.title || ''}`;
                     const mMid = src.match(/중(?:등)?\s*([1-3]-[1-2])/);
                     if (mMid) return `중등 ${mMid[1]}`;
+                    const mMidCompact = src.match(/중(?:등)?\s*([1-3])([1-2])(?:[^0-9]|$)/);
+                    if (mMidCompact) return `중등 ${mMidCompact[1]}-${mMidCompact[2]}`;
                     const mElem = src.match(/(?:초(?:등)?\s*)?([1-6]-[1-2])/);
                     if (mElem) return `초등 ${mElem[1]}`;
-                    const mElem2 = src.match(/초(?:등)?\s*([1-6])([1-2])(?:[^0-9]|$)/);
-                    if (mElem2) return `초등 ${mElem2[1]}-${mElem2[2]}`;
+                    const mLevelCompact = src.match(/(?:^|[^0-9A-Za-z])(?:[UMATHumath]|초(?:등)?)\s*([1-6])([1-2])(?:[^0-9]|$)/);
+                    if (mLevelCompact) return `초등 ${mLevelCompact[1]}-${mLevelCompact[2]}`;
                     return ex.major_grade || '공통 과정';
                   };
                   const targetGrade = deriveGradeFromExam(exam);
                   const diff = exam.avg_difficulty || '중';
                   
                   let scope = '전 범위';
-                  if (exam.scope_start && exam.scope_end) scope = (exam.scope_start === exam.scope_end) ? exam.scope_start : `${exam.scope_start} ~ ${exam.scope_end}`;
-                  else if (exam.scope_start) scope = exam.scope_start;
+                  const cleanStart = exam.scope_start && exam.scope_start !== '분류 없음' && exam.scope_start !== '유형 분류 없음' ? exam.scope_start : '';
+                  const cleanEnd = exam.scope_end && exam.scope_end !== '분류 없음' && exam.scope_end !== '유형 분류 없음' ? exam.scope_end : '';
+                  if (cleanStart && cleanEnd) scope = (cleanStart === cleanEnd) ? cleanStart : `${cleanStart} ~ ${cleanEnd}`;
+                  else if (cleanStart) scope = cleanStart;
 
                   const assignCount = exam.exam_assignment ? exam.exam_assignment.length : 0;
                   const isDistributed = assignCount > 0;
