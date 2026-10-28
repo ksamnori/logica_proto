@@ -442,7 +442,7 @@ async function loadWeekly(studentId: string, ym: string, months: string[]): Prom
     const taxIds = Array.from(new Set(taxOf.values()));
     const items = await selectIn("master_item", "item_id, category_id", "item_id", taxIds);
     const itemToCat = new Map<string, string>(items.map((i: any) => [i.item_id, i.category_id]));
-    const cats = normalizeMasterCategories(await selectIn("master_category", "category_id, depth2, depth3, depth4", "category_id", taxIds.map(t => itemToCat.get(t) || t)));
+    const cats = normalizeMasterCategories(await selectIn("master_category", "category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7", "category_id", taxIds.map(t => itemToCat.get(t) || t)));
     const catMap = new Map<string, any>(cats.map((c: any) => [c.category_id, c]));
     const uMap = new Map<string, { n: number; o: number; f: number }>();
     myAnswers.forEach(a => {

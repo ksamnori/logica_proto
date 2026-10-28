@@ -132,7 +132,7 @@ export async function getExamsAction() {
           const chunk = catIdsArr.slice(i, i + 150);
           const { data: mCats } = await supabaseAdmin
             .from("master_category")
-            .select("category_id, depth2, depth3, depth5, depth6")
+            .select("category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7")
             .in("category_id", chunk);
           if (mCats) {
             mCats.forEach((rawC: any) => {

@@ -91,18 +91,22 @@ export function useExamData() {
 
     try {
       const catIdByTaxId = new Map<string, string>();
+      const itemD6ByTaxId = new Map<string, string>();
       const catIdsToFetch = new Set<string>();
 
       for (let i = 0; i < rawTaxIds.length; i += 100) {
         const chunk = rawTaxIds.slice(i, i + 100);
         const { data: mItems } = await supabase
           .from('master_item')
-          .select('item_id, category_id, depth5, depth6')
+          .select('item_id, category_id, depth6, depth8')
           .in('item_id', chunk);
 
         if (mItems) {
           mItems.forEach((row: any) => {
             const iId = String(row.item_id || "").trim().toUpperCase();
+            if (row.depth6) {
+              itemD6ByTaxId.set(iId, String(row.depth6).trim());
+            }
             if (row.category_id) {
               const cId = String(row.category_id).trim().toUpperCase();
               catIdByTaxId.set(iId, cId);
@@ -111,11 +115,11 @@ export function useExamData() {
           });
         }
 
-        // taxonomy_id가 item_id(6세그먼트: E314-01-01-92-04-001) 형태이면 앞 5세그먼트(E314-01-01-92-04)도 category_id 후보로 추가
+        // taxonomy_id가 item_id(끝자리가 3자리 일련번호이거나 6세그먼트 이상) 형태이면 앞 세그먼트도 category_id 후보로 추가
         chunk.forEach((tid) => {
           if (!catIdByTaxId.has(tid)) {
             const parts = tid.split("-");
-            if (parts.length >= 6) {
+            if (parts.length >= 6 || (parts.length >= 4 && /^\d{3}$/.test(parts[parts.length - 1]))) {
               const parentCat = parts.slice(0, -1).join("-");
               catIdByTaxId.set(tid, parentCat);
               catIdsToFetch.add(parentCat);
@@ -131,7 +135,7 @@ export function useExamData() {
         const chunk = catIdsArr.slice(i, i + 100);
         const { data: mCats } = await supabase
           .from('master_category')
-          .select('category_id, depth5, depth6')
+          .select('*')
           .in('category_id', chunk);
         if (mCats) {
           mCats.forEach((rawC: any) => {
@@ -149,7 +153,7 @@ export function useExamData() {
         const mappedCatId = catIdByTaxId.get(tid);
         const parentCat = mappedCatId ? catMap.get(mappedCatId) : undefined;
         const d5 = directCat?.depth5 || parentCat?.depth5 || "";
-        const d6 = directCat?.depth6 || parentCat?.depth6 || "";
+        const d6 = directCat?.depth6 || parentCat?.depth6 || itemD6ByTaxId.get(tid) || "";
         if (d5) nextD5[tid] = d5;
         if (d6) nextD6[tid] = d6;
       });

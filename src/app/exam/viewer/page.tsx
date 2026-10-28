@@ -155,7 +155,7 @@ const computeExamSummaryMeta = async (
         const chunk = catIdsArr.slice(i, i + 100);
         const { data: mCats } = await supabase
           .from("master_category")
-          .select("category_id, depth2, depth3, depth5, depth6")
+          .select("category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7")
           .in("category_id", chunk);
         if (mCats) {
           mCats.forEach((rawC: any) => {
@@ -352,7 +352,7 @@ const computeHeaderDepth5Scope = async (groups: any[]): Promise<string> => {
         const chunk = catIdsArr.slice(i, i + 100);
         const { data: mCats } = await supabase
           .from("master_category")
-          .select("category_id, depth4, depth5, depth6")
+          .select("category_id, depth1, depth2, depth3, depth4, depth5, depth6, depth7")
           .in("category_id", chunk);
         if (mCats) {
           mCats.forEach((rawC: any) => {
