@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { taxSort, generateUUID, sortQuestionsList, fetchAllRows, getCleanUrl } from "./taxonomyUtils";
+import { hydrateMissingQuestionImages } from "../../exam/step2/examUtils";
 
 
 export const isExcludedDiagnosticBookName = (name?: any): boolean => {
@@ -222,22 +223,80 @@ export function useTaxonomy() {
     if (!selectedBook) return alert("이름을 변경할 교재(문제지 덩어리)를 먼저 선택해주세요.");
     
     const newName = prompt(`현재 이름: ${selectedBook}\n새로운 덩어리 이름을 입력하세요:`, selectedBook);
-    if (!newName || newName.trim() === "" || newName.trim() === selectedBook) return;
+    const trimmedNew = newName ? newName.trim() : "";
+    if (!trimmedNew || trimmedNew === selectedBook) return;
 
     setIsLoading(true);
     try {
-      const { error: qErr } = await supabase.from('question_db').update({ source_book_name: newName.trim() }).eq('source_book_name', selectedBook);
-      if (qErr) throw qErr;
+      const oldName = selectedBook;
 
-      const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', selectedBook).maybeSingle();
-      if (tb) await supabase.from('textbook').update({ title: newName.trim() }).eq('book_id', tb.book_id);
+      // 1) question_db에서 source_book_name 과 book_name 양쪽 모두 새 이름으로 일괄 업데이트
+      const [{ error: qErr1 }, { error: qErr2 }] = await Promise.all([
+        supabase
+          .from('question_db')
+          .update({ source_book_name: trimmedNew, book_name: trimmedNew })
+          .eq('source_book_name', oldName),
+        supabase
+          .from('question_db')
+          .update({ source_book_name: trimmedNew, book_name: trimmedNew })
+          .eq('book_name', oldName),
+      ]);
+      if (qErr1) throw qErr1;
+      if (qErr2) throw qErr2;
 
-      alert(`✅ '${newName.trim()}'(으)로 이름이 통째로 변경되었습니다!`);
-      
-      setSelectedBook(newName.trim());
-      setQuestions(prev => prev.map(q => ({ ...q, source_book_name: newName.trim() })));
-      await loadWorkbooks(); 
-    } catch (err: any) { alert("이름 변경 실패: " + err.message); } finally { setIsLoading(false); }
+      // 2) textbook 테이블 처리: 새 이름의 교재가 이미 존재하면 문항(textbook_question)을 합치고 기존 교재를 정리, 없으면 title 변경
+      const [{ data: oldTb }, { data: targetTb }] = await Promise.all([
+        supabase.from('textbook').select('book_id').eq('title', oldName).maybeSingle(),
+        supabase.from('textbook').select('book_id').eq('title', trimmedNew).maybeSingle(),
+      ]);
+
+      if (oldTb) {
+        if (targetTb && targetTb.book_id !== oldTb.book_id) {
+          await supabase
+            .from('textbook_question')
+            .update({ book_id: targetTb.book_id })
+            .eq('book_id', oldTb.book_id);
+          await supabase.from('textbook').delete().eq('book_id', oldTb.book_id);
+        } else {
+          await supabase.from('textbook').update({ title: trimmedNew }).eq('book_id', oldTb.book_id);
+        }
+      }
+
+      // 3) 세션 캐시 및 최근 선택 교재 목록에서 예전 이름을 제거하고 새 이름으로 즉시 갱신
+      try {
+        sessionStorage.removeItem("logica_taxonomy_workbooks_v2");
+      } catch (e) {}
+
+      setWorkbooks((prev) => {
+        const next = prev.map((b) => (b === oldName ? trimmedNew : b));
+        return Array.from(new Set(next)).filter((b) => b && !isExcludedDiagnosticBookName(b)).sort(taxSort);
+      });
+
+      try {
+        const savedRecent = JSON.parse(localStorage.getItem("logica_taxonomy_recent_books") || "[]");
+        if (Array.isArray(savedRecent)) {
+          const nextRecent = Array.from(new Set(savedRecent.map((b: string) => (b === oldName ? trimmedNew : b))));
+          localStorage.setItem("logica_taxonomy_recent_books", JSON.stringify(nextRecent));
+        }
+      } catch (e) {}
+
+      setSelectedBook(trimmedNew);
+      setQuestions((prev) =>
+        prev.map((q) => ({
+          ...q,
+          source_book_name: q.source_book_name === oldName || !q.source_book_name ? trimmedNew : q.source_book_name,
+          book_name: q.book_name === oldName || !q.book_name ? trimmedNew : q.book_name,
+        }))
+      );
+
+      alert(`✅ '${trimmedNew}'(으)로 교재 이름(source_book_name 및 book_name)이 통째로 변경되었습니다!`);
+      await loadWorkbooks();
+      await fetchQuestions(trimmedNew);
+    } catch (err: any) {
+      alert("이름 변경 실패: " + err.message);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const fetchQuestions = async (bookOverride?: any) => {
@@ -337,6 +396,7 @@ export function useTaxonomy() {
         }
       });
       const finalQuestions = Array.from(finalMap.values());
+      await hydrateMissingQuestionImages(supabase, finalQuestions);
 
       setQuestions(sortQuestionsList(finalQuestions));
       setSelectedQuestion(null); 
@@ -344,7 +404,7 @@ export function useTaxonomy() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  const getKoreanPath = (taxId: string) => {
+  const getKoreanPath = (taxId: string, fallbackName?: string) => {
     if (!taxId || taxId === '미분류') return '분류 정보 없음';
     const matchedItem = items.find(i => i.item_id === taxId);
     if (matchedItem) {
@@ -355,11 +415,12 @@ export function useTaxonomy() {
     }
     const cat = categories.find(c => c.category_id === taxId);
     if (cat) return [cat.depth1, cat.depth2, cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7].filter(Boolean).join(' > ');
+    if (fallbackName) return fallbackName;
     return '알 수 없는 분류 (DB에 없음)';
   };
 
-  const handleAutoFillTaxonomy = () => {
-    const taxId = selectedQuestion?.taxonomy_id;
+  const handleAutoFillTaxonomy = (overrideTaxId?: string) => {
+    const taxId = typeof overrideTaxId === 'string' && overrideTaxId ? overrideTaxId : selectedQuestion?.taxonomy_id;
     if (!taxId || taxId === '미분류') return;
     const matchedItem = items.find(i => i.item_id === taxId);
     const catId = matchedItem ? matchedItem.category_id : taxId;
@@ -883,12 +944,21 @@ export function useTaxonomy() {
           step_2_approach: twin.step_2_approach, 
           step_3_process: twin.step_3_process, 
           step_4_conclusion: twin.step_4_conclusion,
-          taxonomy_id: selectedQuestion.taxonomy_id, 
+          taxonomy_id: selectedQuestion.taxonomy_id,
+          taxonomy_name: selectedQuestion.taxonomy_name || null,
+          sub_taxonomy_id: selectedQuestion.sub_taxonomy_id || null,
+          sub_taxonomy_name: selectedQuestion.sub_taxonomy_name || null,
+          thk_taxonomy_id: selectedQuestion.thk_taxonomy_id || null,
+          thk_taxonomy_name: selectedQuestion.thk_taxonomy_name || null,
           difficulty: selectedQuestion.difficulty || '중', 
           is_human_verified: true,
           derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
           
-          // 🌟 배율 박스 속성 복제
+          // 🌟 이미지 URL 및 배율 박스 속성 복제
+          image_url: selectedQuestion.image_url || null,
+          image_2_url: selectedQuestion.image_2_url || null,
+          answer_image_url: selectedQuestion.answer_image_url || null,
+          answer_image_2_url: selectedQuestion.answer_image_2_url || null,
           image_box: selectedQuestion.image_box,
           image_2_box: selectedQuestion.image_2_box,
           answer_image_box: selectedQuestion.answer_image_box,
@@ -913,6 +983,11 @@ export function useTaxonomy() {
             question: q.question,
             answer: q.answer,
             taxonomy_id: q.taxonomy_id,
+            taxonomy_name: q.taxonomy_name || null,
+            sub_taxonomy_id: q.sub_taxonomy_id || null,
+            sub_taxonomy_name: q.sub_taxonomy_name || null,
+            thk_taxonomy_id: q.thk_taxonomy_id || null,
+            thk_taxonomy_name: q.thk_taxonomy_name || null,
             question_category: '일반'
           }));
           await supabase.from('textbook_question').insert(tqInserts);

@@ -2,8 +2,9 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups } from "./examUtils";
+import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
 import { DIAGNOSTIC_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester } from "../step1/useStep1Data";
+import { normalizeMasterCategories, normalizeMasterCategoryRow } from "../../../lib/normalize";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
 const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
@@ -82,7 +83,7 @@ export function useExamData() {
   const fetchDepthMappings = async (items: any[]) => {
     const rawTaxIds = [...new Set(
       items
-        .flatMap((q: any) => [q?.taxonomy_id, q?.item_id])
+        .flatMap((q: any) => [q?.taxonomy_id, q?.sub_taxonomy_id, q?.item_id])
         .map((id: any) => (id ? String(id).trim().toUpperCase() : ""))
         .filter((id: string) => id && id !== "NULL" && id !== "UNDEFINED" && id !== "미분류")
     )];
@@ -133,7 +134,8 @@ export function useExamData() {
           .select('category_id, depth5, depth6')
           .in('category_id', chunk);
         if (mCats) {
-          mCats.forEach((c: any) => {
+          mCats.forEach((rawC: any) => {
+            const c = normalizeMasterCategoryRow(rawC);
             const cId = String(c.category_id || "").trim().toUpperCase();
             catMap.set(cId, { depth5: c.depth5, depth6: c.depth6 });
           });
@@ -266,6 +268,7 @@ export function useExamData() {
         if (restoredGroups.length === 0) throw new Error('복원할 문항을 찾을 수 없습니다.');
 
         const allItems = restoredGroups.reduce((acc, g) => acc.concat(g.items), []);
+        await hydrateMissingQuestionImages(supabase, allItems);
         await fetchDepthMappings(allItems);
         await fetchParentSources(allItems);
 
@@ -385,6 +388,7 @@ export function useExamData() {
         }
 
         const allItems = allGroups.reduce((acc, g) => acc.concat(g.items), []);
+        await hydrateMissingQuestionImages(supabase, allItems);
         await fetchDepthMappings(allItems);
         await fetchParentSources(allItems);
 
@@ -419,6 +423,11 @@ export function useExamData() {
     const bookName2 = sessionStorage.getItem("bookName2") || "";
     const pageStart = sessionStorage.getItem("pageStart") || "";
     const pageEnd = sessionStorage.getItem("pageEnd") || "";
+    let sourceCategories = { extra: true, twinSimilar: true };
+    try {
+      const scStr = sessionStorage.getItem("sourceCategories");
+      if (scStr) sourceCategories = JSON.parse(scStr);
+    } catch (e) {}
 
     try {
       let allData: any[] = [];
@@ -491,11 +500,11 @@ export function useExamData() {
         }
       }
 
-      // 🌟 2) 일반/사고력/기타 테스트 검색
+      // 🌟 2) 일반/사고력/기타 테스트 검색 (sub_taxonomy_id 포함하여 단원 검색 범위 확장)
       const chunk = Array.from(searchIds);
-      for (let i = 0; i < chunk.length; i += 100) {
-        const currentChunk = chunk.slice(i, i + 100);
-        let orQueryStr = `item_id.in.(${currentChunk.join(',')}),taxonomy_id.in.(${currentChunk.join(',')}),thk_taxonomy_id.in.(${currentChunk.join(',')})`;
+      for (let i = 0; i < chunk.length; i += 50) {
+        const currentChunk = chunk.slice(i, i + 50);
+        let orQueryStr = `item_id.in.(${currentChunk.join(',')}),taxonomy_id.in.(${currentChunk.join(',')}),sub_taxonomy_id.in.(${currentChunk.join(',')}),thk_taxonomy_id.in.(${currentChunk.join(',')})`;
 
         if (examMode === "test") {
           const pdfQueries = currentChunk.map(kw => `pdf_source.ilike.%${kw}%,source_book_name.ilike.%${kw}%,book_name.ilike.%${kw}%`).join(',');
@@ -524,6 +533,7 @@ export function useExamData() {
       });
       allData = Array.from(uniqueDataMap.values());
 
+      const mainExclusion = !isDiagnosticMode ? await fetchMainTextbookExclusionSet(supabase) : null;
       const isPageFilterActive = !isDiagnosticMode && (pageStart !== "" || pageEnd !== "");
       const minPage = pageStart ? parseInt(pageStart, 10) : 0;
       const maxPage = pageEnd ? parseInt(pageEnd, 10) : 999999;
@@ -531,6 +541,10 @@ export function useExamData() {
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
+        // 🌟 문제지 제작 Step 2에서는 메인교재(주교재/본교재) 문제를 출제 풀에서 제외
+        if (!isDiagnosticMode && isMainTextbookQuestion(q, mainExclusion)) return false;
+        // 🌟 Step 1 출처 교재 필터의 '추가문제' / '쌍둥이/유사' 체크박스 필터 적용
+        if (!isDiagnosticMode && examMode !== "test" && !matchesSourceCategoryFilter(q, sourceCategories)) return false;
 
         if (diagSelections.length > 0) {
           const matchesDiag = diagSelections.some(({ sem, quarterKey }) => {
@@ -569,13 +583,23 @@ export function useExamData() {
         return router.push("/exam/step1");
       }
 
-      // 🌟 서브문항 자동 병합: 동일 문항 번호(예: 15-1, 15-2, 15(1), 15(2)), 부모-자식 ID, 공통 지문, 연속 서브 번호((1),(2))를 하나의 대문항 그룹으로 묶어 30문제로 정확히 구성
-      let allGroups = buildMergedQuestionGroups(filteredData, isDiagnosticMode);
+      // 🌟 1) 서브문항이 있는 문항이 불려왔을 때 같은 묶음의 모든 서브문항((1), (2) 등)을 빠짐없이 함께 확보
+      const completeFilteredData = await ensureCompleteSubQuestionBundles(
+        supabase,
+        filteredData,
+        allData,
+        isDiagnosticMode
+      );
+
+      // 🌟 2) 서브문항 자동 병합: 동일 묶음의 서브문항들은 하나의 그룹(g.items)으로 함께 유지
+      let allGroups = buildMergedQuestionGroups(completeFilteredData, isDiagnosticMode);
 
       let selectedGroups: any[] = [];
       if (examMode === 'test' && (testCategory === '진단평가' || testCategory === '입학테스트')) {
         selectedGroups = diagSelections.length > 0 ? allGroups : allGroups.slice(0, qCountReq);
       } else {
+        // 🌟 3) 총 출제 문항 수(qCountReq)는 '병합되지 않은 상태의 개별 문항 수(g.items.length 합계)'를 기준으로 선발하되,
+        // 서브문항 묶음(g.items)은 절대 쪼개지 않고 통째로 포함합니다.
         const diffPool: Record<string, any[]> = { '최하': [], '하': [], '중': [], '상': [], '최상': [] };
         allGroups.forEach(g => {
           let d = (g.items[0].difficulty || getDiffLabelByRate(g.items[0].solving_probability)).trim();
@@ -595,24 +619,60 @@ export function useExamData() {
         while(currentSum < qCountReq) { targetCounts['중']++; currentSum++; }
         while(currentSum > qCountReq && targetCounts['중'] > 0) { targetCounts['중']--; currentSum--; }
 
-        let shortages = 0;
+        let totalSelectedItems = 0;
         for (let k in targetCounts) {
-          const required = targetCounts[k as keyof typeof targetCounts];
-          const available = diffPool[k].length;
-          if (available >= required) selectedGroups.push(...diffPool[k].splice(0, required));
-          else {
-            selectedGroups.push(...diffPool[k].splice(0, available));
-            shortages += (required - available);
+          const requiredItems = targetCounts[k as keyof typeof targetCounts];
+          let currentDiffItems = 0;
+          const pool = diffPool[k];
+          const unpicked: any[] = [];
+
+          for (const g of pool) {
+            const gSize = Array.isArray(g.items) && g.items.length > 0 ? g.items.length : 1;
+            if (
+              currentDiffItems + gSize <= requiredItems &&
+              totalSelectedItems + gSize <= qCountReq
+            ) {
+              selectedGroups.push(g);
+              currentDiffItems += gSize;
+              totalSelectedItems += gSize;
+            } else {
+              unpicked.push(g);
+            }
+          }
+          diffPool[k] = unpicked;
+        }
+
+        // 부족한 문항 수를 남은 풀에서 채우되, 남은 문항 수(qCountReq - totalSelectedItems) 이하로 들어맞는 묶음을 우선 선택
+        if (totalSelectedItems < qCountReq) {
+          const remaining = Object.values(diffPool)
+            .reduce((acc, val) => acc.concat(val), [])
+            .sort(() => 0.5 - Math.random());
+          const stillRemaining: any[] = [];
+
+          for (const g of remaining) {
+            const gSize = Array.isArray(g.items) && g.items.length > 0 ? g.items.length : 1;
+            if (totalSelectedItems + gSize <= qCountReq) {
+              selectedGroups.push(g);
+              totalSelectedItems += gSize;
+            } else {
+              stillRemaining.push(g);
+            }
+          }
+
+          // 만약 남은 후보가 모두 다문항 묶음뿐이어서 아직 qCountReq에 미달한 경우, 묶음을 쪼개지 않고 가장 작은 묶음을 통째로 추가
+          if (totalSelectedItems < qCountReq && stillRemaining.length > 0) {
+            stillRemaining.sort((a, b) => (a.items?.length || 1) - (b.items?.length || 1));
+            for (const g of stillRemaining) {
+              if (totalSelectedItems >= qCountReq) break;
+              selectedGroups.push(g);
+              totalSelectedItems += g.items?.length || 1;
+            }
           }
         }
-        if (shortages > 0) {
-          let remaining = Object.values(diffPool).reduce((acc, val) => acc.concat(val), []).sort(() => 0.5 - Math.random());
-          selectedGroups.push(...remaining.splice(0, shortages));
-        }
-        selectedGroups = selectedGroups.slice(0, qCountReq);
       }
       
       const allItems = selectedGroups.reduce((acc, g) => acc.concat(g.items), []);
+      await hydrateMissingQuestionImages(supabase, allItems);
       await fetchDepthMappings(allItems);
       await fetchParentSources(allItems);
 
@@ -624,8 +684,9 @@ export function useExamData() {
   const loadAddTaxonomyTree = async () => {
     try {
       const [resCat, resItem] = await Promise.all([fetch(URL_MASTER_CAT), fetch(URL_MASTER_ITEM)]);
-      const catData = await resCat.json();
+      const rawCatData = await resCat.json();
       const itemData = await resItem.json();
+      const catData = normalizeMasterCategories(rawCatData);
       
       const fullTree: any = {}; const catMap: any = {};
       catData.forEach((cat: any) => {
@@ -636,7 +697,13 @@ export function useExamData() {
         if (depths.length === 0) { catMap[cat.category_id] = fullTree[d1]; } 
         else {
           depths.forEach((d:any, idx:number) => {
-            if (!currentLevel[d]) currentLevel[d] = { children: {}, categoryId: (idx === depths.length - 1) ? cat.category_id : null };
+            if (!currentLevel[d]) {
+              currentLevel[d] = {
+                children: {},
+                categoryId: (idx === depths.length - 1) ? cat.category_id : null,
+                defaultOpen: idx <= 1, // 과정(depth2, idx=0) 및 대단원(depth3, idx=1)까지만 기본 펼침(중단원 depth4 기본 접힘)
+              };
+            }
             if (idx === depths.length - 1) catMap[cat.category_id] = currentLevel[d];
             currentLevel = currentLevel[d].children;
           });
@@ -645,9 +712,15 @@ export function useExamData() {
       itemData.forEach((item: any) => {
         const parentCat = catMap[item.category_id];
         if (parentCat) {
-          let leafName = item.depth8 || '기본 유형';
-          if (!parentCat.children) parentCat.children = {}; 
-          parentCat.children[leafName] = { itemId: item.item_id, children: null };
+          const leafName = item.depth8 || item.depth7 || item.depth6 || item.type || '기본 유형';
+          if (!parentCat.children) parentCat.children = {};
+          if (parentCat.children[leafName]) {
+            const existing = parentCat.children[leafName];
+            if (!existing.itemIds) existing.itemIds = existing.itemId ? [existing.itemId] : [];
+            if (!existing.itemIds.includes(item.item_id)) existing.itemIds.push(item.item_id);
+          } else {
+            parentCat.children[leafName] = { itemId: item.item_id, itemIds: [item.item_id], children: null };
+          }
         }
       });
       setAddMasterData(fullTree);
@@ -693,25 +766,45 @@ export function useExamData() {
     setTwinPoolTwins([]);
     setTwinPoolSimilars([]);
 
-    const targetId = q.thk_taxonomy_id && String(q.thk_taxonomy_id).trim() !== '' ? q.thk_taxonomy_id : (q.taxonomy_id || q.item_id);
+    const rawCandidateIds = [
+      q.thk_taxonomy_id,
+      q.taxonomy_id,
+      q.sub_taxonomy_id,
+      q.item_id,
+    ]
+      .map((val) => (val ? String(val).trim() : ""))
+      .filter((val) => val && val !== "null" && val !== "undefined" && val !== "None" && val !== "미분류");
 
-    if (!targetId || targetId === 'null' || targetId === 'undefined') {
+    if (rawCandidateIds.length === 0) {
       alert("이 문항은 분류 코드가 명확하지 않아 검색이 불가능합니다.");
       setIsSearchingTwin(false);
       return;
     }
 
     try {
-      let fallbackId = targetId;
-      if (targetId.includes('-')) {
-        const parts = targetId.split('-');
-        if (parts.length > 2) fallbackId = parts.slice(0, -1).join('-');
-      }
-      
-      const parentId = q.parent_question_id || 'NO_PARENT_ID_MATCH';
+      const fallbackPrefixes = Array.from(
+        new Set(
+          rawCandidateIds.map((tid) => {
+            if (tid.includes("-")) {
+              const parts = tid.split("-");
+              if (parts.length > 2) return parts.slice(0, -1).join("-");
+            }
+            return tid;
+          })
+        )
+      );
+
+      const parentId = q.parent_question_id || "NO_PARENT_ID_MATCH";
       const currentQuestionId = q.question_id;
 
-      const orQueryStr = `parent_question_id.eq."${currentQuestionId}",question_id.eq."${parentId}",parent_question_id.eq."${parentId}",item_id.ilike."${fallbackId}%",taxonomy_id.ilike."${fallbackId}%",thk_taxonomy_id.ilike."${fallbackId}%"`;
+      const prefixOrClauses = fallbackPrefixes
+        .map(
+          (fb) =>
+            `item_id.ilike."${fb}%",taxonomy_id.ilike."${fb}%",sub_taxonomy_id.ilike."${fb}%",thk_taxonomy_id.ilike."${fb}%"`
+        )
+        .join(",");
+
+      const orQueryStr = `parent_question_id.eq."${currentQuestionId}",question_id.eq."${parentId}",parent_question_id.eq."${parentId}",${prefixOrClauses}`;
 
       const { data, error } = await supabase.from('question_db')
         .select('*')
@@ -721,14 +814,23 @@ export function useExamData() {
 
       if (error) throw error;
 
+      const mainExclusion = await fetchMainTextbookExclusionSet(supabase);
       const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i: any) => String(i.question_id))), []));
-      const filteredData = (data || []).filter((item: any) => !existingIds.has(String(item.question_id)) && item.is_hidden !== true && item.is_hidden !== 'Y' && item.is_hidden !== 'true');
+      const filteredData = (data || []).filter(
+        (item: any) =>
+          !existingIds.has(String(item.question_id)) &&
+          item.is_hidden !== true &&
+          item.is_hidden !== 'Y' &&
+          item.is_hidden !== 'true' &&
+          !isMainTextbookQuestion(item, mainExclusion)
+      );
 
       if (filteredData.length === 0) {
         setIsSearchingTwin(false);
         return;
       }
 
+      await hydrateMissingQuestionImages(supabase, filteredData);
       await fetchDepthMappings(filteredData);
       await fetchParentSources(filteredData);
 

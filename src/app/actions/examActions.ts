@@ -3,6 +3,7 @@
 
 import { createClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
+import { normalizeMasterCategoryRow } from "@/lib/normalize";
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL || "",
@@ -134,7 +135,8 @@ export async function getExamsAction() {
             .select("category_id, depth2, depth3, depth5, depth6")
             .in("category_id", chunk);
           if (mCats) {
-            mCats.forEach((c: any) => {
+            mCats.forEach((rawC: any) => {
+              const c = normalizeMasterCategoryRow(rawC);
               catMap.set(String(c.category_id || "").trim().toUpperCase(), c);
             });
           }

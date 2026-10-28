@@ -16,7 +16,13 @@ interface ParsedQuestion {
   difficulty?: string | null;
   problem_type?: string | null;
   taxonomy_id?: string | null;
+  taxonomy_name?: string | null;
+  sub_taxonomy_id?: string | null;
+  sub_taxonomy_name?: string | null;
   thk_taxonomy_id?: string | null;
+  thk_taxonomy_name?: string | null;
+  solving_probability?: number | string | null;
+  cognitive_level?: string | null;
   human_verified?: boolean;
   is_human_verified?: boolean;
   [key: string]: any;
@@ -32,7 +38,11 @@ interface TextbookQuestionInsert {
   question_id: string;
   difficulty: string | null;
   taxonomy_id: string | null;
+  taxonomy_name: string | null;
+  sub_taxonomy_id: string | null;
+  sub_taxonomy_name: string | null;
   thk_taxonomy_id: string | null;
+  thk_taxonomy_name: string | null;
   question: string | null;
   raw_metadata: Record<string, unknown>;
 }
@@ -53,6 +63,8 @@ export default function BookUploadPage() {
   const [uploadLogs, setUploadLogs] = useState<string[]>([]);
 
   const [isDragOver, setIsDragOver] = useState(false);
+  // 이미 존재하는 question_id에 대해 분류/난이도 메타데이터만 부분 업데이트할지 여부
+  const [onlyUpdateTaxonomyForExisting, setOnlyUpdateTaxonomyForExisting] = useState(true);
 
   useEffect(() => {
     const checkAccess = async () => {
@@ -153,6 +165,11 @@ export default function BookUploadPage() {
     return allowed.includes(clean) ? clean : null;
   };
 
+  const safeInteger = (val: any, defaultVal: number | null = null) => {
+    const parsed = parseInt(val, 10);
+    return isNaN(parsed) ? defaultVal : parsed;
+  };
+
   const processUpload = async () => {
     if (!fileData || fileData.length === 0) return alert("업로드할 데이터가 없습니다.");
     if (!bookTitle.trim()) return alert("교재 이름을 입력해주세요.");
@@ -162,40 +179,128 @@ export default function BookUploadPage() {
 
     try {
       addLog(`🚀 [Step 1] 마스터 DB(question_db)에 데이터 안전 동기화 시작...`);
-      const masterDbData = fileData.map((q) => ({
-        question_id: q.question_id,
-        item_id: q.item_id || null,
-        pdf_source: q.pdf_source || null,
-        detected_page_num: typeof q.detected_page_num === 'number' ? q.detected_page_num : null,
-        final_printed_page: q.final_printed_page ? String(q.final_printed_page) : null,
-        question_number: q.question_number ? String(q.question_number) : null,
-        sub_num: typeof q.sub_num === 'number' ? q.sub_num : 0,
-        problem_type: q.problem_type || null,
-        difficulty: mapDifficulty(q.difficulty), 
-        question: q.question || "",
-        answer: q.answer || null,
-        step_1_concept: q.step_1_concept || null,
-        step_2_approach: q.step_2_approach || null,
-        step_3_process: q.step_3_process || null,
-        step_4_conclusion: q.step_4_conclusion || null,
-        taxonomy_id: q.taxonomy_id || null,
-        taxonomy_name: q.taxonomy_name || null,
-        cognitive_level: q.cognitive_level || null,
-        is_human_verified: q.human_verified === true || q.is_human_verified === true,
-        thk_taxonomy_id: q.thk_taxonomy_id || null,
-        thk_taxonomy_name: q.thk_taxonomy_name || null,
-        source_book_name: q.source_book_name || q.book_name || bookTitle,
-        updated_at: new Date().toISOString()
-      }));
+
+      const allIds = fileData.map(q => q.question_id).filter(Boolean);
+      const existingMasterIdSet = new Set<string>();
+      const fetchChunkSize = 200;
+
+      for (let i = 0; i < allIds.length; i += fetchChunkSize) {
+        const chunkIds = allIds.slice(i, i + fetchChunkSize);
+        const { data: existingMasterQs, error: fetchMasterErr } = await supabase
+          .from('question_db')
+          .select('question_id')
+          .in('question_id', chunkIds);
+        if (fetchMasterErr) throw new Error(`마스터 DB 기존 문항 조회 오류: ${fetchMasterErr.message}`);
+        existingMasterQs?.forEach(q => existingMasterIdSet.add(q.question_id));
+      }
+
+      const existingMasterToPatch: ParsedQuestion[] = [];
+      const newMasterToUpsert: ParsedQuestion[] = [];
+
+      fileData.forEach((q) => {
+        if (!q.question_id) return;
+        if (onlyUpdateTaxonomyForExisting && existingMasterIdSet.has(q.question_id)) {
+          existingMasterToPatch.push(q);
+        } else {
+          newMasterToUpsert.push(q);
+        }
+      });
 
       const chunkSize = 100;
-      for (let i = 0; i < masterDbData.length; i += chunkSize) {
-        const chunk = masterDbData.slice(i, i + chunkSize);
-        const { error: upsertErr } = await supabase.from('question_db').upsert(chunk, { onConflict: 'question_id' });
-        if (upsertErr) throw new Error(`마스터 DB 병합 오류: ${upsertErr.message}`);
-        setUploadProgress(Math.round(((i + chunk.length) / masterDbData.length) * 40)); 
+      let step1Processed = 0;
+      const step1Total = existingMasterToPatch.length + newMasterToUpsert.length;
+
+      if (onlyUpdateTaxonomyForExisting && existingMasterToPatch.length > 0) {
+        addLog(`🛠️ [Step 1] 마스터 DB 기존 문항 ${existingMasterToPatch.length}건: 본문·정답·이미지는 보존하고 분류/난이도 항목만 부분 업데이트 중...`);
+        const patchBatchSize = 25;
+        for (let i = 0; i < existingMasterToPatch.length; i += patchBatchSize) {
+          const batch = existingMasterToPatch.slice(i, i + patchBatchSize);
+          await Promise.all(
+            batch.map(async (q) => {
+              const patchPayload: Record<string, any> = {
+                taxonomy_id: q.taxonomy_id ?? null,
+                taxonomy_name: q.taxonomy_name ?? null,
+                sub_taxonomy_id: q.sub_taxonomy_id ?? null,
+                sub_taxonomy_name: q.sub_taxonomy_name ?? null,
+                thk_taxonomy_id: q.thk_taxonomy_id ?? null,
+                thk_taxonomy_name: q.thk_taxonomy_name ?? null,
+                difficulty: mapDifficulty(q.difficulty),
+                solving_probability: safeInteger(q.solving_probability),
+                cognitive_level: q.cognitive_level ?? null,
+                problem_type: q.problem_type ?? null,
+                updated_at: new Date().toISOString(),
+              };
+              if (q.image_url && String(q.image_url).trim() !== "" && String(q.image_url) !== "null") {
+                patchPayload.image_url = q.image_url;
+              }
+              if (q.image_2_url && String(q.image_2_url).trim() !== "" && String(q.image_2_url) !== "null") {
+                patchPayload.image_2_url = q.image_2_url;
+              }
+              if (q.image_box) patchPayload.image_box = q.image_box;
+              if (q.image_2_box) patchPayload.image_2_box = typeof q.image_2_box === "object" ? JSON.stringify(q.image_2_box) : q.image_2_box;
+              if (q.answer_image_url && String(q.answer_image_url).trim() !== "" && String(q.answer_image_url) !== "null") {
+                patchPayload.answer_image_url = q.answer_image_url;
+              }
+
+              const { error: patchErr } = await supabase
+                .from('question_db')
+                .update(patchPayload)
+                .eq('question_id', q.question_id);
+
+              if (patchErr) throw new Error(`마스터 DB 부분 업데이트 오류 (${q.question_id}): ${patchErr.message}`);
+            })
+          );
+          step1Processed += batch.length;
+          setUploadProgress(Math.round((step1Processed / (step1Total || 1)) * 40));
+        }
       }
-      addLog(`✅ [Step 1 완료] 마스터 DB 업데이트 완료.`);
+
+      if (newMasterToUpsert.length > 0) {
+        const masterDbData = newMasterToUpsert.map((q) => ({
+          question_id: q.question_id,
+          item_id: q.item_id || null,
+          pdf_source: q.pdf_source || null,
+          detected_page_num: typeof q.detected_page_num === 'number' ? q.detected_page_num : null,
+          final_printed_page: q.final_printed_page ? String(q.final_printed_page) : null,
+          question_number: q.question_number ? String(q.question_number) : null,
+          sub_num: typeof q.sub_num === 'number' ? q.sub_num : 0,
+          problem_type: q.problem_type || null,
+          difficulty: mapDifficulty(q.difficulty), 
+          solving_probability: safeInteger(q.solving_probability),
+          question: q.question || "",
+          answer: q.answer || null,
+          step_1_concept: q.step_1_concept || null,
+          step_2_approach: q.step_2_approach || null,
+          step_3_process: q.step_3_process || null,
+          step_4_conclusion: q.step_4_conclusion || null,
+          image_url: q.image_url || null,
+          image_2_url: q.image_2_url || null,
+          image_box: q.image_box || null,
+          image_2_box: typeof q.image_2_box === "object" && q.image_2_box ? JSON.stringify(q.image_2_box) : (q.image_2_box || null),
+          answer_image_url: q.answer_image_url || null,
+          answer_image_2_url: q.answer_image_2_url || null,
+          answer_image_box: q.answer_image_box || null,
+          taxonomy_id: q.taxonomy_id || null,
+          taxonomy_name: q.taxonomy_name || null,
+          sub_taxonomy_id: q.sub_taxonomy_id || null,
+          sub_taxonomy_name: q.sub_taxonomy_name || null,
+          cognitive_level: q.cognitive_level || null,
+          is_human_verified: q.human_verified === true || q.is_human_verified === true,
+          thk_taxonomy_id: q.thk_taxonomy_id || null,
+          thk_taxonomy_name: q.thk_taxonomy_name || null,
+          source_book_name: q.source_book_name || q.book_name || bookTitle,
+          updated_at: new Date().toISOString()
+        }));
+
+        for (let i = 0; i < masterDbData.length; i += chunkSize) {
+          const chunk = masterDbData.slice(i, i + chunkSize);
+          const { error: upsertErr } = await supabase.from('question_db').upsert(chunk, { onConflict: 'question_id' });
+          if (upsertErr) throw new Error(`마스터 DB 병합 오류: ${upsertErr.message}`);
+          step1Processed += chunk.length;
+          setUploadProgress(Math.round((step1Processed / (step1Total || 1)) * 40)); 
+        }
+      }
+      addLog(`✅ [Step 1 완료] 마스터 DB 업데이트 완료 (신규/전체병합 ${newMasterToUpsert.length}건, 분류 부분업데이트 ${existingMasterToPatch.length}건).`);
 
       addLog(`🚀 [Step 2] 교재 골격(textbook) 확인 중...`);
       let currentBookId: string; 
@@ -253,7 +358,11 @@ export default function BookUploadPage() {
           question_id: q.question_id, 
           difficulty: mapDifficulty(q.difficulty),
           taxonomy_id: q.taxonomy_id || null,
+          taxonomy_name: q.taxonomy_name || null,
+          sub_taxonomy_id: q.sub_taxonomy_id || null,
+          sub_taxonomy_name: q.sub_taxonomy_name || null,
           thk_taxonomy_id: q.thk_taxonomy_id || null,
+          thk_taxonomy_name: q.thk_taxonomy_name || null,
           question: q.question || null,
           raw_metadata: q as Record<string, unknown>
         };
@@ -269,13 +378,55 @@ export default function BookUploadPage() {
       const totalCount = toInsert.length + toUpdate.length;
 
       if (toUpdate.length > 0) {
-        addLog(`🔄 기존 문항 덮어쓰기(Update) ${toUpdate.length}개 진행 중...`);
+        addLog(
+          onlyUpdateTaxonomyForExisting
+            ? `🛠️ 기존 교재 문항 ${toUpdate.length}개: 정답·본문·페이지 정보는 보존하고 분류/난이도 항목만 부분 업데이트 진행 중...`
+            : `🔄 기존 문항 덮어쓰기(Update) ${toUpdate.length}개 진행 중...`
+        );
         const updateChunkSize = 50; 
         for (let i = 0; i < toUpdate.length; i += updateChunkSize) {
           const chunk = toUpdate.slice(i, i + updateChunkSize);
           await Promise.all(chunk.map(async (item) => {
             const { tq_id, ...updateData } = item;
-            await supabase.from('textbook_question').update(updateData).eq('tq_id', tq_id);
+            if (onlyUpdateTaxonomyForExisting) {
+              const partialTqPayload = {
+                taxonomy_id: updateData.taxonomy_id,
+                taxonomy_name: updateData.taxonomy_name,
+                sub_taxonomy_id: updateData.sub_taxonomy_id,
+                sub_taxonomy_name: updateData.sub_taxonomy_name,
+                thk_taxonomy_id: updateData.thk_taxonomy_id,
+                thk_taxonomy_name: updateData.thk_taxonomy_name,
+                difficulty: updateData.difficulty,
+                problem_type: updateData.problem_type,
+              };
+              const { error: tqUpdateErr } = await supabase
+                .from('textbook_question')
+                .update(partialTqPayload)
+                .eq('tq_id', tq_id);
+
+              if (tqUpdateErr) {
+                // 만약 textbook_question 테이블에 아직 신규 분류명/부분류 컬럼이 없는 경우 기본 분류/난이도 4개 컬럼만 안전하게 업데이트
+                await supabase
+                  .from('textbook_question')
+                  .update({
+                    taxonomy_id: updateData.taxonomy_id,
+                    thk_taxonomy_id: updateData.thk_taxonomy_id,
+                    difficulty: updateData.difficulty,
+                    problem_type: updateData.problem_type,
+                  })
+                  .eq('tq_id', tq_id);
+              }
+            } else {
+              const { error: fullUpdateErr } = await supabase
+                .from('textbook_question')
+                .update(updateData)
+                .eq('tq_id', tq_id);
+
+              if (fullUpdateErr) {
+                const { taxonomy_name, sub_taxonomy_id, sub_taxonomy_name, thk_taxonomy_name, ...fallbackData } = updateData;
+                await supabase.from('textbook_question').update(fallbackData).eq('tq_id', tq_id);
+              }
+            }
           }));
           processedCount += chunk.length;
           setUploadProgress(50 + Math.round((processedCount / totalCount) * 50));
@@ -287,7 +438,12 @@ export default function BookUploadPage() {
         for (let i = 0; i < toInsert.length; i += chunkSize) {
           const chunk = toInsert.slice(i, i + chunkSize);
           const { error: insertQErr } = await supabase.from('textbook_question').insert(chunk as any);
-          if (insertQErr) throw new Error(`문항 이어붙이기 오류: ${insertQErr.message}`);
+          if (insertQErr) {
+            // 만약 textbook_question 테이블에 아직 신규 컬럼이 없는 경우 호환 컬럼만으로 재시도
+            const fallbackChunk = chunk.map(({ taxonomy_name, sub_taxonomy_id, sub_taxonomy_name, thk_taxonomy_name, ...rest }) => rest);
+            const { error: retryErr } = await supabase.from('textbook_question').insert(fallbackChunk as any);
+            if (retryErr) throw new Error(`문항 이어붙이기 오류: ${retryErr.message}`);
+          }
           
           processedCount += chunk.length;
           setUploadProgress(50 + Math.round((processedCount / totalCount) * 50));
@@ -295,7 +451,7 @@ export default function BookUploadPage() {
       }
 
       addLog(`🎉 모든 업로드 과정이 완벽하게 종료되었습니다!`);
-      alert(`✅ 성공적으로 공용 교재 처리가 완료되었습니다!\n교재명: ${bookTitle}\n새로 추가됨: ${toInsert.length}개\n기존 업데이트됨: ${toUpdate.length}개`);
+      alert(`✅ 성공적으로 공용 교재 처리가 완료되었습니다!\n교재명: ${bookTitle}\n새로 추가됨: ${toInsert.length}개\n기존 업데이트됨: ${toUpdate.length}개${onlyUpdateTaxonomyForExisting && toUpdate.length > 0 ? ' (분류/난이도 항목만 부분 업데이트)' : ''}`);
       
       setFileData(null); setFileName(""); setBookTitle("");
       const fileInput = document.getElementById('jsonFileInput') as HTMLInputElement;
@@ -336,6 +492,17 @@ export default function BookUploadPage() {
               <li>교재 이름이 같다면 기존 데이터를 날리지 않고 <b>신규 문항만 꼬리에 이어붙입니다(Append).</b></li>
               <li>만약 교재 내에 이미 존재하는 UUID 문항이 다시 업로드되면 내용만 <b>최신 버전으로 업데이트(Update)</b> 합니다.</li>
             </ul>
+            <label className="mt-3 pt-3 border-t border-blue-200 flex items-start gap-2.5 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={onlyUpdateTaxonomyForExisting}
+                onChange={(e) => setOnlyUpdateTaxonomyForExisting(e.target.checked)}
+                className="mt-0.5 w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+              />
+              <span className="text-xs text-slate-800 font-bold leading-relaxed">
+                🔒 이미 존재하는 <code className="text-indigo-700">question_id</code>는 기존 정답·문제 텍스트·페이지 정보를 유지하고 <span className="text-indigo-700 underline">교재/마스터 분류·난이도 항목(taxonomy_id, taxonomy_name, sub_taxonomy_id, sub_taxonomy_name, thk_taxonomy_id, thk_taxonomy_name, difficulty, problem_type 등)만 업데이트</span>하기
+              </span>
+            </label>
           </div>
 
           <div>

@@ -2,20 +2,27 @@
 import React, { useState, useMemo } from "react";
 import { TEST_DATA, TEST_GROUPS } from "./useStep1Data";
 
-export const getAllIds = (node: any) => {
+export const getAllIds = (node: any): string[] => {
+  if (!node || typeof node !== 'object') return [];
+  if (Array.isArray(node._allIds)) return node._allIds;
   const ids: string[] = [];
   const traverse = (n: any) => {
     if (!n) return;
-    if (n.itemId) ids.push(n.itemId);
+    if (Array.isArray(n.itemIds) && n.itemIds.length > 0) {
+      n.itemIds.forEach((id: string) => ids.push(id));
+    } else if (n.itemId) {
+      ids.push(n.itemId);
+    }
     if (n.children) {
       Object.values(n.children).forEach(traverse);
     } else {
       for (const k in n) {
-        if (k !== 'itemId' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && typeof n[k] === 'object') traverse(n[k]);
+        if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') traverse(n[k]);
       }
     }
   };
   traverse(node);
+  node._allIds = ids;
   return ids;
 };
 
@@ -35,23 +42,28 @@ const parseId = (id: string) => {
 };
 
 const getRepresentativeId = (n: any): string => {
-  if (!n) return "";
-  if (n.itemId) return n.itemId;
-  if (n.categoryId) return n.categoryId;
-  if (n.children) {
+  if (!n || typeof n !== 'object') return "";
+  if (typeof n._repId === 'string') return n._repId;
+  let resolved = "";
+  if (n.itemId) resolved = n.itemId;
+  else if (Array.isArray(n.itemIds) && n.itemIds.length > 0) resolved = n.itemIds[0];
+  else if (n.categoryId) resolved = n.categoryId;
+  else if (n.children) {
     const keys = Object.keys(n.children);
     for (let i = 0; i < keys.length; i++) {
       const id = getRepresentativeId(n.children[keys[i]]);
-      if (id) return id;
+      if (id) { resolved = id; break; }
+    }
+  } else {
+    for (const k in n) {
+      if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') {
+        const id = getRepresentativeId(n[k]);
+        if (id) { resolved = id; break; }
+      }
     }
   }
-  for (const k in n) {
-    if (k !== 'itemId' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && typeof n[k] === 'object') {
-      const id = getRepresentativeId(n[k]);
-      if (id) return id;
-    }
-  }
-  return "";
+  n._repId = resolved;
+  return resolved;
 };
 
 const compareNodes = (aKey: string, aNode: any, bKey: string, bNode: any) => {
@@ -88,23 +100,37 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
 
   // 상위에서 데이터 트리를 제대로 구성해 주므로 명시적인 node.children만 체크하면 됩니다.
   if (node.children) {
-    const ids: string[] = [];
-    const traverse = (n: any) => { if (n.itemId) ids.push(n.itemId); if (n.children) Object.values(n.children).forEach(traverse); };
-    traverse(node);
+    const ids = getAllIds(node);
     
     const checkedCount = ids.filter((id: string) => selectedItemIds.has(id)).length;
     const isChecked = checkedCount > 0 && checkedCount === ids.length;
     const isIndeterminate = checkedCount > 0 && checkedCount < ids.length;
 
+    const summaryClass =
+      depth === 4
+        ? "flex items-center space-x-2 py-1.5 px-2.5 bg-slate-100/90 hover:bg-blue-50 rounded-lg transition-colors select-none cursor-pointer group border border-slate-200/80"
+        : depth === 5
+        ? "flex items-center space-x-1.5 py-1 px-2 bg-slate-50/70 hover:bg-blue-50 rounded-md transition-colors select-none cursor-pointer group"
+        : "flex items-center space-x-1.5 py-1 px-1.5 hover:bg-blue-50 rounded-md transition-colors select-none cursor-pointer group";
+
+    const labelClass =
+      depth === 4
+        ? "text-brand font-bold text-[13px] leading-snug"
+        : depth === 5
+        ? "text-slate-800 font-bold text-[12px] leading-snug"
+        : depth === 6
+        ? "text-slate-700 font-semibold text-[11.5px] leading-snug"
+        : "text-slate-600 font-semibold text-[11px] leading-snug";
+
     return (
-      <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 4 ? "mb-2 pl-2 border-l-2 border-slate-100 ml-2" : "mb-1 pl-2 border-l border-slate-100 ml-3"}>
-        <summary className="flex items-center space-x-2 p-2 hover:bg-blue-50 rounded-lg transition-colors select-none cursor-pointer group">
-          <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
-          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer" />
-          <span className="text-slate-700 font-bold text-[14px]">{nodeKey}</span>
+      <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 4 ? "mb-2" : depth === 5 ? "mb-1.5 pl-2 border-l-2 border-slate-200 ml-1.5" : "mb-0.5 pl-1.5 border-l border-slate-100 ml-2.5"}>
+        <summary className={summaryClass}>
+          <svg className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-brand cursor-pointer shrink-0" />
+          <span className={labelClass}>{nodeKey}</span>
         </summary>
         {isOpen && (
-          <div className="ml-4 mt-1 space-y-1 border-l border-slate-100 pl-2">
+          <div className={depth === 4 ? "ml-1.5 mt-1 space-y-1 pl-1" : "ml-3 mt-0.5 space-y-0.5 border-l border-slate-100 pl-1.5"}>
             {Object.keys(node.children).sort((a, b) => compareNodes(a, node.children[a], b, node.children[b])).map(k => (
               <TreeNode key={k} nodeKey={k} node={node.children[k]} depth={depth + 1} selectedItemIds={selectedItemIds} toggleItem={toggleItem} toggleFolder={toggleFolder} />
             ))}
@@ -114,10 +140,12 @@ const TreeNode = React.memo(({ nodeKey, node, depth, selectedItemIds, toggleItem
     );
   } else {
     // 가장 마지막 리프 노드 (항상 데이터 원본의 올바른 이름(nodeKey)이 출력됩니다)
+    const leafIds: string[] = Array.isArray(node.itemIds) && node.itemIds.length > 0 ? node.itemIds : [node.itemId];
+    const isLeafChecked = leafIds.some((id: string) => selectedItemIds.has(id));
     return (
-      <label className="flex items-center space-x-3 p-1.5 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer">
-        <input type="checkbox" checked={selectedItemIds.has(node.itemId)} onChange={e => toggleItem(node.itemId, e.target.checked)} className="w-4 h-4 text-emerald-600 rounded border-slate-300 accent-emerald-600 cursor-pointer" />
-        <span className="text-slate-600 text-sm flex-1 break-keep leading-snug">{nodeKey}</span>
+      <label className="flex items-center space-x-2 py-1 px-1.5 hover:bg-emerald-50 rounded-md transition-colors cursor-pointer">
+        <input type="checkbox" checked={isLeafChecked} onChange={e => toggleItem(leafIds, e.target.checked)} className="w-3.5 h-3.5 text-emerald-600 rounded border-slate-300 accent-emerald-600 cursor-pointer shrink-0" />
+        <span className="text-slate-600 text-[11px] flex-1 break-keep leading-snug">{nodeKey}</span>
       </label>
     );
   }

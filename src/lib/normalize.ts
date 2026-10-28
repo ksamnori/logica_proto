@@ -164,3 +164,201 @@ export function gradeOrder(g: string | null | undefined): number {
   const i = (GRADE_OPTIONS as readonly string[]).indexOf(v);
   return i >= 0 ? i : 99;
 }
+
+// ---------------- 매쓰플랫(MathFLAT) 단원 계층(depth3/depth4/depth5) 자동 보정 ----------------
+
+export const BOGUS_EMPTY_CATEGORY_IDS = new Set<string>([
+  "E222-03-04", // 곱셈구구(2) - 실제 중단원(depth4) 헤더가 빈 소단원으로 잘못 등록된 항목
+  "E222-03-09", // 곱셈구구(3)
+  "E223-04-03", // 길이의 합과 차 알아보고 어림하기
+  "E224-05-07", // 하루의 시간과 달력 알아보기
+  "E225-06-04", // 표와 그래프의 내용 알아보고 표와 그래프로 나타내기
+  "E226-07-04", // 덧셈표와 곱셈표, 생활에서 규칙 찾기
+]);
+
+const E222_D4_2 = new Set(["E222-03-05", "E222-03-06", "E222-03-07", "E222-03-08"]);
+const E222_D4_3 = new Set(["E222-03-10", "E222-03-11", "E222-03-12"]);
+const E223_D4_2 = new Set(["E223-04-04", "E223-04-05", "E223-04-06", "E223-04-07", "E223-04-08", "E223-04-09"]);
+const E224_D4_2 = new Set(["E224-05-08", "E224-05-09"]);
+const E225_D4_2 = new Set(["E225-06-05", "E225-06-06"]);
+const E226_D4_2 = new Set(["E226-07-05", "E226-07-06", "E226-07-07", "E226-07-08"]);
+
+const startsWithAnyPrefix = (cid: string, prefixes: string[]): boolean => {
+  for (let i = 0; i < prefixes.length; i++) {
+    if (cid.startsWith(prefixes[i])) return true;
+  }
+  return false;
+};
+
+export function normalizeMasterCategoryRow<T extends Record<string, any>>(row: T): T {
+  if (!row || typeof row !== "object") return row;
+  const cid = String(row.category_id || "").trim().toUpperCase();
+  if (!cid) return row;
+
+  let d3: string | undefined = undefined;
+  let d4: string | undefined = undefined;
+  let d5: string | undefined = undefined;
+
+  // 1. 초1-1: '수의 크기 비교하기' 중 '비교하기' 부분일치로 인해 4단원(비교하기)으로 잘못 분류된 1단원(9까지의 수) 소단원 복원
+  if (cid === "E114-01-01") {
+    d3 = "9까지의 수";
+    d4 = "9까지의 수";
+    d5 = "수의 크기 비교하기";
+  } else if (cid === "E114-01-02") {
+    d3 = "9까지의 수";
+    d4 = "9까지의 수";
+    d5 = "9까지 수의 활용";
+  }
+  // 2. 초2-2: 2번째·3번째 중단원(depth4) 복원
+  else if (E222_D4_2.has(cid)) {
+    d4 = "곱셈구구(2)";
+  } else if (E222_D4_3.has(cid)) {
+    d4 = "곱셈구구(3)";
+  } else if (E223_D4_2.has(cid)) {
+    d4 = "길이의 합과 차 알아보고 어림하기";
+  } else if (E224_D4_2.has(cid)) {
+    d4 = "하루의 시간과 달력 알아보기";
+  } else if (E225_D4_2.has(cid)) {
+    d4 = "표와 그래프의 내용 알아보고 표와 그래프로 나타내기";
+  } else if (E226_D4_2.has(cid)) {
+    d4 = "덧셈표와 곱셈표, 생활에서 규칙 찾기";
+  }
+  // 3. 초3-1: 대단원명과 동일한 중단원명('평면도형') 누락 복원 및 '나눗셈의 활용' 주제유형 개수 밀림 복원
+  else if (startsWithAnyPrefix(cid, ["E312-01-04-", "E312-01-05-", "E312-01-06-", "E312-01-07-"])) {
+    d4 = "평면도형";
+  } else if (cid.startsWith("E313-03-01-")) {
+    d4 = "나눗셈의 몫 구하기";
+    d5 = "나눗셈의 활용";
+  }
+  // 4. 초3-2: '곱셈의 활용' 주제유형 개수 밀림 복원
+  else if (cid.startsWith("E321-04-01-")) {
+    d4 = "곱셈의 활용";
+    d5 = "곱셈의 활용";
+  }
+  // 5. 초4-1: 대단원명과 동일한 중단원명('평면도형의 이동') 누락 복원
+  else if (
+    startsWithAnyPrefix(cid, [
+      "E414-01-02-",
+      "E414-01-03-",
+      "E414-01-04-",
+      "E414-01-05-",
+      "E414-01-06-",
+      "E414-01-07-",
+    ])
+  ) {
+    d4 = "평면도형의 이동";
+  }
+  // 6. 초4-2: 대단원명과 동일한 중단원명('소수의 덧셈과 뺄셈', '사각형') 누락 복원
+  else if (
+    startsWithAnyPrefix(cid, [
+      "E423-01-06-",
+      "E423-01-07-",
+      "E423-01-08-",
+      "E423-01-09-",
+      "E423-01-10-",
+    ])
+  ) {
+    d4 = "소수의 덧셈과 뺄셈";
+  } else if (
+    startsWithAnyPrefix(cid, [
+      "E424-02-03-",
+      "E424-02-04-",
+      "E424-02-05-",
+      "E424-02-06-",
+    ])
+  ) {
+    d4 = "사각형";
+  }
+  // 7. 초5-2: 대단원명과 동일한 중단원명('분수의 곱셈', '소수의 곱셈') 누락 복원
+  else if (startsWithAnyPrefix(cid, ["E522-01-05-", "E522-01-06-", "E522-01-07-"])) {
+    d4 = "분수의 곱셈";
+  } else if (
+    startsWithAnyPrefix(cid, [
+      "E524-01-05-",
+      "E524-01-06-",
+      "E524-01-07-",
+      "E524-01-08-",
+    ])
+  ) {
+    d4 = "소수의 곱셈";
+  }
+  // 8. 초6-2: '원의 넓이' 주제유형 개수 밀림 복원
+  else if (cid.startsWith("E625-03-01-")) {
+    d4 = "원의 넓이";
+    d5 = "원의 넓이 구하기";
+  } else if (cid.startsWith("E625-03-02-")) {
+    d4 = "원의 넓이";
+    d5 = "여러 가지 원의 넓이";
+  }
+  // 9. 중1-1: 대단원명과 동일한 소단원명('소인수분해', '정수와 유리수') 누락 복원
+  else if (
+    startsWithAnyPrefix(cid, [
+      "M111-01-01-05-",
+      "M111-01-01-06-",
+      "M111-01-01-07-",
+      "M111-01-01-08-",
+      "M111-01-01-09-",
+      "M111-01-01-10-",
+      "M111-01-01-11-",
+      "M111-01-01-12-",
+    ])
+  ) {
+    d5 = "소인수분해";
+  } else if (startsWithAnyPrefix(cid, ["M112-01-01-52-", "M112-01-01-53-", "M112-01-01-54-"])) {
+    d5 = "정수와 유리수";
+  }
+  // 10. 중2-2: '삼각형의 성질', '도형의 닮음', '닮은 도형의 성질', '닮은 도형의 넓이와 부피' 주제유형 개수 밀림 복원
+  else if (cid.startsWith("M221-02-01-")) {
+    d4 = "삼각형의 성질";
+    d5 = "삼각형의 외심과 내심";
+  } else if (cid.startsWith("M222-02-01-")) {
+    d4 = "도형의 닮음";
+    d5 = "닮은 도형";
+  } else if (cid.startsWith("M222-02-02-")) {
+    d4 = "도형의 닮음";
+    d5 = "삼각형의 닮음 조건";
+  } else if (cid.startsWith("M222-04-01-")) {
+    d4 = "닮은 도형의 성질";
+    d5 = "삼각형의 무게중심";
+  } else if (cid.startsWith("M222-04-02-")) {
+    d4 = "닮은 도형의 넓이와 부피";
+    d5 = "닮은 도형의 넓이와 부피";
+  }
+
+  if (d3 === undefined && d4 === undefined && d5 === undefined) {
+    return row;
+  }
+
+  const next: any = { ...row };
+  if (d3 !== undefined) next.depth3 = d3;
+  if (d4 !== undefined) next.depth4 = d4;
+  if (d5 !== undefined) next.depth5 = d5;
+
+  if ("full_path" in next) {
+    const parts = [
+      next.curriculum_version,
+      next.depth1,
+      next.depth2,
+      next.depth3,
+      next.depth4,
+      next.depth5,
+      next.depth6,
+      next.depth7,
+    ].filter(Boolean);
+    next.full_path = parts.join(" > ");
+  }
+
+  return next as T;
+}
+
+export function normalizeMasterCategories<T extends Record<string, any>>(rows: T[]): T[] {
+  if (!Array.isArray(rows)) return [];
+  const result: T[] = [];
+  for (let i = 0; i < rows.length; i++) {
+    const r = rows[i];
+    const cid = String(r?.category_id || "").trim().toUpperCase();
+    if (BOGUS_EMPTY_CATEGORY_IDS.has(cid)) continue;
+    result.push(normalizeMasterCategoryRow(r));
+  }
+  return result;
+}

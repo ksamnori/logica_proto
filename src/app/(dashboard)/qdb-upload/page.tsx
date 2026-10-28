@@ -226,7 +226,7 @@ export default function QuestionDBUploadPage() {
       });
 
       if (onlyUpdateTaxonomyForExisting && existingItemsToPatch.length > 0) {
-        addLog(`🛠️ 기존 문항 ${existingItemsToPatch.length}건: 이미지·정답·본문은 보존하고 분류/난이도 8개 항목만 부분 업데이트 시작...`);
+        addLog(`🛠️ 기존 문항 ${existingItemsToPatch.length}건: 이미지·정답·본문은 보존하고 분류/난이도 10개 항목만 부분 업데이트 시작...`);
         let patchedCount = 0;
         const patchBatchSize = 25;
 
@@ -237,6 +237,8 @@ export default function QuestionDBUploadPage() {
               const patchPayload: Record<string, any> = {
                 taxonomy_id: q.taxonomy_id ?? null,
                 taxonomy_name: q.taxonomy_name ?? null,
+                sub_taxonomy_id: q.sub_taxonomy_id ?? null,
+                sub_taxonomy_name: q.sub_taxonomy_name ?? null,
                 thk_taxonomy_id: q.thk_taxonomy_id ?? null,
                 thk_taxonomy_name: q.thk_taxonomy_name ?? null,
                 difficulty: mapDifficulty(q.difficulty),
@@ -245,6 +247,22 @@ export default function QuestionDBUploadPage() {
                 problem_type: q.problem_type ?? null,
                 updated_at: new Date().toISOString(),
               };
+              // 업로드된 JSON에 유효한 이미지/정답 정보가 포함된 경우에는 누락되지 않도록 함께 업데이트 (null이면 기존 DB 값 보존)
+              if (q.image_url && String(q.image_url).trim() !== "" && String(q.image_url) !== "null") {
+                patchPayload.image_url = q.image_url;
+              }
+              if (q.image_2_url && String(q.image_2_url).trim() !== "" && String(q.image_2_url) !== "null") {
+                patchPayload.image_2_url = q.image_2_url;
+              }
+              if (q.image_box) patchPayload.image_box = safeJsonb(q.image_box);
+              if (q.image_2_box) patchPayload.image_2_box = typeof q.image_2_box === "string" ? q.image_2_box : JSON.stringify(q.image_2_box);
+              if (q.answer_image_url && String(q.answer_image_url).trim() !== "" && String(q.answer_image_url) !== "null") {
+                patchPayload.answer_image_url = q.answer_image_url;
+              }
+              if (q.answer_image_2_url && String(q.answer_image_2_url).trim() !== "" && String(q.answer_image_2_url) !== "null") {
+                patchPayload.answer_image_2_url = q.answer_image_2_url;
+              }
+              if (q.answer_image_box) patchPayload.answer_image_box = safeJsonb(q.answer_image_box);
 
               const { error: patchErr } = await supabase
                 .from('question_db')
@@ -253,6 +271,33 @@ export default function QuestionDBUploadPage() {
 
               if (patchErr) {
                 throw new Error(`문항 부분 업데이트 오류 (${q.question_id}): ${patchErr.message}`);
+              }
+
+              // textbook_question 에 동일 question_id 가 존재하는 경우에도 분류/난이도 정보 동기화
+              const { error: tqSyncErr } = await supabase
+                .from('textbook_question')
+                .update({
+                  taxonomy_id: q.taxonomy_id ?? null,
+                  taxonomy_name: q.taxonomy_name ?? null,
+                  sub_taxonomy_id: q.sub_taxonomy_id ?? null,
+                  sub_taxonomy_name: q.sub_taxonomy_name ?? null,
+                  thk_taxonomy_id: q.thk_taxonomy_id ?? null,
+                  thk_taxonomy_name: q.thk_taxonomy_name ?? null,
+                  difficulty: mapDifficulty(q.difficulty),
+                  problem_type: q.problem_type ?? null,
+                })
+                .eq('question_id', q.question_id);
+
+              if (tqSyncErr) {
+                await supabase
+                  .from('textbook_question')
+                  .update({
+                    taxonomy_id: q.taxonomy_id ?? null,
+                    thk_taxonomy_id: q.thk_taxonomy_id ?? null,
+                    difficulty: mapDifficulty(q.difficulty),
+                    problem_type: q.problem_type ?? null,
+                  })
+                  .eq('question_id', q.question_id);
               }
             })
           );
@@ -301,6 +346,8 @@ export default function QuestionDBUploadPage() {
           group_id: q.group_id || null,
           taxonomy_id: q.taxonomy_id || null,
           taxonomy_name: q.taxonomy_name || null,
+          sub_taxonomy_id: q.sub_taxonomy_id || null,
+          sub_taxonomy_name: q.sub_taxonomy_name || null,
           cognitive_level: q.cognitive_level || null,
           verification_status: q.verification_status || 'PENDING',
           is_human_verified: safeBoolean(q.human_verified, false) || safeBoolean(q.is_human_verified, false),
@@ -350,7 +397,7 @@ export default function QuestionDBUploadPage() {
 
       const totalProcessed = (onlyUpdateTaxonomyForExisting ? existingItemsToPatch.length : 0) + processedCount;
       addLog(`🎉 모든 동기화 작업 최종 완료!`);
-      alert(`✅ 문제은행 처리 및 이미지 업로드가 완료되었습니다!\n\n[처리 문항]\n총 ${totalProcessed}개 (신규 ${insertCount} / 업데이트 ${updateCount}${onlyUpdateTaxonomyForExisting && updateCount > 0 ? ' - 분류·난이도 8개 항목만 부분 업데이트' : ''})\n\n[이미지]\n총 ${imageFiles.length}개 안전하게 덮어쓰기 완료\n\n적용된 교재명: ${finalBookName}`);
+      alert(`✅ 문제은행 처리 및 이미지 업로드가 완료되었습니다!\n\n[처리 문항]\n총 ${totalProcessed}개 (신규 ${insertCount} / 업데이트 ${updateCount}${onlyUpdateTaxonomyForExisting && updateCount > 0 ? ' - 분류·난이도 10개 항목만 부분 업데이트' : ''})\n\n[이미지]\n총 ${imageFiles.length}개 안전하게 덮어쓰기 완료\n\n적용된 교재명: ${finalBookName}`);
 
       setFileData(null);
       setFileName("");
@@ -402,7 +449,7 @@ export default function QuestionDBUploadPage() {
                 className="mt-0.5 w-4 h-4 accent-indigo-600 rounded cursor-pointer"
               />
               <span className="text-xs text-slate-800 font-bold leading-relaxed">
-                🔒 이미 존재하는 <code className="text-indigo-700">question_id</code>는 기존 이미지·정답·문제 텍스트를 유지하고 <span className="text-indigo-700 underline">분류/난이도 8개 항목(taxonomy_id, taxonomy_name, thk_taxonomy_id, thk_taxonomy_name, difficulty, solving_probability, cognitive_level, problem_type)만 업데이트</span>하기
+                🔒 이미 존재하는 <code className="text-indigo-700">question_id</code>는 기존 이미지·정답·문제 텍스트를 유지하고 <span className="text-indigo-700 underline">분류/난이도 10개 항목(taxonomy_id, taxonomy_name, sub_taxonomy_id, sub_taxonomy_name, thk_taxonomy_id, thk_taxonomy_name, difficulty, solving_probability, cognitive_level, problem_type)만 업데이트</span>하기
               </span>
             </label>
           </div>

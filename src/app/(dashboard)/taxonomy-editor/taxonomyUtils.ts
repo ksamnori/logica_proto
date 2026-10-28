@@ -1,5 +1,6 @@
 // src/app/(dashboard)/taxonomy-editor/taxonomyUtils.ts
 import { supabase } from "@/lib/supabase";
+import { normalizeMasterCategories } from "@/lib/normalize";
 
 export const taxSort = (a: string, b: string) => {
   const order: Record<string, number> = { '초등학교': 1, '중학교': 2, '고등학교': 3 };
@@ -107,6 +108,9 @@ export const fetchAllRows = async (tableName: string, selectQuery: string = '*',
     if (error) { console.error(`${tableName} 로드 실패:`, error); break; }
     if (data && data.length > 0) { allData = [...allData, ...data]; start += step; }
     if (!data || data.length < step) hasMore = false; 
+  }
+  if (tableName === 'master_category') {
+    return normalizeMasterCategories(allData);
   }
   return allData;
 };

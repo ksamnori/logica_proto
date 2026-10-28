@@ -162,7 +162,10 @@ export default function TaxonomyEditorPage() {
         const page = String(item.final_printed_page || item.detected_page_num || "").toLowerCase();
         const book = String(item.source_book_name || item.book_name || "").toLowerCase();
         const tax = String(item.taxonomy_id || "").toLowerCase();
-        return qText.includes(kw) || ans.includes(kw) || qNum.includes(kw) || page.includes(kw) || book.includes(kw) || tax.includes(kw);
+        const subTax = String(item.sub_taxonomy_id || "").toLowerCase();
+        const taxName = String(item.taxonomy_name || "").toLowerCase();
+        const subTaxName = String(item.sub_taxonomy_name || "").toLowerCase();
+        return qText.includes(kw) || ans.includes(kw) || qNum.includes(kw) || page.includes(kw) || book.includes(kw) || tax.includes(kw) || subTax.includes(kw) || taxName.includes(kw) || subTaxName.includes(kw);
       });
     });
   }, [normalRoots, trueOrphans, selectedBook, getDescendants, questions, questionTextFilter]);
@@ -1051,18 +1054,40 @@ export default function TaxonomyEditorPage() {
                       </span>
                     </div>
                     
-                    <button 
-                      onClick={handleAutoFillTaxonomy}
-                      className="text-xs font-bold text-slate-500 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg flex flex-col leading-snug text-left transition-colors cursor-pointer group shadow-sm mt-1"
-                    >
-                      <span className="text-xs text-slate-400 mb-0.5 group-hover:text-indigo-500 transition-colors flex items-center gap-1">
-                        <span>🪄 현재 분류 (클릭 시 하단 자동 세팅)</span>
-                        <span className="ml-auto font-mono text-xs bg-white px-1 py-0.5 rounded border border-slate-200">{selectedQuestion.taxonomy_id || '미분류'}</span>
-                      </span>
-                      <span className={selectedQuestion.taxonomy_id && selectedQuestion.taxonomy_id !== '미분류' ? 'text-emerald-700' : 'text-rose-500'}>
-                        {getKoreanPath(selectedQuestion.taxonomy_id)}
-                      </span>
-                    </button>
+                    <div className="flex flex-wrap items-stretch gap-2 mt-1">
+                      <button 
+                        type="button"
+                        onClick={() => handleAutoFillTaxonomy(selectedQuestion.taxonomy_id)}
+                        className="text-xs font-bold text-slate-500 bg-slate-50 hover:bg-indigo-50 border border-slate-200 hover:border-indigo-300 px-3 py-1.5 rounded-lg flex flex-col leading-snug text-left transition-colors cursor-pointer group shadow-sm"
+                      >
+                        <span className="text-xs text-slate-400 mb-0.5 group-hover:text-indigo-500 transition-colors flex items-center gap-2">
+                          <span>🪄 현재 분류 (클릭 시 하단 자동 세팅)</span>
+                          <span className="ml-auto font-mono text-xs bg-white px-1 py-0.5 rounded border border-slate-200">{selectedQuestion.taxonomy_id || '미분류'}</span>
+                        </span>
+                        <span className={selectedQuestion.taxonomy_id && selectedQuestion.taxonomy_id !== '미분류' ? 'text-emerald-700' : 'text-rose-500'}>
+                          {getKoreanPath(selectedQuestion.taxonomy_id, selectedQuestion.taxonomy_name)}
+                        </span>
+                      </button>
+
+                      {selectedQuestion.sub_taxonomy_id &&
+                        selectedQuestion.sub_taxonomy_id !== '미분류' &&
+                        selectedQuestion.sub_taxonomy_id !== 'None' &&
+                        selectedQuestion.sub_taxonomy_id !== 'null' && (
+                          <button
+                            type="button"
+                            onClick={() => handleAutoFillTaxonomy(selectedQuestion.sub_taxonomy_id)}
+                            className="text-xs font-bold text-slate-500 bg-violet-50/60 hover:bg-violet-100/70 border border-violet-200 hover:border-violet-300 px-3 py-1.5 rounded-lg flex flex-col leading-snug text-left transition-colors cursor-pointer group shadow-sm"
+                          >
+                            <span className="text-xs text-violet-500 mb-0.5 group-hover:text-violet-700 transition-colors flex items-center gap-2">
+                              <span>🧭 서브 분류 (클릭 시 하단 자동 세팅)</span>
+                              <span className="ml-auto font-mono text-xs bg-white text-violet-700 px-1 py-0.5 rounded border border-violet-200">{selectedQuestion.sub_taxonomy_id}</span>
+                            </span>
+                            <span className="text-violet-800">
+                              {getKoreanPath(selectedQuestion.sub_taxonomy_id, selectedQuestion.sub_taxonomy_name)}
+                            </span>
+                          </button>
+                        )}
+                    </div>
                   </div>
                   
                   {!isEditingContent ? (

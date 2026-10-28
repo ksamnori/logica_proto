@@ -11,6 +11,7 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
     bookName2, setBookName2,
     pageStart, setPageStart,
     pageEnd, setPageEnd,
+    sourceCategories, setSourceCategories,
   } = step1Data;
 
   const diffTrackRef = useRef<HTMLDivElement>(null);
@@ -65,7 +66,7 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
         
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
           <h3 className="font-bold text-slate-700 mb-4 border-b pb-2 flex justify-between items-center">
-            <span>1. 총 출제 문항 수</span><span className="text-xs font-normal text-slate-400">최대 150문제</span>
+            <span>1. 총 출제 문항 수 <span className="text-xs font-semibold text-brand ml-1">(개별·비병합 문항 수 기준)</span></span><span className="text-xs font-normal text-slate-400">최대 150문제</span>
           </h3>
           <div className="flex items-center justify-between mb-5">
             <div className="flex space-x-2">
@@ -120,7 +121,39 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
 
         {/* 🌟 3. 출처 교재 및 페이지 필터 추가 */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
-          <h3 className="font-bold text-slate-700 mb-4 border-b pb-2">3. 출처 교재 및 페이지 필터 (선택)</h3>
+          <div className="flex flex-wrap justify-between items-center mb-4 border-b pb-2 gap-3">
+            <h3 className="font-bold text-slate-700">3. 출처 교재 및 페이지 필터 (선택)</h3>
+            <div className="flex items-center gap-5 bg-slate-50 px-3.5 py-1.5 rounded-lg border border-slate-200">
+              <label className="flex items-center space-x-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sourceCategories?.extra ?? true}
+                  onChange={(e) =>
+                    setSourceCategories({
+                      ...(sourceCategories || { extra: true, twinSimilar: true }),
+                      extra: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-brand rounded border-slate-300 cursor-pointer"
+                />
+                <span className="text-slate-700 font-bold text-sm">추가문제</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sourceCategories?.twinSimilar ?? true}
+                  onChange={(e) =>
+                    setSourceCategories({
+                      ...(sourceCategories || { extra: true, twinSimilar: true }),
+                      twinSimilar: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-brand rounded border-slate-300 cursor-pointer"
+                />
+                <span className="text-slate-700 font-bold text-sm">쌍둥이/유사</span>
+              </label>
+            </div>
+          </div>
           <div className="grid grid-cols-2 gap-8">
             <div>
               <label className="block text-sm font-bold text-slate-500 mb-3">교재명 키워드 (모두 포함 시 검색)</label>

@@ -89,6 +89,9 @@ export default function ViewerSidebar({
                           <select value={isAdmissionLock ? '입학테스트' : template} onChange={e => handleSettingChange('template', e.target.value)} className={`w-full border border-slate-300 rounded px-2 py-1.5 text-xs font-bold text-slate-700 bg-white focus:outline-none focus:border-brand ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>
                               <option value="basic1">기본1 (좌측 여백 활용)</option>
                               <option value="basic2">기본2 (슬림 헤더, 하단 라벨)</option>
+                              <option value="academy_standard">⭐ 추천1: 학원 표준 평가형 (1P Depth5 범위 + 반·이름·점수란)</option>
+                              <option value="summary_bar">⭐ 추천2: 모던 요약바형 (1P 상단 범위·이름 통합바)</option>
+                              <option value="clinic_note">⭐ 추천3: 클리닉·과제 노트형 (1P 단원표시 + 이름·확인란)</option>
                               {isAdmissionLock && <option value="입학테스트">진단평가 (입학테스트) 전용</option>}
                           </select>
                       </div>
@@ -126,8 +129,8 @@ export default function ViewerSidebar({
                           <div className="flex-1">
                               <label className="block text-xs font-bold text-slate-500 mb-1.5">분할 설정</label>
                               <div className="flex gap-1">
-                                  {[2,4,6].map(num => (
-                                    <button key={num} onClick={() => handleSettingChange('split', num)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${splits === num ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num}</button>
+                                  {[1,2,4,6].map(num => (
+                                    <button key={num} onClick={() => handleSettingChange('split', num)} title={columns === 1 ? `1단 ${num}분할 (페이지당 ${num}문제)` : (num === 1 ? "1단 1분할 (분할 안함)" : `2단 ${num}분할 (페이지당 ${num}문제)`)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${splits === num ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num === 1 ? '1(안함)' : num}</button>
                                   ))}
                               </div>
                           </div>

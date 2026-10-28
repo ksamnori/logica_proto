@@ -2,6 +2,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
+import { normalizeMasterCategories } from "../../../lib/normalize";
 
 const URL_MASTER_CAT = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Category.json";
 const URL_MASTER_ITEM = "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_data/Master_Item.json";
@@ -100,13 +101,31 @@ export const TEST_DATA: Record<string, any> = {
 
 export const TEST_GROUPS = ["주간테스트", "중간테스트", "분기테스트", "단원테스트", "진단평가"];
 
+// 🌟 모듈 레벨 메모리 캐시: Step 1 재진입 시 네트워크/DB 대기 없이 0ms 즉시 렌더링
+let cachedStep1Taxonomy: {
+  mData: any;
+  tData: any;
+  flatIndex: any[];
+  timestamp: number;
+} | null = null;
+
+let cachedStep1Diag: {
+  diagTree: Record<string, any>;
+  qIdsByItemId: Record<string, string[]>;
+  timestamp: number;
+} | null = null;
+
 export function useStep1Data() {
   const router = useRouter();
-  const [isLoading, setIsLoading] = useState(true);
-  const [masterData, setMasterData] = useState<any>({});
-  const [thinkingData, setThinkingData] = useState<any>({});
-  const [testData, setTestData] = useState<any>(TEST_DATA);
-  const [diagQuestionIdsMap, setDiagQuestionIdsMap] = useState<Record<string, string[]>>({});
+  const [isLoading, setIsLoading] = useState(!cachedStep1Taxonomy);
+  const [masterData, setMasterData] = useState<any>(cachedStep1Taxonomy?.mData || {});
+  const [thinkingData, setThinkingData] = useState<any>(cachedStep1Taxonomy?.tData || {});
+  const [testData, setTestData] = useState<any>(
+    cachedStep1Diag ? { ...TEST_DATA, "진단평가": cachedStep1Diag.diagTree } : TEST_DATA
+  );
+  const [diagQuestionIdsMap, setDiagQuestionIdsMap] = useState<Record<string, string[]>>(
+    cachedStep1Diag?.qIdsByItemId || {}
+  );
   
   const [currentMode, setCurrentMode] = useState("regular");
   const [currentTestGroup, setCurrentTestGroup] = useState("주간테스트"); 
@@ -128,83 +147,71 @@ export function useStep1Data() {
   const [bookName2, setBookName2] = useState("");
   const [pageStart, setPageStart] = useState("");
   const [pageEnd, setPageEnd] = useState("");
+  const [sourceCategories, setSourceCategories] = useState({ extra: true, twinSimilar: true });
 
   useEffect(() => {
-    const fetchData = async () => {
+    const traverseAndFlatten = (obj: any, currentPath: string, mode: string, out: any[]) => {
+      if (!obj) return;
+      if ((obj.itemId || obj.itemIds) && !obj.children) {
+        if (mode === "regular") return;
+        out.push({ path: currentPath, node: obj, mode, title: currentPath.split(" > ").pop() });
+        return;
+      }
+      if (currentPath) {
+        out.push({ path: currentPath, node: obj, mode, title: currentPath.split(" > ").pop() });
+      }
+      if (obj.children) {
+        for (const k in obj.children) {
+          traverseAndFlatten(obj.children[k], currentPath ? `${currentPath} > ${k}` : k, mode, out);
+        }
+      } else {
+        for (const k in obj) {
+          if (
+            k !== "itemId" &&
+            k !== "itemIds" &&
+            k !== "categoryId" &&
+            k !== "sortOrder" &&
+            k !== "defaultOpen" &&
+            k !== "_allIds" &&
+            k !== "_repId" &&
+            typeof obj[k] === "object"
+          ) {
+            traverseAndFlatten(obj[k], currentPath ? `${currentPath} > ${k}` : k, mode, out);
+          }
+        }
+      }
+    };
+
+    // 1) 진단평가 버전 트리는 백그라운드에서 비동기로 로드하여 초기 단원 트리 렌더링을 전혀 블로킹하지 않음
+    const loadDiagInBackground = async (baseFlatIndex: any[]) => {
       try {
-        const cb = `?t=${Date.now()}`;
-        const fetchDiagRows = async () => {
-          let allRows: any[] = [];
-          let from = 0;
-          const step = 1000;
-          while (true) {
-            const { data, error } = await supabase
-              .from("question_db")
-              .select("question_id, pdf_source, source_book_name, book_name, created_at, is_hidden")
-              .or("pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%")
-              .order("question_id", { ascending: true })
-              .range(from, from + step - 1);
-            if (error || !data || data.length === 0) break;
-            allRows = allRows.concat(data);
-            if (data.length < step) break;
-            from += step;
-          }
-          return allRows.filter(
-            (q) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
-          );
-        };
+        if (cachedStep1Diag && Date.now() - cachedStep1Diag.timestamp < 5 * 60 * 1000) {
+          setDiagQuestionIdsMap(cachedStep1Diag.qIdsByItemId);
+          setTestData({ ...TEST_DATA, "진단평가": cachedStep1Diag.diagTree });
+          return;
+        }
 
-        const [resCat, resItem, resThk, diagRows] = await Promise.all([
-          fetch(URL_MASTER_CAT + cb, { cache: "no-store" }), 
-          fetch(URL_MASTER_ITEM + cb, { cache: "no-store" }), 
-          fetch(URL_THINKING_CAT + cb, { cache: "no-store" }),
-          fetchDiagRows().catch(() => [] as any[]),
-        ]);
-        const catData = await resCat.json();
-        const itemData = await resItem.json();
-        const thkData = await resThk.json();
+        let allRows: any[] = [];
+        let from = 0;
+        const step = 1000;
+        while (true) {
+          const { data, error } = await supabase
+            .from("question_db")
+            .select("question_id, pdf_source, source_book_name, book_name, created_at, is_hidden")
+            .or("pdf_source.ilike.%입학테스트%,pdf_source.ilike.%진단평가%,source_book_name.ilike.%입학테스트%,source_book_name.ilike.%진단평가%,book_name.ilike.%입학테스트%,book_name.ilike.%진단평가%")
+            .order("question_id", { ascending: true })
+            .range(from, from + step - 1);
+          if (error || !data || data.length === 0) break;
+          allRows = allRows.concat(data);
+          if (data.length < step) break;
+          from += step;
+        }
+        const diagRows = allRows.filter(
+          (q) => q.is_hidden !== true && q.is_hidden !== "Y" && q.is_hidden !== "true"
+        );
 
-        const mData: any = {}; const catMap: any = {};
-        catData.forEach((cat: any) => {
-          if (!cat.depth1 || !cat.depth2) return;
-          if (!mData[cat.depth1]) mData[cat.depth1] = {};
-          if (!mData[cat.depth1][cat.depth2]) mData[cat.depth1][cat.depth2] = {};
-          let curr = mData[cat.depth1][cat.depth2];
-          const depths = [cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7].filter(d => d && !d.includes("세부 정보"));
-          
-          if (depths.length === 0) catMap[cat.category_id] = curr;
-          else {
-            depths.forEach((d, idx) => {
-              if (!curr[d]) curr[d] = { children: {}, categoryId: idx === depths.length - 1 ? cat.category_id : null };
-              if (idx === depths.length - 1) catMap[cat.category_id] = curr[d];
-              curr = curr[d].children;
-            });
-          }
-        });
-        itemData.forEach((item: any) => {
-          const parent = catMap[item.category_id];
-          if (parent) {
-            let leaf = item.depth8 || item.depth7 || item.depth6 || "기본 유형";
-            if (!parent.children) parent.children = {};
-            parent.children[leaf] = { itemId: item.item_id };
-          }
-        });
-
-        const tData: any = {};
-        thkData.forEach((cat: any) => {
-          if (!cat.depth1) return;
-          if (!tData[cat.depth1]) tData[cat.depth1] = {};
-          let curr = tData[cat.depth1];
-          const depths = [cat.depth2, cat.depth3].filter(d => d && !d.includes("세부 정보"));
-          depths.forEach((d, idx) => {
-            if (!curr[d]) curr[d] = { children: idx === depths.length - 1 ? null : {}, itemId: idx === depths.length - 1 ? cat.category_id : null };
-            if (curr[d].children) curr = curr[d].children;
-          });
-        });
-
-        // 🌟 진단평가 학기별 DB 생성일(created_at) 기준 분기 버전 트리 및 문항 ID 매핑 구성
         const diagTree: Record<string, any> = {};
-        const qIdsByItemId: Record<string, string[]> = {};
+        const qIdsMap: Record<string, string[]> = {};
 
         DIAGNOSTIC_SEMESTERS.forEach((sem) => {
           if (!diagTree[sem.group]) {
@@ -223,7 +230,7 @@ export function useStep1Data() {
             }
           });
 
-          qIdsByItemId[sem.baseSource] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
+          qIdsMap[sem.baseSource] = matched.map((q: any) => String(q.question_id)).filter(Boolean);
 
           const quarters = Array.from(quarterMap.values()).sort((a, b) => a.sortOrder - b.sortOrder);
 
@@ -231,7 +238,7 @@ export function useStep1Data() {
             const versionChildren: Record<string, any> = {};
             quarters.forEach((qtr) => {
               const versionItemId = `${sem.baseSource}__QTR__${qtr.key}`;
-              qIdsByItemId[versionItemId] = qtr.qIds;
+              qIdsMap[versionItemId] = qtr.qIds;
               versionChildren[qtr.label] = {
                 itemId: versionItemId,
                 sortOrder: qtr.sortOrder,
@@ -250,45 +257,135 @@ export function useStep1Data() {
           }
         });
 
-        setDiagQuestionIdsMap(qIdsByItemId);
+        cachedStep1Diag = {
+          diagTree,
+          qIdsByItemId: qIdsMap,
+          timestamp: Date.now(),
+        };
+        setDiagQuestionIdsMap(qIdsMap);
         const builtTestData: Record<string, any> = {
           ...TEST_DATA,
           "진단평가": diagTree,
         };
         setTestData(builtTestData);
 
-        const flatIndex: any[] = [];
-        const traverseAndFlatten = (obj: any, currentPath: string, mode: string, out: any[]) => {
-          if (!obj) return;
-          if (obj.itemId && !obj.children) {
-             if (mode === 'regular') return; 
-             out.push({ path: currentPath, node: obj, mode, title: currentPath.split(' > ').pop() });
-             return;
-          }
-          if (currentPath) {
-             out.push({ path: currentPath, node: obj, mode, title: currentPath.split(' > ').pop() });
-          }
-          if (obj.children) {
-             for (const k in obj.children) traverseAndFlatten(obj.children[k], currentPath ? `${currentPath} > ${k}` : k, mode, out);
-          } else {
-             for (const k in obj) {
-                 if (k !== 'itemId' && k !== 'categoryId' && k !== 'sortOrder' && k !== 'defaultOpen' && typeof obj[k] === 'object') {
-                   traverseAndFlatten(obj[k], currentPath ? `${currentPath} > ${k}` : k, mode, out);
-                 }
-             }
-          }
-        };
+        const nextFlat = baseFlatIndex.filter((item) => item.mode !== "test");
+        for (const k in builtTestData) traverseAndFlatten(builtTestData[k], k, "test", nextFlat);
+        setFlatSearchIndex(nextFlat);
+      } catch (e) {
+        console.error(e);
+      }
+    };
 
+    const fetchData = async () => {
+      try {
+        // 캐시가 있으면 0ms 즉시 화면 표시
+        if (cachedStep1Taxonomy && Date.now() - cachedStep1Taxonomy.timestamp < 10 * 60 * 1000) {
+          setMasterData(cachedStep1Taxonomy.mData);
+          setThinkingData(cachedStep1Taxonomy.tData);
+          setFlatSearchIndex(cachedStep1Taxonomy.flatIndex);
+          switchMainTab("regular", cachedStep1Taxonomy.mData, cachedStep1Taxonomy.tData);
+          setIsLoading(false);
+          loadDiagInBackground(cachedStep1Taxonomy.flatIndex);
+          return;
+        }
+
+        // 정적 JSON 3개만 병렬 다운로드하여 즉시 단원 트리 렌더링 (question_db 풀스캔 대기 제거!)
+        const [resCat, resItem, resThk] = await Promise.all([
+          fetch(URL_MASTER_CAT),
+          fetch(URL_MASTER_ITEM),
+          fetch(URL_THINKING_CAT),
+        ]);
+        const [rawCatData, itemData, thkData] = await Promise.all([
+          resCat.json(),
+          resItem.json(),
+          resThk.json(),
+        ]);
+        // 매쓰플랫(MathFLAT) 단원 계층 보정 (누락된 중단원·소단원 복원)
+        const catData = normalizeMasterCategories(rawCatData);
+
+        const mData: any = {};
+        const catMap: any = {};
+        catData.forEach((cat: any) => {
+          if (!cat.depth1 || !cat.depth2) return;
+          if (!mData[cat.depth1]) mData[cat.depth1] = {};
+          if (!mData[cat.depth1][cat.depth2]) mData[cat.depth1][cat.depth2] = {};
+          let curr = mData[cat.depth1][cat.depth2];
+          const depths = [cat.depth3, cat.depth4, cat.depth5, cat.depth6, cat.depth7].filter(
+            (d) => d && !d.includes("세부 정보")
+          );
+
+          if (depths.length === 0) catMap[cat.category_id] = curr;
+          else {
+            depths.forEach((d, idx) => {
+              if (!curr[d]) {
+                curr[d] = {
+                  children: {},
+                  categoryId: idx === depths.length - 1 ? cat.category_id : null,
+                  defaultOpen: idx === 0, // 대단원(depth3)까지만 기본 펼침(중단원 depth4 이하 기본 접힘)
+                };
+              }
+              if (idx === depths.length - 1) catMap[cat.category_id] = curr[d];
+              curr = curr[d].children;
+            });
+          }
+        });
+        itemData.forEach((item: any) => {
+          const parent = catMap[item.category_id];
+          if (parent) {
+            const leaf = item.depth8 || item.depth7 || item.depth6 || item.type || "기본 유형";
+            if (!parent.children) parent.children = {};
+            if (parent.children[leaf]) {
+              const existing = parent.children[leaf];
+              if (!existing.itemIds) existing.itemIds = existing.itemId ? [existing.itemId] : [];
+              if (!existing.itemIds.includes(item.item_id)) existing.itemIds.push(item.item_id);
+            } else {
+              parent.children[leaf] = { itemId: item.item_id, itemIds: [item.item_id] };
+            }
+          }
+        });
+
+        const tData: any = {};
+        thkData.forEach((cat: any) => {
+          if (!cat.depth1) return;
+          if (!tData[cat.depth1]) tData[cat.depth1] = {};
+          let curr = tData[cat.depth1];
+          const depths = [cat.depth2, cat.depth3].filter((d) => d && !d.includes("세부 정보"));
+          depths.forEach((d, idx) => {
+            if (!curr[d]) {
+              curr[d] = {
+                children: idx === depths.length - 1 ? null : {},
+                itemId: idx === depths.length - 1 ? cat.category_id : null,
+              };
+            }
+            if (curr[d].children) curr = curr[d].children;
+          });
+        });
+
+        const flatIndex: any[] = [];
         for (const k in mData) traverseAndFlatten(mData[k], k, "regular", flatIndex);
         for (const k in tData) traverseAndFlatten(tData[k], k, "thinking", flatIndex);
-        for (const k in builtTestData) traverseAndFlatten(builtTestData[k], k, "test", flatIndex);
-        
+        for (const k in TEST_DATA) traverseAndFlatten(TEST_DATA[k], k, "test", flatIndex);
+
+        cachedStep1Taxonomy = {
+          mData,
+          tData,
+          flatIndex,
+          timestamp: Date.now(),
+        };
+
         setFlatSearchIndex(flatIndex);
-        setMasterData(mData); 
+        setMasterData(mData);
         setThinkingData(tData);
         switchMainTab("regular", mData, tData);
         setIsLoading(false);
-      } catch (e) { console.error(e); }
+
+        // 진단평가 분기 트리는 백그라운드에서 비동기 로드
+        loadDiagInBackground(flatIndex);
+      } catch (e) {
+        console.error(e);
+        setIsLoading(false);
+      }
     };
     fetchData();
   }, []);
@@ -333,17 +430,29 @@ export function useStep1Data() {
     }
   };
 
-  const toggleItem = (id: string, checked: boolean) => {
+  const toggleItem = (idOrIds: string | string[], checked: boolean) => {
+    const targetIds = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
     setSelectedItemIds(prev => {
       const next = new Set(prev);
-      if (checked) next.add(id); else next.delete(id);
+      targetIds.forEach(id => {
+        if (!id) return;
+        if (checked) next.add(id); else next.delete(id);
+      });
       return next;
     });
   };
 
   const toggleFolder = (node: any, checked: boolean) => {
     const ids: string[] = [];
-    const traverse = (n: any) => { if (n.itemId) ids.push(n.itemId); if (n.children) Object.values(n.children).forEach(traverse); };
+    const traverse = (n: any) => {
+      if (!n) return;
+      if (Array.isArray(n.itemIds) && n.itemIds.length > 0) {
+        n.itemIds.forEach((id: string) => ids.push(id));
+      } else if (n.itemId) {
+        ids.push(n.itemId);
+      }
+      if (n.children) Object.values(n.children).forEach(traverse);
+    };
     traverse(node);
     setSelectedItemIds(prev => {
       const next = new Set(prev);
@@ -361,6 +470,9 @@ export function useStep1Data() {
 
   const generateExam = () => {
     if (selectedItemIds.size === 0) return alert("출제할 단원(유형)이나 테스트를 최소 1개 이상 왼쪽 트리에서 선택해주세요!");
+    if (!isSettingsDisabled && !sourceCategories.extra && !sourceCategories.twinSimilar) {
+      return alert("출처 교재 및 페이지 필터에서 '추가문제' 또는 '쌍둥이/유사' 중 최소 1개 이상을 체크해주세요!");
+    }
 
     sessionStorage.removeItem("isClinicMode");
     sessionStorage.removeItem("examTitle");
@@ -441,6 +553,10 @@ export function useStep1Data() {
     sessionStorage.setItem("bookName2", isSettingsDisabled ? "" : bookName2.trim());
     sessionStorage.setItem("pageStart", isSettingsDisabled ? "" : pageStart.trim());
     sessionStorage.setItem("pageEnd", isSettingsDisabled ? "" : pageEnd.trim());
+    sessionStorage.setItem(
+      "sourceCategories",
+      JSON.stringify(isSettingsDisabled ? { extra: true, twinSimilar: true } : sourceCategories)
+    );
 
     router.push("/exam/step2"); 
   };
@@ -459,6 +575,7 @@ export function useStep1Data() {
     bookName2, setBookName2,
     pageStart, setPageStart,
     pageEnd, setPageEnd,
+    sourceCategories, setSourceCategories,
 
     switchMainTab, toggleItem, toggleFolder, generateExam
   };

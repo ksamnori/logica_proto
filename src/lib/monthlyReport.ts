@@ -1,3 +1,4 @@
+import { normalizeMasterCategories } from "./normalize";
 // src/lib/monthlyReport.ts
 // 월간 학습 리포트 데이터 수집·계산
 // - 대상: 시험 답안(student_answer) + 과제 답안(student_homework_answer) 중 채점된 문항
@@ -441,7 +442,7 @@ async function loadWeekly(studentId: string, ym: string, months: string[]): Prom
     const taxIds = Array.from(new Set(taxOf.values()));
     const items = await selectIn("master_item", "item_id, category_id", "item_id", taxIds);
     const itemToCat = new Map<string, string>(items.map((i: any) => [i.item_id, i.category_id]));
-    const cats = await selectIn("master_category", "category_id, depth2, depth3, depth4", "category_id", taxIds.map(t => itemToCat.get(t) || t));
+    const cats = normalizeMasterCategories(await selectIn("master_category", "category_id, depth2, depth3, depth4", "category_id", taxIds.map(t => itemToCat.get(t) || t)));
     const catMap = new Map<string, any>(cats.map((c: any) => [c.category_id, c]));
     const uMap = new Map<string, { n: number; o: number; f: number }>();
     myAnswers.forEach(a => {
@@ -553,7 +554,7 @@ export async function buildMonthlyReport(studentId: string, ym: string, onStep?:
   const items = await selectIn("master_item", "item_id, category_id", "item_id", taxIds);
   const itemToCat = new Map<string, string>(items.map((i: any) => [i.item_id, i.category_id]));
   const catIds = Array.from(new Set(taxIds.map(t => itemToCat.get(t) || t)));
-  const cats = await selectIn("master_category", "category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7", "category_id", catIds);
+  const cats = normalizeMasterCategories(await selectIn("master_category", "category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7", "category_id", catIds));
   const catMap = new Map<string, any>(cats.map((c: any) => [c.category_id, c]));
   let compMap = new Map<string, { p: string | null; s: string | null }>();
   try {

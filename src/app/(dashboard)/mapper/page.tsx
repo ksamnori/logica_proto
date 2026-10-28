@@ -270,7 +270,7 @@ export default function VisualMapperPage() {
       const mqNumStr = String(mq.question_number || "");
       const mqBaseNum = mqNumStr.replace(/[^0-9]/g, '');
       const mqBaseText = mqNumStr.replace(/[0-9\-]/g, '').trim(); 
-      const mqTaxParts = getTaxParts(mq.taxonomy_id);
+      const mqTaxCandidates = [getTaxParts(mq.taxonomy_id), getTaxParts(mq.sub_taxonomy_id)].filter(p => p.length > 0);
 
       uniqueWbQs.forEach(wq => {
         if (matchedWbIds.has(wq.question_id)) return;
@@ -278,21 +278,23 @@ export default function VisualMapperPage() {
         const wqNumStr = String(wq.question_number || "");
         const wqBaseNum = wqNumStr.split('-')[0].replace(/[^0-9]/g, '');
         const wqBaseText = wqNumStr.split('-')[0].replace(/[0-9\-]/g, '').trim();
-        const wqTaxParts = getTaxParts(wq.taxonomy_id);
+        const wqTaxCandidates = [getTaxParts(wq.taxonomy_id), getTaxParts(wq.sub_taxonomy_id)].filter(p => p.length > 0);
 
         let isTaxonomyMatch = false;
         let matchedDepth = 0;
 
-        if (mqTaxParts.length > 0 && wqTaxParts.length > 0) {
-          if (mqTaxParts.length >= 7 && wqTaxParts.length >= 7) {
-            if (mqTaxParts.slice(0, 7).join('-') === wqTaxParts.slice(0, 7).join('-')) {
-              isTaxonomyMatch = true;
-              matchedDepth = 7;
-            }
-          } else if (mqTaxParts.length >= 6 && wqTaxParts.length >= 6) {
-            if (mqTaxParts.slice(0, 6).join('-') === wqTaxParts.slice(0, 6).join('-')) {
-              isTaxonomyMatch = true;
-              matchedDepth = 6;
+        for (const mqTaxParts of mqTaxCandidates) {
+          for (const wqTaxParts of wqTaxCandidates) {
+            if (mqTaxParts.length >= 7 && wqTaxParts.length >= 7) {
+              if (mqTaxParts.slice(0, 7).join('-') === wqTaxParts.slice(0, 7).join('-')) {
+                isTaxonomyMatch = true;
+                matchedDepth = Math.max(matchedDepth, 7);
+              }
+            } else if (mqTaxParts.length >= 6 && wqTaxParts.length >= 6) {
+              if (mqTaxParts.slice(0, 6).join('-') === wqTaxParts.slice(0, 6).join('-')) {
+                isTaxonomyMatch = true;
+                matchedDepth = Math.max(matchedDepth, 6);
+              }
             }
           }
         }

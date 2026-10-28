@@ -3,6 +3,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
+import { normalizeMasterCategoryRow } from "@/lib/normalize";
 import { supabase } from "@/lib/supabase";
 import { getISOWeekKST, getKSTDateString } from "@/lib/classRound";
 
@@ -19,6 +20,18 @@ import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMer
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
+
+const getColGapMm = (col: number, split: number): number => {
+  if (col === 1) {
+    if (split >= 6) return 4;
+    if (split >= 4) return 6;
+    if (split === 2) return 12;
+    return 0;
+  }
+  return 15;
+};
+
+const getColGapPx = (col: number, split: number): number => getColGapMm(col, split) * (96 / 25.4);
 const PALETTE_STORAGE_KEY = 'examViewerColorPalette';
 const DEFAULT_PALETTE = ['#2563eb', '#002864', '#14532d'];
 
@@ -145,7 +158,8 @@ const computeExamSummaryMeta = async (
           .select("category_id, depth2, depth3, depth5, depth6")
           .in("category_id", chunk);
         if (mCats) {
-          mCats.forEach((c: any) => {
+          mCats.forEach((rawC: any) => {
+            const c = normalizeMasterCategoryRow(rawC);
             catMap.set(String(c.category_id || "").trim().toUpperCase(), c);
           });
         }
@@ -277,6 +291,111 @@ const computeExamSummaryMeta = async (
   };
 };
 
+// 🌟 1페이지 헤더 표시용: 시험지 내 모든 문항의 Depth 5(소단원) 범위를 자동 추출하는 헬퍼
+const computeHeaderDepth5Scope = async (groups: any[]): Promise<string> => {
+  const allQuestions: any[] = [];
+  (groups || []).forEach((g: any) => {
+    const qList = g?.questions || g?.items || (g?.repQ ? [g.repQ] : []);
+    (qList || []).forEach((q: any) => {
+      if (q) allQuestions.push(q);
+    });
+  });
+  if (allQuestions.length === 0) return "";
+
+  const rawTaxIds = Array.from(
+    new Set(
+      allQuestions
+        .flatMap((q: any) => [q?.taxonomy_id, q?.sub_taxonomy_id, q?.item_id])
+        .map((id: any) => (id ? String(id).trim().toUpperCase() : ""))
+        .filter((id: string) => id && id !== "NULL" && id !== "UNDEFINED" && id !== "NONE" && id !== "미분류")
+    )
+  );
+
+  const d5ByTaxId: Record<string, string> = {};
+  if (rawTaxIds.length > 0) {
+    try {
+      const catIdByTaxId = new Map<string, string>();
+      const catIdsToFetch = new Set<string>();
+
+      for (let i = 0; i < rawTaxIds.length; i += 100) {
+        const chunk = rawTaxIds.slice(i, i + 100);
+        const { data: mItems } = await supabase
+          .from("master_item")
+          .select("item_id, category_id")
+          .in("item_id", chunk);
+        if (mItems) {
+          mItems.forEach((row: any) => {
+            const iId = String(row.item_id || "").trim().toUpperCase();
+            if (row.category_id) {
+              const cId = String(row.category_id).trim().toUpperCase();
+              catIdByTaxId.set(iId, cId);
+              catIdsToFetch.add(cId);
+            }
+          });
+        }
+        chunk.forEach((tid) => {
+          if (!catIdByTaxId.has(tid)) {
+            const parts = tid.split("-");
+            if (parts.length >= 6) {
+              const parentCat = parts.slice(0, -1).join("-");
+              catIdByTaxId.set(tid, parentCat);
+              catIdsToFetch.add(parentCat);
+            }
+            catIdsToFetch.add(tid);
+          }
+        });
+      }
+
+      const catIdsArr = Array.from(catIdsToFetch);
+      const catMap = new Map<string, any>();
+      for (let i = 0; i < catIdsArr.length; i += 100) {
+        const chunk = catIdsArr.slice(i, i + 100);
+        const { data: mCats } = await supabase
+          .from("master_category")
+          .select("category_id, depth4, depth5, depth6")
+          .in("category_id", chunk);
+        if (mCats) {
+          mCats.forEach((rawC: any) => {
+            const c = normalizeMasterCategoryRow(rawC);
+            catMap.set(String(c.category_id || "").trim().toUpperCase(), c);
+          });
+        }
+      }
+
+      rawTaxIds.forEach((tid) => {
+        const cId = catIdByTaxId.get(tid) || tid;
+        const cat = catMap.get(cId) || catMap.get(tid);
+        if (cat) {
+          const d5 = cat.depth5 || cat.depth4 || cat.depth6 || "";
+          if (d5) d5ByTaxId[tid] = d5;
+        }
+      });
+    } catch (e) {}
+  }
+
+  const sortedQs = [...allQuestions].sort((a, b) => {
+    const t1 = String(a?.taxonomy_id || a?.sub_taxonomy_id || a?.item_id || "").trim().toUpperCase();
+    const t2 = String(b?.taxonomy_id || b?.sub_taxonomy_id || b?.item_id || "").trim().toUpperCase();
+    return t1.localeCompare(t2, "ko", { numeric: true });
+  });
+
+  const uniqueD5: string[] = [];
+  sortedQs.forEach((q: any) => {
+    const tid = String(q?.taxonomy_id || q?.item_id || "").trim().toUpperCase();
+    const subTid = String(q?.sub_taxonomy_id || "").trim().toUpperCase();
+    let d5 = (tid && d5ByTaxId[tid]) || (subTid && d5ByTaxId[subTid]) || getDepth5Name(q, d5ByTaxId);
+    if (d5 && d5 !== "분류 없음" && !uniqueD5.includes(d5)) {
+      uniqueD5.push(d5);
+    }
+  });
+
+  if (uniqueD5.length === 0) return "";
+  if (uniqueD5.length === 1) return uniqueD5[0];
+  if (uniqueD5.length === 2) return `${uniqueD5[0]} · ${uniqueD5[1]}`;
+  if (uniqueD5.length === 3) return `${uniqueD5[0]} · ${uniqueD5[1]} · ${uniqueD5[2]}`;
+  return `${uniqueD5[0]} ~ ${uniqueD5[uniqueD5.length - 1]} (외 ${uniqueD5.length - 2}개 소단원)`;
+};
+
 // 🌟 문항(또는 서브문항) 1개의 HTML 블록 생성
 // - 이미지 숨김 여부 반영
 // - 텍스트 뒤에 서브문항 번호((1), (2) 등)가 오고 그 뒤에 다른 텍스트가 없으면 이미지를 번호 우측에 나란히 배치
@@ -286,7 +405,9 @@ const buildSubQuestionItemHtml = (
   sIdx: number,
   textToRender: string,
   hiddenImgSet?: Set<string>,
-  isAdmissionMode: boolean = false
+  isAdmissionMode: boolean = false,
+  col: number = 2,
+  split: number = 4
 ) => {
   const realQId = getRealId(String(q.question_id || ""));
   const isImg1Hidden = Boolean(hiddenImgSet && (hiddenImgSet.has(`${realQId}__img1`) || hiddenImgSet.has(realQId)));
@@ -303,31 +424,41 @@ const buildSubQuestionItemHtml = (
     : { isTrailingSubNum: false, introText: textToRender, subMarkerText: "" };
 
   const isTrailingSubNum = splitSub.isTrailingSubNum;
-  const topMarginClass = sIdx > 0 ? (isTrailingSubNum ? "mt-8" : "mt-16") : "";
-  const maxHeightStyle = isAdmissionMode ? "" : " max-height: 250px;";
+  const isCompactSingleCol = col === 1 && split >= 4;
+  const topMarginClass = sIdx > 0 ? (isCompactSingleCol ? "mt-3" : isTrailingSubNum ? "mt-8" : "mt-16") : "";
+  let maxHeightStyle = " max-height: 250px;";
+  if (isAdmissionMode) {
+    maxHeightStyle = "";
+  } else if (col === 1) {
+    if (split >= 6) maxHeightStyle = " max-height: 95px;";
+    else if (split >= 4) maxHeightStyle = " max-height: 150px;";
+    else if (split === 2) maxHeightStyle = " max-height: 240px;";
+    else maxHeightStyle = " max-height: 340px;";
+  }
+  const imgMarginClass = isCompactSingleCol ? "mt-1.5 mb-1" : "mt-4 mb-3";
 
   if (isTrailingSubNum) {
     const introHtml = splitSub.introText
-      ? `<div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify mb-3">${formatQText(splitSub.introText)}</div>`
+      ? `<div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify ${isCompactSingleCol ? 'mb-1.5' : 'mb-3'}">${formatQText(splitSub.introText)}</div>`
       : "";
 
     // 🌟 이미지 1과 이미지 2가 모두 있는 서브문항이면:
     // 이미지 1은 공통 그림이므로 상단 중앙에 먼저 배치하고, 서브문항 번호((1))는 이미지 2의 좌측에 나란히 배치!
     if (validImg1 && validImg2) {
-      const w1 = getBoxWidth(q.image_box);
-      const w2 = getBoxWidth(q.image_2_box);
-      const commonImg1Html = `<div class="w-full flex justify-center mt-2 mb-4"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w1};${maxHeightStyle}"></div>`;
+      const w1 = getBoxWidth(q.image_box, col, split);
+      const w2 = getBoxWidth(q.image_2_box, col, split);
+      const commonImg1Html = `<div class="w-full flex justify-center ${isCompactSingleCol ? 'mt-1 mb-2' : 'mt-2 mb-4'}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w1};${maxHeightStyle}"></div>`;
       const inlineImg2Html = `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w2};${maxHeightStyle}"></div>`;
       return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}${commonImg1Html}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImg2Html}</div></div></div>`;
     }
 
     let inlineImgs = "";
     if (validImg1) {
-      const w = getBoxWidth(q.image_box);
+      const w = getBoxWidth(q.image_box, col, split);
       inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
     }
     if (validImg2) {
-      const w = getBoxWidth(q.image_2_box);
+      const w = getBoxWidth(q.image_2_box, col, split);
       inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
     }
     return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImgs}</div></div></div>`;
@@ -335,19 +466,19 @@ const buildSubQuestionItemHtml = (
 
   let imgHtml = "";
   if (validImg1) {
-    const w = getBoxWidth(q.image_box);
-    imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+    const w = getBoxWidth(q.image_box, col, split);
+    imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
   }
   if (validImg2) {
-    const w = getBoxWidth(q.image_2_box);
-    imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+    const w = getBoxWidth(q.image_2_box, col, split);
+    imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
   }
 
   return `<div class="w-full min-w-0 math-protect ${topMarginClass}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
 };
 
 // 🌟 [핵심 변경] 이중/삼중으로 꼬인 JSON 문자열도 끝까지 파고들어 width(%)를 기필코 찾아내는 초강력 파서
-const getBoxWidth = (box: any) => {
+const getBoxWidth = (box: any, col: number = 2, split: number = 4) => {
   if (!box || box === 'null' || box === 'undefined') return 'auto';
   let parsed = box;
   for (let i = 0; i < 3; i++) {
@@ -358,6 +489,15 @@ const getBoxWidth = (box: any) => {
     }
   }
   if (parsed && typeof parsed === 'object' && parsed.width) {
+    const rawPct = Number(parsed.width);
+    if (!isNaN(rawPct) && rawPct > 0) {
+      // 1단(전체 폭)일 때는 2단(반폭) 기준으로 저장된 width(%)가 2배로 커지지 않도록 비율 보정
+      if (col === 1) {
+        const scale = split === 1 ? 0.55 : 0.48;
+        return `${Math.round(rawPct * scale * 10) / 10}%`;
+      }
+      return `${rawPct}%`;
+    }
     return `${parsed.width}%`;
   }
   return 'auto';
@@ -639,44 +779,58 @@ export default function ExamViewerPage() {
           document.fonts.load("normal 42px 'CJU_Medium'")
         ]).catch(() => {});
 
-        const probeHeaderFirst = buildHeaderHtml(badge, title, true, initialTmpl, eDate);
-        const probeHeaderOther = buildHeaderHtml(badge, title, false, initialTmpl, eDate);
+        const bulkDepth5Scope = await computeHeaderDepth5Scope(groups);
+        const isBulkSingleColumn = initialCol === 1;
+        const bulkGridClass = isBulkSingleColumn ? 'exam-grid-single' : 'exam-grid-admission';
+
+        const probeHeaderFirst = buildHeaderHtml(badge, title, true, initialTmpl, eDate, {
+          isFirstPage: true,
+          depth5Scope: bulkDepth5Scope,
+          questionCount: groups.length,
+        });
+        const probeHeaderOther = buildHeaderHtml(badge, title, false, initialTmpl, eDate, {
+          isFirstPage: false,
+          depth5Scope: bulkDepth5Scope,
+          questionCount: groups.length,
+        });
         const probeFooter = buildFooterHtml(badge, 0, 1, title, initialTmpl, eDate);
 
         const probe = document.createElement('div');
         probe.className = 'a3-page';
         probe.style.cssText = 'position:absolute; left:-9999px; top:0; visibility:hidden;';
-        probe.innerHTML = probeHeaderFirst + `<div class="exam-grid-admission pt-6 pb-6"></div>` + probeFooter;
+        probe.innerHTML = probeHeaderFirst + `<div class="${bulkGridClass} pt-6 pb-6"></div>` + probeFooter;
         document.body.appendChild(probe);
         await nextFrame();
-        const grid = probe.querySelector('.exam-grid-admission') as HTMLElement;
+        const grid = probe.querySelector(`.${bulkGridClass}`) as HTMLElement;
         const availableHeightFirst = grid.clientHeight;
-        const columnWidth = grid.clientWidth / 2;
+        const columnWidth = isBulkSingleColumn ? grid.clientWidth : grid.clientWidth / 2;
         document.body.removeChild(probe);
 
         const probe2 = document.createElement('div');
         probe2.className = 'a3-page';
         probe2.style.cssText = 'position:absolute; left:-9999px; top:0; visibility:hidden;';
-        probe2.innerHTML = probeHeaderOther + `<div class="exam-grid-admission pt-6 pb-6"></div>` + probeFooter;
+        probe2.innerHTML = probeHeaderOther + `<div class="${bulkGridClass} pt-6 pb-6"></div>` + probeFooter;
         document.body.appendChild(probe2);
         await nextFrame();
-        const grid2 = probe2.querySelector('.exam-grid-admission') as HTMLElement;
+        const grid2 = probe2.querySelector(`.${bulkGridClass}`) as HTMLElement;
         const availableHeightOther = grid2.clientHeight;
         document.body.removeChild(probe2);
 
-        await measureGroupHeights(groups, columnWidth);
+        await measureGroupHeights(groups, columnWidth, initialCol, initialSplit);
 
-        const maxPerColumn = initialSplit / 2;
+        const maxPerColumn = initialCol === 1 ? Math.max(1, initialSplit) : (initialSplit === 1 ? 1 : Math.max(1, Math.floor(initialSplit / 2)));
+        const bulkColGapPx = getColGapPx(initialCol, initialSplit);
+        const usesSpecialFirstPageHeader = initialTitleMode === 'first' || ['academy_standard', 'summary_bar', 'clinic_note'].includes(initialTmpl);
         let targetCols = [];
-        if (initialTitleMode === 'first') {
-          const pass1 = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn);
+        if (usesSpecialFirstPageHeader) {
+          const pass1 = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn, bulkColGapPx, initialCol);
           const firstCols = pass1.slice(0, initialCol);
           const consumed = firstCols.reduce((sum, c) => sum + c.length, 0);
           const rem = groups.slice(consumed);
-          const pass2 = rem.length > 0 ? chunkColumnsByHeight(rem, availableHeightOther - SAFETY_MARGIN_PX, maxPerColumn) : [];
+          const pass2 = rem.length > 0 ? chunkColumnsByHeight(rem, availableHeightOther - SAFETY_MARGIN_PX, maxPerColumn, bulkColGapPx, initialCol) : [];
           targetCols = firstCols.concat(pass2);
         } else {
-          targetCols = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn);
+          targetCols = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn, bulkColGapPx, initialCol);
         }
 
         const pages = [];
@@ -697,7 +851,11 @@ export default function ExamViewerPage() {
             <div class="flex justify-between items-end border-b-[2px] border-slate-400 pb-3 shrink-0 w-full relative z-10 bg-white">
                 <img src="${ADMISSION_HEADER_URL}" class="h-[104px] object-contain -mt-5" onerror="this.outerHTML='<h1 class=\\'text-4xl font-bold text-brand -mt-2\\'>진단평가</h1>'">
                 <div class="mb-1"><div class="flex flex-col items-end gap-1">${eDate ? `<div class="text-[13px] font-bold text-slate-500">${formatExamDate(eDate)}</div>` : ''}${badge ? `<div class="text-slate-700 font-bold text-[14px] px-3 py-1 rounded-[4px] border border-slate-400 bg-white leading-tight">${badge}</div>` : ''}</div></div>
-            </div>` : buildHeaderHtml(badge, title, showTitle, initialTmpl, eDate);
+            </div>` : buildHeaderHtml(badge, title, showTitle, initialTmpl, eDate, {
+              isFirstPage: pIdx === 0,
+              depth5Scope: bulkDepth5Scope,
+              questionCount: groups.length,
+            });
           const fHtml = isBulkDiag ? `
             <div class="border-t-[2px] border-slate-400 pt-4 flex justify-between items-end h-[40px] shrink-0 bg-white w-full relative z-20">
                 <img src="${LOGO_FOOTER_LEFT_URL}" class="h-[16px] object-contain absolute left-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-lexend font-black text-black text-sm absolute left-0 bottom-0\\'>LOGICA</span>'">
@@ -709,15 +867,18 @@ export default function ExamViewerPage() {
                 <img src="${LOGO_FOOTER_RIGHT_URL}" class="h-[22px] object-contain absolute right-0 bottom-0" onerror="this.outerHTML='<span class=\\'font-bold text-[#006699] text-sm absolute right-0 bottom-0\\'>천종현수학연구소</span>'">
             </div>` : buildFooterHtml(badge, pIdx, pages.length, title, initialTmpl, eDate);
           
+          const pageAvailH = (pIdx === 0 ? availableHeightFirst : availableHeightOther) - SAFETY_MARGIN_PX;
           let rHtml = '';
-          if (pageCols.right === null) {
+          if (isBulkSingleColumn) {
+            rHtml = '';
+          } else if (pageCols.right === null) {
             const h = showTitle ? availableHeightFirst : availableHeightOther;
             const lines = Array.from({ length: Math.ceil((h || 1587)/28) + 1 }).map(() => `<div style="height: 28px; border-bottom: 1px solid #e2e8f0; box-sizing: border-box;"></div>`).join('');
             rHtml = `<div class="w-full h-full min-w-0 flex flex-col pl-6" style="border-left: 1px dashed #cbd5e1; overflow: hidden;"><div class="text-[13px] font-bold text-slate-400 mb-2 tracking-widest">풀 이</div><div class="flex-1" style="overflow: hidden;">${lines}</div></div>`;
           } else {
-            rHtml = generateLocalColHtml(pageCols.right, cNum, isBulkDiag);
+            rHtml = generateLocalColHtml(pageCols.right, cNum, isBulkDiag, initialCol, initialSplit, pageAvailH);
           }
-          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="exam-grid-admission pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum, isBulkDiag)}${rHtml}</div>${fHtml}</div>`;
+          finalBulkHtml += `<div class="a3-page" style="--color-num:${cNum}; --color-title:${cTit}; --color-line:${cLin};">${hHtml}<div class="${bulkGridClass} pt-6 pb-6">${generateLocalColHtml(pageCols.left, cNum, isBulkDiag, initialCol, initialSplit, pageAvailH)}${rHtml}</div>${fHtml}</div>`;
         });
 
         if (pages.length % 2 !== 0) {
@@ -905,7 +1066,8 @@ export default function ExamViewerPage() {
 
         hasUnsavedChangesRef.current = false; 
 
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge };
+        const depth5Scope = await computeHeaderDepth5Scope(groups);
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope };
 
         Promise.all([
           document.fonts.load("400 17px 'NanumSquare'"),
@@ -1090,7 +1252,8 @@ export default function ExamViewerPage() {
 
         hasUnsavedChangesRef.current = isNew;
 
-        examStateRef.current = { groups, examTitle: title, displayBadge: badge };
+        const depth5Scope = await computeHeaderDepth5Scope(groups);
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope };
 
         Promise.all([
           document.fonts.load("400 17px 'NanumSquare'"),
@@ -1124,11 +1287,12 @@ export default function ExamViewerPage() {
     });
   };
 
-  const measureGroupHeights = async (groups: any[], columnWidth: number) => {
+  const measureGroupHeights = async (groups: any[], columnWidth: number, col: number = 2, split: number = 4) => {
     const probe = document.createElement('div');
     probe.style.cssText = `position:absolute; left:-9999px; top:0; width:${columnWidth}px; visibility:hidden;`;
     document.body.appendChild(probe);
 
+    const isCompactSingleCol = col === 1 && split >= 4;
     groups.forEach((g, idx) => {
         const wrap = document.createElement('div');
         wrap.id = `measure-${idx}`;
@@ -1138,12 +1302,12 @@ export default function ExamViewerPage() {
         
         let subHtml = '';
         if (isGroupMerged && common) {
-            subHtml += `<div class="w-full min-w-0 math-protect mb-3"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
+            subHtml += `<div class="w-full min-w-0 math-protect ${isCompactSingleCol ? 'mb-1.5' : 'mb-3'}"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
         }
 
         g.questions.forEach((q: any, sIdx: number) => {
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
-            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmissionLock);
+            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmissionLock, col, split);
         });
 
         wrap.innerHTML = `<div class="flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
@@ -1176,7 +1340,13 @@ export default function ExamViewerPage() {
     document.body.removeChild(probe);
   };
 
-  const chunkColumnsByHeight = (groups: any[], maxColumnHeight: number, maxPerColumn: number) => {
+  const chunkColumnsByHeight = (
+    groups: any[],
+    maxColumnHeight: number,
+    maxPerColumn: number,
+    colGapPx: number = COLUMN_GAP_PX,
+    col: number = 2
+  ) => {
     const columns = [];
     let i = 0;
     while (i < groups.length) {
@@ -1184,9 +1354,12 @@ export default function ExamViewerPage() {
         const maxTry = Math.min(maxPerColumn, groups.length - i);
         for (let count = maxTry; count >= 1; count--) {
             const slice = groups.slice(i, i + count);
-            const gapTotal = COLUMN_GAP_PX * (count - 1);
+            const gapTotal = colGapPx * (count - 1);
             const shareEach = (maxColumnHeight - gapTotal) / count;
-            const allFit = slice.every(g => g.measuredHeight <= shareEach);
+            const totalMeasured = slice.reduce((sum, g) => sum + (g.measuredHeight || 0), 0);
+            const allFit =
+              slice.every(g => g.measuredHeight <= shareEach) ||
+              (col === 1 && totalMeasured + gapTotal <= maxColumnHeight * 0.94);
             if (allFit) {
                 columns.push(slice);
                 i += count;
@@ -1199,9 +1372,18 @@ export default function ExamViewerPage() {
     return columns;
   };
 
-  const generateLocalColHtml = (cGroups: any[], numColorStr: string = 'var(--color-num)', isAdmCol: boolean = isAdmissionLock) => {
+  const generateLocalColHtml = (
+    cGroups: any[],
+    numColorStr: string = 'var(--color-num)',
+    isAdmCol: boolean = isAdmissionLock,
+    col: number = columns,
+    split: number = splits,
+    availColHeight: number = 0
+  ) => {
     if (!cGroups || cGroups.length === 0) return `<div class="flex flex-col flex-1 w-full min-w-0"></div>`;
-    let cHtml = '<div class="flex flex-col flex-1 w-full min-w-0 gap-[15mm]">';
+    const gapMm = isAdmCol ? 15 : getColGapMm(col, split);
+    const isCompactSingleCol = !isAdmCol && col === 1 && split >= 4;
+    let cHtml = `<div class="flex flex-col flex-1 w-full min-w-0" style="gap: ${gapMm}mm;">`;
     
     cGroups.forEach(g => {
         const isGroupMerged = g.is_merged_text && g.questions.length > 1;
@@ -1209,13 +1391,13 @@ export default function ExamViewerPage() {
         
         let subHtml = '';
         if (isGroupMerged && common) {
-            subHtml += `<div class="w-full min-w-0 math-protect mb-3"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
+            subHtml += `<div class="w-full min-w-0 math-protect ${isCompactSingleCol ? 'mb-1.5' : 'mb-3'}"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(common)}</div></div>`;
         }
 
         const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
         g.questions.forEach((q: any, sIdx: number) => {
             const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
-            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol);
+            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol, col, split);
         });
         const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
         
@@ -1230,6 +1412,32 @@ export default function ExamViewerPage() {
                 </div>
             </div>`;
     });
+
+    // 🌟 1단 구성일 때 마지막 페이지 등에 문항 수가 분할 수(1, 2, 4, 6)보다 적으면
+    // 빈 슬롯(flex-1)을 하단에 채워 위에서부터 정확히 1/N 분할 위치에 배치되도록 보장
+    if (col === 1 && !isAdmCol) {
+      const maxPerCol = Math.max(1, split);
+      if (cGroups.length < maxPerCol) {
+        const gapPx = getColGapPx(col, split);
+        const effH = availColHeight > 0 ? availColHeight : 1200;
+        const shareEach = (effH - gapPx * (maxPerCol - 1)) / maxPerCol;
+        const allWithinSlot = cGroups.every(g => (g.measuredHeight || 0) <= shareEach);
+        const totalMeasured = cGroups.reduce((s, g) => s + (g.measuredHeight || 0), 0);
+        const fillerCount = allWithinSlot
+          ? (maxPerCol - cGroups.length)
+          : Math.max(
+              0,
+              Math.min(
+                maxPerCol - cGroups.length,
+                Math.floor((effH - totalMeasured - gapPx * Math.max(0, cGroups.length - 1)) / Math.max(1, shareEach + gapPx))
+              )
+            );
+        for (let f = 0; f < fillerCount; f++) {
+          cHtml += `<div class="flex-1 w-full min-w-0 pointer-events-none" aria-hidden="true"></div>`;
+        }
+      }
+    }
+
     cHtml += '</div>';
     return cHtml;
   };
@@ -1257,35 +1465,45 @@ export default function ExamViewerPage() {
     if (!examStateRef.current) return;
     (window as any).__examRenderReady = false;
     await waitForFonts([col, split, tMode, tmpl, eDate, tit, badge]);
-    const { groups } = examStateRef.current;
+    const { groups, depth5Scope } = examStateRef.current;
+    const isSingleColumn = col === 1;
+    const gridClass = isSingleColumn ? 'exam-grid-single' : 'exam-grid-admission';
 
-    const probeHeaderFirst = buildHeaderHtml(badge, tit, true, tmpl, eDate);
-    const probeHeaderOther = buildHeaderHtml(badge, tit, false, tmpl, eDate);
+    const probeHeaderFirst = buildHeaderHtml(badge, tit, true, tmpl, eDate, {
+      isFirstPage: true,
+      depth5Scope: depth5Scope || '',
+      questionCount: groups.length,
+    });
+    const probeHeaderOther = buildHeaderHtml(badge, tit, false, tmpl, eDate, {
+      isFirstPage: false,
+      depth5Scope: depth5Scope || '',
+      questionCount: groups.length,
+    });
     const probeFooter = buildFooterHtml(badge, 0, 1, tit, tmpl, eDate);
 
     const probe = document.createElement('div');
     probe.className = 'a3-page';
     probe.style.cssText = 'position:absolute; left:-9999px; top:0; visibility:hidden;';
-    probe.innerHTML = probeHeaderFirst + `<div class="exam-grid-admission pt-6 pb-6"></div>` + probeFooter;
+    probe.innerHTML = probeHeaderFirst + `<div class="${gridClass} pt-6 pb-6"></div>` + probeFooter;
     document.body.appendChild(probe);
     await nextFrame();
 
-    const grid = probe.querySelector('.exam-grid-admission') as HTMLElement;
+    const grid = probe.querySelector(`.${gridClass}`) as HTMLElement;
     const availableHeightFirst = grid.clientHeight;
-    const columnWidth = grid.clientWidth / 2;
+    const columnWidth = isSingleColumn ? grid.clientWidth : grid.clientWidth / 2;
     document.body.removeChild(probe);
 
     const probe2 = document.createElement('div');
     probe2.className = 'a3-page';
     probe2.style.cssText = 'position:absolute; left:-9999px; top:0; visibility:hidden;';
-    probe2.innerHTML = probeHeaderOther + `<div class="exam-grid-admission pt-6 pb-6"></div>` + probeFooter;
+    probe2.innerHTML = probeHeaderOther + `<div class="${gridClass} pt-6 pb-6"></div>` + probeFooter;
     document.body.appendChild(probe2);
     await nextFrame();
-    const grid2 = probe2.querySelector('.exam-grid-admission') as HTMLElement;
+    const grid2 = probe2.querySelector(`.${gridClass}`) as HTMLElement;
     const availableHeightOther = grid2.clientHeight;
     document.body.removeChild(probe2);
 
-    await measureGroupHeights(groups, columnWidth);
+    await measureGroupHeights(groups, columnWidth, col, split);
 
     examStateRef.current = { ...examStateRef.current, availableHeightFirst, availableHeightOther, columnWidth };
     await renderPages(col, split, tMode, tmpl, eDate, tit, badge);
@@ -1294,19 +1512,23 @@ export default function ExamViewerPage() {
   const renderPages = async (col: number = columns, split: number = splits, tMode: string = titleMode, tmpl: string = template, eDate: string = examDate, tit: string = examTitle, badge: string = displayBadge) => {
     if (!examStateRef.current || !examContainerRef.current) return;
 
-    const { groups, availableHeightFirst, availableHeightOther } = examStateRef.current;
-    const maxPerColumn = split / 2;
+    const { groups, availableHeightFirst, availableHeightOther, depth5Scope } = examStateRef.current;
+    const isSingleColumn = col === 1;
+    const gridClass = isSingleColumn ? 'exam-grid-single' : 'exam-grid-admission';
+    const maxPerColumn = col === 1 ? Math.max(1, split) : (split === 1 ? 1 : Math.max(1, Math.floor(split / 2)));
+    const colGapPx = getColGapPx(col, split);
     
     let targetCols = [];
-    if (tMode === 'first') {
-      const pass1 = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn);
+    const usesSpecialFirstPageHeader = tMode === 'first' || ['academy_standard', 'summary_bar', 'clinic_note'].includes(tmpl);
+    if (usesSpecialFirstPageHeader) {
+      const pass1 = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn, colGapPx, col);
       const firstCols = pass1.slice(0, col);
       const consumed = firstCols.reduce((sum, c) => sum + c.length, 0);
       const rem = groups.slice(consumed);
-      const pass2 = rem.length > 0 ? chunkColumnsByHeight(rem, availableHeightOther - SAFETY_MARGIN_PX, maxPerColumn) : [];
+      const pass2 = rem.length > 0 ? chunkColumnsByHeight(rem, availableHeightOther - SAFETY_MARGIN_PX, maxPerColumn, colGapPx, col) : [];
       targetCols = firstCols.concat(pass2);
     } else {
-      targetCols = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn);
+      targetCols = chunkColumnsByHeight(groups, availableHeightFirst - SAFETY_MARGIN_PX, maxPerColumn, colGapPx, col);
     }
 
     const pages = [];
@@ -1319,19 +1541,26 @@ export default function ExamViewerPage() {
     let finalHtml = '';
     pages.forEach((pageCols, pIdx) => {
       const showTitle = !(tMode === 'first' && pIdx > 0);
-      const hHtml = buildHeaderHtml(badge, tit, showTitle, tmpl, eDate);
+      const hHtml = buildHeaderHtml(badge, tit, showTitle, tmpl, eDate, {
+        isFirstPage: pIdx === 0,
+        depth5Scope: depth5Scope || '',
+        questionCount: groups.length,
+      });
       const fHtml = buildFooterHtml(badge, pIdx, pages.length, tit, tmpl, eDate);
+      const pageAvailH = (pIdx === 0 ? availableHeightFirst : availableHeightOther) - SAFETY_MARGIN_PX;
       
       let rHtml = '';
-      if (pageCols.right === null) {
-        const h = showTitle ? availableHeightFirst : availableHeightOther;
+      if (isSingleColumn) {
+        rHtml = '';
+      } else if (pageCols.right === null) {
+        const h = pIdx === 0 ? availableHeightFirst : availableHeightOther;
         const lines = Array.from({ length: Math.ceil((h || 1587)/28) + 1 }).map(() => `<div style="height: 28px; border-bottom: 1px solid #e2e8f0; box-sizing: border-box;"></div>`).join('');
         rHtml = `<div class="w-full h-full min-w-0 flex flex-col pl-6" style="border-left: 1px dashed #cbd5e1; overflow: hidden;"><div class="text-[13px] font-bold text-slate-400 mb-2 tracking-widest">풀 이</div><div class="flex-1" style="overflow: hidden;">${lines}</div></div>`;
       } else {
-        rHtml = generateLocalColHtml(pageCols.right);
+        rHtml = generateLocalColHtml(pageCols.right, 'var(--color-num)', isAdmissionLock, col, split, pageAvailH);
       }
 
-      finalHtml += `<div class="a3-page">${hHtml}<div class="exam-grid-admission pt-6 pb-6">${generateLocalColHtml(pageCols.left)}${rHtml}</div>${fHtml}</div>`;
+      finalHtml += `<div class="a3-page">${hHtml}<div class="${gridClass} pt-6 pb-6">${generateLocalColHtml(pageCols.left, 'var(--color-num)', isAdmissionLock, col, split, pageAvailH)}${rHtml}</div>${fHtml}</div>`;
     });
 
     examContainerRef.current.innerHTML = finalHtml;
@@ -1591,8 +1820,18 @@ export default function ExamViewerPage() {
     if (field === 'colorTitle') { setColorTitle(val); return; }
     if (field === 'colorLine') { setColorLine(val); return; }
 
-    if (field === 'column') { setColumns(val); remeasureAndRender(val, splits, titleMode, template, examDate, examTitle, displayBadge); }
-    if (field === 'split') { setSplits(val); remeasureAndRender(columns, val, titleMode, template, examDate, examTitle, displayBadge); }
+    if (field === 'column') {
+      const nextSplit = val === 2 && splits === 1 ? 4 : splits;
+      setColumns(val);
+      if (nextSplit !== splits) setSplits(nextSplit);
+      remeasureAndRender(val, nextSplit, titleMode, template, examDate, examTitle, displayBadge);
+    }
+    if (field === 'split') {
+      const nextCol = val === 1 ? 1 : columns;
+      setSplits(val);
+      if (nextCol !== columns) setColumns(nextCol);
+      remeasureAndRender(nextCol, val, titleMode, template, examDate, examTitle, displayBadge);
+    }
     if (field === 'titleMode') { setTitleMode(val); remeasureAndRender(columns, splits, val, template, examDate, examTitle, displayBadge); }
     if (field === 'template') { setTemplate(val); remeasureAndRender(columns, splits, titleMode, val, examDate, examTitle, displayBadge); }
     
@@ -1907,6 +2146,7 @@ export default function ExamViewerPage() {
         .a3-page + .a3-page { margin-top: 24px; }
         
         .exam-grid-admission { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20mm; flex: 1; min-height: 0; width: 100%; position: relative; overflow: hidden; }
+        .exam-grid-single { display: flex; flex-direction: column; flex: 1; min-height: 0; width: 100%; position: relative; overflow: hidden; }
         .exam-grid-admission::before { content: ''; position: absolute; top: 0; bottom: 0; left: 50%; width: 1px; background-color: var(--color-line); transform: translateX(-50%); }
         .math-protect { min-width: 0; max-width: 100%; word-break: keep-all; overflow-wrap: break-word; }
         mjx-container[display="true"] { max-width: 100% !important; overflow-x: auto !important; overflow-y: hidden !important; }

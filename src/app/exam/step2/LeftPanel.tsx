@@ -1,7 +1,7 @@
 // src/app/exam/step2/LeftPanel.tsx
 import React, { useState, useMemo, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, formatText, getCleanUrl, renderParentRelations, compareSubQuestions, compareQuestionsBySource } from "./examUtils";
+import { getDiffLabelByRate, getTypeName, getDepth5Name, getDepth6Name, getSubDepth6Name, formatText, getCleanUrl, renderParentRelations, compareSubQuestions, compareQuestionsBySource, fetchMainTextbookExclusionSet, isMainTextbookQuestion, hydrateMissingQuestionImages, ensureCompleteSubQuestionBundles, matchesSourceCategoryFilter } from "./examUtils";
 
 const parseId = (id: string) => {
   if (!id) return null;
@@ -20,23 +20,46 @@ const parseId = (id: string) => {
 };
 
 const getRepresentativeId = (n: any): string => {
-  if (!n) return "";
-  if (n.itemId) return n.itemId;
-  if (n.categoryId) return n.categoryId;
-  if (n.children) {
+  if (!n || typeof n !== 'object') return "";
+  if (typeof n._repId === 'string') return n._repId;
+  let resolved = "";
+  if (n.itemId) resolved = n.itemId;
+  else if (Array.isArray(n.itemIds) && n.itemIds.length > 0) resolved = n.itemIds[0];
+  else if (n.categoryId) resolved = n.categoryId;
+  else if (n.children) {
     const keys = Object.keys(n.children);
     for (let i = 0; i < keys.length; i++) {
       const id = getRepresentativeId(n.children[keys[i]]);
-      if (id) return id;
+      if (id) { resolved = id; break; }
+    }
+  } else {
+    for (const k in n) {
+      if (k !== 'itemId' && k !== 'itemIds' && k !== 'categoryId' && k !== 'defaultOpen' && k !== '_allIds' && k !== '_repId' && typeof n[k] === 'object') {
+        const id = getRepresentativeId(n[k]);
+        if (id) { resolved = id; break; }
+      }
     }
   }
-  for (const k in n) {
-    if (k !== 'itemId' && k !== 'categoryId' && typeof n[k] === 'object') {
-      const id = getRepresentativeId(n[k]);
-      if (id) return id;
+  n._repId = resolved;
+  return resolved;
+};
+
+const getAllAddIds = (node: any): string[] => {
+  if (!node || typeof node !== 'object') return [];
+  if (Array.isArray(node._allIds)) return node._allIds;
+  const ids: string[] = [];
+  const traverse = (n: any) => {
+    if (!n) return;
+    if (Array.isArray(n.itemIds) && n.itemIds.length > 0) {
+      n.itemIds.forEach((id: string) => ids.push(id));
+    } else if (n.itemId) {
+      ids.push(n.itemId);
     }
-  }
-  return "";
+    if (n.children) Object.values(n.children).forEach(traverse);
+  };
+  traverse(node);
+  node._allIds = ids;
+  return ids;
 };
 
 const compareNodes = (aKey: string, aNode: any, bKey: string, bNode: any) => {
@@ -65,26 +88,33 @@ const sortD1 = (a: string, b: string) => {
 };
 
 const AddTreeNode = React.memo(({ nodeKey, node, depth, selectedAddIds, toggleAddItem, toggleAddFolder }: any) => {
-  const [isOpen, setIsOpen] = useState(depth <= 3);
+  const [isOpen, setIsOpen] = useState<boolean>(node?.defaultOpen ?? (depth <= 3));
 
   if (node.children) {
-    const ids: string[] = [];
-    const traverse = (n: any) => { if (n.itemId) ids.push(n.itemId); if (n.children) Object.values(n.children).forEach(traverse); };
-    traverse(node);
+    const ids = getAllAddIds(node);
     
     const checkedCount = ids.filter((id: string) => selectedAddIds.has(id)).length;
     const isChecked = checkedCount > 0 && checkedCount === ids.length;
     const isIndeterminate = checkedCount > 0 && checkedCount < ids.length;
 
+    const summaryClass =
+      depth === 3
+        ? "font-bold text-[13px] leading-snug cursor-pointer py-1.5 bg-slate-100/90 px-2.5 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-1.5 text-brand border border-slate-200/80"
+        : depth === 4
+        ? "flex items-center space-x-1.5 py-1 px-2 bg-slate-50/70 hover:bg-blue-50 rounded-md transition-colors select-none cursor-pointer group text-slate-800 font-bold text-[12px] leading-snug"
+        : depth === 5
+        ? "flex items-center space-x-1.5 py-1 px-1.5 hover:bg-blue-50 rounded-md transition-colors select-none cursor-pointer group text-slate-700 font-semibold text-[11.5px] leading-snug"
+        : "flex items-center space-x-1.5 py-1 px-1.5 hover:bg-blue-50 rounded-md transition-colors select-none cursor-pointer group text-slate-600 font-semibold text-[11px] leading-snug";
+
     return (
-      <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 3 ? "mb-2" : "mb-1 pl-1 ml-2 border-l border-slate-200"}>
-        <summary className={depth === 3 ? "font-bold text-[16px] cursor-pointer py-2 bg-slate-100 px-3 rounded-lg hover:bg-slate-200 transition-colors flex items-center gap-2 text-brand" : "flex items-center space-x-2 p-1.5 hover:bg-blue-50 rounded-lg transition-colors select-none cursor-pointer group text-slate-700 font-bold text-[14px]"}>
-          <svg className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
-          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleAddFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer shrink-0" />
+      <details open={isOpen} onToggle={(e: any) => setIsOpen(e.currentTarget.open)} className={depth === 3 ? "mb-2" : depth === 4 ? "mb-1.5 pl-2 ml-1.5 border-l-2 border-slate-200" : "mb-0.5 pl-1.5 ml-2 border-l border-slate-200"}>
+        <summary className={summaryClass}>
+          <svg className="w-3.5 h-3.5 text-slate-400 group-hover:text-blue-500 transition-transform details-arrow shrink-0" style={{ transform: isOpen ? 'rotate(90deg)' : 'none' }} fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"></path></svg>
+          <input type="checkbox" ref={el => { if (el) el.indeterminate = isIndeterminate; }} checked={isChecked} onChange={e => toggleAddFolder(node, e.target.checked)} onClick={e => e.stopPropagation()} className="w-3.5 h-3.5 rounded border-slate-300 accent-brand cursor-pointer shrink-0" />
           <span className="truncate">{nodeKey}</span>
         </summary>
         {isOpen && (
-          <div className={depth === 3 ? "pl-2 mt-2 space-y-1" : "ml-4 mt-1 space-y-1"}>
+          <div className={depth === 3 ? "pl-1 mt-1 space-y-1" : "ml-3 mt-0.5 space-y-0.5"}>
             {Object.keys(node.children).sort((a, b) => compareNodes(a, node.children[a], b, node.children[b])).map(k => (
               <AddTreeNode key={k} nodeKey={k} node={node.children[k]} depth={depth + 1} selectedAddIds={selectedAddIds} toggleAddItem={toggleAddItem} toggleAddFolder={toggleAddFolder} />
             ))}
@@ -93,9 +123,11 @@ const AddTreeNode = React.memo(({ nodeKey, node, depth, selectedAddIds, toggleAd
       </details>
     );
   } else {
+    const leafIds: string[] = Array.isArray(node.itemIds) && node.itemIds.length > 0 ? node.itemIds : [node.itemId];
+    const isLeafChecked = leafIds.some((id: string) => selectedAddIds.has(id));
     return (
-      <label className="flex items-center gap-2 py-1.5 px-3 ml-4 hover:bg-emerald-50 rounded-lg text-[13px] text-slate-600 transition-colors cursor-pointer border border-transparent hover:border-emerald-100">
-        <input type="checkbox" checked={selectedAddIds.has(node.itemId)} onChange={e => toggleAddItem(node.itemId, e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-emerald-600 shrink-0 cursor-pointer" />
+      <label className="flex items-center gap-1.5 py-1 px-2 ml-3 hover:bg-emerald-50 rounded-md text-[11px] text-slate-600 transition-colors cursor-pointer border border-transparent hover:border-emerald-100">
+        <input type="checkbox" checked={isLeafChecked} onChange={e => toggleAddItem(leafIds, e.target.checked)} className="w-3.5 h-3.5 rounded border-slate-300 accent-emerald-600 shrink-0 cursor-pointer" />
         <span className="flex-1 break-keep leading-snug">{nodeKey}</span>
       </label>
     );
@@ -125,6 +157,15 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const [addPageStart, setAddPageStart] = useState("");
   const [addPageEnd, setAddPageEnd] = useState("");
   const [addQuestionText, setAddQuestionText] = useState("");
+  const [addSourceCategories, setAddSourceCategories] = useState<{ extra: boolean; twinSimilar: boolean }>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = sessionStorage.getItem("sourceCategories");
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return { extra: true, twinSimilar: true };
+  });
   const [searchResultFilter, setSearchResultFilter] = useState("");
 
   useEffect(() => {
@@ -167,6 +208,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
         const typeName = getTypeName(repQ);
         const depth5Name = getDepth5Name(repQ, depth5Map);
         const depth6Name = getDepth6Name(repQ, depth6Map);
+        const subDepth6Name = getSubDepth6Name(repQ, depth6Map);
         const numStr = `${idx + 1}번`;
         const itemsMatch = g.items.some((q: any) => {
           const text = String(q.question || q.text_question || "").toLowerCase();
@@ -174,12 +216,20 @@ export default function LeftPanel({ examData }: { examData: any }) {
           const book = String(q.source_book_name || q.book_name || q.pdf_source || "").toLowerCase();
           const page = String(q.final_printed_page || q.detected_page_num || q.page_number || "").toLowerCase();
           const qNum = String(q.question_number || "").toLowerCase();
+          const tax = String(q.taxonomy_id || "").toLowerCase();
+          const subTax = String(q.sub_taxonomy_id || "").toLowerCase();
+          const taxName = String(q.taxonomy_name || "").toLowerCase();
+          const subTaxName = String(q.sub_taxonomy_name || "").toLowerCase();
           return (
             text.includes(kw) ||
             ans.includes(kw) ||
             book.includes(kw) ||
             page.includes(kw) ||
-            qNum.includes(kw)
+            qNum.includes(kw) ||
+            tax.includes(kw) ||
+            subTax.includes(kw) ||
+            taxName.includes(kw) ||
+            subTaxName.includes(kw)
           );
         });
         return (
@@ -188,6 +238,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
           typeName.toLowerCase().includes(kw) ||
           depth5Name.toLowerCase().includes(kw) ||
           depth6Name.toLowerCase().includes(kw) ||
+          subDepth6Name.toLowerCase().includes(kw) ||
           numStr.includes(kw)
         );
       });
@@ -203,6 +254,11 @@ export default function LeftPanel({ examData }: { examData: any }) {
       const page = String(q.final_printed_page || q.detected_page_num || "").toLowerCase();
       const qNum = String(q.question_number || "").toLowerCase();
       const d6 = String(getDepth6Name(q, depth6Map) || "").toLowerCase();
+      const subD6 = String(getSubDepth6Name(q, depth6Map) || "").toLowerCase();
+      const tax = String(q.taxonomy_id || "").toLowerCase();
+      const subTax = String(q.sub_taxonomy_id || "").toLowerCase();
+      const taxName = String(q.taxonomy_name || "").toLowerCase();
+      const subTaxName = String(q.sub_taxonomy_name || "").toLowerCase();
       const typeName = String(getTypeName(q) || "").toLowerCase();
       return (
         text.includes(kw) ||
@@ -211,6 +267,11 @@ export default function LeftPanel({ examData }: { examData: any }) {
         page.includes(kw) ||
         qNum.includes(kw) ||
         d6.includes(kw) ||
+        subD6.includes(kw) ||
+        tax.includes(kw) ||
+        subTax.includes(kw) ||
+        taxName.includes(kw) ||
+        subTaxName.includes(kw) ||
         typeName.includes(kw)
       );
     });
@@ -257,6 +318,48 @@ export default function LeftPanel({ examData }: { examData: any }) {
     });
     setCheckedIds(new Set());
     alert('✅ 서브문항 공통 지문 선택 병합이 완료되었습니다!');
+  };
+
+  const unmergeAllQuestions = () => {
+    const hasMerged = questions.some(
+      (g: any) => (g.items && g.items.length > 1) || g.is_merged_text || g.is_group
+    );
+    if (!hasMerged) {
+      alert("현재 병합된 문항이 없습니다.");
+      return;
+    }
+    if (!confirm("모든 병합 문항을 해제하여 개별 문항으로 분리하시겠습니까?")) return;
+
+    const now = Date.now();
+    setQuestions((prevQs: any[]) => {
+      const unmergedList: any[] = [];
+      prevQs.forEach((g: any, gIdx: number) => {
+        if (g.items && g.items.length > 1) {
+          g.items.forEach((item: any, subIdx: number) => {
+            unmergedList.push({
+              id: `unmerged_${now}_${gIdx}_${subIdx}_${item.question_id}`,
+              is_group: false,
+              is_merged_text: false,
+              items: [item],
+              sort_order: unmergedList.length + 1,
+            });
+          });
+        } else {
+          unmergedList.push({
+            ...g,
+            is_group: false,
+            is_merged_text: false,
+            sort_order: unmergedList.length + 1,
+          });
+        }
+      });
+      return unmergedList;
+    });
+    setCheckedIds(new Set());
+    try {
+      sessionStorage.removeItem("examUserMergedTextQuestions");
+    } catch (e) {}
+    alert("✅ 전체 문항의 병합이 모두 해제되었습니다!");
   };
 
   const autoMergeSubQuestions = () => {
@@ -339,11 +442,23 @@ export default function LeftPanel({ examData }: { examData: any }) {
     
     try {
       let allSearched: any[] = [];
-      for (let i = 0; i < selectedCatIds.length; i += 50) {
-        const chunk = selectedCatIds.slice(i, i + 50);
+      const expandedCatIdSet = new Set<string>();
+      selectedCatIds.forEach((rawId: any) => {
+        const id = String(rawId || "").trim();
+        if (!id) return;
+        expandedCatIdSet.add(id);
+        if (id.includes("-")) {
+          const parts = id.split("-");
+          if (parts.length > 2) expandedCatIdSet.add(parts.slice(0, -1).join("-"));
+        }
+      });
+      const expandedCatIds = Array.from(expandedCatIdSet);
+
+      for (let i = 0; i < expandedCatIds.length; i += 40) {
+        const chunk = expandedCatIds.slice(i, i + 40);
         
-        // 🌟 1. 기본 쿼리 생성
-        let query = supabase.from('question_db').select('*').or(`item_id.in.(${chunk.join(',')}),taxonomy_id.in.(${chunk.join(',')}),thk_taxonomy_id.in.(${chunk.join(',')})`);
+        // 🌟 1. 기본 쿼리 생성 (sub_taxonomy_id 까지 포함하여 단원 검색 범위 확장)
+        let query = supabase.from('question_db').select('*').or(`item_id.in.(${chunk.join(',')}),taxonomy_id.in.(${chunk.join(',')}),sub_taxonomy_id.in.(${chunk.join(',')}),thk_taxonomy_id.in.(${chunk.join(',')})`);
         
         // 🌟 2. 검색 교재명 필터 적용 (두 단어 모두 포함)
         if (addBookName1.trim()) query = query.ilike("book_name", `%${addBookName1.trim()}%`);
@@ -370,12 +485,26 @@ export default function LeftPanel({ examData }: { examData: any }) {
         });
       }
 
+      const mainExclusion = await fetchMainTextbookExclusionSet(supabase);
       const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i:any) => i.question_id)), []));
-      let newQs = allSearched.filter(q => !existingIds.has(q.question_id) && !q.is_hidden && q.is_hidden !== 'Y');
+      const uniqueSearchedMap = new Map<string, any>();
+      allSearched.forEach((q: any) => {
+        if (q && q.question_id) uniqueSearchedMap.set(String(q.question_id), q);
+      });
+      let newQs = Array.from(uniqueSearchedMap.values()).filter(
+        q =>
+          !existingIds.has(q.question_id) &&
+          !q.is_hidden &&
+          q.is_hidden !== 'Y' &&
+          q.is_hidden !== 'true' &&
+          !isMainTextbookQuestion(q, mainExclusion) &&
+          matchesSourceCategoryFilter(q, addSourceCategories)
+      );
       
       // 랜덤하게 50개만 보여주기
       newQs = newQs.sort(() => 0.5 - Math.random()).slice(0, 50); 
       
+      await hydrateMissingQuestionImages(supabase, newQs);
       await fetchDepthMappings(newQs); 
       await fetchParentSources(newQs);
       
@@ -388,11 +517,24 @@ export default function LeftPanel({ examData }: { examData: any }) {
     }
   };
 
-  const addNewQuestionToExam = (q: any) => {
+  const addNewQuestionToExam = async (q: any) => {
     const cloned = JSON.parse(JSON.stringify(q));
-    const newGroup = { id: `single_${cloned.question_id}_${Date.now()}`, is_group: false, items: [cloned] };
+    let bundleItems = await ensureCompleteSubQuestionBundles(supabase, [cloned], newSearchResults, false);
+    if (bundleItems.length > 1) {
+      await hydrateMissingQuestionImages(supabase, bundleItems);
+      await fetchDepthMappings(bundleItems);
+      await fetchParentSources(bundleItems);
+      bundleItems = [...bundleItems].sort(compareSubQuestions);
+    }
+    const addedIds = new Set(bundleItems.map((item: any) => String(item.question_id)));
+    const newGroup = {
+      id: bundleItems.length > 1 ? `merged_${Date.now()}_${bundleItems[0].question_id}` : `single_${cloned.question_id}_${Date.now()}`,
+      is_group: bundleItems.length > 1,
+      is_merged_text: bundleItems.length > 1,
+      items: bundleItems,
+    };
     setQuestions((prev: any) => [...prev, newGroup]);
-    setNewSearchResults((prev: any) => prev.filter((item: any) => item.question_id !== q.question_id));
+    setNewSearchResults((prev: any) => prev.filter((item: any) => !addedIds.has(String(item.question_id))));
     setTimeout(() => {
       const rightList = document.getElementById('right-problem-list');
       if (rightList) rightList.scrollTo({ top: rightList.scrollHeight, behavior: 'smooth' });
@@ -434,7 +576,14 @@ export default function LeftPanel({ examData }: { examData: any }) {
               <span className="text-slate-800 font-bold text-lg">📊 출제 통계 요약</span>
               <div className="text-right">
                 <span className="text-slate-400 font-bold text-sm">학습지 문제 수</span>
-                <span className="text-3xl font-bold text-brand ml-2">{questions.length}<span className="text-base text-slate-500 ml-1">제</span></span>
+                <span className="text-3xl font-bold text-brand ml-2">
+                  {questions.length}<span className="text-base text-slate-500 ml-1">제</span>
+                </span>
+                {questions.reduce((acc: number, g: any) => acc + (g.items?.length || 1), 0) !== questions.length && (
+                  <div className="text-[11px] font-bold text-slate-400 mt-0.5">
+                    비병합 개별 기준 총 {questions.reduce((acc: number, g: any) => acc + (g.items?.length || 1), 0)}문항
+                  </div>
+                )}
               </div>
             </div>
             <div className="flex justify-around items-stretch h-28 px-4 pb-2 mt-2 border-b border-slate-100">
@@ -488,20 +637,21 @@ export default function LeftPanel({ examData }: { examData: any }) {
                   )}
                 </div>
 
-                <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm overflow-x-auto no-scrollbar">
-                  <label className="flex items-center space-x-2 px-1 cursor-pointer shrink-0">
+                <div className="flex flex-wrap justify-between items-center gap-1.5 bg-white p-2 rounded-lg border border-slate-200 shadow-sm">
+                  <label className="flex items-center space-x-1.5 px-1 cursor-pointer shrink-0">
                     <input type="checkbox" checked={questions.length > 0 && checkedIds.size === questions.length} onChange={(e) => toggleAllChecks(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-brand cursor-pointer" />
-                    <span className="text-[13px] font-bold text-slate-600 whitespace-nowrap">전체 선택</span>
+                    <span className="text-[12px] font-bold text-slate-600 whitespace-nowrap">전체 선택</span>
                   </label>
-                  <div className="flex space-x-1.5 shrink-0 ml-auto">
-                    <button onClick={moveSelectedToTop} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↑ 맨 위로</button>
-                    <button onClick={moveSelectedToBottom} className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↓ 맨 아래로</button>
+                  <div className="flex flex-wrap gap-1 items-center ml-auto">
+                    <button onClick={moveSelectedToTop} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11.5px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↑ 맨 위로</button>
+                    <button onClick={moveSelectedToBottom} className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-600 text-[11.5px] font-bold rounded border border-slate-200 transition-colors whitespace-nowrap">↓ 맨 아래로</button>
                     
-                    <button onClick={sortBySource} className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 text-xs font-bold rounded border border-blue-200 transition-colors shadow-sm whitespace-nowrap" title="교재 및 페이지/번호 순으로 전체 정렬">🔄 순서 정렬</button>
+                    <button onClick={sortBySource} className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 text-[11.5px] font-bold rounded border border-blue-200 transition-colors shadow-sm whitespace-nowrap" title="교재 및 페이지/번호 순으로 전체 정렬">🔄 순서 정렬</button>
                     
-                    <button onClick={autoMergeSubQuestions} className="px-2.5 py-1.5 bg-violet-50 hover:bg-violet-100 text-violet-700 text-xs font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 정렬/병합</button>
-                    <button onClick={mergeSelected} className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-bold rounded border border-indigo-200 transition-colors shadow-sm whitespace-nowrap">🔗 선택 병합</button>
-                    <button onClick={deleteSelected} className="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 text-xs font-bold rounded border border-rose-200 transition-colors whitespace-nowrap">🗑️ 삭제</button>
+                    <button onClick={autoMergeSubQuestions} className="px-2 py-1 bg-violet-50 hover:bg-violet-100 text-violet-700 text-[11.5px] font-bold rounded border border-violet-200 transition-colors shadow-sm whitespace-nowrap" title="서브문항 일괄 압축">✨ 자동 정렬/병합</button>
+                    <button onClick={mergeSelected} className="px-2 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-[11.5px] font-bold rounded border border-indigo-200 transition-colors shadow-sm whitespace-nowrap">🔗 선택 병합</button>
+                    <button onClick={unmergeAllQuestions} className="px-2 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-[11.5px] font-bold rounded border border-amber-200 transition-colors shadow-sm whitespace-nowrap" title="묶여 있는 모든 서브문항 병합을 일괄 해제">✂️ 전체 병합 해제</button>
+                    <button onClick={deleteSelected} className="px-2 py-1 bg-rose-50 hover:bg-rose-100 text-rose-600 text-[11.5px] font-bold rounded border border-rose-200 transition-colors whitespace-nowrap">🗑️ 삭제</button>
                   </div>
                 </div>
               </div>
@@ -587,6 +737,29 @@ export default function LeftPanel({ examData }: { examData: any }) {
 
               {/* 🌟 1. 검색 필터 UI 패널 */}
               <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 shadow-inner space-y-3">
+                <div className="flex items-center justify-between bg-white px-3.5 py-2 rounded-lg border border-slate-200">
+                  <span className="text-xs font-bold text-slate-600">출처 교재 구분 필터 (교재명 단어 포함)</span>
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center space-x-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={addSourceCategories.extra}
+                        onChange={(e) => setAddSourceCategories((prev) => ({ ...prev, extra: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-brand rounded border-slate-300 cursor-pointer"
+                      />
+                      <span className="text-slate-700 font-bold text-xs">추가문제</span>
+                    </label>
+                    <label className="flex items-center space-x-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={addSourceCategories.twinSimilar}
+                        onChange={(e) => setAddSourceCategories((prev) => ({ ...prev, twinSimilar: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-brand rounded border-slate-300 cursor-pointer"
+                      />
+                      <span className="text-slate-700 font-bold text-xs">쌍둥이/유사</span>
+                    </label>
+                  </div>
+                </div>
                 <div className="grid grid-cols-2 gap-6">
                   <div>
                     <label className="block text-xs font-bold text-slate-500 mb-2">교재명 키워드 필터</label>
@@ -667,8 +840,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
                         .sort((a, b) => compareNodes(a, addMasterData[currentAddD1].children[currentAddD2].children[a], b, addMasterData[currentAddD1].children[currentAddD2].children[b]))
                         .map(k => (
                           <AddTreeNode key={k} nodeKey={k} node={addMasterData[currentAddD1].children[currentAddD2].children[k]} depth={3} selectedAddIds={addSelectedCatIds} 
-                            toggleAddItem={(id: string, chk: boolean) => setAddSelectedCatIds((prev:any) => { const n = new Set(prev); chk ? n.add(id) : n.delete(id); return n; })} 
-                            toggleAddFolder={(node: any, chk: boolean) => { const ids: string[] = []; const trav = (n: any) => { if(n.itemId) ids.push(n.itemId); if(n.children) Object.values(n.children).forEach(trav); }; trav(node); setAddSelectedCatIds((prev:any) => { const n = new Set(prev); ids.forEach((id: string) => chk ? n.add(id) : n.delete(id)); return n; }); }} />
+                            toggleAddItem={(idOrIds: string | string[], chk: boolean) => { const targetIds = Array.isArray(idOrIds) ? idOrIds : [idOrIds]; setAddSelectedCatIds((prev:any) => { const n = new Set(prev); targetIds.forEach((id: string) => { if (!id) return; chk ? n.add(id) : n.delete(id); }); return n; }); }} 
+                            toggleAddFolder={(node: any, chk: boolean) => { const ids = getAllAddIds(node); setAddSelectedCatIds((prev:any) => { const n = new Set(prev); ids.forEach((id: string) => chk ? n.add(id) : n.delete(id)); return n; }); }} />
                         ))
                       ) : (
                         <div className="text-center py-10 text-slate-400 font-bold">해당 학년/학기에 등록된 단원 정보가 없습니다.</div>
@@ -717,6 +890,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
                    filteredNewSearchResults.map((q: any) => {
                      const d = q.difficulty || getDiffLabelByRate(q.solving_probability);
                      const d6 = getDepth6Name(q, depth6Map);
+                     const subD6 = q.sub_taxonomy_id && q.sub_taxonomy_id !== q.taxonomy_id ? getSubDepth6Name(q, depth6Map) : "";
                      let diffColor = "text-blue-500 bg-blue-50 border-blue-100";
                      if(d === '최하') diffColor = "text-slate-500 bg-slate-100 border-slate-200";
                      else if(d === '하') diffColor = "text-sky-500 bg-sky-50 border-sky-100";
@@ -727,10 +901,13 @@ export default function LeftPanel({ examData }: { examData: any }) {
                        <div key={q.question_id} className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm relative hover:border-brand transition-colors group">
                          <div className="flex justify-between items-start mb-3 border-b border-slate-100 pb-3">
                            <div className="flex flex-col gap-1.5">
-                             <div className="flex gap-1.5 items-center">
+                             <div className="flex gap-1.5 items-center flex-wrap">
                                <span className="text-xs font-bold text-slate-500 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded">{getTypeName(q)}</span>
                                <span className={`text-xs font-bold px-1.5 py-0.5 rounded border ${diffColor}`}>{d}</span>
                                <span className="text-xs font-bold text-slate-400 bg-white border border-slate-200 px-1.5 py-0.5 rounded">{d6}</span>
+                               {subD6 && (
+                                 <span className="text-xs font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">🧭 서브: {subD6}</span>
+                               )}
                              </div>
                              {/* 검색 결과에서도 출처(교재/페이지) 표시 */}
                              <div className="text-xs font-bold text-slate-500 flex items-center gap-1.5 mt-1">
@@ -745,7 +922,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
                            <button onClick={() => addNewQuestionToExam(q)} className="bg-brand hover:bg-blue-900 text-white text-[12px] font-bold px-4 py-2 rounded shadow-sm transition-colors shrink-0">➕ 추가</button>
                          </div>
                          <div className="font-myungjo text-[15px] font-semibold leading-[2.0] text-slate-800 break-keep" dangerouslySetInnerHTML={{ __html: formatText(q.question) }} />
-                         {q.image_url && <img src={getCleanUrl(q.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded" alt="" />}
+                         {q.image_url && getCleanUrl(q.image_url) && <img src={getCleanUrl(q.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded object-contain" alt="" />}
+                         {q.image_2_url && getCleanUrl(q.image_2_url) && <img src={getCleanUrl(q.image_2_url)} className="max-h-32 mt-2 mix-blend-multiply border border-slate-200 rounded object-contain" alt="" />}
                        </div>
                      );
                    })
@@ -790,7 +968,8 @@ export default function LeftPanel({ examData }: { examData: any }) {
                     </div>
                     <div className="mb-2">{renderParentRelations(altQ, parentSourceMap)}</div>
                     <div className="font-myungjo font-semibold text-[15px] text-slate-800 leading-[2.0] break-keep" dangerouslySetInnerHTML={{ __html: formatText(altQ.question) }}></div>
-                    {altQ.image_url && <img src={getCleanUrl(altQ.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded" alt="Q" />}
+                    {altQ.image_url && getCleanUrl(altQ.image_url) && <img src={getCleanUrl(altQ.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded object-contain" alt="Q" />}
+                    {altQ.image_2_url && getCleanUrl(altQ.image_2_url) && <img src={getCleanUrl(altQ.image_2_url)} className="max-h-32 mt-2 mix-blend-multiply border border-slate-200 rounded object-contain" alt="Q2" />}
                   </div>
                  );
                })

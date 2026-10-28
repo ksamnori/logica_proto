@@ -2,16 +2,431 @@
 import React from "react";
 
 export const getCleanUrl = (url: string) => {
-  if (!url || url === 'null') return '';
-  let validUrl = url;
-  if (typeof validUrl === 'string' && validUrl.trim().startsWith('[')) { 
-    try { validUrl = JSON.parse(validUrl)[0]; } catch(e) {} 
+  if (!url || url === 'null' || url === 'undefined') return '';
+  let validUrl = String(url).trim();
+  if (validUrl.startsWith('[')) { 
+    try {
+      const parsed = JSON.parse(validUrl);
+      if (Array.isArray(parsed) && parsed.length > 0) validUrl = String(parsed[0] || '').trim();
+    } catch(e) {} 
   }
-  if (validUrl && validUrl !== 'null' && !validUrl.startsWith('http') && !validUrl.startsWith('data:image')) {
+  validUrl = validUrl.replace(/^["']|["']$/g, '').trim();
+  const lower = validUrl.toLowerCase();
+  if (!validUrl || lower === 'null' || lower === 'undefined') return '';
+  if (!lower.startsWith('http') && !lower.startsWith('data:image') && !lower.startsWith('blob:')) {
     const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://kfwlmbwornivkrvoeqdh.supabase.co';
-    validUrl = `${SUPABASE_URL}/storage/v1/object/public/question_images/${validUrl.replace(/^\/+/, '')}`;
+    const cleanPath = validUrl.replace(/^\/+/, '').replace(/^question_images\/+/, '');
+    validUrl = `${SUPABASE_URL}/storage/v1/object/public/question_images/${cleanPath}`;
   }
   return validUrl;
+};
+
+// 🌟 메인교재(주교재/본교재) 판별 및 제외용 캐시 및 헬퍼 함수
+let cachedMainExclusion: {
+  timestamp: number;
+  mainBookTitles: Set<string>;
+  mainQuestionIds: Set<string>;
+} | null = null;
+
+const NON_MAIN_BOOK_KEYWORDS_REGEX = /(?:추가\s*문제|추가\s*문항|_추가|추가_|추가|쌍둥이|TWIN|유사|SIMILAR|워크북|WORKBOOK|부교재|연산|주간\s*테스트|중간\s*테스트|분기\s*테스트|단원\s*테스트|단원\s*평가|입학\s*테스트|진단\s*평가|테스트|평가|보충|클리닉|프린트|모의고사|기출)/i;
+
+export const fetchMainTextbookExclusionSet = async (supabaseClient: any) => {
+  if (cachedMainExclusion && Date.now() - cachedMainExclusion.timestamp < 60000) {
+    return cachedMainExclusion;
+  }
+  const mainBookTitles = new Set<string>();
+  const mainQuestionIds = new Set<string>();
+  try {
+    const { data: tbRows } = await supabaseClient
+      .from('textbook')
+      .select('book_id, title, book_type');
+
+    const mainBookIds: string[] = [];
+    if (Array.isArray(tbRows)) {
+      tbRows.forEach((tb: any) => {
+        const bType = String(tb.book_type || '').trim();
+        const bTitle = String(tb.title || '').trim();
+        if (!bTitle) return;
+        // book_type이 주교재/본교재이거나, 비-메인 키워드(쌍둥이/유사/추가문제/워크북/부교재/테스트)가 없는 주교재인 경우
+        if (
+          (bType === '주교재' || bType === '본교재' || !bType) &&
+          !NON_MAIN_BOOK_KEYWORDS_REGEX.test(bTitle)
+        ) {
+          mainBookTitles.add(bTitle);
+          if (tb.book_id) mainBookIds.push(tb.book_id);
+        }
+      });
+    }
+
+    if (mainBookIds.length > 0) {
+      let from = 0;
+      const step = 1000;
+      while (true) {
+        const { data: tqRows, error } = await supabaseClient
+          .from('textbook_question')
+          .select('question_id')
+          .in('book_id', mainBookIds)
+          .range(from, from + step - 1);
+        if (error || !tqRows || tqRows.length === 0) break;
+        tqRows.forEach((r: any) => {
+          if (r.question_id) mainQuestionIds.add(String(r.question_id).trim());
+        });
+        if (tqRows.length < step) break;
+        from += step;
+      }
+    }
+  } catch (e) {
+    console.error('메인교재 제외 목록 조회 실패:', e);
+  }
+
+  cachedMainExclusion = {
+    timestamp: Date.now(),
+    mainBookTitles,
+    mainQuestionIds,
+  };
+  return cachedMainExclusion;
+};
+
+export const isMainTextbookQuestion = (
+  q: any,
+  exclusion?: { mainBookTitles: Set<string>; mainQuestionIds: Set<string> } | null
+): boolean => {
+  if (!q) return false;
+
+  // 1) 쌍둥이(TWIN) / 유사(SIMILAR) 파생 문항은 시험지 출제용 문항이므로 메인교재가 아님
+  const deriv = String(q.derivation_type || '').trim().toUpperCase();
+  if (deriv === 'TWIN' || deriv === '쌍둥이' || deriv === '유사' || deriv === 'SIMILAR') {
+    return false;
+  }
+  const pType = String(q.problem_type || '').trim();
+  if (pType === '쌍둥이' || pType === '유사' || pType === 'TWIN') {
+    return false;
+  }
+
+  const bookName = String(q.book_name || '').trim();
+  const sourceBookName = String(q.source_book_name || '').trim();
+  const pdfSource = String(q.pdf_source || '').trim();
+  const combinedBook = `${bookName} ${sourceBookName} ${pdfSource}`.trim();
+
+  // 2) 교재명에 추가문제, 쌍둥이, 유사, 워크북, 부교재, 테스트, 평가 등이 포함되어 있으면 출제 허용 문항
+  if (NON_MAIN_BOOK_KEYWORDS_REGEX.test(combinedBook)) {
+    return false;
+  }
+
+  // 3) textbook(주교재) 및 textbook_question에 등록된 메인교재 문항인지 확인
+  const realQid = String(q.question_id || '').trim().replace(/_added_\d+$/, '');
+  if (exclusion?.mainQuestionIds?.has(realQid)) {
+    return true;
+  }
+  if (bookName && exclusion?.mainBookTitles?.has(bookName)) {
+    return true;
+  }
+  if (sourceBookName && exclusion?.mainBookTitles?.has(sourceBookName)) {
+    return true;
+  }
+
+  // 4) 교재 업로드(/book-upload)를 통해 올라가 book_name이 비어있고 source_book_name만 있는 일반 교재 문항
+  if (!bookName && sourceBookName) {
+    return true;
+  }
+
+  // 5) 로지카 본교재 명칭(예: 초등로지카 MAX 4-2, 초등로지카 Core 3-1 등)이면서 추가문제/쌍둥이/유사/워크북/테스트가 아닌 경우
+  if (/(?:로지카|LOGICA)/i.test(combinedBook)) {
+    return true;
+  }
+
+  return false;
+};
+
+// 🌟 문항이 '쌍둥이/유사' 문항인지 판별하는 헬퍼
+export const isTwinOrSimilarQuestion = (q: any): boolean => {
+  if (!q) return false;
+  const deriv = String(q.derivation_type || '').trim().toUpperCase();
+  if (deriv === 'TWIN' || deriv === '쌍둥이' || deriv === '유사' || deriv === 'SIMILAR') {
+    return true;
+  }
+  const pType = String(q.problem_type || '').trim().toUpperCase();
+  if (pType === '쌍둥이' || pType === '유사' || pType === 'TWIN' || pType === 'SIMILAR') {
+    return true;
+  }
+  const bookName = String(q.book_name || '').trim();
+  const sourceBookName = String(q.source_book_name || '').trim();
+  const pdfSource = String(q.pdf_source || '').trim();
+  const combinedBook = `${bookName} ${sourceBookName} ${pdfSource}`.trim();
+
+  if (/(?:쌍둥이|TWIN|유사|SIMILAR)/i.test(combinedBook)) {
+    return true;
+  }
+
+  const qNumStr = String(q.question_number || '').trim();
+  if (/-(?:T|S)\d+$/i.test(qNumStr)) {
+    return true;
+  }
+
+  const hasExplicitExtraBook = /(?:추가\s*문제|추가\s*문항|_추가|추가_|추가)/i.test(combinedBook);
+  if (!hasExplicitExtraBook) {
+    const pid = String(q.parent_question_id || '').trim();
+    if (pid && pid !== 'null' && pid !== 'undefined') {
+      return true;
+    }
+    if (q.parent_relations && String(q.parent_relations) !== 'null') {
+      let parsed = q.parent_relations;
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch (e) { parsed = null; }
+      }
+      if (Array.isArray(parsed)) parsed = parsed[0];
+      if (parsed && typeof parsed === 'object' && (parsed.twin_id || parsed.similars_ids || parsed.similar_ids)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+};
+
+// 🌟 Step 1 & Step 2 '추가문제' / '쌍둥이/유사' 체크박스 필터 매칭 헬퍼
+// book_name 또는 source_book_name 에 '추가'('추가문제' 체크 시) 또는 '쌍둥이'/'유사'('쌍둥이/유사' 체크 시) 단어가 포함된 문항만 허용
+export const matchesSourceCategoryFilter = (
+  q: any,
+  sourceCategories?: { extra?: boolean; twinSimilar?: boolean } | null
+): boolean => {
+  if (!q) return false;
+  const allowExtra = sourceCategories?.extra ?? true;
+  const allowTwinSimilar = sourceCategories?.twinSimilar ?? true;
+  if (!allowExtra && !allowTwinSimilar) return false;
+
+  const bookName = String(q.book_name || '').trim();
+  const sourceBookName = String(q.source_book_name || '').trim();
+  const bookText = `${bookName} ${sourceBookName}`.trim();
+
+  const hasExtraWord = bookText.includes('추가');
+  const hasTwinSimilarWord =
+    bookText.includes('쌍둥이') ||
+    bookText.includes('유사');
+
+  if (allowExtra && hasExtraWord) return true;
+  if (allowTwinSimilar && hasTwinSimilarWord) return true;
+  return false;
+};
+
+// 🌟 서브 분류(sub_taxonomy_id) 등으로 불러온 문항에 이미지가 누락된 경우
+// textbook_question.raw_metadata, 부모 문항(parent_question_id), 또는 동일 출처/페이지/번호 문항에서 이미지를 자동 복원하고 DB에도 백필하는 헬퍼
+export const hydrateMissingQuestionImages = async (supabaseClient: any, questionsArray: any[]) => {
+  if (!Array.isArray(questionsArray) || questionsArray.length === 0) return;
+
+  const hasValidImg = (val: any) =>
+    Boolean(val && String(val).trim() !== '' && String(val) !== 'null' && String(val) !== 'undefined');
+
+  // 1) 문항 자체의 raw_metadata / raw_source_tags 내부에 이미지가 들어있는 경우 우선 복원
+  questionsArray.forEach((q: any) => {
+    if (!q || hasValidImg(q.image_url)) return;
+    const rawMeta = q.raw_metadata || q.raw_source_tags;
+    if (rawMeta) {
+      let parsed = rawMeta;
+      if (typeof parsed === 'string') {
+        try { parsed = JSON.parse(parsed); } catch (e) { parsed = null; }
+      }
+      if (parsed && typeof parsed === 'object') {
+        if (hasValidImg(parsed.image_url)) q.image_url = parsed.image_url;
+        if (!hasValidImg(q.image_2_url) && hasValidImg(parsed.image_2_url)) q.image_2_url = parsed.image_2_url;
+        if (!q.image_box && parsed.image_box) q.image_box = parsed.image_box;
+        if (!q.image_2_box && parsed.image_2_box) q.image_2_box = parsed.image_2_box;
+        if (!hasValidImg(q.answer_image_url) && hasValidImg(parsed.answer_image_url)) q.answer_image_url = parsed.answer_image_url;
+      }
+    }
+  });
+
+  const stillMissing = questionsArray.filter((q: any) => q && !hasValidImg(q.image_url));
+  if (stillMissing.length === 0) return;
+
+  const toRealId = (qid: any) => String(qid || '').trim().replace(/_added_\d+$/, '');
+  const missingIds = Array.from(new Set(stillMissing.map((q: any) => toRealId(q.question_id)).filter(Boolean)));
+  const patchedDbPayloads = new Map<string, Record<string, any>>();
+
+  // 2) textbook_question.raw_metadata 에서 복원
+  try {
+    for (let i = 0; i < missingIds.length; i += 100) {
+      const chunk = missingIds.slice(i, i + 100);
+      const { data: tqRows } = await supabaseClient
+        .from('textbook_question')
+        .select('question_id, raw_metadata')
+        .in('question_id', chunk);
+
+      if (Array.isArray(tqRows)) {
+        const metaByQid = new Map<string, any>();
+        tqRows.forEach((row: any) => {
+          if (!row.question_id || !row.raw_metadata) return;
+          let meta = row.raw_metadata;
+          if (typeof meta === 'string') {
+            try { meta = JSON.parse(meta); } catch (e) { meta = null; }
+          }
+          if (meta && typeof meta === 'object' && (hasValidImg(meta.image_url) || hasValidImg(meta.image_2_url))) {
+            metaByQid.set(String(row.question_id).trim(), meta);
+          }
+        });
+
+        stillMissing.forEach((q: any) => {
+          const rId = toRealId(q.question_id);
+          const meta = metaByQid.get(rId);
+          if (!meta) return;
+          const dbPatch: Record<string, any> = {};
+          if (!hasValidImg(q.image_url) && hasValidImg(meta.image_url)) {
+            q.image_url = meta.image_url;
+            dbPatch.image_url = meta.image_url;
+          }
+          if (!hasValidImg(q.image_2_url) && hasValidImg(meta.image_2_url)) {
+            q.image_2_url = meta.image_2_url;
+            dbPatch.image_2_url = meta.image_2_url;
+          }
+          if (!q.image_box && meta.image_box) {
+            q.image_box = meta.image_box;
+            dbPatch.image_box = meta.image_box;
+          }
+          if (!q.image_2_box && meta.image_2_box) {
+            q.image_2_box = meta.image_2_box;
+            dbPatch.image_2_box = typeof meta.image_2_box === 'object' ? JSON.stringify(meta.image_2_box) : meta.image_2_box;
+          }
+          if (!hasValidImg(q.answer_image_url) && hasValidImg(meta.answer_image_url)) {
+            q.answer_image_url = meta.answer_image_url;
+            dbPatch.answer_image_url = meta.answer_image_url;
+          }
+          if (Object.keys(dbPatch).length > 0) {
+            patchedDbPayloads.set(rId, { ...(patchedDbPayloads.get(rId) || {}), ...dbPatch });
+          }
+        });
+      }
+    }
+  } catch (e) {}
+
+  // 3) 부모 문항(parent_question_id)에서 이미지 상속 복원 (쌍둥이/유사 문항 생성 시 image_box만 복사되고 image_url이 누락된 경우)
+  const missingWithParent = questionsArray.filter(
+    (q: any) =>
+      q &&
+      !hasValidImg(q.image_url) &&
+      q.parent_question_id &&
+      String(q.parent_question_id).trim() !== '' &&
+      String(q.parent_question_id).trim() !== 'null'
+  );
+  if (missingWithParent.length > 0) {
+    try {
+      const parentIds = Array.from(
+        new Set(missingWithParent.map((q: any) => String(q.parent_question_id).trim()))
+      );
+      const parentMap = new Map<string, any>();
+      for (let i = 0; i < parentIds.length; i += 100) {
+        const chunk = parentIds.slice(i, i + 100);
+        const { data: pRows } = await supabaseClient
+          .from('question_db')
+          .select('question_id, image_url, image_2_url, image_box, image_2_box, answer_image_url, answer_image_2_url, answer_image_box')
+          .in('question_id', chunk);
+        if (Array.isArray(pRows)) {
+          pRows.forEach((p: any) => {
+            if (p.question_id) parentMap.set(String(p.question_id).trim(), p);
+          });
+        }
+      }
+
+      missingWithParent.forEach((q: any) => {
+        const p = parentMap.get(String(q.parent_question_id).trim());
+        if (!p) return;
+        const rId = toRealId(q.question_id);
+        const dbPatch: Record<string, any> = {};
+        if (!hasValidImg(q.image_url) && hasValidImg(p.image_url)) {
+          q.image_url = p.image_url;
+          dbPatch.image_url = p.image_url;
+        }
+        if (!hasValidImg(q.image_2_url) && hasValidImg(p.image_2_url)) {
+          q.image_2_url = p.image_2_url;
+          dbPatch.image_2_url = p.image_2_url;
+        }
+        if (!q.image_box && p.image_box) {
+          q.image_box = p.image_box;
+          dbPatch.image_box = p.image_box;
+        }
+        if (!q.image_2_box && p.image_2_box) {
+          q.image_2_box = p.image_2_box;
+          dbPatch.image_2_box = p.image_2_box;
+        }
+        if (Object.keys(dbPatch).length > 0) {
+          patchedDbPayloads.set(rId, { ...(patchedDbPayloads.get(rId) || {}), ...dbPatch });
+        }
+      });
+    } catch (e) {}
+  }
+
+  // 4) 동일 교재(source_book_name / book_name / pdf_source) + 동일 페이지 + 동일 문항번호의 다른 행에 이미지가 존재하는 경우 복원
+  const stillMissingAfterParent = questionsArray.filter((q: any) => q && !hasValidImg(q.image_url));
+  if (stillMissingAfterParent.length > 0) {
+    try {
+      const booksToLookup = Array.from(
+        new Set(
+          stillMissingAfterParent
+            .flatMap((q: any) => [q.book_name, q.source_book_name, q.pdf_source])
+            .map((s: any) => (s ? String(s).trim() : ''))
+            .filter(Boolean)
+        )
+      ).slice(0, 10);
+
+      if (booksToLookup.length > 0) {
+        const { data: siblingRows } = await supabaseClient
+          .from('question_db')
+          .select('question_id, book_name, source_book_name, pdf_source, final_printed_page, detected_page_num, question_number, sub_num, image_url, image_2_url, image_box, image_2_box, answer_image_url')
+          .in('source_book_name', booksToLookup)
+          .not('image_url', 'is', null)
+          .limit(1000);
+
+        if (Array.isArray(siblingRows) && siblingRows.length > 0) {
+          const makeKey = (row: any) => {
+            const page = String(row.final_printed_page || row.detected_page_num || '').replace(/[^0-9]/g, '');
+            const qn = String(row.question_number || '').trim();
+            const sn = String(row.sub_num ?? 0).trim();
+            return `${page}__${qn}__${sn}`;
+          };
+          const siblingMap = new Map<string, any>();
+          siblingRows.forEach((s: any) => {
+            if (hasValidImg(s.image_url)) {
+              siblingMap.set(makeKey(s), s);
+            }
+          });
+
+          stillMissingAfterParent.forEach((q: any) => {
+            const match = siblingMap.get(makeKey(q));
+            if (!match) return;
+            const rId = toRealId(q.question_id);
+            const dbPatch: Record<string, any> = {};
+            if (!hasValidImg(q.image_url) && hasValidImg(match.image_url)) {
+              q.image_url = match.image_url;
+              dbPatch.image_url = match.image_url;
+            }
+            if (!hasValidImg(q.image_2_url) && hasValidImg(match.image_2_url)) {
+              q.image_2_url = match.image_2_url;
+              dbPatch.image_2_url = match.image_2_url;
+            }
+            if (!q.image_box && match.image_box) {
+              q.image_box = match.image_box;
+              dbPatch.image_box = match.image_box;
+            }
+            if (!q.image_2_box && match.image_2_box) {
+              q.image_2_box = match.image_2_box;
+              dbPatch.image_2_box = match.image_2_box;
+            }
+            if (Object.keys(dbPatch).length > 0) {
+              patchedDbPayloads.set(rId, { ...(patchedDbPayloads.get(rId) || {}), ...dbPatch });
+            }
+          });
+        }
+      }
+    } catch (e) {}
+  }
+
+  // 복원된 이미지 정보를 백그라운드에서 question_db 에도 영구 반영
+  if (patchedDbPayloads.size > 0) {
+    Promise.all(
+      Array.from(patchedDbPayloads.entries()).map(([qId, payload]) =>
+        supabaseClient.from('question_db').update(payload).eq('question_id', qId)
+      )
+    ).catch(() => {});
+  }
 };
 
 export const getDiffLabelByRate = (rate: number | null | undefined) => {
@@ -45,10 +460,11 @@ export const smartSplitTaxonomy = (pathStr: string) => {
   return merged.filter(p => p !== '');
 };
 
-// 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다.
+// 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다. (sub_taxonomy_id 폴백 포함)
 export const getDepth5Name = (q: any, depth5Map: Record<string, string>) => {
   const tId = q?.taxonomy_id ? String(q.taxonomy_id).trim().toUpperCase() : null;
   const iId = q?.item_id ? String(q.item_id).trim().toUpperCase() : null;
+  const subId = q?.sub_taxonomy_id ? String(q.sub_taxonomy_id).trim().toUpperCase() : null;
   if (tId && depth5Map[tId]) return depth5Map[tId];
   if (iId && depth5Map[iId]) return depth5Map[iId];
   if (tId && tId.includes("-")) {
@@ -59,13 +475,23 @@ export const getDepth5Name = (q: any, depth5Map: Record<string, string>) => {
     const parts = smartSplitTaxonomy(q.taxonomy_name);
     return parts.length >= 5 ? parts[4] : parts[parts.length - 1];
   }
+  if (subId && depth5Map[subId]) return depth5Map[subId];
+  if (subId && subId.includes("-")) {
+    const parentCat = subId.split("-").slice(0, -1).join("-");
+    if (depth5Map[parentCat]) return depth5Map[parentCat];
+  }
+  if (q?.sub_taxonomy_name) {
+    const parts = smartSplitTaxonomy(q.sub_taxonomy_name);
+    return parts.length >= 5 ? parts[4] : parts[parts.length - 1];
+  }
   return '분류 없음';
 };
 
-// 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다.
+// 🌟 사고력 문제라도 교과 분류(기본 taxonomy)를 출력하도록 thk_taxonomy 우선 적용 로직을 제거했습니다. (sub_taxonomy_id 폴백 포함)
 export const getDepth6Name = (q: any, depth6Map: Record<string, string>) => {
   const tId = q?.taxonomy_id ? String(q.taxonomy_id).trim().toUpperCase() : null;
   const iId = q?.item_id ? String(q.item_id).trim().toUpperCase() : null;
+  const subId = q?.sub_taxonomy_id ? String(q.sub_taxonomy_id).trim().toUpperCase() : null;
   if (tId && depth6Map[tId]) return depth6Map[tId];
   if (iId && depth6Map[iId]) return depth6Map[iId];
   if (tId && tId.includes("-")) {
@@ -76,7 +502,32 @@ export const getDepth6Name = (q: any, depth6Map: Record<string, string>) => {
     const parts = smartSplitTaxonomy(q.taxonomy_name);
     return parts.length >= 6 ? parts[5] : parts[parts.length - 1];
   }
+  if (subId && depth6Map[subId]) return depth6Map[subId];
+  if (subId && subId.includes("-")) {
+    const parentCat = subId.split("-").slice(0, -1).join("-");
+    if (depth6Map[parentCat]) return depth6Map[parentCat];
+  }
+  if (q?.sub_taxonomy_name) {
+    const parts = smartSplitTaxonomy(q.sub_taxonomy_name);
+    return parts.length >= 6 ? parts[5] : parts[parts.length - 1];
+  }
   return '유형 분류 없음';
+};
+
+// 🌟 서브 분류(sub_taxonomy_id)가 존재할 때 해당 서브 분류의 Depth 6 이름을 반환하는 헬퍼
+export const getSubDepth6Name = (q: any, depth6Map: Record<string, string>): string => {
+  const subId = q?.sub_taxonomy_id ? String(q.sub_taxonomy_id).trim().toUpperCase() : null;
+  if (!subId || subId === "NULL" || subId === "NONE" || subId === "미분류") return "";
+  if (depth6Map[subId]) return depth6Map[subId];
+  if (subId.includes("-")) {
+    const parentCat = subId.split("-").slice(0, -1).join("-");
+    if (depth6Map[parentCat]) return depth6Map[parentCat];
+  }
+  if (q?.sub_taxonomy_name) {
+    const parts = smartSplitTaxonomy(q.sub_taxonomy_name);
+    return parts.length >= 6 ? parts[5] : parts[parts.length - 1];
+  }
+  return subId;
 };
 
 export const formatText = (str: string) => {
@@ -378,17 +829,22 @@ export const getDiagnosticMainScore = (gIdx: number): number => {
   ];
 };
 
+const getTwinVariantSuffix = (qNumRaw: any): string => {
+  const s = String(qNumRaw || "").trim();
+  const m = s.match(/-((?:T|S)\d+)$/i);
+  return m ? m[1].toUpperCase() : "";
+};
+
 export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDiagnosticMode: boolean = false): boolean => {
   if (!lastItem || !nextItem) return false;
-
-  const pid1 = String(lastItem.parent_question_id || "").trim();
-  const pid2 = String(nextItem.parent_question_id || "").trim();
   const qid1 = String(lastItem.question_id || "").trim();
   const qid2 = String(nextItem.question_id || "").trim();
+  if (qid1 && qid2 && qid1 === qid2) return false;
 
-  if (pid1 && pid1 !== "null" && pid1 === pid2) return true;
-  if (qid1 && pid2 && pid2 !== "null" && qid1 === pid2) return true;
-  if (qid2 && pid1 && pid1 !== "null" && qid2 === pid1) return true;
+  // 서로 다른 쌍둥이/유사 파생 번호(-T1 vs -T2, -T1 vs -S1 등)를 가진 문항끼리는 서브문항으로 묶지 않음
+  const var1 = getTwinVariantSuffix(lastItem.question_number);
+  const var2 = getTwinVariantSuffix(nextItem.question_number);
+  if ((var1 || var2) && var1 !== var2) return false;
 
   const gid1 = String(lastItem.group_id || "").trim();
   const gid2 = String(nextItem.group_id || "").trim();
@@ -404,8 +860,41 @@ export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDia
 
   const num1 = parseQuestionNumberParts(lastItem.question_number);
   const num2 = parseQuestionNumberParts(nextItem.question_number);
+  const sub1 = parseInt(String(lastItem.sub_num ?? "0"), 10) || 0;
+  const sub2 = parseInt(String(nextItem.sub_num ?? "0"), 10) || 0;
+  const ss1 = parseInt(String(lastItem.sub_sub_num ?? "0"), 10) || 0;
+  const ss2 = parseInt(String(nextItem.sub_sub_num ?? "0"), 10) || 0;
+
+  const text1 = String(lastItem.question || lastItem.text_question || "");
+  const text2 = String(nextItem.question || nextItem.text_question || "");
+  const [m1, m2] = extractSubMarkerBetween(text1, text2);
+
+  const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
+  const clean1 = text1.replace(removeNumberingRegex, "$1");
+  const clean2 = text2.replace(removeNumberingRegex, "$1");
+
+  let k = 0;
+  while (k < clean1.length && k < clean2.length && clean1[k] === clean2[k]) k++;
+  const commonPrefix = clean1.substring(0, k);
+  const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
+
   if (samePage && num1.main !== 99999 && num1.main === num2.main) {
-    return true;
+    const hasDistinctSubIndicator =
+      sub1 !== sub2 ||
+      ss1 !== ss2 ||
+      num1.dash !== num2.dash ||
+      num1.paren !== num2.paren ||
+      (m1 > 0 && m2 > 0 && m1 !== m2) ||
+      textOnlyCommon.length >= 6 ||
+      sub1 > 0 ||
+      sub2 > 0 ||
+      num1.dash > 0 ||
+      num2.dash > 0 ||
+      num1.paren > 0 ||
+      num2.paren > 0;
+    if (hasDistinctSubIndicator) {
+      return true;
+    }
   }
   if (
     isDiagnosticMode &&
@@ -416,36 +905,99 @@ export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDia
     return true;
   }
 
-  const sub1 = parseInt(String(lastItem.sub_num ?? "0"), 10) || 0;
-  const sub2 = parseInt(String(nextItem.sub_num ?? "0"), 10) || 0;
-  if (samePage && sub2 > 1 && (sub2 === sub1 + 1 || sub1 >= 1)) {
+  if (samePage && num1.main === num2.main && sub2 > 1 && (sub2 === sub1 + 1 || sub1 >= 1)) {
     return true;
   }
 
-  const text1 = String(lastItem.question || lastItem.text_question || "");
-  const text2 = String(nextItem.question || nextItem.text_question || "");
-  const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
-
-  const clean1 = text1.replace(removeNumberingRegex, "$1");
-  const clean2 = text2.replace(removeNumberingRegex, "$1");
-
-  let k = 0;
-  while (k < clean1.length && k < clean2.length && clean1[k] === clean2[k]) k++;
-  const commonPrefix = clean1.substring(0, k);
-  const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
-
-  if (samePage && textOnlyCommon.length >= 6) {
+  if (samePage && (num1.main === num2.main || num1.main === 99999 || num2.main === 99999) && textOnlyCommon.length >= 8) {
     return true;
   }
 
-  if (samePage) {
-    const [m1, m2] = extractSubMarkerBetween(text1, text2);
+  if (samePage && (num1.main === num2.main || num1.main === 99999 || num2.main === 99999)) {
     if (m1 >= 1 && m2 === m1 + 1) {
       return true;
     }
   }
 
   return false;
+};
+
+// 🌟 서브문항이 있는 문항이 선택되었을 때, 단원(taxonomy_id)이나 정답률/유형 필터 때문에
+// 같은 묶음의 다른 서브문항((1), (2), (3) 등)이 누락되지 않도록 DB 및 조회 풀에서 형제 서브문항을 모두 찾아 합쳐주는 헬퍼
+export const ensureCompleteSubQuestionBundles = async (
+  supabaseClient: any,
+  filteredData: any[],
+  allFetchedData: any[] = [],
+  isDiagnosticMode: boolean = false
+): Promise<any[]> => {
+  if (!Array.isArray(filteredData) || filteredData.length === 0) return [];
+
+  const resultMap = new Map<string, any>();
+  filteredData.forEach((q: any) => {
+    if (q && q.question_id) resultMap.set(String(q.question_id), q);
+  });
+
+  // 1) 이미 메모리에 로드된 allFetchedData 내에서 같은 묶음(서브문항)인 행이 있으면 즉시 포함
+  const currentList = Array.from(resultMap.values());
+  (allFetchedData || []).forEach((cand: any) => {
+    if (!cand || !cand.question_id) return;
+    if (cand.is_hidden === true || cand.is_hidden === "Y" || cand.is_hidden === "true") return;
+    const cid = String(cand.question_id);
+    if (resultMap.has(cid)) return;
+    if (currentList.some((existing) => shouldMergeAdjacentQuestions(existing, cand, isDiagnosticMode))) {
+      resultMap.set(cid, cand);
+    }
+  });
+
+  // 2) 다른 taxonomy_id 로 분류되어 초기 쿼리에 포함되지 않은 형제 서브문항을 DB에서 조회하여 보강
+  const hasSubIndicator = (q: any): boolean => {
+    if (!q) return false;
+    const sub = parseInt(String(q.sub_num ?? "0"), 10) || 0;
+    const ssub = parseInt(String(q.sub_sub_num ?? "0"), 10) || 0;
+    if (sub > 0 || ssub > 0) return true;
+    if (q.group_id && String(q.group_id) !== "null") return true;
+    const np = parseQuestionNumberParts(q.question_number);
+    if (np.dash > 0 || np.paren > 0) return true;
+    const txt = String(q.question || q.text_question || "");
+    if (extractStandaloneSubMarker(txt) > 0) return true;
+    return false;
+  };
+
+  const subCandidates = Array.from(resultMap.values()).filter(hasSubIndicator);
+  if (subCandidates.length > 0 && supabaseClient) {
+    try {
+      const booksToFetch = Array.from(
+        new Set(
+          subCandidates
+            .map((q: any) => String(q.source_book_name || q.book_name || "").trim())
+            .filter(Boolean)
+        )
+      ).slice(0, 15);
+
+      if (booksToFetch.length > 0) {
+        const { data: siblingRows } = await supabaseClient
+          .from("question_db")
+          .select("*")
+          .in("source_book_name", booksToFetch)
+          .limit(2000);
+
+        if (Array.isArray(siblingRows) && siblingRows.length > 0) {
+          const snapshot = Array.from(resultMap.values());
+          siblingRows.forEach((row: any) => {
+            if (!row || !row.question_id) return;
+            if (row.is_hidden === true || row.is_hidden === "Y" || row.is_hidden === "true") return;
+            const rid = String(row.question_id);
+            if (resultMap.has(rid)) return;
+            if (snapshot.some((existing) => shouldMergeAdjacentQuestions(existing, row, isDiagnosticMode))) {
+              resultMap.set(rid, row);
+            }
+          });
+        }
+      }
+    } catch (e) {}
+  }
+
+  return Array.from(resultMap.values());
 };
 
 export const buildMergedQuestionGroups = (rawQuestions: any[], isDiagnosticMode: boolean = false, preserveOrder: boolean = false): any[] => {

@@ -1,3 +1,4 @@
+import { normalizeMasterCategories } from "./normalize";
 // src/lib/classReport.ts
 // 반 전체 월간 성취도 리포트 데이터 (학생 개인 월간 리포트의 반 종합판)
 // - 대상: 그 반에 수강 중인 재원생 (이름에 '테스트'·'선생님'이 들어간 더미 학생 제외)
@@ -327,7 +328,7 @@ export async function buildClassReport(classId: string, ym: string, onStep?: (t:
   const items = await selectIn("master_item", "item_id, category_id", "item_id", taxIds);
   const itemToCat = new Map<string, string>(items.map((i: any) => [i.item_id, i.category_id]));
   const catIds = Array.from(new Set(taxIds.map(t => itemToCat.get(t) || t)));
-  const cats = await selectIn("master_category", "category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7", "category_id", catIds);
+  const cats = normalizeMasterCategories(await selectIn("master_category", "category_id, curriculum_version, depth1, depth2, depth3, depth4, depth5, depth6, depth7", "category_id", catIds));
   const catMap = new Map<string, any>(cats.map((c: any) => [c.category_id, c]));
   let compMap = new Map<string, { p: string | null; s: string | null }>();
   try {

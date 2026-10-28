@@ -1,15 +1,27 @@
 // src/app/exam/step2/RightPreview.tsx
 import React, { useState, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore, isSubNumberOnlyText, splitTrailingSubNumberText } from "./examUtils";
+import { getDiffLabelByRate, getTypeName, getDepth6Name, getSubDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore, isSubNumberOnlyText, splitTrailingSubNumberText } from "./examUtils";
 
 // 🌟 [핵심 수정] 배율이 없을 때 100%로 늘어나서 '거인증'이 생기는 것을 막기 위해 기본값을 'auto'로 변경
 const getBoxWidth = (box: any) => {
   if (!box || box === 'null' || box === 'undefined') return 'auto';
-  if (typeof box === 'string') {
-    try { const p = JSON.parse(box); return p && p.width ? `${p.width}%` : 'auto'; } catch(e) { return 'auto'; }
+  let parsed = box;
+  for (let i = 0; i < 3; i++) {
+    if (typeof parsed === 'string') {
+      try { parsed = JSON.parse(parsed); } catch(e) { break; }
+    } else {
+      break;
+    }
   }
-  return box.width ? `${box.width}%` : 'auto';
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.width !== undefined && parsed.width !== null) {
+    const w = Number(parsed.width);
+    if (!isNaN(w)) {
+      if (w >= 10 && w <= 100) return `${w}%`;
+      if (w > 0 && w <= 1) return `${Math.max(20, Math.round(w * 100))}%`;
+    }
+  }
+  return 'auto';
 };
 
 export default function RightPreview({ examData }: { examData: any }) {
@@ -289,6 +301,10 @@ export default function RightPreview({ examData }: { examData: any }) {
           difficulty: aiTargetInfo.q.difficulty,
           taxonomy_id: aiTargetInfo.q.taxonomy_id,
           taxonomy_name: aiTargetInfo.q.taxonomy_name,
+          sub_taxonomy_id: aiTargetInfo.q.sub_taxonomy_id || null,
+          sub_taxonomy_name: aiTargetInfo.q.sub_taxonomy_name || null,
+          thk_taxonomy_id: aiTargetInfo.q.thk_taxonomy_id || null,
+          thk_taxonomy_name: aiTargetInfo.q.thk_taxonomy_name || null,
           options: aiTargetInfo.q.options,
           image_url: aiTargetInfo.q.image_url,
           image_2_url: aiTargetInfo.q.image_2_url,
@@ -431,6 +447,7 @@ export default function RightPreview({ examData }: { examData: any }) {
            if (!kw) return true;
            const repQ = g.items[0];
            const d6 = String(getDepth6Name(repQ, depth6Map) || "").toLowerCase();
+           const subD6 = String(getSubDepth6Name(repQ, depth6Map) || "").toLowerCase();
            const tName = String(getTypeName(repQ) || "").toLowerCase();
            const numStr = `${idx + 1}번`;
            const itemMatch = g.items.some((q: any) => {
@@ -440,14 +457,19 @@ export default function RightPreview({ examData }: { examData: any }) {
              const bk = String(q.source_book_name || q.book_name || q.pdf_source || "").toLowerCase();
              const pg = String(q.final_printed_page || q.detected_page_num || "").toLowerCase();
              const qn = String(q.question_number || "").toLowerCase();
-             return txt.includes(kw) || ans.includes(kw) || exp.includes(kw) || bk.includes(kw) || pg.includes(kw) || qn.includes(kw);
+             const tax = String(q.taxonomy_id || "").toLowerCase();
+             const subTax = String(q.sub_taxonomy_id || "").toLowerCase();
+             const taxName = String(q.taxonomy_name || "").toLowerCase();
+             const subTaxName = String(q.sub_taxonomy_name || "").toLowerCase();
+             return txt.includes(kw) || ans.includes(kw) || exp.includes(kw) || bk.includes(kw) || pg.includes(kw) || qn.includes(kw) || tax.includes(kw) || subTax.includes(kw) || taxName.includes(kw) || subTaxName.includes(kw);
            });
-           return itemMatch || d6.includes(kw) || tName.includes(kw) || numStr.includes(kw);
+           return itemMatch || d6.includes(kw) || subD6.includes(kw) || tName.includes(kw) || numStr.includes(kw);
          }).map(({ g, idx }: { g: any; idx: number }) => {
            const qNum = idx + 1;
            const repQ = g.items[0];
            const isThk = isThinking(repQ);
-           const depth6Name = getDepth6Name(repQ, depth6Map); 
+           const depth6Name = getDepth6Name(repQ, depth6Map);
+           const subDepth6Name = repQ.sub_taxonomy_id && repQ.sub_taxonomy_id !== repQ.taxonomy_id ? getSubDepth6Name(repQ, depth6Map) : ""; 
            const diffLabel = (repQ.difficulty || getDiffLabelByRate(repQ.solving_probability)).trim();
            const rateVal = repQ.solving_probability != null ? Math.round(repQ.solving_probability) + '%' : '-';
            const typeName = getTypeName(repQ);
@@ -498,7 +520,12 @@ export default function RightPreview({ examData }: { examData: any }) {
                
                <div className="flex-1 flex flex-col relative p-5 min-w-0">
                  <div className="flex justify-between items-center mb-1.5 pointer-events-none">
-                   <span className={`text-[14px] font-bold ${isDragOverTarget ? 'text-emerald-700' : 'text-slate-600'}`}>{depth6Name}</span>
+                   <div className="flex items-center gap-2 flex-wrap">
+                     <span className={`text-[14px] font-bold ${isDragOverTarget ? 'text-emerald-700' : 'text-slate-600'}`}>{depth6Name}</span>
+                     {subDepth6Name && (
+                       <span className="text-[11px] font-bold text-violet-600 bg-violet-50 border border-violet-200 px-1.5 py-0.5 rounded">🧭 서브: {subDepth6Name}</span>
+                     )}
+                   </div>
                  </div>
                  
                  {isGroupMerged && common && !isEditingMode && (

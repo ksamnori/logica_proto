@@ -432,9 +432,9 @@ export default function TwinManagerPage() {
             step_2_approach: twin.step_2_approach, 
             step_3_process: twin.step_3_process, 
             step_4_conclusion: twin.step_4_conclusion,
-            taxonomy_id: parentQ.taxonomy_id, 
+            taxonomy_id: parentQ.taxonomy_id, taxonomy_name: parentQ.taxonomy_name || null, sub_taxonomy_id: parentQ.sub_taxonomy_id || null, sub_taxonomy_name: parentQ.sub_taxonomy_name || null, thk_taxonomy_id: parentQ.thk_taxonomy_id || null, thk_taxonomy_name: parentQ.thk_taxonomy_name || null, 
             difficulty: parentQ.difficulty || '중', 
-            derivation_type: isSimilar ? '유사' : 'TWIN',
+            image_url: parentQ.image_url || null, image_2_url: parentQ.image_2_url || null, image_box: parentQ.image_box || null, image_2_box: parentQ.image_2_box || null, answer_image_url: parentQ.answer_image_url || null, answer_image_2_url: parentQ.answer_image_2_url || null, answer_image_box: parentQ.answer_image_box || null, derivation_type: isSimilar ? '유사' : 'TWIN',
           });
         }
       }
