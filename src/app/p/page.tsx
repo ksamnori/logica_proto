@@ -1027,11 +1027,11 @@ export default function ParentPortalPage() {
   const LOGO_URL =
     "https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png";
   const inputCls =
-    "w-full min-h-[48px] px-4 rounded-lg border border-[#CBD2D9] bg-white text-[16px] text-[#1F2933] placeholder:text-[#9AA5B1] outline-none focus:border-[#002864] focus:ring-2 focus:ring-[#002864]/15";
+    "w-full min-h-[48px] px-4 rounded-lg border border-[#CBD5E1] bg-white text-[16px] text-[#1E293B] placeholder:text-[#9AA5B1] outline-none focus:border-[#2563EB] focus:ring-2 focus:ring-[#2563EB]/15";
   const primaryBtn =
-    "w-full min-h-[48px] rounded-lg bg-[#002864] text-white text-[16px] font-semibold hover:bg-[#001a42] transition-colors disabled:opacity-50";
+    "w-full min-h-[48px] rounded-lg bg-[#2563EB] text-white text-[16px] font-semibold hover:bg-[#1D4ED8] shadow-xs transition-colors disabled:opacity-50";
   const secondaryBtn =
-    "w-full min-h-[48px] rounded-lg border border-[#CBD2D9] bg-white text-[#3E4C59] text-[16px] font-semibold hover:bg-[#F5F7FA] transition-colors disabled:opacity-50";
+    "w-full min-h-[48px] rounded-lg border border-[#CBD5E1] bg-white text-[#334155] text-[16px] font-semibold hover:bg-[#F8FAFC] transition-colors disabled:opacity-50";
 
   const formatCountdown = (sec: number) => {
     const m = Math.floor(sec / 60);
@@ -1040,8 +1040,8 @@ export default function ParentPortalPage() {
   };
 
   const AcademyInfo = () => (
-    <div className="text-[12px] text-[#616E7C] leading-relaxed text-center">
-      <p className="font-semibold text-[#3E4C59]">
+    <div className="text-[12px] text-[#64748B] leading-relaxed text-center">
+      <p className="font-semibold text-[#334155]">
         (주)이배움 로지카대치본원학원
       </p>
       <p>대표자 천종현, 사업자등록번호 732-85-02927</p>
@@ -1050,7 +1050,7 @@ export default function ParentPortalPage() {
         대표번호{" "}
         <a
           href="tel:025558875"
-          className="underline underline-offset-2 text-[#3E4C59]"
+          className="underline underline-offset-2 text-[#334155]"
         >
           02-555-8875
         </a>
@@ -1063,34 +1063,34 @@ export default function ParentPortalPage() {
     if (isKakaoLoading)
       return (
         <div
-          className="flex-1 flex flex-col items-center justify-center gap-4 p-6 bg-[#F5F7FA]"
+          className="flex-1 flex flex-col items-center justify-center gap-4 p-6 bg-[#F8FAFC]"
           role="status"
         >
           <span
-            className="w-8 h-8 border-[3px] border-[#002864] border-t-transparent rounded-full animate-spin"
+            className="w-8 h-8 border-[3px] border-[#2563EB] border-t-transparent rounded-full animate-spin"
             aria-hidden="true"
           ></span>
-          <p className="text-[16px] font-semibold text-[#1F2933]">
+          <p className="text-[16px] font-semibold text-[#1E293B]">
             카카오 계정을 확인하고 있어요
           </p>
         </div>
       );
 
     return (
-      <div className="flex-1 overflow-y-auto bg-[#F5F7FA]">
+      <div className="flex-1 overflow-y-auto bg-[#F8FAFC]">
         <div className="min-h-full flex flex-col items-center justify-center px-5 py-10">
-          <div className="w-full max-w-[400px] bg-white rounded-2xl border border-[#E4E7EB] px-6 py-8 flex flex-col gap-6">
+          <div className="w-full max-w-[400px] bg-white rounded-2xl border border-[#E2E8F0] px-6 py-8 flex flex-col gap-6">
             <div className="flex flex-col items-center gap-3 text-center">
               <img src={LOGO_URL} className="h-9 object-contain" alt="로지카" />
               <div>
-                <h1 className="text-[20px] font-bold text-[#1F2933]">
+                <h1 className="text-[20px] font-bold text-[#1E293B]">
                   {authState === "setup"
                     ? "처음 오셨군요"
                     : authState === "reset_otp" || authState === "reset_new_pw"
                     ? "비밀번호 재설정"
                     : "학부모님, 반가워요"}
                 </h1>
-                <p className="text-[14px] text-[#616E7C] mt-1">
+                <p className="text-[14px] text-[#64748B] mt-1">
                   {authState === "check_phone" &&
                     "자녀의 출결, 진도, 성적을 확인할 수 있어요."}
                   {authState === "login" && "비밀번호를 입력해 주세요."}
@@ -1123,11 +1123,11 @@ export default function ParentPortalPage() {
                 </button>
 
                 <div className="flex items-center gap-3" aria-hidden="true">
-                  <div className="flex-1 border-t border-[#E4E7EB]"></div>
-                  <span className="text-[13px] text-[#616E7C]">
+                  <div className="flex-1 border-t border-[#E2E8F0]"></div>
+                  <span className="text-[13px] text-[#64748B]">
                     또는 전화번호로
                   </span>
-                  <div className="flex-1 border-t border-[#E4E7EB]"></div>
+                  <div className="flex-1 border-t border-[#E2E8F0]"></div>
                 </div>
 
                 <form
@@ -1139,7 +1139,7 @@ export default function ParentPortalPage() {
                 >
                   <label
                     htmlFor="parent-phone"
-                    className="text-[14px] font-semibold text-[#3E4C59]"
+                    className="text-[14px] font-semibold text-[#334155]"
                   >
                     학원에 등록한 학부모 휴대전화번호
                   </label>
@@ -1169,12 +1169,12 @@ export default function ParentPortalPage() {
                   loginParent();
                 }}
               >
-                <div className="rounded-lg bg-[#F5F7FA] px-4 py-3 text-[15px] text-[#3E4C59] tabular-nums">
+                <div className="rounded-lg bg-[#F8FAFC] px-4 py-3 text-[15px] text-[#334155] tabular-nums">
                   {phoneInput}
                 </div>
                 <label
                   htmlFor="parent-pw"
-                  className="text-[14px] font-semibold text-[#3E4C59]"
+                  className="text-[14px] font-semibold text-[#334155]"
                 >
                   비밀번호
                 </label>
@@ -1206,7 +1206,7 @@ export default function ParentPortalPage() {
                     type="button"
                     disabled={isOtpSending}
                     onClick={handleSendResetOtp}
-                    className="text-[13.5px] font-semibold text-[#002864] hover:underline underline-offset-4 py-1.5 disabled:opacity-50"
+                    className="text-[13.5px] font-semibold text-[#1D4ED8] hover:underline underline-offset-4 py-1.5 disabled:opacity-50"
                   >
                     {isOtpSending
                       ? "인증번호 문자 발송 중..."
@@ -1224,13 +1224,13 @@ export default function ParentPortalPage() {
                   handleVerifyResetOtp();
                 }}
               >
-                <div className="rounded-lg bg-[#F5F7FA] px-4 py-3 flex items-center justify-between text-[14px] text-[#3E4C59]">
+                <div className="rounded-lg bg-[#F8FAFC] px-4 py-3 flex items-center justify-between text-[14px] text-[#334155]">
                   <span className="tabular-nums font-medium">{phoneInput}</span>
                   <button
                     type="button"
                     disabled={isOtpSending}
                     onClick={handleSendResetOtp}
-                    className="text-[12.5px] font-semibold text-[#002864] underline underline-offset-2 disabled:opacity-50"
+                    className="text-[12.5px] font-semibold text-[#1D4ED8] underline underline-offset-2 disabled:opacity-50"
                   >
                     {isOtpSending ? "재발송 중..." : "인증번호 재발송"}
                   </button>
@@ -1239,13 +1239,13 @@ export default function ParentPortalPage() {
                 <div className="flex items-center justify-between mt-1">
                   <label
                     htmlFor="parent-otp"
-                    className="text-[14px] font-semibold text-[#3E4C59]"
+                    className="text-[14px] font-semibold text-[#334155]"
                   >
                     인증번호 6자리
                   </label>
                   <span
                     className={`text-[13px] font-bold tabular-nums ${
-                      otpTimeLeft <= 30 ? "text-[#C8372D]" : "text-[#002864]"
+                      otpTimeLeft <= 30 ? "text-[#C8372D]" : "text-[#1D4ED8]"
                     }`}
                   >
                     남은 시간 {formatCountdown(otpTimeLeft)}
@@ -1300,7 +1300,7 @@ export default function ParentPortalPage() {
 
                 <label
                   htmlFor="reset-new-pw"
-                  className="text-[14px] font-semibold text-[#3E4C59] mt-1"
+                  className="text-[14px] font-semibold text-[#334155] mt-1"
                 >
                   새 비밀번호
                 </label>
@@ -1317,7 +1317,7 @@ export default function ParentPortalPage() {
 
                 <label
                   htmlFor="reset-new-pw-confirm"
-                  className="text-[14px] font-semibold text-[#3E4C59]"
+                  className="text-[14px] font-semibold text-[#334155]"
                 >
                   새 비밀번호 확인
                 </label>
@@ -1358,15 +1358,15 @@ export default function ParentPortalPage() {
                   setupParent();
                 }}
               >
-                <div className="rounded-lg bg-[#F5F7FA] px-4 py-3 text-[15px] text-[#3E4C59] tabular-nums">
+                <div className="rounded-lg bg-[#F8FAFC] px-4 py-3 text-[15px] text-[#334155] tabular-nums">
                   {phoneInput}
                 </div>
                 <label
                   htmlFor="parent-name"
-                  className="text-[14px] font-semibold text-[#3E4C59]"
+                  className="text-[14px] font-semibold text-[#334155]"
                 >
                   학부모님 성함{" "}
-                  <span className="font-normal text-[#616E7C]">(선택)</span>
+                  <span className="font-normal text-[#64748B]">(선택)</span>
                 </label>
                 <input
                   id="parent-name"
@@ -1379,7 +1379,7 @@ export default function ParentPortalPage() {
                 />
                 <label
                   htmlFor="parent-new-pw"
-                  className="text-[14px] font-semibold text-[#3E4C59] mt-1"
+                  className="text-[14px] font-semibold text-[#334155] mt-1"
                 >
                   사용할 비밀번호
                 </label>
@@ -1393,20 +1393,20 @@ export default function ParentPortalPage() {
                   placeholder="비밀번호 입력"
                 />
 
-                <label className="flex items-start gap-3 mt-2 cursor-pointer rounded-lg border border-[#E4E7EB] px-3 py-3">
+                <label className="flex items-start gap-3 mt-2 cursor-pointer rounded-lg border border-[#E2E8F0] px-3 py-3">
                   <input
                     type="checkbox"
                     checked={isAgreed}
                     onChange={(e) => setIsAgreed(e.target.checked)}
-                    className="mt-0.5 w-5 h-5 shrink-0 accent-[#002864]"
+                    className="mt-0.5 w-5 h-5 shrink-0 accent-[#2563EB]"
                   />
-                  <span className="text-[13px] text-[#3E4C59] leading-relaxed">
+                  <span className="text-[13px] text-[#334155] leading-relaxed">
                     (필수) 만 14세 미만 자녀의 개인정보 수집·이용 및{" "}
                     <a
                       href="/privacy"
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="text-[#002864] underline underline-offset-2"
+                      className="text-[#1D4ED8] underline underline-offset-2"
                     >
                       개인정보 처리방침
                     </a>
@@ -1429,12 +1429,12 @@ export default function ParentPortalPage() {
               </form>
             )}
 
-            <div className="flex flex-col gap-4 pt-5 border-t border-[#E4E7EB]">
+            <div className="flex flex-col gap-4 pt-5 border-t border-[#E2E8F0]">
               <a
                 href="/privacy"
                 target="_blank"
                 rel="noopener noreferrer"
-                className="text-[13px] text-[#616E7C] underline underline-offset-2 text-center"
+                className="text-[13px] text-[#64748B] underline underline-offset-2 text-center"
               >
                 개인정보 처리방침
               </a>
@@ -1451,19 +1451,19 @@ export default function ParentPortalPage() {
   );
 
   return (
-    <div className="text-[#1F2933] relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-[#F5F7FA] overscroll-none">
+    <div className="text-[#1E293B] relative h-[100dvh] w-full overflow-hidden flex flex-col font-pretendard bg-[#F8FAFC] overscroll-none">
       {authState === "dashboard" ? (
         <div className="flex-1 flex flex-col h-full overflow-hidden relative">
-          <header className="bg-white shrink-0 z-20 border-b border-[#E4E7EB]">
+          <header className="bg-white shrink-0 z-20 border-b border-[#E2E8F0]">
             <div className="w-full max-w-2xl mx-auto px-4 h-14 flex justify-between items-center">
               <img src={LOGO_URL} className="h-6 object-contain" alt="로지카" />
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
                   onClick={openSettingsModal}
-                  className="min-h-[38px] px-2.5 py-1 flex items-center gap-2 text-[13.5px] font-semibold text-[#3E4C59] hover:text-[#1F2933] hover:bg-[#F5F7FA] rounded-lg border border-[#E4E7EB] transition-colors"
+                  className="min-h-[38px] px-2.5 py-1 flex items-center gap-2 text-[13.5px] font-semibold text-[#334155] hover:text-[#1E293B] hover:bg-[#F8FAFC] rounded-lg border border-[#E2E8F0] transition-colors"
                 >
-                  <span className="w-6 h-6 rounded-full bg-[#EAF1F9] border border-[#CBD2D9] overflow-hidden flex items-center justify-center shrink-0 text-[12px] text-[#002864] font-bold">
+                  <span className="w-6 h-6 rounded-full bg-[#EFF6FF] border border-[#CBD5E1] overflow-hidden flex items-center justify-center shrink-0 text-[12px] text-[#1D4ED8] font-bold">
                     {parentAvatarUrl ? (
                       <img
                         src={parentAvatarUrl}
@@ -1472,7 +1472,7 @@ export default function ParentPortalPage() {
                       />
                     ) : (
                       <svg
-                        className="w-3.5 h-3.5 text-[#002864]"
+                        className="w-3.5 h-3.5 text-[#1D4ED8]"
                         fill="none"
                         stroke="currentColor"
                         viewBox="0 0 24 24"
@@ -1487,11 +1487,11 @@ export default function ParentPortalPage() {
                     )}
                   </span>
                   {infoName && (
-                    <span className="max-w-[84px] truncate text-[#1F2933]">
+                    <span className="max-w-[84px] truncate text-[#1E293B]">
                       {infoName}
                     </span>
                   )}
-                  <span className="flex items-center gap-1 text-[#616E7C]">
+                  <span className="flex items-center gap-1 text-[#64748B]">
                     <svg
                       className="w-4 h-4"
                       fill="none"
@@ -1518,7 +1518,7 @@ export default function ParentPortalPage() {
                 <button
                   type="button"
                   onClick={logout}
-                  className="min-h-[38px] px-2.5 text-[13.5px] font-medium text-[#616E7C] hover:text-[#1F2933] hover:bg-[#F5F7FA] rounded-lg transition-colors"
+                  className="min-h-[38px] px-2.5 text-[13.5px] font-medium text-[#64748B] hover:text-[#1E293B] hover:bg-[#F8FAFC] rounded-lg transition-colors"
                 >
                   로그아웃
                 </button>
@@ -1540,8 +1540,8 @@ export default function ParentPortalPage() {
                       onClick={() => setSelectedStudentId(student.student_id)}
                       className={`shrink-0 min-h-[40px] px-4 rounded-full text-[14px] transition-colors ${
                         active
-                          ? "bg-[#002864] text-white font-semibold"
-                          : "bg-white text-[#3E4C59] font-medium border border-[#CBD2D9] hover:bg-[#F5F7FA]"
+                          ? "bg-[#2563EB] text-white font-semibold shadow-xs"
+                          : "bg-white text-[#334155] font-medium border border-[#CBD5E1] hover:bg-[#F8FAFC]"
                       }`}
                     >
                       {student.name}
@@ -1558,14 +1558,14 @@ export default function ParentPortalPage() {
               role="status"
             >
               <span
-                className="w-8 h-8 border-[3px] border-[#002864] border-t-transparent rounded-full animate-spin"
+                className="w-8 h-8 border-[3px] border-[#2563EB] border-t-transparent rounded-full animate-spin"
                 aria-hidden="true"
               ></span>
               <div>
-                <p className="text-[16px] font-semibold text-[#1F2933]">
+                <p className="text-[16px] font-semibold text-[#1E293B]">
                   자녀의 학습 기록을 불러오고 있어요
                 </p>
-                <p className="mt-1 text-[14px] text-[#616E7C]">
+                <p className="mt-1 text-[14px] text-[#64748B]">
                   기록이 많으면 몇 초 걸릴 수 있어요.
                 </p>
               </div>
@@ -1575,11 +1575,11 @@ export default function ParentPortalPage() {
               <main className="flex-1 overflow-y-auto w-full px-4 py-4 sm:py-6 pb-32 overscroll-contain">
                 <div className="w-full max-w-2xl mx-auto flex flex-col gap-6">
                   {!selectedStudent ? (
-                    <div className="bg-white rounded-xl border border-[#E4E7EB] px-5 py-12 text-center flex flex-col gap-2">
-                      <p className="text-[16px] font-semibold text-[#1F2933]">
+                    <div className="bg-white rounded-xl border border-[#E2E8F0] px-5 py-12 text-center flex flex-col gap-2">
+                      <p className="text-[16px] font-semibold text-[#1E293B]">
                         연결된 자녀 정보가 없어요
                       </p>
-                      <p className="text-[14px] text-[#616E7C]">
+                      <p className="text-[14px] text-[#64748B]">
                         학원에 등록된 연락처와 로그인한 번호가 같은지 학원에 확인해 주세요.
                       </p>
                     </div>
@@ -1602,8 +1602,8 @@ export default function ParentPortalPage() {
           {/* ⚙️ 학부모 프로필 및 비밀번호 설정 모달 */}
           {isSettingsOpen && (
             <div className="fixed inset-0 z-[9999] bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
-              <div className="bg-white w-full max-w-md rounded-2xl border border-[#E4E7EB] shadow-2xl overflow-hidden flex flex-col max-h-[90dvh]">
-                <div className="px-5 py-4 bg-[#002864] text-white flex items-center justify-between shrink-0">
+              <div className="bg-white w-full max-w-md rounded-2xl border border-[#E2E8F0] shadow-2xl overflow-hidden flex flex-col max-h-[90dvh]">
+                <div className="px-5 py-4 bg-gradient-to-r from-[#1E3A8A] to-[#2563EB] text-white flex items-center justify-between shrink-0">
                   <h2 className="text-[17px] font-bold">학부모 계정 설정</h2>
                   <button
                     type="button"
@@ -1619,14 +1619,14 @@ export default function ParentPortalPage() {
                   className="p-5 flex flex-col gap-5 overflow-y-auto flex-1"
                 >
                   {/* 1. 프로필 이미지 설정 */}
-                  <div className="flex flex-col items-center gap-3 pb-4 border-b border-[#E4E7EB]">
-                    <span className="text-[13px] font-semibold text-[#616E7C]">
+                  <div className="flex flex-col items-center gap-3 pb-4 border-b border-[#E2E8F0]">
+                    <span className="text-[13px] font-semibold text-[#64748B]">
                       프로필 이미지 <span className="font-normal">(선택)</span>
                     </span>
 
                     {!cropImageSrc ? (
                       <>
-                        <div className="w-20 h-20 rounded-full bg-[#F5F7FA] border-2 border-[#CBD2D9] overflow-hidden flex items-center justify-center">
+                        <div className="w-20 h-20 rounded-full bg-[#F8FAFC] border-2 border-[#CBD5E1] overflow-hidden flex items-center justify-center">
                           {!removeAvatarFlag && parentAvatarUrl ? (
                             <img
                               src={parentAvatarUrl}
@@ -1651,7 +1651,7 @@ export default function ParentPortalPage() {
                         </div>
 
                         <div className="flex items-center gap-2">
-                          <label className="relative overflow-hidden cursor-pointer px-3.5 py-1.5 rounded-lg bg-[#EAF1F9] hover:bg-[#dce8f5] text-[#002864] text-[13px] font-semibold transition-colors">
+                          <label className="relative overflow-hidden cursor-pointer px-3.5 py-1.5 rounded-lg bg-[#EFF6FF] hover:bg-[#dce8f5] text-[#1D4ED8] text-[13px] font-semibold transition-colors">
                             <span>사진 선택 및 자르기</span>
                             <input
                               type="file"
@@ -1664,7 +1664,7 @@ export default function ParentPortalPage() {
                             <button
                               type="button"
                               onClick={() => setRemoveAvatarFlag(true)}
-                              className="px-3 py-1.5 rounded-lg border border-[#CBD2D9] text-[#616E7C] hover:text-[#C8372D] text-[13px] font-medium"
+                              className="px-3 py-1.5 rounded-lg border border-[#CBD5E1] text-[#64748B] hover:text-[#C8372D] text-[13px] font-medium"
                             >
                               기본 이미지로
                             </button>
@@ -1672,12 +1672,12 @@ export default function ParentPortalPage() {
                         </div>
                       </>
                     ) : (
-                      <div className="w-full bg-[#F5F7FA] p-3.5 rounded-xl border border-[#CBD2D9] flex flex-col items-center gap-2.5">
-                        <span className="text-[12px] font-semibold text-[#002864]">
+                      <div className="w-full bg-[#F8FAFC] p-3.5 rounded-xl border border-[#CBD5E1] flex flex-col items-center gap-2.5">
+                        <span className="text-[12px] font-semibold text-[#1D4ED8]">
                           사진을 끌어서 위치를 맞춘 뒤 확대/축소해 주세요
                         </span>
                         <div
-                          className="relative w-[150px] h-[150px] rounded-full overflow-hidden bg-white border-2 border-[#002864] cursor-move select-none"
+                          className="relative w-[150px] h-[150px] rounded-full overflow-hidden bg-white border-2 border-[#2563EB] cursor-move select-none"
                           style={{ touchAction: "none" }}
                           onMouseDown={(e) => startCropDrag(e.clientX, e.clientY)}
                           onMouseMove={(e) => moveCropDrag(e.clientX, e.clientY)}
@@ -1710,7 +1710,7 @@ export default function ParentPortalPage() {
                           />
                         </div>
                         <div className="w-full flex items-center gap-2 px-2">
-                          <span className="text-[12px] text-[#616E7C]">축소</span>
+                          <span className="text-[12px] text-[#64748B]">축소</span>
                           <input
                             type="range"
                             min={0.5}
@@ -1720,14 +1720,14 @@ export default function ParentPortalPage() {
                             onChange={(e) =>
                               setCropZoom(parseFloat(e.target.value))
                             }
-                            className="flex-1 accent-[#002864]"
+                            className="flex-1 accent-[#2563EB]"
                           />
-                          <span className="text-[12px] text-[#616E7C]">확대</span>
+                          <span className="text-[12px] text-[#64748B]">확대</span>
                         </div>
                         <button
                           type="button"
                           onClick={() => setCropImageSrc(null)}
-                          className="text-[12.5px] text-[#616E7C] underline"
+                          className="text-[12.5px] text-[#64748B] underline"
                         >
                           사진 선택 취소
                         </button>
@@ -1739,10 +1739,10 @@ export default function ParentPortalPage() {
                   <div className="flex flex-col gap-1.5">
                     <label
                       htmlFor="settings-parent-name"
-                      className="text-[14px] font-semibold text-[#3E4C59]"
+                      className="text-[14px] font-semibold text-[#334155]"
                     >
                       학부모님 성함{" "}
-                      <span className="font-normal text-[#616E7C]">
+                      <span className="font-normal text-[#64748B]">
                         (선택사항)
                       </span>
                     </label>
@@ -1757,11 +1757,11 @@ export default function ParentPortalPage() {
                   </div>
 
                   {/* 3. 로그인 비밀번호 변경 */}
-                  <div className="flex flex-col gap-2.5 pt-3 border-t border-[#E4E7EB]">
+                  <div className="flex flex-col gap-2.5 pt-3 border-t border-[#E2E8F0]">
                     <div>
-                      <h3 className="text-[14px] font-semibold text-[#3E4C59]">
+                      <h3 className="text-[14px] font-semibold text-[#334155]">
                         로그인 비밀번호 변경{" "}
-                        <span className="font-normal text-[#616E7C]">
+                        <span className="font-normal text-[#64748B]">
                           (변경 시에만 입력)
                         </span>
                       </h3>

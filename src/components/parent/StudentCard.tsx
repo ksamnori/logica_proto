@@ -210,21 +210,6 @@ const isEndedEnrollment = (e: any): boolean => {
   return false;
 };
 
-const safeParseIds = (raw: any): number[] => {
-  if (!raw) return [];
-  try {
-    let val = raw;
-    if (typeof val === "string") {
-      if (val === "null" || val.trim() === "") return [];
-      val = JSON.parse(val);
-    }
-    if (Array.isArray(val)) return val.map(Number);
-  } catch (err) {
-    console.warn("데이터 파싱 경고:", err);
-  }
-  return [];
-};
-
 // 💡 오늘의 KST 날짜 구하기 헬퍼 함수
 const getKSTDateStr = (offsetDays = 0) => {
   const kstAdjusted = new Date(
@@ -233,20 +218,20 @@ const getKSTDateStr = (offsetDays = 0) => {
   return kstAdjusted.toISOString().split("T")[0];
 };
 
-// 💡 상담 유형별 테마 컬러
+// 💡 상담 유형별 파스텔 테마 컬러
 const getConsultBadgeColor = (type: string) => {
   switch (type) {
     case "퇴원상담":
-      return "bg-[#FBEAE8] text-[#A32A22]";
+      return "bg-[#FFE4E6] text-[#BE123C]";
     case "신규상담":
     case "입학상담":
-      return "bg-[#E7F4EE] text-[#0B5E41]";
+      return "bg-[#DCFCE7] text-[#15803D]";
     case "태도상담":
-      return "bg-[#FDF1DC] text-[#7A4A00]";
+      return "bg-[#FEF3C7] text-[#B45309]";
     case "성적상담":
-      return "bg-[#EAF1F9] text-[#24578F]";
+      return "bg-[#DBEAFE] text-[#1D4ED8]";
     default:
-      return "bg-[#EEF0F2] text-[#3E4C59]";
+      return "bg-[#F1F5F9] text-[#475569]";
   }
 };
 
@@ -260,7 +245,7 @@ const formatKDate = (dateStr: string) => {
   return `${d.getMonth() + 1}월 ${d.getDate()}일 ${WEEKDAYS[d.getDay()]}요일`;
 };
 
-// "2026.09.03" 또는 "09.03"
+// "2026.09.03"
 const formatShortDate = (dateStr?: string | null) => {
   if (!dateStr) return "";
   const clean = String(dateStr).split("T")[0];
@@ -341,11 +326,11 @@ const splitLabel = (label: string) => {
   ];
 };
 
-// 🌟 방사 차트 컴포넌트
+// 🌟 방사 차트 컴포넌트 (산뜻한 블루 & 파스텔 스카이 톤)
 const RadarChart = ({ data }: { data: any[] }) => {
   if (!data || data.length < 3) {
     return (
-      <div className="text-center text-[#616E7C] text-[14px] py-8 leading-relaxed">
+      <div className="text-center text-[#64748B] text-[14px] py-8 leading-relaxed">
         단원이 3개 이상 쌓이면
         <br />
         그래프로 보여드려요.
@@ -397,8 +382,8 @@ const RadarChart = ({ data }: { data: any[] }) => {
       <polygon
         key={levelIndex}
         points={pts}
-        fill="none"
-        stroke="#E4E7EB"
+        fill={levelIndex === levels - 1 ? "rgba(241, 245, 249, 0.45)" : "none"}
+        stroke="#E2E8F0"
         strokeWidth="1"
       />
     );
@@ -413,7 +398,7 @@ const RadarChart = ({ data }: { data: any[] }) => {
         y1={center}
         x2={center + radius * Math.cos(angle)}
         y2={center + radius * Math.sin(angle)}
-        stroke="#E4E7EB"
+        stroke="#E2E8F0"
         strokeWidth="1"
       />
     );
@@ -429,24 +414,24 @@ const RadarChart = ({ data }: { data: any[] }) => {
 
       <polygon
         points={polyFinStr}
-        fill="rgba(157, 185, 227, 0.45)"
-        stroke="#9DB9E3"
+        fill="rgba(147, 197, 253, 0.42)"
+        stroke="#60A5FA"
         strokeWidth="2"
         strokeLinejoin="round"
       />
       {pointsFin.map((p, i) => (
-        <circle key={`fin-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#6F93C8" />
+        <circle key={`fin-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#60A5FA" />
       ))}
 
       <polygon
         points={polyInitStr}
-        fill="rgba(0, 40, 100, 0.35)"
-        stroke="#002864"
+        fill="rgba(37, 99, 235, 0.28)"
+        stroke="#2563EB"
         strokeWidth="2"
         strokeLinejoin="round"
       />
       {pointsInit.map((p, i) => (
-        <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#002864" />
+        <circle key={`init-dot-${i}`} cx={p.x} cy={p.y} r="3" fill="#2563EB" />
       ))}
 
       {labelPoints.map((p, i) => {
@@ -455,7 +440,7 @@ const RadarChart = ({ data }: { data: any[] }) => {
           <text
             key={`text-${i}`}
             fontSize="11"
-            fill="#3E4C59"
+            fill="#334155"
             textAnchor="middle"
           >
             {lines.length === 1 ? (
@@ -569,7 +554,7 @@ export default function StudentCard({ student }: { student: any }) {
       )
     : [];
 
-  // 🌟 수업 일지 데이터 로드 (과제 탭에서 배정 과제와 함께 표시)
+  // 🌟 수업 일지 데이터 로드 (과제 탭에서 표시)
   useEffect(() => {
     if (activeTab === "homework" && classId) {
       const fetchLogs = async () => {
@@ -1090,8 +1075,7 @@ export default function StudentCard({ student }: { student: any }) {
     new Date(getKSTDateStr()).getTime() - 14 * 24 * 3600000;
 
   // ==========================================================
-  // 🎨 화면 (2026-10 리디자인)
-  // 색: 남색 #002864(주색) / 완료 #0F8A5F / 진행·주의 #E9A23B / 위험 #C8372D / 정보 #2F6FB2
+  // 🎨 화면 (신뢰감 있는 브랜드 네이비/블루 + 따뜻한 파스텔 톤 조화)
   // ==========================================================
 
   const todayStatus = useMemo(() => {
@@ -1115,10 +1099,17 @@ export default function StudentCard({ student }: { student: any }) {
   }, [attendanceMap]);
 
   const TONE_DOT: Record<string, string> = {
-    done: "bg-[#0F8A5F]",
-    warn: "bg-[#E9A23B]",
-    danger: "bg-[#C8372D]",
-    idle: "bg-[#C3CAD2]",
+    done: "bg-[#10B981]",
+    warn: "bg-[#F59E0B]",
+    danger: "bg-[#F43F5E]",
+    idle: "bg-[#94A3B8]",
+  };
+
+  const TONE_BANNER: Record<string, string> = {
+    done: "bg-[#F0FDF4]/80 border-[#BBF7D0]",
+    warn: "bg-[#FFFBEB]/85 border-[#FDE68A]",
+    danger: "bg-[#FFF1F2]/85 border-[#FECDD3]",
+    idle: "bg-[#F8FAFC] border-[#E2E8F0]",
   };
 
   const todayLabel = (() => {
@@ -1203,7 +1194,7 @@ export default function StudentCard({ student }: { student: any }) {
   const selectedBook =
     books[Math.min(selectedBookIdx, Math.max(0, books.length - 1))];
 
-  // 한 줄 20쪽의 촘촘한 진도 블록
+  // 한 줄 20쪽의 산뜻한 파스텔·에메랄드 진도 블록
   const renderPageBlocks = (
     bookPages: number[],
     pageStatuses: Record<number, "done" | "homework" | "none" | "excluded">,
@@ -1211,7 +1202,7 @@ export default function StudentCard({ student }: { student: any }) {
   ) => {
     if (!bookPages || bookPages.length === 0) {
       return (
-        <p className="text-[14px] text-[#616E7C]">
+        <p className="text-[14px] text-[#64748B]">
           이 교재의 페이지 정보가 아직 없어요.
         </p>
       );
@@ -1225,18 +1216,28 @@ export default function StudentCard({ student }: { student: any }) {
       const before = startPage !== undefined && p < startPage;
       if (st === "done" && before)
         return {
-          cls: "bg-[#A8D8C2]",
+          cls: "bg-[#A7F3D0] hover:bg-[#6EE7B7]",
           text: `${p}쪽: 합류 이전, 보강으로 완료`,
         };
-      if (st === "done") return { cls: "bg-[#0F8A5F]", text: `${p}쪽: 완료` };
+      if (st === "done")
+        return {
+          cls: "bg-[#34D399] hover:bg-[#10B981]",
+          text: `${p}쪽: 완료`,
+        };
       if (st === "homework")
-        return { cls: "bg-[#E9A23B]", text: `${p}쪽: 과제 진행 중` };
+        return {
+          cls: "bg-[#FBBF24] hover:bg-[#F59E0B]",
+          text: `${p}쪽: 과제 진행 중`,
+        };
       if (st === "excluded" || before)
         return {
-          cls: "bg-[#ECEFF2]",
+          cls: "bg-[#F8FAFC] border border-[#E2E8F0]",
           text: `${p}쪽: 합류 이전 (진도율 계산 제외)`,
         };
-      return { cls: "bg-[#C3CAD2]", text: `${p}쪽: 아직 안 함` };
+      return {
+        cls: "bg-[#EDF2F7] hover:bg-[#E2E8F0]",
+        text: `${p}쪽: 아직 안 함`,
+      };
     };
     return (
       <div
@@ -1245,7 +1246,7 @@ export default function StudentCard({ student }: { student: any }) {
       >
         {rows.map((row, ri) => (
           <div key={ri} className="flex items-center gap-1.5">
-            <span className="w-8 shrink-0 text-right text-[12px] text-[#616E7C] tabular-nums">
+            <span className="w-8 shrink-0 text-right text-[12px] text-[#64748B] tabular-nums">
               {row[0]}
             </span>
             <div
@@ -1260,7 +1261,7 @@ export default function StudentCard({ student }: { student: any }) {
                     type="button"
                     aria-label={l.text}
                     onClick={() => showToast(l.text)}
-                    className={`h-[14px] rounded-[2px] ${l.cls}`}
+                    className={`h-[14px] rounded-[3px] transition-colors ${l.cls}`}
                   />
                 );
               })}
@@ -1296,21 +1297,21 @@ export default function StudentCard({ student }: { student: any }) {
       .join(" ");
 
     return (
-      <section className="bg-white p-4 rounded-xl border border-[#E4E7EB] flex flex-col gap-3">
+      <section className="bg-white p-4 rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] flex flex-col gap-3">
         <div>
-          <h3 className="text-[17px] font-bold text-[#1F2933]">
+          <h3 className="text-[17px] font-bold text-[#1E293B]">
             주간테스트 점수 변화
           </h3>
-          <p className="text-[13px] text-[#616E7C] mt-1 leading-relaxed">
+          <p className="text-[13px] text-[#64748B] mt-1 leading-relaxed">
             처음 푼 점수와 오답을 고친 뒤의 점수, 같은 시험의 반 평균이에요.
           </p>
         </div>
-        <ul className="grid grid-cols-2 gap-2 text-[13px] text-[#3E4C59]">
+        <ul className="grid grid-cols-2 gap-2 text-[13px] text-[#475569]">
           <li className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-sm bg-[#002864]"></span>처음 점수
+            <span className="w-3 h-3 rounded-sm bg-[#2563EB]"></span>처음 점수
           </li>
           <li className="flex items-center gap-2">
-            <span className="w-3 h-3 rounded-sm bg-[#9DB9E3]"></span>고친 뒤 점수
+            <span className="w-3 h-3 rounded-sm bg-[#93C5FD]"></span>고친 뒤 점수
           </li>
           <li className="flex items-center gap-2">
             <svg width="20" height="10" aria-hidden="true">
@@ -1319,7 +1320,7 @@ export default function StudentCard({ student }: { student: any }) {
                 y1="5"
                 x2="20"
                 y2="5"
-                stroke="#7B8794"
+                stroke="#94A3B8"
                 strokeWidth="2"
                 strokeDasharray="3 3"
               />
@@ -1333,7 +1334,7 @@ export default function StudentCard({ student }: { student: any }) {
                 y1="5"
                 x2="20"
                 y2="5"
-                stroke="#0F8A5F"
+                stroke="#10B981"
                 strokeWidth="2"
                 strokeDasharray="3 3"
               />
@@ -1357,14 +1358,14 @@ export default function StudentCard({ student }: { student: any }) {
                   y1={getY(score)}
                   x2={dynamicWidth - 10}
                   y2={getY(score)}
-                  stroke="#EEF0F2"
+                  stroke="#F1F5F9"
                   strokeWidth="1.5"
                 />
                 <text
                   x={paddingX - 15}
                   y={getY(score) + 4}
                   fontSize="11"
-                  fill="#616E7C"
+                  fill="#64748B"
                   textAnchor="end"
                 >
                   {score}
@@ -1388,8 +1389,8 @@ export default function StudentCard({ student }: { student: any }) {
                       y={getY(finalScore)}
                       width={barWidth}
                       height={height - paddingY - getY(finalScore)}
-                      fill="#9DB9E3"
-                      rx="4"
+                      fill="#93C5FD"
+                      rx="5"
                     />
                   )}
                   {initialScore > 0 && (
@@ -1398,15 +1399,15 @@ export default function StudentCard({ student }: { student: any }) {
                       y={getY(initialScore)}
                       width={barWidth}
                       height={height - paddingY - getY(initialScore)}
-                      fill="#002864"
-                      rx="4"
+                      fill="#2563EB"
+                      rx="5"
                     />
                   )}
                   <text
                     x={cx}
                     y={height - 15}
                     fontSize="11"
-                    fill="#3E4C59"
+                    fill="#475569"
                     textAnchor="middle"
                   >
                     {shortTitle}
@@ -1416,7 +1417,7 @@ export default function StudentCard({ student }: { student: any }) {
                       x={cx}
                       y={getY(100) - 12}
                       fontSize="13"
-                      fill="#1F2933"
+                      fill="#1E293B"
                       textAnchor="middle"
                       fontWeight="700"
                     >
@@ -1429,14 +1430,14 @@ export default function StudentCard({ student }: { student: any }) {
             <polyline
               points={pointsInitAvg}
               fill="none"
-              stroke="#7B8794"
+              stroke="#94A3B8"
               strokeWidth="2"
               strokeDasharray="4 4"
             />
             <polyline
               points={pointsFinAvg}
               fill="none"
-              stroke="#0F8A5F"
+              stroke="#10B981"
               strokeWidth="2"
               strokeDasharray="4 4"
             />
@@ -1449,7 +1450,7 @@ export default function StudentCard({ student }: { student: any }) {
                     cy={getY(r.class_init_avg)}
                     r="4"
                     fill="#FFFFFF"
-                    stroke="#7B8794"
+                    stroke="#94A3B8"
                     strokeWidth="2"
                   />
                   <circle
@@ -1457,7 +1458,7 @@ export default function StudentCard({ student }: { student: any }) {
                     cy={getY(r.class_fin_avg)}
                     r="4"
                     fill="#FFFFFF"
-                    stroke="#0F8A5F"
+                    stroke="#10B981"
                     strokeWidth="2"
                   />
                 </g>
@@ -1479,23 +1480,29 @@ export default function StudentCard({ student }: { student: any }) {
   ];
 
   const ATT_DOT: Record<string, string> = {
-    출석: "bg-[#0F8A5F]",
-    지각: "bg-[#E9A23B]",
-    조퇴: "bg-[#E9A23B]",
-    결석: "bg-[#C8372D]",
+    출석: "bg-[#10B981]",
+    지각: "bg-[#F59E0B]",
+    조퇴: "bg-[#F59E0B]",
+    결석: "bg-[#F43F5E]",
+  };
+  const ATT_BG_SOFT: Record<string, string> = {
+    출석: "bg-[#ECFDF5] text-[#065F46] font-semibold",
+    지각: "bg-[#FFFBEB] text-[#92400E] font-semibold",
+    조퇴: "bg-[#FFFBEB] text-[#92400E] font-semibold",
+    결석: "bg-[#FFF1F2] text-[#9F1239] font-semibold",
   };
   const ATT_TEXT: Record<string, string> = {
-    출석: "text-[#0B5E41]",
-    지각: "text-[#7A4A00]",
-    조퇴: "text-[#7A4A00]",
-    결석: "text-[#A32A22]",
+    출석: "text-[#059669]",
+    지각: "text-[#D97706]",
+    조퇴: "text-[#D97706]",
+    결석: "text-[#E11D48]",
   };
 
   const MAKEUP_CHIP: Record<string, string> = {
-    예정: "bg-[#EAF1F9] text-[#24578F]",
-    진행중: "bg-[#FDF1DC] text-[#7A4A00]",
-    완료: "bg-[#E7F4EE] text-[#0B5E41]",
-    취소: "bg-[#EEF0F2] text-[#616E7C]",
+    예정: "bg-[#DBEAFE] text-[#1D4ED8]",
+    진행중: "bg-[#FEF3C7] text-[#B45309]",
+    완료: "bg-[#DCFCE7] text-[#15803D]",
+    취소: "bg-[#F1F5F9] text-[#64748B]",
   };
 
   const visibleLessonLogs = showAllLogs
@@ -1509,23 +1516,35 @@ export default function StudentCard({ student }: { student: any }) {
   );
 
   return (
-    <div className="bg-[#F5F7FA] rounded-2xl border border-[#E4E7EB] overflow-hidden font-pretendard relative max-w-full text-[#1F2933]">
+    <div className="bg-[#F8FAFC] rounded-2xl border border-[#E2E8F0] shadow-[0_2px_12px_rgba(15,23,42,0.04)] overflow-hidden font-pretendard relative max-w-full text-[#1E293B]">
       {/* 학생 요약 */}
       <div className="bg-white px-5 pt-5 pb-4 flex flex-col gap-4">
         <div className="flex flex-col gap-1">
-          <h2 className="text-[22px] font-bold leading-tight">{student.name}</h2>
-          <p className="text-[14px] text-[#616E7C]">
-            {[student.grade || "학년 정보 없음", className, scheduleText]
+          <div className="flex items-center gap-2 flex-wrap">
+            <h2 className="text-[22px] font-bold leading-tight text-[#0F172A]">
+              {student.name}
+            </h2>
+            {className && (
+              <span className="text-[12px] font-semibold px-2.5 py-0.5 rounded-full bg-[#EFF6FF] text-[#1D4ED8]">
+                {className}
+              </span>
+            )}
+          </div>
+          <p className="text-[14px] text-[#64748B]">
+            {[student.grade || "학년 정보 없음", scheduleText]
               .filter(Boolean)
-              .join(", ")}
+              .join(" · ")}
           </p>
         </div>
 
+        {/* 오늘 상태 배너 (파스텔 배경 적용) */}
         <section
           aria-label="오늘"
-          className="rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-3"
+          className={`rounded-xl border p-4 flex flex-col gap-2.5 transition-colors ${
+            TONE_BANNER[todayStatus.tone] || TONE_BANNER.idle
+          }`}
         >
-          <div className="text-[13px] font-semibold text-[#616E7C]">
+          <div className="text-[13px] font-semibold text-[#64748B]">
             {todayLabel}
           </div>
           <div className="flex items-center gap-2.5">
@@ -1534,18 +1553,18 @@ export default function StudentCard({ student }: { student: any }) {
                 TONE_DOT[todayStatus.tone]
               }`}
             ></span>
-            <span className="text-[16px] font-semibold">
+            <span className="text-[16px] font-bold text-[#1E293B]">
               {todayStatus.text}
             </span>
           </div>
           {pendingHw && (
-            <div className="flex items-center gap-2.5">
+            <div className="flex items-center gap-2.5 pt-0.5">
               <span
                 className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                  pendingHw.count > 0 ? "bg-[#E9A23B]" : "bg-[#0F8A5F]"
+                  pendingHw.count > 0 ? "bg-[#F59E0B]" : "bg-[#10B981]"
                 }`}
               ></span>
-              <span className="text-[15px] text-[#3E4C59]">
+              <span className="text-[14.5px] text-[#334155]">
                 {pendingHw.count > 0
                   ? `남은 과제 ${pendingHw.count}개${
                       pendingHw.nextDue
@@ -1558,17 +1577,20 @@ export default function StudentCard({ student }: { student: any }) {
           )}
         </section>
 
-        <section aria-label="요약" className="grid grid-cols-3 gap-2">
-          <div className="rounded-xl border border-[#E4E7EB] px-3 py-3 flex flex-col gap-1">
-            <span className="text-[13px] text-[#616E7C]">최근 4주 출석</span>
-            <span className="text-[26px] font-bold tabular-nums leading-tight">
+        {/* 핵심 지표 3종 파스텔 틴트 카드 */}
+        <section aria-label="요약" className="grid grid-cols-3 gap-2.5">
+          <div className="rounded-xl border border-[#DCFCE7] bg-[#F0FDF4]/75 px-3 py-3 flex flex-col gap-1">
+            <span className="text-[12.5px] font-semibold text-[#15803D]">
+              최근 4주 출석
+            </span>
+            <span className="text-[25px] font-bold text-[#14532D] tabular-nums leading-tight">
               {recentAttendance.attended}
-              <span className="text-[15px] font-medium text-[#616E7C]">
+              <span className="text-[14px] font-medium text-[#15803D]/80">
                 /{recentAttendance.total}회
               </span>
             </span>
             {(recentAttendance.late > 0 || recentAttendance.absent > 0) && (
-              <span className="text-[12px] text-[#616E7C]">
+              <span className="text-[11.5px] text-[#475569]">
                 {[
                   recentAttendance.late > 0
                     ? `지각 ${recentAttendance.late}회`
@@ -1582,25 +1604,37 @@ export default function StudentCard({ student }: { student: any }) {
               </span>
             )}
           </div>
-          <div className="rounded-xl border border-[#E4E7EB] px-3 py-3 flex flex-col gap-1">
-            <span className="text-[13px] text-[#616E7C]">주교재 진도</span>
-            <span className="text-[26px] font-bold tabular-nums leading-tight">
+
+          <div className="rounded-xl border border-[#DBEAFE] bg-[#EFF6FF]/80 px-3 py-3 flex flex-col gap-1">
+            <span className="text-[12.5px] font-semibold text-[#1D4ED8]">
+              주교재 진도
+            </span>
+            <span className="text-[25px] font-bold text-[#1E3A8A] tabular-nums leading-tight">
               {mainBook ? mainBook.stats?.percent ?? 0 : "-"}
-              <span className="text-[15px] font-medium text-[#616E7C]">
+              <span className="text-[14px] font-medium text-[#1D4ED8]/80">
                 {mainBook ? "%" : ""}
               </span>
             </span>
+            {mainBook && (
+              <span className="text-[11.5px] text-[#475569] truncate">
+                {mainBook.stats?.donePagesCount ?? 0}/
+                {mainBook.stats?.maxPageCount ?? 0}쪽 완료
+              </span>
+            )}
           </div>
-          <div className="rounded-xl border border-[#E4E7EB] px-3 py-3 flex flex-col gap-1">
-            <span className="text-[13px] text-[#616E7C]">주간테스트</span>
-            <span className="text-[26px] font-bold tabular-nums leading-tight">
+
+          <div className="rounded-xl border border-[#E0E7FF] bg-[#EEF2FF]/80 px-3 py-3 flex flex-col gap-1">
+            <span className="text-[12.5px] font-semibold text-[#4338CA]">
+              주간테스트
+            </span>
+            <span className="text-[25px] font-bold text-[#312E81] tabular-nums leading-tight">
               {latestExam ? latestExam.original_score ?? 0 : "-"}
-              <span className="text-[15px] font-medium text-[#616E7C]">
+              <span className="text-[14px] font-medium text-[#4338CA]/80">
                 {latestExam ? "점" : ""}
               </span>
             </span>
             {latestExam && (
-              <span className="text-[12px] text-[#616E7C]">
+              <span className="text-[11.5px] text-[#475569]">
                 반 평균 {latestExam.class_init_avg}점
               </span>
             )}
@@ -1611,7 +1645,7 @@ export default function StudentCard({ student }: { student: any }) {
       {/* 탭 */}
       <nav
         aria-label="자세히 보기"
-        className="bg-white border-b border-[#E4E7EB] px-3 flex gap-1 overflow-x-auto"
+        className="bg-white border-y border-[#E2E8F0] px-3 flex gap-1 overflow-x-auto"
       >
         {TABS.map((tab) => {
           const active = activeTab === tab.id;
@@ -1621,10 +1655,10 @@ export default function StudentCard({ student }: { student: any }) {
               type="button"
               aria-current={active ? "page" : undefined}
               onClick={() => setActiveTab(tab.id)}
-              className={`shrink-0 min-h-[48px] px-3 text-[15px] border-b-[3px] transition-colors ${
+              className={`shrink-0 min-h-[48px] px-3.5 text-[15px] border-b-[3px] transition-colors ${
                 active
-                  ? "border-[#002864] text-[#002864] font-bold"
-                  : "border-transparent text-[#616E7C] font-medium"
+                  ? "border-[#2563EB] text-[#1D4ED8] font-bold"
+                  : "border-transparent text-[#64748B] hover:text-[#334155] font-medium"
               }`}
             >
               {tab.label}
@@ -1637,13 +1671,13 @@ export default function StudentCard({ student }: { student: any }) {
         {/* 출결 */}
         {activeTab === "attendance" && (
           <>
-            <section className="bg-white rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-3">
+            <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
               <div className="flex justify-between items-center">
                 <button
                   type="button"
                   onClick={handlePrevMonth}
                   aria-label="이전 달"
-                  className="w-11 h-11 rounded-full flex items-center justify-center text-[#3E4C59] hover:bg-[#F5F7FA]"
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-[#475569] hover:bg-[#F1F5F9]"
                 >
                   <svg
                     className="w-5 h-5"
@@ -1660,14 +1694,14 @@ export default function StudentCard({ student }: { student: any }) {
                     ></path>
                   </svg>
                 </button>
-                <span className="text-[17px] font-bold">
+                <span className="text-[17px] font-bold text-[#1E293B]">
                   {year}년 {month + 1}월
                 </span>
                 <button
                   type="button"
                   onClick={handleNextMonth}
                   aria-label="다음 달"
-                  className="w-11 h-11 rounded-full flex items-center justify-center text-[#3E4C59] hover:bg-[#F5F7FA]"
+                  className="w-10 h-10 rounded-full flex items-center justify-center text-[#475569] hover:bg-[#F1F5F9]"
                 >
                   <svg
                     className="w-5 h-5"
@@ -1686,9 +1720,18 @@ export default function StudentCard({ student }: { student: any }) {
                 </button>
               </div>
 
-              <div className="grid grid-cols-7 text-center text-[12px] text-[#616E7C]">
+              <div className="grid grid-cols-7 text-center text-[12px] font-medium text-[#64748B]">
                 {WEEKDAYS.map((w, i) => (
-                  <span key={w} className={i === 0 ? "text-[#C8372D]" : ""}>
+                  <span
+                    key={w}
+                    className={
+                      i === 0
+                        ? "text-[#F43F5E]"
+                        : i === 6
+                        ? "text-[#3B82F6]"
+                        : ""
+                    }
+                  >
                     {w}
                   </span>
                 ))}
@@ -1707,8 +1750,12 @@ export default function StudentCard({ student }: { student: any }) {
                   const isSelected = selectedDateStr === dateStr;
                   const att = attendanceMap.get(dateStr);
                   const dot = att
-                    ? ATT_DOT[att.status] || "bg-[#9AA5B1]"
+                    ? ATT_DOT[att.status] || "bg-[#94A3B8]"
                     : "";
+                  const softCircle =
+                    !isSelected && att
+                      ? ATT_BG_SOFT[att.status] || "text-[#334155]"
+                      : "text-[#334155]";
                   return (
                     <button
                       key={d}
@@ -1721,10 +1768,10 @@ export default function StudentCard({ student }: { student: any }) {
                       className="h-11 flex flex-col items-center justify-center gap-[3px]"
                     >
                       <span
-                        className={`w-8 h-8 flex items-center justify-center rounded-full text-[14px] tabular-nums ${
+                        className={`w-8 h-8 flex items-center justify-center rounded-full text-[14px] tabular-nums transition-colors ${
                           isSelected
-                            ? "bg-[#002864] text-white font-semibold"
-                            : "text-[#3E4C59]"
+                            ? "bg-[#2563EB] text-white font-bold shadow-xs"
+                            : softCircle
                         }`}
                       >
                         {d}
@@ -1737,44 +1784,46 @@ export default function StudentCard({ student }: { student: any }) {
 
               <ul
                 aria-label="달력 안내"
-                className="flex flex-wrap gap-x-4 gap-y-2 text-[13px] text-[#3E4C59]"
+                className="flex flex-wrap gap-x-4 gap-y-2 pt-1 border-t border-[#F1F5F9] text-[13px] text-[#475569]"
               >
                 <li className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#0F8A5F]"></span>출석
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#10B981]"></span>
+                  출석
                 </li>
                 <li className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#E9A23B]"></span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#F59E0B]"></span>
                   지각·조퇴
                 </li>
                 <li className="flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-[#C8372D]"></span>결석
+                  <span className="w-2.5 h-2.5 rounded-full bg-[#F43F5E]"></span>
+                  결석
                 </li>
               </ul>
             </section>
 
-            <section className="bg-white rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-3">
-              <h3 className="text-[15px] font-semibold">
+            <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
+              <h3 className="text-[15px] font-bold text-[#1E293B]">
                 {selectedDate.getMonth() + 1}월 {selectedDate.getDate()}일{" "}
                 {WEEKDAYS[selectedDate.getDay()]}요일
               </h3>
               {selectedAtt ? (
                 <div className="grid grid-cols-[64px_1fr] gap-y-2 text-[15px]">
-                  <span className="text-[#616E7C]">상태</span>
+                  <span className="text-[#64748B]">상태</span>
                   <span
-                    className={`font-semibold ${
-                      ATT_TEXT[selectedAtt.status] || "text-[#3E4C59]"
+                    className={`font-bold ${
+                      ATT_TEXT[selectedAtt.status] || "text-[#334155]"
                     }`}
                   >
                     {selectedAtt.status}
                   </span>
                   {selectedAtt.status !== "결석" && (
                     <>
-                      <span className="text-[#616E7C]">등원</span>
-                      <span className="tabular-nums">
+                      <span className="text-[#64748B]">등원</span>
+                      <span className="tabular-nums font-medium">
                         {formatTime(selectedAtt.check_in_time) || "-"}
                       </span>
-                      <span className="text-[#616E7C]">하원</span>
-                      <span className="tabular-nums">
+                      <span className="text-[#64748B]">하원</span>
+                      <span className="tabular-nums font-medium">
                         {formatTime(selectedAtt.check_out_time) ||
                           "아직 학원에 있어요"}
                       </span>
@@ -1782,7 +1831,7 @@ export default function StudentCard({ student }: { student: any }) {
                   )}
                 </div>
               ) : (
-                <p className="text-[14px] text-[#616E7C]">
+                <p className="text-[14px] text-[#64748B]">
                   이 날의 출결 기록이 없어요.
                 </p>
               )}
@@ -1790,39 +1839,43 @@ export default function StudentCard({ student }: { student: any }) {
 
             <section
               aria-label={`${month + 1}월 출결 요약`}
-              className="grid grid-cols-3 gap-2"
+              className="grid grid-cols-3 gap-2.5"
             >
-              <div className="bg-white rounded-xl border border-[#E4E7EB] px-3 py-3 flex flex-col gap-1">
-                <span className="text-[13px] text-[#616E7C]">
+              <div className="bg-[#F0FDF4]/80 rounded-xl border border-[#DCFCE7] px-3 py-3 flex flex-col gap-1">
+                <span className="text-[12.5px] font-semibold text-[#15803D]">
                   {month + 1}월 출석
                 </span>
-                <span className="text-[26px] font-bold text-[#0F8A5F] tabular-nums leading-tight">
+                <span className="text-[25px] font-bold text-[#059669] tabular-nums leading-tight">
                   {monthAttendance.present}
-                  <span className="text-[15px] font-medium text-[#616E7C]">
+                  <span className="text-[14px] font-medium text-[#15803D]/80">
                     회
                   </span>
                 </span>
               </div>
-              <div className="bg-white rounded-xl border border-[#E4E7EB] px-3 py-3 flex flex-col gap-1">
-                <span className="text-[13px] text-[#616E7C]">지각·조퇴</span>
-                <span className="text-[26px] font-bold text-[#9A5B00] tabular-nums leading-tight">
+              <div className="bg-[#FFFBEB]/85 rounded-xl border border-[#FEF3C7] px-3 py-3 flex flex-col gap-1">
+                <span className="text-[12.5px] font-semibold text-[#B45309]">
+                  지각·조퇴
+                </span>
+                <span className="text-[25px] font-bold text-[#D97706] tabular-nums leading-tight">
                   {monthAttendance.late + monthAttendance.early}
-                  <span className="text-[15px] font-medium text-[#616E7C]">
+                  <span className="text-[14px] font-medium text-[#B45309]/80">
                     회
                   </span>
                 </span>
               </div>
-              <div className="bg-white rounded-xl border border-[#E4E7EB] px-3 py-3 flex flex-col gap-1">
-                <span className="text-[13px] text-[#616E7C]">결석</span>
+              <div className="bg-[#FFF1F2]/80 rounded-xl border border-[#FFE4E6] px-3 py-3 flex flex-col gap-1">
+                <span className="text-[12.5px] font-semibold text-[#BE123C]">
+                  결석
+                </span>
                 <span
-                  className={`text-[26px] font-bold tabular-nums leading-tight ${
+                  className={`text-[25px] font-bold tabular-nums leading-tight ${
                     monthAttendance.absent > 0
-                      ? "text-[#C8372D]"
-                      : "text-[#1F2933]"
+                      ? "text-[#E11D48]"
+                      : "text-[#334155]"
                   }`}
                 >
                   {monthAttendance.absent}
-                  <span className="text-[15px] font-medium text-[#616E7C]">
+                  <span className="text-[14px] font-medium text-[#BE123C]/80">
                     회
                   </span>
                 </span>
@@ -1831,7 +1884,7 @@ export default function StudentCard({ student }: { student: any }) {
           </>
         )}
 
-        {/* 진도 (수업별 기록 섹션 제거 및 교재 선택·일정·최근 진행 요약 강화) */}
+        {/* 진도 */}
         {activeTab === "progress" && (
           <>
             {books.length === 0 ? (
@@ -1859,37 +1912,37 @@ export default function StudentCard({ student }: { student: any }) {
                           onClick={() => setSelectedBookIdx(idx)}
                           className={`flex flex-col gap-1 text-left px-3.5 py-2.5 rounded-xl border transition-all ${
                             active
-                              ? "bg-[#002864] text-white border-[#002864] shadow-sm"
-                              : "bg-white text-[#1F2933] border-[#CBD2D9] hover:bg-[#F5F7FA]"
+                              ? "bg-[#EFF6FF] text-[#1E3A8A] border-[#3B82F6] ring-1 ring-[#3B82F6]/30 shadow-xs"
+                              : "bg-white text-[#334155] border-[#E2E8F0] hover:bg-[#F8FAFC]"
                           }`}
                         >
                           <div className="flex items-center justify-between gap-2 w-full">
                             <span
                               className={`text-[11px] font-semibold px-2 py-0.5 rounded-full ${
                                 active
-                                  ? "bg-white/20 text-white"
+                                  ? "bg-[#DBEAFE] text-[#1D4ED8]"
                                   : bType === "주교재"
-                                  ? "bg-[#EAF1F9] text-[#002864]"
-                                  : "bg-[#EEF0F2] text-[#3E4C59]"
+                                  ? "bg-[#EFF6FF] text-[#2563EB]"
+                                  : "bg-[#F1F5F9] text-[#475569]"
                               }`}
                             >
                               {bType}
                             </span>
                             <span
                               className={`text-[13px] font-bold tabular-nums ${
-                                active
-                                  ? "text-white"
-                                  : isBookDone
-                                  ? "text-[#0F8A5F]"
-                                  : "text-[#002864]"
+                                isBookDone
+                                  ? "text-[#059669]"
+                                  : active
+                                  ? "text-[#1D4ED8]"
+                                  : "text-[#475569]"
                               }`}
                             >
                               {isBookDone ? "✓ 100% 완료" : `${pct}%`}
                             </span>
                           </div>
                           <span
-                            className={`text-[14px] font-semibold truncate w-full ${
-                              active ? "text-white" : "text-[#1F2933]"
+                            className={`text-[14px] font-bold truncate w-full ${
+                              active ? "text-[#1E3A8A]" : "text-[#1E293B]"
                             }`}
                           >
                             {bTitle}
@@ -1943,33 +1996,39 @@ export default function StudentCard({ student }: { student: any }) {
                       hwPages.length > 0 ? formatPageRanges(hwPages, 3) : "";
 
                     return (
-                      <section className="bg-white rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-4">
+                      <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-4">
                         <div className="flex flex-col gap-1.5">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[12px] font-semibold px-2.5 py-0.5 rounded-full bg-[#EAF1F9] text-[#002864]">
+                            <span className="text-[12px] font-semibold px-2.5 py-0.5 rounded-full bg-[#DBEAFE] text-[#1D4ED8]">
                               {tb?.book_type || "교재"}
                             </span>
-                            <span className="text-[15px] font-bold text-[#1F2933]">
+                            <span className="text-[15px] font-bold text-[#0F172A]">
                               {tb?.title || "교재명 없음"}
                             </span>
                           </div>
                           <div className="flex items-baseline gap-2 flex-wrap mt-1">
-                            <span className="text-[40px] font-bold text-[#002864] tabular-nums leading-none">
+                            <span
+                              className={`text-[40px] font-bold tabular-nums leading-none ${
+                                isBookCompleted
+                                  ? "text-[#059669]"
+                                  : "text-[#1D4ED8]"
+                              }`}
+                            >
                               {stats.percent}%
                             </span>
-                            <span className="text-[15px] text-[#3E4C59]">
+                            <span className="text-[15px] text-[#475569]">
                               전체 {stats.maxPageCount}쪽 중{" "}
-                              <strong className="font-bold text-[#1F2933]">
+                              <strong className="font-bold text-[#1E293B]">
                                 {stats.donePagesCount}쪽
                               </strong>{" "}
                               완료
                             </span>
                           </div>
-                          {/* 전체 진도율 프로그레스 바 */}
-                          <div className="w-full h-2.5 bg-[#EEF0F2] rounded-full overflow-hidden mt-1">
+                          {/* 전체 진도율 프로그레스 바 (파스텔 트랙 + 산뜻한 컬러 바) */}
+                          <div className="w-full h-2.5 bg-[#EFF6FF] rounded-full overflow-hidden mt-1">
                             <div
                               className={`h-full rounded-full transition-all ${
-                                isBookCompleted ? "bg-[#0F8A5F]" : "bg-[#002864]"
+                                isBookCompleted ? "bg-[#10B981]" : "bg-[#3B82F6]"
                               }`}
                               style={{
                                 width: `${Math.min(100, stats.percent || 0)}%`,
@@ -1978,50 +2037,51 @@ export default function StudentCard({ student }: { student: any }) {
                           </div>
                         </div>
 
-                        {/* 교재 일정 및 최근 진행 페이지 요약 박스 */}
-                        <div className="rounded-xl bg-[#F5F7FA] border border-[#E4E7EB] p-3.5 flex flex-col gap-2 text-[13.5px]">
+                        {/* 교재 일정 및 최근 진행 페이지 요약 박스 (부드러운 파스텔 스카이 톤) */}
+                        <div className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] p-3.5 flex flex-col gap-2 text-[13.5px]">
                           {hasTargetSchedule && (
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[#616E7C] font-medium shrink-0">
+                              <span className="text-[#64748B] font-medium shrink-0">
                                 목표 일정
                               </span>
-                              <span className="text-[#1F2933] font-semibold tabular-nums text-right">
+                              <span className="text-[#1E293B] font-semibold tabular-nums text-right">
                                 {targetStart || "미정"} ~ {targetEnd || "미정"}
                               </span>
                             </div>
                           )}
                           <div className="flex items-center justify-between gap-2">
-                            <span className="text-[#616E7C] font-medium shrink-0">
+                            <span className="text-[#64748B] font-medium shrink-0">
                               실제 진행 기간
                             </span>
-                            <span className="text-[#1F2933] font-semibold tabular-nums text-right">
+                            <span className="text-[#1E293B] font-semibold tabular-nums text-right">
                               {actualStart ? (
                                 <>
-                                  {actualStart} ~ {actualEnd || formatShortDate(getKSTDateStr())}{" "}
+                                  {actualStart} ~{" "}
+                                  {actualEnd || formatShortDate(getKSTDateStr())}{" "}
                                   <span
-                                    className={`inline-block ml-1 px-1.5 py-0.5 rounded text-[11px] font-bold ${
+                                    className={`inline-block ml-1 px-2 py-0.5 rounded-full text-[11px] font-bold ${
                                       isBookCompleted
-                                        ? "bg-[#E7F4EE] text-[#0B5E41]"
-                                        : "bg-[#EAF1F9] text-[#002864]"
+                                        ? "bg-[#DCFCE7] text-[#15803D]"
+                                        : "bg-[#DBEAFE] text-[#1D4ED8]"
                                     }`}
                                   >
                                     {isBookCompleted ? "완료" : "진행중"}
                                   </span>
                                 </>
                               ) : (
-                                <span className="text-[#616E7C] font-normal">
+                                <span className="text-[#64748B] font-normal">
                                   첫 진도 체크 전이에요
                                 </span>
                               )}
                             </span>
                           </div>
 
-                          <div className="border-t border-[#E4E7EB] pt-2 mt-0.5 flex flex-col gap-1.5">
+                          <div className="border-t border-[#E2E8F0] pt-2 mt-0.5 flex flex-col gap-1.5">
                             <div className="flex items-center justify-between gap-2">
-                              <span className="text-[#616E7C] font-medium shrink-0">
+                              <span className="text-[#64748B] font-medium shrink-0">
                                 최근 완료 위치
                               </span>
-                              <span className="text-[#0B5E41] font-semibold text-right">
+                              <span className="text-[#059669] font-semibold text-right">
                                 {lastDonePage
                                   ? `마지막 완료 ${lastDonePage}쪽 (${recentDoneText})`
                                   : "아직 완료된 페이지가 없어요"}
@@ -2029,10 +2089,10 @@ export default function StudentCard({ student }: { student: any }) {
                             </div>
                             {currentHwText && (
                               <div className="flex items-center justify-between gap-2">
-                                <span className="text-[#616E7C] font-medium shrink-0">
+                                <span className="text-[#64748B] font-medium shrink-0">
                                   과제 진행 페이지
                                 </span>
-                                <span className="text-[#9A5B00] font-semibold text-right">
+                                <span className="text-[#D97706] font-semibold text-right">
                                   {currentHwText} ({hwPages.length}쪽 진행 중)
                                 </span>
                               </div>
@@ -2041,36 +2101,36 @@ export default function StudentCard({ student }: { student: any }) {
                         </div>
 
                         {hasStart && (
-                          <p className="text-[13.5px] leading-relaxed text-[#3E4C59] bg-[#EAF1F9]/60 border border-[#CBD2D9] rounded-lg px-3 py-2">
+                          <p className="text-[13.5px] leading-relaxed text-[#1E3A8A] bg-[#EFF6FF] border border-[#BFDBFE] rounded-lg px-3 py-2">
                             💡 {stats.startPage}쪽부터 반에 합류하여, 그 이전 페이지는 진도율 계산에서 제외했어요.
                           </p>
                         )}
 
                         <ul
                           aria-label="색 안내"
-                          className="grid grid-cols-2 gap-x-3 gap-y-2 text-[13px] text-[#3E4C59]"
+                          className="grid grid-cols-2 gap-x-3 gap-y-2 text-[13px] text-[#475569]"
                         >
                           <li className="flex items-center gap-2">
-                            <span className="w-3.5 h-3.5 rounded-[3px] bg-[#0F8A5F]"></span>
+                            <span className="w-3.5 h-3.5 rounded-[3px] bg-[#34D399]"></span>
                             완료 ({donePages.length}쪽)
                           </li>
                           <li className="flex items-center gap-2">
-                            <span className="w-3.5 h-3.5 rounded-[3px] bg-[#E9A23B]"></span>
+                            <span className="w-3.5 h-3.5 rounded-[3px] bg-[#FBBF24]"></span>
                             과제 진행 중 ({hwPages.length}쪽)
                           </li>
                           <li className="flex items-center gap-2">
-                            <span className="w-3.5 h-3.5 rounded-[3px] bg-[#C3CAD2]"></span>
+                            <span className="w-3.5 h-3.5 rounded-[3px] bg-[#EDF2F7] border border-[#CBD5E1]"></span>
                             아직 안 함
                           </li>
                           {hasStart && (
                             <li className="flex items-center gap-2">
-                              <span className="w-3.5 h-3.5 rounded-[3px] bg-[#ECEFF2]"></span>
+                              <span className="w-3.5 h-3.5 rounded-[3px] bg-[#F8FAFC] border border-[#E2E8F0]"></span>
                               합류 이전 (계산 제외)
                             </li>
                           )}
                           {hasStart && (
                             <li className="flex items-center gap-2">
-                              <span className="w-3.5 h-3.5 rounded-[3px] bg-[#A8D8C2]"></span>
+                              <span className="w-3.5 h-3.5 rounded-[3px] bg-[#A7F3D0]"></span>
                               합류 이전, 보강 완료
                             </li>
                           )}
@@ -2092,7 +2152,9 @@ export default function StudentCard({ student }: { student: any }) {
         {/* 과제 (선생님이 직접 입력한 수업 알림장 및 개별 코멘트만 노출) */}
         {activeTab === "homework" && (
           <section className="flex flex-col gap-3">
-            <h3 className="text-[17px] font-bold">수업 알림장 및 개별 코멘트</h3>
+            <h3 className="text-[17px] font-bold text-[#1E293B]">
+              수업 알림장 및 개별 코멘트
+            </h3>
             {isLogsLoading ? (
               <LoadingBox text="수업 알림장을 불러오는 중이에요." />
             ) : visibleLessonLogs.length === 0 &&
@@ -2103,42 +2165,44 @@ export default function StudentCard({ student }: { student: any }) {
                 {visibleLessonLogs.map((log) => (
                   <article
                     key={`hw-${log.lesson_log_id}`}
-                    className="bg-white rounded-xl border border-[#E4E7EB] px-4 py-3.5 flex flex-col gap-3"
+                    className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] px-4 py-3.5 flex flex-col gap-3"
                   >
-                    <div className="text-[15px] font-semibold">
-                      {formatKDate(log.actual_date)} 수업
+                    <div className="flex items-center justify-between">
+                      <span className="text-[15px] font-bold text-[#1E293B]">
+                        {formatKDate(log.actual_date)} 수업
+                      </span>
                     </div>
                     {log.my_individual_comment && (
-                      <div className="bg-[#EAF1F9] rounded-lg px-3 py-2.5 flex flex-col gap-1">
-                        <span className="text-[13px] font-semibold text-[#24578F]">
-                          {student.name} 학생에게 따로 남긴 말
+                      <div className="bg-[#EFF6FF] border border-[#BFDBFE] rounded-xl px-3.5 py-2.5 flex flex-col gap-1">
+                        <span className="text-[12.5px] font-bold text-[#1D4ED8]">
+                          💌 {student.name} 학생에게 따로 남긴 말
                         </span>
-                        <p className="text-[14px] leading-relaxed whitespace-pre-wrap">
+                        <p className="text-[14px] text-[#1E3A8A] leading-relaxed whitespace-pre-wrap">
                           {log.my_individual_comment}
                         </p>
                       </div>
                     )}
                     {(log.parsed_progress || log.parsed_homework) && (
-                      <div className="grid grid-cols-[44px_1fr] gap-x-2 gap-y-1.5 text-[14px] leading-relaxed">
+                      <div className="flex flex-col gap-2 text-[14px] leading-relaxed">
                         {log.parsed_progress && (
-                          <>
-                            <span className="text-[#616E7C] font-medium">
+                          <div className="flex items-start gap-2.5">
+                            <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded-md bg-[#ECFDF5] text-[#059669] text-[12px] font-semibold">
                               진도
                             </span>
-                            <span className="whitespace-pre-wrap text-[#1F2933]">
+                            <span className="whitespace-pre-wrap text-[#1E293B]">
                               {log.parsed_progress}
                             </span>
-                          </>
+                          </div>
                         )}
                         {log.parsed_homework && (
-                          <>
-                            <span className="text-[#616E7C] font-medium">
+                          <div className="flex items-start gap-2.5">
+                            <span className="shrink-0 mt-0.5 px-2 py-0.5 rounded-md bg-[#FFFBEB] text-[#D97706] text-[12px] font-semibold">
                               과제
                             </span>
-                            <span className="whitespace-pre-wrap text-[#3E4C59]">
+                            <span className="whitespace-pre-wrap text-[#334155]">
                               {log.parsed_homework}
                             </span>
-                          </>
+                          </div>
                         )}
                       </div>
                     )}
@@ -2148,7 +2212,7 @@ export default function StudentCard({ student }: { student: any }) {
                   <button
                     type="button"
                     onClick={() => setShowAllLogs(true)}
-                    className="min-h-[48px] rounded-lg border border-[#CBD2D9] bg-white text-[15px] font-semibold text-[#3E4C59] hover:bg-[#F5F7FA]"
+                    className="min-h-[48px] rounded-xl border border-[#CBD5E1] bg-white text-[15px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
                   >
                     이전 알림장 기록 {hiddenOlderLogsCount}개 더 보기
                   </button>
@@ -2161,7 +2225,7 @@ export default function StudentCard({ student }: { student: any }) {
         {/* 보강 */}
         {activeTab === "makeup" && (
           <>
-            <h3 className="text-[17px] font-bold">보강 일정</h3>
+            <h3 className="text-[17px] font-bold text-[#1E293B]">보강 일정</h3>
             {isMakeupLoading ? (
               <LoadingBox text="보강 일정을 불러오는 중이에요." />
             ) : makeups.length === 0 ? (
@@ -2177,10 +2241,10 @@ export default function StudentCard({ student }: { student: any }) {
                 return (
                   <article
                     key={m.makeup_id}
-                    className="bg-white rounded-xl border border-[#E4E7EB] px-4 py-3.5 flex flex-col gap-2"
+                    className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] px-4 py-3.5 flex flex-col gap-2"
                   >
                     <div className="flex justify-between items-center gap-2">
-                      <span className="text-[15px] font-semibold">
+                      <span className="text-[15px] font-bold text-[#1E293B]">
                         {d.getMonth() + 1}월 {d.getDate()}일{" "}
                         {WEEKDAYS[d.getDay()]}요일 {timeStr}
                       </span>
@@ -2193,13 +2257,13 @@ export default function StudentCard({ student }: { student: any }) {
                       </span>
                     </div>
                     <div className="grid grid-cols-[48px_1fr] gap-x-2 gap-y-1 text-[14px]">
-                      <span className="text-[#616E7C]">내용</span>
+                      <span className="text-[#64748B]">내용</span>
                       <span>
                         {m.target_category_id || "정해지는 대로 알려드릴게요"}
                       </span>
-                      <span className="text-[#616E7C]">장소</span>
+                      <span className="text-[#64748B]">장소</span>
                       <span>{m.classroom || "-"}</span>
-                      <span className="text-[#616E7C]">담당</span>
+                      <span className="text-[#64748B]">담당</span>
                       <span>
                         {m.instructor?.name
                           ? `${m.instructor.name} 선생님`
@@ -2221,61 +2285,63 @@ export default function StudentCard({ student }: { student: any }) {
             <>
               {renderGrowthChart()}
 
-              <section className="bg-white rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-3">
-                <h3 className="text-[17px] font-bold">주간테스트 기록</h3>
+              <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
+                <h3 className="text-[17px] font-bold text-[#1E293B]">
+                  주간테스트 기록
+                </h3>
                 {examResults.length === 0 ? (
-                  <p className="text-[14px] text-[#616E7C]">
+                  <p className="text-[14px] text-[#64748B]">
                     아직 기록이 없어요.
                   </p>
                 ) : (
-                  <div className="flex flex-col divide-y divide-[#E4E7EB]">
+                  <div className="flex flex-col divide-y divide-[#F1F5F9]">
                     {examResults.map((ex: any, i: number) => (
                       <div key={i} className="py-3 flex flex-col gap-2">
                         <div className="flex justify-between items-start gap-3">
                           <div className="min-w-0">
                             <div
-                              className="text-[15px] font-semibold truncate"
+                              className="text-[15px] font-semibold text-[#1E293B] truncate"
                               title={ex.title}
                             >
                               {ex.title}
                             </div>
-                            <div className="text-[12px] text-[#616E7C]">
+                            <div className="text-[12px] text-[#64748B]">
                               {ex.created_at ? formatKDate(ex.created_at) : "-"}
                             </div>
                           </div>
                           <div className="text-right shrink-0">
                             <div className="text-[15px] tabular-nums">
-                              <span className="font-bold text-[#002864]">
+                              <span className="font-bold text-[#2563EB]">
                                 {ex.original_score || 0}
                               </span>
-                              <span className="text-[#616E7C]"> → </span>
-                              <span className="font-bold">
+                              <span className="text-[#94A3B8]"> → </span>
+                              <span className="font-bold text-[#0F172A]">
                                 {ex.final_score || 0}점
                               </span>
                             </div>
-                            <div className="text-[12px] text-[#616E7C] tabular-nums">
+                            <div className="text-[12px] text-[#64748B] tabular-nums">
                               반 평균 {ex.class_init_avg} → {ex.class_fin_avg}점
                             </div>
                           </div>
                         </div>
                         <div className="flex flex-wrap gap-1.5 text-[12px] font-semibold">
                           {ex.oCount > 0 && (
-                            <span className="rounded-full px-2 py-0.5 bg-[#E7F4EE] text-[#0B5E41]">
+                            <span className="rounded-full px-2.5 py-0.5 bg-[#DCFCE7] text-[#15803D]">
                               처음부터 정답 {ex.oCount}
                             </span>
                           )}
                           {ex.roCount > 0 && (
-                            <span className="rounded-full px-2 py-0.5 bg-[#EAF1F9] text-[#24578F]">
+                            <span className="rounded-full px-2.5 py-0.5 bg-[#DBEAFE] text-[#1D4ED8]">
                               스스로 고침 {ex.roCount}
                             </span>
                           )}
                           {ex.toCount > 0 && (
-                            <span className="rounded-full px-2 py-0.5 bg-[#FDF1DC] text-[#7A4A00]">
+                            <span className="rounded-full px-2.5 py-0.5 bg-[#FEF3C7] text-[#B45309]">
                               힌트 후 정답 {ex.toCount}
                             </span>
                           )}
                           {ex.xCount > 0 && (
-                            <span className="rounded-full px-2 py-0.5 bg-[#FBEAE8] text-[#A32A22]">
+                            <span className="rounded-full px-2.5 py-0.5 bg-[#FFE4E6] text-[#BE123C]">
                               아직 오답 {ex.xCount}
                             </span>
                           )}
@@ -2286,16 +2352,18 @@ export default function StudentCard({ student }: { student: any }) {
                 )}
               </section>
 
-              <section className="bg-white rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-3">
+              <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
                 <div className="flex justify-between items-end gap-2">
-                  <h3 className="text-[17px] font-bold">단원별 성취도</h3>
-                  <div className="flex gap-3 text-[12px] text-[#3E4C59]">
+                  <h3 className="text-[17px] font-bold text-[#1E293B]">
+                    단원별 성취도
+                  </h3>
+                  <div className="flex gap-3 text-[12px] text-[#475569]">
                     <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-sm bg-[#002864]"></span>
+                      <span className="w-2.5 h-2.5 rounded-sm bg-[#2563EB]"></span>
                       처음
                     </span>
                     <span className="flex items-center gap-1">
-                      <span className="w-2.5 h-2.5 rounded-sm bg-[#9DB9E3]"></span>
+                      <span className="w-2.5 h-2.5 rounded-sm bg-[#93C5FD]"></span>
                       고친 뒤
                     </span>
                   </div>
@@ -2304,7 +2372,7 @@ export default function StudentCard({ student }: { student: any }) {
                   <RadarChart data={categoryAnalysis} />
                 </div>
                 {categoryAnalysis.length === 0 ? (
-                  <p className="text-[14px] text-[#616E7C]">
+                  <p className="text-[14px] text-[#64748B]">
                     아직 단원별 기록이 없어요.
                   </p>
                 ) : (
@@ -2312,18 +2380,20 @@ export default function StudentCard({ student }: { student: any }) {
                     {categoryAnalysis.map((cat: any, i: number) => (
                       <div key={i} className="flex flex-col gap-1">
                         <div className="flex justify-between items-center text-[14px]">
-                          <span className="truncate pr-2">{cat.name}</span>
-                          <span className="shrink-0 tabular-nums font-semibold">
+                          <span className="truncate pr-2 text-[#334155]">
+                            {cat.name}
+                          </span>
+                          <span className="shrink-0 tabular-nums font-bold text-[#1D4ED8]">
                             {cat.final_rate}%
                           </span>
                         </div>
-                        <div className="w-full bg-[#EEF0F2] h-2 rounded-full relative overflow-hidden">
+                        <div className="w-full bg-[#EFF6FF] h-2 rounded-full relative overflow-hidden">
                           <div
-                            className="absolute inset-y-0 left-0 bg-[#9DB9E3] rounded-full"
+                            className="absolute inset-y-0 left-0 bg-[#93C5FD] rounded-full"
                             style={{ width: `${cat.final_rate}%` }}
                           ></div>
                           <div
-                            className="absolute inset-y-0 left-0 bg-[#002864] rounded-full"
+                            className="absolute inset-y-0 left-0 bg-[#2563EB] rounded-full"
                             style={{ width: `${cat.initial_rate}%` }}
                           ></div>
                         </div>
@@ -2333,27 +2403,29 @@ export default function StudentCard({ student }: { student: any }) {
                 )}
               </section>
 
-              <section className="bg-white rounded-xl border border-[#E4E7EB] p-4 flex flex-col gap-3">
-                <h3 className="text-[17px] font-bold">학교 내신 성적</h3>
+              <section className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] p-4 flex flex-col gap-3">
+                <h3 className="text-[17px] font-bold text-[#1E293B]">
+                  학교 내신 성적
+                </h3>
                 {schoolExams.length === 0 ? (
-                  <p className="text-[14px] text-[#616E7C]">
+                  <p className="text-[14px] text-[#64748B]">
                     등록된 학교 성적이 없어요.
                   </p>
                 ) : (
-                  <div className="grid grid-cols-2 gap-2">
+                  <div className="grid grid-cols-2 gap-2.5">
                     {schoolExams.map((se: any, idx: number) => (
                       <div
                         key={se.id || idx}
-                        className="rounded-lg bg-[#F5F7FA] px-3 py-2.5 flex flex-col gap-1"
+                        className="rounded-xl bg-[#F8FAFC] border border-[#E2E8F0] px-3.5 py-2.5 flex flex-col gap-1"
                       >
-                        <span className="text-[12px] text-[#616E7C]">
+                        <span className="text-[12px] text-[#64748B]">
                           {se.year}년 {se.semester}학기 {se.exam_type}
                         </span>
                         <div className="flex justify-between items-baseline">
-                          <span className="text-[14px] font-semibold">
+                          <span className="text-[14px] font-semibold text-[#334155]">
                             {se.subject}
                           </span>
-                          <span className="text-[17px] font-bold tabular-nums">
+                          <span className="text-[17px] font-bold text-[#1E3A8A] tabular-nums">
                             {se.score}점
                           </span>
                         </div>
@@ -2368,7 +2440,7 @@ export default function StudentCard({ student }: { student: any }) {
         {/* 상담 */}
         {activeTab === "consultation" && (
           <>
-            <h3 className="text-[17px] font-bold">상담 기록</h3>
+            <h3 className="text-[17px] font-bold text-[#1E293B]">상담 기록</h3>
             {consultLogs.length === 0 ? (
               <EmptyBox text="아직 상담 기록이 없어요. 궁금한 점은 상담 버튼으로 남겨 주세요." />
             ) : (
@@ -2379,7 +2451,7 @@ export default function StudentCard({ student }: { student: any }) {
                 return (
                   <article
                     key={idx}
-                    className="bg-white rounded-xl border border-[#E4E7EB] px-4 py-3.5 flex flex-col gap-2"
+                    className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] px-4 py-3.5 flex flex-col gap-2"
                   >
                     <div className="flex justify-between items-center gap-2">
                       <span
@@ -2389,13 +2461,13 @@ export default function StudentCard({ student }: { student: any }) {
                       >
                         {log.consultation_type || "상담"}
                       </span>
-                      <span className="text-[13px] text-[#616E7C]">
+                      <span className="text-[13px] text-[#64748B]">
                         {formatKDate(log.created_at)}
                         {instName ? `, ${instName} 선생님` : ""}
                       </span>
                     </div>
                     {hasSummary && (
-                      <p className="text-[15px] leading-relaxed">
+                      <p className="text-[15px] text-[#334155] leading-relaxed">
                         {log.parent_summary}
                       </p>
                     )}
@@ -2410,7 +2482,7 @@ export default function StudentCard({ student }: { student: any }) {
       {toastMessage && (
         <div
           role="status"
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 w-max max-w-[90%] bg-[#1F2933] text-white px-4 py-2.5 rounded-lg text-[14px] shadow-lg z-[9999] pointer-events-none"
+          className="absolute bottom-6 left-1/2 -translate-x-1/2 w-max max-w-[90%] bg-[#1E293B] text-white px-4 py-2.5 rounded-xl text-[14px] shadow-lg z-[9999] pointer-events-none"
         >
           {toastMessage}
         </div>
@@ -2420,18 +2492,18 @@ export default function StudentCard({ student }: { student: any }) {
 }
 
 const EmptyBox = ({ text }: { text: string }) => (
-  <div className="bg-white rounded-xl border border-[#E4E7EB] px-4 py-10 text-center text-[14px] text-[#616E7C]">
+  <div className="bg-white rounded-xl border border-[#E2E8F0] px-4 py-10 text-center text-[14px] text-[#64748B]">
     {text}
   </div>
 );
 
 const LoadingBox = ({ text }: { text: string }) => (
   <div
-    className="bg-white rounded-xl border border-[#E4E7EB] px-4 py-10 flex flex-col items-center gap-3 text-[14px] text-[#616E7C]"
+    className="bg-white rounded-xl border border-[#E2E8F0] px-4 py-10 flex flex-col items-center gap-3 text-[14px] text-[#64748B]"
     role="status"
   >
     <span
-      className="w-6 h-6 border-[3px] border-[#002864] border-t-transparent rounded-full animate-spin"
+      className="w-6 h-6 border-[3px] border-[#2563EB] border-t-transparent rounded-full animate-spin"
       aria-hidden="true"
     ></span>
     {text}
