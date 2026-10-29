@@ -448,15 +448,6 @@ const buildSubQuestionItemHtml = (
   const hasQ2 = Boolean(rawQ2 && rawQ2 !== "undefined" && rawQ2 !== "null");
   const isCompactSingleCol = col === 1 && split >= 4;
   const topMarginClass = sIdx > 0 ? (isCompactSingleCol ? "mt-3" : (isTrailingSubNum || !hasText) ? "mt-6" : "mt-16") : "";
-  let maxHeightStyle = " max-height: 250px;";
-  if (isAdmissionMode) {
-    maxHeightStyle = "";
-  } else if (col === 1) {
-    if (split >= 6) maxHeightStyle = " max-height: 95px;";
-    else if (split >= 4) maxHeightStyle = " max-height: 150px;";
-    else if (split === 2) maxHeightStyle = " max-height: 240px;";
-    else maxHeightStyle = " max-height: 340px;";
-  }
   const imgMarginClass = isCompactSingleCol ? "mt-1.5 mb-1" : "mt-4 mb-3";
   const q2BlockHtml = hasQ2
     ? `<div class="flex items-start ${isCompactSingleCol ? 'mt-1.5' : 'mt-3'}"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(rawQ2)}</div></div>`
@@ -472,19 +463,19 @@ const buildSubQuestionItemHtml = (
     if (validImg1 && validImg2) {
       const w1 = getBoxWidth(q.image_box, col, split);
       const w2 = getBoxWidth(q.image_2_box, col, split);
-      const commonImg1Html = `<div class="w-full flex justify-center ${isCompactSingleCol ? 'mt-1 mb-2' : 'mt-2 mb-4'}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w1};${maxHeightStyle}"></div>`;
-      const inlineImg2Html = `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w2};${maxHeightStyle}"></div>`;
+      const commonImg1Html = `<div class="w-full flex justify-center ${isCompactSingleCol ? 'mt-1 mb-2' : 'mt-2 mb-4'}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: ${w1}; height: auto;"></div>`;
+      const inlineImg2Html = `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: ${w2}; height: auto;"></div>`;
       return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}${commonImg1Html}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImg2Html}</div></div>${q2BlockHtml}</div>`;
     }
 
     let inlineImgs = "";
     if (validImg1) {
       const w = getBoxWidth(q.image_box, col, split);
-      inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+      inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: ${w}; height: auto;"></div>`;
     }
     if (validImg2) {
       const w = getBoxWidth(q.image_2_box, col, split);
-      inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+      inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: ${w}; height: auto;"></div>`;
     }
     return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImgs}</div></div>${q2BlockHtml}</div>`;
   }
@@ -492,11 +483,11 @@ const buildSubQuestionItemHtml = (
   let imgHtml = "";
   if (validImg1) {
     const w = getBoxWidth(q.image_box, col, split);
-    imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+    imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: ${w}; height: auto;"></div>`;
   }
   if (validImg2) {
     const w = getBoxWidth(q.image_2_box, col, split);
-    imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
+    imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: ${w}; height: auto;"></div>`;
   }
 
   const textBlockHtml = hasText

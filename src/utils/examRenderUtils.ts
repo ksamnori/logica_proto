@@ -275,10 +275,10 @@ export const generateGroupBlock = (g: any) => {
       let safeImg2Url = String(q.image_2_url || '').trim();
       let imgHtml = '';
       if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-          imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+          imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: auto; height: auto;"></div>`;
       }
       if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
-          imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+          imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full h-auto object-contain mix-blend-multiply" style="width: auto; height: auto;"></div>`;
       }
       let rawQ2 = String(q.question_2 || '').trim();
       let q2Html = '';
