@@ -36,7 +36,6 @@ export async function recoverInstructorSession(): Promise<boolean> {
       document.cookie = `logica_tenant_id=${instructor.tenant_id}; path=/; max-age=86400;`;
     }
 
-    const { data: { session } } = await supabase.auth.getSession();
     if (session?.access_token) {
       document.cookie = `sb-access-token=${session.access_token}; path=/; max-age=86400;`;
     }
