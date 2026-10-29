@@ -1178,7 +1178,7 @@ function ReviewContent() {
         let tempT = 0; dedupScoreMap.forEach((a:any) => tempT += (Number(a.earned_score) || 0));
         const finalScore = roundScore(tempT);
 
-        let { error: uErr } = await supabase.from('exam_assignment').update({ total_score: recalcTotal > 0 ? roundScore(recalcTotal) : finalScore, status: '채점완료' }).eq('assignment_id', parseInt(assignmentId as string));
+        let { error: uErr } = await supabase.from('exam_assignment').update({ total_score: finalScore, status: '채점완료' }).eq('assignment_id', parseInt(assignmentId as string));
         if (uErr) throw new Error("시험지 총점 업데이트 실패: " + uErr.message);
 
         const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, question_id').eq('student_id', contextIds.studentId);
@@ -1293,7 +1293,7 @@ function ReviewContent() {
         assignment_id: parseInt(assignmentId as string), 
         student_id: contextIds.studentId, 
         exam_id: contextIds.examPaperId,
-        total_score: finalScore,
+        total_score: recalcTotal > 0 ? roundScore(recalcTotal) : finalScore,
         score_geometry: sGeo, score_measure: sMea, score_stat: sStat, score_rule: sRule, score_calc: sCalc,
         score_calc_sense: sCalcSense, score_spatial_percep: sSpatial, score_logical_reason: sLogic,
         score_thinking: sThink, score_persistence: sPersist, score_knowledge: sKnow,
