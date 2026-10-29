@@ -330,7 +330,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(qItem.question),
-            imageUrl: getCleanUrl(qItem.image_url), options: safeParseOptions(qItem.options),
+            questionText2: qItem.question_2 ? formatMathTextForWeb(qItem.question_2) : '',
+            imageUrl: getCleanUrl(qItem.image_url), image2Url: getCleanUrl(qItem.image_2_url), options: safeParseOptions(qItem.options),
             answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '',
             hintText: dbHint,
             aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -347,7 +348,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, tq_id: tq.tq_id, question_id: tq.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
-            imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), options: safeParseOptions(raw.options),
+            questionText2: (freshQ.question_2 || raw.question_2) ? formatMathTextForWeb(freshQ.question_2 || raw.question_2) : '',
+            imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), image2Url: getCleanUrl(freshQ.image_2_url || raw.image_2_url), options: safeParseOptions(raw.options),
             answer: String(tq.answer || '').trim(), explanation: raw.explanation || raw.solution || '',
             hintText: dbHint || tbFields.hintText,
             hasHint: !!dbHint || tbFields.hasHint,
@@ -476,7 +478,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           examAssignmentId: matchedAssignId,
           assigned_score: scoreByQuestionId.get(String(qId)) ?? defaultItemScore,
           source: matchedTitle || `이번 주 ${displayLabel}`, questionText: formatMathTextForWeb(it.question_db.question),
-          imageUrl: getCleanUrl(it.question_db.image_url), options: safeParseOptions(it.question_db.options),
+          questionText2: it.question_db.question_2 ? formatMathTextForWeb(it.question_db.question_2) : '',
+          imageUrl: getCleanUrl(it.question_db.image_url), image2Url: getCleanUrl(it.question_db.image_2_url), options: safeParseOptions(it.question_db.options),
           answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
           hintText: dbHint,
           aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -536,7 +539,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         assigned_score: scoreByQuestionId.get(String(qId)) ?? defaultItemScore,
         bookId: Number(assignId), bookType, bookTitle: title || '배정된 과제',
         source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
-        imageUrl: getCleanUrl(it.question_db.image_url), options: safeParseOptions(it.question_db.options),
+        questionText2: it.question_db.question_2 ? formatMathTextForWeb(it.question_db.question_2) : '',
+        imageUrl: getCleanUrl(it.question_db.image_url), image2Url: getCleanUrl(it.question_db.image_2_url), options: safeParseOptions(it.question_db.options),
         answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
         hintText: dbHint,
         aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -578,7 +582,7 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
 
       const hwQIds = qs.map((qItem: any) => qItem.question_id).filter(Boolean);
       const { data: freshQDb } = hwQIds.length > 0 
-        ? await supabaseClient.from('question_db').select('question_id, step_1_concept, step_2_approach, final_printed_page, detected_page_num, question_number').in('question_id', hwQIds)
+        ? await supabaseClient.from('question_db').select('question_id, question_2, image_2_url, step_1_concept, step_2_approach, final_printed_page, detected_page_num, question_number').in('question_id', hwQIds)
         : { data: [] };
       const freshQDbMap = new Map((freshQDb || []).map((qItem: any) => [qItem.question_id, qItem]));
 
@@ -591,7 +595,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), homework_id: qItem.homeworkId, tq_id: qItem.tq_id, question_id: qItem.question_id,
           source: qItem.homeworkTitle || '통합 과제', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
-          imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || qItem.image_url), options: safeParseOptions(raw.options),
+          questionText2: (freshQ.question_2 || raw.question_2) ? formatMathTextForWeb(freshQ.question_2 || raw.question_2) : '',
+          imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || qItem.image_url), image2Url: getCleanUrl(freshQ.image_2_url || raw.image_2_url), options: safeParseOptions(raw.options),
           answer: String(qItem.answer || '').trim(), explanation: raw.explanation || raw.solution || '', 
           hintText: dbHint || tbFields.hintText,
           hasHint: !!dbHint || tbFields.hasHint,
@@ -628,7 +633,8 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
           source: r.source_type || '오답노트', questionText: formatMathTextForWeb(qItem.question),
-          imageUrl: getCleanUrl(qItem.image_url), options: safeParseOptions(qItem.options),
+          questionText2: qItem.question_2 ? formatMathTextForWeb(qItem.question_2) : '',
+          imageUrl: getCleanUrl(qItem.image_url), image2Url: getCleanUrl(qItem.image_2_url), options: safeParseOptions(qItem.options),
           answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '', 
           hintText: dbHint,
           aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,

@@ -90,25 +90,25 @@ export default function GlobalList({
           </div>
         </div>
 
-        <div className="flex justify-between items-center bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm mt-0.5">
-          <label className="flex items-center gap-1.5 cursor-pointer pl-1.5">
-            <input type="checkbox" checked={globalList.length > 0 && globalSelectedBlocks.length === globalList.length} onChange={handleSelectAllGlobal} className="w-4 h-4 accent-rose-500" />
-            <span className="text-[12px] font-bold text-slate-700">전체 선택</span>
+        <div className="flex flex-wrap justify-between items-center gap-2 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm mt-0.5">
+          <label className="flex items-center gap-1.5 cursor-pointer pl-1.5 whitespace-nowrap shrink-0">
+            <input type="checkbox" checked={globalList.length > 0 && globalSelectedBlocks.length === globalList.length} onChange={handleSelectAllGlobal} className="w-4 h-4 accent-rose-500 shrink-0" />
+            <span className="text-[12px] font-bold text-slate-700 whitespace-nowrap">전체 선택</span>
           </label>
-          <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
             {activeTab === 'HOMEWORK' && globalSelectedBlocks.length >= 2 && (
-              <button onClick={handleExtractCommonHomework} className="px-3 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-xs transition-colors whitespace-nowrap shadow-sm mr-2 animate-pulse">
+              <button onClick={handleExtractCommonHomework} className="px-3 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-xs transition-colors whitespace-nowrap shrink-0 shadow-sm mr-1 animate-pulse">
                 🔗 공통 과제 분리
               </button>
             )}
-            <button onClick={handleBulkCompleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap">
+            <button onClick={handleBulkCompleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap shrink-0">
               ✅ 선택 완료처리 ({globalSelectedBlocks.length})
             </button>
-            <button onClick={handleBulkDeleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap">
+            <button onClick={handleBulkDeleteGlobal} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap shrink-0">
               🗑️ 선택 삭제 ({globalSelectedBlocks.length})
             </button>
             
-            <button onClick={handleBulkPrint} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap shadow-sm">
+            <button onClick={handleBulkPrint} disabled={globalSelectedBlocks.length === 0} className="px-2.5 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-xs transition-colors disabled:opacity-40 whitespace-nowrap shrink-0 shadow-sm">
               🖨️ 선택 한 장에 모아 출력 ({globalSelectedBlocks.length})
             </button>
           </div>
@@ -148,7 +148,7 @@ export default function GlobalList({
               else if(isCompleted) statusBadge = "bg-slate-300 text-slate-700 border border-slate-400";
               else statusBadge = "bg-amber-50 text-amber-600 border border-amber-100";
 
-              let typeBadge = res.type === 'archive' ? "📦 보존됨" : res.type === 'raw_inc' ? "🔥 원본오답" : activeTab === 'EXAM' ? "📝 주간/중간테스트" : activeTab === 'QUARTERLY' ? "📅 분기평가" : activeTab === 'INCORRECT' ? "❌ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
+              let typeBadge = res.type === 'archive' ? "📦 보존됨" : res.type === 'raw_inc' ? "🔥 원본오답" : activeTab === 'EXAM' ? "📝 주간/중간테스트" : activeTab === 'QUARTERLY' ? "📅 분기평가" : activeTab === 'INCORRECT' ? "✕ 오답" : activeTab === 'SIMILAR' ? "🔄 오답유사" : activeTab === 'OVERDUE' ? "⏰ 미완료과제" : res.is_exam_hw ? "📝 문제지 과제" : "📚 교재 과제";
               let typeColor = res.type === 'archive' ? "bg-slate-700 text-amber-400 border-slate-600" : res.type === 'raw_inc' ? "bg-rose-800 text-rose-100 border-rose-700" : activeTab === 'EXAM' ? "bg-blue-100 text-blue-700 border-blue-200" : activeTab === 'QUARTERLY' ? "bg-fuchsia-100 text-fuchsia-700 border-fuchsia-200" : activeTab === 'INCORRECT' ? "bg-emerald-100 text-emerald-700 border-emerald-200" : activeTab === 'SIMILAR' ? "bg-violet-100 text-violet-700 border-violet-200" : activeTab === 'OVERDUE' ? "bg-rose-100 text-rose-700 border-rose-200" : "bg-amber-100 text-amber-700 border-amber-200";
               
               let rawTitle = (activeTab === 'HOMEWORK' && !res.is_exam_hw ? hw?.homework_title : m?.title) || '제목 없음';

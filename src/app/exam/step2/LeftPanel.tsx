@@ -968,6 +968,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
                          <div className="font-myungjo text-[15px] font-semibold leading-[2.0] text-slate-800 break-keep" dangerouslySetInnerHTML={{ __html: formatText(q.question) }} />
                          {q.image_url && getCleanUrl(q.image_url) && <img src={getCleanUrl(q.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded object-contain" alt="" />}
                          {q.image_2_url && getCleanUrl(q.image_2_url) && <img src={getCleanUrl(q.image_2_url)} className="max-h-32 mt-2 mix-blend-multiply border border-slate-200 rounded object-contain" alt="" />}
+                         {q.question_2 && String(q.question_2).trim() !== '' && String(q.question_2) !== 'null' && (
+                           <div className="font-myungjo text-[15px] font-semibold leading-[2.0] text-slate-800 break-keep mt-2" dangerouslySetInnerHTML={{ __html: formatText(q.question_2) }} />
+                         )}
                        </div>
                      );
                    })
@@ -1014,6 +1017,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
                     <div className="font-myungjo font-semibold text-[15px] text-slate-800 leading-[2.0] break-keep" dangerouslySetInnerHTML={{ __html: formatText(altQ.question) }}></div>
                     {altQ.image_url && getCleanUrl(altQ.image_url) && <img src={getCleanUrl(altQ.image_url)} className="max-h-32 mt-3 mix-blend-multiply border border-slate-200 rounded object-contain" alt="Q" />}
                     {altQ.image_2_url && getCleanUrl(altQ.image_2_url) && <img src={getCleanUrl(altQ.image_2_url)} className="max-h-32 mt-2 mix-blend-multiply border border-slate-200 rounded object-contain" alt="Q2" />}
+                    {altQ.question_2 && String(altQ.question_2).trim() !== '' && String(altQ.question_2) !== 'null' && (
+                      <div className="font-myungjo font-semibold text-[15px] text-slate-800 leading-[2.0] break-keep mt-2" dangerouslySetInnerHTML={{ __html: formatText(altQ.question_2) }}></div>
+                    )}
                   </div>
                  );
                })

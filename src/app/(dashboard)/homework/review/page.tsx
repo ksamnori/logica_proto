@@ -414,12 +414,14 @@ const MathText = memo(({ html, className = "", isDiv = false }: { html: string, 
 });
 MathText.displayName = "MathText";
 
-const QuestionContent = memo(({ textToRender, imageUrl, answer }: { textToRender: string, imageUrl: string, answer: string }) => {
+const QuestionContent = memo(({ textToRender, imageUrl, image2Url, text2ToRender, answer }: { textToRender: string, imageUrl: string, image2Url?: string, text2ToRender?: string, answer: string }) => {
   return (
     <div className="flex-1 bg-white/60 px-4 py-3 rounded-lg border border-slate-200 flex flex-col gap-2 overflow-hidden shadow-inner">
       <div className="font-bold text-slate-800 text-[14px] math-text whitespace-pre-wrap">
         <MathText html={textToRender} />
         {imageUrl && <img src={imageUrl} className="max-w-full max-h-40 mt-2 mix-blend-multiply" alt="" />}
+        {image2Url && <img src={image2Url} className="max-w-full max-h-40 mt-2 mix-blend-multiply" alt="" />}
+        {text2ToRender && <div className="mt-2"><MathText html={text2ToRender} /></div>}
       </div>
       <div className="mt-2 pt-2 border-t border-dashed border-slate-200 flex items-center gap-2">
          <span className="bg-blue-100 text-blue-700 px-2 py-0.5 rounded text-xs font-bold shrink-0">DB 정답</span>
@@ -1136,6 +1138,8 @@ function HomeworkReviewContent() {
                         <QuestionContent 
                           textToRender={formatMathTextForWeb(textToRender)} 
                           imageUrl={getCleanUrl(q.image_url)} 
+                          image2Url={getCleanUrl(q.image_2_url)}
+                          text2ToRender={q.question_2 ? formatMathTextForWeb(q.question_2) : ''}
                           answer={q.answer ? `$ ${formatMathTextForWeb(q.answer)} $` : ''} 
                         />
 
@@ -1191,6 +1195,8 @@ function HomeworkReviewContent() {
                 </h3>
                 <MathText isDiv className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" html={formatMathTextForWeb(modalQ.question || modalQ.text_question || '-').replace(/\n/g, '<br>')} />
                 {getCleanUrl(modalQ.image_url) && <img src={getCleanUrl(modalQ.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
+                {getCleanUrl(modalQ.image_2_url) && <img src={getCleanUrl(modalQ.image_2_url)} className="max-w-full mt-3 rounded-lg border border-slate-200" alt="Question 2" />}
+                {modalQ.question_2 && <MathText isDiv className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed mt-3" html={formatMathTextForWeb(modalQ.question_2).replace(/\n/g, '<br>')} />}
               </div>
               
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">

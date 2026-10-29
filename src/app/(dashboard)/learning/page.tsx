@@ -6,6 +6,11 @@ import { supabase } from "@/lib/supabase";
 import { ViewState } from "./types";
 import { useLearningFetch, LEVEL_ORDER } from "./hooks/useLearningFetch";
 import { useLearningActions } from "./hooks/useLearningActions";
+import {
+  fetchMainTextbookExclusionSet,
+  isMainTextbookQuestion,
+  isWorkbookQuestion,
+} from "@/app/exam/step2/examUtils";
 
 import LearningSidebar from "./components/LearningSidebar";
 import StudentDashboard from "./components/StudentDashboard";
@@ -65,6 +70,8 @@ export default function LearningPage() {
   const [bulkSim, setBulkSim] = useState(1);
   const [bulkDiff, setBulkDiff] = useState('그대로');
   const [bulkExclude, setBulkExclude] = useState(true);
+  const [bulkExcludeMain, setBulkExcludeMain] = useState(true);
+  const [bulkExcludeWorkbook, setBulkExcludeWorkbook] = useState(true);
   const [bulkLimitActive, setBulkLimitActive] = useState(true);
   const [bulkLimit, setBulkLimit] = useState(3);
   const [bulkTotalLimitActive, setBulkTotalLimitActive] = useState(true);
@@ -361,6 +368,7 @@ export default function LearningPage() {
 
     const myTenantId = localStorage.getItem("logica_tenant_id") || 'hq';
     const instId = localStorage.getItem('logica_instructor_id') || 'system';
+    const exclusion = (bulkExcludeMain || bulkExcludeWorkbook) ? await fetchMainTextbookExclusionSet(supabase) : null;
 
     for (let i = 0; i < studentsInClass.length; i++) {
       const st = studentsInClass[i];
@@ -443,13 +451,17 @@ export default function LearningPage() {
             continue; 
         }
 
+        const rpcBulkLimit = (bulkExcludeMain || bulkExcludeWorkbook) && bulkLimitActive
+          ? Math.max(bulkLimit * 5, 20)
+          : bulkLimit;
+
         const { data: matchedIds, error: matchErr } = await supabase.rpc('get_clinic_matches', {
           p_target_qids: uniqueQids,
           p_twin_count: bulkTwin,
           p_sim_count: bulkSim,
           p_diff_opt: bulkDiff,
           p_exclude_orig: bulkExclude,
-          p_max_limit: bulkLimit,
+          p_max_limit: rpcBulkLimit,
           p_is_limit_active: bulkLimitActive
         });
 
@@ -466,9 +478,50 @@ export default function LearningPage() {
             continue; 
         }
 
-        let finalMatchedIds = matchedIds;
+        let finalMatchedIds: string[] = matchedIds;
+        if (bulkExcludeMain || bulkExcludeWorkbook) {
+          const cleanIds = Array.from(
+            new Set(
+              (matchedIds as string[])
+                .map((id) => String(id || '').trim().replace(/_added_\d+$/, ''))
+                .filter(Boolean)
+            )
+          );
+          const qMap = new Map<string, any>();
+          for (let c = 0; c < cleanIds.length; c += 500) {
+            const chunk = cleanIds.slice(c, c + 500);
+            const { data: qRows } = await supabase
+              .from('question_db')
+              .select('question_id, taxonomy_id, sub_taxonomy_id, derivation_type, problem_type, book_name, source_book_name, pdf_source')
+              .in('question_id', chunk);
+            (qRows || []).forEach((row: any) => {
+              if (row?.question_id) qMap.set(String(row.question_id).trim(), row);
+            });
+          }
+
+          const typeCounter = new Map<string, number>();
+          finalMatchedIds = [];
+          for (const rawId of matchedIds as string[]) {
+            const qid = String(rawId || '').trim();
+            if (!qid) continue;
+            const realQid = qid.replace(/_added_\d+$/, '');
+            const q = qMap.get(qid) || qMap.get(realQid) || { question_id: realQid };
+            if (bulkExcludeMain && isMainTextbookQuestion(q, exclusion)) continue;
+            if (bulkExcludeWorkbook && isWorkbookQuestion(q, exclusion)) continue;
+            if (bulkLimitActive && bulkLimit > 0) {
+              const taxKey = String(q.taxonomy_id || q.sub_taxonomy_id || '').trim();
+              if (taxKey) {
+                const used = typeCounter.get(taxKey) || 0;
+                if (used >= bulkLimit) continue;
+                typeCounter.set(taxKey, used + 1);
+              }
+            }
+            finalMatchedIds.push(qid);
+          }
+        }
+
         if (bulkTotalLimitActive && bulkTotalLimit > 0) {
-            finalMatchedIds = matchedIds.slice(0, bulkTotalLimit);
+            finalMatchedIds = finalMatchedIds.slice(0, bulkTotalLimit);
         }
 
         if (finalMatchedIds.length === 0) { skipNoMatch++; continue; }
@@ -585,7 +638,7 @@ export default function LearningPage() {
               <div className="w-px h-6 bg-slate-300 mx-0.5 shrink-0"></div>
               <button 
                 onClick={() => setIsBulkModalOpen(true)}
-                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-bold text-[13px] shadow-sm transition-colors animate-[fadeIn_0.3s_ease-out] shrink-0"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg bg-violet-500 hover:bg-violet-600 text-white font-bold text-[13px] shadow-sm transition-colors animate-[fadeIn_0.3s_ease-out] shrink-0 whitespace-nowrap"
               >
                 <span className="text-sm">🖨️</span>
                 <span>[{currentView.className}] 전원 오답유사 생성</span>
@@ -619,7 +672,7 @@ export default function LearningPage() {
                </div>
                <button 
                   onClick={handleOpenPreview}
-                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold rounded-xl shadow-sm transition-all"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 font-bold rounded-xl shadow-sm transition-all whitespace-nowrap shrink-0"
                >
                   <span className="text-lg">👀</span> 학생 포털 미리보기
                </button>
@@ -666,7 +719,7 @@ export default function LearningPage() {
                 </div>
               )}
               <div className="w-full flex justify-end px-5 pt-3 pb-1 -mb-1 relative z-20 pointer-events-none">
-                 <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-brand hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
+                 <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-sm whitespace-nowrap ${showCompleted ? 'bg-blue-50 border-blue-200 text-brand hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
                     <span>{showCompleted ? '✅' : '🔒'}</span><span>{showCompleted ? '완료 포함' : '미완료만 보기'}</span>
                  </button>
               </div>
@@ -696,7 +749,7 @@ export default function LearningPage() {
                         🔥 개별 문항 삭제/관리 버튼(✂️)을 눌러 원치 않는 오답을 영구 삭제할 수 있습니다.
                       </span>
                    )}
-                   <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-sm ${showCompleted ? 'bg-blue-50 border-blue-200 text-brand hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
+                   <button onClick={() => setShowCompleted(prev => !prev)} className={`pointer-events-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all border shadow-sm whitespace-nowrap ${showCompleted ? 'bg-blue-50 border-blue-200 text-brand hover:bg-blue-100' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`} title="완료된 항목 숨김/표시 전환">
                       <span>{showCompleted ? '✅' : '🔒'}</span><span>{showCompleted ? '완료 포함' : '미완료만 보기'}</span>
                    </button>
                 </div>
@@ -886,6 +939,7 @@ export default function LearningPage() {
         const expText = singleQuestionPreview.explanation;
         const solText = singleQuestionPreview.solution;
         const qText = singleQuestionPreview.question;
+        const qText2 = singleQuestionPreview.question_2;
 
         return (
           <div className="fixed inset-0 z-[120] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm p-4 animate-[fadeIn_0.2s_ease-out]">
@@ -900,19 +954,25 @@ export default function LearningPage() {
               </div>
 
               <div className="p-6 overflow-y-auto bg-slate-100 flex-1 flex flex-col gap-6 custom-scrollbar">
-                 {/* 문제 영역 */}
+                 {/* 문제 영역: question -> image_url -> image_2_url -> question_2 */}
                  <div>
                     <h3 className="text-sm font-bold text-slate-500 mb-2 flex items-center gap-1.5">
                       <span className="w-2 h-2 rounded-full bg-blue-500"></span>문제
                     </h3>
-                    {qImg || qImg2 ? (
-                      <div className="space-y-2 bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                        {qImg && <img src={qImg} alt="문제1" className="w-full object-contain" />}
-                        {qImg2 && <img src={qImg2} alt="문제2" className="w-full object-contain mt-2 border-t border-slate-100 pt-2" />}
-                      </div>
-                    ) : qText ? (
-                      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm text-slate-700 whitespace-pre-wrap">
-                        {qText}
+                    {(qText || qImg || qImg2 || qText2) ? (
+                      <div className="space-y-3 bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                        {qText && (
+                          <div className="text-slate-700 whitespace-pre-wrap leading-relaxed">
+                            {qText}
+                          </div>
+                        )}
+                        {qImg && <img src={qImg} alt="문제1" className="w-full object-contain rounded" />}
+                        {qImg2 && <img src={qImg2} alt="문제2" className="w-full object-contain mt-2 border-t border-slate-100 pt-2 rounded" />}
+                        {qText2 && (
+                          <div className="text-slate-700 whitespace-pre-wrap leading-relaxed pt-2 border-t border-slate-100">
+                            {qText2}
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <div className="w-full h-32 bg-white rounded-xl border border-slate-200 flex items-center justify-center text-slate-400 font-bold text-sm shadow-sm">등록된 문제 데이터가 없습니다.</div>
@@ -1046,6 +1106,17 @@ export default function LearningPage() {
                           <input type="checkbox" checked={bulkExclude} onChange={e => setBulkExclude(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
                           <span className="text-[13px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">기존에 이미 틀렸던 원본 문제는 포함하지 않기</span>
                         </label>
+
+                        <div className="flex items-center gap-6">
+                          <label className="flex items-center gap-2 cursor-pointer group w-max">
+                            <input type="checkbox" checked={bulkExcludeMain} onChange={e => setBulkExcludeMain(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                            <span className="text-[13px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">주교재 제외</span>
+                          </label>
+                          <label className="flex items-center gap-2 cursor-pointer group w-max">
+                            <input type="checkbox" checked={bulkExcludeWorkbook} onChange={e => setBulkExcludeWorkbook(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-violet-500" />
+                            <span className="text-[13px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">워크북 제외</span>
+                          </label>
+                        </div>
 
                         <div className="flex items-center gap-3">
                           <label className="flex items-center gap-2 cursor-pointer group">

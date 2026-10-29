@@ -274,9 +274,27 @@ export default function AdmissionPage() {
           const map: any = {};
           assignments?.forEach((a: any) => {
             if (String(a.admission_session_id) === String(sessionId) || (examId && String(a.exam_id) === String(examId))) {
-              if (!map[a.student_id] || a.status === '채점완료') map[a.student_id] = a;
+              if (!map[a.student_id] || a.status === '채점완료') map[a.student_id] = { ...a, has_report: false };
             }
           });
+
+          const assignIds = Object.values(map)
+            .map((a: any) => a?.assignment_id)
+            .filter(Boolean);
+
+          if (assignIds.length > 0) {
+            const { data: repRows } = await supabase
+              .from('admission_test_report')
+              .select('assignment_id')
+              .in('assignment_id', assignIds);
+            const repSet = new Set((repRows || []).map((r: any) => String(r.assignment_id)));
+            Object.keys(map).forEach((stuId) => {
+              const aId = map[stuId]?.assignment_id;
+              if (aId && repSet.has(String(aId))) {
+                map[stuId].has_report = true;
+              }
+            });
+          }
           return map;
         };
 
@@ -793,9 +811,27 @@ export default function AdmissionPage() {
                               {isDone ? '채점/리뷰' : '채점하기'}
                             </button>
                             {isDone && hasReportAuth && (
-                              <button onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')} className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0">
-                                📊 리포트
-                              </button>
+                              shadowAssign.has_report ? (
+                                <button
+                                  onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')}
+                                  className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0"
+                                  title="생성된 진단 분석 리포트를 열람합니다"
+                                >
+                                  📊 리포트
+                                </button>
+                              ) : (
+                                <button
+                                  onClick={() => {
+                                    if (confirm("아직 진단 리포트가 생성되지 않은 학생입니다.\n채점/리뷰 화면으로 이동하여 [2️⃣ 진단 리포트 생성하기]를 진행하시겠습니까?")) {
+                                      router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`);
+                                    }
+                                  }}
+                                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-400 border border-dashed border-slate-300 px-2.5 py-1.5 rounded font-bold transition-colors ml-1 shrink-0"
+                                  title="채점은 완료되었으나 아직 리포트가 생성되지 않았습니다 (클릭 시 생성 화면 이동)"
+                                >
+                                  리포트 미생성
+                                </button>
+                              )
                             )}
                           </div>
                         );

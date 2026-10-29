@@ -196,8 +196,10 @@ export default function TaHandheldDashboard() {
                   <span className="text-xs font-bold px-2.5 py-1 rounded bg-brand border border-blue-900 shadow-sm text-white">{currentCall.qNum}번 문항{currentCall.source ? ' · '+currentCall.source : ''}</span>
                 </div>
                 <MathText className="text-[20px] text-slate-800 font-myungjo font-semibold leading-[2.0] break-keep" html={currentCall.questionText} />
-                {currentCall.options && <div className="mt-5 flex flex-col gap-2">{currentCall.options.map((opt, i) => <div key={i} className="text-[17px] text-slate-700 font-medium flex gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100"><span className="font-bold text-indigo-400 shrink-0">{i + 1}.</span><span>{opt}</span></div>)}</div>}
                 {currentCall.imageUrl && <img src={currentCall.imageUrl} className="max-w-[720px] w-full rounded-xl border-2 border-slate-200 mt-4 shadow-sm" />}
+                {currentCall.image2Url && <img src={currentCall.image2Url} className="max-w-[720px] w-full rounded-xl border-2 border-slate-200 mt-4 shadow-sm" />}
+                {currentCall.questionText2 && <MathText className="text-[20px] text-slate-800 font-myungjo font-semibold leading-[2.0] break-keep mt-4" html={currentCall.questionText2} />}
+                {currentCall.options && <div className="mt-5 flex flex-col gap-2">{currentCall.options.map((opt, i) => <div key={i} className="text-[17px] text-slate-700 font-medium flex gap-2 bg-slate-50 px-4 py-2.5 rounded-xl border border-slate-100"><span className="font-bold text-indigo-400 shrink-0">{i + 1}.</span><span>{opt}</span></div>)}</div>}
                 <div className="mt-6 pt-4 border-t-2 border-dashed border-slate-200 flex items-start gap-3">
                   <span className="text-xs font-bold px-2 py-1 rounded border border-emerald-200 bg-emerald-50 text-emerald-700 shrink-0 mt-0.5">정답</span>
                   <span className="text-lg font-bold text-emerald-700">{currentCall.answer || '정보 없음'}</span>

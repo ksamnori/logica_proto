@@ -130,14 +130,14 @@ export default function Sidebar() {
     const disabled = !canAccess(path);
     const isFactory = ['/factory-dashboard', '/pdf-parser', '/mapper', '/taxonomy-editor', '/twin-manager', '/qdb-upload', '/book-upload', '/competency-mapper', '/contest-db'].includes(path);
 
-    const baseClass = `flex flex-col items-center justify-center px-2 py-2 rounded-xl transition-all border relative overflow-hidden ${full ? 'col-span-2' : 'col-span-1'}`;
+    const baseClass = `flex flex-col items-center justify-center px-1.5 py-2 rounded-xl transition-all border relative overflow-hidden whitespace-nowrap ${full ? 'col-span-2' : 'col-span-1'}`;
 
     if (disabled) {
       return (
         <div className={`${baseClass} bg-slate-50/50 border-slate-100 text-slate-400 opacity-40 cursor-not-allowed`} title="접근 권한이 없습니다 (권한 관리 페이지에서 허용 필요)">
-          <span className="text-[13px] font-bold truncate w-full text-center">{label}</span>
-          {desc && <span className="text-xs font-medium mt-0.5">{desc}</span>}
-          <span className="absolute top-1 right-2 text-[8px] font-bold text-slate-300">🔒</span>
+          <span className="text-[12px] font-bold whitespace-nowrap truncate w-full text-center tracking-tight">{label}</span>
+          {desc && <span className="text-[11px] font-medium whitespace-nowrap truncate w-full text-center tracking-tight mt-0.5">{desc}</span>}
+          <span className="absolute top-1 right-1.5 text-[8px] font-bold text-slate-300">🔒</span>
         </div>
       );
     }
@@ -191,8 +191,8 @@ export default function Sidebar() {
 
     return (
       <Link href={linkTo || path} className={`${baseClass} ${customBg}`}>
-        <span className={`text-[13px] truncate w-full text-center tracking-tight ${customLabel}`}>{label}</span>
-        {desc && <span className={`text-xs truncate w-full text-center tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
+        <span className={`text-[12px] whitespace-nowrap truncate w-full text-center tracking-tight ${customLabel}`}>{label}</span>
+        {desc && <span className={`text-[11px] whitespace-nowrap truncate w-full text-center tracking-tight mt-0.5 ${customDesc}`}>{desc}</span>}
       </Link>
     );
   };
@@ -226,20 +226,20 @@ export default function Sidebar() {
     const open = isSectionOpen(id);
     const forced = sectionHasCurrent(id);
     return (
-      <div className={`mb-4 ${tone === "factory" ? "mx-3 rounded-xl bg-amber-50/40 border border-amber-100" : ""}`}>
+      <div className={`mb-4 ${tone === "factory" ? "mx-2 rounded-xl bg-amber-50/40 border border-amber-100" : ""}`}>
         <button
           type="button"
           onClick={() => !forced && toggleSection(id)}
           aria-expanded={open}
           title={forced ? "지금 보고 있는 화면이 이 분류에 있어서 펼쳐져 있습니다" : open ? "접기" : "펼치기"}
-          className={`w-full flex items-center gap-2 py-2 text-left rounded-lg transition-colors ${tone === "factory" ? "px-3" : "px-4"} ${forced ? "cursor-default" : "hover:bg-slate-50"}`}
+          className={`w-full flex items-center gap-1.5 py-2 text-left rounded-lg transition-colors whitespace-nowrap ${tone === "factory" ? "px-2.5" : "px-3"} ${forced ? "cursor-default" : "hover:bg-slate-50"}`}
         >
-          <span className="text-xs font-bold text-slate-500 tracking-wide">{title}</span>
-          {!open && <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-1.5 leading-5">{count}</span>}
-          <svg className={`ml-auto w-4 h-4 text-slate-400 transition-transform ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
+          <span className="text-xs font-bold text-slate-500 tracking-wide whitespace-nowrap">{title}</span>
+          {!open && <span className="text-xs font-semibold text-slate-400 bg-slate-100 rounded-full px-1.5 leading-5 shrink-0">{count}</span>}
+          <svg className={`ml-auto w-4 h-4 text-slate-400 transition-transform shrink-0 ${open ? "rotate-180" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6" /></svg>
         </button>
         {open && (
-          <div className={`grid grid-cols-2 gap-2 mt-1 ${tone === "factory" ? "px-2 pb-2" : "px-3"}`}>
+          <div className={`grid grid-cols-2 gap-1.5 mt-1 ${tone === "factory" ? "px-1.5 pb-2" : "px-2.5"}`}>
             {children}
           </div>
         )}
@@ -248,22 +248,22 @@ export default function Sidebar() {
   };
 
   return (
-    <aside className="print:hidden w-[280px] bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20 h-full relative">
+    <aside className="print:hidden w-[232px] bg-white border-r border-slate-200 flex flex-col shrink-0 shadow-[4px_0_24px_rgba(0,0,0,0.02)] z-20 h-full relative">
 
-      <div onClick={() => canAccess("/home") ? router.push("/home") : router.push("/admission")} className="h-24 flex items-center px-6 border-b border-slate-100 shrink-0 cursor-pointer group hover:bg-slate-50 transition-colors gap-3.5">
-        <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-9 object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
+      <div onClick={() => canAccess("/home") ? router.push("/home") : router.push("/admission")} className="h-20 flex items-center px-3.5 border-b border-slate-100 shrink-0 cursor-pointer group hover:bg-slate-50 transition-colors gap-2.5">
+        <img src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png" alt="Logica" className="h-7 max-w-[92px] object-contain shrink-0" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
 
-        <div className="flex flex-col border-l-2 border-slate-200 pl-3.5 flex-1 min-w-0 justify-center h-12">
-          <span className="text-[15px] font-bold text-slate-800 truncate leading-tight mb-0.5">
+        <div className="flex flex-col border-l-2 border-slate-200 pl-2.5 flex-1 min-w-0 justify-center h-10">
+          <span className="text-[13.5px] font-bold text-slate-800 whitespace-nowrap truncate leading-tight mb-0.5">
             {tenantName}
           </span>
-          <span className="text-xs font-bold text-slate-400 uppercase leading-none tracking-wider whitespace-nowrap">
+          <span className="text-[10.5px] font-bold text-slate-400 uppercase leading-none tracking-normal whitespace-nowrap truncate">
             {strictSuperAdmin ? "Super Admin" : (displayRole === 'GUEST' ? "테스트(읽기전용)" : displayRole.replace('_', ' '))}
           </span>
         </div>
       </div>
 
-      <nav className="flex-1 py-5 overflow-y-auto custom-scroll">
+      <nav className="flex-1 py-4 overflow-y-auto custom-scroll">
 
         {renderSection("academy", "학원 관리", 3, <>
           <MenuItem path="/home" label="홈 (대시보드)" full />

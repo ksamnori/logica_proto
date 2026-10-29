@@ -446,17 +446,28 @@ export async function getParentProfileAction(parentId: string, phone?: string | 
     const hasPassword = !!(parentRow[pwCol] && String(parentRow[pwCol]).trim() !== "");
 
     let profileImageUrl: string | null = null;
-    if (hasImgColumns && parentRow[imgCol]) {
-      profileImageUrl = resolvePublicImageUrl(parentRow[imgCol]);
+    if (hasImgColumns) {
+      const candidateCol =
+        parentRow[imgCol] ||
+        (!targetDigits
+          ? parentRow.profile_image_url ||
+            parentRow.profile_image_url_2 ||
+            parentRow.profile_image_url_3
+          : null);
+      if (candidateCol) {
+        profileImageUrl = resolvePublicImageUrl(candidateCol);
+      }
     }
 
     // DB 컬럼이 아직 없거나 비어 있을 경우 Storage의 고정 경로 파일이 있는지 확인
     if (!profileImageUrl) {
       const folder = "parent_avatars";
-      const targetPrefix = `parent_${parentId}_slot${slot}`;
+      const searchPrefix = targetDigits
+        ? `parent_${parentId}_slot${slot}`
+        : `parent_${parentId}_slot`;
       const { data: files } = await supabaseAdmin.storage
         .from("system_images")
-        .list(folder, { search: targetPrefix, limit: 5 });
+        .list(folder, { search: searchPrefix, limit: 10 });
       if (files && files.length > 0) {
         const sortedFiles = [...files].sort((a, b) =>
           String(b.name).localeCompare(String(a.name))
@@ -711,7 +722,7 @@ export async function getStudentPortalExtraDataAction({
       const { data: classLogs } = await supabaseAdmin
         .from("daily_lesson_log")
         .select(
-          "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, lesson_log_student_comment(student_id, comment)"
+          "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, class(name), lesson_log_student_comment(student_id, comment)"
         )
         .in("class_id", allClassIds)
         .order("actual_date", { ascending: false });
@@ -725,7 +736,7 @@ export async function getStudentPortalExtraDataAction({
         const { data: extraLogs } = await supabaseAdmin
           .from("daily_lesson_log")
           .select(
-            "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, lesson_log_student_comment(student_id, comment)"
+            "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, class(name), lesson_log_student_comment(student_id, comment)"
           )
           .in("lesson_log_id", missingIds)
           .order("actual_date", { ascending: false });

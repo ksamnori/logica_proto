@@ -34,7 +34,7 @@ export interface StudentData {
 
 export interface CallData {
   seat: string; studentId?: string; qNum: number; name: string; classes: string[];
-  questionText: string; imageUrl: string; options: string[] | null; answer: string; explanation: string; source: string; calledAt: number;
+  questionText: string; questionText2?: string; imageUrl: string; image2Url?: string; options: string[] | null; answer: string; explanation: string; source: string; calledAt: number;
 }
 
 export interface RecheckData {
@@ -286,7 +286,7 @@ export function useTaHandheld() {
           const c = dbCalls[qNumKey] || {};
           callsRef.current[key] = {
             seat: row.seat, studentId: row.student_id, qNum: qNumKey === 'general' ? ('general' as any) : Number(qNumKey),
-            name, classes, questionText: c.questionText || '', imageUrl: c.imageUrl || '', options: c.options || null,
+            name, classes, questionText: c.questionText || '', questionText2: c.questionText2 || '', imageUrl: c.imageUrl || '', image2Url: c.image2Url || '', options: c.options || null,
             answer: c.answer || '', explanation: c.explanation || '', source: c.source || '', calledAt: c.requestedAt || Date.now(),
           };
         }
@@ -399,7 +399,7 @@ export function useTaHandheld() {
     const st = activeStudentsRef.current[seat];
     if (action === 'call') {
       if (!st.calls) st.calls = {}; st.calls[data.qNum] = Date.now(); st.status = 'call';
-      callsRef.current[`${seat}::${data.qNum}`] = { seat, studentId: st.studentId, qNum: data.qNum, name: data.name, classes: st.classes || [], questionText: data.questionText || '', imageUrl: data.imageUrl || '', options: data.options || null, answer: data.answer || '', explanation: data.explanation || '', source: data.source || '', calledAt: Date.now() };
+      callsRef.current[`${seat}::${data.qNum}`] = { seat, studentId: st.studentId, qNum: data.qNum, name: data.name, classes: st.classes || [], questionText: data.questionText || '', questionText2: data.questionText2 || '', imageUrl: data.imageUrl || '', image2Url: data.image2Url || '', options: data.options || null, answer: data.answer || '', explanation: data.explanation || '', source: data.source || '', calledAt: Date.now() };
     } else if (action === 'cancel_call') {
       delete callsRef.current[`${seat}::${data.qNum}`];
       setMarkState(prev => { const n = {...prev}; delete n[`${seat}::${data.qNum}`]; return n; });

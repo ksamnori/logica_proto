@@ -84,6 +84,12 @@ export default function QuestionModal({ isOpen, question, onClose }: QuestionMod
               <div className="text-xs font-bold text-slate-400 mb-2.5 border-b border-slate-100 pb-2">질문 내용</div>
               <div className="math-text text-slate-800 font-medium whitespace-pre-wrap leading-relaxed"
                    dangerouslySetInnerHTML={{ __html: renderHTML(qData.question) }} />
+              {qData.image_url && <img src={qData.image_url} className="max-w-full mt-3 rounded-lg border border-slate-200" alt=" 문제 이미지 1" />}
+              {qData.image_2_url && <img src={qData.image_2_url} className="max-w-full mt-3 rounded-lg border border-slate-200" alt="문제 이미지 2" />}
+              {qData.question_2 && (
+                <div className="math-text text-slate-800 font-medium whitespace-pre-wrap leading-relaxed mt-3"
+                     dangerouslySetInnerHTML={{ __html: renderHTML(qData.question_2) }} />
+              )}
            </div>
 
            <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">

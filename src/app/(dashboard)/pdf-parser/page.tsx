@@ -266,6 +266,7 @@ export default function PdfParserPage() {
             blob: undefined, 
             preview: undefined,
             questionText: cleanQText,
+            questionText2: '',
             answer: '',
             isExtracting: false,
             isPreviewMode: false
@@ -366,7 +367,7 @@ export default function PdfParserPage() {
         blob: blob, preview: previewUrl,
         blob2: undefined, preview2: undefined,
         answerBlob: undefined, answerPreview: undefined,
-        answer: '', questionText: '', isExtracting: false,
+        answer: '', questionText: '', questionText2: '', isExtracting: false,
         isPreviewMode: false 
       }]);
       setCurrentQNum(prev => prev + 1);
@@ -431,6 +432,7 @@ export default function PdfParserPage() {
           image_2_url: image2Url,
           answer_image_url: answerImgUrl,
           question: finalQuestionText, 
+          question_2: item.questionText2?.trim() ? item.questionText2.trim() : null,
           answer: item.answer || null,
           taxonomy_id: null,
           difficulty: item.difficulty || '중', 
@@ -670,6 +672,20 @@ export default function PdfParserPage() {
                           value={item.questionText} 
                           onChange={(e) => updateItem(item.id, 'questionText', e.target.value)} 
                           className="w-full h-16 px-2 py-1.5 border border-slate-300 rounded text-xs font-medium text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 resize-y bg-yellow-50/30"
+                        />
+                      )}
+
+                      <span className="text-xs font-bold text-slate-500 mt-1">문제 텍스트 2 (이미지 하단 출력 — 선택)</span>
+                      {item.isPreviewMode ? (
+                        <div className="w-full min-h-[2.5rem] px-2 py-1.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-800 bg-white whitespace-pre-wrap overflow-x-auto shadow-inner">
+                          {item.questionText2 || <span className="text-slate-400 italic text-xs">하단 텍스트 없음</span>}
+                        </div>
+                      ) : (
+                        <textarea 
+                          placeholder="이미지 아래에 이어서 출력될 문제 텍스트 (선택)" 
+                          value={item.questionText2 || ''} 
+                          onChange={(e) => updateItem(item.id, 'questionText2', e.target.value)} 
+                          className="w-full h-12 px-2 py-1.5 border border-slate-300 rounded text-xs font-medium text-slate-700 outline-none focus:ring-1 focus:ring-indigo-500 resize-y bg-yellow-50/20"
                         />
                       )}
                     </div>

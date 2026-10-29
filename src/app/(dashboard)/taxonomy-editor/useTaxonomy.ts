@@ -41,7 +41,7 @@ export function useTaxonomy() {
   const [editForm, setEditForm] = useState({ 
     page_number: '', question_number: '', sub_num: '',
     difficulty: '미지정', solving_probability: '',
-    question: '', answer: '', 
+    question: '', question_2: '', answer: '', 
     image_url: '', image_2_url: '', 
     answer_image_url: '', answer_image_2_url: '',
     image_box: '', image_2_box: '', answer_image_box: '',
@@ -473,7 +473,7 @@ export function useTaxonomy() {
       page_number: String(q.final_printed_page || q.detected_page_num || ''), question_number: String(q.question_number || ''),
       sub_num: String(q.sub_num || ''), difficulty: q.difficulty || '미지정',
       solving_probability: q.solving_probability !== null && q.solving_probability !== undefined ? String(q.solving_probability) : '',
-      question: q.question || '', answer: q.answer || '', 
+      question: q.question || '', question_2: q.question_2 || '', answer: q.answer || '', 
       image_url: q.image_url || '', image_2_url: q.image_2_url || '',
       answer_image_url: q.answer_image_url || '', answer_image_2_url: q.answer_image_2_url || '',
       image_box: typeof q.image_box === 'object' && q.image_box !== null ? JSON.stringify(q.image_box) : (q.image_box || ''),
@@ -522,7 +522,7 @@ export function useTaxonomy() {
       
       setQuestions(prev => sortQuestionsList([...prev, newQ])); setSelectedQuestion(newQ);
       setEditForm({ 
-        page_number: '999', question_number: 'NEW', sub_num: '0', difficulty: '미지정', solving_probability: '', question: newQ.question, answer: '', 
+        page_number: '999', question_number: 'NEW', sub_num: '0', difficulty: '미지정', solving_probability: '', question: newQ.question, question_2: '', answer: '', 
         image_url: '', image_2_url: '', answer_image_url: '', answer_image_2_url: '', 
         image_box: '', image_2_box: '', answer_image_box: '',
         step_1_concept: '', step_2_approach: '', step_3_process: '', step_4_conclusion: '' 
@@ -758,7 +758,7 @@ export function useTaxonomy() {
       const updateData = {
         final_printed_page: parsedPage, question_number: editForm.question_number, sub_num: parsedSubNum,
         difficulty: editForm.difficulty === '미지정' ? null : editForm.difficulty, solving_probability: parsedProbability,
-        question: editForm.question, answer: editForm.answer,
+        question: editForm.question, question_2: editForm.question_2 || null, answer: editForm.answer,
         
         image_url: editForm.image_url, 
         image_2_url: editForm.image_2_url, 
@@ -950,6 +950,7 @@ export function useTaxonomy() {
           final_printed_page: selectedQuestion.final_printed_page, 
           question_number: `${selectedQuestion.question_number}-${suffix}`, 
           question: twin.question, 
+          question_2: twin.question_2 !== undefined ? (twin.question_2 || null) : (selectedQuestion.question_2 || null),
           answer: twin.answer, 
           step_1_concept: twin.step_1_concept, 
           step_2_approach: twin.step_2_approach, 

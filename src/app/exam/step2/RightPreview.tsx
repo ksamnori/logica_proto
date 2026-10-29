@@ -148,7 +148,7 @@ export default function RightPreview({ examData }: { examData: any }) {
     const img2Obj = parseBoxObject(q.image_2_box);
     setEditingId(q.question_id);
     setEditForm({
-      question: q.question || '', answer: q.answer || '', explanation: q.explanation || '', solution: q.solution || '',
+      question: q.question || '', question_2: q.question_2 || '', answer: q.answer || '', explanation: q.explanation || '', solution: q.solution || '',
       step_1_concept: q.step_1_concept || '', step_2_approach: q.step_2_approach || '', step_3_process: q.step_3_process || '', step_4_conclusion: q.step_4_conclusion || '',
       // 🌟 이미지 URL과 박스(배율) 데이터 추가 로드 (배열/다중 문자열도 안전하게 객체 JSON으로 변환)
       image_url: q.image_url || '', image_2_url: q.image_2_url || '',
@@ -221,6 +221,7 @@ export default function RightPreview({ examData }: { examData: any }) {
     setGeneratedTwins([{
        question_type: '유사',
        question: aiTargetInfo?.q.question || '',
+       question_2: aiTargetInfo?.q.question_2 || '',
        answer: aiTargetInfo?.q.answer || '',
        step_1_concept: aiTargetInfo?.q.step_1_concept || '',
        step_2_approach: aiTargetInfo?.q.step_2_approach || '',
@@ -267,6 +268,7 @@ export default function RightPreview({ examData }: { examData: any }) {
       const cleanedTwins = data.data.map((twin: any, idx: number) => ({
         ...twin,
         question: twin.question?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        question_2: (twin.question_2 ?? aiTargetInfo.q.question_2 ?? '')?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         answer: twin.answer?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         step_1_concept: twin.step_1_concept?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         step_2_approach: twin.step_2_approach?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
@@ -352,6 +354,7 @@ export default function RightPreview({ examData }: { examData: any }) {
 
           question_id: newQid,
           question: twin.question,
+          question_2: twin.question_2 !== undefined ? (twin.question_2 || null) : (aiTargetInfo.q.question_2 || null),
           answer: twin.answer,
           step_1_concept: twin.step_1_concept,
           step_2_approach: twin.step_2_approach,
@@ -720,6 +723,19 @@ export default function RightPreview({ examData }: { examData: any }) {
                                    )}
                                  </>
                                )}
+
+                               {q.question_2 && String(q.question_2).trim() !== '' && String(q.question_2) !== 'null' && String(q.question_2) !== 'undefined' && (
+                                 <div
+                                   className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none mt-3"
+                                   dangerouslySetInnerHTML={{
+                                     __html: formatText(
+                                       hideSubNumber && !isEditing && !textToRender
+                                         ? stripLeadingSubNumber(String(q.question_2))
+                                         : String(q.question_2)
+                                     )
+                                   }}
+                                 />
+                               )}
                                
                                {q.options && q.options !== 'null' && typeof q.options === 'string' && (
                                   <div className="pl-2 pt-2">
@@ -867,6 +883,9 @@ export default function RightPreview({ examData }: { examData: any }) {
                              </div>
                            )}
                            
+                           <label className="block text-[12px] font-extrabold text-amber-800 mb-1">📝 문제 2 수정 (이미지 하단 출력 — 선택)</label>
+                           <textarea value={editForm.question_2 || ''} onChange={e => setEditForm({...editForm, question_2: e.target.value})} placeholder="이미지(그래프/도형) 아래에 출력할 추가 문제 텍스트가 있는 경우 입력하세요." className="w-full p-2.5 border border-amber-300 rounded mb-3 text-[14px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white" rows={2}></textarea>
+
                            <label className="block text-[12px] font-extrabold text-amber-800 mb-1">🎯 정답 수정</label>
                            <textarea value={editForm.answer} onChange={e => setEditForm({...editForm, answer: e.target.value})} className="w-full p-2 border border-amber-300 rounded mb-3 text-[14px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white" rows={1}></textarea>
                            
@@ -959,13 +978,24 @@ export default function RightPreview({ examData }: { examData: any }) {
                       </div>
                       
                       <div className="flex flex-col gap-1.5 flex-1 mt-1">
-                        <label className="text-[11px] font-bold text-slate-500">새 문제 텍스트</label>
+                        <label className="text-[11px] font-bold text-slate-500">새 문제 텍스트 (이미지 상단)</label>
                         {twin.isPreviewMode ? (
                           <div className="w-full min-h-[6rem] p-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
                             {twin.question || <span className="text-slate-400 italic text-xs">텍스트가 없습니다.</span>}
                           </div>
                         ) : (
                           <textarea value={twin.question} onChange={(e) => handleTwinChange(idx, 'question', e.target.value)} className="w-full h-24 p-3 text-sm border border-slate-300 rounded-lg bg-yellow-50/30 resize-none outline-none focus:ring-2 focus:ring-indigo-400" />
+                        )}
+                      </div>
+
+                      <div className="flex flex-col gap-1.5 mt-1">
+                        <label className="text-[11px] font-bold text-slate-500">새 문제 텍스트 2 (이미지 하단 — 선택)</label>
+                        {twin.isPreviewMode ? (
+                          <div className="w-full min-h-[3rem] p-2.5 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
+                            {twin.question_2 || <span className="text-slate-400 italic text-xs">하단 텍스트 없음</span>}
+                          </div>
+                        ) : (
+                          <textarea value={twin.question_2 || ''} onChange={(e) => handleTwinChange(idx, 'question_2', e.target.value)} placeholder="이미지 아래에 출력될 문제 텍스트 (선택)" className="w-full h-16 p-2.5 text-sm border border-slate-300 rounded-lg bg-yellow-50/20 resize-none outline-none focus:ring-2 focus:ring-indigo-400" />
                         )}
                       </div>
 

@@ -5,6 +5,11 @@ import React, { useState, useEffect } from 'react';
 import LearningRow, { statusToneOf } from "./LearningRow";
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+import {
+  fetchMainTextbookExclusionSet,
+  isMainTextbookQuestion,
+  isWorkbookQuestion,
+} from '@/app/exam/step2/examUtils';
 
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
@@ -137,6 +142,8 @@ export default function StudentTimeline({
   const [similarCount, setSimilarCount] = useState<number>(1);
   const [difficultyOption, setDifficultyOption] = useState<string>('그대로');
   const [excludeOriginal, setExcludeOriginal] = useState<boolean>(true);
+  const [excludeMain, setExcludeMain] = useState<boolean>(true);
+  const [excludeWorkbook, setExcludeWorkbook] = useState<boolean>(true);
   const [maxTypeLimit, setMaxTypeLimit] = useState<number>(3);
   const [isMaxTypeLimitActive, setIsMaxTypeLimitActive] = useState<boolean>(true);
 
@@ -328,7 +335,60 @@ export default function StudentTimeline({
     setIsCalculating(true);
     const timer = setTimeout(() => { calculateExactMatches(); }, 300);
     return () => clearTimeout(timer);
-  }, [selectedTaxonomyIds, selectedBlocks, modalTab, twinCount, similarCount, difficultyOption, excludeOriginal, genMethod, isMaxTypeLimitActive, maxTypeLimit, startDate, endDate, expectedFinalCount]);
+  }, [selectedTaxonomyIds, selectedBlocks, modalTab, twinCount, similarCount, difficultyOption, excludeOriginal, excludeMain, excludeWorkbook, genMethod, isMaxTypeLimitActive, maxTypeLimit, startDate, endDate, expectedFinalCount]);
+
+  // 🌟 주교재 제외 / 워크북 제외 및 유형별 최대 문제 수 제한 후처리 헬퍼
+  const filterClinicMatchedQuestions = async (rawIds: string[]): Promise<string[]> => {
+    if (!Array.isArray(rawIds) || rawIds.length === 0) return [];
+    if (!excludeMain && !excludeWorkbook) return rawIds;
+
+    const exclusion = await fetchMainTextbookExclusionSet(supabaseClient);
+    const qMap = new Map<string, any>();
+    const cleanIds = Array.from(
+      new Set(
+        rawIds
+          .map((id) => String(id || '').trim().replace(/_added_\d+$/, ''))
+          .filter(Boolean)
+      )
+    );
+
+    for (let i = 0; i < cleanIds.length; i += 500) {
+      const chunk = cleanIds.slice(i, i + 500);
+      const { data: qRows } = await supabaseClient
+        .from('question_db')
+        .select('question_id, taxonomy_id, sub_taxonomy_id, derivation_type, problem_type, book_name, source_book_name, pdf_source')
+        .in('question_id', chunk);
+      (qRows || []).forEach((row: any) => {
+        if (row?.question_id) qMap.set(String(row.question_id).trim(), row);
+      });
+    }
+
+    const typeCounter = new Map<string, number>();
+    const filtered: string[] = [];
+
+    for (const rawId of rawIds) {
+      const qid = String(rawId || '').trim();
+      if (!qid) continue;
+      const realQid = qid.replace(/_added_\d+$/, '');
+      const q = qMap.get(qid) || qMap.get(realQid) || { question_id: realQid };
+
+      if (excludeMain && isMainTextbookQuestion(q, exclusion)) continue;
+      if (excludeWorkbook && isWorkbookQuestion(q, exclusion)) continue;
+
+      if (genMethod !== 'SAME' && isMaxTypeLimitActive && maxTypeLimit > 0) {
+        const taxKey = String(q.taxonomy_id || q.sub_taxonomy_id || '').trim();
+        if (taxKey) {
+          const used = typeCounter.get(taxKey) || 0;
+          if (used >= maxTypeLimit) continue;
+          typeCounter.set(taxKey, used + 1);
+        }
+      }
+
+      filtered.push(qid);
+    }
+
+    return filtered;
+  };
 
   const calculateExactMatches = async () => {
     try {
@@ -391,7 +451,16 @@ export default function StudentTimeline({
         return; 
       }
       
-      if (genMethod === 'SAME') { setMatchedCache(uniqueQids); setIsCalculating(false); return; }
+      if (genMethod === 'SAME') {
+        const filteredSame = await filterClinicMatchedQuestions(uniqueQids);
+        setMatchedCache(filteredSame);
+        setIsCalculating(false);
+        return;
+      }
+
+      const rpcMaxLimit = (excludeMain || excludeWorkbook) && isMaxTypeLimitActive
+        ? Math.max(maxTypeLimit * 5, 20)
+        : maxTypeLimit;
 
       const { data: matchedIds, error } = await supabaseClient.rpc('get_clinic_matches', {
         p_target_qids: uniqueQids,
@@ -399,7 +468,7 @@ export default function StudentTimeline({
         p_sim_count: similarCount,
         p_diff_opt: difficultyOption,
         p_exclude_orig: excludeOriginal,
-        p_max_limit: maxTypeLimit,
+        p_max_limit: rpcMaxLimit,
         p_is_limit_active: isMaxTypeLimitActive
       });
 
@@ -408,10 +477,11 @@ export default function StudentTimeline({
         alert(`DB 매칭 중 에러가 발생했습니다. 오버로딩 에러일 수 있습니다.\n상세내용: ${error.message}`);
         setMatchedCache([]);
       } else {
-        if (!matchedIds || matchedIds.length === 0) {
-            alert(`원본 오답은 ${uniqueQids.length}개를 찾았으나, DB에서 매칭되는 유사문제를 단 1개도 찾지 못했습니다.\n\n※ 이 경우 'AI 문제 자동 생성기' 기능 연동이 필요합니다.`);
+        const finalFilteredIds = await filterClinicMatchedQuestions(matchedIds || []);
+        if (!finalFilteredIds || finalFilteredIds.length === 0) {
+            alert(`원본 오답은 ${uniqueQids.length}개를 찾았으나, 조건에 부합하는 유사문제를 찾지 못했습니다.\n\n※ 이 경우 제외 조건을 확인하거나 'AI 문제 자동 생성기' 기능 연동이 필요합니다.`);
         }
-        setMatchedCache(matchedIds || []);
+        setMatchedCache(finalFilteredIds || []);
       }
     } catch (err) {
       console.error("Calculate Catch Error:", err);
@@ -439,6 +509,15 @@ export default function StudentTimeline({
     sessionStorage.setItem('clinicTargetClassId', currentView?.classId);
     sessionStorage.setItem('isClinicMode', 'true');
     sessionStorage.setItem('examType', '오답유사');
+    sessionStorage.setItem(
+      'sourceCategories',
+      JSON.stringify({
+        extra: true,
+        twinSimilar: true,
+        excludeMain,
+        excludeWorkbook,
+      })
+    );
 
     window.location.href = '/exam/step2?source=clinic_incorrect';
   };
@@ -542,59 +621,60 @@ export default function StudentTimeline({
   const renderHeader = () => {
     const isAllSelected = filteredTimeline?.length > 0 && selectedBlocks.length === filteredTimeline.length;
     return (
-      <div className="px-6 py-4 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-3">
-        <div className="flex justify-between items-center">
-          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <span className="bg-brand text-white text-xs font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap">{currentView?.className || '반 미지정'}</span>
+      <div className="px-4 py-3 border-b border-slate-200 bg-slate-50 shrink-0 shadow-sm z-10 flex flex-col gap-2.5">
+        <div className="flex justify-between items-center gap-2">
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 whitespace-nowrap min-w-0">
+            <span className="bg-brand text-white text-xs font-bold px-2 py-0.5 rounded shadow-sm whitespace-nowrap shrink-0">{currentView?.className || '반 미지정'}</span>
             <span 
               onClick={() => currentView?.studentId && router.push(`/student/${currentView.studentId}`)}
-              className="text-brand whitespace-nowrap cursor-pointer hover:underline hover:text-blue-600 transition-colors"
+              className="text-brand whitespace-nowrap cursor-pointer hover:underline hover:text-blue-600 transition-colors shrink-0"
               title="학생 상세 페이지로 이동"
             >
               {currentView?.studentName || '알 수 없음'}
-            </span> 학생 전체 활동 타임라인
+            </span>
+            <span className="whitespace-nowrap truncate">학생 전체 활동 타임라인</span>
           </h2>
-          <div className="flex bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm">
-            <button onClick={() => setDateFilter('1W')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1W' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1주일</button>
+          <div className="flex bg-white border border-slate-300 rounded-lg overflow-hidden shadow-sm shrink-0">
+            <button onClick={() => setDateFilter('1W')} className={`px-3.5 py-1.5 text-[12px] font-bold whitespace-nowrap ${dateFilter === '1W' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1주일</button>
             <div className="w-px bg-slate-300"></div>
-            <button onClick={() => setDateFilter('1M')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === '1M' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1개월</button>
+            <button onClick={() => setDateFilter('1M')} className={`px-3.5 py-1.5 text-[12px] font-bold whitespace-nowrap ${dateFilter === '1M' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>1개월</button>
             <div className="w-px bg-slate-300"></div>
-            <button onClick={() => setDateFilter('ALL')} className={`px-4 py-2 text-[12px] font-bold ${dateFilter === 'ALL' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>전체</button>
+            <button onClick={() => setDateFilter('ALL')} className={`px-3.5 py-1.5 text-[12px] font-bold whitespace-nowrap ${dateFilter === 'ALL' ? 'bg-brand text-white' : 'text-slate-500 hover:bg-slate-50'}`}>전체</button>
           </div>
         </div>
 
-        <div className="flex justify-between items-center bg-white p-2 rounded-lg border border-slate-200 shadow-sm mt-0.5">
-          <div className="flex items-center gap-3 pl-2">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={isAllSelected || false} onChange={handleSelectAllStudent || (() => {})} className="w-5 h-5 accent-rose-500" />
-              <span className="text-[13px] font-bold text-slate-700">전체 선택</span>
+        <div className="flex flex-wrap justify-between items-center gap-x-2 gap-y-1.5 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm mt-0.5">
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <label className="flex items-center gap-1.5 cursor-pointer pl-1 whitespace-nowrap shrink-0">
+              <input type="checkbox" checked={isAllSelected || false} onChange={handleSelectAllStudent || (() => {})} className="w-4 h-4 accent-rose-500 shrink-0" />
+              <span className="text-[12px] font-bold text-slate-700 whitespace-nowrap">전체 선택</span>
             </label>
-            <div className="w-px h-4 bg-slate-300 mx-1"></div>
+            <div className="w-px h-3.5 bg-slate-300 mx-0.5 shrink-0"></div>
             {activeTab === 'HOMEWORK' && selectedBlocks.length >= 2 && (
-              <button onClick={handleExtractCommonHomework} className="px-3 py-1.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-[12px] transition-colors shadow-sm mr-1 animate-pulse">
+              <button onClick={handleExtractCommonHomework} className="px-2 py-1 rounded bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-bold text-[11.5px] xl:text-[12px] transition-colors shadow-sm animate-pulse whitespace-nowrap shrink-0">
                 🔗 공통 과제 분리
               </button>
             )}
-            <button onClick={handleBulkCompleteStudent} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[12px] disabled:opacity-40">✅ 선택 완료 ({selectedBlocks.length})</button>
-            <button onClick={handleBulkDeleteStudent} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[12px] disabled:opacity-40">🗑️ 선택 삭제 ({selectedBlocks.length})</button>
+            <button onClick={handleBulkCompleteStudent} disabled={selectedBlocks.length === 0} className="px-2 py-1 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 font-bold text-[11.5px] xl:text-[12px] disabled:opacity-40 whitespace-nowrap shrink-0">✅ 선택 완료 ({selectedBlocks.length})</button>
+            <button onClick={handleBulkDeleteStudent} disabled={selectedBlocks.length === 0} className="px-2 py-1 rounded bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 font-bold text-[11.5px] xl:text-[12px] disabled:opacity-40 whitespace-nowrap shrink-0">🗑️ 선택 삭제 ({selectedBlocks.length})</button>
             
-            <button onClick={handleBulkPrint} disabled={selectedBlocks.length === 0} className="px-3 py-1.5 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[12px] disabled:opacity-40 shadow-sm whitespace-nowrap">🖨️ 선택 한 장에 모아 출력 ({selectedBlocks.length})</button>
+            <button onClick={handleBulkPrint} disabled={selectedBlocks.length === 0} className="px-2 py-1 rounded bg-sky-50 text-sky-700 border border-sky-200 hover:bg-sky-100 font-bold text-[11.5px] xl:text-[12px] disabled:opacity-40 shadow-sm whitespace-nowrap shrink-0">🖨️ 선택 한 장에 모아 출력 ({selectedBlocks.length})</button>
           </div>
 
-          <div className="flex items-center gap-2 pr-1">
-            <span className="text-[12px] font-bold text-slate-500 mr-1 flex items-center gap-1">🖨️ 맞춤 오답 프린트 생성기 <span className="text-slate-300 ml-1">|</span></span>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-[11.5px] xl:text-[12px] font-bold text-slate-500 flex items-center gap-1 whitespace-nowrap shrink-0">🖨️ 맞춤 오답 프린트 생성기 <span className="text-slate-300 ml-0.5">|</span></span>
             
             {selectedBlocks.length > 0 && (
               <button 
                 onClick={() => openModal('SELECTED')} 
-                className="px-3 py-1.5 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[12px] transition-all shadow-sm"
+                className="px-2 py-1 rounded bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-[11.5px] xl:text-[12px] transition-all shadow-sm whitespace-nowrap shrink-0"
               >
                 학습지별 오답 추출
               </button>
             )}
             
-            <button onClick={() => openModal('TAXONOMY')} className="px-3 py-1.5 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[12px] transition-all shadow-sm">유형별 약점 추출</button>
-            <button onClick={() => openModal('PERIOD')} className="px-3 py-1.5 rounded bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 font-bold text-[12px] transition-all shadow-sm">기간별 오답 추출</button>
+            <button onClick={() => openModal('TAXONOMY')} className="px-2 py-1 rounded bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold text-[11.5px] xl:text-[12px] transition-all shadow-sm whitespace-nowrap shrink-0">유형별 약점 추출</button>
+            <button onClick={() => openModal('PERIOD')} className="px-2 py-1 rounded bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 font-bold text-[11.5px] xl:text-[12px] transition-all shadow-sm whitespace-nowrap shrink-0">기간별 오답 추출</button>
           </div>
         </div>
       </div>
@@ -765,10 +845,20 @@ export default function StudentTimeline({
                   </select> 출제합니다.
                 </div>
 
-                <div className="space-y-4 mb-8 pl-1">
+                <div className="space-y-3.5 mb-8 pl-1">
                   <label className="flex items-center gap-2 cursor-pointer group w-max">
                     <input type="checkbox" checked={excludeOriginal} onChange={e => setExcludeOriginal(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-sky-500" />
                     <span className="text-[14px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">기존 출제 문제 제외</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer group w-max">
+                    <input type="checkbox" checked={excludeMain} onChange={e => setExcludeMain(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-sky-500" />
+                    <span className="text-[14px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">주교재 제외</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer group w-max">
+                    <input type="checkbox" checked={excludeWorkbook} onChange={e => setExcludeWorkbook(e.target.checked)} className="w-4 h-4 rounded border-slate-300 accent-sky-500" />
+                    <span className="text-[14px] font-bold text-slate-700 group-hover:text-slate-900 transition-colors">워크북 제외</span>
                   </label>
 
                   <div className="flex items-center gap-3">

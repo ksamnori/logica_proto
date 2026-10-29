@@ -519,7 +519,7 @@ export default function ClinicViewer() {
     forceUpdate();
     
     const qItem = questions[currentQIndex];
-    const callPayload = { qNum: currentQIndex + 1, questionText: qItem.questionText, imageUrl: qItem.imageUrl, options: qItem.options, answer: qItem.answer, explanation: qItem.explanation, source: qItem.source };
+    const callPayload = { qNum: currentQIndex + 1, questionText: qItem.questionText, questionText2: qItem.questionText2 || '', imageUrl: qItem.imageUrl, image2Url: qItem.image2Url || '', options: qItem.options, answer: qItem.answer, explanation: qItem.explanation, source: qItem.source };
     sendAction(willCall ? 'call' : 'cancel_call', willCall ? callPayload : { qNum: currentQIndex + 1 });
     
     const sid = clinicSessionStateRef.current?.id;
@@ -1319,7 +1319,7 @@ export default function ClinicViewer() {
                 <div className={`h-full overflow-y-auto custom-scrollbar p-8 md:p-10 ${!isTimedRound ? 'pb-32' : ''}`}>
                   <div className="relative min-h-full">
                     <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-loose lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-30' : ''}`}>
-                      <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} />
+                      <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} image2Url={q.image2Url} html2={q.questionText2} />
                     </div>
                     {isSubjective && curAnsMode === 'pen' && (
                       <ClinicCanvas

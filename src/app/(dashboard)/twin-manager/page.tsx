@@ -427,6 +427,7 @@ export default function TwinManagerPage() {
             final_printed_page: parentQ.final_printed_page, 
             question_number: `${formatQNum(parentQ.question_number, parentQ.sub_num)}-${suffix}`, 
             question: twin.question, 
+            question_2: twin.question_2 !== undefined ? (twin.question_2 || null) : (parentQ.question_2 || null),
             answer: twin.answer, 
             step_1_concept: twin.step_1_concept, 
             step_2_approach: twin.step_2_approach, 
@@ -470,6 +471,7 @@ export default function TwinManagerPage() {
     try {
       const updateData = {
         question: editingQ.question,
+        question_2: editingQ.question_2 || null,
         answer: editingQ.answer,
         final_printed_page: editingQ.final_printed_page ? parseInt(editingQ.final_printed_page) : null,
         question_number: editingQ.question_number,
@@ -667,7 +669,10 @@ export default function TwinManagerPage() {
           </button>
         </div>
         
-        <div className="text-xs font-medium text-slate-600 line-clamp-2 leading-relaxed whitespace-pre-wrap">{q.question}</div>
+        <div className="text-xs font-medium text-slate-600 line-clamp-2 leading-relaxed whitespace-pre-wrap">
+          {q.question}
+          {q.question_2 ? `\n${q.question_2}` : ''}
+        </div>
 
         <div className="mt-1 pt-2 border-t border-slate-100 flex flex-col gap-1.5">
           {parentQ && (
@@ -857,8 +862,12 @@ export default function TwinManagerPage() {
               </div>
 
               <div className="flex flex-col gap-1">
-                <label className="text-xs font-bold text-slate-500">문제 내용 (LaTeX 허용)</label>
+                <label className="text-xs font-bold text-slate-500">문제 내용 (LaTeX 허용 — 이미지 상단)</label>
                 <textarea value={editingQ.question || ''} onChange={e => setEditingQ({...editingQ, question: e.target.value})} className="p-3 border rounded-xl text-sm font-medium h-32 resize-y outline-none focus:border-blue-400 bg-yellow-50/30" />
+              </div>
+              <div className="flex flex-col gap-1">
+                <label className="text-xs font-bold text-slate-500">문제 내용 2 (이미지 하단 출력 — 선택)</label>
+                <textarea value={editingQ.question_2 || ''} onChange={e => setEditingQ({...editingQ, question_2: e.target.value})} placeholder="이미지 아래에 이어서 출력될 문제 텍스트 (선택)" className="p-3 border rounded-xl text-sm font-medium h-20 resize-y outline-none focus:border-blue-400 bg-yellow-50/20" />
               </div>
               <div className="flex flex-col gap-1">
                 <label className="text-xs font-bold text-slate-500">정답 텍스트</label>

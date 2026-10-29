@@ -1179,6 +1179,12 @@ export default function TaxonomyEditorPage() {
                       </div>
                     )}
 
+                    {selectedQuestion.question_2 && String(selectedQuestion.question_2).trim() !== '' && (
+                      <div className="text-base font-medium text-slate-800 leading-relaxed whitespace-pre-wrap p-4 bg-slate-50 rounded-xl border border-slate-200 shadow-inner mt-4">
+                        {selectedQuestion.question_2}
+                      </div>
+                    )}
+
                     {selectedQuestion.answer && (
                       <div className="mt-6 text-sm font-bold text-blue-700 bg-blue-50 p-3 rounded-xl border border-blue-100">
                         정답: {selectedQuestion.answer}
@@ -1260,6 +1266,18 @@ export default function TaxonomyEditorPage() {
                       {/* 🌟 슬라이더가 추가된 renderImageBox 호출 부분 */}
                       {renderImageBox("문제 이미지 1", "image_url", "image_box", "indigo")}
                       {renderImageBox("문제 이미지 2", "image_2_url", "image_2_box", "indigo")}
+                    </div>
+
+                    <div className="flex flex-col gap-1.5 mt-2">
+                      <label className="text-xs font-bold text-slate-500">
+                        문제 텍스트 2 — 이미지 하단 출력 (선택, <code className="font-mono text-indigo-500 bg-indigo-50 px-1 py-0.5 rounded border border-indigo-100">question_2</code>)
+                      </label>
+                      <textarea
+                        value={editForm.question_2 || ''}
+                        onChange={e => setEditForm({ ...editForm, question_2: e.target.value })}
+                        placeholder="문제 이미지 1 / 2 아래에 이어서 출력될 텍스트가 있는 경우 입력하세요."
+                        className="w-full min-h-[110px] p-3 border border-slate-300 rounded-xl focus:ring-2 focus:ring-brand outline-none text-sm font-medium leading-relaxed resize-y bg-yellow-50/20"
+                      />
                     </div>
                     
                     <div className="flex flex-col gap-1.5 mt-4">

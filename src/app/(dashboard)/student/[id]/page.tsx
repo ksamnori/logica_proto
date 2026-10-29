@@ -9,6 +9,23 @@ import ConsultModal from "@/components/student/ConsultModal";
 import { BillingModal, PaymentModal } from "@/components/student/BillingModals";
 import { deleteConsultLog as deleteConsultLogAction } from "@/app/actions/consultation";
 import { deleteStudentCompletely } from "@/app/actions/consultation";
+import { getParentProfileAction, getStudentPortalExtraDataAction } from "@/app/actions/parentAuth";
+import { getStudentMessageHistoryAction } from "@/app/actions/alimtalk";
+
+const DOUBLE_SURNAMES = ["남궁", "황보", "제갈", "선우", "독고", "사공", "서문", "소봉", "장곡", "강전"];
+
+function getStudentAvatarDisplayName(rawName: string | null | undefined): string {
+  const name = String(rawName || "").trim();
+  if (!name) return "-";
+  if (name.length === 1) return name;
+  if (name.length === 2) return name.slice(1); // 2글자 -> 뒤 1글자
+  if (name.length === 3) return name.slice(1); // 3글자 -> 뒤 2글자
+  // 4글자 이상: 복성(남궁, 황보 등)으로 시작하면 앞 2글자 제외, 그 외(김로지B, 성1+이름3 등)는 앞 1글자 제외(뒤 3글자)
+  if (DOUBLE_SURNAMES.some((s) => name.startsWith(s)) && name.length >= 4) {
+    return name.slice(2, 5);
+  }
+  return name.slice(1, 4);
+}
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
@@ -270,9 +287,18 @@ export default function StudentDetailPage() {
   const [progressBooks, setProgressBooks] = useState<any[]>([]);
   const [examResults, setExamResults] = useState<any[]>([]);
   const [hwList, setHwList] = useState<any[]>([]);
+  const [lessonLogList, setLessonLogList] = useState<any[]>([]);
+  const [isLessonLogLoading, setIsLessonLogLoading] = useState<boolean>(false);
+  const [parentAvatarUrl, setParentAvatarUrl] = useState<string | null>(null);
   const [clinicList, setClinicList] = useState<any[]>([]);
   const [makeupList, setMakeupList] = useState<any[]>([]); // 🌟 보강 데이터 상태 추가
   const [billingList, setBillingList] = useState<any[]>([]);
+  const [msgHistory, setMsgHistory] = useState<{ dbLogs: any[]; solapiLogs: any[]; trackedPhones: string[] }>({
+    dbLogs: [],
+    solapiLogs: [],
+    trackedPhones: [],
+  });
+  const [isMsgLoading, setIsMsgLoading] = useState<boolean>(false);
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
   const [categoryAnalysis, setCategoryAnalysis] = useState<any[]>([]);
 
@@ -321,8 +347,10 @@ export default function StudentDetailPage() {
 
   useEffect(() => {
     if (activeTab === "billing") loadBillings();
+    if (activeTab === "messages") loadMessageHistory();
     if (activeTab === "exam") { loadExamResults(); loadSchoolExams(); loadCategoryAnalysis(); }
     if (activeTab === "hw") loadHwList();
+    if (activeTab === "lesson_log") loadLessonLogs();
     if (activeTab === "clinic") loadClinicList();
     if (activeTab === "makeup") loadMakeupList(); // 🌟 보강 데이터 로드 함수 호출
   }, [activeTab]);
@@ -372,6 +400,27 @@ export default function StudentDetailPage() {
       if (error) console.error("데이터 로딩 오류:", error);
       if (!stuData) { setIsNotFound(true); return; }
       setStudent(stuData);
+
+      const parentObj: any = unwrap(stuData.parent);
+      if (parentObj) {
+        const directImg =
+          parentObj.profile_image_url ||
+          parentObj.profile_image_url_2 ||
+          parentObj.profile_image_url_3 ||
+          null;
+        if (directImg && String(directImg).startsWith("http")) {
+          setParentAvatarUrl(directImg);
+        }
+        if (parentObj.parent_id) {
+          getParentProfileAction(parentObj.parent_id)
+            .then((res) => {
+              if (res.success && res.profileImageUrl) {
+                setParentAvatarUrl(res.profileImageUrl);
+              }
+            })
+            .catch(() => {});
+        }
+      }
 
       const { data: enrollData } = await supabase.from("enrollment")
         .select("enrollment_id, class_id, start_date, end_date, status, class(name)")
@@ -808,6 +857,83 @@ export default function StudentDetailPage() {
     setHwList(data || []);
   };
 
+  const loadLessonLogs = async () => {
+    setIsLessonLogLoading(true);
+    try {
+      const classIds = Array.from(
+        new Set((enrollments || []).map((e: any) => e.class_id).filter(Boolean))
+      ) as string[];
+      const res = await getStudentPortalExtraDataAction({
+        studentId,
+        classIds,
+      });
+
+      let rawLogs: any[] = [];
+      if (res.success && res.lessonLogs) {
+        rawLogs = res.lessonLogs;
+      } else if (classIds.length > 0) {
+        const { data } = await supabase
+          .from("daily_lesson_log")
+          .select(
+            "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, class(name), lesson_log_student_comment(student_id, comment)"
+          )
+          .in("class_id", classIds)
+          .order("actual_date", { ascending: false });
+        rawLogs = data || [];
+      }
+
+      const classMap = new Map<string, string>();
+      (enrollments || []).forEach((e: any) => {
+        const cName = unwrap(e.class)?.name;
+        if (e.class_id && cName) classMap.set(String(e.class_id), cName);
+      });
+
+      const parsed = rawLogs
+        .map((log: any) => {
+          const desc = log.homework_desc || "";
+          const progressMatch = desc.match(
+            /\[📖 오늘의 진도\]\n([\s\S]*?)(?=\n\n\[📝 공통 과제\]|\n\n\[🧑‍🎓 개별 과제\]|$)/
+          );
+          const hwMatch = desc.match(
+            /\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/
+          );
+          const pDesc = progressMatch ? progressMatch[1].trim() : "";
+          let hDesc = hwMatch ? hwMatch[1].trim() : "";
+          if (!progressMatch && !hwMatch && desc.trim()) {
+            hDesc = desc.trim();
+          }
+          const myComment = (log.lesson_log_student_comment || []).find(
+            (c: any) => String(c.student_id) === String(studentId)
+          );
+          const cName =
+            unwrap(log.class as any)?.name ||
+            classMap.get(String(log.class_id)) ||
+            "수업";
+
+          return {
+            ...log,
+            className: cName,
+            parsed_progress: pDesc,
+            parsed_homework: hDesc,
+            my_individual_comment: myComment ? myComment.comment : null,
+          };
+        })
+        .filter(
+          (l: any) =>
+            l.parsed_progress ||
+            l.parsed_homework ||
+            l.my_individual_comment ||
+            (l.instructor_note && String(l.instructor_note).trim() !== "")
+        );
+
+      setLessonLogList(parsed);
+    } catch (e) {
+      console.error("수업일지 로드 실패:", e);
+    } finally {
+      setIsLessonLogLoading(false);
+    }
+  };
+
   const loadClinicList = async () => {
     const { data } = await supabase.from("clinic_task").select("*, textbook_question(question_number)").eq("student_id", studentId).order("created_at", { ascending: false });
     setClinicList(data || []);
@@ -826,6 +952,37 @@ export default function StudentDetailPage() {
   const loadBillings = async () => {
     const { data } = await supabase.from("academy_billing").select("*, class(name)").eq("student_id", studentId).order("billing_month", { ascending: false }).limit(200);
     setBillingList(data || []);
+  };
+
+  const loadMessageHistory = async () => {
+    setIsMsgLoading(true);
+    try {
+      const parentObj: any = unwrap(student?.parent);
+      const phones = [
+        student?.phone,
+        parentObj?.phone,
+        parentObj?.phone_2,
+        parentObj?.phone_3,
+      ].filter(Boolean) as string[];
+
+      const res = await getStudentMessageHistoryAction({
+        studentId,
+        studentName: student?.name || "",
+        phones,
+      });
+
+      if (res.success) {
+        setMsgHistory({
+          dbLogs: res.dbLogs || [],
+          solapiLogs: res.solapiLogs || [],
+          trackedPhones: res.trackedPhones || [],
+        });
+      }
+    } catch (e) {
+      console.error("발송 내역 로드 실패:", e);
+    } finally {
+      setIsMsgLoading(false);
+    }
   };
 
   const loadSchoolExams = async () => {
@@ -1030,9 +1187,11 @@ export default function StudentDetailPage() {
     { id: 'progress', name: '진도 기록' },
     ...(allowedActions.includes('action_view_exam') ? [{ id: 'exam', name: '주간테스트 성적' }] : []),
     { id: 'hw', name: '과제 현황' },
+    { id: 'lesson_log', name: '수업일지' },
     ...(allowedActions.includes('action_view_clinic') ? [{ id: 'clinic', name: '오답 클리닉' }] : []),
     { id: 'makeup', name: '보강 이력' }, // 🌟 새로 추가된 부분
-    { id: 'billing', name: '수납/청구' }
+    { id: 'billing', name: '수납/청구' },
+    { id: 'messages', name: '카톡/문자 내역' }
   ];
 
   return (
@@ -1044,8 +1203,25 @@ export default function StudentDetailPage() {
         <div className="flex justify-between items-start bg-white p-6 rounded-2xl border border-slate-200 shadow-sm relative overflow-hidden shrink-0">
           <div className="absolute top-0 right-0 w-64 h-full bg-gradient-to-l from-blue-50/50 to-transparent"></div>
           <div className="flex items-center gap-5 relative z-10">
-            <div className="w-20 h-20 bg-gradient-to-br from-brand to-[#1e3a8a] text-white rounded-full flex items-center justify-center text-3xl font-bold shadow-md shrink-0">
-              {student.name.substring(1, 3) || "-"}
+            <div className="w-20 h-20 bg-gradient-to-br from-brand to-[#1e3a8a] text-white rounded-full flex items-center justify-center font-bold shadow-md shrink-0 overflow-hidden border-2 border-white">
+              {parentAvatarUrl ? (
+                <img
+                  src={parentAvatarUrl}
+                  alt={student.name}
+                  className="w-full h-full object-cover"
+                  onError={() => setParentAvatarUrl(null)}
+                />
+              ) : (
+                <span
+                  className={
+                    getStudentAvatarDisplayName(student.name).length >= 3
+                      ? "text-xl tracking-tight"
+                      : "text-3xl"
+                  }
+                >
+                  {getStudentAvatarDisplayName(student.name)}
+                </span>
+              )}
             </div>
             <div>
               <div className="flex items-center gap-2 mb-1">
@@ -1088,9 +1264,11 @@ export default function StudentDetailPage() {
             {activeTab === "progress" && <ProgressTab progressBooks={progressBooks} />}
             {activeTab === "exam" && <ExamTab examResults={examResults} schoolExams={schoolExams} categoryAnalysis={categoryAnalysis} setIsSchoolExamModalOpen={setIsSchoolExamModalOpen} deleteSchoolExam={deleteSchoolExam} />}
             {activeTab === "hw" && <HwTab hwList={hwList} />}
+            {activeTab === "lesson_log" && <LessonLogTab lessonLogList={lessonLogList} isLoading={isLessonLogLoading} studentName={student.name} />}
             {activeTab === "clinic" && <ClinicTab clinicList={clinicList} />}
             {activeTab === "makeup" && <MakeupTab makeupList={makeupList} />} {/* 🌟 보강 이력 탭 컨텐츠 연결 */}
             {activeTab === "billing" && <BillingTab billingList={billingList} setIsBillingModalOpen={setIsBillingModalOpen} setPayFormInit={setPayFormInit} setIsPaymentModalOpen={setIsPaymentModalOpen} />}
+            {activeTab === "messages" && <MessageHistoryTab msgHistory={msgHistory} isLoading={isMsgLoading} onRefresh={loadMessageHistory} />}
           </div>
         </div>
         
@@ -1727,6 +1905,90 @@ function HwTab({ hwList }: any) {
   );
 }
 
+function LessonLogTab({ lessonLogList, isLoading, studentName }: { lessonLogList: any[]; isLoading: boolean; studentName: string }) {
+  return (
+    <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
+      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+        <h3 className="font-bold text-slate-700 text-[13px]">수업일지 및 개별 코멘트 기록</h3>
+        <span className="text-xs font-bold text-slate-400">총 {lessonLogList.length}건</span>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-12 text-slate-400 font-bold text-xs bg-slate-50 border border-slate-200 rounded-xl">
+          수업일지를 불러오는 중입니다...
+        </div>
+      ) : lessonLogList.length === 0 ? (
+        <div className="text-center py-12 text-slate-400 font-bold text-xs bg-slate-50 border border-slate-200 rounded-xl">
+          작성된 수업일지가 없습니다.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {lessonLogList.map((log: any, idx: number) => (
+            <div
+              key={log.lesson_log_id || idx}
+              className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-3 hover:border-blue-300 transition-colors"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded">
+                    {log.className || "수업"}
+                  </span>
+                  <span className="text-[13px] font-bold text-slate-800">
+                    {log.actual_date || "-"}
+                  </span>
+                </div>
+              </div>
+
+              {log.my_individual_comment && (
+                <div className="bg-indigo-50/70 border border-indigo-100 rounded-lg px-3 py-2.5 flex flex-col gap-1">
+                  <span className="text-[11.5px] font-bold text-indigo-700">
+                    💌 {studentName} 학생 개별 코멘트
+                  </span>
+                  <p className="text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap">
+                    {log.my_individual_comment}
+                  </p>
+                </div>
+              )}
+
+              {(log.parsed_progress || log.parsed_homework) && (
+                <div className="flex flex-col gap-2 text-xs leading-relaxed">
+                  {log.parsed_progress && (
+                    <div className="flex items-start gap-2">
+                      <span className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold text-[11px]">
+                        진도
+                      </span>
+                      <span className="text-slate-700 font-medium whitespace-pre-wrap">
+                        {log.parsed_progress}
+                      </span>
+                    </div>
+                  )}
+                  {log.parsed_homework && (
+                    <div className="flex items-start gap-2">
+                      <span className="shrink-0 mt-0.5 px-1.5 py-0.5 rounded bg-amber-50 text-amber-700 border border-amber-200 font-bold text-[11px]">
+                        과제
+                      </span>
+                      <span className="text-slate-600 font-medium whitespace-pre-wrap">
+                        {log.parsed_homework}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {log.instructor_note && String(log.instructor_note).trim() !== "" && (
+                <div className="mt-auto pt-2 border-t border-slate-100 text-[11.5px] text-slate-500">
+                  <span className="font-bold text-slate-600 mr-1.5">강사 메모:</span>
+                  <span className="whitespace-pre-wrap">{log.instructor_note}</span>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ClinicTab({ clinicList }: any) {
   return (
     <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
@@ -1833,3 +2095,198 @@ function BillingTab({ billingList, setIsBillingModalOpen, setPayFormInit, setIsP
     </div>
   );
 }
+
+
+function MessageHistoryTab({
+  msgHistory,
+  isLoading,
+  onRefresh,
+}: {
+  msgHistory: { dbLogs: any[]; solapiLogs: any[]; trackedPhones: string[] };
+  isLoading: boolean;
+  onRefresh: () => void;
+}) {
+  const [sourceFilter, setSourceFilter] = useState<"all" | "solapi" | "db">("all");
+  const [keyword, setKeyword] = useState("");
+
+  const combinedLogs = useMemo(() => {
+    const db = msgHistory.dbLogs || [];
+    const sol = msgHistory.solapiLogs || [];
+    if (sourceFilter === "solapi") return sol;
+    if (sourceFilter === "db") return db;
+    return [...sol, ...db].sort((a, b) =>
+      String(b.sentAt || "").localeCompare(String(a.sentAt || ""))
+    );
+  }, [msgHistory, sourceFilter]);
+
+  const filteredLogs = useMemo(() => {
+    const kw = keyword.trim().toLowerCase();
+    if (!kw) return combinedLogs;
+    return combinedLogs.filter(
+      (item: any) =>
+        String(item.body || "").toLowerCase().includes(kw) ||
+        String(item.title || "").toLowerCase().includes(kw) ||
+        String(item.recipientPhone || "").toLowerCase().includes(kw) ||
+        String(item.recipientName || "").toLowerCase().includes(kw)
+    );
+  }, [combinedLogs, keyword]);
+
+  const formatSentAt = (iso: string) => {
+    if (!iso) return "-";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
+    const days = ["일", "월", "화", "수", "목", "금", "토"];
+    return `${d.getFullYear()}.${String(d.getMonth() + 1).padStart(2, "0")}.${String(
+      d.getDate()
+    ).padStart(2, "0")}(${days[d.getDay()]}) ${String(d.getHours()).padStart(
+      2,
+      "0"
+    )}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  return (
+    <div className="space-y-4 animate-[fadeIn_0.2s_ease-out]">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div>
+          <h3 className="font-bold text-slate-700 text-[13px] flex items-center gap-2">
+            <span>💬 학부모 카톡 알림톡 및 문자 발송 내역</span>
+            {msgHistory.trackedPhones?.length > 0 && (
+              <span className="text-[11px] font-bold bg-slate-100 text-slate-600 px-2 py-0.5 rounded-full border border-slate-200">
+                조회 번호: {msgHistory.trackedPhones.join(", ")}
+              </span>
+            )}
+          </h3>
+          <p className="text-[11.5px] text-slate-400 font-medium mt-0.5">
+            솔라피(Solapi) 발송 서버의 실제 원문과 학원 DB(notification_log) 기록을 함께 조회합니다.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex bg-slate-100 p-1 rounded-lg border border-slate-200 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => setSourceFilter("all")}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                sourceFilter === "all"
+                  ? "bg-white text-brand shadow-xs"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              전체 ({(msgHistory.solapiLogs?.length || 0) + (msgHistory.dbLogs?.length || 0)})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSourceFilter("solapi")}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                sourceFilter === "solapi"
+                  ? "bg-white text-brand shadow-xs"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              솔라피 원문 ({msgHistory.solapiLogs?.length || 0})
+            </button>
+            <button
+              type="button"
+              onClick={() => setSourceFilter("db")}
+              className={`px-2.5 py-1 rounded-md transition-colors ${
+                sourceFilter === "db"
+                  ? "bg-white text-brand shadow-xs"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              학원 DB 로그 ({msgHistory.dbLogs?.length || 0})
+            </button>
+          </div>
+
+          <input
+            type="text"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            placeholder="메시지 내용·번호 검색"
+            className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-medium text-slate-700 focus:outline-none focus:border-brand w-44 bg-white"
+          />
+
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={isLoading}
+            className="px-3 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-colors disabled:opacity-50"
+          >
+            {isLoading ? "조회 중..." : "🔄 새로고침"}
+          </button>
+        </div>
+      </div>
+
+      {isLoading ? (
+        <div className="text-center py-14 text-slate-400 font-bold text-xs bg-slate-50 border border-slate-200 rounded-xl">
+          솔라피 서버 및 학원 DB에서 발송 내역을 불러오는 중입니다...
+        </div>
+      ) : filteredLogs.length === 0 ? (
+        <div className="text-center py-14 text-slate-400 font-bold text-xs bg-slate-50 border border-slate-200 rounded-xl">
+          해당 학생 학부모님께 발송된 카톡/문자 내역이 없습니다.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {filteredLogs.map((item: any, idx: number) => {
+            const isKakao = String(item.channelLabel || "").includes("알림톡");
+            const isSuccess = String(item.status || "").includes("성공") || String(item.status || "").includes("완료");
+            const isPending = String(item.status || "").includes("대기");
+
+            const statusCls = isSuccess
+              ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+              : isPending
+              ? "bg-amber-50 text-amber-700 border-amber-200"
+              : "bg-rose-50 text-rose-600 border-rose-200";
+
+            const channelCls = isKakao
+              ? "bg-[#FEF9C3] text-[#854D0E] border-[#FDE047]"
+              : "bg-blue-50 text-blue-700 border-blue-200";
+
+            return (
+              <div
+                key={item.id || idx}
+                className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex flex-col gap-2.5 hover:border-blue-300 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded border ${channelCls}`}
+                    >
+                      {isKakao ? "💬 " : "📱 "}
+                      {item.channelLabel}
+                    </span>
+                    <span className="text-[10.5px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 border border-slate-200">
+                      {item.source === "solapi" ? "솔라피 서버" : "학원 DB"}
+                    </span>
+                    <span
+                      className={`text-[11px] font-bold px-2 py-0.5 rounded border ${statusCls}`}
+                    >
+                      {item.status}
+                    </span>
+                  </div>
+                  <span className="text-[11.5px] font-bold text-slate-400 tabular-nums shrink-0">
+                    {formatSentAt(item.sentAt)}
+                  </span>
+                </div>
+
+                <div className="flex items-center justify-between text-xs text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
+                  <span className="font-bold text-slate-700 truncate">
+                    수신: {item.recipientName || "학부모"}
+                  </span>
+                  <span className="font-bold text-slate-500 tabular-nums">
+                    {item.recipientPhone || "-"}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50/60 p-3 rounded-lg border border-slate-100 text-xs text-slate-700 font-medium leading-relaxed whitespace-pre-wrap break-words max-h-48 overflow-y-auto custom-scroll">
+                  {item.body || item.title || "-"}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+

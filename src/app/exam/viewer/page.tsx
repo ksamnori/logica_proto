@@ -425,6 +425,8 @@ const buildSubQuestionItemHtml = (
 
   const isTrailingSubNum = splitSub.isTrailingSubNum;
   const hasText = Boolean(textToRender && String(textToRender).trim());
+  const rawQ2 = String(q.question_2 || "").trim();
+  const hasQ2 = Boolean(rawQ2 && rawQ2 !== "undefined" && rawQ2 !== "null");
   const isCompactSingleCol = col === 1 && split >= 4;
   const topMarginClass = sIdx > 0 ? (isCompactSingleCol ? "mt-3" : (isTrailingSubNum || !hasText) ? "mt-6" : "mt-16") : "";
   let maxHeightStyle = " max-height: 250px;";
@@ -437,6 +439,9 @@ const buildSubQuestionItemHtml = (
     else maxHeightStyle = " max-height: 340px;";
   }
   const imgMarginClass = isCompactSingleCol ? "mt-1.5 mb-1" : "mt-4 mb-3";
+  const q2BlockHtml = hasQ2
+    ? `<div class="flex items-start ${isCompactSingleCol ? 'mt-1.5' : 'mt-3'}"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(rawQ2)}</div></div>`
+    : "";
 
   if (isTrailingSubNum) {
     const introHtml = splitSub.introText
@@ -450,7 +455,7 @@ const buildSubQuestionItemHtml = (
       const w2 = getBoxWidth(q.image_2_box, col, split);
       const commonImg1Html = `<div class="w-full flex justify-center ${isCompactSingleCol ? 'mt-1 mb-2' : 'mt-2 mb-4'}"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w1};${maxHeightStyle}"></div>`;
       const inlineImg2Html = `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w2};${maxHeightStyle}"></div>`;
-      return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}${commonImg1Html}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImg2Html}</div></div></div>`;
+      return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}${commonImg1Html}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImg2Html}</div></div>${q2BlockHtml}</div>`;
     }
 
     let inlineImgs = "";
@@ -462,7 +467,7 @@ const buildSubQuestionItemHtml = (
       const w = getBoxWidth(q.image_2_box, col, split);
       inlineImgs += `<div class="w-full flex justify-start"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
     }
-    return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImgs}</div></div></div>`;
+    return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${introHtml}<div class="flex items-start gap-3"><div class="text-[17px] leading-[1.6] text-black tracking-wide font-semibold shrink-0 pt-0.5">${formatQText(splitSub.subMarkerText)}</div><div class="flex-1 min-w-0 flex flex-col gap-2 items-start">${inlineImgs}</div></div>${q2BlockHtml}</div>`;
   }
 
   let imgHtml = "";
@@ -478,7 +483,7 @@ const buildSubQuestionItemHtml = (
   const textBlockHtml = hasText
     ? `<div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(textToRender)}</div></div>`
     : "";
-  return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${textBlockHtml}${imgHtml}</div>`;
+  return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${textBlockHtml}${imgHtml}${q2BlockHtml}</div>`;
 };
 
 // 🌟 [핵심 변경] 이중/삼중으로 꼬인 JSON 문자열도 끝까지 파고들어 width(%)를 기필코 찾아내는 초강력 파서

@@ -1472,6 +1472,10 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
                 <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
                 <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.items?.[0]?.question?.question || '-').replace(/\n/g, '<br>') }} />
                 {getCleanUrl(modalQ.items?.[0]?.question?.image_url) && <img src={getCleanUrl(modalQ.items[0].question.image_url)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
+                {getCleanUrl(modalQ.items?.[0]?.question?.image_2_url) && <img src={getCleanUrl(modalQ.items[0].question.image_2_url)} className="max-w-full mt-3 rounded-lg border border-slate-200" alt="Question 2" />}
+                {modalQ.items?.[0]?.question?.question_2 && (
+                  <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed mt-3" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.items[0].question.question_2).replace(/\n/g, '<br>') }} />
+                )}
               </div>
               <div className="bg-blue-50 p-5 rounded-xl border border-blue-100 shadow-sm">
                 <h3 className="font-bold text-blue-800 border-b border-blue-200 pb-2 mb-3">정답 (Answer)</h3>

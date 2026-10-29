@@ -254,6 +254,9 @@ export default function QuestionDBUploadPage() {
               if (q.image_2_url && String(q.image_2_url).trim() !== "" && String(q.image_2_url) !== "null") {
                 patchPayload.image_2_url = q.image_2_url;
               }
+              if (q.question_2 !== undefined && q.question_2 !== null && String(q.question_2).trim() !== "" && String(q.question_2) !== "null") {
+                patchPayload.question_2 = q.question_2;
+              }
               if (q.image_box) patchPayload.image_box = safeJsonb(q.image_box);
               if (q.image_2_box) patchPayload.image_2_box = typeof q.image_2_box === "string" ? q.image_2_box : JSON.stringify(q.image_2_box);
               if (q.answer_image_url && String(q.answer_image_url).trim() !== "" && String(q.answer_image_url) !== "null") {
@@ -326,6 +329,7 @@ export default function QuestionDBUploadPage() {
           difficulty: mapDifficulty(q.difficulty), 
           solving_probability: safeInteger(q.solving_probability),
           question: q.question || "",
+          question_2: q.question_2 || null,
           options: safeJsonb(q.options),
           answer: q.answer || null,
           step_1_concept: q.step_1_concept || null,

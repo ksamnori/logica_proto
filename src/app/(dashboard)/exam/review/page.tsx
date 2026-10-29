@@ -1234,6 +1234,8 @@ function ReviewContent() {
                       <div key={idx} className="mb-4">
                         <div dangerouslySetInnerHTML={{ __html: pre + formatMathTextForWeb(q.question) }} className="math-text text-slate-700 font-medium whitespace-pre-wrap" />
                         {getCleanUrl(q.image_url) && <img src={getCleanUrl(q.image_url)} className="max-w-full mt-2 rounded-lg border border-slate-200" alt="Q" />}
+                        {getCleanUrl(q.image_2_url) && <img src={getCleanUrl(q.image_2_url)} className="max-w-full mt-2 rounded-lg border border-slate-200" alt="Q2" />}
+                        {q.question_2 && <div dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(q.question_2) }} className="math-text text-slate-700 font-medium whitespace-pre-wrap mt-2" />}
                       </div>
                     );
                   })}

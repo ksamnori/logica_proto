@@ -511,7 +511,7 @@ export default function AdmissionAnalyticsPage() {
         let fetchedQuestions: any[] = [];
         if (uuidIds.length > 0) {
           const { data: qDbData } = await supabase.from('question_db')
-            .select('question_id, parent_question_id, question_number, sub_num, question, image_url, answer')
+            .select('question_id, parent_question_id, question_number, sub_num, question, question_2, image_url, image_2_url, answer')
             .in('question_id', uuidIds).limit(2000);
           if (qDbData) fetchedQuestions.push(...qDbData);
         }
@@ -600,7 +600,9 @@ export default function AdmissionAnalyticsPage() {
         question_number: q.question_number,
         sub_num: q.sub_num || 0,
         questionContent: q.question,
+        questionContent2: q.question_2,
         imageUrl: q.image_url,
+        image2Url: q.image_2_url,
         answerContent: q.answer
       });
     });
@@ -1211,6 +1213,12 @@ export default function AdmissionAnalyticsPage() {
                   <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed text-[15px]" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.questionContent || '문제 텍스트가 없습니다.') }} />
                   {getCleanUrl(modalQ.imageUrl) && (
                     <img src={getCleanUrl(modalQ.imageUrl)} className="max-w-full mt-5 rounded-lg border border-slate-200 shadow-sm" alt="Question Image" />
+                  )}
+                  {getCleanUrl(modalQ.image2Url) && (
+                    <img src={getCleanUrl(modalQ.image2Url)} className="max-w-full mt-3 rounded-lg border border-slate-200 shadow-sm" alt="Question Image 2" />
+                  )}
+                  {modalQ.questionContent2 && (
+                    <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed text-[15px] mt-4" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.questionContent2) }} />
                   )}
                 </div>
 

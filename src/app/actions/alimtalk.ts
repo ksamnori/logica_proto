@@ -112,6 +112,16 @@ export async function sendTestResultAlimtalk({
       }
     }]);
     const r = interpretSolapiResult(response);
+    try {
+      const statusStr = !r.success ? "실패" : (r.pending ? "대기" : "성공");
+      const contentStr = `[학습결과] ${testName} (점수: ${studentScore}, 반평균: ${classAverage})${comment ? `\n${comment}` : ""}`;
+      await supabaseAdmin.from("notification_log").insert({
+        target_name: `${studentName} / ${parentName || "학부모"}`,
+        target_phone: parentPhone,
+        message_content: r.reason ? `${contentStr} — ${r.reason}` : contentStr,
+        status: statusStr,
+      });
+    } catch {}
     return { success: r.success, pending: r.pending, message: r.reason, data: response };
   } catch (error: any) {
     return { success: false, message: typeof error === 'object' ? JSON.stringify(error) : String(error) };
@@ -435,8 +445,42 @@ export async function sendQueuedMessages(tenantId: string) {
         res = { success: false, message: e?.message || String(e) };
       }
 
-      const logMessage =
-        msg.template_id === "GENERAL_SMS" ? `${msg.preview_title} 발송` : msg.preview_title;
+      let logMessage = msg.preview_title || "[알림]";
+      if (msg.template_id === "KA01TP260921034958500GAtQOl600yJ") {
+        // 출결 알림톡: 일시 및 출결상태 상세 포함
+        const parts = [
+          msg.preview_title || `[출결] ${msg.status_label || ""}`,
+          msg.time_string ? `(${msg.time_string})` : "",
+        ].filter(Boolean);
+        logMessage = parts.join(" ");
+      } else if (msg.template_id === "KA01TP260921035109788D7zIQYMgqvp") {
+        // 학사일정 알림톡: 적용일시 및 상세내용 포함
+        const detailParts = [
+          msg.apply_date ? `적용일시: ${msg.apply_date}` : "",
+          msg.details ? String(msg.details).trim() : "",
+        ].filter(Boolean);
+        logMessage = detailParts.length > 0
+          ? `${msg.preview_title}\n${detailParts.join("\n")}`
+          : msg.preview_title;
+      } else if (msg.template_id === "KA01TP26092103514300371OMrxorSxG") {
+        // 시간표 변경 및 보강 안내 알림톡: 기존/변경일시 및 상세내용 포함
+        const changeInfo =
+          msg.old_date || msg.new_date
+            ? `일시변경: ${msg.old_date || "-"} → ${msg.new_date || "-"}`
+            : "";
+        const detailParts = [
+          changeInfo,
+          msg.details ? String(msg.details).trim() : "",
+        ].filter(Boolean);
+        logMessage = detailParts.length > 0
+          ? `${msg.preview_title}\n${detailParts.join("\n")}`
+          : msg.preview_title;
+      } else if (msg.template_id === "GENERAL_SMS") {
+        // 일반 문자: 제목 + 실제 발송 본문(details) 전체 저장
+        logMessage = msg.details
+          ? `${msg.preview_title} 발송\n${String(msg.details).trim()}`
+          : `${msg.preview_title} 발송`;
+      }
 
       const logStatus = !res?.success ? "실패" : (res?.pending ? "대기" : "성공");
 
@@ -636,5 +680,330 @@ export async function kioskAttendance(studentId: string) {
   } catch (error: any) {
     console.error("[kioskAttendance]", error);
     return { success: false, message: error?.message || String(error) };
+  }
+}
+
+
+// ------------------------------------------------------------------
+// 12. 학생별(학부모별) 지난 카톡 알림톡 및 문자 내역 통합 조회 (DB + 솔라피 서버 직접 조회)
+// ------------------------------------------------------------------
+function formatPhoneVariants(rawPhones: string[]): { rawList: string[]; allVariants: string[] } {
+  const rawSet = new Set<string>();
+  const varSet = new Set<string>();
+
+  for (const p of rawPhones) {
+    if (!p || String(p).includes("unassigned")) continue;
+    const digits = String(p).replace(/[^0-9]/g, "");
+    if (digits.length < 9) continue;
+    rawSet.add(digits);
+    varSet.add(digits);
+    if (digits.length === 11) {
+      varSet.add(`${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`);
+    } else if (digits.length === 10) {
+      varSet.add(`${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`);
+    }
+  }
+  return {
+    rawList: Array.from(rawSet),
+    allVariants: Array.from(varSet),
+  };
+}
+
+function buildSolapiDisplayContent(msg: any): { title: string; body: string; channelLabel: string } {
+  const msgType = String(msg?.type || "").toUpperCase();
+  const vars = msg?.kakaoOptions?.variables || {};
+  const rawText = String(msg?.text || msg?.content || "").trim();
+
+  if (msgType === "ATA" || msgType === "CTA" || msg?.kakaoOptions) {
+    const channelLabel = "카카오 알림톡";
+    // 변수들이 있으면 실제 발송된 알림톡 내용을 보기 좋게 재구성
+    if (vars && Object.keys(vars).length > 0) {
+      const stu = vars["#{학생명}"] || "";
+      const attStatus = vars["#{출결상태}"] || "";
+      const timeStr = vars["#{일시}"] || "";
+      const schName = vars["#{일정명}"] || "";
+      const applyDate = vars["#{적용일시}"] || "";
+      const oldDate = vars["#{기존일시}"] || "";
+      const newDate = vars["#{변경일시}"] || "";
+      const details = vars["#{상세내용}"] || "";
+      const testName = vars["#{테스트명}"] || "";
+      const stuScore = vars["#{학생점수}"] || "";
+      const classAvg = vars["#{반평균}"] || "";
+      const comment = vars["#{코멘트}"] || "";
+
+      if (attStatus || timeStr) {
+        return {
+          title: `[출결 안내] ${attStatus}`,
+          body: `${stu ? `${stu} 학생 ` : ""}${attStatus ? `[${attStatus}] ` : ""}${timeStr ? `일시: ${timeStr}` : ""}`.trim(),
+          channelLabel,
+        };
+      }
+      if (schName) {
+        return {
+          title: `[학사일정 안내] ${schName}`,
+          body: [
+            applyDate ? `적용일시: ${applyDate}` : "",
+            details ? `상세내용:\n${details}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          channelLabel,
+        };
+      }
+      if (oldDate || newDate) {
+        return {
+          title: `[시간표/보강 안내]`,
+          body: [
+            `기존일시: ${oldDate || "-"} → 변경일시: ${newDate || "-"}`,
+            details ? `상세내용:\n${details}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          channelLabel,
+        };
+      }
+      if (testName) {
+        return {
+          title: `[학습 결과 안내] ${testName}`,
+          body: [
+            `학생 점수: ${stuScore || "-"} (반 평균: ${classAvg || "-"})`,
+            comment ? `코멘트:\n${comment}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          channelLabel,
+        };
+      }
+
+      const fallbackPairs = Object.entries(vars)
+        .map(([k, v]) => `${k.replace(/[#{}]/g, "")}: ${v}`)
+        .join("\n");
+      return {
+        title: rawText || "카카오 알림톡",
+        body: fallbackPairs,
+        channelLabel,
+      };
+    }
+
+    return {
+      title: rawText.split("\n")[0] || "카카오 알림톡",
+      body: rawText,
+      channelLabel,
+    };
+  }
+
+  const channelLabel =
+    msgType === "LMS" ? "장문 문자(LMS)" : msgType === "MMS" ? "멀티 문자(MMS)" : "일반 문자(SMS)";
+  const lines = rawText.split("\n").filter((l) => l.trim() !== "");
+  const firstLine = lines[0] || channelLabel;
+  return {
+    title: firstLine.length > 36 ? firstLine.slice(0, 36) + "..." : firstLine,
+    body: rawText,
+    channelLabel,
+  };
+}
+
+export async function getStudentMessageHistoryAction({
+  studentId,
+  studentName,
+  phones = [],
+}: {
+  studentId: string;
+  studentName?: string;
+  phones?: string[];
+}) {
+  try {
+    // 1. 학생 및 학부모 연락처 수집
+    const phoneCandidates: string[] = [...(phones || [])];
+    const parentLabelMap: Record<string, string> = {};
+
+    if (studentId) {
+      const { data: stuRow } = await supabaseAdmin
+        .from("student")
+        .select(
+          "name, phone, parent(name, phone, relationship, name_2, phone_2, relationship_2, name_3, phone_3, relationship_3)"
+        )
+        .eq("student_id", studentId)
+        .maybeSingle();
+
+      if (stuRow) {
+        if (!studentName && stuRow.name) studentName = stuRow.name;
+        if (stuRow.phone) {
+          const d = String(stuRow.phone).replace(/[^0-9]/g, "");
+          if (d) {
+            phoneCandidates.push(d);
+            parentLabelMap[d] = `${stuRow.name} (학생 본인)`;
+          }
+        }
+        const pObj: any = Array.isArray(stuRow.parent) ? stuRow.parent[0] : stuRow.parent;
+        if (pObj) {
+          const addP = (ph?: string | null, nm?: string | null, rel?: string | null) => {
+            if (!ph || String(ph).includes("unassigned")) return;
+            const d = String(ph).replace(/[^0-9]/g, "");
+            if (!d) return;
+            phoneCandidates.push(d);
+            const relLabel = rel || "학부모";
+            const nameLabel = nm && nm !== "미입력" ? `${nm} (${relLabel})` : `${stuRow.name} ${relLabel}`;
+            parentLabelMap[d] = nameLabel;
+          };
+          addP(pObj.phone, pObj.name, pObj.relationship);
+          addP(pObj.phone_2, pObj.name_2, pObj.relationship_2);
+          addP(pObj.phone_3, pObj.name_3, pObj.relationship_3);
+        }
+      }
+    }
+
+    const { rawList, allVariants } = formatPhoneVariants(phoneCandidates);
+
+    // 2. 학원 DB (notification_log) 조회
+    let dbLogs: any[] = [];
+    const orFilters: string[] = [];
+    allVariants.forEach((v) => {
+      orFilters.push(`target_phone.eq.${v}`);
+      orFilters.push(`receiver_phone.eq.${v}`);
+    });
+    if (studentName && studentName.trim()) {
+      orFilters.push(`target_name.ilike.%${studentName.trim()}%`);
+    }
+
+    if (orFilters.length > 0) {
+      const { data: rows, error: dbErr } = await supabaseAdmin
+        .from("notification_log")
+        .select("*")
+        .or(orFilters.join(","))
+        .order("created_at", { ascending: false })
+        .limit(200);
+
+      if (dbErr) {
+        // receiver_phone 컬럼이 없는 스키마일 경우 target_phone과 target_name만으로 재시도
+        const fallbackFilters: string[] = [];
+        allVariants.forEach((v) => fallbackFilters.push(`target_phone.eq.${v}`));
+        if (studentName && studentName.trim()) {
+          fallbackFilters.push(`target_name.ilike.%${studentName.trim()}%`);
+        }
+        if (fallbackFilters.length > 0) {
+          const { data: fbRows } = await supabaseAdmin
+            .from("notification_log")
+            .select("*")
+            .or(fallbackFilters.join(","))
+            .order("created_at", { ascending: false })
+            .limit(200);
+          dbLogs = fbRows || [];
+        }
+      } else {
+        dbLogs = rows || [];
+      }
+    }
+
+    const formattedDbLogs = dbLogs.map((row: any, idx: number) => {
+      const rawPhone = String(row.target_phone || row.receiver_phone || "");
+      const digits = rawPhone.replace(/[^0-9]/g, "");
+      const fullContent = String(row.message_content || row.content || "").trim();
+      const catMatch = fullContent.match(/^\[(.*?)\]/);
+      const category = catMatch ? catMatch[1] : row.noti_type || "알림";
+      const sentAt = row.created_at || row.sent_at || new Date().toISOString();
+
+      return {
+        id: `db_${row.noti_log_id || row.id || idx}`,
+        source: "db" as const,
+        category,
+        channelLabel:
+          category.includes("문자") || category.includes("SMS") || category.includes("BILL") || category.includes("UNPAID")
+            ? "문자(SMS/LMS)"
+            : "카카오 알림톡",
+        recipientName:
+          row.target_name || parentLabelMap[digits] || (studentName ? `${studentName} 학부모` : "학부모"),
+        recipientPhone: rawPhone,
+        title: fullContent.split("\n")[0] || category,
+        body: fullContent,
+        status: row.status || "성공",
+        sentAt,
+      };
+    });
+
+    // 3. 솔라피(Solapi) 서버 발송 내역 직접 조회
+    const solapiLogs: any[] = [];
+    if (
+      process.env.SOLAPI_API_KEY &&
+      process.env.SOLAPI_API_SECRET &&
+      rawList.length > 0
+    ) {
+      const messageService = new SolapiMessageService(
+        process.env.SOLAPI_API_KEY,
+        process.env.SOLAPI_API_SECRET
+      );
+
+      await Promise.all(
+        rawList.map(async (digits) => {
+          try {
+            const res: any = await (messageService as any).getMessages({
+              to: digits,
+              limit: 50,
+            });
+            const listObj = res?.messageList || res?.data?.messageList || {};
+            const items: any[] = Array.isArray(listObj)
+              ? listObj
+              : Object.values(listObj);
+
+            items.forEach((m: any, i: number) => {
+              if (!m) return;
+              // 비밀번호 재설정 인증번호 문자는 발송 내역에서 제외
+              const rawText = String(m.text || m.content || "");
+              if (rawText.includes("비밀번호 재설정 인증번호는")) return;
+
+              const { title, body, channelLabel } = buildSolapiDisplayContent(m);
+              const sCode = String(m.statusCode || "");
+              let status = "성공";
+              if (sCode === "4000") status = "성공";
+              else if (["2000", "3000"].includes(sCode) || !sCode) status = "대기";
+              else status = `실패 (${m.statusMessage || sCode})`;
+
+              const sentAt =
+                m.dateSent || m.dateCreated || m.dateUpdated || m.createdAt || new Date().toISOString();
+              const fmtPhone =
+                digits.length === 11
+                  ? `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`
+                  : digits;
+
+              solapiLogs.push({
+                id: `solapi_${m.messageId || m._id || `${digits}_${i}`}`,
+                source: "solapi" as const,
+                category: channelLabel.includes("알림톡") ? "알림톡" : "문자",
+                channelLabel,
+                recipientName:
+                  parentLabelMap[digits] || (studentName ? `${studentName} 학부모` : "학부모"),
+                recipientPhone: fmtPhone,
+                title,
+                body,
+                status,
+                sentAt,
+              });
+            });
+          } catch (err) {
+            console.warn(`[getStudentMessageHistoryAction] 솔라피 조회 실패 (${digits}):`, err);
+          }
+        })
+      );
+    }
+
+    solapiLogs.sort((a, b) =>
+      String(b.sentAt || "").localeCompare(String(a.sentAt || ""))
+    );
+
+    return {
+      success: true,
+      dbLogs: formattedDbLogs,
+      solapiLogs,
+      trackedPhones: allVariants.filter((p) => p.includes("-")),
+    };
+  } catch (err: any) {
+    console.error("[getStudentMessageHistoryAction]", err);
+    return {
+      success: false,
+      dbLogs: [],
+      solapiLogs: [],
+      trackedPhones: [],
+      message: err?.message || String(err),
+    };
   }
 }

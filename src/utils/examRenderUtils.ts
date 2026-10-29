@@ -272,15 +272,25 @@ export const generateGroupBlock = (g: any) => {
   let subHtml = '';
   g.questions.forEach((q: any, sIdx: number) => {
       let safeImgUrl = String(q.image_url || '').trim();
+      let safeImg2Url = String(q.image_2_url || '').trim();
       let imgHtml = '';
       if (safeImgUrl && safeImgUrl !== 'undefined' && safeImgUrl !== 'null') {
-          imgHtml = `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+          imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImgUrl)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+      }
+      if (safeImg2Url && safeImg2Url !== 'undefined' && safeImg2Url !== 'null') {
+          imgHtml += `<div class="w-full flex justify-center mt-4 mb-3"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="max-height: 450px;"></div>`;
+      }
+      let rawQ2 = String(q.question_2 || '').trim();
+      let q2Html = '';
+      if (rawQ2 && rawQ2 !== 'undefined' && rawQ2 !== 'null') {
+          q2Html = `<div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify mt-3">${formatQText(rawQ2)}</div>`;
       }
       const prefix = g.questions.length > 1 ? `<span class="font-bold text-black mr-1">(${q.sub_num || sIdx + 1})</span>` : '';
       subHtml += `
           <div class="w-full min-w-0 math-protect ${sIdx > 0 ? 'mt-8' : ''}">
               <div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${prefix}${formatQText(q.question)}</div>
               ${imgHtml}
+              ${q2Html}
           </div>`;
   });
   return `

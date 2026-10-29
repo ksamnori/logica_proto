@@ -176,24 +176,27 @@ export default function SupervisorDashboard() {
                         } catch (e) {}
                     }
 
-                    let rawImgUrl = parseVal(fallbackDb.image_url) || parseVal(fallbackDb.image_2_url) || parseVal(rawMeta.image_url) || parseVal(rawMeta.imageUrl) || parseVal(fallbackTq.image_url);
-                    if (rawImgUrl.startsWith('[')) {
-                        try { rawImgUrl = JSON.parse(rawImgUrl)[0] || ''; } catch (e) {}
-                    }
-                    let finalImgUrl = '';
-                    
-                    if (rawImgUrl) {
-                        if (rawImgUrl.startsWith('http') || rawImgUrl.startsWith('data:')) {
-                            finalImgUrl = rawImgUrl;
-                        } else {
-                            const { data } = supabaseClient.storage.from('question_images').getPublicUrl(rawImgUrl);
-                            finalImgUrl = data.publicUrl;
+                    const resolveImgUrl = (raw: string) => {
+                        let u = raw;
+                        if (u && u.startsWith('[')) {
+                            try { u = JSON.parse(u)[0] || ''; } catch (e) {}
                         }
-                    }
+                        if (!u) return '';
+                        if (u.startsWith('http') || u.startsWith('data:')) return u;
+                        const { data } = supabaseClient.storage.from('question_images').getPublicUrl(u);
+                        return data.publicUrl;
+                    };
+
+                    const rawImgUrl = parseVal(fallbackDb.image_url) || parseVal(rawMeta.image_url) || parseVal(rawMeta.imageUrl) || parseVal(fallbackTq.image_url);
+                    const rawImg2Url = parseVal(fallbackDb.image_2_url) || parseVal(rawMeta.image_2_url);
+                    const finalImgUrl = resolveImgUrl(rawImgUrl);
+                    const finalImg2Url = resolveImgUrl(rawImg2Url);
 
                     qMap[strId] = {
                         questionText: parseVal(fallbackTq.question) || parseVal(rawMeta.question) || parseVal(fallbackDb.question) || parseVal(fallbackDb.question_text),
+                        questionText2: parseVal(fallbackDb.question_2) || parseVal(rawMeta.question_2),
                         imageUrl: finalImgUrl,
+                        image2Url: finalImg2Url,
                         correctAnswer: parseVal(fallbackTq.answer) || parseVal(rawMeta.answer) || parseVal(fallbackDb.answer)
                     };
                 });
@@ -210,7 +213,9 @@ export default function SupervisorDashboard() {
                     cleanInput,
                     isDrawing,
                     questionText: info.questionText || '',
+                    questionText2: info.questionText2 || '',
                     imageUrl: info.imageUrl || '',
+                    image2Url: info.image2Url || '',
                     correctAnswer: info.correctAnswer || ''
                 };
             });
@@ -353,6 +358,12 @@ export default function SupervisorDashboard() {
                                                 {ans.imageUrl && ans.imageUrl !== '' && (
                                                     <img src={ans.imageUrl} className="max-w-full rounded-lg mt-4 shadow-sm" alt="문제 원본 이미지" />
                                                 )}
+                                                {ans.image2Url && ans.image2Url !== '' && (
+                                                    <img src={ans.image2Url} className="max-w-full rounded-lg mt-4 shadow-sm" alt="문제 원본 이미지 2" />
+                                                )}
+                                                {ans.questionText2 && (
+                                                    <MathText className="font-bold text-slate-800 leading-relaxed font-myungjo mt-4" html={ans.questionText2} />
+                                                )}
                                             </div>
                                             
                                             {ans.isDrawing && (
@@ -432,6 +443,16 @@ export default function SupervisorDashboard() {
                             
                             <MathText className="text-[16px] md:text-[17px] text-slate-800 font-myungjo font-semibold leading-[1.8] break-keep" html={callProcessModal.callInfo.questionText} />
                             
+                            {callProcessModal.callInfo.imageUrl && (
+                                <img src={callProcessModal.callInfo.imageUrl} className="max-w-[720px] w-full rounded-xl border-2 border-slate-200 mt-4 shadow-sm" alt="문제 첨부 이미지" />
+                            )}
+                            {callProcessModal.callInfo.image2Url && (
+                                <img src={callProcessModal.callInfo.image2Url} className="max-w-[720px] w-full rounded-xl border-2 border-slate-200 mt-4 shadow-sm" alt="문제 첨부 이미지 2" />
+                            )}
+                            {callProcessModal.callInfo.questionText2 && (
+                                <MathText className="text-[16px] md:text-[17px] text-slate-800 font-myungjo font-semibold leading-[1.8] break-keep mt-4" html={callProcessModal.callInfo.questionText2} />
+                            )}
+
                             {callProcessModal.callInfo.options && (
                                 <div className="mt-4 flex flex-col gap-2">
                                     {callProcessModal.callInfo.options.map((opt: string, i: number) => (
@@ -441,10 +462,6 @@ export default function SupervisorDashboard() {
                                         </div>
                                     ))}
                                 </div>
-                            )}
-                            
-                            {callProcessModal.callInfo.imageUrl && (
-                                <img src={callProcessModal.callInfo.imageUrl} className="max-w-[720px] w-full rounded-xl border-2 border-slate-200 mt-4 shadow-sm" alt="문제 첨부 이미지" />
                             )}
                             
                             <div className="mt-6 pt-4 border-t-2 border-dashed border-slate-200 flex items-start gap-3">
