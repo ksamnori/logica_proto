@@ -3,7 +3,9 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
+import { getStudentPortalExtraDataAction } from "@/app/actions/parentAuth";
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
@@ -464,8 +466,36 @@ const RadarChart = ({ data }: { data: any[] }) => {
   );
 };
 
-export default function StudentCard({ student }: { student: any }) {
+export default function StudentCard({
+  student,
+  authToken,
+  parentId,
+}: {
+  student: any;
+  authToken?: string | null;
+  parentId?: string | null;
+}) {
   const router = useRouter();
+
+  const authSupabase = useMemo(() => {
+    if (!authToken) return supabase;
+    return createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        global: {
+          headers: {
+            Authorization: `Bearer ${authToken}`,
+          },
+        },
+        auth: {
+          persistSession: false,
+          autoRefreshToken: false,
+          detectSessionInUrl: false,
+        },
+      }
+    );
+  }, [authToken]);
   const [activeTab, setActiveTab] = useState<
     "attendance" | "progress" | "homework" | "makeup" | "exam" | "consultation"
   >("attendance");
@@ -505,7 +535,7 @@ export default function StudentCard({ student }: { student: any }) {
     if (!student?.student_id) return;
     const loadPendingHomework = async () => {
       try {
-        const { data, error } = await supabase
+        const { data, error } = await authSupabase
           .from("student_homework_result")
           .select("status, homework_assignment!inner(homework_title, due_date)")
           .eq("student_id", student.student_id)
@@ -554,67 +584,121 @@ export default function StudentCard({ student }: { student: any }) {
       )
     : [];
 
-  // 🌟 수업 일지 데이터 로드 (과제 탭에서 표시)
+  // 학생이 수강 중이거나 과거에 수강했던 모든 반 ID 추출
+  const allEnrolledClassIds = useMemo(() => {
+    const ids = new Set<string>();
+    if (classId) ids.add(classId);
+    (student.enrollment || []).forEach((e: any) => {
+      const cid = unwrap(e.class)?.class_id || e.class_id;
+      if (cid) ids.add(cid);
+    });
+    return Array.from(ids);
+  }, [classId, student.enrollment]);
+
+  // 수업일지 파싱 헬퍼
+  const parseRawLessonLogs = (rawLogs: any[]) => {
+    return (rawLogs || [])
+      .map((log) => {
+        const desc = log.homework_desc || "";
+        const progressMatch = desc.match(
+          /\[📖 오늘의 진도\]\n([\s\S]*?)(?=\n\n\[📝 공통 과제\]|\n\n\[🧑‍🎓 개별 과제\]|$)/
+        );
+        const hwMatch = desc.match(
+          /\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/
+        );
+
+        const pDesc = progressMatch ? progressMatch[1].trim() : "";
+        let hDesc = hwMatch ? hwMatch[1].trim() : "";
+        if (!progressMatch && !hwMatch && desc.trim()) {
+          hDesc = desc.trim();
+        }
+
+        const myComment = (log.lesson_log_student_comment || []).find(
+          (c: any) => String(c.student_id) === String(student.student_id)
+        );
+
+        return {
+          ...log,
+          parsed_progress: pDesc,
+          parsed_homework: hDesc,
+          my_individual_comment: myComment ? myComment.comment : null,
+        };
+      })
+      .filter(
+        (l) =>
+          l.parsed_progress || l.parsed_homework || l.my_individual_comment
+      );
+  };
+
+  // 초기 마운트 시 student.individual_makeup 선반영 및 서버 액션으로 전체 수업일지·보강 내역 로드
   useEffect(() => {
-    if (activeTab === "homework" && classId) {
-      const fetchLogs = async () => {
-        setIsLogsLoading(true);
-        try {
-          const { data } = await supabase
+    if (!student?.student_id) return;
+
+    if (Array.isArray(student.individual_makeup) && student.individual_makeup.length > 0) {
+      const sortedInitialMakeups = [...student.individual_makeup].sort((a, b) =>
+        String(b.schedule_date || "").localeCompare(String(a.schedule_date || ""))
+      );
+      setMakeups(sortedInitialMakeups);
+    }
+
+    let cancelled = false;
+    const loadLogsAndMakeups = async () => {
+      setIsLogsLoading(true);
+      setIsMakeupLoading(true);
+      try {
+        const res = await getStudentPortalExtraDataAction({
+          parentId,
+          authToken,
+          studentId: student.student_id,
+          classIds: allEnrolledClassIds,
+        });
+
+        if (!cancelled && res.success) {
+          setLessonLogs(parseRawLessonLogs(res.lessonLogs || []));
+          if (res.makeups && res.makeups.length > 0) {
+            setMakeups(res.makeups);
+          } else if (!Array.isArray(student.individual_makeup)) {
+            setMakeups([]);
+          }
+          return;
+        }
+
+        // 폴백: 클라이언트 authSupabase 직접 조회
+        if (allEnrolledClassIds.length > 0) {
+          const { data: cLogs } = await authSupabase
             .from("daily_lesson_log")
             .select(
-              `
-               lesson_log_id, actual_date, homework_desc,
-               lesson_log_student_comment(student_id, comment)
-            `
+              "lesson_log_id, actual_date, homework_desc, lesson_log_student_comment(student_id, comment)"
             )
-            .eq("class_id", classId)
+            .in("class_id", allEnrolledClassIds)
             .order("actual_date", { ascending: false });
-
-          if (data) {
-            const parsedLogs = data.map((log) => {
-              const desc = log.homework_desc || "";
-              const progressMatch = desc.match(
-                /\[📖 오늘의 진도\]\n([\s\S]*?)(?=\n\n\[📝 공통 과제\]|\n\n\[🧑‍🎓 개별 과제\]|$)/
-              );
-              const hwMatch = desc.match(
-                /\[📝 공통 과제\]\n([\s\S]*?)(?=\n\n\[🧑‍🎓 개별 과제\]|$)/
-              );
-
-              const pDesc = progressMatch ? progressMatch[1].trim() : "";
-              let hDesc = hwMatch ? hwMatch[1].trim() : "";
-              if (!progressMatch && !hwMatch) hDesc = desc; // 구형 포맷 대응
-
-              const myComment = (log.lesson_log_student_comment || []).find(
-                (c: any) => c.student_id === student.student_id
-              );
-
-              return {
-                ...log,
-                parsed_progress: pDesc,
-                parsed_homework: hDesc,
-                my_individual_comment: myComment ? myComment.comment : null,
-              };
-            });
-
-            setLessonLogs(
-              parsedLogs.filter(
-                (l) =>
-                  l.parsed_progress ||
-                  l.parsed_homework ||
-                  l.my_individual_comment
-              )
-            );
+          if (!cancelled && cLogs) {
+            setLessonLogs(parseRawLessonLogs(cLogs));
           }
-        } catch (error) {
-          console.error("일지 정보 로딩 에러:", error);
-        } finally {
-          setIsLogsLoading(false);
         }
-      };
-      fetchLogs();
-    }
-  }, [activeTab, classId, student.student_id]);
+        const { data: mData } = await authSupabase
+          .from("individual_makeup")
+          .select("*, instructor(name)")
+          .eq("student_id", student.student_id)
+          .order("schedule_date", { ascending: false });
+        if (!cancelled && mData && mData.length > 0) {
+          setMakeups(mData);
+        }
+      } catch (err) {
+        console.error("수업일지/보강 로드 에러:", err);
+      } finally {
+        if (!cancelled) {
+          setIsLogsLoading(false);
+          setIsMakeupLoading(false);
+        }
+      }
+    };
+
+    loadLogsAndMakeups();
+    return () => {
+      cancelled = true;
+    };
+  }, [student?.student_id, authToken, parentId, allEnrolledClassIds, authSupabase]);
 
   // 성적 데이터 로드
   useEffect(() => {
@@ -631,28 +715,6 @@ export default function StudentCard({ student }: { student: any }) {
       loadAllExamData();
     }
   }, [activeTab, student]);
-
-  // 보강 일정 데이터 로드
-  useEffect(() => {
-    if (activeTab === "makeup" && student?.student_id) {
-      const fetchMakeups = async () => {
-        setIsMakeupLoading(true);
-        try {
-          const { data } = await supabase
-            .from("individual_makeup")
-            .select("*, instructor(name)")
-            .eq("student_id", student.student_id)
-            .order("schedule_date", { ascending: false });
-          setMakeups(data || []);
-        } catch (err) {
-          console.error("보강 내역 로드 에러:", err);
-        } finally {
-          setIsMakeupLoading(false);
-        }
-      };
-      fetchMakeups();
-    }
-  }, [activeTab, student?.student_id]);
 
   const loadExamResults = async () => {
     try {
@@ -689,17 +751,17 @@ export default function StudentCard({ student }: { student: any }) {
         { data: examItems },
         { data: gcData },
       ] = await Promise.all([
-        supabase
+        authSupabase
           .from("exam_assignment")
           .select("assignment_id, exam_id")
           .in("exam_id", examIds)
           .not("status", "in", '("응시전","미응시","예정","대기")'),
-        supabase
+        authSupabase
           .from("exam_item")
           .select("exam_id, question_id, sort_order, assigned_score")
           .in("exam_id", examIds)
           .order("sort_order"),
-        supabase
+        authSupabase
           .from("master_grading_code")
           .select("code, description, is_correct, score_ratio, admission_ratio"),
       ]);
@@ -746,7 +808,7 @@ export default function StudentCard({ student }: { student: any }) {
       let allAnswers: any[] = [];
       for (let i = 0; i < allAssignIds.length; i += 200) {
         const chunk = allAssignIds.slice(i, i + 200);
-        const { data: chunkAnswers } = await supabase
+        const { data: chunkAnswers } = await authSupabase
           .from("student_answer")
           .select("exam_assignment_id, question_id, grading_code, earned_score")
           .in("exam_assignment_id", chunk);
@@ -925,7 +987,7 @@ export default function StudentCard({ student }: { student: any }) {
       let questions: any[] = [];
       for (let i = 0; i < qIds.length; i += 200) {
         const chunk = qIds.slice(i, i + 200);
-        const { data: qData } = await supabase
+        const { data: qData } = await authSupabase
           .from("question_db")
           .select("question_id, taxonomy_id")
           .in("question_id", chunk);
@@ -1507,9 +1569,7 @@ export default function StudentCard({ student }: { student: any }) {
 
   const visibleLessonLogs = showAllLogs
     ? lessonLogs
-    : lessonLogs.filter(
-        (l) => new Date(l.actual_date).getTime() >= twoWeeksAgoMs
-      );
+    : lessonLogs.slice(0, 15);
   const hiddenOlderLogsCount = Math.max(
     0,
     lessonLogs.length - visibleLessonLogs.length
@@ -2225,28 +2285,54 @@ export default function StudentCard({ student }: { student: any }) {
         {/* 보강 */}
         {activeTab === "makeup" && (
           <>
-            <h3 className="text-[17px] font-bold text-[#1E293B]">보강 일정</h3>
-            {isMakeupLoading ? (
+            <h3 className="text-[17px] font-bold text-[#1E293B]">
+              보강 일정 및 기록
+            </h3>
+            {isMakeupLoading && makeups.length === 0 ? (
               <LoadingBox text="보강 일정을 불러오는 중이에요." />
             ) : makeups.length === 0 ? (
-              <EmptyBox text="잡힌 보강 일정이 없어요." />
+              <EmptyBox text="등록된 보강 일정이나 이전 보강 기록이 없어요." />
             ) : (
-              makeups.map((m: any) => {
+              makeups.map((m: any, idx: number) => {
                 const d = new Date(m.schedule_date);
-                const timeStr = `${String(d.getHours()).padStart(
-                  2,
-                  "0"
-                )}:${String(d.getMinutes()).padStart(2, "0")}`;
+                const startStr = !isNaN(d.getTime())
+                  ? `${String(d.getHours()).padStart(2, "0")}:${String(
+                      d.getMinutes()
+                    ).padStart(2, "0")}`
+                  : "";
+                let rawNote = String(m.instructor_note || "").trim();
+                let endStr = "";
+                const endMatch = rawNote.match(/\[종료예정\s*(\d{2}:\d{2})\]/);
+                if (endMatch) {
+                  endStr = endMatch[1];
+                  rawNote = rawNote.replace(/\[종료예정\s*\d{2}:\d{2}\]/, "").trim();
+                }
+                const timeRangeStr = endStr ? `${startStr} ~ ${endStr}` : startStr;
                 const status = m.status || "예정";
+                const instObj = unwrap(m.instructor) as any;
+                const instName = instObj?.name || "";
+                const topicText =
+                  (m.target_category_id && String(m.target_category_id).trim()) ||
+                  rawNote ||
+                  "정해지는 대로 알려드릴게요";
+                const showExtraNote =
+                  rawNote &&
+                  m.target_category_id &&
+                  String(m.target_category_id).trim() !== "" &&
+                  rawNote !== String(m.target_category_id).trim();
+
                 return (
                   <article
-                    key={m.makeup_id}
+                    key={m.makeup_id || idx}
                     className="bg-white rounded-xl border border-[#E2E8F0] shadow-[0_1px_3px_rgba(15,23,42,0.03)] px-4 py-3.5 flex flex-col gap-2"
                   >
                     <div className="flex justify-between items-center gap-2">
                       <span className="text-[15px] font-bold text-[#1E293B]">
-                        {d.getMonth() + 1}월 {d.getDate()}일{" "}
-                        {WEEKDAYS[d.getDay()]}요일 {timeStr}
+                        {!isNaN(d.getTime())
+                          ? `${d.getFullYear()}년 ${d.getMonth() + 1}월 ${d.getDate()}일 ${
+                              WEEKDAYS[d.getDay()]
+                            }요일 ${timeRangeStr}`
+                          : m.schedule_date || "-"}
                       </span>
                       <span
                         className={`text-[12px] font-semibold rounded-full px-2.5 py-1 shrink-0 ${
@@ -2258,16 +2344,22 @@ export default function StudentCard({ student }: { student: any }) {
                     </div>
                     <div className="grid grid-cols-[48px_1fr] gap-x-2 gap-y-1 text-[14px]">
                       <span className="text-[#64748B]">내용</span>
-                      <span>
-                        {m.target_category_id || "정해지는 대로 알려드릴게요"}
+                      <span className="text-[#1E293B] font-medium whitespace-pre-wrap">
+                        {topicText}
                       </span>
+                      {showExtraNote && (
+                        <>
+                          <span className="text-[#64748B]">비고</span>
+                          <span className="text-[#334155] whitespace-pre-wrap">
+                            {rawNote}
+                          </span>
+                        </>
+                      )}
                       <span className="text-[#64748B]">장소</span>
-                      <span>{m.classroom || "-"}</span>
+                      <span className="text-[#334155]">{m.classroom || "-"}</span>
                       <span className="text-[#64748B]">담당</span>
-                      <span>
-                        {m.instructor?.name
-                          ? `${m.instructor.name} 선생님`
-                          : "정해지는 대로 알려드릴게요"}
+                      <span className="text-[#334155]">
+                        {instName ? `${instName} 선생님` : "정해지는 대로 알려드릴게요"}
                       </span>
                     </div>
                   </article>

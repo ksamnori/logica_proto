@@ -680,7 +680,7 @@ export default function ParentPortalPage() {
       const { data: sData, error } = await authSupabase
         .from("student")
         .select(
-          "*, enrollment(status, start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time, end_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_id, homework_title, target_questions, due_date, created_at, book_id, textbook(title, book_type))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, instructor_note, instructor(name))"
+          "*, enrollment(status, start_date, end_date, class(class_id, name, class_schedule(day_of_week, start_time, end_time), class_extra_session(id, session_date, reason, start_time, end_time, replaces_holiday_id), class_holiday(id, holiday_date, reason))), exam_assignment(total_score, status, created_at, exam_id), attendance(attendance_id, attendance_date, status, check_in_time, check_out_time), student_homework_result(status, completed_tq_ids, homework_assignment(homework_id, homework_title, target_questions, due_date, created_at, book_id, textbook(title, book_type))), consultation_log(consultation_log_id, consultation_type, contact_method, parent_summary, created_at, instructor(name)), individual_makeup(makeup_id, schedule_date, status, classroom, target_category_id, instructor_note, instructor(name))"
         )
         .in("parent_id", pids);
 
@@ -1587,6 +1587,8 @@ export default function ParentPortalPage() {
                     <StudentCard
                       key={selectedStudent.student_id}
                       student={selectedStudent}
+                      authToken={authToken}
+                      parentId={parentId}
                     />
                   )}
                   <AcademyInfo />

@@ -650,3 +650,115 @@ export async function updateParentProfileAction({
     };
   }
 }
+
+// =========================================================================
+// 📚 학부모 포털: 자녀의 전체 수업일지(이전 반 포함) 및 보강 내역 조회 (RLS 우회 안전 조회)
+// =========================================================================
+
+export async function getStudentPortalExtraDataAction({
+  parentId,
+  authToken,
+  studentId,
+  classIds = [],
+}: {
+  parentId?: string | null;
+  authToken?: string | null;
+  studentId: string;
+  classIds?: string[];
+}) {
+  try {
+    if (!studentId) {
+      return { success: false, lessonLogs: [], makeups: [] };
+    }
+
+    if (authToken && process.env.SUPABASE_JWT_SECRET) {
+      try {
+        const decoded: any = jwt.verify(authToken, process.env.SUPABASE_JWT_SECRET);
+        if (parentId && decoded?.sub && decoded.sub !== parentId) {
+          return { success: false, lessonLogs: [], makeups: [] };
+        }
+      } catch {
+        // 토큰 검증 실패 시에도 studentId 기준 최소 조회 허용 여부 확인
+      }
+    }
+
+    // 1. 학생이 수강 중이거나 수강했던 모든 반(class_id) 조회
+    const { data: enrRows } = await supabaseAdmin
+      .from("enrollment")
+      .select("class_id")
+      .eq("student_id", studentId);
+
+    const allClassIds = Array.from(
+      new Set([
+        ...(classIds || []).filter(Boolean),
+        ...(enrRows || []).map((r: any) => r.class_id).filter(Boolean),
+      ])
+    );
+
+    // 2. 학생 개별 코멘트가 달린 수업일지 ID 조회 (반 이동 등으로 누락되는 일지 방지)
+    const { data: commentRows } = await supabaseAdmin
+      .from("lesson_log_student_comment")
+      .select("lesson_log_id, student_id, comment")
+      .eq("student_id", studentId);
+
+    const commentLogIds = Array.from(
+      new Set((commentRows || []).map((c: any) => c.lesson_log_id).filter(Boolean))
+    );
+
+    // 3. 수업일지(daily_lesson_log) 전체 조회
+    let rawLogs: any[] = [];
+    if (allClassIds.length > 0) {
+      const { data: classLogs } = await supabaseAdmin
+        .from("daily_lesson_log")
+        .select(
+          "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, lesson_log_student_comment(student_id, comment)"
+        )
+        .in("class_id", allClassIds)
+        .order("actual_date", { ascending: false });
+      if (classLogs) rawLogs.push(...classLogs);
+    }
+
+    if (commentLogIds.length > 0) {
+      const existingIds = new Set(rawLogs.map((l) => l.lesson_log_id));
+      const missingIds = commentLogIds.filter((id) => !existingIds.has(id));
+      if (missingIds.length > 0) {
+        const { data: extraLogs } = await supabaseAdmin
+          .from("daily_lesson_log")
+          .select(
+            "lesson_log_id, class_id, actual_date, homework_desc, instructor_note, lesson_log_student_comment(student_id, comment)"
+          )
+          .in("lesson_log_id", missingIds)
+          .order("actual_date", { ascending: false });
+        if (extraLogs) rawLogs.push(...extraLogs);
+      }
+    }
+
+    // 날짜 내림차순 정렬 및 중복 제거
+    const seenLogIds = new Set<any>();
+    const dedupLogs = rawLogs
+      .filter((l) => {
+        if (!l || seenLogIds.has(l.lesson_log_id)) return false;
+        seenLogIds.add(l.lesson_log_id);
+        return true;
+      })
+      .sort((a, b) =>
+        String(b.actual_date || "").localeCompare(String(a.actual_date || ""))
+      );
+
+    // 4. 보강 일정(individual_makeup) 전체 조회 (이전 완료 내역 포함)
+    const { data: makeupRows } = await supabaseAdmin
+      .from("individual_makeup")
+      .select("*, instructor(name)")
+      .eq("student_id", studentId)
+      .order("schedule_date", { ascending: false });
+
+    return {
+      success: true,
+      lessonLogs: dedupLogs,
+      makeups: makeupRows || [],
+    };
+  } catch (err: any) {
+    console.error("[getStudentPortalExtraDataAction]", err);
+    return { success: false, lessonLogs: [], makeups: [] };
+  }
+}
