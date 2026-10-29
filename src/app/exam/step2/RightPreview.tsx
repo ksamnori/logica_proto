@@ -730,7 +730,9 @@ export default function RightPreview({ examData }: { examData: any }) {
                                    dangerouslySetInnerHTML={{
                                      __html: formatText(
                                        hideSubNumber && !isEditing && !textToRender
-                                         ? stripLeadingSubNumber(String(q.question_2))
+                                         ? String(q.question_2)
+                                             .replace(/^((?:\s*<[^>]+>\s*)*)\(?\s*\d+\s*\)\s*/, '$1')
+                                             .replace(/^((?:\s*<[^>]+>\s*)*)[①-⑩]\s*/, '$1')
                                          : String(q.question_2)
                                      )
                                    }}
