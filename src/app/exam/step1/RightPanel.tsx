@@ -130,12 +130,10 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                   checked={sourceCategories?.extra ?? true}
                   onChange={(e) =>
                     setSourceCategories({
-                      extra: true,
-                      twinSimilar: true,
-                      excludeMain: true,
-                      excludeWorkbook: true,
-                      ...(sourceCategories || {}),
                       extra: e.target.checked,
+                      twinSimilar: sourceCategories?.twinSimilar ?? true,
+                      excludeMain: sourceCategories?.excludeMain ?? true,
+                      excludeWorkbook: sourceCategories?.excludeWorkbook ?? true,
                     })
                   }
                   className="w-4 h-4 accent-brand rounded border-slate-300 cursor-pointer"
@@ -148,12 +146,10 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                   checked={sourceCategories?.twinSimilar ?? true}
                   onChange={(e) =>
                     setSourceCategories({
-                      extra: true,
-                      twinSimilar: true,
-                      excludeMain: true,
-                      excludeWorkbook: true,
-                      ...(sourceCategories || {}),
+                      extra: sourceCategories?.extra ?? true,
                       twinSimilar: e.target.checked,
+                      excludeMain: sourceCategories?.excludeMain ?? true,
+                      excludeWorkbook: sourceCategories?.excludeWorkbook ?? true,
                     })
                   }
                   className="w-4 h-4 accent-brand rounded border-slate-300 cursor-pointer"
@@ -167,12 +163,10 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                   checked={sourceCategories?.excludeMain ?? true}
                   onChange={(e) =>
                     setSourceCategories({
-                      extra: true,
-                      twinSimilar: true,
-                      excludeMain: true,
-                      excludeWorkbook: true,
-                      ...(sourceCategories || {}),
+                      extra: sourceCategories?.extra ?? true,
+                      twinSimilar: sourceCategories?.twinSimilar ?? true,
                       excludeMain: e.target.checked,
+                      excludeWorkbook: sourceCategories?.excludeWorkbook ?? true,
                     })
                   }
                   className="w-4 h-4 accent-rose-600 rounded border-slate-300 cursor-pointer"
@@ -185,11 +179,9 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                   checked={sourceCategories?.excludeWorkbook ?? true}
                   onChange={(e) =>
                     setSourceCategories({
-                      extra: true,
-                      twinSimilar: true,
-                      excludeMain: true,
-                      excludeWorkbook: true,
-                      ...(sourceCategories || {}),
+                      extra: sourceCategories?.extra ?? true,
+                      twinSimilar: sourceCategories?.twinSimilar ?? true,
+                      excludeMain: sourceCategories?.excludeMain ?? true,
                       excludeWorkbook: e.target.checked,
                     })
                   }

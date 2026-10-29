@@ -1473,7 +1473,7 @@ export default function StudentCard({ student }: { student: any }) {
   const TABS: { id: typeof activeTab; label: string }[] = [
     { id: "attendance", label: "출결" },
     { id: "progress", label: "진도" },
-    { id: "homework", label: "과제" },
+    { id: "homework", label: "수업일지" },
     { id: "makeup", label: "보강" },
     { id: "exam", label: "성적" },
     { id: "consultation", label: "상담" },
@@ -2149,17 +2149,17 @@ export default function StudentCard({ student }: { student: any }) {
           </>
         )}
 
-        {/* 과제 (선생님이 직접 입력한 수업 알림장 및 개별 코멘트만 노출) */}
+        {/* 수업일지 (선생님이 직접 입력한 수업일지 및 개별 코멘트 그대로 노출) */}
         {activeTab === "homework" && (
           <section className="flex flex-col gap-3">
             <h3 className="text-[17px] font-bold text-[#1E293B]">
-              수업 알림장 및 개별 코멘트
+              수업일지
             </h3>
             {isLogsLoading ? (
-              <LoadingBox text="수업 알림장을 불러오는 중이에요." />
+              <LoadingBox text="수업일지를 불러오는 중이에요." />
             ) : visibleLessonLogs.length === 0 &&
               hiddenOlderLogsCount === 0 ? (
-              <EmptyBox text="아직 작성된 수업 알림장이 없어요." />
+              <EmptyBox text="아직 작성된 수업일지가 없어요." />
             ) : (
               <>
                 {visibleLessonLogs.map((log) => (
@@ -2214,7 +2214,7 @@ export default function StudentCard({ student }: { student: any }) {
                     onClick={() => setShowAllLogs(true)}
                     className="min-h-[48px] rounded-xl border border-[#CBD5E1] bg-white text-[15px] font-semibold text-[#334155] hover:bg-[#F8FAFC]"
                   >
-                    이전 알림장 기록 {hiddenOlderLogsCount}개 더 보기
+                    이전 수업일지 {hiddenOlderLogsCount}개 더 보기
                   </button>
                 )}
               </>
