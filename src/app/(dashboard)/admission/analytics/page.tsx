@@ -660,7 +660,9 @@ export default function AdmissionAnalyticsPage() {
           totalCount,
           correctCount,
           questionContent: item.questionContent,
+          questionContent2: item.questionContent2,
           imageUrl: item.imageUrl,
+          image2Url: item.image2Url,
           answerContent: item.answerContent
         });
       });
@@ -1214,8 +1216,8 @@ export default function AdmissionAnalyticsPage() {
                   {getCleanUrl(modalQ.imageUrl) && (
                     <img src={getCleanUrl(modalQ.imageUrl)} className="max-w-full mt-5 rounded-lg border border-slate-200 shadow-sm" alt="Question Image" />
                   )}
-                  {getCleanUrl(modalQ.image2Url) && (
-                    <img src={getCleanUrl(modalQ.image2Url)} className="max-w-full mt-3 rounded-lg border border-slate-200 shadow-sm" alt="Question Image 2" />
+                  {getCleanUrl(modalQ.image2Url || '') && (
+                    <img src={getCleanUrl(modalQ.image2Url || '')} className="max-w-full mt-3 rounded-lg border border-slate-200 shadow-sm" alt="Question Image 2" />
                   )}
                   {modalQ.questionContent2 && (
                     <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed text-[15px] mt-4" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQ.questionContent2) }} />

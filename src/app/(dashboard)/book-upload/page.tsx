@@ -238,6 +238,9 @@ export default function BookUploadPage() {
               }
               if (q.question_2 !== undefined && q.question_2 !== null && String(q.question_2).trim() !== "" && String(q.question_2) !== "null") {
                 patchPayload.question_2 = q.question_2;
+                if (q.question !== undefined && q.question !== null) {
+                  patchPayload.question = q.question;
+                }
               }
               if (q.image_box) patchPayload.image_box = q.image_box;
               if (q.image_2_box) patchPayload.image_2_box = typeof q.image_2_box === "object" ? JSON.stringify(q.image_2_box) : q.image_2_box;

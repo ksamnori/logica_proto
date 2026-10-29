@@ -43,7 +43,9 @@ interface MatrixCol {
   page: string;
   number: string;
   questionText: string;
+  questionText2?: string;
   imageUrl: string;
+  image2Url?: string;
   answer: string;
 }
 
@@ -1126,7 +1128,7 @@ export default function ClassReportPage() {
                 <h3 className="font-bold text-slate-800 border-b border-slate-100 pb-2 mb-3">질문 (Question)</h3>
                 <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQuestion.questionText || '-').replace(/\n/g, '<br>') }} />
                 {getCleanUrl(modalQuestion.imageUrl) && <img src={getCleanUrl(modalQuestion.imageUrl)} className="max-w-full mt-4 rounded-lg border border-slate-200" alt="Question" />}
-                {getCleanUrl(modalQuestion.image2Url) && <img src={getCleanUrl(modalQuestion.image2Url)} className="max-w-full mt-3 rounded-lg border border-slate-200" alt="Question 2" />}
+                {getCleanUrl(modalQuestion.image2Url || '') && <img src={getCleanUrl(modalQuestion.image2Url || '')} className="max-w-full mt-3 rounded-lg border border-slate-200" alt="Question 2" />}
                 {modalQuestion.questionText2 && (
                   <div className="math-text text-slate-700 font-medium whitespace-pre-wrap leading-relaxed mt-3" dangerouslySetInnerHTML={{ __html: formatMathTextForWeb(modalQuestion.questionText2).replace(/\n/g, '<br>') }} />
                 )}
