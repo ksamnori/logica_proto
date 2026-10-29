@@ -21,77 +21,172 @@ export const getCleanUrl = (url: string) => {
   return validUrl;
 };
 
-// 🌟 메인교재(주교재/본교재) 판별 및 제외용 캐시 및 헬퍼 함수
-let cachedMainExclusion: {
+// 🌟 주교재(본교재) 및 워크북 판별·제외용 캐시 및 헬퍼 함수 (/lesson 교재 구분 연동)
+export interface TextbookExclusionInfo {
   timestamp: number;
   mainBookTitles: Set<string>;
   mainQuestionIds: Set<string>;
-} | null = null;
+  workbookBookTitles: Set<string>;
+  workbookQuestionIds: Set<string>;
+}
+
+let cachedMainExclusion: TextbookExclusionInfo | null = null;
 
 const NON_MAIN_BOOK_KEYWORDS_REGEX = /(?:추가\s*문제|추가\s*문항|_추가|추가_|추가|쌍둥이|TWIN|유사|SIMILAR|워크북|WORKBOOK|부교재|연산|주간\s*테스트|중간\s*테스트|분기\s*테스트|단원\s*테스트|단원\s*평가|입학\s*테스트|진단\s*평가|테스트|평가|보충|클리닉|프린트|모의고사|기출)/i;
+const DERIVATIVE_OR_EXTRA_KEYWORDS_REGEX = /(?:추가\s*문제|추가\s*문항|_추가|추가_|추가|쌍둥이|TWIN|유사|SIMILAR)/i;
 
-export const fetchMainTextbookExclusionSet = async (supabaseClient: any) => {
+export const fetchMainTextbookExclusionSet = async (supabaseClient: any): Promise<TextbookExclusionInfo> => {
   if (cachedMainExclusion && Date.now() - cachedMainExclusion.timestamp < 60000) {
     return cachedMainExclusion;
   }
   const mainBookTitles = new Set<string>();
   const mainQuestionIds = new Set<string>();
+  const workbookBookTitles = new Set<string>();
+  const workbookQuestionIds = new Set<string>();
+
   try {
-    const { data: tbRows } = await supabaseClient
-      .from('textbook')
-      .select('book_id, title, book_type');
+    let tbRows: any[] = [];
+    let tbFrom = 0;
+    while (true) {
+      const { data, error } = await supabaseClient
+        .from('textbook')
+        .select('book_id, title, book_type')
+        .range(tbFrom, tbFrom + 999);
+      if (error || !data || data.length === 0) break;
+      tbRows = tbRows.concat(data);
+      if (data.length < 1000) break;
+      tbFrom += 1000;
+    }
 
     const mainBookIds: string[] = [];
+    const workbookBookIds: string[] = [];
+
     if (Array.isArray(tbRows)) {
       tbRows.forEach((tb: any) => {
         const bType = String(tb.book_type || '').trim();
         const bTitle = String(tb.title || '').trim();
         if (!bTitle) return;
-        // book_type이 주교재/본교재이거나, 비-메인 키워드(쌍둥이/유사/추가문제/워크북/부교재/테스트)가 없는 주교재인 경우
+
+        // 1) 워크북: textbook.book_type 이 '워크북'(또는 '과제')이거나 제목에 워크북이 포함된 교재
+        if (
+          (bType === '워크북' || bType === '과제' || /(?:워크북|WORKBOOK)/i.test(bTitle)) &&
+          !DERIVATIVE_OR_EXTRA_KEYWORDS_REGEX.test(bTitle)
+        ) {
+          workbookBookTitles.add(bTitle);
+          if (tb.book_id) workbookBookIds.push(String(tb.book_id).trim());
+          return;
+        }
+
+        // 2) 주교재: textbook.book_type 이 '주교재'/'본교재'이거나 비-메인 키워드가 없는 교재
         if (
           (bType === '주교재' || bType === '본교재' || !bType) &&
           !NON_MAIN_BOOK_KEYWORDS_REGEX.test(bTitle)
         ) {
           mainBookTitles.add(bTitle);
-          if (tb.book_id) mainBookIds.push(tb.book_id);
+          if (tb.book_id) mainBookIds.push(String(tb.book_id).trim());
         }
       });
     }
 
-    if (mainBookIds.length > 0) {
+    const mainBookIdSet = new Set(mainBookIds);
+    const workbookBookIdSet = new Set(workbookBookIds);
+    const allTargetBookIds = Array.from(new Set([...mainBookIds, ...workbookBookIds]));
+
+    if (allTargetBookIds.length > 0) {
       let from = 0;
       const step = 1000;
       while (true) {
         const { data: tqRows, error } = await supabaseClient
           .from('textbook_question')
-          .select('question_id')
-          .in('book_id', mainBookIds)
+          .select('book_id, question_id')
+          .in('book_id', allTargetBookIds)
           .range(from, from + step - 1);
         if (error || !tqRows || tqRows.length === 0) break;
         tqRows.forEach((r: any) => {
-          if (r.question_id) mainQuestionIds.add(String(r.question_id).trim());
+          if (!r.question_id) return;
+          const qid = String(r.question_id).trim();
+          const bid = String(r.book_id || '').trim();
+          if (workbookBookIdSet.has(bid)) {
+            workbookQuestionIds.add(qid);
+          } else if (mainBookIdSet.has(bid)) {
+            mainQuestionIds.add(qid);
+          }
         });
         if (tqRows.length < step) break;
         from += step;
       }
     }
   } catch (e) {
-    console.error('메인교재 제외 목록 조회 실패:', e);
+    console.error('주교재/워크북 제외 목록 조회 실패:', e);
   }
 
   cachedMainExclusion = {
     timestamp: Date.now(),
     mainBookTitles,
     mainQuestionIds,
+    workbookBookTitles,
+    workbookQuestionIds,
   };
   return cachedMainExclusion;
 };
 
-export const isMainTextbookQuestion = (
+// 🌟 문항이 '워크북' 문항인지 판별하는 헬퍼 (/lesson의 워크북 DB 및 교재명 연동)
+export const isWorkbookQuestion = (
   q: any,
-  exclusion?: { mainBookTitles: Set<string>; mainQuestionIds: Set<string> } | null
+  exclusion?: Partial<TextbookExclusionInfo> | null
 ): boolean => {
   if (!q) return false;
+
+  // 1) 쌍둥이(TWIN) / 유사(SIMILAR) 파생 문항은 워크북 원본 문항이 아님
+  const deriv = String(q.derivation_type || '').trim().toUpperCase();
+  if (deriv === 'TWIN' || deriv === '쌍둥이' || deriv === '유사' || deriv === 'SIMILAR') {
+    return false;
+  }
+  const pType = String(q.problem_type || '').trim().toUpperCase();
+  if (pType === '쌍둥이' || pType === '유사' || pType === 'TWIN' || pType === 'SIMILAR') {
+    return false;
+  }
+
+  const bookName = String(q.book_name || '').trim();
+  const sourceBookName = String(q.source_book_name || '').trim();
+  const pdfSource = String(q.pdf_source || '').trim();
+  const combinedBook = `${bookName} ${sourceBookName} ${pdfSource}`.trim();
+
+  // 2) 교재명에 추가문제, 쌍둥이, 유사 등이 명시된 경우 워크북 원본이 아니라 파생/추가 문항임
+  if (DERIVATIVE_OR_EXTRA_KEYWORDS_REGEX.test(combinedBook)) {
+    return false;
+  }
+
+  // 3) textbook(워크북) 및 textbook_question에 등록된 워크북 문항인지 확인
+  const realQid = String(q.question_id || '').trim().replace(/_added_\d+$/, '');
+  if (exclusion?.workbookQuestionIds?.has(realQid)) {
+    return true;
+  }
+  if (bookName && exclusion?.workbookBookTitles?.has(bookName)) {
+    return true;
+  }
+  if (sourceBookName && exclusion?.workbookBookTitles?.has(sourceBookName)) {
+    return true;
+  }
+
+  // 4) 교재명에 '워크북' 또는 'WORKBOOK'이 포함된 경우
+  if (/(?:워크북|WORKBOOK)/i.test(combinedBook)) {
+    return true;
+  }
+
+  return false;
+};
+
+export const isMainTextbookQuestion = (
+  q: any,
+  exclusion?: Partial<TextbookExclusionInfo> | null
+): boolean => {
+  if (!q) return false;
+
+  // 워크북 문항은 주교재가 아님 ('워크북 제외' 체크박스에서 별도 제어)
+  if (isWorkbookQuestion(q, exclusion)) {
+    return false;
+  }
 
   // 1) 쌍둥이(TWIN) / 유사(SIMILAR) 파생 문항은 시험지 출제용 문항이므로 메인교재가 아님
   const deriv = String(q.derivation_type || '').trim().toUpperCase();
@@ -108,7 +203,7 @@ export const isMainTextbookQuestion = (
   const pdfSource = String(q.pdf_source || '').trim();
   const combinedBook = `${bookName} ${sourceBookName} ${pdfSource}`.trim();
 
-  // 2) 교재명에 추가문제, 쌍둥이, 유사, 워크북, 부교재, 테스트, 평가 등이 포함되어 있으면 출제 허용 문항
+  // 2) 교재명에 추가문제, 쌍둥이, 유사, 워크북, 부교재, 테스트, 평가 등이 포함되어 있으면 주교재가 아님
   if (NON_MAIN_BOOK_KEYWORDS_REGEX.test(combinedBook)) {
     return false;
   }
@@ -184,15 +279,34 @@ export const isTwinOrSimilarQuestion = (q: any): boolean => {
   return false;
 };
 
-// 🌟 Step 1 & Step 2 '추가문제' / '쌍둥이/유사' 체크박스 필터 매칭 헬퍼
-// book_name 또는 source_book_name 에 '추가'('추가문제' 체크 시) 또는 '쌍둥이'/'유사'('쌍둥이/유사' 체크 시) 단어가 포함된 문항만 허용
+// 🌟 Step 1 & Step 2 '추가문제' / '쌍둥이/유사' / '주교재 제외' / '워크북 제외' 체크박스 필터 매칭 헬퍼
 export const matchesSourceCategoryFilter = (
   q: any,
-  sourceCategories?: { extra?: boolean; twinSimilar?: boolean } | null
+  sourceCategories?: {
+    extra?: boolean;
+    twinSimilar?: boolean;
+    excludeMain?: boolean;
+    excludeWorkbook?: boolean;
+  } | null,
+  exclusion?: Partial<TextbookExclusionInfo> | null
 ): boolean => {
   if (!q) return false;
   const allowExtra = sourceCategories?.extra ?? true;
   const allowTwinSimilar = sourceCategories?.twinSimilar ?? true;
+  const excludeMain = sourceCategories?.excludeMain ?? true;
+  const excludeWorkbook = sourceCategories?.excludeWorkbook ?? true;
+
+  // 1) 주교재 문항인 경우: '주교재 제외'가 체크되어 있으면 제외(false), 체크 해제되어 있으면 포함(true)
+  if (isMainTextbookQuestion(q, exclusion)) {
+    return !excludeMain;
+  }
+
+  // 2) 워크북 문항인 경우: '워크북 제외'가 체크되어 있으면 제외(false), 체크 해제되어 있으면 포함(true)
+  if (isWorkbookQuestion(q, exclusion)) {
+    return !excludeWorkbook;
+  }
+
+  // 3) 일반 출제 문항('추가문제' / '쌍둥이/유사'): book_name 또는 source_book_name 키워드 매칭
   if (!allowExtra && !allowTwinSimilar) return false;
 
   const bookName = String(q.book_name || '').trim();
@@ -628,47 +742,70 @@ export const processGroupText = (items: any[]) => {
   if (!items || items.length === 0) return { common: "", remainders: [] };
   if (items.length === 1) return { common: "", remainders: [items[0].question || items[0].text_question || ""] };
 
-  let strings = items.map(i => i.question || i.text_question || "");
+  const strings = items.map(i => String(i.question || i.text_question || "").trim());
   if (strings.some(s => !s)) return { common: "", remainders: strings };
+
+  // 🌟 모든 서브문항의 문제 텍스트가 100% 동일한 경우 (예: (1), (2)가 이미지 안에 들어있는 문항)
+  // 전체 지문을 공통 지문(common)으로 올리고 각 서브문항 텍스트(remainders)는 빈 문자열("")로 처리
+  if (strings.every(s => s === strings[0])) {
+    const textOnly = strings[0].replace(/<[^>]+>/g, "").trim();
+    if (textOnly.length >= 2) {
+      return { common: strings[0], remainders: strings.map(() => "") };
+    }
+  }
 
   let prefix = strings[0];
   for (let i = 1; i < strings.length; i++) {
-      let s = strings[i];
-      let j = 0;
-      while (j < prefix.length && j < s.length && prefix[j] === s[j]) j++;
-      prefix = prefix.substring(0, j);
+    const s = strings[i];
+    let j = 0;
+    while (j < prefix.length && j < s.length && prefix[j] === s[j]) j++;
+    prefix = prefix.substring(0, j);
   }
 
+  // 끝에 걸친 열린 괄호 "(", "[" 등 서브문항 번호 조각 제거
+  prefix = prefix.replace(/[\(\[\{\s]+$/, "");
+
   let common = prefix;
-  let boundary = Math.max(
-      prefix.lastIndexOf("<br"), prefix.lastIndexOf("</p>"), 
-      prefix.lastIndexOf("</div>"), prefix.lastIndexOf("<table")
+  const boundary = Math.max(
+    prefix.lastIndexOf("<br"), prefix.lastIndexOf("</p>"), 
+    prefix.lastIndexOf("</div>"), prefix.lastIndexOf("<table")
   );
   
   if (boundary !== -1) {
-      let endTag = prefix.indexOf(">", boundary);
-      if (endTag !== -1) common = prefix.substring(0, endTag + 1);
-      else common = prefix.substring(0, boundary);
+    const endTag = prefix.indexOf(">", boundary);
+    if (endTag !== -1) common = prefix.substring(0, endTag + 1);
+    else common = prefix.substring(0, boundary);
   } else {
-      let lastPunc = Math.max(prefix.lastIndexOf("."), prefix.lastIndexOf(":"), prefix.lastIndexOf("시오"));
-      if (lastPunc !== -1) {
-          if (prefix[lastPunc] === '오') common = prefix.substring(0, lastPunc + 1); 
-          else common = prefix.substring(0, lastPunc + 1);
+    const lastPunc = Math.max(
+      prefix.lastIndexOf("."),
+      prefix.lastIndexOf("?"),
+      prefix.lastIndexOf("!"),
+      prefix.lastIndexOf(":"),
+      prefix.lastIndexOf("시오"),
+      prefix.lastIndexOf("세요")
+    );
+    if (lastPunc !== -1) {
+      if (prefix.slice(lastPunc, lastPunc + 2) === "시오" || prefix.slice(lastPunc, lastPunc + 2) === "세요") {
+        const afterVerb = prefix[lastPunc + 2] === "." ? lastPunc + 3 : lastPunc + 2;
+        common = prefix.substring(0, afterVerb);
       } else {
-          let lastSpace = prefix.lastIndexOf(" ");
-          if (lastSpace !== -1) common = prefix.substring(0, lastSpace + 1);
+        common = prefix.substring(0, lastPunc + 1);
       }
+    } else {
+      const lastSpace = prefix.lastIndexOf(" ");
+      if (lastSpace !== -1) common = prefix.substring(0, lastSpace + 1);
+    }
   }
 
-  let remainders = strings.map(s => {
-      let rem = s.substring(common.length);
-      rem = rem.replace(/^(\s*<br\s*\/?>\s*)+/gi, '').trim();
-      return rem;
+  const remainders = strings.map(s => {
+    let rem = s.substring(common.length);
+    rem = rem.replace(/^(\s*<br\s*\/?>\s*)+/gi, "").trim();
+    return rem;
   });
 
-  const textOnlyCommon = common.replace(/<[^>]+>/g, '').trim();
+  const textOnlyCommon = common.replace(/<[^>]+>/g, "").trim();
   if (textOnlyCommon.length < 2) {
-      return { common: "", remainders: strings };
+    return { common: "", remainders: strings };
   }
 
   return { common, remainders };

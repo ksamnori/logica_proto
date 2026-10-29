@@ -424,8 +424,9 @@ const buildSubQuestionItemHtml = (
     : { isTrailingSubNum: false, introText: textToRender, subMarkerText: "" };
 
   const isTrailingSubNum = splitSub.isTrailingSubNum;
+  const hasText = Boolean(textToRender && String(textToRender).trim());
   const isCompactSingleCol = col === 1 && split >= 4;
-  const topMarginClass = sIdx > 0 ? (isCompactSingleCol ? "mt-3" : isTrailingSubNum ? "mt-8" : "mt-16") : "";
+  const topMarginClass = sIdx > 0 ? (isCompactSingleCol ? "mt-3" : (isTrailingSubNum || !hasText) ? "mt-6" : "mt-16") : "";
   let maxHeightStyle = " max-height: 250px;";
   if (isAdmissionMode) {
     maxHeightStyle = "";
@@ -474,7 +475,10 @@ const buildSubQuestionItemHtml = (
     imgHtml += `<div class="w-full flex justify-center ${imgMarginClass}"><img src="${getCleanUrl(safeImg2Url)}" class="max-w-full object-contain mix-blend-multiply" style="width: ${w};${maxHeightStyle}"></div>`;
   }
 
-  return `<div class="w-full min-w-0 math-protect ${topMarginClass}"><div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(textToRender)}</div></div>${imgHtml}</div>`;
+  const textBlockHtml = hasText
+    ? `<div class="flex items-start"><div class="text-[17px] leading-[1.9] text-black tracking-wide w-full font-semibold text-justify">${formatQText(textToRender)}</div></div>`
+    : "";
+  return `<div class="w-full min-w-0 math-protect ${topMarginClass}">${textBlockHtml}${imgHtml}</div>`;
 };
 
 // 🌟 [핵심 변경] 이중/삼중으로 꼬인 JSON 문자열도 끝까지 파고들어 width(%)를 기필코 찾아내는 초강력 파서
@@ -1306,7 +1310,7 @@ export default function ExamViewerPage() {
         }
 
         g.questions.forEach((q: any, sIdx: number) => {
-            const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
+            const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
             subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmissionLock, col, split);
         });
 
@@ -1396,7 +1400,7 @@ export default function ExamViewerPage() {
 
         const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
         g.questions.forEach((q: any, sIdx: number) => {
-            const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
+            const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
             subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol, col, split);
         });
         const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
@@ -1635,7 +1639,7 @@ export default function ExamViewerPage() {
 
                 const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
                 g.questions.forEach((q: any, sIdx: number) => {
-                    const textToRender = isGroupMerged && remainders[sIdx] ? remainders[sIdx] : (q.question || q.text_question || '');
+                    const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
                     subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, true);
                 });
                 

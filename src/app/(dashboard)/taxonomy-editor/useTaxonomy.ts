@@ -739,10 +739,21 @@ export function useTaxonomy() {
       const parsedSubNum = parseInt(editForm.sub_num) || 0;
       const parsedProbability = editForm.solving_probability.trim() === '' ? null : parseFloat(editForm.solving_probability);
 
-      let parsedImgBox = null, parsedImg2Box = null, parsedAnsImgBox = null;
-      try { parsedImgBox = editForm.image_box ? JSON.parse(editForm.image_box) : null; } catch(e){}
-      try { parsedImg2Box = editForm.image_2_box ? JSON.parse(editForm.image_2_box) : null; } catch(e){}
-      try { parsedAnsImgBox = editForm.answer_image_box ? JSON.parse(editForm.answer_image_box) : null; } catch(e){}
+      const normalizeBoxForDb = (raw: any) => {
+        if (!raw || raw === 'null' || raw === 'undefined') return null;
+        let parsed = raw;
+        for (let i = 0; i < 4; i++) {
+          if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch(e) { break; }
+          } else { break; }
+        }
+        if (Array.isArray(parsed)) return { bbox: parsed };
+        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) return parsed;
+        return null;
+      };
+      const parsedImgBox = normalizeBoxForDb(editForm.image_box);
+      const parsedImg2Box = normalizeBoxForDb(editForm.image_2_box);
+      const parsedAnsImgBox = normalizeBoxForDb(editForm.answer_image_box);
 
       const updateData = {
         final_printed_page: parsedPage, question_number: editForm.question_number, sub_num: parsedSubNum,

@@ -3,19 +3,49 @@ import React, { useState, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
 import { getDiffLabelByRate, getTypeName, getDepth6Name, getSubDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore, isSubNumberOnlyText, splitTrailingSubNumberText } from "./examUtils";
 
-// 🌟 [핵심 수정] 배율이 없을 때 100%로 늘어나서 '거인증'이 생기는 것을 막기 위해 기본값을 'auto'로 변경
-const getBoxWidth = (box: any) => {
-  if (!box || box === 'null' || box === 'undefined') return 'auto';
+// 🌟 [핵심 수정] 배열([y1,x1,y2,x2])이나 다중 JSON 문자열 형태도 안전하게 객체로 정규화하는 헬퍼
+const parseBoxObject = (box: any): Record<string, any> => {
+  if (!box || box === 'null' || box === 'undefined') return {};
   let parsed = box;
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i < 4; i++) {
     if (typeof parsed === 'string') {
       try { parsed = JSON.parse(parsed); } catch(e) { break; }
     } else {
       break;
     }
   }
-  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed) && parsed.width !== undefined && parsed.width !== null) {
-    const w = Number(parsed.width);
+  if (Array.isArray(parsed)) {
+    return { bbox: parsed };
+  }
+  if (parsed && typeof parsed === 'object') {
+    return { ...parsed };
+  }
+  return {};
+};
+
+const getBoxWidthNumber = (box: any, defaultWidth: number = 100): number => {
+  const obj = parseBoxObject(box);
+  if (obj.width !== undefined && obj.width !== null) {
+    const w = Number(obj.width);
+    if (!isNaN(w)) {
+      if (w >= 10 && w <= 100) return Math.round(w);
+      if (w > 0 && w <= 1) return Math.max(20, Math.round(w * 100));
+    }
+  }
+  return defaultWidth;
+};
+
+const setBoxWidthJson = (box: any, widthVal: number): string => {
+  const obj = parseBoxObject(box);
+  const clamped = Math.max(20, Math.min(100, Math.round(Number(widthVal) || 100)));
+  return JSON.stringify({ ...obj, width: clamped });
+};
+
+// 🌟 [핵심 수정] 배율이 없을 때 100%로 늘어나서 '거인증'이 생기는 것을 막기 위해 기본값을 'auto'로 변경
+const getBoxWidth = (box: any) => {
+  const obj = parseBoxObject(box);
+  if (obj.width !== undefined && obj.width !== null) {
+    const w = Number(obj.width);
     if (!isNaN(w)) {
       if (w >= 10 && w <= 100) return `${w}%`;
       if (w > 0 && w <= 1) return `${Math.max(20, Math.round(w * 100))}%`;
@@ -114,14 +144,16 @@ export default function RightPreview({ examData }: { examData: any }) {
   };
 
   const startEditing = (q: any) => {
+    const img1Obj = parseBoxObject(q.image_box);
+    const img2Obj = parseBoxObject(q.image_2_box);
     setEditingId(q.question_id);
     setEditForm({
       question: q.question || '', answer: q.answer || '', explanation: q.explanation || '', solution: q.solution || '',
       step_1_concept: q.step_1_concept || '', step_2_approach: q.step_2_approach || '', step_3_process: q.step_3_process || '', step_4_conclusion: q.step_4_conclusion || '',
-      // 🌟 이미지 URL과 박스(배율) 데이터 추가 로드
+      // 🌟 이미지 URL과 박스(배율) 데이터 추가 로드 (배열/다중 문자열도 안전하게 객체 JSON으로 변환)
       image_url: q.image_url || '', image_2_url: q.image_2_url || '',
-      image_box: typeof q.image_box === 'object' && q.image_box !== null ? JSON.stringify(q.image_box) : (q.image_box || ''),
-      image_2_box: typeof q.image_2_box === 'object' && q.image_2_box !== null ? JSON.stringify(q.image_2_box) : (q.image_2_box || ''),
+      image_box: Object.keys(img1Obj).length > 0 ? JSON.stringify(img1Obj) : '',
+      image_2_box: Object.keys(img2Obj).length > 0 ? JSON.stringify(img2Obj) : '',
     });
   };
 
@@ -129,10 +161,11 @@ export default function RightPreview({ examData }: { examData: any }) {
     try {
       const realId = editingId?.includes('_added_') ? editingId.split('_added_')[0] : editingId;
       
-      // 🌟 DB 스키마에 맞춰 박스 데이터 파싱 처리
-      let parsedImgBox = null, parsedImg2Box = null;
-      try { parsedImgBox = editForm.image_box ? JSON.parse(editForm.image_box) : null; } catch(e){}
-      try { parsedImg2Box = editForm.image_2_box ? JSON.parse(editForm.image_2_box) : null; } catch(e){}
+      // 🌟 DB 스키마에 맞춰 박스 데이터 파싱 처리 (배열/다중 문자열 안전 변환)
+      const img1Obj = parseBoxObject(editForm.image_box);
+      const img2Obj = parseBoxObject(editForm.image_2_box);
+      const parsedImgBox = Object.keys(img1Obj).length > 0 ? img1Obj : null;
+      const parsedImg2Box = Object.keys(img2Obj).length > 0 ? img2Obj : null;
 
       const updateData = {
         ...editForm,
@@ -144,7 +177,7 @@ export default function RightPreview({ examData }: { examData: any }) {
       if (error) throw error;
       
       setQuestions((prev: any) => prev.map((g: any) => ({
-        ...g, items: g.items.map((item: any) => item.question_id === editingId ? { ...item, ...updateData } : item)
+        ...g, items: g.items.map((item: any) => (item.question_id === editingId || item.question_id === realId) ? { ...item, ...updateData } : item)
       })));
       alert("✅ 수정 및 이미지 배율이 데이터베이스에 완벽하게 반영되었습니다!");
       setEditingId(null);
@@ -535,7 +568,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                  {g.items.map((q: any, subIdx: number) => {
                    const isEditing = editingId === q.question_id;
                    
-                   let textToRender = isGroupMerged && remainders[subIdx] ? remainders[subIdx] : (q.question || q.text_question || '');
+                   let textToRender = (isGroupMerged && common && remainders[subIdx] !== undefined) ? remainders[subIdx] : (q.question || q.text_question || '');
                    if (hideSubNumber && textToRender && !isEditing) {
                      textToRender = textToRender.replace(/^((?:\s*<[^>]+>\s*)*)\(?\s*\d+\s*\)\s*/, '$1');
                      textToRender = textToRender.replace(/^((?:\s*<[^>]+>\s*)*)[①-⑩]\s*/, '$1');
@@ -749,7 +782,7 @@ export default function RightPreview({ examData }: { examData: any }) {
                            )}
                          </>
                        ) : (
-                         <div className="p-5 bg-amber-50 rounded-xl border border-amber-200 shadow-inner cursor-default mt-2" onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} draggable>
+                         <div className="p-5 bg-amber-50 rounded-xl border border-amber-200 shadow-inner cursor-default mt-2" onMouseDown={(e) => e.stopPropagation()}>
                            <label className="block text-[12px] font-extrabold text-amber-800 mb-1">📝 문제 수정</label>
                            <textarea value={editForm.question} onChange={e => setEditForm({...editForm, question: e.target.value})} className="w-full p-3 border border-amber-300 rounded mb-3 text-[14px] font-bold focus:outline-none focus:ring-2 focus:ring-amber-500 custom-scrollbar cursor-text bg-white" rows={3}></textarea>
                            
@@ -757,49 +790,77 @@ export default function RightPreview({ examData }: { examData: any }) {
                              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4">
                                {editForm.image_url && (
                                  <div className="flex flex-col gap-2 p-3 bg-white border border-amber-200 rounded">
-                                   <div className="flex justify-between items-center">
+                                   <div className="flex justify-between items-center gap-2 flex-wrap">
                                      <span className="text-[12px] font-bold text-amber-800">🖼️ 이미지 1 너비 조절</span>
-                                     <span className="text-[11px] font-black text-amber-600">
-                                       {(() => { try { return JSON.parse(editForm.image_box).width || 100; } catch(e) { return 100; } })()}%
-                                     </span>
+                                     <div className="flex items-center gap-1">
+                                       {[40, 60, 80, 100].map(preset => (
+                                         <button
+                                           key={preset}
+                                           type="button"
+                                           onClick={() => setEditForm((prev: any) => ({ ...prev, image_box: setBoxWidthJson(prev.image_box, preset) }))}
+                                           className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors ${getBoxWidthNumber(editForm.image_box, 100) === preset ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}
+                                         >
+                                           {preset}%
+                                         </button>
+                                       ))}
+                                       <span className="text-[11px] font-black text-amber-600 ml-1 min-w-[34px] text-right">
+                                         {getBoxWidthNumber(editForm.image_box, 100)}%
+                                       </span>
+                                     </div>
                                    </div>
                                    <input 
-                                     type="range" min="20" max="100" step="5" 
-                                     value={(() => { try { return JSON.parse(editForm.image_box).width || 100; } catch(e) { return 100; } })()}
+                                     type="range" min="20" max="100" step="5"
+                                     draggable={false}
+                                     onMouseDown={(e) => e.stopPropagation()}
+                                     onPointerDown={(e) => e.stopPropagation()}
+                                     onTouchStart={(e) => e.stopPropagation()}
+                                     value={getBoxWidthNumber(editForm.image_box, 100)}
                                      onChange={(e) => {
-                                       let boxData = { width: 100 };
-                                       try { const p = JSON.parse(editForm.image_box); if(p) boxData = p; } catch(err){}
-                                       boxData.width = parseInt(e.target.value);
-                                       setEditForm({...editForm, image_box: JSON.stringify(boxData)});
+                                       const nextW = parseInt(e.target.value, 10);
+                                       setEditForm((prev: any) => ({ ...prev, image_box: setBoxWidthJson(prev.image_box, nextW) }));
                                      }}
                                      className="w-full accent-amber-600 cursor-pointer"
                                    />
                                    <div className="flex justify-center mt-2 border border-slate-100 p-1 bg-slate-50">
-                                      <img src={getCleanUrl(editForm.image_url)} style={{ width: `${(() => { try { return JSON.parse(editForm.image_box).width || 100; } catch(e) { return 100; } })()}%`, maxHeight: '80px', objectFit: 'contain' }} alt="" draggable="false" />
+                                      <img src={getCleanUrl(editForm.image_url)} style={{ width: `${getBoxWidthNumber(editForm.image_box, 100)}%`, maxHeight: '120px', objectFit: 'contain' }} alt="" draggable="false" />
                                    </div>
                                  </div>
                                )}
                                {editForm.image_2_url && (
                                  <div className="flex flex-col gap-2 p-3 bg-white border border-amber-200 rounded">
-                                   <div className="flex justify-between items-center">
+                                   <div className="flex justify-between items-center gap-2 flex-wrap">
                                      <span className="text-[12px] font-bold text-amber-800">🖼️ 이미지 2 너비 조절</span>
-                                     <span className="text-[11px] font-black text-amber-600">
-                                       {(() => { try { return JSON.parse(editForm.image_2_box).width || 100; } catch(e) { return 100; } })()}%
-                                     </span>
+                                     <div className="flex items-center gap-1">
+                                       {[40, 60, 80, 100].map(preset => (
+                                         <button
+                                           key={preset}
+                                           type="button"
+                                           onClick={() => setEditForm((prev: any) => ({ ...prev, image_2_box: setBoxWidthJson(prev.image_2_box, preset) }))}
+                                           className={`px-1.5 py-0.5 text-[10px] font-bold rounded border transition-colors ${getBoxWidthNumber(editForm.image_2_box, 100) === preset ? 'bg-amber-600 text-white border-amber-600' : 'bg-amber-50 text-amber-700 border-amber-200 hover:bg-amber-100'}`}
+                                         >
+                                           {preset}%
+                                         </button>
+                                       ))}
+                                       <span className="text-[11px] font-black text-amber-600 ml-1 min-w-[34px] text-right">
+                                         {getBoxWidthNumber(editForm.image_2_box, 100)}%
+                                       </span>
+                                     </div>
                                    </div>
                                    <input 
-                                     type="range" min="20" max="100" step="5" 
-                                     value={(() => { try { return JSON.parse(editForm.image_2_box).width || 100; } catch(e) { return 100; } })()}
+                                     type="range" min="20" max="100" step="5"
+                                     draggable={false}
+                                     onMouseDown={(e) => e.stopPropagation()}
+                                     onPointerDown={(e) => e.stopPropagation()}
+                                     onTouchStart={(e) => e.stopPropagation()}
+                                     value={getBoxWidthNumber(editForm.image_2_box, 100)}
                                      onChange={(e) => {
-                                       let boxData = { width: 100 };
-                                       try { const p = JSON.parse(editForm.image_2_box); if(p) boxData = p; } catch(err){}
-                                       boxData.width = parseInt(e.target.value);
-                                       setEditForm({...editForm, image_2_box: JSON.stringify(boxData)});
+                                       const nextW = parseInt(e.target.value, 10);
+                                       setEditForm((prev: any) => ({ ...prev, image_2_box: setBoxWidthJson(prev.image_2_box, nextW) }));
                                      }}
                                      className="w-full accent-amber-600 cursor-pointer"
                                    />
                                    <div className="flex justify-center mt-2 border border-slate-100 p-1 bg-slate-50">
-                                      <img src={getCleanUrl(editForm.image_2_url)} style={{ width: `${(() => { try { return JSON.parse(editForm.image_2_box).width || 100; } catch(e) { return 100; } })()}%`, maxHeight: '80px', objectFit: 'contain' }} alt="" draggable="false" />
+                                      <img src={getCleanUrl(editForm.image_2_url)} style={{ width: `${getBoxWidthNumber(editForm.image_2_box, 100)}%`, maxHeight: '120px', objectFit: 'contain' }} alt="" draggable="false" />
                                    </div>
                                  </div>
                                )}

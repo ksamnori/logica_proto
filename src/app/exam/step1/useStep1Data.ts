@@ -147,7 +147,12 @@ export function useStep1Data() {
   const [bookName2, setBookName2] = useState("");
   const [pageStart, setPageStart] = useState("");
   const [pageEnd, setPageEnd] = useState("");
-  const [sourceCategories, setSourceCategories] = useState({ extra: true, twinSimilar: true });
+  const [sourceCategories, setSourceCategories] = useState({
+    extra: true,
+    twinSimilar: true,
+    excludeMain: true,
+    excludeWorkbook: true,
+  });
 
   useEffect(() => {
     const traverseAndFlatten = (obj: any, currentPath: string, mode: string, out: any[]) => {
@@ -470,8 +475,13 @@ export function useStep1Data() {
 
   const generateExam = () => {
     if (selectedItemIds.size === 0) return alert("출제할 단원(유형)이나 테스트를 최소 1개 이상 왼쪽 트리에서 선택해주세요!");
-    if (!isSettingsDisabled && !sourceCategories.extra && !sourceCategories.twinSimilar) {
-      return alert("출처 교재 및 페이지 필터에서 '추가문제' 또는 '쌍둥이/유사' 중 최소 1개 이상을 체크해주세요!");
+    const hasAnySourceTarget =
+      sourceCategories.extra ||
+      sourceCategories.twinSimilar ||
+      sourceCategories.excludeMain === false ||
+      sourceCategories.excludeWorkbook === false;
+    if (!isSettingsDisabled && !hasAnySourceTarget) {
+      return alert("출처 교재 및 페이지 필터에서 '추가문제' 또는 '쌍둥이/유사'를 체크하거나, '주교재 제외'/'워크북 제외' 중 최소 1개 이상을 해제해주세요!");
     }
 
     sessionStorage.removeItem("isClinicMode");
@@ -555,7 +565,11 @@ export function useStep1Data() {
     sessionStorage.setItem("pageEnd", isSettingsDisabled ? "" : pageEnd.trim());
     sessionStorage.setItem(
       "sourceCategories",
-      JSON.stringify(isSettingsDisabled ? { extra: true, twinSimilar: true } : sourceCategories)
+      JSON.stringify(
+        isSettingsDisabled
+          ? { extra: true, twinSimilar: true, excludeMain: true, excludeWorkbook: true }
+          : sourceCategories
+      )
     );
 
     router.push("/exam/step2"); 

@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
+import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, isWorkbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
 import { DIAGNOSTIC_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester } from "../step1/useStep1Data";
 import { normalizeMasterCategories, normalizeMasterCategoryRow } from "../../../lib/normalize";
 
@@ -427,10 +427,17 @@ export function useExamData() {
     const bookName2 = sessionStorage.getItem("bookName2") || "";
     const pageStart = sessionStorage.getItem("pageStart") || "";
     const pageEnd = sessionStorage.getItem("pageEnd") || "";
-    let sourceCategories = { extra: true, twinSimilar: true };
+    let sourceCategories = {
+      extra: true,
+      twinSimilar: true,
+      excludeMain: true,
+      excludeWorkbook: true,
+    };
     try {
       const scStr = sessionStorage.getItem("sourceCategories");
-      if (scStr) sourceCategories = JSON.parse(scStr);
+      if (scStr) {
+        sourceCategories = { ...sourceCategories, ...JSON.parse(scStr) };
+      }
     } catch (e) {}
 
     try {
@@ -522,9 +529,6 @@ export function useExamData() {
             finalQuery = finalQuery.eq("source_book_name", testSourceFilter);
         }
 
-        if (bookName1 && !isDiagnosticMode) finalQuery = finalQuery.ilike("book_name", `%${bookName1}%`);
-        if (bookName2 && !isDiagnosticMode) finalQuery = finalQuery.ilike("book_name", `%${bookName2}%`);
-
         const { data, error } = await finalQuery.limit(2000);
         if (error) throw error;
         if (data) allData = allData.concat(data);
@@ -541,14 +545,24 @@ export function useExamData() {
       const isPageFilterActive = !isDiagnosticMode && (pageStart !== "" || pageEnd !== "");
       const minPage = pageStart ? parseInt(pageStart, 10) : 0;
       const maxPage = pageEnd ? parseInt(pageEnd, 10) : 999999;
+      const kwBook1 = !isDiagnosticMode ? bookName1.trim().toLowerCase() : "";
+      const kwBook2 = !isDiagnosticMode ? bookName2.trim().toLowerCase() : "";
 
       const isRateFilterActive = (rateMax < 100 || rateMin > 0) && examMode !== "test";
       const filteredData = allData.filter(q => {
         if (q.is_hidden === true || q.is_hidden === 'Y' || q.is_hidden === 'true') return false;
-        // 🌟 문제지 제작 Step 2에서는 메인교재(주교재/본교재) 문제를 출제 풀에서 제외
-        if (!isDiagnosticMode && isMainTextbookQuestion(q, mainExclusion)) return false;
-        // 🌟 Step 1 출처 교재 필터의 '추가문제' / '쌍둥이/유사' 체크박스 필터 적용
-        if (!isDiagnosticMode && examMode !== "test" && !matchesSourceCategoryFilter(q, sourceCategories)) return false;
+        // 🌟 주교재 제외 / 워크북 제외 / 추가문제 / 쌍둥이·유사 필터 적용
+        if (!isDiagnosticMode) {
+          if ((sourceCategories.excludeMain ?? true) && isMainTextbookQuestion(q, mainExclusion)) return false;
+          if ((sourceCategories.excludeWorkbook ?? true) && isWorkbookQuestion(q, mainExclusion)) return false;
+          if (examMode !== "test" && !matchesSourceCategoryFilter(q, sourceCategories, mainExclusion)) return false;
+
+          if (kwBook1 || kwBook2) {
+            const combinedBookName = `${q.book_name || ""} ${q.source_book_name || ""}`.toLowerCase();
+            if (kwBook1 && !combinedBookName.includes(kwBook1)) return false;
+            if (kwBook2 && !combinedBookName.includes(kwBook2)) return false;
+          }
+        }
 
         if (diagSelections.length > 0) {
           const matchesDiag = diagSelections.some(({ sem, quarterKey }) => {
@@ -819,6 +833,11 @@ export function useExamData() {
       if (error) throw error;
 
       const mainExclusion = await fetchMainTextbookExclusionSet(supabase);
+      let twinSourceCategories = { excludeMain: true, excludeWorkbook: true };
+      try {
+        const scStr = sessionStorage.getItem("sourceCategories");
+        if (scStr) twinSourceCategories = { ...twinSourceCategories, ...JSON.parse(scStr) };
+      } catch (e) {}
       const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i: any) => String(i.question_id))), []));
       const filteredData = (data || []).filter(
         (item: any) =>
@@ -826,7 +845,8 @@ export function useExamData() {
           item.is_hidden !== true &&
           item.is_hidden !== 'Y' &&
           item.is_hidden !== 'true' &&
-          !isMainTextbookQuestion(item, mainExclusion)
+          !((twinSourceCategories.excludeMain ?? true) && isMainTextbookQuestion(item, mainExclusion)) &&
+          !((twinSourceCategories.excludeWorkbook ?? true) && isWorkbookQuestion(item, mainExclusion))
       );
 
       if (filteredData.length === 0) {

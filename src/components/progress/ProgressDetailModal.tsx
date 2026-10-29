@@ -114,6 +114,22 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
   useEffect(() => {
     if (selectedQ) {
       setQData(selectedQ);
+      if (selectedQ.tq_id && !selectedQ.question) {
+        supabase.from('textbook_question').select('*').eq('tq_id', selectedQ.tq_id).maybeSingle().then(({ data: tqData }) => {
+          if (tqData) {
+            setQData((prev: any) => {
+              if (!prev) return tqData;
+              const merged = { ...tqData, ...prev };
+              for (const key in tqData) {
+                if ((merged[key] === null || merged[key] === undefined || merged[key] === '') && tqData[key]) {
+                  merged[key] = tqData[key];
+                }
+              }
+              return merged;
+            });
+          }
+        });
+      }
       if (selectedQ.question_id) {
         supabase.from('question_db').select('*').eq('question_id', selectedQ.question_id).single().then(({data}) => {
           if (data) {
@@ -309,17 +325,22 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                <tbody>
                  {data.students.map((stu, sIdx) => (
                    <tr key={stu.id} className="group hover:bg-blue-50/20 transition-colors">
-                     <td className={`sticky left-0 z-10 border-b border-r border-slate-300 py-2 px-3 font-bold text-[12px] text-slate-700 shadow-[2px_0_5px_rgba(0,0,0,0.03)] group-hover:bg-blue-50/50 ${sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
+                     <td
+                       className={`sticky left-0 z-20 border-b border-r border-slate-300 py-2 px-3 font-bold text-[12px] text-slate-700 shadow-[2px_0_5px_rgba(0,0,0,0.04)] ${sIdx % 2 === 0 ? 'bg-white group-hover:bg-blue-50' : 'bg-slate-50 group-hover:bg-blue-50'}`}
+                       style={{ backgroundColor: sIdx % 2 === 0 ? '#ffffff' : '#f8fafc' }}
+                     >
                        <div className="truncate w-full text-center">{stu.name}</div>
                      </td>
                      
                      {data.pages.map(p => {
                        const pageQs = data.groupedQs[p] || [];
                        return (
-                         <td key={p} className={`border-b border-r border-slate-200 p-1.5 align-top group-hover:bg-blue-50/10 ${sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50/70'}`}>
+                         <td key={p} className={`border-b border-r border-slate-200 p-1.5 align-top group-hover:bg-blue-50/10 ${sIdx % 2 === 0 ? 'bg-white' : 'bg-slate-50'}`}>
                            <div className="flex flex-wrap gap-[2px] justify-start max-w-[120px]">
                              {pageQs.map((q: any) => {
                                const code = ansMap[stu.id]?.[q.tq_id];
+                               const label = getCodeLabel(code);
+                               const isHomeworkLabel = code === 'HOMEWORK' || label === '과제';
                                const displayQNum = String(q.question_number || '').replace(/TWIN/gi, 'T').replace(/SIMILAR/gi, 'S').replace(/CLINIC/gi, 'C');
                                return (
                                  <div 
@@ -329,9 +350,14 @@ export default function ProgressDetailModal({ data, onClose }: ProgressDetailMod
                                       if (dragDistance.current > 5) return; 
                                       setSelectedQ(q);
                                     }}
-                                    className={`w-[20px] h-[20px] flex items-center justify-center rounded-[3px] border hover:scale-125 transition-transform text-xs font-bold tracking-tighter cursor-pointer ${getBlockStyle(code)}`}
+                                    style={{
+                                      fontSize: isHomeworkLabel ? '8px' : (label && label.length >= 2 ? '9.5px' : '11px'),
+                                      lineHeight: 1,
+                                      letterSpacing: isHomeworkLabel ? '-0.5px' : '-0.02em',
+                                    }}
+                                    className={`w-[20px] h-[20px] flex items-center justify-center rounded-[3px] border hover:scale-125 transition-transform font-extrabold whitespace-nowrap overflow-hidden cursor-pointer ${getBlockStyle(code)}`}
                                  >
-                                    {getCodeLabel(code)}
+                                    {label}
                                  </div>
                                );
                              })}

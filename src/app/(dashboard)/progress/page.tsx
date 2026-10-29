@@ -62,6 +62,7 @@ export default function ProgressPage() {
   const [selectedBookId, setSelectedBookId] = useState("");
   const [selectedWbId, setSelectedWbId] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState("all");
+  const pendingUrlBookIdRef = useRef<string>("");
   
   const [activeMainPage, setActiveMainPage] = useState<number | null>(null);
   const [activeWbPage, setActiveWbPage] = useState<number | null>(null);
@@ -118,7 +119,19 @@ export default function ProgressPage() {
     checkAccess();
   }, [router]);
 
-  useEffect(() => { if (isAuthorized) { fetchInitialClasses(); loadMathJax(); } }, [isAuthorized]);
+  useEffect(() => {
+    if (isAuthorized) {
+      if (typeof window !== "undefined") {
+        const params = new URLSearchParams(window.location.search);
+        const qClassId = params.get("class_id") || "";
+        const qBookId = params.get("book_id") || "";
+        if (qBookId) pendingUrlBookIdRef.current = qBookId;
+        if (qClassId) setSelectedClassId(qClassId);
+      }
+      fetchInitialClasses();
+      loadMathJax();
+    }
+  }, [isAuthorized]);
   useEffect(() => { if (!selectedClassId) return; fetchClassDetails(selectedClassId); }, [selectedClassId]);
 
   useEffect(() => {
@@ -209,8 +222,27 @@ export default function ProgressPage() {
       });
       
       setTextbooks(mains); setWorkbooks(wbs);
-      if (!mains.find(b => b.book_id === selectedBookId)) setSelectedBookId("");
-      if (!wbs.find(b => b.book_id === selectedWbId)) setSelectedWbId("");
+      const urlTargetBookId = pendingUrlBookIdRef.current;
+      if (urlTargetBookId) {
+        pendingUrlBookIdRef.current = "";
+        const matchedMain = mains.find(b => String(b.book_id) === String(urlTargetBookId));
+        const matchedWb = wbs.find(b => String(b.book_id) === String(urlTargetBookId));
+        if (matchedMain) {
+          setSelectedBookId(matchedMain.book_id);
+          if (wbs.length === 1) setSelectedWbId(wbs[0].book_id);
+          else if (!wbs.find(b => b.book_id === selectedWbId)) setSelectedWbId("");
+        } else if (matchedWb) {
+          setSelectedWbId(matchedWb.book_id);
+          if (mains.length === 1) setSelectedBookId(mains[0].book_id);
+          else if (!mains.find(b => b.book_id === selectedBookId)) setSelectedBookId("");
+        } else {
+          if (!mains.find(b => b.book_id === selectedBookId)) setSelectedBookId("");
+          if (!wbs.find(b => b.book_id === selectedWbId)) setSelectedWbId("");
+        }
+      } else {
+        if (!mains.find(b => b.book_id === selectedBookId)) setSelectedBookId("");
+        if (!wbs.find(b => b.book_id === selectedWbId)) setSelectedWbId("");
+      }
 
       const sMap = new Map();
       // 🌟 기존 directStudents 매핑 로직 제거
@@ -712,12 +744,13 @@ export default function ProgressPage() {
         }
 
         const { data: res } = await supabase.from('student_homework_result').select('hw_result_id, completed_tq_ids').eq('homework_id', hwId).eq('student_id', sId).maybeSingle();
+        const nowIso = new Date().toISOString();
         if (res) {
           const comp = safeParseIds(res.completed_tq_ids);
           const newComp = Array.from(new Set([...comp, ...tq_ids]));
-          await supabase.from('student_homework_result').update({ completed_tq_ids: newComp, status: '채점완료' }).eq('hw_result_id', res.hw_result_id);
+          await supabase.from('student_homework_result').update({ completed_tq_ids: newComp, status: '채점완료', checked_at: nowIso }).eq('hw_result_id', res.hw_result_id);
         } else {
-          await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids });
+          await supabase.from('student_homework_result').insert({ homework_id: hwId, student_id: sId, status: '채점완료', completed_tq_ids: tq_ids, checked_at: nowIso });
         }
       }));
     } catch (e: any) {

@@ -357,7 +357,13 @@ const processGroupText = (items: any[]) => {
   if (rawStrings.some(s => !s)) return { common: "", remainders: rawStrings };
 
   const removeNumberingRegex = /^((?:<[^>]+>|\s|&nbsp;)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑳]|[0-9]+[\.\)])((?:<[^>]+>|\s|&nbsp;)*)/i;
-  let cleanedStrings = rawStrings.map(s => s.replace(removeNumberingRegex, "$1$2"));
+  let cleanedStrings = rawStrings.map(s => String(s || "").replace(removeNumberingRegex, "$1$2").trim());
+  if (cleanedStrings.every(s => s === cleanedStrings[0])) {
+    const textOnly = cleanedStrings[0].replace(/<[^>]+>/g, "").trim();
+    if (textOnly.length >= 2) {
+      return { common: cleanedStrings[0], remainders: cleanedStrings.map(() => "") };
+    }
+  }
 
   let prefix = cleanedStrings[0];
   for (let i = 1; i < cleanedStrings.length; i++) {
@@ -1094,7 +1100,7 @@ function HomeworkReviewContent() {
                     else if (mark === 'B') rowBg = "bg-slate-300/30";
                     else if (mark === 'RO') rowBg = "bg-[#3b82f6]/10";
 
-                    const textToRender = g.is_merged_text && remainders[subIdx] ? remainders[subIdx] : (q.question || q.text_question || '');
+                    const textToRender = (g.is_merged_text && common && remainders[subIdx] !== undefined) ? remainders[subIdx] : (q.question || q.text_question || '');
 
                     return (
                       <div key={q.tq_id} className={`flex items-center p-4 gap-4 ${subIdx > 0 ? 'border-t border-slate-100' : ''} ${rowBg} transition-colors`}>

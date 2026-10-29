@@ -123,14 +123,18 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-6 mb-6">
           <div className="flex flex-wrap justify-between items-center mb-4 border-b pb-2 gap-3">
             <h3 className="font-bold text-slate-700">3. 출처 교재 및 페이지 필터 (선택)</h3>
-            <div className="flex items-center gap-5 bg-slate-50 px-3.5 py-1.5 rounded-lg border border-slate-200">
+            <div className="flex flex-wrap items-center gap-4 bg-slate-50 px-3.5 py-1.5 rounded-lg border border-slate-200">
               <label className="flex items-center space-x-2 cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={sourceCategories?.extra ?? true}
                   onChange={(e) =>
                     setSourceCategories({
-                      ...(sourceCategories || { extra: true, twinSimilar: true }),
+                      extra: true,
+                      twinSimilar: true,
+                      excludeMain: true,
+                      excludeWorkbook: true,
+                      ...(sourceCategories || {}),
                       extra: e.target.checked,
                     })
                   }
@@ -144,13 +148,54 @@ export default function RightPanel({ step1Data }: { step1Data: any }) {
                   checked={sourceCategories?.twinSimilar ?? true}
                   onChange={(e) =>
                     setSourceCategories({
-                      ...(sourceCategories || { extra: true, twinSimilar: true }),
+                      extra: true,
+                      twinSimilar: true,
+                      excludeMain: true,
+                      excludeWorkbook: true,
+                      ...(sourceCategories || {}),
                       twinSimilar: e.target.checked,
                     })
                   }
                   className="w-4 h-4 accent-brand rounded border-slate-300 cursor-pointer"
                 />
                 <span className="text-slate-700 font-bold text-sm">쌍둥이/유사</span>
+              </label>
+              <div className="h-4 w-[1px] bg-slate-300 hidden sm:block" />
+              <label className="flex items-center space-x-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sourceCategories?.excludeMain ?? true}
+                  onChange={(e) =>
+                    setSourceCategories({
+                      extra: true,
+                      twinSimilar: true,
+                      excludeMain: true,
+                      excludeWorkbook: true,
+                      ...(sourceCategories || {}),
+                      excludeMain: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-rose-600 rounded border-slate-300 cursor-pointer"
+                />
+                <span className="text-slate-700 font-bold text-sm">주교재 제외</span>
+              </label>
+              <label className="flex items-center space-x-2 cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  checked={sourceCategories?.excludeWorkbook ?? true}
+                  onChange={(e) =>
+                    setSourceCategories({
+                      extra: true,
+                      twinSimilar: true,
+                      excludeMain: true,
+                      excludeWorkbook: true,
+                      ...(sourceCategories || {}),
+                      excludeWorkbook: e.target.checked,
+                    })
+                  }
+                  className="w-4 h-4 accent-rose-600 rounded border-slate-300 cursor-pointer"
+                />
+                <span className="text-slate-700 font-bold text-sm">워크북 제외</span>
               </label>
             </div>
           </div>

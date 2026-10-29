@@ -176,18 +176,29 @@ export default function TaxonomyEditorPage() {
     const colorClasses = colorTheme === 'indigo' ? "border-indigo-300 bg-indigo-50/30 hover:bg-indigo-50 focus:ring-indigo-500 text-indigo-800" : "border-emerald-300 bg-emerald-50/30 hover:bg-emerald-50 focus:ring-emerald-500 text-emerald-800";
     const sliderColor = colorTheme === 'indigo' ? "accent-indigo-600" : "accent-emerald-600";
 
-    let boxData = { width: 100 };
-    if (boxFieldKey) {
-      try {
-        const parsed = JSON.parse(editForm[boxFieldKey as keyof typeof editForm] as string);
-        if (parsed && typeof parsed.width !== 'undefined') boxData.width = parsed.width;
-      } catch (e) {}
-    }
+    const parseBoxObj = (raw: any): Record<string, any> => {
+      if (!raw || raw === 'null' || raw === 'undefined') return {};
+      let parsed = raw;
+      for (let i = 0; i < 4; i++) {
+        if (typeof parsed === 'string') {
+          try { parsed = JSON.parse(parsed); } catch(e) { break; }
+        } else { break; }
+      }
+      if (Array.isArray(parsed)) return { bbox: parsed };
+      if (parsed && typeof parsed === 'object') return { ...parsed };
+      return {};
+    };
+
+    const rawBoxObj = boxFieldKey ? parseBoxObj(editForm[boxFieldKey as keyof typeof editForm]) : {};
+    const currentWidth = (rawBoxObj.width !== undefined && rawBoxObj.width !== null && !isNaN(Number(rawBoxObj.width)))
+      ? Math.max(20, Math.min(100, Math.round(Number(rawBoxObj.width))))
+      : 100;
+    const boxData = { ...rawBoxObj, width: currentWidth };
 
     const handleWidthChange = (w: number) => {
       if (!boxFieldKey) return;
-      const newData = JSON.stringify({ ...boxData, width: w });
-      setEditForm({ ...editForm, [boxFieldKey]: newData });
+      const newData = JSON.stringify({ ...rawBoxObj, width: w });
+      setEditForm((prev: any) => ({ ...prev, [boxFieldKey]: newData }));
     };
 
     return (

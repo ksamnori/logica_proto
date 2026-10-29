@@ -130,7 +130,7 @@ export default function ViewerSidebar({
                               <label className="block text-xs font-bold text-slate-500 mb-1.5">분할 설정</label>
                               <div className="flex gap-1">
                                   {[1,2,4,6].map(num => (
-                                    <button key={num} onClick={() => handleSettingChange('split', num)} title={columns === 1 ? `1단 ${num}분할 (페이지당 ${num}문제)` : (num === 1 ? "1단 1분할 (분할 안함)" : `2단 ${num}분할 (페이지당 ${num}문제)`)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${splits === num ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num === 1 ? '1(안함)' : num}</button>
+                                    <button key={num} onClick={() => handleSettingChange('split', num)} title={columns === 1 ? `1단 ${num}분할 (페이지당 ${num}문제)` : (num === 1 ? "1단 1분할 (분할 안함)" : `2단 ${num}분할 (페이지당 ${num}문제)`)} className={`flex-1 py-1.5 rounded border font-bold text-xs ${splits === num ? 'border-brand bg-blue-50 text-brand' : 'border-slate-200 text-slate-500'} ${isAdmissionLock ? 'opacity-40 pointer-events-none' : ''}`}>{num}</button>
                                   ))}
                               </div>
                           </div>

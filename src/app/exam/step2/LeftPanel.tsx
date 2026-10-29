@@ -157,14 +157,25 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const [addPageStart, setAddPageStart] = useState("");
   const [addPageEnd, setAddPageEnd] = useState("");
   const [addQuestionText, setAddQuestionText] = useState("");
-  const [addSourceCategories, setAddSourceCategories] = useState<{ extra: boolean; twinSimilar: boolean }>(() => {
+  const [addSourceCategories, setAddSourceCategories] = useState<{
+    extra: boolean;
+    twinSimilar: boolean;
+    excludeMain: boolean;
+    excludeWorkbook: boolean;
+  }>(() => {
+    const defaults = {
+      extra: true,
+      twinSimilar: true,
+      excludeMain: true,
+      excludeWorkbook: true,
+    };
     if (typeof window !== "undefined") {
       try {
         const saved = sessionStorage.getItem("sourceCategories");
-        if (saved) return JSON.parse(saved);
+        if (saved) return { ...defaults, ...JSON.parse(saved) };
       } catch (e) {}
     }
-    return { extra: true, twinSimilar: true };
+    return defaults;
   });
   const [searchResultFilter, setSearchResultFilter] = useState("");
 
@@ -295,29 +306,38 @@ export default function LeftPanel({ examData }: { examData: any }) {
 
   const mergeSelected = () => {
     if (checkedIds.size === 0) return alert("병합할 문항을 선택하세요.");
+    if (checkedIds.size > 1 && !confirm("선택한 문항들을 공통 지문을 가진 하나의 묶음 문항으로 병합하시겠습니까?")) {
+      return;
+    }
+    const now = Date.now();
     setQuestions((prevQs: any[]) => {
       const newQs = [...prevQs];
       if (checkedIds.size === 1) {
         return newQs.map(g => checkedIds.has(g.id) ? { ...g, is_merged_text: true } : g);
       }
-      if (!confirm("선택한 문항들을 공통 지문을 가진 하나의 묶음 문항으로 병합하시겠습니까?")) return prevQs;
       const selectedGroups = newQs.filter(g => checkedIds.has(g.id));
+      if (selectedGroups.length === 0) return prevQs;
       const unselectedGroups = newQs.filter(g => !checkedIds.has(g.id));
       
       const allMergedItems = selectedGroups
         .reduce((acc: any[], g: any) => acc.concat(g.items), [])
         .sort(compareSubQuestions);
       const mergedGroup = {
-        id: `merged_${Date.now()}_${allMergedItems[0].question_id}`,
+        id: `merged_${now}_${allMergedItems[0].question_id}`,
+        is_group: true,
         is_merged_text: true, 
         items: allMergedItems,
         sort_order: selectedGroups[0].sort_order
       };
-      let insertIndex = newQs.findIndex(g => g.id === selectedGroups[0].id);
+      const firstSelectedId = selectedGroups[0].id;
+      let insertIndex = 0;
+      for (let i = 0; i < newQs.length; i++) {
+        if (newQs[i].id === firstSelectedId) break;
+        if (!checkedIds.has(newQs[i].id)) insertIndex++;
+      }
       return [...unselectedGroups.slice(0, insertIndex), mergedGroup, ...unselectedGroups.slice(insertIndex)];
     });
     setCheckedIds(new Set());
-    alert('✅ 서브문항 공통 지문 선택 병합이 완료되었습니다!');
   };
 
   const unmergeAllQuestions = () => {
@@ -365,71 +385,68 @@ export default function LeftPanel({ examData }: { examData: any }) {
   const autoMergeSubQuestions = () => {
     if (!confirm("페이지 순으로 정렬한 뒤, 공통 지문(8글자 이상)을 가진 서브 문항들을 자동으로 병합하시겠습니까?")) return;
     
-    setQuestions((prevQs: any[]) => {
-      let sortedQs = prevQs.map((g: any) => ({
-        ...g,
-        items: g.items.length > 1 ? [...g.items].sort(compareSubQuestions) : [...g.items]
-      })).sort((a, b) => compareQuestionsBySource(a.items[0], b.items[0]));
+    let sortedQs = questions.map((g: any) => ({
+      ...g,
+      items: g.items.length > 1 ? [...g.items].sort(compareSubQuestions) : [...g.items]
+    })).sort((a: any, b: any) => compareQuestionsBySource(a.items[0], b.items[0]));
 
-      const result: any[] = [];
-      let i = 0;
+    const result: any[] = [];
+    let i = 0;
+    
+    const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
+    let mergedCount = 0;
+
+    while (i < sortedQs.length) {
+      let currentGroup = { ...sortedQs[i], items: [...sortedQs[i].items] }; 
+      let j = i + 1;
       
-      const removeNumberingRegex = /^((?:<[^>]+>|&nbsp;|\s)*)(?:\([0-9가-힣a-zA-Z]+\)|[①-⑩]|[0-9]+[\.\)])(?:&nbsp;|\s)*/i;
-      let mergedCount = 0;
-
-      while (i < sortedQs.length) {
-        let currentGroup = { ...sortedQs[i], items: [...sortedQs[i].items] }; 
-        let j = i + 1;
+      while (j < sortedQs.length) {
+        const lastItem = currentGroup.items[currentGroup.items.length - 1];
+        const nextItem = sortedQs[j].items[0];
         
-        while (j < sortedQs.length) {
-          const lastItem = currentGroup.items[currentGroup.items.length - 1];
-          const nextItem = sortedQs[j].items[0];
-          
-          const text1 = lastItem.question || lastItem.text_question || "";
-          const text2 = nextItem.question || nextItem.text_question || "";
-          
-          const clean1 = text1.replace(removeNumberingRegex, "$1");
-          const clean2 = text2.replace(removeNumberingRegex, "$1");
-          
-          let k = 0;
-          while (k < clean1.length && k < clean2.length && clean1[k] === clean2[k]) k++;
-          
-          const commonPrefix = clean1.substring(0, k);
-          const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, '').trim();
-          
-          const hasSameParent = lastItem.parent_question_id && lastItem.parent_question_id !== 'null' && lastItem.parent_question_id === nextItem.parent_question_id;
-          
-          if (hasSameParent || textOnlyCommon.length >= 8) {
-            if (!currentGroup.id.startsWith('merged_')) {
-                currentGroup.id = `merged_${Date.now()}_${currentGroup.items[0].question_id}`;
-            }
-            currentGroup.items.push(...sortedQs[j].items);
-            currentGroup.is_group = true;
-            currentGroup.is_merged_text = true;
-            mergedCount++;
-            j++;
-          } else {
-            break; 
+        const text1 = lastItem.question || lastItem.text_question || "";
+        const text2 = nextItem.question || nextItem.text_question || "";
+        
+        const clean1 = text1.replace(removeNumberingRegex, "$1");
+        const clean2 = text2.replace(removeNumberingRegex, "$1");
+        
+        let k = 0;
+        while (k < clean1.length && k < clean2.length && clean1[k] === clean2[k]) k++;
+        
+        const commonPrefix = clean1.substring(0, k);
+        const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, '').trim();
+        
+        const hasSameParent = lastItem.parent_question_id && lastItem.parent_question_id !== 'null' && lastItem.parent_question_id === nextItem.parent_question_id;
+        
+        if (hasSameParent || textOnlyCommon.length >= 8) {
+          if (!currentGroup.id.startsWith('merged_')) {
+              currentGroup.id = `merged_${Date.now()}_${i}_${currentGroup.items[0].question_id}`;
           }
-        }
-        
-        if (currentGroup.items.length > 1) {
-          currentGroup.items.sort(compareSubQuestions);
+          currentGroup.items.push(...sortedQs[j].items);
+          currentGroup.is_group = true;
           currentGroup.is_merged_text = true;
+          mergedCount++;
+          j++;
+        } else {
+          break; 
         }
-        
-        result.push(currentGroup);
-        i = j; 
-      }
-
-      if (mergedCount === 0) {
-          alert("병합할 만한 조건(8글자 이상 지문 일치 등)을 만족하는 문항이 없습니다.");
-      } else {
-          alert(`✨ 시험지 문항들이 교재/페이지 순으로 정렬되었으며, 공통 지문을 가진 서브 문항들이 성공적으로 자동 병합되었습니다!`);
       }
       
-      return result;
-    });
+      if (currentGroup.items.length > 1) {
+        currentGroup.items.sort(compareSubQuestions);
+        currentGroup.is_merged_text = true;
+      }
+      
+      result.push(currentGroup);
+      i = j; 
+    }
+
+    setQuestions(result);
+    if (mergedCount === 0) {
+      alert("병합할 만한 조건(8글자 이상 지문 일치 등)을 만족하는 문항이 없습니다.");
+    } else {
+      alert(`✨ 시험지 문항들이 교재/페이지 순으로 정렬되었으며, 공통 지문을 가진 서브 문항들이 성공적으로 자동 병합되었습니다!`);
+    }
   };
 
   const searchNewQuestions = async () => {
@@ -460,9 +477,6 @@ export default function LeftPanel({ examData }: { examData: any }) {
         // 🌟 1. 기본 쿼리 생성 (sub_taxonomy_id 까지 포함하여 단원 검색 범위 확장)
         let query = supabase.from('question_db').select('*').or(`item_id.in.(${chunk.join(',')}),taxonomy_id.in.(${chunk.join(',')}),sub_taxonomy_id.in.(${chunk.join(',')}),thk_taxonomy_id.in.(${chunk.join(',')})`);
         
-        // 🌟 2. 검색 교재명 필터 적용 (두 단어 모두 포함)
-        if (addBookName1.trim()) query = query.ilike("book_name", `%${addBookName1.trim()}%`);
-        if (addBookName2.trim()) query = query.ilike("book_name", `%${addBookName2.trim()}%`);
         if (addQuestionText.trim()) query = query.ilike("question", `%${addQuestionText.trim()}%`);
 
         const { data, error } = await query.limit(1000); // 넉넉하게 불러온 뒤 페이지 필터 적용
@@ -471,6 +485,18 @@ export default function LeftPanel({ examData }: { examData: any }) {
         if (data) allSearched = allSearched.concat(data);
       }
       
+      // 🌟 2. 검색 교재명 필터 적용 (book_name 및 source_book_name 모두 매칭)
+      const kw1 = addBookName1.trim().toLowerCase();
+      const kw2 = addBookName2.trim().toLowerCase();
+      if (kw1 || kw2) {
+        allSearched = allSearched.filter((q: any) => {
+          const combinedBook = `${q.book_name || ""} ${q.source_book_name || ""}`.toLowerCase();
+          if (kw1 && !combinedBook.includes(kw1)) return false;
+          if (kw2 && !combinedBook.includes(kw2)) return false;
+          return true;
+        });
+      }
+
       // 🌟 3. 페이지 번호 필터 적용 (숫자 파싱)
       const isPageFilterActive = addPageStart !== "" || addPageEnd !== "";
       if (isPageFilterActive) {
@@ -497,8 +523,7 @@ export default function LeftPanel({ examData }: { examData: any }) {
           !q.is_hidden &&
           q.is_hidden !== 'Y' &&
           q.is_hidden !== 'true' &&
-          !isMainTextbookQuestion(q, mainExclusion) &&
-          matchesSourceCategoryFilter(q, addSourceCategories)
+          matchesSourceCategoryFilter(q, addSourceCategories, mainExclusion)
       );
       
       // 랜덤하게 50개만 보여주기
@@ -737,9 +762,9 @@ export default function LeftPanel({ examData }: { examData: any }) {
 
               {/* 🌟 1. 검색 필터 UI 패널 */}
               <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 shrink-0 shadow-inner space-y-3">
-                <div className="flex items-center justify-between bg-white px-3.5 py-2 rounded-lg border border-slate-200">
-                  <span className="text-xs font-bold text-slate-600">출처 교재 구분 필터 (교재명 단어 포함)</span>
-                  <div className="flex items-center gap-4">
+                <div className="flex flex-wrap items-center justify-between gap-2 bg-white px-3.5 py-2 rounded-lg border border-slate-200">
+                  <span className="text-xs font-bold text-slate-600">출처 교재 구분 필터</span>
+                  <div className="flex flex-wrap items-center gap-3.5">
                     <label className="flex items-center space-x-1.5 cursor-pointer select-none">
                       <input
                         type="checkbox"
@@ -757,6 +782,25 @@ export default function LeftPanel({ examData }: { examData: any }) {
                         className="w-3.5 h-3.5 accent-brand rounded border-slate-300 cursor-pointer"
                       />
                       <span className="text-slate-700 font-bold text-xs">쌍둥이/유사</span>
+                    </label>
+                    <div className="h-3.5 w-[1px] bg-slate-300" />
+                    <label className="flex items-center space-x-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={addSourceCategories.excludeMain}
+                        onChange={(e) => setAddSourceCategories((prev) => ({ ...prev, excludeMain: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-rose-600 rounded border-slate-300 cursor-pointer"
+                      />
+                      <span className="text-slate-700 font-bold text-xs">주교재 제외</span>
+                    </label>
+                    <label className="flex items-center space-x-1.5 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={addSourceCategories.excludeWorkbook}
+                        onChange={(e) => setAddSourceCategories((prev) => ({ ...prev, excludeWorkbook: e.target.checked }))}
+                        className="w-3.5 h-3.5 accent-rose-600 rounded border-slate-300 cursor-pointer"
+                      />
+                      <span className="text-slate-700 font-bold text-xs">워크북 제외</span>
                     </label>
                   </div>
                 </div>
