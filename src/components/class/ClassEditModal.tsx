@@ -369,7 +369,7 @@ export default function ClassEditModal({ isOpen, classItem, currentUser, onClose
   const isSpecialOrMakeup = modalData.class_type === 'SPECIAL' || modalData.class_type === 'MAKEUP';
 
   return (
-    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
       <div className="bg-white w-full max-w-4xl max-h-[90vh] rounded-2xl shadow-2xl flex flex-col overflow-hidden">
         <div className="bg-brand p-5 text-white flex justify-between items-center shrink-0">
           <h2 className="text-xl font-bold tracking-tight">🏫 반 상세 정보 및 수강생 관리</h2>

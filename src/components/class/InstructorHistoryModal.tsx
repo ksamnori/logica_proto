@@ -90,7 +90,7 @@ export default function InstructorHistoryModal({ isOpen, onClose, classId, class
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[70] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
+    <div className="fixed inset-0 z-[10000] bg-slate-900/60 backdrop-blur-sm flex justify-center items-center p-4">
       <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] animate-in fade-in zoom-in-95 duration-200">
         
         {/* 모달 헤더 */}

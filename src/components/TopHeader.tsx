@@ -123,7 +123,8 @@ export default function TopHeader({ instId, instructorName, profileImgUrl, isSup
   useEffect(() => {
     let isMounted = true;
     const verifyAndFetchUserInfo = async () => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      const { data: { session }, error: authError } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
       if (authError || !user) return; 
       
       if (isMounted) setCurrentUid(user.id);

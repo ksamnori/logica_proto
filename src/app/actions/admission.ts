@@ -18,6 +18,118 @@ async function getTenantId() {
   return cookieStore.get("logica_tenant_id")?.value;
 }
 
+function matchesStandardName(row: any, targetStd: string, coreTag: string): boolean {
+  if (!row) return false;
+  const candidates = [
+    row.standard_name,
+    row.standard,
+    row.grade,
+    row.level,
+    row.name,
+    row.title,
+    row.exam_name,
+  ]
+    .filter((v) => v !== undefined && v !== null)
+    .map((v) => String(v).trim());
+
+  for (const val of candidates) {
+    if (!val) continue;
+    if (val === targetStd || val === coreTag) return true;
+    const tagMatch = val.match(/\d+-\d+/);
+    if (tagMatch && coreTag && tagMatch[0] === coreTag) return true;
+    if (coreTag && val.includes(coreTag)) return true;
+  }
+  return false;
+}
+
+/**
+ * 🌟 진단평가 기준표(admission_standard_meta_2610 / admission_standard_baseline_2610) 서버 액션 로더
+ * - Service Role Key(supabaseAdmin)를 사용하여 신규 테이블의 RLS(Row Level Security) 차단 문제를 완벽 우회합니다.
+ * - standard_name 표기 차이('5-2', '초등 5-2', '초5-2' 등)를 유연하게 매칭하며,
+ *   _2610 테이블에 해당 학기 데이터가 없을 경우 기존 테이블(admission_standard_meta / admission_standard_baseline)로 자동 폴백합니다.
+ */
+export async function fetchAdmissionStandardDataAction(standardName: string) {
+  try {
+    const rawStd = String(standardName || "").trim();
+    const matchTag = rawStd.match(/\d+-\d+/);
+    const coreTag = matchTag ? matchTag[0] : rawStd;
+
+    let metaRows: any[] = [];
+    let baselineRow: any = null;
+
+    // 1. admission_standard_meta_2610 조회
+    const { data: meta2610, error: meta2610Err } = await supabaseAdmin
+      .from("admission_standard_meta_2610")
+      .select("*");
+
+    if (!meta2610Err && Array.isArray(meta2610) && meta2610.length > 0) {
+      const exact = meta2610.filter(
+        (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
+                    String(r.standard_name ?? r.standard ?? "").trim() === coreTag
+      );
+      metaRows = exact.length > 0 ? exact : meta2610.filter((r: any) => matchesStandardName(r, rawStd, coreTag));
+    }
+
+    // 폴백: admission_standard_meta
+    if (!metaRows || metaRows.length === 0) {
+      const { data: metaLegacy } = await supabaseAdmin
+        .from("admission_standard_meta")
+        .select("*");
+      if (Array.isArray(metaLegacy) && metaLegacy.length > 0) {
+        const exact = metaLegacy.filter(
+          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
+                      String(r.standard_name ?? r.standard ?? "").trim() === coreTag
+        );
+        metaRows = exact.length > 0 ? exact : metaLegacy.filter((r: any) => matchesStandardName(r, rawStd, coreTag));
+      }
+    }
+
+    // 2. admission_standard_baseline_2610 조회
+    const { data: base2610, error: base2610Err } = await supabaseAdmin
+      .from("admission_standard_baseline_2610")
+      .select("*");
+
+    if (!base2610Err && Array.isArray(base2610) && base2610.length > 0) {
+      baselineRow =
+        base2610.find(
+          (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
+                      String(r.standard_name ?? r.standard ?? "").trim() === coreTag
+        ) ||
+        base2610.find((r: any) => matchesStandardName(r, rawStd, coreTag)) ||
+        null;
+    }
+
+    // 폴백: admission_standard_baseline
+    if (!baselineRow) {
+      const { data: baseLegacy } = await supabaseAdmin
+        .from("admission_standard_baseline")
+        .select("*");
+      if (Array.isArray(baseLegacy) && baseLegacy.length > 0) {
+        baselineRow =
+          baseLegacy.find(
+            (r: any) => String(r.standard_name ?? r.standard ?? "").trim() === rawStd ||
+                        String(r.standard_name ?? r.standard ?? "").trim() === coreTag
+          ) ||
+          baseLegacy.find((r: any) => matchesStandardName(r, rawStd, coreTag)) ||
+          null;
+      }
+    }
+
+    return {
+      success: true,
+      metaRows: metaRows || [],
+      baselineRow: baselineRow || null,
+    };
+  } catch (error: any) {
+    return {
+      success: false,
+      metaRows: [],
+      baselineRow: null,
+      message: error?.message || "기준표 로드 실패",
+    };
+  }
+}
+
 // 🌟 프론트엔드에서 명시적으로 tenantId를 넘겨줄 수 있도록 파라미터(clientTenantId) 추가
 export async function assignStudents(sessionId: string, examId: string | null, studentIds: string[], clientTenantId?: string) {
   const tenantId = clientTenantId || await getTenantId();

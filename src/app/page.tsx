@@ -22,11 +22,11 @@ export default function LoginPage() {
 
   useEffect(() => {
     const clearSession = async () => {
+      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
       localStorage.clear(); 
       sessionStorage.clear(); 
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
       document.cookie = "logica_tenant_id=; path=/; max-age=0;"; 
-      await supabase.auth.signOut(); 
     };
     clearSession();
   }, []);

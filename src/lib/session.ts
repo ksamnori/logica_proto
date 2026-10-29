@@ -16,7 +16,8 @@ export function isInstructorSessionMissing(): boolean {
 // role/tenant 등을 다시 채워넣는다. 성공하면 true, 진짜로 로그인이 끊긴 경우엔 false.
 export async function recoverInstructorSession(): Promise<boolean> {
   try {
-    const { data: { user } } = await supabase.auth.getUser();
+    const { data: { session } } = await supabase.auth.getSession();
+    const user = session?.user ?? null;
     if (!user) return false;
 
     const { data: instructor } = await supabase

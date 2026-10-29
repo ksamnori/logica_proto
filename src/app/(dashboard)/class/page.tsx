@@ -304,7 +304,7 @@ export default function ClassPage() {
     setFilterLevel("all"); setFilterGrade("all"); setFilterInstructor("all"); setShowPlanned(false); setShowEnded(false); setHideTest(true); 
   };
 
-  const openEditModal = (classItem: any) => { setSelectedClass(classItem); setIsEditModalOpen(true); };
+  const openEditModal = (classItem: any) => { setTip(null); setSelectedClass(classItem); setIsEditModalOpen(true); };
   const closeEditModal = () => { setIsEditModalOpen(false); setSelectedClass(null); };
 
   // ---------- 반 정보 툴팁 (화면 밖으로 나가지 않도록 body에 띄움) ----------
@@ -598,8 +598,8 @@ export default function ClassPage() {
           >
             <div className="flex w-full min-w-max min-h-full">
               
-              <div className="w-14 shrink-0 border-r border-slate-300 bg-slate-50 z-[80] sticky left-0 pointer-events-none print-time-col">
-                <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-[90] flex items-center justify-center font-bold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
+              <div className="w-14 shrink-0 border-r border-slate-300 bg-slate-50 z-[20] sticky left-0 pointer-events-none print-time-col">
+                <div className="h-10 border-b border-slate-200 bg-slate-100 sticky top-0 z-[30] flex items-center justify-center font-bold text-[11px] text-slate-500 tracking-tighter whitespace-nowrap">
                   평일시간
                 </div>
                 <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${wdRowCount})` }}>
@@ -731,7 +731,7 @@ export default function ClassPage() {
                     <React.Fragment key={day}>
                       {isSaturday && (
                         <div className="w-14 shrink-0 border-l border-r border-slate-300 bg-slate-50 relative pointer-events-none print-time-col">
-                          <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-[70] flex items-center justify-center font-bold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
+                          <div className="h-10 border-b border-slate-300 bg-slate-100 sticky top-0 z-[20] flex items-center justify-center font-bold text-[11px] text-blue-600 tracking-tighter whitespace-nowrap">
                             토요시간
                           </div>
                           <div className="relative border-b border-slate-200/60" style={{ height: `calc(var(--hour-height) * ${satRowCount})` }}>
@@ -745,7 +745,7 @@ export default function ClassPage() {
                       )}
                       
                       <div className="print-day-col border-r border-slate-300 relative shrink-0" style={{ flex: `${totalCols} 1 0%`, maxWidth: `${totalCols * 140}px`, minWidth: `${minWidthFinal}px` }}>
-                        <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-bold text-[13px] bg-white sticky top-0 z-[70] shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
+                        <div className={`h-10 border-b border-slate-200 flex items-center justify-center font-bold text-[13px] bg-white sticky top-0 z-[20] shadow-sm ${isSaturday ? 'text-blue-500' : 'text-slate-600'}`}>
                           {day}요일
                         </div>
                         
@@ -787,7 +787,7 @@ export default function ClassPage() {
                                 }}
                                 onMouseEnter={(e) => { if (dragState.current.isDown) return; showTip({ cls: b.classObj, instName, studentCount, studentNamesStr, rect: e.currentTarget.getBoundingClientRect() }); }}
                                 onMouseLeave={hideTipSoon}
-                                className={`print-box absolute rounded-lg px-1 py-1.5 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.06)] border transition-transform hover:-translate-y-1 hover:shadow-lg hover:z-[60] flex flex-col items-center text-center group ${colorClass} bg-opacity-95 hover:bg-opacity-100`}
+                                className={`print-box absolute rounded-lg px-1 py-1.5 cursor-pointer shadow-[0_2px_8px_rgba(0,0,0,0.06)] border transition-transform hover:-translate-y-1 hover:shadow-lg hover:z-[15] flex flex-col items-center text-center group ${colorClass} bg-opacity-95 hover:bg-opacity-100`}
                                 style={{ 
                                   top: `calc(var(--hour-height) * ${s - startHour})`, 
                                   height: `calc(var(--hour-height) * ${e - s})`, 

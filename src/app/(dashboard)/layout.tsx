@@ -25,10 +25,11 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
 
   useEffect(() => {
     const fetchLayoutData = async () => {
-      // 1. 수파베이스 로그인 세션 확인
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      // 1. 수파베이스 로그인 세션 확인 (getSession 우선 사용하여 불필요한 /user 중복 네트워크 호출 및 context canceled 방지)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      const user = session?.user ?? null;
       
-      if (authError || !user) {
+      if (sessionError || !user) {
         router.push("/"); // 수파베이스 세션이 없으면 쫓아냄
         return; 
       }
