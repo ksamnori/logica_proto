@@ -1191,6 +1191,40 @@ export const buildMergedQuestionGroups = (rawQuestions: any[], isDiagnosticMode:
 
 
 // 🌟 서브문항 텍스트가 "(1)", "(2)", "①", "[1]", "(가)" 등 번호만 있고 본문 텍스트가 없는지 판별
+
+// 🌟 텍스트 앞단에 이미 (1), (2), ①, [1], 1) 등의 서브문항 번호가 있는지 판별
+export const hasLeadingSubNumber = (rawText: any): boolean => {
+  if (!rawText) return false;
+  const plain = String(rawText)
+    .replace(/^(\s*<[^>]+>\s*)*/, "")
+    .replace(/&nbsp;/gi, " ")
+    .trim();
+  if (!plain) return false;
+  return /^(?:\(\s*(?:\d+|[가-하]|[ㄱ-ㅎ]|[a-zA-Z])\s*\)|\[\s*\d+\s*\]|[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]|\d+\s*\))/.test(plain);
+};
+
+// 🌟 텍스트 앞단의 (1), (2), ①, [1], 1) 서브문항 번호를 제거
+export const stripLeadingSubNumber = (rawText: any): string => {
+  if (!rawText) return "";
+  let s = String(rawText);
+  s = s.replace(/^((?:\s*<[^>]+>\s*)*)\(\s*(?:\d+|[가-하]|[ㄱ-ㅎ]|[a-zA-Z])\s*\)\s*/, "$1");
+  s = s.replace(/^((?:\s*<[^>]+>\s*)*)\[\s*\d+\s*\]\s*/, "$1");
+  s = s.replace(/^((?:\s*<[^>]+>\s*)*)[①②③④⑤⑥⑦⑧⑨⑩⑪⑫⑬⑭⑮]\s*/, "$1");
+  s = s.replace(/^((?:\s*<[^>]+>\s*)*)\d+\s*\)\s*/, "$1");
+  return s;
+};
+
+// 🌟 텍스트 앞단에 (1), (2) 등의 서브문항 번호가 없으면 자동으로 붙여주는 헬퍼
+export const ensureLeadingSubNumber = (rawText: any, subNum: number): string => {
+  if (!rawText) return "";
+  const s = String(rawText);
+  if (!s.trim()) return "";
+  if (hasLeadingSubNumber(s) || splitTrailingSubNumberText(s).isTrailingSubNum) {
+    return s;
+  }
+  return s.replace(/^((?:\s*<[^>]+>\s*)*)/, `$1(${subNum}) `);
+};
+
 export const isSubNumberOnlyText = (rawText: any): boolean => {
   if (!rawText) return false;
   const plain = String(rawText)

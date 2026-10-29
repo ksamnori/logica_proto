@@ -16,7 +16,7 @@ import {
   formatExamDate, getCleanUrl, formatQText, buildHeaderHtml, buildFooterHtml
 } from "@/utils/examRenderUtils";
 
-import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups, isSubNumberOnlyText, splitTrailingSubNumberText, getDiffLabelByRate, getDepth5Name, getDepth6Name } from "../step2/examUtils";
+import { processGroupText, compareSubQuestions, getDiagnosticMainScore, buildMergedQuestionGroups, isSubNumberOnlyText, splitTrailingSubNumberText, stripLeadingSubNumber, ensureLeadingSubNumber, getDiffLabelByRate, getDepth5Name, getDepth6Name } from "../step2/examUtils";
 
 const COLUMN_GAP_PX = 15 * (96 / 25.4);
 const SAFETY_MARGIN_PX = 8 * (96 / 25.4);
@@ -403,11 +403,12 @@ const computeHeaderDepth5Scope = async (groups: any[]): Promise<string> => {
 const buildSubQuestionItemHtml = (
   q: any,
   sIdx: number,
-  textToRender: string,
+  rawTextToRender: string,
   hiddenImgSet?: Set<string>,
   isAdmissionMode: boolean = false,
   col: number = 2,
-  split: number = 4
+  split: number = 4,
+  isGroupMerged: boolean = false
 ) => {
   const realQId = getRealId(String(q.question_id || ""));
   const isImg1Hidden = Boolean(hiddenImgSet && (hiddenImgSet.has(`${realQId}__img1`) || hiddenImgSet.has(realQId)));
@@ -419,13 +420,31 @@ const buildSubQuestionItemHtml = (
   const validImg2 = Boolean(safeImg2Url && safeImg2Url !== "undefined" && safeImg2Url !== "null");
   const hasAnyImg = validImg1 || validImg2;
 
+  const hideSubNum = typeof window !== "undefined" && sessionStorage.getItem("examHideSubNumber") === "1";
+  let textToRender = rawTextToRender || "";
+  let rawQ2 = String(q.question_2 || "").trim();
+  if (rawQ2 === "undefined" || rawQ2 === "null") rawQ2 = "";
+
+  if (hideSubNum) {
+    if (textToRender) textToRender = stripLeadingSubNumber(textToRender);
+    if (rawQ2) rawQ2 = stripLeadingSubNumber(rawQ2);
+  } else if (isGroupMerged) {
+    const subNumber = sIdx + 1;
+    if (textToRender && String(textToRender).trim() !== "") {
+      textToRender = ensureLeadingSubNumber(textToRender, subNumber);
+    } else if (rawQ2 && String(rawQ2).trim() !== "") {
+      rawQ2 = ensureLeadingSubNumber(rawQ2, subNumber);
+    } else if (hasAnyImg) {
+      textToRender = `(${subNumber})`;
+    }
+  }
+
   const splitSub = hasAnyImg
     ? splitTrailingSubNumberText(textToRender)
     : { isTrailingSubNum: false, introText: textToRender, subMarkerText: "" };
 
   const isTrailingSubNum = splitSub.isTrailingSubNum;
   const hasText = Boolean(textToRender && String(textToRender).trim());
-  const rawQ2 = String(q.question_2 || "").trim();
   const hasQ2 = Boolean(rawQ2 && rawQ2 !== "undefined" && rawQ2 !== "null");
   const isCompactSingleCol = col === 1 && split >= 4;
   const topMarginClass = sIdx > 0 ? (isCompactSingleCol ? "mt-3" : (isTrailingSubNum || !hasText) ? "mt-6" : "mt-16") : "";
@@ -1316,7 +1335,7 @@ export default function ExamViewerPage() {
 
         g.questions.forEach((q: any, sIdx: number) => {
             const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
-            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmissionLock, col, split);
+            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmissionLock, col, split, isGroupMerged);
         });
 
         wrap.innerHTML = `<div class="flex flex-col relative w-full min-w-0 bg-white z-10" data-display-num="${g.displayNum}">
@@ -1406,7 +1425,7 @@ export default function ExamViewerPage() {
         const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
         g.questions.forEach((q: any, sIdx: number) => {
             const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
-            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol, col, split);
+            subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, isAdmCol, col, split, isGroupMerged);
         });
         const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';
         
@@ -1645,7 +1664,7 @@ export default function ExamViewerPage() {
                 const finalScore = g.questions[0].assigned_score || (isAdmissionLock ? getDiagnosticMainScore(g.displayNum ? g.displayNum - 1 : 0) : null);
                 g.questions.forEach((q: any, sIdx: number) => {
                     const textToRender = (isGroupMerged && common && remainders[sIdx] !== undefined) ? remainders[sIdx] : (q.question || q.text_question || '');
-                    subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, true);
+                    subHtml += buildSubQuestionItemHtml(q, sIdx, textToRender, hiddenImageSetRef.current, true, 2, 4, isGroupMerged);
                 });
                 
                 const scoreTagHtml = finalScore ? `<div class="mt-2 bg-[#d5d8df] text-[#625c86] font-extrabold text-[12px] px-2 py-0.5 rounded-[5px] leading-none whitespace-nowrap tracking-tight shadow-sm">${finalScore}점</div>` : '';

@@ -1,7 +1,7 @@
 // src/app/exam/step2/RightPreview.tsx
 import React, { useState, useEffect } from "react";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, getTypeName, getDepth6Name, getSubDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore, isSubNumberOnlyText, splitTrailingSubNumberText } from "./examUtils";
+import { getDiffLabelByRate, getTypeName, getDepth6Name, getSubDepth6Name, formatText, getCleanUrl, isThinking, processGroupText, getDiagnosticMainScore, isSubNumberOnlyText, splitTrailingSubNumberText, stripLeadingSubNumber, ensureLeadingSubNumber } from "./examUtils";
 
 // 🌟 [핵심 수정] 배열([y1,x1,y2,x2])이나 다중 JSON 문자열 형태도 안전하게 객체로 정규화하는 헬퍼
 const parseBoxObject = (box: any): Record<string, any> => {
@@ -69,7 +69,21 @@ export default function RightPreview({ examData }: { examData: any }) {
   const [previewTitle, setPreviewTitle] = useState<string | null>(null);
   const [previewBadge, setPreviewBadge] = useState<string | null>(null);
 
-  const [hideSubNumber, setHideSubNumber] = useState(false);
+  const [hideSubNumber, setHideSubNumber] = useState<boolean>(() => {
+    if (typeof window !== "undefined") {
+      return sessionStorage.getItem("examHideSubNumber") === "1";
+    }
+    return false;
+  });
+  const toggleHideSubNumber = () => {
+    setHideSubNumber((prev) => {
+      const next = !prev;
+      if (typeof window !== "undefined") {
+        sessionStorage.setItem("examHideSubNumber", next ? "1" : "0");
+      }
+      return next;
+    });
+  };
   const [previewSearch, setPreviewSearch] = useState("");
 
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
@@ -431,11 +445,11 @@ export default function RightPreview({ examData }: { examData: any }) {
         <div className="flex space-x-2 items-center">
           
           <button 
-            onClick={() => setHideSubNumber(!hideSubNumber)} 
-            className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[13px] rounded-lg transition-colors border shadow-sm ${hideSubNumber ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-slate-50 text-slate-600 border-slate-300 hover:bg-slate-100'}`}
-            title="문제 텍스트(DB) 앞단에 적혀있는 (1), (2), ① 등의 꼬리 문항 번호를 정규식으로 깔끔하게 지워줍니다."
+            onClick={toggleHideSubNumber} 
+            className={`flex items-center gap-1.5 px-4 py-2 font-bold text-[13px] rounded-lg transition-colors border shadow-sm ${hideSubNumber ? 'bg-rose-50 text-rose-600 border-rose-200 hover:bg-rose-100' : 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100'}`}
+            title="병합된 서브문항 앞에 (1), (2) 꼬리번호를 자동으로 붙여서 표시하거나 숨깁니다."
           >
-            {hideSubNumber ? '🙈 (1) 꼬리번호 숨김' : '🐵 (1) 꼬리번호 보기'}
+            {hideSubNumber ? '🙈 (1) 서브번호 숨김 중' : '🔢 (1) 서브번호 표시 중'}
           </button>
 
           <button onClick={forceMathRefresh} className="flex items-center gap-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-lg transition-colors border border-slate-300">
@@ -572,10 +586,10 @@ export default function RightPreview({ examData }: { examData: any }) {
                    const isEditing = editingId === q.question_id;
                    
                    let textToRender = (isGroupMerged && common && remainders[subIdx] !== undefined) ? remainders[subIdx] : (q.question || q.text_question || '');
-                   if (hideSubNumber && textToRender && !isEditing) {
-                     textToRender = textToRender.replace(/^((?:\s*<[^>]+>\s*)*)\(?\s*\d+\s*\)\s*/, '$1');
-                     textToRender = textToRender.replace(/^((?:\s*<[^>]+>\s*)*)[①-⑩]\s*/, '$1');
-                   }
+                   const rawQ2Str = (q.question_2 && String(q.question_2).trim() !== '' && String(q.question_2) !== 'null' && String(q.question_2) !== 'undefined')
+                     ? String(q.question_2)
+                     : '';
+                   let q2ToRender = rawQ2Str;
 
                    const isTwin = q.problem_type === '쌍둥이' || q.derivation_type === 'TWIN' || q.derivation_type === '쌍둥이';
                    const isSimilar = q.problem_type === '유사' || q.derivation_type === '유사';
@@ -588,6 +602,22 @@ export default function RightPreview({ examData }: { examData: any }) {
                    const showImg1 = hasImg1 && !isImg1Hidden;
                    const showImg2 = hasImg2 && !isImg2Hidden;
                    const hasVisibleImg = showImg1 || showImg2;
+
+                   if (!isEditing) {
+                     if (hideSubNumber) {
+                       if (textToRender) textToRender = stripLeadingSubNumber(textToRender);
+                       if (q2ToRender) q2ToRender = stripLeadingSubNumber(q2ToRender);
+                     } else if (isGroupMerged) {
+                       const subNumber = subIdx + 1;
+                       if (textToRender && String(textToRender).trim() !== '') {
+                         textToRender = ensureLeadingSubNumber(textToRender, subNumber);
+                       } else if (q2ToRender && String(q2ToRender).trim() !== '') {
+                         q2ToRender = ensureLeadingSubNumber(q2ToRender, subNumber);
+                       } else if (hasVisibleImg) {
+                         textToRender = `(${subNumber})`;
+                       }
+                     }
+                   }
 
                    const splitSubInfo = hasVisibleImg
                      ? splitTrailingSubNumberText(textToRender)
@@ -724,17 +754,11 @@ export default function RightPreview({ examData }: { examData: any }) {
                                  </>
                                )}
 
-                               {q.question_2 && String(q.question_2).trim() !== '' && String(q.question_2) !== 'null' && String(q.question_2) !== 'undefined' && (
+                               {q2ToRender && (
                                  <div
                                    className="font-myungjo font-semibold text-[16px] text-slate-800 leading-[2.2] tracking-wide break-keep pointer-events-none mt-3"
                                    dangerouslySetInnerHTML={{
-                                     __html: formatText(
-                                       hideSubNumber && !isEditing && !textToRender
-                                         ? String(q.question_2)
-                                             .replace(/^((?:\s*<[^>]+>\s*)*)\(?\s*\d+\s*\)\s*/, '$1')
-                                             .replace(/^((?:\s*<[^>]+>\s*)*)[①-⑩]\s*/, '$1')
-                                         : String(q.question_2)
-                                     )
+                                     __html: formatText(q2ToRender)
                                    }}
                                  />
                                )}
