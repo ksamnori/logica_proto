@@ -102,26 +102,58 @@ export default function TeacherDashboardPage() {
   };
 
   useEffect(() => {
-    const instId = localStorage.getItem("logica_instructor_id") || "1";
-    const name = localStorage.getItem("logica_instructor_name") || "선생님";
-    const role = localStorage.getItem("logica_instructor_role") || "";
-    const position = localStorage.getItem("logica_instructor_position") || "";
-    const tId = localStorage.getItem("logica_tenant_id") || "hq"; 
-    setTenantId(tId);
+    const initHome = async () => {
+      let instId = localStorage.getItem("logica_instructor_id") || "";
+      let name = localStorage.getItem("logica_instructor_name") || "선생님";
+      let role = localStorage.getItem("logica_instructor_role") || "";
+      let position = localStorage.getItem("logica_instructor_position") || "";
+      let tId = localStorage.getItem("logica_tenant_id") || "hq";
 
-    const isSuperLevel = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-                         String(position).includes('최고관리자') || 
-                         String(position).includes('원장') || 
-                         String(position).includes('실장');
-                         
-    const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-                      String(position).includes('최고관리자') || 
-                      String(position).includes('원장');
+      const isUuid = (v: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(v);
 
-    setCurrentUser({ instId, name, isSuperLevel });
+      if (!isUuid(instId)) {
+        const { data: { session } } = await supabase.auth.getSession();
+        const uid = session?.user?.id || "";
+        if (isUuid(uid)) {
+          instId = uid;
+          localStorage.setItem("logica_instructor_id", uid);
+          const { data: instRow } = await supabase.from("instructor").select("*").eq("instructor_id", uid).maybeSingle();
+          if (instRow) {
+            name = instRow.name || name;
+            role = instRow.role || role;
+            position = instRow.position || position;
+            tId = instRow.tenant_id || tId;
+            localStorage.setItem("logica_instructor_name", name);
+            if (role) localStorage.setItem("logica_instructor_role", role);
+            if (position) localStorage.setItem("logica_instructor_position", position);
+            if (instRow.tenant_id) localStorage.setItem("logica_tenant_id", instRow.tenant_id);
+          }
+        } else {
+          instId = "";
+        }
+      }
 
-    loadPermissions(role, tId, isGodMode);
-    loadDashboardData(instId);
+      setTenantId(tId);
+
+      const isSuperLevel = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                           String(position).includes('최고관리자') || 
+                           String(position).includes('원장') || 
+                           String(position).includes('실장');
+                           
+      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
+                        String(position).includes('최고관리자') || 
+                        String(position).includes('원장');
+
+      setCurrentUser({ instId, name, isSuperLevel });
+
+      loadPermissions(role, tId, isGodMode);
+      if (isUuid(instId)) {
+        loadDashboardData(instId);
+      } else {
+        fetchMemos();
+      }
+    };
+    initHome();
 
     const closeMenu = (e: MouseEvent) => {
       const target = e.target as Element;
@@ -251,6 +283,7 @@ export default function TeacherDashboardPage() {
   };
 
   const loadDashboardData = async (instId: string) => {
+    if (!instId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(instId)) return;
     const { data: classes } = await supabase
       .from("class")
       .select("*, class_schedule(day_of_week, start_time, end_time)")
@@ -315,6 +348,7 @@ export default function TeacherDashboardPage() {
   };
 
   const fetchUpcomingSchedules = async (instId: string) => {
+    if (!instId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(instId)) return;
     const todayStr = getKSTDateStr();
 
     try {

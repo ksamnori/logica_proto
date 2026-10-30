@@ -19,11 +19,80 @@ export default function ExamListPage() {
   const [exams, setExams] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>('ALL');
-  const [filterLevel, setFilterLevel] = useState("ALL");
-  const [filterGrade, setFilterGrade] = useState("ALL");
-  const [filterCreator, setFilterCreator] = useState("ALL");
-  const [searchQuery, setSearchQuery] = useState("");
+  const EXAM_LIST_FILTER_STORAGE_KEY = "logica_exam_list_filter_state";
+  const EXAM_LIST_SCROLL_STORAGE_KEY = "logica_exam_list_scroll_top";
+
+  const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
+        if (['ALL', 'EXAM', 'HOMEWORK', 'INCORRECT', 'SIMILAR'].includes(saved.mainTab)) return saved.mainTab;
+      } catch (e) {}
+    }
+    return 'ALL';
+  });
+  const [filterLevel, setFilterLevel] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
+        if (saved.filterLevel) return String(saved.filterLevel);
+      } catch (e) {}
+    }
+    return "ALL";
+  });
+  const [filterGrade, setFilterGrade] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
+        if (saved.filterGrade) return String(saved.filterGrade);
+      } catch (e) {}
+    }
+    return "ALL";
+  });
+  const [filterCreator, setFilterCreator] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
+        if (saved.filterCreator) return String(saved.filterCreator);
+      } catch (e) {}
+    }
+    return "ALL";
+  });
+  const [searchQuery, setSearchQuery] = useState(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
+        if (typeof saved.searchQuery === "string") return saved.searchQuery;
+      } catch (e) {}
+    }
+    return "";
+  });
+  const listScrollRef = useRef<HTMLDivElement>(null);
+  const restoredScrollRef = useRef(false);
+
+  // 탭/분류/검색 상태가 바뀔 때마다 sessionStorage에 즉시 저장하여 Viewer나 Step 2에서 돌아왔을 때 그대로 유지
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(
+        EXAM_LIST_FILTER_STORAGE_KEY,
+        JSON.stringify({ mainTab, filterLevel, filterGrade, filterCreator, searchQuery })
+      );
+    } catch (e) {}
+  }, [mainTab, filterLevel, filterGrade, filterCreator, searchQuery]);
+
+  // 목록 로딩 완료 후 이전 스크롤 위치 복원
+  useEffect(() => {
+    if (!isLoading && exams.length > 0 && !restoredScrollRef.current && listScrollRef.current) {
+      restoredScrollRef.current = true;
+      const savedTop = Number(sessionStorage.getItem(EXAM_LIST_SCROLL_STORAGE_KEY) || "0");
+      if (savedTop > 0) {
+        requestAnimationFrame(() => {
+          if (listScrollRef.current) listScrollRef.current.scrollTop = savedTop;
+        });
+      }
+    }
+  }, [isLoading, exams.length]);
 
   const [publishModal, setPublishModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
   const [gradingModal, setGradingModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
@@ -520,6 +589,10 @@ export default function ExamListPage() {
 
   const resetFilters = () => {
     setMainTab("ALL"); setFilterLevel("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL"); setSearchQuery("");
+    try {
+      sessionStorage.removeItem(EXAM_LIST_FILTER_STORAGE_KEY);
+      sessionStorage.removeItem(EXAM_LIST_SCROLL_STORAGE_KEY);
+    } catch (e) {}
   };
 
   const deleteExam = async (examId: string, examType: string, assignCount: number) => {
@@ -703,7 +776,15 @@ export default function ExamListPage() {
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm flex-1 flex flex-col overflow-hidden min-h-0">
-        <div className="overflow-y-auto flex-1 custom-scroll">
+        <div
+          ref={listScrollRef}
+          onScroll={(e) => {
+            try {
+              sessionStorage.setItem(EXAM_LIST_SCROLL_STORAGE_KEY, String(e.currentTarget.scrollTop));
+            } catch (err) {}
+          }}
+          className="overflow-y-auto flex-1 custom-scroll"
+        >
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
@@ -783,7 +864,7 @@ export default function ExamListPage() {
                             📑 정답
                           </button>
 
-                          <button onClick={() => router.push(`/exam/viewer?exam_id=${exam.exam_id}`)} className="font-bold text-slate-800 text-[15px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
+                          <button onClick={() => { clearSessionStorageForExam(); router.push(`/exam/viewer?exam_id=${exam.exam_id}`); }} className="font-bold text-slate-800 text-[15px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
                           
                           {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded text-xs font-bold shadow-sm shrink-0">{exam.sub_title}</span>}
                           {isNew && <span className="text-xs font-bold text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">NEW</span>}

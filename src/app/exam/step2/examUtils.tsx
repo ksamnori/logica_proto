@@ -189,12 +189,7 @@ export const isMainTextbookQuestion = (
   }
 
   // 1) 쌍둥이(TWIN) / 유사(SIMILAR) 파생 문항은 시험지 출제용 문항이므로 메인교재가 아님
-  const deriv = String(q.derivation_type || '').trim().toUpperCase();
-  if (deriv === 'TWIN' || deriv === '쌍둥이' || deriv === '유사' || deriv === 'SIMILAR') {
-    return false;
-  }
-  const pType = String(q.problem_type || '').trim();
-  if (pType === '쌍둥이' || pType === '유사' || pType === 'TWIN') {
+  if (isTwinOrSimilarQuestion(q)) {
     return false;
   }
 
@@ -813,21 +808,42 @@ export const processGroupText = (items: any[]) => {
 
 export const parseQuestionNumberParts = (numStr: any) => {
   if (numStr === null || numStr === undefined || numStr === "") {
-    return { main: 99999, dash: 0, paren: 0, orig: "" };
+    return { prefix: "", main: 99999, dash: 0, paren: 0, baseKey: "_99999_0", orig: "" };
   }
   const s = String(numStr).trim();
-  const mMain = s.match(/^(\d+)/);
-  if (!mMain) return { main: 99999, dash: 0, paren: 0, orig: s };
-  const main = parseInt(mMain[1], 10);
+  const clean = s.replace(/-(?:T|S)\d+$/i, "").replace(/번$/g, "").trim();
 
-  const noParen = s.replace(/\(\d+\)/g, "");
-  const mDash = noParen.match(/-(\d+)/);
-  const dash = mDash ? parseInt(mDash[1], 10) : 0;
-
-  const mParen = s.match(/\((\d+)\)/);
+  const mParen = clean.match(/\((\d+)\)/);
   const paren = mParen ? parseInt(mParen[1], 10) : 0;
+  const noParen = clean.replace(/\(\d+\)/g, "").trim();
 
-  return { main, dash, paren, orig: s };
+  // 1) "유형1-2", "유형 1-2", "1-2" 형태 (접두어 + 대번호 - 소번호)
+  const mPrefixNumDash = noParen.match(/^([가-힣a-zA-Z]*)\s*(\d+)\s*-\s*(\d+)/);
+  if (mPrefixNumDash) {
+    const prefix = (mPrefixNumDash[1] || "").trim().toLowerCase();
+    const main = parseInt(mPrefixNumDash[2], 10);
+    const dash = parseInt(mPrefixNumDash[3], 10);
+    return { prefix, main, dash, paren, baseKey: `${prefix}_${main}_${dash}`, orig: s };
+  }
+
+  // 2) "Q-1", "A-2", "유형-1" 형태 (접두어 - 번호)
+  const mAlphaDashNum = noParen.match(/^([가-힣a-zA-Z]+)\s*-\s*(\d+)/);
+  if (mAlphaDashNum) {
+    const prefix = (mAlphaDashNum[1] || "").trim().toLowerCase();
+    const main = parseInt(mAlphaDashNum[2], 10);
+    return { prefix, main, dash: 0, paren, baseKey: `${prefix}_${main}_0`, orig: s };
+  }
+
+  // 3) "16", "예제 1", "개념2" 형태 (접두어 + 단일 번호)
+  const mPrefixSingle = noParen.match(/^([가-힣a-zA-Z]*)\s*(\d+)/);
+  if (mPrefixSingle) {
+    const prefix = (mPrefixSingle[1] || "").trim().toLowerCase();
+    const main = parseInt(mPrefixSingle[2], 10);
+    return { prefix, main, dash: 0, paren, baseKey: `${prefix}_${main}_0`, orig: s };
+  }
+
+  const fallbackPrefix = noParen.toLowerCase();
+  return { prefix: fallbackPrefix, main: 99999, dash: 0, paren, baseKey: `${fallbackPrefix}_99999_0`, orig: s };
 };
 
 const parseLeadingSubMarker = (rem: string): number => {
@@ -952,6 +968,7 @@ export const compareQuestionsBySource = (a: any, b: any): number => {
 
   const qA = parseQuestionNumberParts(a.question_number);
   const qB = parseQuestionNumberParts(b.question_number);
+  if (qA.prefix !== qB.prefix) return qA.prefix.localeCompare(qB.prefix, "ko", { numeric: true });
   if (qA.main !== qB.main) return qA.main - qB.main;
   if (qA.dash !== qB.dash) return qA.dash - qB.dash;
   if (qA.paren !== qB.paren) return qA.paren - qB.paren;
@@ -1015,42 +1032,75 @@ export const shouldMergeAdjacentQuestions = (lastItem: any, nextItem: any, isDia
   const commonPrefix = clean1.substring(0, k);
   const textOnlyCommon = commonPrefix.replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").trim();
 
-  if (samePage && num1.main !== 99999 && num1.main === num2.main) {
+  // 🌟 접두어(예: "Q-1" vs "유형1-2")나 대문항 번호가 서로 다르면 절대 병합하지 않음
+  if (num1.prefix !== num2.prefix) return false;
+  if (num1.main !== 99999 && num2.main !== 99999 && num1.main !== num2.main) return false;
+
+  // 🌟 "유형1-1" vs "유형1-2" 또는 "1-1" vs "1-2"처럼 대시(-) 뒤 번호가 다른 경우는
+  // 별개의 독립 문항이므로 공통 지문이 12자 이상 완전히 일치할 때만 병합 허용
+  if (!isDiagnosticMode && num1.dash !== num2.dash && textOnlyCommon.length < 12) {
+    return false;
+  }
+
+  // 🌟 두 문항이 각자 "(1)", "(2)" 앞에 서로 다른 독립 지문(10자 이상)을 가지고 있는데
+  // 공통 지문(textOnlyCommon)이 거의 없다면 서로 다른 문제의 서브문항이므로 병합 차단
+  const getIntroBeforeSubMarker = (raw: string): string => {
+    const plain = String(raw || "")
+      .replace(/<br\s*\/?>/gi, "\n")
+      .replace(/<\/p>/gi, "\n")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&nbsp;/gi, " ")
+      .trim();
+    const idx = plain.search(/(?:\n|(?:답하세요|답하시오|구하세요|구하시오|고르세요|고르시오|쓰세요|쓰시오|나타내시오|나타내세요)[\.\:\s]*)\s*(?:\(\s*\d+\s*\)|[①-⑩]|\(\s*[가-하]\s*\))/);
+    return idx > 0 ? plain.slice(0, idx).trim() : "";
+  };
+  const intro1 = getIntroBeforeSubMarker(text1);
+  const intro2 = getIntroBeforeSubMarker(text2);
+  if (intro1.length >= 10 && intro2.length >= 10 && textOnlyCommon.length < 8) {
+    return false;
+  }
+
+  const sameBaseQuestion =
+    num1.main !== 99999 &&
+    num1.prefix === num2.prefix &&
+    num1.main === num2.main &&
+    num1.dash === num2.dash;
+
+  if (samePage && sameBaseQuestion) {
     const hasDistinctSubIndicator =
       sub1 !== sub2 ||
       ss1 !== ss2 ||
-      num1.dash !== num2.dash ||
       num1.paren !== num2.paren ||
       (m1 > 0 && m2 > 0 && m1 !== m2) ||
       textOnlyCommon.length >= 6 ||
       sub1 > 0 ||
       sub2 > 0 ||
-      num1.dash > 0 ||
-      num2.dash > 0 ||
       num1.paren > 0 ||
       num2.paren > 0;
     if (hasDistinctSubIndicator) {
       return true;
     }
   }
+
   if (
     isDiagnosticMode &&
     num1.main !== 99999 &&
+    num1.prefix === num2.prefix &&
     num1.main === num2.main &&
     (samePage || num1.dash > 0 || num2.dash > 0 || num1.paren > 0 || num2.paren > 0)
   ) {
     return true;
   }
 
-  if (samePage && num1.main === num2.main && sub2 > 1 && (sub2 === sub1 + 1 || sub1 >= 1)) {
+  if (samePage && sameBaseQuestion && sub2 > 1 && (sub2 === sub1 + 1 || sub1 >= 1)) {
     return true;
   }
 
-  if (samePage && (num1.main === num2.main || num1.main === 99999 || num2.main === 99999) && textOnlyCommon.length >= 8) {
+  if (samePage && (sameBaseQuestion || (num1.main === 99999 && num2.main === 99999 && num1.prefix === num2.prefix)) && textOnlyCommon.length >= 8) {
     return true;
   }
 
-  if (samePage && (num1.main === num2.main || num1.main === 99999 || num2.main === 99999)) {
+  if (samePage && sameBaseQuestion) {
     if (m1 >= 1 && m2 === m1 + 1) {
       return true;
     }
@@ -1219,7 +1269,11 @@ export const ensureLeadingSubNumber = (rawText: any, subNum: number): string => 
   if (!rawText) return "";
   const s = String(rawText);
   if (!s.trim()) return "";
-  if (hasLeadingSubNumber(s) || splitTrailingSubNumberText(s).isTrailingSubNum) {
+  if (
+    hasLeadingSubNumber(s) ||
+    extractStandaloneSubMarker(s) > 0 ||
+    splitTrailingSubNumberText(s).isTrailingSubNum
+  ) {
     return s;
   }
   return s.replace(/^((?:\s*<[^>]+>\s*)*)/, `$1(${subNum}) `);

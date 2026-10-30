@@ -965,7 +965,11 @@ export default function ExamViewerPage() {
     try {
       if (urlExamId) {
         currentExamIdRef.current = urlExamId;
+        isNewExamRef.current = false;
         setSavedExamId(urlExamId);
+        // 이전 작업 세션의 캐시 문항 데이터가 남아 Step 2 이동 시 엉뚱한 문제가 뜨는 현상 방지
+        ['restoreExamQuestions', 'examQuestions', 'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'duplicateExamId'].forEach(k => sessionStorage.removeItem(k));
+        sessionStorage.setItem('editExamId', urlExamId);
 
         const { data: examData } = await supabase.from('exam_master').select('*').eq('exam_id', urlExamId).single();
         if (!examData) throw new Error("시험지를 찾을 수 없습니다.");
@@ -2192,7 +2196,7 @@ export default function ExamViewerPage() {
         <ViewerHeader 
           isExamDistributed={isExamDistributed} 
           isNewExam={isNewExamRef.current} 
-          currentExamId={currentExamIdRef.current} 
+          currentExamId={savedExamId || currentExamIdRef.current} 
           onAttemptLeave={attemptLeave} 
         />
       )}

@@ -2,7 +2,7 @@
 import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
-import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, isWorkbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
+import { getDiffLabelByRate, smartSplitTaxonomy, getDepth5Name, getDepth6Name, extractParentIds, parseQuestionNumberParts, compareSubQuestions, compareQuestionsBySource, buildMergedQuestionGroups, fetchMainTextbookExclusionSet, isMainTextbookQuestion, isWorkbookQuestion, hydrateMissingQuestionImages, matchesSourceCategoryFilter, ensureCompleteSubQuestionBundles } from "./examUtils";
 import { DIAGNOSTIC_SEMESTERS, getDiagnosticQuarterInfo, matchDiagnosticSemester } from "../step1/useStep1Data";
 import { normalizeMasterCategories, normalizeMasterCategoryRow } from "../../../lib/normalize";
 
@@ -198,7 +198,16 @@ export function useExamData() {
   const fetchAndFilterQuestions = async () => {
     setIsLoading(true);
 
-    if (sessionStorage.getItem('restoreExamQuestions') === '1' && sessionStorage.getItem('examQuestions')) {
+    const directUrlExamId = searchParams.get('exam_id');
+    const directDuplicateUrlId = searchParams.get('duplicate_exam_id');
+
+    // URL에 exam_id 또는 duplicate_exam_id가 명시된 경우에는 이전 세션 캐시(restoreExamQuestions)를 무시하고 해당 시험지를 DB에서 정확히 로드
+    if (directUrlExamId || directDuplicateUrlId) {
+      sessionStorage.removeItem('restoreExamQuestions');
+      sessionStorage.removeItem('examQuestions');
+    }
+
+    if (!directUrlExamId && !directDuplicateUrlId && sessionStorage.getItem('restoreExamQuestions') === '1' && sessionStorage.getItem('examQuestions')) {
       setIsRestoredMode(true); 
       setTimeout(() => sessionStorage.removeItem('restoreExamQuestions'), 1500);
       try {
@@ -784,6 +793,19 @@ export function useExamData() {
     setTwinPoolTwins([]);
     setTwinPoolSimilars([]);
 
+    const toRealQId = (id: any) => String(id || "").trim().replace(/_added_\d+$/, "");
+    const currentQuestionId = toRealQId(q.question_id);
+
+    // parent_question_id 뿐만 아니라 parent_relations(twin_id, similars_ids)에 들어 있는 모든 부모 ID 추출
+    const extractedRel = extractParentIds(q.parent_relations, q.parent_question_id);
+    const parentIds = Array.from(
+      new Set(
+        [...extractedRel.twins, ...extractedRel.similars]
+          .map((id) => toRealQId(id))
+          .filter((id) => id && id !== "null" && id !== "undefined" && id !== currentQuestionId)
+      )
+    );
+
     const rawCandidateIds = [
       q.thk_taxonomy_id,
       q.taxonomy_id,
@@ -793,8 +815,8 @@ export function useExamData() {
       .map((val) => (val ? String(val).trim() : ""))
       .filter((val) => val && val !== "null" && val !== "undefined" && val !== "None" && val !== "미분류");
 
-    if (rawCandidateIds.length === 0) {
-      alert("이 문항은 분류 코드가 명확하지 않아 검색이 불가능합니다.");
+    if (rawCandidateIds.length === 0 && parentIds.length === 0) {
+      alert("이 문항은 분류 코드나 부모 문항 정보가 없어 검색이 불가능합니다.");
       setIsSearchingTwin(false);
       return;
     }
@@ -812,25 +834,166 @@ export function useExamData() {
         )
       );
 
-      const parentId = q.parent_question_id || "NO_PARENT_ID_MATCH";
-      const currentQuestionId = q.question_id;
+      let data: any[] = [];
 
-      const prefixOrClauses = fallbackPrefixes
-        .map(
-          (fb) =>
-            `item_id.ilike."${fb}%",taxonomy_id.ilike."${fb}%",sub_taxonomy_id.ilike."${fb}%",thk_taxonomy_id.ilike."${fb}%"`
-        )
-        .join(",");
+      // 1) 분류 코드(taxonomy) 기반 유사/형제 문항 조회 (sub_taxonomy_id 미지원 환경 폴백 포함)
+      if (fallbackPrefixes.length > 0) {
+        const taxPartsWithSub: string[] = [];
+        const taxPartsBase: string[] = [];
+        fallbackPrefixes.forEach((fb) => {
+          taxPartsWithSub.push(`item_id.ilike."${fb}%"`);
+          taxPartsWithSub.push(`taxonomy_id.ilike."${fb}%"`);
+          taxPartsWithSub.push(`sub_taxonomy_id.ilike."${fb}%"`);
+          taxPartsWithSub.push(`thk_taxonomy_id.ilike."${fb}%"`);
 
-      const orQueryStr = `parent_question_id.eq."${currentQuestionId}",question_id.eq."${parentId}",parent_question_id.eq."${parentId}",${prefixOrClauses}`;
+          taxPartsBase.push(`item_id.ilike."${fb}%"`);
+          taxPartsBase.push(`taxonomy_id.ilike."${fb}%"`);
+          taxPartsBase.push(`thk_taxonomy_id.ilike."${fb}%"`);
+        });
 
-      const { data, error } = await supabase.from('question_db')
-        .select('*')
-        .or(orQueryStr)
-        .neq('question_id', currentQuestionId)
-        .limit(200);
+        const { data: taxData, error: taxErr } = await supabase
+          .from("question_db")
+          .select("*")
+          .or(taxPartsWithSub.join(","))
+          .neq("question_id", currentQuestionId)
+          .limit(300);
 
-      if (error) throw error;
+        if (!taxErr && Array.isArray(taxData)) {
+          data = data.concat(taxData);
+        } else {
+          const { data: fallbackTaxData } = await supabase
+            .from("question_db")
+            .select("*")
+            .or(taxPartsBase.join(","))
+            .neq("question_id", currentQuestionId)
+            .limit(300);
+          if (Array.isArray(fallbackTaxData)) {
+            data = data.concat(fallbackTaxData);
+          }
+        }
+      }
+
+      // 2) 현재 문항을 부모로 가지는 직접 자식(쌍둥이) 문항 조회
+      if (currentQuestionId) {
+        const { data: childData } = await supabase
+          .from("question_db")
+          .select("*")
+          .eq("parent_question_id", currentQuestionId);
+        if (Array.isArray(childData)) data = data.concat(childData);
+      }
+
+      // 3) 부모 문항(question_id IN parentIds) 및 형제 문항(parent_question_id IN parentIds) 직접 조회
+      // (.limit(300)에 걸려 부모/형제 문항이 잘리는 현상 방지)
+      const extraParentIds = new Set<string>(parentIds);
+      if (extraParentIds.size > 0) {
+        const firstFamilyIds = Array.from(extraParentIds);
+        const [{ data: directParents }, { data: directSiblings }] = await Promise.all([
+          supabase.from("question_db").select("*").in("question_id", firstFamilyIds),
+          supabase.from("question_db").select("*").in("parent_question_id", firstFamilyIds),
+        ]);
+        if (Array.isArray(directParents)) {
+          data = data.concat(directParents);
+          directParents.forEach((item: any) => {
+            const pRel = extractParentIds(item.parent_relations, item.parent_question_id);
+            [...pRel.twins, ...pRel.similars].forEach((upId) => {
+              const cleanUp = toRealQId(upId);
+              if (cleanUp && cleanUp !== currentQuestionId) extraParentIds.add(cleanUp);
+            });
+          });
+        }
+        if (Array.isArray(directSiblings)) data = data.concat(directSiblings);
+
+        // 상위 부모가 추가로 발견된 경우 한 번 더 조회
+        const secondFamilyIds = Array.from(extraParentIds).filter((id) => !firstFamilyIds.includes(id));
+        if (secondFamilyIds.length > 0) {
+          const [{ data: upParents }, { data: upSiblings }] = await Promise.all([
+            supabase.from("question_db").select("*").in("question_id", secondFamilyIds),
+            supabase.from("question_db").select("*").in("parent_question_id", secondFamilyIds),
+          ]);
+          if (Array.isArray(upParents)) data = data.concat(upParents);
+          if (Array.isArray(upSiblings)) data = data.concat(upSiblings);
+        }
+      }
+
+      // 4) 동일 페이지 기반 부모/형제 문항 보강 (예: parent_question_id 없이 parent_relations나 15-T1, 15-S1 번호 체계로만 묶인 경우)
+      // 단, 유사문항 풀(similars)에 다른 단원 문항이 섞이지 않도록 부모/형제(PARENT/SIBLING)로 판별된 문항만 추가
+      let samePageCandidates: any[] = [];
+      const pageNumInt = parseInt(String(q.final_printed_page || q.detected_page_num || "").replace(/[^0-9]/g, ""), 10);
+      if (!isNaN(pageNumInt) && pageNumInt > 0) {
+        const { data: samePageData } = await supabase
+          .from("question_db")
+          .select("*")
+          .eq("final_printed_page", pageNumInt)
+          .limit(200);
+        if (Array.isArray(samePageData)) {
+          samePageCandidates = samePageData;
+        }
+      }
+
+      // 만약 조회된 부모 문항이 또 다른 상위 부모를 가지고 있거나, 부모의 다른 형제들이 누락되지 않도록 부모 ID 집합 확장
+      const allParentIdSet = new Set<string>(parentIds);
+      (data || []).forEach((item: any) => {
+        const iid = toRealQId(item.question_id);
+        if (allParentIdSet.has(iid)) {
+          const pRel = extractParentIds(item.parent_relations, item.parent_question_id);
+          [...pRel.twins, ...pRel.similars].forEach((upId) => {
+            const cleanUp = toRealQId(upId);
+            if (cleanUp && cleanUp !== currentQuestionId) allParentIdSet.add(cleanUp);
+          });
+        }
+      });
+
+      // 동일 출처/페이지/대문항번호 기반 부모·형제 판별용 정보 (예: 15번, 15-T1, 15-T2, 15-S1, 15-S2)
+      const qBook = String(q.source_book_name || q.book_name || q.pdf_source || "").trim();
+      const qPage = String(q.final_printed_page || q.detected_page_num || "").replace(/[^0-9]/g, "");
+      const qNumParts = parseQuestionNumberParts(q.question_number);
+      const qHasVariantSuffix = /-(?:T|S)\d+$/i.test(String(q.question_number || "").trim());
+
+      const getRelationRole = (item: any): "PARENT" | "SIBLING" | null => {
+        const iid = toRealQId(item.question_id);
+        if (!iid || iid === currentQuestionId) return null;
+
+        // 1) 직접 부모 문항인 경우
+        if (allParentIdSet.has(iid)) return "PARENT";
+
+        // 2) parent_question_id 또는 parent_relations로 연결된 자식/형제 문항인 경우
+        const itemRel = extractParentIds(item.parent_relations, item.parent_question_id);
+        const itemParents = new Set(
+          [...itemRel.twins, ...itemRel.similars]
+            .map((id) => toRealQId(id))
+            .filter(Boolean)
+        );
+        if (itemParents.has(currentQuestionId)) return "SIBLING";
+        for (const pid of allParentIdSet) {
+          if (itemParents.has(pid)) return "SIBLING";
+        }
+
+        // 3) 동일(또는 파생) 교재 + 동일 페이지 + 동일 문항번호 기반 부모/형제 (예: 원본 15번 vs 15-T1, 15-T2, 15-S1)
+        const normalizeBaseBook = (b: string) =>
+          String(b || "")
+            .replace(/\s*(?:쌍둥이|유사|TWIN|SIMILAR)\s*$/i, "")
+            .trim();
+        const iBook = String(item.source_book_name || item.book_name || item.pdf_source || "").trim();
+        const iPage = String(item.final_printed_page || item.detected_page_num || "").replace(/[^0-9]/g, "");
+        const isSameBaseBook =
+          qBook &&
+          iBook &&
+          (qBook === iBook || normalizeBaseBook(qBook) === normalizeBaseBook(iBook));
+        if (isSameBaseBook && qPage && iPage && qPage === iPage && qNumParts.main !== 99999) {
+          const iNumParts = parseQuestionNumberParts(item.question_number);
+          const iHasVariantSuffix = /-(?:T|S)\d+$/i.test(String(item.question_number || "").trim());
+          if (
+            iNumParts.baseKey === qNumParts.baseKey &&
+            iNumParts.paren === qNumParts.paren &&
+            (qHasVariantSuffix || iHasVariantSuffix)
+          ) {
+            if (qHasVariantSuffix && !iHasVariantSuffix) return "PARENT";
+            return "SIBLING";
+          }
+        }
+
+        return null;
+      };
 
       const mainExclusion = await fetchMainTextbookExclusionSet(supabase);
       let twinSourceCategories = { excludeMain: true, excludeWorkbook: true };
@@ -838,16 +1001,54 @@ export function useExamData() {
         const scStr = sessionStorage.getItem("sourceCategories");
         if (scStr) twinSourceCategories = { ...twinSourceCategories, ...JSON.parse(scStr) };
       } catch (e) {}
-      const existingIds = new Set(questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i: any) => String(i.question_id))), []));
-      const filteredData = (data || []).filter(
-        (item: any) =>
-          !existingIds.has(String(item.question_id)) &&
-          item.is_hidden !== true &&
-          item.is_hidden !== 'Y' &&
-          item.is_hidden !== 'true' &&
-          !((twinSourceCategories.excludeMain ?? true) && isMainTextbookQuestion(item, mainExclusion)) &&
-          !((twinSourceCategories.excludeWorkbook ?? true) && isWorkbookQuestion(item, mainExclusion))
+
+      const existingIds = new Set(
+        questions.reduce((acc: string[], g: any) => acc.concat(g.items.map((i: any) => toRealQId(i.question_id))), [])
       );
+
+      // 동일 페이지 후보 중에서는 실제 부모/형제 관계(PARENT / SIBLING)인 문항만 합류
+      samePageCandidates.forEach((item: any) => {
+        const role = getRelationRole(item);
+        if (role === "PARENT" || role === "SIBLING") {
+          data.push(item);
+        }
+      });
+
+      // 중복 제거
+      const uniqueDataMap = new Map<string, any>();
+      (data || []).forEach((item: any) => {
+        if (!item || !item.question_id) return;
+        const iid = toRealQId(item.question_id);
+        if (iid && iid !== currentQuestionId && !uniqueDataMap.has(iid)) {
+          uniqueDataMap.set(iid, item);
+        }
+      });
+
+      const baseCandidates = Array.from(uniqueDataMap.values()).filter((item: any) => {
+        const iid = toRealQId(item.question_id);
+        if (existingIds.has(iid)) return false;
+        if (item.is_hidden === true || item.is_hidden === "Y" || item.is_hidden === "true") return false;
+        const role = getRelationRole(item);
+        if (role === "PARENT" || role === "SIBLING") {
+          item._relationRole = role;
+        }
+        return true;
+      });
+
+      let filteredData = baseCandidates.filter((item: any) => {
+        // 🌟 부모문제(PARENT)와 형제문제(SIBLING)는 주교재/워크북 제외 필터와 무관하게 무조건 표시!
+        if (item._relationRole === "PARENT" || item._relationRole === "SIBLING") {
+          return true;
+        }
+        if ((twinSourceCategories.excludeMain ?? true) && isMainTextbookQuestion(item, mainExclusion)) return false;
+        if ((twinSourceCategories.excludeWorkbook ?? true) && isWorkbookQuestion(item, mainExclusion)) return false;
+        return true;
+      });
+
+      // 만약 주교재/워크북 제외 필터 때문에 유사문항까지 모두 걸러져 결과가 0건이면 기본 후보군을 표시
+      if (filteredData.length === 0 && baseCandidates.length > 0) {
+        filteredData = baseCandidates;
+      }
 
       if (filteredData.length === 0) {
         setIsSearchingTwin(false);
@@ -858,22 +1059,32 @@ export function useExamData() {
       await fetchDepthMappings(filteredData);
       await fetchParentSources(filteredData);
 
-      const twins: any[] = [];
+      const parents: any[] = [];
+      const siblings: any[] = [];
       const similars: any[] = [];
 
-      filteredData.forEach(item => {
-        const isExactTwin = (item.parent_question_id === currentQuestionId) || 
-                            (item.question_id === parentId && parentId !== 'NO_PARENT_ID_MATCH') || 
-                            (item.parent_question_id === parentId && parentId !== 'NO_PARENT_ID_MATCH');
-        if (isExactTwin) twins.push(item);
-        else similars.push(item);
+      filteredData.forEach((item) => {
+        const role = item._relationRole || getRelationRole(item);
+        if (role === "PARENT") {
+          item._relationRole = "PARENT";
+          parents.push(item);
+        } else if (role === "SIBLING") {
+          item._relationRole = "SIBLING";
+          siblings.push(item);
+        } else {
+          item._relationRole = "SIMILAR";
+          similars.push(item);
+        }
       });
 
-      setTwinPoolTwins(twins.sort(() => 0.5 - Math.random()).slice(0, 2));
-      setTwinPoolSimilars(similars.sort(() => 0.5 - Math.random()).slice(0, 10));
+      parents.sort(compareQuestionsBySource);
+      siblings.sort(compareQuestionsBySource);
 
+      // 🌟 부모문제와 형제문제는 개수 제한(.slice(0, 2)) 없이 모두 표시!
+      setTwinPoolTwins([...parents, ...siblings]);
+      setTwinPoolSimilars(similars.sort(() => 0.5 - Math.random()).slice(0, 15));
     } catch (err) {
-      console.error("쌍둥이 검색 에러:", err);
+      console.warn("쌍둥이 검색 경고:", err);
     } finally {
       setIsSearchingTwin(false);
     }

@@ -34,7 +34,7 @@ export function useAdminDashboard() {
 
   useEffect(() => {
     // [보안 경고] 추후 반드시 supabase.auth.getSession() 기반으로 변경해야 합니다.
-    const instId = localStorage.getItem('logica_instructor_id') || "1";
+    const instId = localStorage.getItem('logica_instructor_id') || "";
     const name = localStorage.getItem('logica_instructor_name') || "관리자";
     setCurrentUser({ instId, name });
 

@@ -59,7 +59,7 @@ export default function ConsultationManagementPage() {
   const [hideTestStudents, setHideTestStudents] = useState<boolean>(true);
 
   useEffect(() => {
-    const instId = localStorage.getItem("logica_instructor_id") || "1";
+    const instId = localStorage.getItem("logica_instructor_id") || "";
     const name = localStorage.getItem("logica_instructor_name") || "관리자";
     const tId = localStorage.getItem("logica_tenant_id") || "hq"; 
     

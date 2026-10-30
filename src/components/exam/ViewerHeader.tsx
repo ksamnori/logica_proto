@@ -30,8 +30,16 @@ export default function ViewerHeader({ isExamDistributed, isNewExam, currentExam
             onClick={() => {
                 if (isExamDistributed) return;
                 onAttemptLeave(() => {
-                    const targetUrl = currentExamId ? `/exam/step2?exam_id=${currentExamId}` : '/exam/step2';
-                    router.push(targetUrl);
+                    const params = typeof window !== 'undefined' ? new URLSearchParams(window.location.search) : null;
+                    const urlExamId = params?.get('exam_id') || params?.get('id');
+                    const effectiveExamId = urlExamId || currentExamId;
+                    if (effectiveExamId && !isNewExam) {
+                        ['restoreExamQuestions', 'examQuestions', 'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'duplicateExamId'].forEach(k => sessionStorage.removeItem(k));
+                        sessionStorage.setItem('editExamId', effectiveExamId);
+                        router.push(`/exam/step2?exam_id=${effectiveExamId}`);
+                    } else {
+                        router.push('/exam/step2');
+                    }
                 });
             }} 
             className={`flex items-center gap-1.5 font-bold bg-slate-50 border border-slate-200 px-3 py-1.5 rounded-lg text-sm shadow-sm transition-colors ${isExamDistributed ? 'text-slate-400 opacity-60 cursor-not-allowed pointer-events-none' : 'text-slate-500 hover:text-slate-800 hover:bg-slate-100'}`}
@@ -52,8 +60,10 @@ export default function ViewerHeader({ isExamDistributed, isNewExam, currentExam
         
         {!isNewExam && (
           <button onClick={() => onAttemptLeave(() => {
-              try { window.close(); } catch (e) {}
-              setTimeout(() => router.push('/exam-list'), 200);
+              if (typeof window !== 'undefined' && window.opener) {
+                  try { window.close(); return; } catch (e) {}
+              }
+              router.push('/exam-list');
           })} className="text-slate-500 hover:text-rose-500 font-bold flex items-center gap-2 bg-slate-50 border border-slate-200 hover:bg-rose-50 px-3 py-1.5 rounded-lg text-sm shadow-sm transition-colors">
              닫기 ✖
           </button>

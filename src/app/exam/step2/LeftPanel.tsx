@@ -1003,10 +1003,26 @@ export default function LeftPanel({ examData }: { examData: any }) {
                  return (
                   <div key={altQ.question_id} className="bg-white border-2 border-slate-200 rounded-xl p-5 shadow-sm hover:border-indigo-400 transition-all">
                     <div className="flex justify-between items-center mb-4 border-b border-slate-100 pb-3">
-                      <div className="flex items-center space-x-2">
-                        {isTwin ? <span className="text-xs bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold shadow-sm">🚀 쌍둥이</span> : <span className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded font-bold shadow-sm">💡 유사</span>}
-                        <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold shadow-sm shrink-0">{getTypeName(altQ)}</span>
-                        <span className="text-xs text-slate-500 font-bold border border-slate-200 px-1 rounded">{altQ.difficulty || '중'}</span>
+                      <div className="flex flex-col gap-1.5">
+                        <div className="flex items-center space-x-2 flex-wrap">
+                          {altQ._relationRole === 'PARENT' ? (
+                            <span className="text-xs bg-amber-100 text-amber-800 border border-amber-300 px-2 py-0.5 rounded font-bold shadow-sm">👑 부모문항</span>
+                          ) : isTwin ? (
+                            <span className="text-xs bg-rose-100 text-rose-700 border border-rose-200 px-2 py-0.5 rounded font-bold shadow-sm">🚀 형제/쌍둥이</span>
+                          ) : (
+                            <span className="text-xs bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded font-bold shadow-sm">💡 유사</span>
+                          )}
+                          <span className="text-xs bg-slate-100 text-slate-600 px-2 py-0.5 rounded font-bold shadow-sm shrink-0">{getTypeName(altQ)}</span>
+                          <span className="text-xs text-slate-500 font-bold border border-slate-200 px-1 rounded">{altQ.difficulty || '중'}</span>
+                        </div>
+                        <div className="text-xs font-bold text-slate-500 flex items-center gap-1.5">
+                          <span className="bg-slate-100 text-slate-500 px-1.5 py-[2px] rounded border border-slate-200 leading-none">출처</span>
+                          <span className="leading-none mt-0.5">
+                            {altQ.source_book_name || altQ.book_name || altQ.pdf_source || '출처 없음'}
+                            {altQ.final_printed_page || altQ.detected_page_num ? ` p.${String(altQ.final_printed_page || altQ.detected_page_num).replace(/p/gi, '').trim()}` : ''}
+                            {altQ.question_number ? ` ${String(altQ.question_number).replace(/번/g, '').trim()}번` : ''}
+                          </span>
+                        </div>
                       </div>
                       <div className="flex gap-2">
                         <button onClick={() => addTwinToExam(altQ)} className="px-3 py-1.5 bg-emerald-600 text-white text-[13px] font-bold rounded shadow-sm hover:bg-emerald-700">이 문항 추가</button>
