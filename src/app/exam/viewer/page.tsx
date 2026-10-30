@@ -2050,7 +2050,7 @@ export default function ExamViewerPage() {
         const items = preItems.map(it => ({ ...it, exam_id: examId }));
         const { error: itemsErr } = await supabase.from('exam_item').insert(items);
         if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
-      }
+      } else {
         const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트', layout_settings: finalLayoutSettings, ...weeklyFields, ...summaryMetaFields }).eq('exam_id', examId);
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
