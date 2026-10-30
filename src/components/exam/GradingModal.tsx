@@ -25,6 +25,21 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
     }
   }, [isOpen, examId]);
 
+  // 채점 화면에서 뒤로가기로 돌아왔을 때(BFCache / 포커스 복귀 포함) 최신 채점 현황 및 점수 자동 갱신
+  useEffect(() => {
+    if (!isOpen || !examId) return;
+    const handleRefresh = () => {
+      loadAssignments();
+      onUpdate();
+    };
+    window.addEventListener("focus", handleRefresh);
+    window.addEventListener("pageshow", handleRefresh);
+    return () => {
+      window.removeEventListener("focus", handleRefresh);
+      window.removeEventListener("pageshow", handleRefresh);
+    };
+  }, [isOpen, examId]);
+
   const loadAssignments = async () => {
     setIsLoading(true);
     try {
@@ -74,11 +89,22 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
        return;
     }
 
+    // 채점 페이지에서 뒤로가기/이전화면으로 돌아가기를 눌렀을 때 이 출제 및 채점 현황 모달이 다시 열리도록 저장
+    try {
+      sessionStorage.setItem(
+        "logica_exam_list_grading_modal",
+        JSON.stringify({ isOpen: true, examId, title })
+      );
+      sessionStorage.setItem("logica_exam_list_from_grading_modal", "1");
+    } catch (e) {}
+
+    const extraParams = `&from=exam_list&exam_id=${encodeURIComponent(examId || "")}&exam_title=${encodeURIComponent(title || "")}`;
+
     // 🌟 [핵심 수정] 분기평가, 분기테스트는 철저하게 exam/review 로 라우팅
     if (['분기테스트', '분기평가'].includes(examType)) {
-      window.location.href = `/exam/review?assignment_id=${assignmentId}&student_id=${studentId}`;
+      window.location.href = `/exam/review?assignment_id=${assignmentId}&student_id=${studentId}${extraParams}`;
     } else {
-      window.location.href = `/homework/review?assignment_id=${assignmentId}&student_id=${studentId}&is_exam_hw=true`;
+      window.location.href = `/homework/review?assignment_id=${assignmentId}&student_id=${studentId}&is_exam_hw=true${extraParams}`;
     }
   };
 

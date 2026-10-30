@@ -94,11 +94,13 @@ export async function sendTestResultAlimtalk({
   const senderPhone = process.env.SOLAPI_SENDER_PHONE || process.env.SOLAPI_SENDER_NUMBER || "025558875";
   const kakaoPfId = process.env.SOLAPI_KAKAO_PFID || process.env.KAKAO_PFID || "KA01PF26082601194637290lqdNuJR1q";
 
+  const testResultText = `[로지카대치본원학원] 학습 결과 안내\n\n${parentName || "학부모"} 학부모님,\n${studentName} 학생의 ${testName} 결과를 안내해 드립니다.\n\n시험명 : ${testName}\n\n학생 점수 : ${studentScore}점\n\n반 평균 : ${classAverage}점\n\n선생님 코멘트 : ${comment}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`;
+
   try {
     const response = await messageService.send([{
       to: String(parentPhone).replace(/[^0-9]/g, ""), 
       from: String(senderPhone).replace(/[^0-9]/g, ""),
-      text: "학습 결과 안내",
+      text: testResultText,
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
@@ -141,11 +143,13 @@ export async function sendScheduleNoticeAlimtalk({
   const senderPhone = process.env.SOLAPI_SENDER_PHONE || process.env.SOLAPI_SENDER_NUMBER || "025558875";
   const kakaoPfId = process.env.SOLAPI_KAKAO_PFID || process.env.KAKAO_PFID || "KA01PF26082601194637290lqdNuJR1q";
 
+  const scheduleText = `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${parentName || "학부모"} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${scheduleName}\n■ 적용 일시 : ${applyDate}\n■ 상세 안내 : ${details}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`;
+
   try {
     const response = await messageService.send([{
       to: String(parentPhone).replace(/[^0-9]/g, ""), 
       from: String(senderPhone).replace(/[^0-9]/g, ""),
-      text: "학사일정 안내",
+      text: scheduleText,
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
@@ -176,11 +180,13 @@ export async function sendClassChangeAlimtalk({
   const senderPhone = process.env.SOLAPI_SENDER_PHONE || process.env.SOLAPI_SENDER_NUMBER || "025558875";
   const kakaoPfId = process.env.SOLAPI_KAKAO_PFID || process.env.KAKAO_PFID || "KA01PF26082601194637290lqdNuJR1q";
 
+  const changeText = `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${parentName || "학부모"} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${oldDate}\n■ 변경 일시 : ${newDate}\n■ 상세 안내 : ${details}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`;
+
   try {
     const response = await messageService.send([{
       to: String(parentPhone).replace(/[^0-9]/g, ""), 
       from: String(senderPhone).replace(/[^0-9]/g, ""),
-      text: "보강 안내",
+      text: changeText,
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
@@ -435,8 +441,15 @@ export async function sendQueuedMessages(tenantId: string) {
         } else if (msg.template_id === "KA01TP26092103514300371OMrxorSxG") {
           res = await sendClassChangeAlimtalk(payload as any);
         } else if (msg.template_id === "GENERAL_SMS") {
-          // 🌟 텍스트 기반 버튼 스타일 렌더링 (학부모 페이지 링크 삽입)
-          const textContent = `[로지카대치본원학원]\n\n${msg.parent_name} 학부모님,\n\n${msg.details}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
+          // 🌟 텍스트 기반 버튼 스타일 렌더링 (개별 보강 문자처럼 이미 머리말/학부모 호칭이 포함된 경우 중복 방지)
+          const rawDetails = String(msg.details || "").trim();
+          const isPreformatted =
+            rawDetails.startsWith("[로지카대치본원학원] 보강 안내") ||
+            rawDetails.includes("학부모님,");
+          const cleanedDetails = rawDetails.replace(/^\[로지카대치본원학원\]\s*/, "");
+          const textContent = isPreformatted
+            ? `${rawDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`
+            : `[로지카대치본원학원]\n\n${msg.parent_name} 학부모님,\n\n${cleanedDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
           res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
         } else {
           res = { success: false, message: `알 수 없는 템플릿: ${msg.template_id}` };
@@ -738,39 +751,25 @@ function buildSolapiDisplayContent(msg: any): { title: string; body: string; cha
           channelLabel,
         };
       }
+      const pName = vars["#{이름}"] || "학부모";
       if (schName) {
         return {
-          title: `[학사일정 안내] ${schName}`,
-          body: [
-            applyDate ? `적용일시: ${applyDate}` : "",
-            details ? `상세내용:\n${details}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          title: `[로지카대치본원학원] 학사일정(휴원/개강) 안내`,
+          body: `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${pName} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${schName}\n■ 적용 일시 : ${applyDate || "-"}\n■ 상세 안내 : ${details || "-"}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`,
           channelLabel,
         };
       }
       if (oldDate || newDate) {
         return {
-          title: `[시간표/보강 안내]`,
-          body: [
-            `기존일시: ${oldDate || "-"} → 변경일시: ${newDate || "-"}`,
-            details ? `상세내용:\n${details}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          title: `[로지카대치본원학원] 시간표 변경 및 보강 안내`,
+          body: `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${pName} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${oldDate || "-"}\n■ 변경 일시 : ${newDate || "-"}\n■ 상세 안내 : ${details || "-"}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`,
           channelLabel,
         };
       }
       if (testName) {
         return {
-          title: `[학습 결과 안내] ${testName}`,
-          body: [
-            `학생 점수: ${stuScore || "-"} (반 평균: ${classAvg || "-"})`,
-            comment ? `코멘트:\n${comment}` : "",
-          ]
-            .filter(Boolean)
-            .join("\n"),
+          title: `[로지카대치본원학원] 학습 결과 안내`,
+          body: `[로지카대치본원학원] 학습 결과 안내\n\n${pName} 학부모님,\n${stu} 학생의 ${testName} 결과를 안내해 드립니다.\n\n시험명 : ${testName}\n\n학생 점수 : ${stuScore || "-"}점\n\n반 평균 : ${classAvg || "-"}점\n\n선생님 코멘트 : ${comment || "-"}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`,
           channelLabel,
         };
       }

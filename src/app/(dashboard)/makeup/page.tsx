@@ -129,13 +129,15 @@ export default function MakeupPage() {
 
       let instQuery = supabase.from('instructor').select('instructor_id, name').eq('status', '재직');
       
-      // 모달용 학생 리스트도 동일하게 딥 조인
+      // 모달용 학생 리스트도 동일하게 딥 조인 (알림톡 대기열 발송용 학부모 연락처 포함)
       let stuQuery = supabase
         .from('student')
         .select(`
           student_id, 
           name, 
           grade, 
+          tenant_id,
+          parent(name, phone, relationship, name_2, phone_2, relationship_2),
           enrollment(
             status,
             end_date,
@@ -392,7 +394,8 @@ export default function MakeupPage() {
       <MakeupModal 
         isOpen={isModalOpen} 
         makeupData={selectedMakeup} 
-        students={modalStudents} 
+        students={students} 
+        initialClassId={modalClassId}
         instructors={instructors} 
         onClose={() => { setIsModalOpen(false); setModalClassId(null); }} 
         onSuccess={fetchInitialData} 

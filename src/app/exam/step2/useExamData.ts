@@ -915,18 +915,41 @@ export function useExamData() {
         }
       }
 
-      // 4) 동일 페이지 기반 부모/형제 문항 보강 (예: parent_question_id 없이 parent_relations나 15-T1, 15-S1 번호 체계로만 묶인 경우)
-      // 단, 유사문항 풀(similars)에 다른 단원 문항이 섞이지 않도록 부모/형제(PARENT/SIBLING)로 판별된 문항만 추가
+      // 4) 동일 교재 + 동일 페이지 기반 부모/형제 문항 보강
+      // (예: "확인2" vs "확인2-2", "15" vs "15-T1" 등 parent_question_id 없이 같은 교재/페이지의 번호 체계로 묶인 경우)
       let samePageCandidates: any[] = [];
       const pageNumInt = parseInt(String(q.final_printed_page || q.detected_page_num || "").replace(/[^0-9]/g, ""), 10);
+      const baseBookSearch = String(q.source_book_name || q.book_name || q.pdf_source || "")
+        .replace(/\s*(?:쌍둥이|유사|워크북|추가문제|추가문항|부교재|TWIN|SIMILAR|WORKBOOK)\s*$/i, "")
+        .trim();
+
       if (!isNaN(pageNumInt) && pageNumInt > 0) {
-        const { data: samePageData } = await supabase
-          .from("question_db")
-          .select("*")
-          .eq("final_printed_page", pageNumInt)
-          .limit(200);
-        if (Array.isArray(samePageData)) {
-          samePageCandidates = samePageData;
+        if (baseBookSearch) {
+          const [{ data: spFinal }, { data: spDetected }] = await Promise.all([
+            supabase
+              .from("question_db")
+              .select("*")
+              .or(`source_book_name.ilike."%${baseBookSearch}%",book_name.ilike."%${baseBookSearch}%"`)
+              .eq("final_printed_page", pageNumInt)
+              .limit(200),
+            supabase
+              .from("question_db")
+              .select("*")
+              .or(`source_book_name.ilike."%${baseBookSearch}%",book_name.ilike."%${baseBookSearch}%"`)
+              .eq("detected_page_num", pageNumInt)
+              .limit(200),
+          ]);
+          if (Array.isArray(spFinal)) samePageCandidates = samePageCandidates.concat(spFinal);
+          if (Array.isArray(spDetected)) samePageCandidates = samePageCandidates.concat(spDetected);
+        } else {
+          const { data: samePageData } = await supabase
+            .from("question_db")
+            .select("*")
+            .eq("final_printed_page", pageNumInt)
+            .limit(200);
+          if (Array.isArray(samePageData)) {
+            samePageCandidates = samePageData;
+          }
         }
       }
 
@@ -968,10 +991,11 @@ export function useExamData() {
           if (itemParents.has(pid)) return "SIBLING";
         }
 
-        // 3) 동일(또는 파생) 교재 + 동일 페이지 + 동일 문항번호 기반 부모/형제 (예: 원본 15번 vs 15-T1, 15-T2, 15-S1)
+        // 3) 동일(또는 파생) 교재 + 동일 페이지 + 동일 대문항(접두어+본번호) 기반 부모/형제
+        // (예: "확인2" vs "확인2-2", "확인2-1" vs "확인2-2", "유형1-1" vs "유형1-2", "15" vs "15-T1", "15-S1")
         const normalizeBaseBook = (b: string) =>
           String(b || "")
-            .replace(/\s*(?:쌍둥이|유사|TWIN|SIMILAR)\s*$/i, "")
+            .replace(/\s*(?:쌍둥이|유사|워크북|추가문제|추가문항|부교재|TWIN|SIMILAR|WORKBOOK)\s*$/i, "")
             .trim();
         const iBook = String(item.source_book_name || item.book_name || item.pdf_source || "").trim();
         const iPage = String(item.final_printed_page || item.detected_page_num || "").replace(/[^0-9]/g, "");
@@ -979,15 +1003,34 @@ export function useExamData() {
           qBook &&
           iBook &&
           (qBook === iBook || normalizeBaseBook(qBook) === normalizeBaseBook(iBook));
-        if (isSameBaseBook && qPage && iPage && qPage === iPage && qNumParts.main !== 99999) {
+
+        const qTaxKey = String(q.taxonomy_id || q.thk_taxonomy_id || q.item_id || "").trim();
+        const iTaxKey = String(item.taxonomy_id || item.thk_taxonomy_id || item.item_id || "").trim();
+        const isSamePageOrSameUnit =
+          (qPage && iPage && qPage === iPage) ||
+          ((!qPage || !iPage) && qTaxKey && iTaxKey && qTaxKey === iTaxKey);
+
+        if (isSameBaseBook && isSamePageOrSameUnit) {
           const iNumParts = parseQuestionNumberParts(item.question_number);
           const iHasVariantSuffix = /-(?:T|S)\d+$/i.test(String(item.question_number || "").trim());
-          if (
-            iNumParts.baseKey === qNumParts.baseKey &&
-            iNumParts.paren === qNumParts.paren &&
-            (qHasVariantSuffix || iHasVariantSuffix)
-          ) {
-            if (qHasVariantSuffix && !iHasVariantSuffix) return "PARENT";
+
+          const isSameMainQuestion =
+            (qNumParts.main !== 99999 &&
+              iNumParts.prefix === qNumParts.prefix &&
+              iNumParts.main === qNumParts.main) ||
+            (qNumParts.main === 99999 &&
+              iNumParts.main === 99999 &&
+              qNumParts.prefix !== "" &&
+              iNumParts.prefix === qNumParts.prefix);
+
+          if (isSameMainQuestion) {
+            if (
+              qHasVariantSuffix &&
+              !iHasVariantSuffix &&
+              (iNumParts.dash === qNumParts.dash || iNumParts.dash === 0)
+            ) {
+              return "PARENT";
+            }
             return "SIBLING";
           }
         }

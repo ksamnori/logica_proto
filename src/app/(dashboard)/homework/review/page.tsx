@@ -557,7 +557,7 @@ function HomeworkReviewContent() {
         const em = Array.isArray(aData.exam_master) ? aData.exam_master[0] : aData.exam_master;
         const isAdm = Boolean(em?.exam_type && (em.exam_type.includes('입학테스트') || em.exam_type.includes('진단평가')));
         setStudentInfo(stuData);
-        setHomeworkInfo({ homework_title: em.title, class: aData.class, textbook: { title: em.exam_type || '학습지' }, exam_type: em.exam_type });
+        setHomeworkInfo({ homework_title: em.title, exam_id: em?.exam_id || aData.exam_id, class: aData.class, textbook: { title: em.exam_type || '학습지' }, exam_type: em.exam_type });
         setHwResult({ status: aData.status, hw_result_id: aData.assignment_id }); 
         
         const { data: items } = await supabase.from('exam_item').select('question_id, sort_order, assigned_score').eq('exam_id', em.exam_id).order('sort_order');
@@ -1006,6 +1006,34 @@ function HomeworkReviewContent() {
     }
   };
 
+  const handleGoBack = () => {
+    try {
+      const fromParam = searchParams.get("from");
+      const fromStorage = sessionStorage.getItem("logica_exam_list_from_grading_modal") === "1";
+      const savedModalRaw = sessionStorage.getItem("logica_exam_list_grading_modal");
+      let savedModal: any = null;
+      if (savedModalRaw) {
+        try { savedModal = JSON.parse(savedModalRaw); } catch (e) {}
+      }
+
+      if (isExamHw && (fromParam === "exam_list" || fromStorage || (savedModal && savedModal.isOpen))) {
+        const targetExamId = searchParams.get("exam_id") || homeworkInfo?.exam_id || savedModal?.examId || "";
+        const targetTitle = searchParams.get("exam_title") || homeworkInfo?.homework_title || savedModal?.title || "";
+        if (targetExamId) {
+          sessionStorage.setItem(
+            "logica_exam_list_grading_modal",
+            JSON.stringify({ isOpen: true, examId: String(targetExamId), title: String(targetTitle) })
+          );
+          router.push(
+            `/exam-list?open_grading_exam_id=${encodeURIComponent(String(targetExamId))}&open_grading_title=${encodeURIComponent(String(targetTitle))}`
+          );
+          return;
+        }
+      }
+    } catch (e) {}
+    router.back();
+  };
+
   if (isLoading) {
     return <div className="h-screen flex items-center justify-center bg-slate-50 font-bold text-slate-400">데이터를 불러오는 중입니다...</div>;
   }
@@ -1026,7 +1054,7 @@ function HomeworkReviewContent() {
     <div className="flex flex-col h-screen bg-slate-100 overflow-hidden font-pretendard">
       <header className="bg-white border-b border-slate-200 px-6 py-4 flex justify-between items-center shrink-0 shadow-sm z-10">
         <div className="flex items-center gap-4">
-          <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
+          <button onClick={handleGoBack} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
           </button>
           <div className="w-px h-6 bg-slate-300"></div>
@@ -1170,7 +1198,7 @@ function HomeworkReviewContent() {
 
         <div className="mt-6 pt-6 border-t border-slate-300 flex justify-center pb-20 gap-4">
           <button 
-            onClick={() => router.back()} 
+            onClick={handleGoBack} 
             className="bg-brand hover:bg-blue-900 text-white font-bold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>

@@ -951,7 +951,12 @@ export default function ExamViewerPage() {
       return;
     }
 
-    const urlExamId = params.get('exam_id') || params.get('id');
+    // URL에 exam_id가 없더라도 브라우저 뒤로가기 등으로 진입했을 때 examQuestions가 비어있고 editExamId가 남아있다면 DB 조회 모드로 안전하게 폴백
+    const rawUrlExamId = params.get('exam_id') || params.get('id');
+    const fallbackSessionExamId = (!rawUrlExamId && !sessionStorage.getItem('examQuestions'))
+      ? sessionStorage.getItem('editExamId')
+      : null;
+    const urlExamId = rawUrlExamId || fallbackSessionExamId;
 
     let isNew = false;
     let title = "시험지";
@@ -965,11 +970,13 @@ export default function ExamViewerPage() {
     try {
       if (urlExamId) {
         currentExamIdRef.current = urlExamId;
+        rebuildExamIdRef.current = null;
         isNewExamRef.current = false;
         setSavedExamId(urlExamId);
-        // 이전 작업 세션의 캐시 문항 데이터가 남아 Step 2 이동 시 엉뚱한 문제가 뜨는 현상 방지
-        ['restoreExamQuestions', 'examQuestions', 'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'duplicateExamId'].forEach(k => sessionStorage.removeItem(k));
-        sessionStorage.setItem('editExamId', urlExamId);
+        // ⚠️ 중요: 단순 조회 진입 시 editExamId를 sessionStorage에 세팅하면,
+        // 저장/뒤로가기 시 targetExamIdToRebuild가 활성화되어 exam_item을 삭제(재생성)하므로 절대 여기서 editExamId를 세팅하지 않음!
+        // (이전 단계 버튼 클릭 시에만 ViewerHeader에서 editExamId를 세팅함)
+        ['restoreExamQuestions', 'examQuestions', 'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'duplicateExamId', 'editExamId'].forEach(k => sessionStorage.removeItem(k));
 
         const { data: examData } = await supabase.from('exam_master').select('*').eq('exam_id', urlExamId).single();
         if (!examData) throw new Error("시험지를 찾을 수 없습니다.");
@@ -1089,6 +1096,8 @@ export default function ExamViewerPage() {
 
         hasUnsavedChangesRef.current = false; 
 
+        // 비동기 단원 범위 계산 중에도 문항 배열(groups)이 즉시 참조되도록 먼저 할당하여 빈 배열 저장 사고 원천 차단
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope: "" };
         const depth5Scope = await computeHeaderDepth5Scope(groups);
         examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope };
 
@@ -1275,6 +1284,7 @@ export default function ExamViewerPage() {
 
         hasUnsavedChangesRef.current = isNew;
 
+        examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope: "" };
         const depth5Scope = await computeHeaderDepth5Scope(groups);
         examStateRef.current = { groups, examTitle: title, displayBadge: badge, depth5Scope };
 
@@ -1928,9 +1938,16 @@ export default function ExamViewerPage() {
       const myTenantId = localStorage.getItem('logica_tenant_id'); 
       
       if (!instId) throw new Error("로그인 정보를 찾을 수 없습니다.");
-      if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
 
-      const flatQIds = examStateRef.current?.groups.reduce((acc: string[], g: any) => acc.concat(g.questions.map((q: any) => getRealId(q.question_id))), []) || [];
+      const flatQIds = examStateRef.current?.groups?.reduce((acc: string[], g: any) => acc.concat((g.questions || []).map((q: any) => getRealId(q.question_id))), []) || [];
+
+      // 🛡️ [절대 보호막] 문항 데이터가 아직 로드되지 않았거나 0개일 때는 절대 DB 덮어쓰기나 exam_item 삭제를 수행하지 않음!
+      if (!examStateRef.current || !Array.isArray(examStateRef.current.groups) || examStateRef.current.groups.length === 0 || flatQIds.length === 0) {
+        alert("⚠️ 시험지 문항 데이터가 아직 로드되지 않았거나 비어 있어 저장을 중단했습니다. (기존 문제지 보호)");
+        return false;
+      }
+
+      if (layoutType === '입학테스트' && examStateRef.current?.groups.length !== 30) throw new Error('입학테스트 문제는 30개로 고정되어 있습니다.');
       
       let userMergedTextQuestions: string[][] = [];
       if (examStateRef.current?.groups) {

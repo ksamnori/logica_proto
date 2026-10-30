@@ -21,6 +21,7 @@ export default function ExamListPage() {
 
   const EXAM_LIST_FILTER_STORAGE_KEY = "logica_exam_list_filter_state";
   const EXAM_LIST_SCROLL_STORAGE_KEY = "logica_exam_list_scroll_top";
+  const EXAM_LIST_GRADING_MODAL_STORAGE_KEY = "logica_exam_list_grading_modal";
 
   const [mainTab, setMainTab] = useState<'ALL' | 'EXAM' | 'HOMEWORK' | 'INCORRECT' | 'SIMILAR'>(() => {
     if (typeof window !== "undefined") {
@@ -95,7 +96,61 @@ export default function ExamListPage() {
   }, [isLoading, exams.length]);
 
   const [publishModal, setPublishModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
-  const [gradingModal, setGradingModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
+  const resolveInitialGradingModal = (): { isOpen: boolean; examId: string; title: string } => {
+    if (typeof window !== "undefined") {
+      try {
+        const sp = new URLSearchParams(window.location.search);
+        const qExamId = sp.get("open_grading_exam_id");
+        const qTitle = sp.get("open_grading_title") || "";
+        if (qExamId) {
+          return { isOpen: true, examId: String(qExamId), title: String(qTitle) };
+        }
+      } catch (e) {}
+      try {
+        const saved = JSON.parse(sessionStorage.getItem(EXAM_LIST_GRADING_MODAL_STORAGE_KEY) || "null");
+        if (saved && saved.isOpen && saved.examId) {
+          return { isOpen: true, examId: String(saved.examId), title: String(saved.title || "") };
+        }
+      } catch (e) {}
+    }
+    return { isOpen: false, examId: "", title: "" };
+  };
+
+  const [gradingModal, setGradingModal] = useState<{ isOpen: boolean; examId: string; title: string }>(resolveInitialGradingModal);
+
+  // 채점 페이지에서 뒤로가기로 복귀 시(URL 쿼리, sessionStorage, popstate, pageshow, focus 모두 대응) 출제 및 채점 현황 모달 복원
+  // (주의: 여기서 sessionStorage를 자동 삭제하면 Strict Mode 이중 마운트나 라우터 캐시 복원 시 모달이 닫히므로, 닫기(onClose) 시에만 삭제)
+  useEffect(() => {
+    const syncGradingModalFromStorageOrUrl = () => {
+      const resolved = resolveInitialGradingModal();
+      if (resolved.isOpen && resolved.examId) {
+        setGradingModal((prev) => {
+          if (prev.isOpen && prev.examId === resolved.examId && prev.title) return prev;
+          return resolved;
+        });
+      }
+    };
+
+    syncGradingModalFromStorageOrUrl();
+    window.addEventListener("pageshow", syncGradingModalFromStorageOrUrl);
+    window.addEventListener("popstate", syncGradingModalFromStorageOrUrl);
+    window.addEventListener("focus", syncGradingModalFromStorageOrUrl);
+    return () => {
+      window.removeEventListener("pageshow", syncGradingModalFromStorageOrUrl);
+      window.removeEventListener("popstate", syncGradingModalFromStorageOrUrl);
+      window.removeEventListener("focus", syncGradingModalFromStorageOrUrl);
+    };
+  }, [isAuthorized]);
+
+  // 만약 모달에 examId만 있고 title이 비어있다면 exams 로드 후 제목 자동 채움
+  useEffect(() => {
+    if (gradingModal.isOpen && gradingModal.examId && !gradingModal.title && exams.length > 0) {
+      const matched = exams.find((e: any) => String(e.exam_id) === String(gradingModal.examId));
+      if (matched?.title) {
+        setGradingModal((prev) => ({ ...prev, title: matched.title }));
+      }
+    }
+  }, [gradingModal.isOpen, gradingModal.examId, gradingModal.title, exams]);
 
   // 🌟 [정답지 조회 모달 상태]
   const [answerModal, setAnswerModal] = useState<{ isOpen: boolean; examId: string; title: string }>({ isOpen: false, examId: "", title: "" });
@@ -645,7 +700,7 @@ export default function ExamListPage() {
       'editOriginalType', 'editOriginalId', 'editStudentId', 'editClassId', 'editMasterId',
       'examUserMergedTextQuestions', 'examHiddenImageQuestions', 'clinicTargetStudentId', 'clinicTargetClassId', 'clinicTargetStudentIds',
       'editHomeworkId', 'editExamId', 'duplicateExamId', 'splitHomeworkIds', 'splitCommonTqIds',
-      'isClinicMode'
+      'isClinicMode', 'logica_exam_list_grading_modal', 'logica_exam_list_from_grading_modal'
     ];
     keysToRemove.forEach(k => sessionStorage.removeItem(k));
   };
@@ -881,7 +936,24 @@ export default function ExamListPage() {
                             출제하기
                           </button>
                           
-                          <button onClick={() => setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[84px] h-[30px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-bold shadow-sm transition-colors">
+                          <button onClick={() => {
+                            try {
+                              if (listScrollRef.current) {
+                                sessionStorage.setItem(EXAM_LIST_SCROLL_STORAGE_KEY, String(listScrollRef.current.scrollTop));
+                              }
+                              sessionStorage.setItem(
+                                EXAM_LIST_GRADING_MODAL_STORAGE_KEY,
+                                JSON.stringify({ isOpen: true, examId: exam.exam_id, title: exam.title })
+                              );
+                              sessionStorage.setItem("logica_exam_list_from_grading_modal", "1");
+                              window.history.replaceState(
+                                null,
+                                "",
+                                `/exam-list?open_grading_exam_id=${encodeURIComponent(exam.exam_id)}&open_grading_title=${encodeURIComponent(exam.title || "")}`
+                              );
+                            } catch (e) {}
+                            setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title });
+                          }} className="w-[84px] h-[30px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-bold shadow-sm transition-colors">
                             출제현황({assignCount}명)
                           </button>
                           
@@ -933,7 +1005,16 @@ export default function ExamListPage() {
         isOpen={gradingModal.isOpen} 
         examId={gradingModal.examId} 
         title={gradingModal.title} 
-        onClose={() => setGradingModal({ isOpen: false, examId: "", title: "" })} 
+        onClose={() => {
+          try {
+            sessionStorage.removeItem(EXAM_LIST_GRADING_MODAL_STORAGE_KEY);
+            sessionStorage.removeItem("logica_exam_list_from_grading_modal");
+            if (window.location.search.includes("open_grading_exam_id")) {
+              window.history.replaceState(null, "", "/exam-list");
+            }
+          } catch (e) {}
+          setGradingModal({ isOpen: false, examId: "", title: "" });
+        }} 
         onUpdate={() => loadExams(true)} 
       />
 

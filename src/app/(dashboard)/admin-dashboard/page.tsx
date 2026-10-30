@@ -168,6 +168,11 @@ export default function AdminDashboardPage() {
   
   const [bulkType, setBulkType] = useState('schedule');
   const [bulkTarget, setBulkTarget] = useState('all');
+  const [selectedBulkStudentIds, setSelectedBulkStudentIds] = useState<string[]>([]);
+  const [isBulkStudentModalOpen, setIsBulkStudentModalOpen] = useState(false);
+  const [bulkStudentSearchQuery, setBulkStudentSearchQuery] = useState("");
+  const [bulkStudentClassFilter, setBulkStudentClassFilter] = useState("all");
+  const [previewQueueIdx, setPreviewQueueIdx] = useState<number | null>(null);
   
   const [bulkForm, setBulkForm] = useState({ 
     scheduleName: '', applyDate: '', 
@@ -714,8 +719,16 @@ export default function AdminDashboardPage() {
   };
 
   const loadRecentLessonLogForBulk = async () => {
-    if (!bulkTarget || bulkTarget === 'all') {
-      alert("⚠️ 먼저 일지를 불러올 대상을 '특정 반'으로 선택해주세요.");
+    let targetClassId = bulkTarget !== 'all' && bulkTarget !== 'custom' ? bulkTarget : "";
+    if (!targetClassId && selectedBulkStudentIds.length > 0) {
+      const firstStu = allStudentsData.find((s: any) => String(s.student_id) === String(selectedBulkStudentIds[0]));
+      const activeEnrolls = (firstStu?.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+      const firstCls = unwrap(activeEnrolls[0]?.class);
+      if (firstCls?.class_id) targetClassId = String(firstCls.class_id);
+    }
+
+    if (!targetClassId) {
+      alert("⚠️ 먼저 일지를 불러올 대상을 '특정 반' 또는 '개별 학생'으로 선택해주세요.");
       return;
     }
 
@@ -723,7 +736,7 @@ export default function AdminDashboardPage() {
       const { data, error } = await supabase
         .from('daily_lesson_log')
         .select('homework_desc')
-        .eq('class_id', bulkTarget)
+        .eq('class_id', targetClassId)
         .order('actual_date', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -779,7 +792,10 @@ export default function AdminDashboardPage() {
     if (bulkType === 'general' && !bulkForm.details) return alert('발송할 자유 내용을 입력해주세요.');
 
     let targets = allStudentsData.filter((s: any) => s.status === '재원');
-    if (bulkTarget !== 'all') {
+    if (selectedBulkStudentIds.length > 0) {
+      const selectedSet = new Set(selectedBulkStudentIds.map(String));
+      targets = allStudentsData.filter((s: any) => selectedSet.has(String(s.student_id)));
+    } else if (bulkTarget !== 'all' && bulkTarget !== 'custom') {
       targets = targets.filter((s: any) => {
         const activeEnrolls = s.enrollment?.filter((e:any) => !isEndedEnrollment(e)) || [];
         return activeEnrolls.some((e:any) => unwrap(e.class)?.class_id === bulkTarget);
@@ -1039,10 +1055,83 @@ export default function AdminDashboardPage() {
               </div>
               <div className="flex-1 overflow-y-auto custom-scroll p-5 flex flex-col gap-3">
                 
-                <select value={bulkTarget} onChange={e => setBulkTarget(e.target.value)} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-slate-50/50 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500">
-                  <option value="all">전체 재원생 대상</option>
-                  {classStats.map((c: any) => <option key={c.class_id} value={c.class_id}>[특정 반] {c.name}</option>)}
-                </select>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={selectedBulkStudentIds.length > 0 ? "custom" : bulkTarget}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      if (val === "custom") return;
+                      setSelectedBulkStudentIds([]);
+                      setBulkTarget(val);
+                    }}
+                    className="flex-1 min-w-0 border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-slate-50/50 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                  >
+                    <option value="all">전체 재원생 대상</option>
+                    {classStats.map((c: any) => (
+                      <option key={c.class_id} value={c.class_id}>
+                        [특정 반] {c.name}
+                      </option>
+                    ))}
+                    {selectedBulkStudentIds.length > 0 && (
+                      <option value="custom">🎯 개별 학생 선택됨 ({selectedBulkStudentIds.length}명)</option>
+                    )}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (bulkTarget !== "all" && bulkTarget !== "custom" && selectedBulkStudentIds.length === 0) {
+                        setBulkStudentClassFilter(bulkTarget);
+                      }
+                      setIsBulkStudentModalOpen(true);
+                    }}
+                    className={`shrink-0 px-3 py-2 rounded-lg text-xs font-bold border shadow-sm transition-colors flex items-center gap-1 ${
+                      selectedBulkStudentIds.length > 0
+                        ? "bg-indigo-600 text-white border-indigo-600 hover:bg-indigo-700"
+                        : "bg-white text-indigo-600 border-indigo-200 hover:bg-indigo-50"
+                    }`}
+                  >
+                    <span>🔍</span>
+                    <span>
+                      {selectedBulkStudentIds.length > 0
+                        ? `학생 선택(${selectedBulkStudentIds.length}명)`
+                        : "학생 검색/선택"}
+                    </span>
+                  </button>
+                </div>
+
+                {selectedBulkStudentIds.length > 0 && (
+                  <div className="bg-indigo-50/70 border border-indigo-200 rounded-lg p-2 flex flex-wrap items-center gap-1.5 max-h-20 overflow-y-auto custom-scroll">
+                    <span className="text-[11px] font-bold text-indigo-700 mr-1">발송 대상:</span>
+                    {selectedBulkStudentIds.map((sid) => {
+                      const stu = allStudentsData.find((s: any) => String(s.student_id) === String(sid));
+                      if (!stu) return null;
+                      return (
+                        <span
+                          key={sid}
+                          className="inline-flex items-center gap-1 bg-white text-slate-700 border border-indigo-200 rounded-md px-2 py-0.5 text-[11px] font-bold shadow-sm"
+                        >
+                          {stu.name}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedBulkStudentIds((prev) => prev.filter((id) => id !== String(sid)))
+                            }
+                            className="text-slate-400 hover:text-rose-500 font-bold ml-0.5"
+                          >
+                            ×
+                          </button>
+                        </span>
+                      );
+                    })}
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBulkStudentIds([])}
+                      className="ml-auto text-[11px] font-bold text-rose-500 hover:underline px-1"
+                    >
+                      전체해제
+                    </button>
+                  </div>
+                )}
 
                 <select value={bulkType} onChange={e => { setBulkType(e.target.value); setBulkForm({ scheduleName: '', applyDate: '', oldDate: '', newDate: '', homeworkTitle: '', dueDate: '', details: '' }); }} className="w-full border border-slate-300 rounded-lg p-2 text-xs font-bold text-slate-700 bg-white shadow-sm focus:border-indigo-500 focus:outline-none">
                   <option value="schedule">📅 학사일정 (개강/휴원) 안내</option>
@@ -1084,12 +1173,28 @@ export default function AdminDashboardPage() {
                   💬 발송 대기열
                   {queuedMessages.length > 0 && <span className="text-xs font-bold text-[#3a2929] bg-[#fef01b] px-2 py-0.5 rounded-full shadow-sm">{queuedMessages.length}건 대기중</span>}
                 </h3>
-                  {queuedMessages.length > 0 && <button onClick={async () => {
-                   const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
-                   const res = await clearQueue(validTenantId);
-                   if (!res.success) alert(`삭제 실패: ${res.message}`);
-                   fetchQueue(); 
-                }} className="text-xs text-slate-400 hover:text-rose-500 font-bold transition-colors">전체 비우기</button>}
+                  {queuedMessages.length > 0 && (
+                    <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewQueueIdx(0)}
+                        className="text-xs text-indigo-600 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg font-bold transition-colors shadow-sm"
+                      >
+                        🔍 내용 미리보기
+                      </button>
+                      <button
+                        onClick={async () => {
+                          const validTenantId = tenantId === "hq" ? "1ff4299c-d72b-4d99-97b0-45fee08e3b73" : tenantId;
+                          const res = await clearQueue(validTenantId);
+                          if (!res.success) alert(`삭제 실패: ${res.message}`);
+                          fetchQueue();
+                        }}
+                        className="text-xs text-slate-400 hover:text-rose-500 font-bold transition-colors"
+                      >
+                        전체 비우기
+                      </button>
+                    </div>
+                  )}
               </div>
               
               <div className="flex-1 overflow-y-auto custom-scroll p-3 bg-slate-50/50">
@@ -1102,26 +1207,42 @@ export default function AdminDashboardPage() {
                 ) : (
                   <div className="flex flex-col gap-1.5">
                     {queuedMessages.map((msg: any, idx: number) => (
-                      <div key={msg.queue_id || idx} className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-300 transition-colors relative gap-0.5">
+                      <div
+                        key={msg.queue_id || idx}
+                        onClick={() => setPreviewQueueIdx(idx)}
+                        className="bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 shadow-sm flex flex-col group hover:border-indigo-400 hover:bg-indigo-50/20 cursor-pointer transition-colors relative gap-0.5"
+                        title="클릭하여 발송될 카톡/문자 전문 미리보기"
+                      >
                         <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-1.5">
-                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.preview_title)}`}>{msg.preview_title}</span>
-                            <div className="flex items-baseline gap-1">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <span className={`text-xs font-bold px-1.5 py-0.5 rounded shadow-sm border truncate max-w-[70px] ${getBadgeColor(msg.preview_title)}`}>
+                              {msg.preview_title}
+                            </span>
+                            <div className="flex items-baseline gap-1 truncate">
                               <span className="text-xs font-bold text-slate-700">{msg.student_name}</span>
                               <span className="text-xs text-indigo-500 font-bold">{msg.parent_name}</span>
                               <span className="text-xs text-slate-400 font-medium">{msg.parent_phone}</span>
                             </div>
                           </div>
-                          <div className="flex items-center pr-5">
-                            <span className="text-xs font-bold text-slate-400">{msg.time_string || ''}</span>
+                          <div className="flex items-center gap-1.5 pr-6 shrink-0">
+                            <span className="text-[11px] font-bold text-indigo-500 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 opacity-0 group-hover:opacity-100 transition-opacity">
+                              미리보기
+                            </span>
+                            <span className="text-xs font-bold text-slate-400">{msg.time_string || ""}</span>
                           </div>
-                                                    <button onClick={async () => {
-                             const res = await deleteQueueItem(msg.queue_id);
-                             if (!res.success) alert(`삭제 실패: ${res.message}`);
-                             fetchQueue(); 
-                          }} className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-bold shrink-0 absolute right-1.5 top-1.5">×</button>
+                          <button
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              const res = await deleteQueueItem(msg.queue_id);
+                              if (!res.success) alert(`삭제 실패: ${res.message}`);
+                              fetchQueue();
+                            }}
+                            className="w-5 h-5 rounded-full bg-slate-100 text-slate-400 flex items-center justify-center hover:bg-rose-100 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100 font-bold shrink-0 absolute right-1.5 top-1.5"
+                          >
+                            ×
+                          </button>
                         </div>
-                        
+
                         {msg.template_id !== "KA01TP260921034958500GAtQOl600yJ" && msg.details && (
                           <div className="mt-0.5 bg-slate-50 px-2 py-1 rounded text-xs text-slate-600 border border-slate-100 line-clamp-1 leading-snug" title={msg.details}>
                             {msg.details}
@@ -1333,6 +1454,321 @@ export default function AdminDashboardPage() {
       <MemoCreateModal isOpen={isMemoModalOpen} onClose={() => setIsMemoModalOpen(false)} memoData={memoData} setMemoData={setMemoData} onSave={saveMemo} />
 
       <ClassDetailModal isOpen={isClassModalOpen} onClose={() => setIsClassModalOpen(false)} classModalData={classModalData} classSchedules={classSchedules} classStudents={classStudents} />
+
+      {/* 개별 학생 검색 및 선택 모달 */}
+      {isBulkStudentModalOpen && (() => {
+        const activeStudents = allStudentsData.filter((s: any) => s.status === "재원");
+        const filteredModalStudents = activeStudents.filter((s: any) => {
+          const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+          if (bulkStudentClassFilter !== "all") {
+            const inClass = activeEnrolls.some((e: any) => String(unwrap(e.class)?.class_id) === String(bulkStudentClassFilter));
+            if (!inClass) return false;
+          }
+          const q = bulkStudentSearchQuery.trim().toLowerCase();
+          if (!q) return true;
+          const pInfo = unwrap(s.parent);
+          const classNames = activeEnrolls.map((e: any) => unwrap(e.class)?.name || "").join(" ");
+          const searchable = `${s.name || ""} ${s.school || ""} ${s.phone || ""} ${pInfo?.phone || ""} ${pInfo?.phone_2 || ""} ${classNames}`.toLowerCase();
+          return searchable.includes(q);
+        });
+
+        const toggleStudent = (sid: string) => {
+          setSelectedBulkStudentIds((prev) =>
+            prev.includes(sid) ? prev.filter((id) => id !== sid) : [...prev, sid]
+          );
+        };
+
+        return (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4">
+            <div className="bg-white w-full max-w-lg rounded-2xl shadow-2xl flex flex-col overflow-hidden max-h-[85vh] animate-[fadeIn_0.2s_ease-out]">
+              <div className="bg-brand px-5 py-4 text-white flex justify-between items-center shrink-0">
+                <div>
+                  <h3 className="font-bold text-base flex items-center gap-2">
+                    <span>🔍</span> 알림톡 / 문자 발송 대상 학생 검색 및 선택
+                  </h3>
+                  <p className="text-xs text-blue-200 mt-0.5">
+                    특정 학생만 개별로 선택하여 알림톡이나 문자를 발송할 수 있습니다.
+                  </p>
+                </div>
+                <button
+                  onClick={() => setIsBulkStudentModalOpen(false)}
+                  className="text-white hover:text-rose-400 text-2xl font-bold leading-none"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="p-4 bg-slate-50 border-b border-slate-200 space-y-2.5 shrink-0">
+                <div className="flex gap-2">
+                  <select
+                    value={bulkStudentClassFilter}
+                    onChange={(e) => setBulkStudentClassFilter(e.target.value)}
+                    className="w-40 border border-slate-300 rounded-lg px-2.5 py-2 text-xs font-bold text-slate-700 bg-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="all">전체 반</option>
+                    {classStats.map((c: any) => (
+                      <option key={c.class_id} value={c.class_id}>
+                        {c.name}
+                      </option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    value={bulkStudentSearchQuery}
+                    onChange={(e) => setBulkStudentSearchQuery(e.target.value)}
+                    placeholder="학생 이름, 학교, 학부모 연락처 검색..."
+                    className="flex-1 border border-slate-300 rounded-lg px-3 py-2 text-xs font-bold text-slate-800 bg-white focus:outline-none focus:border-indigo-500 placeholder:font-normal"
+                  />
+                </div>
+                <div className="flex items-center justify-between text-xs font-bold text-slate-500">
+                  <span>
+                    검색 결과 <strong className="text-slate-800">{filteredModalStudents.length}</strong>명 / 선택됨{" "}
+                    <strong className="text-indigo-600">{selectedBulkStudentIds.length}</strong>명
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const idsToAdd = filteredModalStudents.map((s: any) => String(s.student_id));
+                        setSelectedBulkStudentIds((prev) => Array.from(new Set([...prev, ...idsToAdd])));
+                      }}
+                      className="text-indigo-600 hover:underline"
+                    >
+                      검색결과 전체선택
+                    </button>
+                    <span className="text-slate-300">|</span>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedBulkStudentIds([])}
+                      className="text-rose-500 hover:underline"
+                    >
+                      선택 초기화
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex-1 overflow-y-auto custom-scroll p-3 divide-y divide-slate-100 bg-white min-h-[260px]">
+                {filteredModalStudents.length === 0 ? (
+                  <div className="py-16 text-center text-xs font-bold text-slate-400">
+                    조건에 맞는 재원생이 없습니다.
+                  </div>
+                ) : (
+                  filteredModalStudents.map((s: any) => {
+                    const sid = String(s.student_id);
+                    const isChecked = selectedBulkStudentIds.includes(sid);
+                    const activeEnrolls = (s.enrollment || []).filter((e: any) => !isEndedEnrollment(e));
+                    const classNames =
+                      Array.from(
+                        new Set(activeEnrolls.map((e: any) => unwrap(e.class)?.name).filter(Boolean))
+                      ).join(", ") || "반 미배정";
+                    const pInfo = unwrap(s.parent);
+                    const phoneStr = pInfo?.phone || pInfo?.phone_2 || "연락처 미등록";
+
+                    return (
+                      <label
+                        key={sid}
+                        className={`flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-colors ${
+                          isChecked ? "bg-indigo-50/70" : "hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => toggleStudent(sid)}
+                            className="w-4 h-4 accent-indigo-600 rounded cursor-pointer"
+                          />
+                          <div className="flex flex-col min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-slate-800">{s.name}</span>
+                              <span className="text-[11px] font-bold text-indigo-600 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 truncate max-w-[180px]">
+                                {classNames}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-400 font-medium mt-0.5">
+                              학부모 연락처: {phoneStr}
+                            </span>
+                          </div>
+                        </div>
+                        {isChecked && (
+                          <span className="text-[11px] font-bold text-indigo-600 bg-white px-2 py-0.5 rounded border border-indigo-200 shrink-0">
+                            선택됨 ✓
+                          </span>
+                        )}
+                      </label>
+                    );
+                  })
+                )}
+              </div>
+
+              <div className="p-4 bg-slate-50 border-t border-slate-200 flex justify-end gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsBulkStudentModalOpen(false)}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-sm transition-colors"
+                >
+                  선택 완료 ({selectedBulkStudentIds.length}명)
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* 발송 대기열 메시지 상세 미리보기 모달 */}
+      {previewQueueIdx !== null && queuedMessages[previewQueueIdx] && (() => {
+        const msg = queuedMessages[previewQueueIdx];
+        const isGeneralSms = msg.template_id === "GENERAL_SMS";
+        const isAttendance = msg.template_id === "KA01TP260921034958500GAtQOl600yJ";
+        const isSchedule = msg.template_id === "KA01TP260921035109788D7zIQYMgqvp";
+        const isMakeup = msg.template_id === "KA01TP26092103514300371OMrxorSxG";
+        const isTestResult = Boolean(msg.test_name || String(msg.preview_title || "").includes("학습결과"));
+
+        const rawDetails = String(msg.details || "").trim();
+        const isPreformattedSms =
+          rawDetails.startsWith("[로지카대치본원학원] 보강 안내") ||
+          rawDetails.includes("학부모님,");
+        const cleanedDetails = rawDetails.replace(/^\[로지카대치본원학원\]\s*/, "");
+
+        const fullSmsText = isPreformattedSms
+          ? `${rawDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 https://www.logicaclass.com/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`
+          : `[로지카대치본원학원]\n\n${msg.parent_name || "학부모"} 학부모님,\n\n${cleanedDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 https://www.logicaclass.com/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
+
+        const scheduleAlimtalkText = `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${msg.schedule_name || "-"}\n■ 적용 일시 : ${msg.apply_date || "-"}\n■ 상세 안내 : ${msg.details || "-"}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`;
+
+        const makeupAlimtalkText = `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${msg.old_date || "-"}\n■ 변경 일시 : ${msg.new_date || "-"}\n■ 상세 안내 : ${msg.details || "-"}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`;
+
+        const testResultAlimtalkText = `[로지카대치본원학원] 학습 결과 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n${msg.student_name || ""} 학생의 ${msg.test_name || "-"} 결과를 안내해 드립니다.\n\n시험명 : ${msg.test_name || "-"}\n\n학생 점수 : ${msg.student_score || "-"}점\n\n반 평균 : ${msg.class_average || "-"}점\n\n선생님 코멘트 : ${msg.comment || msg.details || "-"}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`;
+
+        return (
+          <div
+            className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-4"
+            onClick={() => setPreviewQueueIdx(null)}
+          >
+            <div
+              className="bg-white w-full max-w-md rounded-2xl shadow-2xl flex flex-col overflow-hidden animate-[fadeIn_0.2s_ease-out]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-slate-800 px-5 py-4 text-white flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-2">
+                  <span className="text-lg">🔍</span>
+                  <div>
+                    <h3 className="font-bold text-sm">
+                      발송 대기열 메시지 미리보기 ({previewQueueIdx + 1} / {queuedMessages.length})
+                    </h3>
+                    <p className="text-[11px] text-slate-300 mt-0.5">
+                      {isGeneralSms ? "일반 문자(SMS/LMS) 발송 예정" : "카카오 알림톡 템플릿 발송 예정"}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setPreviewQueueIdx(null)}
+                  className="text-slate-300 hover:text-white text-2xl font-bold leading-none"
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div className="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between text-xs">
+                <div className="flex items-center gap-1.5">
+                  <span className={`font-bold px-2 py-0.5 rounded border ${getBadgeColor(msg.preview_title)}`}>
+                    {msg.preview_title}
+                  </span>
+                  <span className="font-bold text-slate-800">{msg.student_name}</span>
+                  <span className="font-bold text-indigo-600">{msg.parent_name}</span>
+                </div>
+                <span className="font-bold text-slate-500">{msg.parent_phone}</span>
+              </div>
+
+              <div className="p-5 bg-[#b2c7d9] max-h-[60vh] overflow-y-auto custom-scroll">
+                {isGeneralSms ? (
+                  <div className="bg-white rounded-2xl p-4 shadow-md border border-slate-200 text-xs text-slate-800 whitespace-pre-wrap leading-relaxed font-medium">
+                    <div className="text-[11px] font-bold text-slate-400 border-b border-slate-100 pb-1.5 mb-2 flex justify-between">
+                      <span>✉️ 문자 메시지 (LMS)</span>
+                      <span>발신: 02-555-8875</span>
+                    </div>
+                    {fullSmsText}
+                  </div>
+                ) : (
+                  <div className="bg-white rounded-2xl overflow-hidden shadow-md border border-slate-200">
+                    <div className="bg-[#fef01b] px-4 py-2.5 flex items-center justify-between border-b border-amber-200">
+                      <span className="text-xs font-extrabold text-[#3a2929]">알림톡 도착</span>
+                      <span className="text-[11px] font-bold text-[#3a2929]/80">로지카대치본원학원</span>
+                    </div>
+
+                    <div className="p-4 text-xs text-slate-800 space-y-2.5 leading-relaxed font-medium whitespace-pre-wrap">
+                      {isAttendance && (
+                        `[로지카대치본원학원] 출결 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n${msg.student_name || ""} 학생의 출결 상태를 안내해 드립니다.\n\n■ 학생명 : ${msg.student_name || "-"}\n■ 출결상태 : ${msg.status_label || String(msg.preview_title || "").replace("[출결] ", "")}\n■ 일시 : ${msg.time_string || "-"}\n\n문의: 02-555-8875`
+                      )}
+                      {isSchedule && scheduleAlimtalkText}
+                      {isMakeup && makeupAlimtalkText}
+                      {isTestResult && testResultAlimtalkText}
+                      {!isAttendance && !isSchedule && !isMakeup && !isTestResult && (
+                        msg.details || msg.preview_desc || "-"
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="p-4 bg-white border-t border-slate-200 flex items-center justify-between gap-2 shrink-0">
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    disabled={previewQueueIdx <= 0}
+                    onClick={() => setPreviewQueueIdx((prev) => (prev !== null && prev > 0 ? prev - 1 : prev))}
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-xs font-bold rounded-lg transition-colors"
+                  >
+                    ◀ 이전
+                  </button>
+                  <button
+                    type="button"
+                    disabled={previewQueueIdx >= queuedMessages.length - 1}
+                    onClick={() =>
+                      setPreviewQueueIdx((prev) =>
+                        prev !== null && prev < queuedMessages.length - 1 ? prev + 1 : prev
+                      )
+                    }
+                    className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 text-slate-700 text-xs font-bold rounded-lg transition-colors"
+                  >
+                    다음 ▶
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const res = await deleteQueueItem(msg.queue_id);
+                      if (!res.success) {
+                        alert(`삭제 실패: ${res.message}`);
+                        return;
+                      }
+                      await fetchQueue();
+                      if (queuedMessages.length <= 1) {
+                        setPreviewQueueIdx(null);
+                      } else if (previewQueueIdx >= queuedMessages.length - 1) {
+                        setPreviewQueueIdx(Math.max(0, queuedMessages.length - 2));
+                      }
+                    }}
+                    className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 text-xs font-bold rounded-lg transition-colors"
+                  >
+                    이 항목 삭제
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewQueueIdx(null)}
+                    className="px-4 py-1.5 bg-slate-800 hover:bg-slate-900 text-white text-xs font-bold rounded-lg transition-colors"
+                  >
+                    닫기
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
       
       {isInquiryOpen && (
         <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[9999] flex items-center justify-center p-6 sm:p-10">

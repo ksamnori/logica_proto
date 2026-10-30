@@ -1322,6 +1322,34 @@ function ReviewContent() {
     }
   };
 
+  const handleGoBack = () => {
+    try {
+      const fromParam = searchParams.get("from");
+      const fromStorage = sessionStorage.getItem("logica_exam_list_from_grading_modal") === "1";
+      const savedModalRaw = sessionStorage.getItem("logica_exam_list_grading_modal");
+      let savedModal: any = null;
+      if (savedModalRaw) {
+        try { savedModal = JSON.parse(savedModalRaw); } catch (e) {}
+      }
+
+      if (!isHomeworkMode && (fromParam === "exam_list" || fromStorage || (savedModal && savedModal.isOpen))) {
+        const targetExamId = searchParams.get("exam_id") || contextIds.examPaperId || savedModal?.examId || "";
+        const targetTitle = searchParams.get("exam_title") || savedModal?.title || headerInfo.title.replace(/^📝\s*/, "").replace(/\s*채점표$/, "") || "";
+        if (targetExamId) {
+          sessionStorage.setItem(
+            "logica_exam_list_grading_modal",
+            JSON.stringify({ isOpen: true, examId: String(targetExamId), title: String(targetTitle) })
+          );
+          router.push(
+            `/exam-list?open_grading_exam_id=${encodeURIComponent(String(targetExamId))}&open_grading_title=${encodeURIComponent(String(targetTitle))}`
+          );
+          return;
+        }
+      }
+    } catch (e) {}
+    router.back();
+  };
+
   return (
     <div className="flex h-screen overflow-hidden bg-[#f1f5f9] w-full font-pretendard">
       <main className="flex-1 overflow-y-auto custom-scroll p-4 sm:p-8 relative">
@@ -1329,7 +1357,7 @@ function ReviewContent() {
           
           <div className="bg-brand text-white p-6 rounded-t-2xl shadow-md flex justify-between items-center no-print">
             <div>
-              <button onClick={() => router.back()} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
+              <button onClick={handleGoBack} className="text-white hover:text-blue-200 flex items-center gap-2 font-bold text-lg mb-2 transition-colors bg-blue-900/40 px-4 py-2 rounded-xl border border-blue-800/50 w-fit shadow-sm">
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg> 뒤로가기
               </button>
               <h1 className="text-2xl font-bold tracking-tight">{headerInfo.title}</h1>
@@ -1448,7 +1476,7 @@ function ReviewContent() {
 
             <div className="mt-8 mb-6 flex justify-center no-print">
               <button 
-                onClick={() => router.back()} 
+                onClick={handleGoBack} 
                 className="bg-brand hover:bg-blue-900 text-white font-bold text-[15px] py-4 px-12 rounded-xl shadow-lg transition-transform hover:-translate-y-1 flex items-center gap-2"
               >
                 <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
