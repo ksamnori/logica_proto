@@ -2010,10 +2010,24 @@ export default function ExamViewerPage() {
       const targetExamIdToRebuild = rebuildExamIdRef.current || editExamId;
 
       if (isNewExamRef.current || editOriginalId || splitHwIdsStr || targetExamIdToRebuild) {
+        const preItems: { question_id: any; sort_order: number; assigned_score: number | null }[] = [];
+        let fIdx = 1;
+        examStateRef.current?.groups.forEach((g: any, gIdx: number) => {
+          const score = layoutType === '입학테스트' ? [2,3,4,5][(gIdx < 4 ? 0 : gIdx < 13 ? 1 : gIdx < 20 ? 2 : gIdx === 20 ? 3 : gIdx < 23 ? 0 : gIdx < 25 ? 1 : gIdx < 28 ? 2 : 3)] : null;
+          (g.questions || []).forEach((q: any) => preItems.push({
+            question_id: getRealId(q.question_id),
+            sort_order: fIdx++,
+            assigned_score: score
+          }));
+        });
+        if (preItems.length === 0) {
+          throw new Error("저장할 문항이 비어 있어 기존 문제지 보호를 위해 저장을 중단했습니다.");
+        }
+
         if (targetExamIdToRebuild) {
           const { error: rebuildErr } = await supabase.from('exam_master').update({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
-            total_questions: flatQIds.length, instructor_id: instId,
+            total_questions: preItems.length, instructor_id: instId,
             layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
             ...weeklyFields,
             ...summaryMetaFields
@@ -2024,7 +2038,7 @@ export default function ExamViewerPage() {
         } else {
           const { data, error: insertErr } = await supabase.from('exam_master').insert({
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
-            total_questions: flatQIds.length, instructor_id: instId,
+            total_questions: preItems.length, instructor_id: instId,
             layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
             ...weeklyFields,
             ...summaryMetaFields
@@ -2033,19 +2047,10 @@ export default function ExamViewerPage() {
           examId = data.exam_id;
         }
 
-        const items: any[] = []; let fIdx = 1;
-        examStateRef.current?.groups.forEach((g: any, gIdx: number) => {
-          const score = layoutType === '입학테스트' ? [2,3,4,5][(gIdx < 4 ? 0 : gIdx < 13 ? 1 : gIdx < 20 ? 2 : gIdx === 20 ? 3 : gIdx < 23 ? 0 : gIdx < 25 ? 1 : gIdx < 28 ? 2 : 3)] : null;
-          g.questions.forEach((q: any) => items.push({ 
-             exam_id: examId, 
-             question_id: getRealId(q.question_id), 
-             sort_order: fIdx++, 
-             assigned_score: score 
-          }));
-        });
+        const items = preItems.map(it => ({ ...it, exam_id: examId }));
         const { error: itemsErr } = await supabase.from('exam_item').insert(items);
         if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
-      } else {
+      }
         const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트', layout_settings: finalLayoutSettings, ...weeklyFields, ...summaryMetaFields }).eq('exam_id', examId);
         if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
       }
