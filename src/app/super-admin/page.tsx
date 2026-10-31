@@ -16,6 +16,8 @@ const supabaseAnon = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, { auth: { per
 interface TenantRecord {
   tenant_id: string;
   name: string;
+  tenant_type?: string;
+  status?: string;
 }
 
 interface StudentPhoneRecord {
@@ -59,6 +61,10 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
 export default function AdminDashboardPage() {
   const [adminProfileName, setAdminProfileName] = useState("관리자님");
   const [activeTab, setActiveTab] = useState("student");
+  const [isStrictSuperAdmin, setIsStrictSuperAdmin] = useState<boolean>(false);
+  const [myTenantId, setMyTenantId] = useState<string>("");
+  const [myTenantName, setMyTenantName] = useState<string>("");
+  const [accessChecked, setAccessChecked] = useState<boolean>(false);
 
   const [tenants, setTenants] = useState<TenantRecord[]>([]);
 
@@ -106,7 +112,7 @@ export default function AdminDashboardPage() {
         if (session?.user?.id) {
           const { data: inst } = await supabase
             .from('instructor')
-            .select('instructor_id, role, position, name')
+            .select('instructor_id, role, position, name, tenant_id')
             .eq('instructor_id', session.user.id)
             .maybeSingle();
             
@@ -114,8 +120,9 @@ export default function AdminDashboardPage() {
             instId = inst.instructor_id || ""; 
             localStorage.setItem('logica_instructor_id', instId);
             localStorage.setItem('logica_instructor_name', inst.name || '관리자');
-            localStorage.setItem('logica_instructor_role', inst.role || 'SUPER_ADMIN');
-            localStorage.setItem('logica_instructor_position', inst.position || '최고관리자');
+            localStorage.setItem('logica_instructor_role', inst.role || 'ADMIN');
+            localStorage.setItem('logica_instructor_position', inst.position || '원장');
+            if (inst.tenant_id) localStorage.setItem('logica_tenant_id', inst.tenant_id);
           }
         }
       }
@@ -128,19 +135,38 @@ export default function AdminDashboardPage() {
 
       const { data } = await supabase
         .from('instructor')
-        .select('position, name, role')
+        .select('position, name, role, tenant_id')
         .eq('instructor_id', instId)
         .single();
         
       if (data) {
-        const isRealSuperAdmin = data.role === 'SUPER_ADMIN' || data.role === 'ADMIN' || String(data.position).includes('최고관리자') || String(data.position).includes('원장');
-        if (!isRealSuperAdmin) {
-          alert('⛔ 비정상적인 접근입니다. 최고관리자 권한이 부족합니다.');
+        const posStr = String(data.position || "");
+        const roleStr = String(data.role || "");
+        const isSuper = roleStr === 'SUPER_ADMIN' || posStr.includes('최고관리자') || posStr.includes('대장');
+        const isPrincipalOwner = !isSuper && (
+          roleStr === 'ADMIN' ||
+          roleStr === 'PRINCIPAL' ||
+          (posStr.includes('원장') && !posStr.includes('부원장'))
+        );
+
+        if (!isSuper && !isPrincipalOwner) {
+          alert('⛔ 비정상적인 접근입니다. 최고관리자 또는 원장 권한이 필요합니다.');
           window.location.href = '/admin-dashboard';
           return;
         }
-        setAdminProfileName(`${data.name} ${data.position || '관리자'}님`);
-        fetchTenants(); 
+
+        const userTenantId = data.tenant_id || localStorage.getItem('logica_tenant_id') || "";
+        if (!isSuper && !userTenantId) {
+          alert('⛔ 소속 지점(테넌트) 정보가 없습니다. 최고관리자에게 문의해주세요.');
+          window.location.href = '/admin-dashboard';
+          return;
+        }
+
+        setIsStrictSuperAdmin(isSuper);
+        setMyTenantId(userTenantId);
+        setAdminProfileName(`${data.name} ${data.position || (isSuper ? '최고관리자' : '원장')}님`);
+        await fetchTenants(isSuper, userTenantId);
+        setAccessChecked(true);
       } else {
         alert('강사 정보를 확인할 수 없습니다. 다시 로그인해주세요.');
         window.location.href = '/';
@@ -149,21 +175,39 @@ export default function AdminDashboardPage() {
     checkSuperAdminAccess();
   }, []);
 
-  const fetchTenants = async () => {
-    const { data } = await supabase.from('academy_tenant').select('*').eq('status', 'ACTIVE');
-    if (data && data.length > 0) {
-      setTenants(data);
-      const daechi = data.find((t: TenantRecord) => t.name.includes('대치'));
-      const defaultId = daechi ? daechi.tenant_id : data[0].tenant_id;
-      setSTenantId(defaultId);
-      setITenantId(defaultId);
+  const fetchTenants = async (isSuper: boolean, userTenantId: string) => {
+    if (isSuper) {
+      const { data } = await supabase.from('academy_tenant').select('*');
+      if (data && data.length > 0) {
+        const activeOrHq = (data as TenantRecord[]).filter(
+          (t) => t.status === 'ACTIVE' || t.tenant_type === 'HQ' || String(t.name).includes('본사')
+        );
+        const list = activeOrHq.length > 0 ? activeOrHq : (data as TenantRecord[]);
+        setTenants(list);
+        const daechi = list.find((t: TenantRecord) => t.name.includes('대치'));
+        const firstBranch = list.find((t: TenantRecord) => t.tenant_type !== 'HQ' && !t.name.includes('본사'));
+        const defaultId = daechi ? daechi.tenant_id : (firstBranch ? firstBranch.tenant_id : list[0].tenant_id);
+        setSTenantId(defaultId);
+        setITenantId(defaultId);
+      }
+    } else {
+      const { data } = await supabase.from('academy_tenant').select('*').eq('tenant_id', userTenantId);
+      const myList = (data as TenantRecord[]) || [];
+      setTenants(myList);
+      const branchName = myList[0]?.name || '소속 학원';
+      setMyTenantName(branchName);
+      setSTenantId(userTenantId);
+      setITenantId(userTenantId);
+      setStudentListTenantFilter(userTenantId);
+      setInstructorListTenantFilter(userTenantId);
     }
   };
 
   useEffect(() => {
+    if (!accessChecked) return;
     if (activeTab === "instructor-manage") loadInstructors();
     if (activeTab === "student-manage") loadStudents();
-  }, [activeTab, studentListTenantFilter, instructorListTenantFilter]);
+  }, [accessChecked, activeTab, studentListTenantFilter, instructorListTenantFilter, isStrictSuperAdmin, myTenantId]);
 
   const handlePhoneChange = (setter: (val: string) => void) => (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value.replace(/[^0-9]/g, '');
@@ -182,7 +226,8 @@ export default function AdminDashboardPage() {
 
   // --- 학생 로직 --- //
   const registerStudent = async () => {
-    if (!sTenantId) return alert("소속 지점을 선택해주세요!");
+    const targetTenantId = isStrictSuperAdmin ? sTenantId : myTenantId;
+    if (!targetTenantId) return alert("소속 지점을 선택해주세요!");
     
     // 🌟 [수정] 학생 연락처는 필수에서 제외, 학부모 연락처는 필수
     if (!sName || !pContact || !sPw) {
@@ -233,7 +278,7 @@ export default function AdminDashboardPage() {
 
       const { error: studentError } = await supabase.from('student').insert([{
           name: sName, grade: normalizeGrade(sGrade, sSchool), school: sSchool, phone: finalContact,
-          password_hash: sPw ? await hashPin(sPw) : null, status: sStatus, parent_id: finalParentId, tenant_id: sTenantId
+          password_hash: sPw ? await hashPin(sPw) : null, status: sStatus, parent_id: finalParentId, tenant_id: targetTenantId
       }]);
       if (studentError) throw studentError;
 
@@ -244,6 +289,7 @@ export default function AdminDashboardPage() {
   };
 
   const loadStudents = async () => {
+    if (!accessChecked) return;
     setIsLoadingStudents(true);
     try {
       let query = supabase
@@ -251,7 +297,13 @@ export default function AdminDashboardPage() {
         .select('*, parent(phone), academy_tenant(name)')
         .order('created_at', { ascending: false });
 
-      if (studentListTenantFilter !== "all") {
+      if (!isStrictSuperAdmin) {
+        if (!myTenantId) {
+          setStudentsList([]);
+          return;
+        }
+        query = query.eq('tenant_id', myTenantId);
+      } else if (studentListTenantFilter !== "all") {
         query = query.eq('tenant_id', studentListTenantFilter);
       }
 
@@ -272,18 +324,25 @@ export default function AdminDashboardPage() {
   };
 
   const saveStudentEdit = async () => {
+    const targetTenantId = isStrictSuperAdmin ? editStudent.tenant_id : myTenantId;
     if (!editStudent.name) return alert('이름은 필수입니다.');
-    if (!editStudent.tenant_id) return alert('소속 지점을 지정해야 합니다.');
+    if (!targetTenantId) return alert('소속 지점을 지정해야 합니다.');
 
     try {
-      const { error } = await supabase.from('student').update({
+      let updateQuery = supabase.from('student').update({
         name: editStudent.name,
         school: editStudent.school || null,
         grade: normalizeGrade(editStudent.grade, editStudent.school) || null,
         phone: formatPhone(editStudent.phone) || null,
         status: editStudent.status,
-        tenant_id: editStudent.tenant_id
+        tenant_id: targetTenantId
       }).eq('student_id', editStudent.student_id);
+
+      if (!isStrictSuperAdmin && myTenantId) {
+        updateQuery = updateQuery.eq('tenant_id', myTenantId);
+      }
+
+      const { error } = await updateQuery;
 
       if (error) throw error;
       alert('학생 정보가 수정되었습니다.');
@@ -309,7 +368,8 @@ export default function AdminDashboardPage() {
 
   // --- 강사 로직 --- //
   const registerInstructor = async () => {
-    if (!iTenantId) return alert("소속 지점을 선택해주세요!");
+    const targetTenantId = isStrictSuperAdmin ? iTenantId : myTenantId;
+    if (!targetTenantId) return alert("소속 지점을 선택해주세요!");
     if (!iEmail || !iPw || !iName) return alert("이메일, 비밀번호, 이름은 필수입니다!");
     if (!iEmail.includes('@')) return alert("올바른 이메일 형식을 입력해주세요.");
     if (iPw.length < 6) return alert("비밀번호는 최소 6자리 이상이어야 합니다.");
@@ -344,7 +404,7 @@ export default function AdminDashboardPage() {
       const fallbackLoginId = iEmail.split('@')[0];
       const { error: dbError } = await supabase.from('instructor').insert([{
         instructor_id: newUserId, login_id: fallbackLoginId, name: iName, position: iPosition,
-        role: assignedRole, email: iEmail, phone: iPhone || null, status: '재직', tenant_id: iTenantId 
+        role: assignedRole, email: iEmail, phone: iPhone || null, status: '재직', tenant_id: targetTenantId 
       }]);
 
       if (dbError) {
@@ -361,11 +421,18 @@ export default function AdminDashboardPage() {
   };
 
   const loadInstructors = async () => {
+    if (!accessChecked) return;
     setIsLoadingInstructors(true);
     try {
       let query = supabase.from('instructor').select('*, academy_tenant(tenant_type, name)').order('created_at', { ascending: false });
 
-      if (instructorListTenantFilter !== "all") {
+      if (!isStrictSuperAdmin) {
+        if (!myTenantId) {
+          setInstructors([]);
+          return;
+        }
+        query = query.eq('tenant_id', myTenantId);
+      } else if (instructorListTenantFilter !== "all") {
         query = query.eq('tenant_id', instructorListTenantFilter);
       }
 
@@ -373,11 +440,14 @@ export default function AdminDashboardPage() {
       if (error) throw error;
 
       const filteredData = (data as InstructorRecord[] || []).filter((inst) => {
-        const isHQ = inst.academy_tenant?.tenant_type === 'HQ' || inst.academy_tenant?.name?.includes('본사') || inst.position?.includes('본사'); 
-        return !isHQ;
+        // 최고관리자는 모든 지점과 본사를 모두 통제 가능하며, 원장은 본인 지점 소속 교강사만 조회(본사 및 최고관리자 제외)
+        if (isStrictSuperAdmin) return true;
+        const isHQ = inst.academy_tenant?.tenant_type === 'HQ' || inst.academy_tenant?.name?.includes('본사') || inst.position?.includes('본사');
+        const isSA = inst.role === 'SUPER_ADMIN' || String(inst.position || '').includes('최고관리자') || String(inst.position || '').includes('대장');
+        return !isHQ && !isSA && inst.tenant_id === myTenantId;
       });
 
-      const posOrder: Record<string, number> = { '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6, '테스트/체험': 7 };
+      const posOrder: Record<string, number> = { '최고관리자': 0, '대장': 0, '원장': 1, '부원장': 2, '실장': 3, '전임강사': 4, '파트강사': 5, '조교': 6, '테스트/체험': 7 };
       const sortedData = filteredData.sort((a, b) => {
         let orderA = posOrder[a.position] || 99;
         let orderB = posOrder[b.position] || 99;
@@ -395,11 +465,13 @@ export default function AdminDashboardPage() {
   };
 
   const saveInstructorEdit = async () => {
+    const targetTenantId = isStrictSuperAdmin ? editInst.tenant_id : myTenantId;
     if (!editInst.name) return alert('이름은 필수입니다.');
-    if (!editInst.tenant_id) return alert('소속 지점을 지정해야 합니다.');
+    if (!targetTenantId) return alert('소속 지점을 지정해야 합니다.');
 
-    let assignedRole = 'TEACHER';
-    if (editInst.position === '원장') assignedRole = 'ADMIN';
+    let assignedRole = editInst.role || 'TEACHER';
+    if (editInst.position === '최고관리자' || editInst.position === '대장') assignedRole = 'SUPER_ADMIN';
+    else if (editInst.position === '원장') assignedRole = 'ADMIN';
     else if (editInst.position === '부원장') assignedRole = 'VICE_ADMIN';
     else if (editInst.position === '실장') assignedRole = 'MANAGER';
     else if (editInst.position === '전임강사') assignedRole = 'TEACHER';
@@ -408,10 +480,16 @@ export default function AdminDashboardPage() {
     else if (editInst.position === '테스트/체험') assignedRole = 'GUEST';
 
     try {
-      const { error } = await supabase.from('instructor').update({
+      let updateQuery = supabase.from('instructor').update({
         name: editInst.name, position: editInst.position, role: assignedRole,
-        phone: editInst.phone || null, email: editInst.email || null, status: editInst.status, tenant_id: editInst.tenant_id
+        phone: editInst.phone || null, email: editInst.email || null, status: editInst.status, tenant_id: targetTenantId
       }).eq('instructor_id', editInst.instructor_id);
+
+      if (!isStrictSuperAdmin && myTenantId) {
+        updateQuery = updateQuery.eq('tenant_id', myTenantId);
+      }
+
+      const { error } = await updateQuery;
 
       if (error) throw error;
       alert('선생님 정보가 성공적으로 수정되었습니다.');
@@ -423,7 +501,9 @@ export default function AdminDashboardPage() {
   const softDeleteInstructor = async (id: string, name: string) => {
     if (!confirm(`[${name}] 선생님을 정말 퇴사 처리하시겠습니까?\n\n🚨 과거 내역 보존을 위해 DB에서 삭제되지 않고 '퇴사' 상태로만 변경됩니다.`)) return;
     try {
-      const { error } = await supabase.from('instructor').update({ status: '퇴사', deleted_at: new Date().toISOString() }).eq('instructor_id', id);
+      let q = supabase.from('instructor').update({ status: '퇴사', deleted_at: new Date().toISOString() }).eq('instructor_id', id);
+      if (!isStrictSuperAdmin && myTenantId) q = q.eq('tenant_id', myTenantId);
+      const { error } = await q;
       if (error) throw error;
       alert('안전하게 퇴사 처리가 완료되었습니다.');
       loadInstructors();
@@ -468,9 +548,17 @@ export default function AdminDashboardPage() {
         
         <div className="bg-[#002864] text-white p-6 shrink-0 relative flex justify-between items-center">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight">⚙️ Logica 슈퍼 어드민 센터</h1>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {isStrictSuperAdmin ? "⚙️ Logica 슈퍼 어드민 센터" : "⚙️ Logica 어드민 센터"}
+            </h1>
             <div className="flex items-center gap-3 mt-2">
-              <span className="bg-blue-800 text-blue-200 text-xs px-2 py-1 rounded font-bold border border-blue-600">최고 관리자 전용</span>
+              {isStrictSuperAdmin ? (
+                <span className="bg-blue-800 text-blue-200 text-xs px-2 py-1 rounded font-bold border border-blue-600">최고 관리자 전용 (전 지점 · 본사 통합)</span>
+              ) : (
+                <span className="bg-emerald-800 text-emerald-200 text-xs px-2 py-1 rounded font-bold border border-emerald-600">
+                  원장(관리자) 전용 · {myTenantName || "소속 지점"}
+                </span>
+              )}
               <span className="text-blue-200 text-sm font-bold">{adminProfileName}</span>
             </div>
           </div>
@@ -500,8 +588,16 @@ export default function AdminDashboardPage() {
                 <h2 className="text-xl font-bold mb-5 text-slate-800 border-b border-slate-100 pb-3">신규 학생 정보 입력</h2>
                 <div className="grid grid-cols-2 gap-5">
                   <div className="col-span-2 bg-slate-50 p-4 border border-slate-200 rounded-lg">
-                    <label className="block text-sm font-bold text-slate-700 mb-1">소속 지점 (Tenant) <span className="text-red-500">*</span></label>
-                    <select value={sTenantId} onChange={(e) => setSTenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-700">
+                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                      소속 지점 (Tenant) <span className="text-red-500">*</span>
+                      {!isStrictSuperAdmin && <span className="ml-2 text-xs text-emerald-700 font-bold">(원장님 소속 지점으로 고정됩니다)</span>}
+                    </label>
+                    <select
+                      value={isStrictSuperAdmin ? sTenantId : myTenantId}
+                      disabled={!isStrictSuperAdmin}
+                      onChange={(e) => setSTenantId(e.target.value)}
+                      className={`w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold ${!isStrictSuperAdmin ? "bg-slate-100 text-slate-600 cursor-not-allowed" : "text-slate-700 bg-white"}`}
+                    >
                       {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                     </select>
                   </div>
@@ -558,16 +654,24 @@ export default function AdminDashboardPage() {
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
                 <div className="flex justify-between items-center mb-4 shrink-0">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-xl font-bold text-slate-800">등록된 전체 학생 목록 (슈퍼어드민)</h2>
-                    {/* 🌟 학생 목록 지점 필터 드롭다운 */}
-                    <select 
-                      value={studentListTenantFilter} 
-                      onChange={(e) => setStudentListTenantFilter(e.target.value)}
-                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
-                    >
-                      <option value="all">🏢 전체 지점</option>
-                      {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
-                    </select>
+                    <h2 className="text-xl font-bold text-slate-800">
+                      {isStrictSuperAdmin ? "등록된 전체 학생 목록 (슈퍼어드민)" : `등록된 학생 목록 (${myTenantName || "소속 지점"})`}
+                    </h2>
+                    {/* 🌟 최고관리자는 전체 지점 선택 가능, 원장은 본인 지점만 고정 표시 */}
+                    {isStrictSuperAdmin ? (
+                      <select 
+                        value={studentListTenantFilter} 
+                        onChange={(e) => setStudentListTenantFilter(e.target.value)}
+                        className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
+                      >
+                        <option value="all">🏢 전체 지점</option>
+                        {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                      </select>
+                    ) : (
+                      <span className="px-3 py-1.5 border border-blue-200 rounded-lg text-sm font-bold text-[#002864] bg-blue-50">
+                        🏢 {myTenantName || "소속 지점"} 전용
+                      </span>
+                    )}
                   </div>
                   <button onClick={loadStudents} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors">새로고침 ↻</button>
                 </div>
@@ -626,8 +730,16 @@ export default function AdminDashboardPage() {
                 <h2 className="text-xl font-bold mb-4 text-slate-800">신규 관리자(선생님) 등록</h2>
                 <div className="grid grid-cols-2 gap-4">
                   <div className="col-span-2 bg-slate-50 p-4 border border-slate-200 rounded-lg">
-                    <label className="block text-sm font-bold text-slate-700 mb-1">소속 지점 (Tenant) <span className="text-red-500">*</span></label>
-                    <select value={iTenantId} onChange={(e) => setITenantId(e.target.value)} className="w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold text-slate-700">
+                    <label className="block text-sm font-bold text-slate-700 mb-1">
+                      소속 지점 (Tenant) <span className="text-red-500">*</span>
+                      {!isStrictSuperAdmin && <span className="ml-2 text-xs text-emerald-700 font-bold">(원장님 소속 지점으로 고정됩니다)</span>}
+                    </label>
+                    <select
+                      value={isStrictSuperAdmin ? iTenantId : myTenantId}
+                      disabled={!isStrictSuperAdmin}
+                      onChange={(e) => setITenantId(e.target.value)}
+                      className={`w-full px-4 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-[#002864] font-bold ${!isStrictSuperAdmin ? "bg-slate-100 text-slate-600 cursor-not-allowed" : "text-slate-700 bg-white"}`}
+                    >
                       {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                     </select>
                   </div>
@@ -665,16 +777,24 @@ export default function AdminDashboardPage() {
               <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-[600px]">
                 <div className="flex justify-between items-center mb-4 shrink-0">
                   <div className="flex items-center gap-3">
-                    <h2 className="text-xl font-bold text-slate-800">등록된 관리자 전체 목록 (슈퍼어드민)</h2>
-                    {/* 🌟 강사 목록 지점 필터 드롭다운 */}
-                    <select 
-                      value={instructorListTenantFilter} 
-                      onChange={(e) => setInstructorListTenantFilter(e.target.value)}
-                      className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
-                    >
-                      <option value="all">🏢 전체 지점</option>
-                      {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
-                    </select>
+                    <h2 className="text-xl font-bold text-slate-800">
+                      {isStrictSuperAdmin ? "등록된 관리자 전체 목록 (슈퍼어드민)" : `등록된 선생님 목록 (${myTenantName || "소속 지점"})`}
+                    </h2>
+                    {/* 🌟 최고관리자는 본사 포함 전체 지점 선택 가능, 원장은 본인 지점만 고정 표시 */}
+                    {isStrictSuperAdmin ? (
+                      <select 
+                        value={instructorListTenantFilter} 
+                        onChange={(e) => setInstructorListTenantFilter(e.target.value)}
+                        className="px-3 py-1.5 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 bg-slate-50 focus:outline-none focus:ring-2 focus:ring-[#002864]"
+                      >
+                        <option value="all">🏢 전체 지점 (본사 포함)</option>
+                        {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
+                      </select>
+                    ) : (
+                      <span className="px-3 py-1.5 border border-blue-200 rounded-lg text-sm font-bold text-[#002864] bg-blue-50">
+                        🏢 {myTenantName || "소속 지점"} 전용
+                      </span>
+                    )}
                   </div>
                   <button onClick={loadInstructors} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-sm transition-colors">새로고침 ↻</button>
                 </div>
@@ -745,7 +865,12 @@ export default function AdminDashboardPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-500 mb-1">소속 지점</label>
-                  <select value={editStudent.tenant_id || ""} onChange={(e) => setEditStudent({...editStudent, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
+                  <select
+                    value={isStrictSuperAdmin ? (editStudent.tenant_id || "") : myTenantId}
+                    disabled={!isStrictSuperAdmin}
+                    onChange={(e) => setEditStudent({...editStudent, tenant_id: e.target.value})}
+                    className={`w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864] ${!isStrictSuperAdmin ? "bg-slate-100 text-slate-600 cursor-not-allowed" : "bg-white"}`}
+                  >
                     {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                   </select>
                 </div>
@@ -790,7 +915,12 @@ export default function AdminDashboardPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="col-span-2">
                   <label className="block text-xs font-bold text-slate-500 mb-1">소속 지점</label>
-                  <select value={editInst.tenant_id || ""} onChange={(e) => setEditInst({...editInst, tenant_id: e.target.value})} className="w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864]">
+                  <select
+                    value={isStrictSuperAdmin ? (editInst.tenant_id || "") : myTenantId}
+                    disabled={!isStrictSuperAdmin}
+                    onChange={(e) => setEditInst({...editInst, tenant_id: e.target.value})}
+                    className={`w-full px-3 py-2 rounded border border-slate-300 font-bold focus:outline-none focus:border-[#002864] ${!isStrictSuperAdmin ? "bg-slate-100 text-slate-600 cursor-not-allowed" : "bg-white"}`}
+                  >
                     {tenants.map(t => <option key={t.tenant_id} value={t.tenant_id}>{t.name}</option>)}
                   </select>
                 </div>

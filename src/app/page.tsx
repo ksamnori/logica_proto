@@ -19,6 +19,7 @@ export default function LoginPage() {
   
   const [showAdminChoice, setShowAdminChoice] = useState(false);
   const [adminProfileName, setAdminProfileName] = useState("");
+  const [isSuperAdminChoice, setIsSuperAdminChoice] = useState(false);
 
   useEffect(() => {
     const clearSession = async () => {
@@ -87,6 +88,12 @@ export default function LoginPage() {
       const position = String(instructorData.position);
       
       const isSuperAdmin = role === 'SUPER_ADMIN' || position.includes('최고관리자') || position.includes('대장');
+      // 💡 원장(본인 지점 통제 관리자) vs 부원장/실장 분리 ("부원장"에는 "원장" 문자열이 포함되므로 제외)
+      const isOwnerPrincipal = !isSuperAdmin && (
+        role === 'ADMIN' ||
+        role === 'PRINCIPAL' ||
+        (position.includes('원장') && !position.includes('부원장'))
+      );
       const isPrincipal = ['ADMIN', 'VICE_ADMIN', 'MANAGER'].includes(role) || 
                           ['원장', '부원장', '실장'].some((p: string) => position.includes(p));
       // 💡 신규: 조교(TA) 여부 판별
@@ -139,8 +146,14 @@ export default function LoginPage() {
       // 💡 직급에 따른 자동 라우팅 처리
       if (isSuperAdmin) {
         setAdminProfileName(instructorData.name);
+        setIsSuperAdminChoice(true);
         setShowAdminChoice(true);
         setIsLoading(false); 
+      } else if (isOwnerPrincipal) {
+        setAdminProfileName(instructorData.name);
+        setIsSuperAdminChoice(false);
+        setShowAdminChoice(true);
+        setIsLoading(false);
       } else if (isPrincipal) {
         alert(`로그인 성공! ${instructorData.name}님 환영합니다.`);
         router.replace("/admin-dashboard"); 
@@ -270,8 +283,19 @@ export default function LoginPage() {
 
         sessionStorage.setItem("just_logged_in", "true");
 
+        const isOwnerPrincipal = !isSuperAdmin && (
+          role === 'ADMIN' ||
+          role === 'PRINCIPAL' ||
+          (position.includes('원장') && !position.includes('부원장'))
+        );
         if (isSuperAdmin) {
           setAdminProfileName(instructorData.name);
+          setIsSuperAdminChoice(true);
+          setShowAdminChoice(true);
+          setIsLoading(false);
+        } else if (isOwnerPrincipal) {
+          setAdminProfileName(instructorData.name);
+          setIsSuperAdminChoice(false);
           setShowAdminChoice(true);
           setIsLoading(false);
         } else {
@@ -427,23 +451,27 @@ export default function LoginPage() {
         <div className="fixed inset-0 bg-slate-900/70 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 animate-[fadeIn_0.2s_ease-out]">
           <div className="bg-white w-full max-w-[500px] rounded-2xl shadow-2xl overflow-hidden flex flex-col">
             <div className="bg-brand p-5 text-center relative shrink-0">
-              <h2 className="text-xl font-bold text-white">👑 최고 관리자 로그인</h2>
+              <h2 className="text-xl font-bold text-white">
+                {isSuperAdminChoice ? "👑 최고 관리자 로그인" : "👑 관리자 로그인"}
+              </h2>
               <p className="text-blue-200 text-sm mt-1">{adminProfileName}님, 접속할 시스템을 선택해주세요.</p>
             </div>
             
             <div className="p-5 space-y-2.5 bg-slate-50">
-              <button 
-                onClick={() => router.replace("/hq-login")}
-                className="w-full flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-purple-600 hover:shadow-md transition-all group"
-              >
-                <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-xl group-hover:bg-purple-600 transition-colors shrink-0">
-                  <span className="group-hover:text-white transition-colors">🏢</span>
-                </div>
-                <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-purple-700 transition-colors truncate">본사 워크스페이스 (HQ)</h3>
-                  <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">본사 전용 시스템 및 가맹점 통합 관리</p>
-                </div>
-              </button>
+              {isSuperAdminChoice && (
+                <button 
+                  onClick={() => router.replace("/hq-login")}
+                  className="w-full flex items-center gap-4 bg-white p-3 rounded-xl border border-slate-200 shadow-sm hover:border-purple-600 hover:shadow-md transition-all group"
+                >
+                  <div className="w-10 h-10 bg-purple-50 rounded-full flex items-center justify-center text-xl group-hover:bg-purple-600 transition-colors shrink-0">
+                    <span className="group-hover:text-white transition-colors">🏢</span>
+                  </div>
+                  <div className="text-left flex-1 min-w-0">
+                    <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-purple-700 transition-colors truncate">본사 워크스페이스 (HQ)</h3>
+                    <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">본사 전용 시스템 및 가맹점 통합 관리</p>
+                  </div>
+                </button>
+              )}
 
               <button 
                 onClick={() => router.replace("/admin-dashboard")}
@@ -492,7 +520,9 @@ export default function LoginPage() {
                   <span className="group-hover:text-white transition-colors">⚙️</span>
                 </div>
                 <div className="text-left flex-1 min-w-0">
-                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-emerald-700 transition-colors truncate">최고 관리자 통제실</h3>
+                  <h3 className="font-bold text-slate-800 text-[14px] group-hover:text-emerald-700 transition-colors truncate">
+                    {isSuperAdminChoice ? "최고 관리자 통제실" : "관리자 통제실"}
+                  </h3>
                   <p className="text-xs font-bold text-slate-400 mt-0.5 truncate">시스템 설정 및 계정 권한 마스터 관리</p>
                 </div>
               </button>

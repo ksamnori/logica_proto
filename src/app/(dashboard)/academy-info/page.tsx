@@ -132,7 +132,7 @@ export default function AcademyInfoPage() {
       }
 
       const myTenantId = instData.tenant_id;
-      const isSuperLevel = instData.role === 'SUPER_ADMIN' || instData.role === 'ADMIN' || String(instData.position).includes('최고관리자') || String(instData.position).includes('원장');
+      const isSuperLevel = instData.role === 'SUPER_ADMIN' || String(instData.position).includes('최고관리자') || String(instData.position).includes('대장');
 
       setCurrentUser({ instId, name: instData.name || "관리자", role: instData.role || "", tenantId: myTenantId || "" });
 
