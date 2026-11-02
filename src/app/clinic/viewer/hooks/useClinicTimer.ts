@@ -1,5 +1,5 @@
 // src/app/clinic/viewer/hooks/useClinicTimer.ts
-import { useState, useEffect, MutableRefObject } from 'react';
+import { useState, useEffect, useRef, MutableRefObject } from 'react';
 import { SupabaseClient } from '@supabase/supabase-js';
 import { closeSessionAtLimit } from '@/lib/clinicSession';
 import { ROUND1_TIME_LIMIT_SECONDS } from '../utils';
@@ -26,6 +26,9 @@ export function useClinicTimer({
   const [roundRemainingSec, setRoundRemainingSec] = useState(ROUND1_TIME_LIMIT_SECONDS);
   const [isTimerInitialized, setIsTimerInitialized] = useState(false);
 
+  const sessionExpiredHandledRef = useRef(false);
+  const roundExpiredHandledRef = useRef(false);
+
   useEffect(() => {
     // 1. 우측 상단 전체 세션 타이머
     const sessionTimer = setInterval(() => {
@@ -35,7 +38,9 @@ export function useClinicTimer({
       
       if (rem <= 0) {
         setClinicRemainingStr("00:00");
-        if (!timeIsUp) {
+        clearInterval(sessionTimer);
+        if (!timeIsUp && !sessionExpiredHandledRef.current) {
+          sessionExpiredHandledRef.current = true;
           if (clinicSessionStateRef.current.id) {
             closeSessionAtLimit(supabaseClient, clinicSessionStateRef.current.id, clinicSessionStateRef.current.started_at, clinicSessionStateRef.current.duration_ms);
           }
@@ -67,7 +72,10 @@ export function useClinicTimer({
         setRoundRemainingSec(p => {
           if (p <= 1) { 
             if (roundTimer) clearInterval(roundTimer); 
-            handleTimeUp(); 
+            if (!roundExpiredHandledRef.current) {
+              roundExpiredHandledRef.current = true;
+              handleTimeUp();
+            }
             return 0; 
           }
           return p - 1;

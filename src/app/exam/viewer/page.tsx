@@ -5,6 +5,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { normalizeMasterCategoryRow } from "@/lib/normalize";
 import { supabase } from "@/lib/supabase";
+import { saveExamViewerMasterAction } from "@/app/actions/clinicActions";
 import { getISOWeekKST, getKSTDateString } from "@/lib/classRound";
 
 import ViewerHeader from "@/components/exam/ViewerHeader";
@@ -2024,35 +2025,28 @@ export default function ExamViewerPage() {
           throw new Error("저장할 문항이 비어 있어 기존 문제지 보호를 위해 저장을 중단했습니다.");
         }
 
-        if (targetExamIdToRebuild) {
-          const { error: rebuildErr } = await supabase.from('exam_master').update({
+        const saveRes = await saveExamViewerMasterAction({
+          targetExamIdToRebuild,
+          examId,
+          isRebuildOrNew: true,
+          masterPayload: {
             title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
             total_questions: preItems.length, instructor_id: instId,
-            layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
+            layout_settings: finalLayoutSettings, tenant_id: myTenantId,
             ...weeklyFields,
             ...summaryMetaFields
-          }).eq('exam_id', targetExamIdToRebuild);
-          if (rebuildErr) throw new Error(`문제지 갱신 실패: ${rebuildErr.message}`);
-          examId = targetExamIdToRebuild;
-          await supabase.from('exam_item').delete().eq('exam_id', examId);
-        } else {
-          const { data, error: insertErr } = await supabase.from('exam_master').insert({
-            title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트',
-            total_questions: preItems.length, instructor_id: instId,
-            layout_settings: finalLayoutSettings, tenant_id: myTenantId, 
-            ...weeklyFields,
-            ...summaryMetaFields
-          }).select().single();
-          if (insertErr || !data) throw new Error(`새 문제지 생성 실패: ${insertErr?.message || '알 수 없는 오류'}`);
-          examId = data.exam_id;
-        }
-
-        const items = preItems.map(it => ({ ...it, exam_id: examId }));
-        const { error: itemsErr } = await supabase.from('exam_item').insert(items);
-        if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
+          },
+          preItems
+        });
+        if (!saveRes.success || !saveRes.examId) throw new Error(saveRes.error || "문제지 저장 실패");
+        examId = saveRes.examId;
       } else {
-        const { error: updateErr } = await supabase.from('exam_master').update({ title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트', layout_settings: finalLayoutSettings, ...weeklyFields, ...summaryMetaFields }).eq('exam_id', examId);
-        if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
+        const saveRes = await saveExamViewerMasterAction({
+          examId,
+          isRebuildOrNew: false,
+          masterPayload: { title: examTitle, sub_title: displayBadge, exam_type: layoutType || '과제프린트', layout_settings: finalLayoutSettings, ...weeklyFields, ...summaryMetaFields }
+        });
+        if (!saveRes.success) throw new Error(saveRes.error || "레이아웃 설정 저장 실패");
       }
 
       const splitCommonTqIdsStr = sessionStorage.getItem('splitCommonTqIds');

@@ -8,19 +8,34 @@ const getAdminClient = () => {
     return createClient(
         process.env.NEXT_PUBLIC_SUPABASE_URL!,
         process.env.SUPABASE_SERVICE_ROLE_KEY!, 
-        { auth: { persistSession: false } }
+        { auth: { persistSession: false, autoRefreshToken: false } }
     );
 };
 
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+    if (!e) return true;
+    if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+    if (e.end_date) return true;
+    return false;
+};
+
+const getKSTDateString = () => new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+
 // 🌟 공통 헬퍼: 유효한 instructor_id를 찾기 위한 폴백(대비책) 함수
 async function getFallbackInstructorId(supabaseAdmin: any): Promise<string | null> {
-    // class 테이블에서 instructor_id가 비어있지 않은 아무 레코드나 하나 가져옵니다.
     const { data } = await supabaseAdmin.from('class')
         .select('instructor_id')
         .not('instructor_id', 'is', null)
         .limit(1)
         .maybeSingle();
-    return data?.instructor_id || null;
+    if (data?.instructor_id) return data.instructor_id;
+
+    const { data: inst } = await supabaseAdmin.from('instructor')
+        .select('instructor_id')
+        .limit(1)
+        .maybeSingle();
+    return inst?.instructor_id || null;
 }
 
 export async function processIncompleteHomeworks(studentId: string, pendingHwIds: number[], tenantId: string) {
@@ -79,7 +94,6 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
                 .filter(Boolean);
 
             if (unresolvedQids.length > 0) {
-                
                 let currentInstId = fallbackInstId;
                 if (hw.class && !Array.isArray(hw.class) && hw.class.instructor_id) {
                     currentInstId = hw.class.instructor_id;
@@ -108,7 +122,7 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
                 if (masterData) {
                     const newExamId = masterData.exam_id;
                     const examItems = unresolvedQids.map((qId: number, idx: number) => ({
-                        exam_id: newExamId, question_id: qId, sort_order: idx + 1
+                        exam_id: newExamId, question_id: String(qId), sort_order: idx + 1
                     }));
 
                     for (let i = 0; i < examItems.length; i += 100) {
@@ -119,12 +133,12 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
                         exam_id: newExamId,
                         student_id: studentId,
                         class_id: hw.class_id,
-                        status: '미응시'
+                        status: '미응시',
+                        tenant_id: tenantId
                     });
                 }
             }
 
-            // 🌟 확실한 픽스: 'hw_result_id' 컬럼 사용 및 스키마 기반 업데이트
             const { data: existingResult } = await supabaseAdmin.from('student_homework_result')
                 .select('hw_result_id')
                 .eq('student_id', studentId)
@@ -210,7 +224,7 @@ export async function generateIncorrectClinic(params: {
         
         const examItems = uniqueQids.map((qId, idx) => ({
             exam_id: newExamId,
-            question_id: String(qId), // 🔥 안전한 파싱을 위해 String 캐스팅
+            question_id: String(qId),
             sort_order: idx + 1
         }));
         
@@ -222,7 +236,8 @@ export async function generateIncorrectClinic(params: {
             exam_id: newExamId,
             student_id: studentId,
             class_id: targetClassId,
-            status: '미응시'
+            status: '미응시',
+            tenant_id: tenantId
         }).select().single();
 
         if (assignErr || !assignData) {
@@ -233,5 +248,459 @@ export async function generateIncorrectClinic(params: {
     } catch (err: any) {
         console.error(err);
         return { success: false, error: err.message };
+    }
+}
+
+// 🌟 [신규] 클리닉 뷰어(학생 화면)에서 오답 프린트 생성/병합 (Service Role Key로 exam_master RLS 위반 원천 차단)
+export async function generateIncorrectPrintServerAction(params: {
+    studentId: string;
+    studentName: string;
+    incQIds: (number | string)[];
+    sourceTitle: string;
+    syncIncorrectRecord?: boolean;
+    statusMap?: Record<string | number, string>;
+}) {
+    const supabaseAdmin = getAdminClient();
+    const { studentId, studentName, incQIds, sourceTitle, syncIncorrectRecord = true, statusMap } = params;
+    const uIds = Array.from(new Set((incQIds || []).filter(Boolean).map(String)));
+    if (uIds.length === 0) return { success: true };
+
+    try {
+        if (syncIncorrectRecord) {
+            const incUpserts = uIds.map(qid => ({
+                student_id: studentId,
+                question_id: qid,
+                source_type: '시험지',
+                status: statusMap?.[qid] || 'X',
+                resolved_at: null
+            }));
+            await supabaseAdmin.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
+        }
+
+        const cleanSourceTitle = (sourceTitle || '클리닉').replace(new RegExp(`^\\[${studentName}\\]\\s*`), '').trim();
+        const title = `[${studentName}] ${cleanSourceTitle} 오답 프린트`;
+
+        const { data: exMasters } = await supabaseAdmin.from('exam_master')
+            .select('exam_id, created_at')
+            .eq('title', title)
+            .eq('exam_type', '오답프린트')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        let existingExamId: string | null = null;
+        let merged = false;
+
+        if (exMasters && exMasters.length > 0) {
+            const todayStr = getKSTDateString();
+            const validMasters = exMasters.filter((m: any) => {
+                const createdAtKST = new Date(new Date(m.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+                return createdAtKST === todayStr;
+            });
+
+            if (validMasters.length > 0) {
+                const examIds = validMasters.map((m: any) => m.exam_id);
+                const { data: assignments } = await supabaseAdmin.from('exam_assignment')
+                    .select('assignment_id, exam_id')
+                    .eq('student_id', studentId)
+                    .in('exam_id', examIds)
+                    .eq('status', '미응시')
+                    .limit(1);
+
+                if (assignments && assignments.length > 0) {
+                    existingExamId = assignments[0].exam_id;
+                }
+            }
+        }
+
+        if (existingExamId) {
+            const { data: existingItems } = await supabaseAdmin.from('exam_item').select('question_id').eq('exam_id', existingExamId);
+            const existingQIds = new Set((existingItems || []).map((item: any) => String(item.question_id)));
+            const newQIds = uIds.filter(id => !existingQIds.has(String(id)));
+
+            if (newQIds.length > 0) {
+                const maxSortOrder = existingItems?.length || 0;
+                const itemsToInsert = newQIds.map((qid, i) => ({
+                    exam_id: existingExamId, question_id: String(qid), sort_order: maxSortOrder + i + 1, assigned_score: 0
+                }));
+                await supabaseAdmin.from('exam_item').insert(itemsToInsert);
+
+                const newTotal = maxSortOrder + newQIds.length;
+                await supabaseAdmin.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
+                const newScore = Math.round((100 / newTotal) * 100) / 100;
+                await supabaseAdmin.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
+            }
+            merged = true;
+        }
+
+        if (!merged) {
+            const { data: clsRows } = await supabaseAdmin.from('enrollment').select('class_id, status, end_date, class(instructor_id, tenant_id)').eq('student_id', studentId);
+            const cls = (clsRows || []).find((e: any) => !isEndedEnrollment(e)) || clsRows?.[0];
+            const classData: any = Array.isArray(cls?.class) ? cls?.class[0] : cls?.class;
+            let instId = classData?.instructor_id;
+            const tenantId = classData?.tenant_id || null;
+            const classId = cls?.class_id || null;
+
+            if (!instId) {
+                instId = await getFallbackInstructorId(supabaseAdmin);
+            }
+            if (!instId) return { success: false, error: '강사 정보를 찾을 수 없습니다.' };
+
+            const { data: ex, error: exErr } = await supabaseAdmin.from('exam_master').insert({
+                title,
+                exam_type: '오답프린트',
+                instructor_id: instId,
+                total_questions: uIds.length,
+                tenant_id: tenantId
+            }).select().single();
+
+            if (exErr || !ex) {
+                throw new Error(exErr?.message || '오답프린트 exam_master 생성 실패');
+            }
+
+            const items = uIds.map((qid, i) => ({
+                exam_id: ex.exam_id,
+                question_id: String(qid),
+                sort_order: i + 1,
+                assigned_score: Math.round((100 / uIds.length) * 100) / 100
+            }));
+            await supabaseAdmin.from('exam_item').insert(items);
+            await supabaseAdmin.from('exam_assignment').insert({
+                exam_id: ex.exam_id,
+                student_id: studentId,
+                class_id: classId,
+                status: '미응시',
+                tenant_id: tenantId
+            });
+        }
+
+        return { success: true };
+    } catch (e: any) {
+        console.error('generateIncorrectPrintServerAction 오류:', e);
+        return { success: false, error: e?.message };
+    }
+}
+
+// 🌟 [신규] 클리닉 뷰어(학생 화면)에서 미완료 프린트 생성/병합 (Service Role Key로 exam_master RLS 위반 원천 차단)
+export async function generateOverduePrintServerAction(params: {
+    studentId: string;
+    studentName: string;
+    uIds: (number | string)[];
+    sourceTitle: string;
+}) {
+    const supabaseAdmin = getAdminClient();
+    const { studentId, studentName, uIds: rawIds, sourceTitle } = params;
+    const uIds = Array.from(new Set((rawIds || []).filter(Boolean).map(String)));
+    if (uIds.length === 0) return { success: true };
+
+    try {
+        const cleanSourceTitle = (sourceTitle || '클리닉').replace(new RegExp(`^\\[${studentName}\\]\\s*`), '').trim();
+        const title = `[${studentName}] ${cleanSourceTitle} 미완료 프린트`;
+
+        const { data: exMasters } = await supabaseAdmin.from('exam_master')
+            .select('exam_id, created_at')
+            .eq('title', title)
+            .eq('exam_type', '미완료과제')
+            .order('created_at', { ascending: false })
+            .limit(10);
+
+        let existingExamId: string | null = null;
+        let merged = false;
+
+        if (exMasters && exMasters.length > 0) {
+            const todayStr = getKSTDateString();
+            const validMasters = exMasters.filter((m: any) => {
+                const createdAtKST = new Date(new Date(m.created_at).getTime() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+                return createdAtKST === todayStr;
+            });
+
+            if (validMasters.length > 0) {
+                const examIds = validMasters.map((m: any) => m.exam_id);
+                const { data: assignments } = await supabaseAdmin.from('exam_assignment')
+                    .select('assignment_id, exam_id')
+                    .eq('student_id', studentId)
+                    .in('exam_id', examIds)
+                    .eq('status', '미응시')
+                    .limit(1);
+
+                if (assignments && assignments.length > 0) {
+                    existingExamId = assignments[0].exam_id;
+                }
+            }
+        }
+
+        if (existingExamId) {
+            const { data: existingItems } = await supabaseAdmin.from('exam_item').select('question_id').eq('exam_id', existingExamId);
+            const existingQIds = new Set((existingItems || []).map((item: any) => String(item.question_id)));
+            const newQIds = uIds.filter(id => !existingQIds.has(String(id)));
+
+            if (newQIds.length > 0) {
+                const maxSortOrder = existingItems?.length || 0;
+                const itemsToInsert = newQIds.map((qid, i) => ({
+                    exam_id: existingExamId, question_id: String(qid), sort_order: maxSortOrder + i + 1, assigned_score: 0
+                }));
+                await supabaseAdmin.from('exam_item').insert(itemsToInsert);
+
+                const newTotal = maxSortOrder + newQIds.length;
+                await supabaseAdmin.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
+                const newScore = Math.round((100 / newTotal) * 100) / 100;
+                await supabaseAdmin.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
+            }
+            merged = true;
+        }
+
+        if (!merged) {
+            const { data: clsRows } = await supabaseAdmin.from('enrollment').select('class_id, status, end_date, class(instructor_id, tenant_id)').eq('student_id', studentId);
+            const cls = (clsRows || []).find((e: any) => !isEndedEnrollment(e)) || clsRows?.[0];
+            const classData: any = Array.isArray(cls?.class) ? cls?.class[0] : cls?.class;
+            let instId = classData?.instructor_id;
+            const tenantId = classData?.tenant_id || null;
+            const classId = cls?.class_id || null;
+
+            if (!instId) {
+                instId = await getFallbackInstructorId(supabaseAdmin);
+            }
+            if (!instId) return { success: false, error: '강사 정보를 찾을 수 없습니다.' };
+
+            const { data: ex, error: exErr } = await supabaseAdmin.from('exam_master').insert({
+                title,
+                exam_type: '미완료과제',
+                instructor_id: instId,
+                total_questions: uIds.length,
+                tenant_id: tenantId
+            }).select().single();
+
+            if (exErr || !ex) {
+                throw new Error(exErr?.message || '미완료과제 exam_master 생성 실패');
+            }
+
+            const items = uIds.map((qid, i) => ({
+                exam_id: ex.exam_id,
+                question_id: String(qid),
+                sort_order: i + 1,
+                assigned_score: Math.round((100 / uIds.length) * 100) / 100
+            }));
+            await supabaseAdmin.from('exam_item').insert(items);
+            await supabaseAdmin.from('exam_assignment').insert({
+                exam_id: ex.exam_id,
+                student_id: studentId,
+                status: '미응시',
+                class_id: classId,
+                tenant_id: tenantId
+            });
+        }
+
+        return { success: true };
+    } catch (e: any) {
+        console.error('generateOverduePrintServerAction 오류:', e);
+        return { success: false, error: e?.message };
+    }
+}
+
+// 🌟 [신규] 클리닉 뷰어에서 기존 오답 프린트에 문항 추가 시 Service Role Key 사용
+export async function appendToExistingIncorrectPrintAction(studentId: string, questionId: string | number) {
+    if (!studentId || !questionId) return { success: false };
+    const supabaseAdmin = getAdminClient();
+
+    try {
+        const { data: assignments } = await supabaseAdmin.from('exam_assignment')
+            .select('assignment_id, exam_id, status, exam_master!inner(exam_type, total_questions)')
+            .eq('student_id', studentId)
+            .eq('exam_master.exam_type', '오답프린트')
+            .not('status', 'in', '("제출완료", "채점완료", "완료")')
+            .order('created_at', { ascending: false })
+            .limit(1);
+
+        if (assignments && assignments.length > 0) {
+            const assign = assignments[0];
+            const examId = assign.exam_id;
+            const { data: existingItem } = await supabaseAdmin.from('exam_item')
+                .select('question_id')
+                .eq('exam_id', examId)
+                .eq('question_id', String(questionId))
+                .maybeSingle();
+
+            if (!existingItem) {
+                const { count } = await supabaseAdmin.from('exam_item')
+                    .select('*', { count: 'exact', head: true })
+                    .eq('exam_id', examId);
+                const nextSortOrder = (count || 0) + 1;
+                await supabaseAdmin.from('exam_item').insert({
+                    exam_id: examId,
+                    question_id: String(questionId),
+                    sort_order: nextSortOrder
+                });
+                await supabaseAdmin.from('exam_master')
+                    .update({ total_questions: nextSortOrder })
+                    .eq('exam_id', examId);
+            }
+        }
+        return { success: true };
+    } catch (err: any) {
+        console.error('appendToExistingIncorrectPrintAction 실패:', err);
+        return { success: false, error: err?.message };
+    }
+}
+
+// 🌟 [신규] 학습관리(/learning) 및 타임라인에서 오답유사 클리닉 문제지 생성 및 배부 (RLS 우회 보장)
+export async function createClinicExamBundleAction(params: {
+    title: string;
+    subTitle: string;
+    examType: string;
+    instructorId?: string | null;
+    tenantId?: string | null;
+    layoutSettings?: any;
+    questionIds: (string | number)[];
+    studentId: string;
+    classId?: string | null;
+    createClinicTasks?: boolean;
+}) {
+    const supabaseAdmin = getAdminClient();
+    const {
+        title,
+        subTitle,
+        examType,
+        instructorId,
+        tenantId,
+        layoutSettings,
+        questionIds,
+        studentId,
+        classId,
+        createClinicTasks = true
+    } = params;
+
+    try {
+        let finalInstId = instructorId || null;
+        if (!finalInstId) {
+            finalInstId = await getFallbackInstructorId(supabaseAdmin);
+        }
+
+        const { data: masterData, error: mstErr } = await supabaseAdmin.from('exam_master').insert({
+            title,
+            sub_title: subTitle,
+            exam_type: examType,
+            total_questions: questionIds.length,
+            instructor_id: finalInstId,
+            tenant_id: tenantId || null,
+            layout_settings: layoutSettings || {
+                column: 2,
+                split: 4,
+                titleMode: 'all',
+                template: 'basic1',
+                numberColor: '#175b6a',
+                titleColor: '#002864',
+                lineColor: '#94a3b8'
+            }
+        }).select().single();
+
+        if (mstErr || !masterData) {
+            throw new Error(mstErr?.message || '시험지 마스터 생성 실패');
+        }
+
+        const newExamId = masterData.exam_id;
+        const examItems = questionIds.map((qId, idx) => ({
+            exam_id: newExamId,
+            question_id: String(qId),
+            sort_order: idx + 1
+        }));
+
+        for (let i = 0; i < examItems.length; i += 100) {
+            const { error: itemsErr } = await supabaseAdmin.from('exam_item').insert(examItems.slice(i, i + 100));
+            if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
+        }
+
+        const { error: assignErr } = await supabaseAdmin.from('exam_assignment').insert({
+            exam_id: newExamId,
+            student_id: studentId,
+            class_id: classId || null,
+            status: '미응시',
+            tenant_id: tenantId || null
+        });
+        if (assignErr) throw new Error(`학생 배부 실패: ${assignErr.message}`);
+
+        if (createClinicTasks) {
+            const tasks = questionIds.map(qId => ({
+                student_id: studentId,
+                task_type: '유형오답클리닉',
+                question_id: String(qId),
+                status: '대기'
+            }));
+            for (let i = 0; i < tasks.length; i += 100) {
+                await supabaseAdmin.from('clinic_task').insert(tasks.slice(i, i + 100));
+            }
+        }
+
+        return { success: true, examId: newExamId };
+    } catch (err: any) {
+        console.error('createClinicExamBundleAction 실패:', err);
+        return { success: false, error: err?.message };
+    }
+}
+
+// 🌟 [신규] exam_master 필드 업데이트 서버 액션 (RLS 우회 보장)
+export async function updateExamMasterFieldsAction(examId: string, fields: Record<string, any>) {
+    if (!examId) return { success: false, error: 'examId가 없습니다.' };
+    const supabaseAdmin = getAdminClient();
+    try {
+        const { error } = await supabaseAdmin.from('exam_master').update(fields).eq('exam_id', examId);
+        if (error) throw error;
+        return { success: true };
+    } catch (err: any) {
+        console.error('updateExamMasterFieldsAction 실패:', err);
+        return { success: false, error: err?.message };
+    }
+}
+// 🌟 [신규] 시험지 뷰어(/exam/viewer)에서 exam_master 생성/갱신 및 문항 저장 (RLS 우회 보장)
+export async function saveExamViewerMasterAction(params: {
+    targetExamIdToRebuild?: string | null;
+    examId?: string | null;
+    isRebuildOrNew: boolean;
+    masterPayload: Record<string, any>;
+    preItems?: { question_id: any; sort_order: number; assigned_score: number | null }[];
+}) {
+    const supabaseAdmin = getAdminClient();
+    const { targetExamIdToRebuild, examId, isRebuildOrNew, masterPayload, preItems = [] } = params;
+
+    try {
+        let finalExamId = examId || null;
+
+        if (isRebuildOrNew) {
+            if (targetExamIdToRebuild) {
+                const { error: rebuildErr } = await supabaseAdmin
+                    .from("exam_master")
+                    .update(masterPayload)
+                    .eq("exam_id", targetExamIdToRebuild);
+                if (rebuildErr) throw new Error(`문제지 갱신 실패: ${rebuildErr.message}`);
+                finalExamId = targetExamIdToRebuild;
+                await supabaseAdmin.from("exam_item").delete().eq("exam_id", finalExamId);
+            } else {
+                const { data, error: insertErr } = await supabaseAdmin
+                    .from("exam_master")
+                    .insert(masterPayload)
+                    .select()
+                    .single();
+                if (insertErr || !data) throw new Error(`새 문제지 생성 실패: ${insertErr?.message || "알 수 없는 오류"}`);
+                finalExamId = data.exam_id;
+            }
+
+            if (preItems.length > 0 && finalExamId) {
+                const items = preItems.map((it) => ({ ...it, exam_id: finalExamId }));
+                for (let i = 0; i < items.length; i += 100) {
+                    const { error: itemsErr } = await supabaseAdmin.from("exam_item").insert(items.slice(i, i + 100));
+                    if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
+                }
+            }
+        } else {
+            if (!finalExamId) throw new Error("저장할 문제지 ID가 없습니다.");
+            const { error: updateErr } = await supabaseAdmin
+                .from("exam_master")
+                .update(masterPayload)
+                .eq("exam_id", finalExamId);
+            if (updateErr) throw new Error(`레이아웃 설정 저장 실패: ${updateErr.message}`);
+        }
+
+        return { success: true, examId: finalExamId };
+    } catch (err: any) {
+        console.error("saveExamViewerMasterAction 실패:", err);
+        return { success: false, error: err?.message };
     }
 }

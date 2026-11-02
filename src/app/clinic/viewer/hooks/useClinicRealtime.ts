@@ -69,6 +69,7 @@ export function useClinicRealtime({
   });
 
   const runSelfCorrectionRef = useRef<any>(null);
+  const checkoutHandledRef = useRef(false);
 
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
@@ -76,7 +77,7 @@ export function useClinicRealtime({
 
     const runSelfCorrection = async () => {
       const sid = clinicSessionStateRef.current?.id;
-      if (!sid || cancelled) return;
+      if (!sid || cancelled || checkoutHandledRef.current) return;
 
       const { data, error } = await supabaseClient
         .from('clinic_session_state')
@@ -102,7 +103,12 @@ export function useClinicRealtime({
       }
 
       if (data.ended_at) {
-          handleTimeUp('force_checkout_by_ta', true);
+          if (!checkoutHandledRef.current) {
+              checkoutHandledRef.current = true;
+              cancelled = true;
+              clearInterval(interval);
+              handleTimeUp('force_checkout_by_ta', true);
+          }
           return;
       }
 

@@ -3,6 +3,7 @@
 
 import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+import { updateExamMasterFieldsAction } from "@/app/actions/clinicActions";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -224,7 +225,7 @@ export default function PublishModal({ isOpen, examId, title, onClose, onSuccess
     try {
       const { data: exMaster } = await supabase.from('exam_master').select('exam_type').eq('exam_id', examId).single();
       if (exMaster?.exam_type === '과제프린트') {
-        await supabase.from('exam_master').update({ exam_type: '과제' }).eq('exam_id', examId);
+        await updateExamMasterFieldsAction(examId, { exam_type: '과제' });
       }
 
       const { data: existing } = await supabase.from('exam_assignment').select('student_id, class_id').eq('exam_id', examId);

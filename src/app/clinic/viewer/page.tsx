@@ -12,6 +12,7 @@ import { BOOK_TYPE_COLORS } from "@/lib/clinicHomework";
 import PointBadge from "@/components/clinic/PointBadge";
 
 import { generateIncorrectPrint, finalizeSessionData } from '@/lib/clinicPrintActions';
+import { appendToExistingIncorrectPrintAction } from '@/app/actions/clinicActions';
 import { useClinicTimer } from "./hooks/useClinicTimer";
 import { useClinicDataFetch } from "./hooks/useClinicDataFetch";
 import { useClinicRealtime } from "./hooks/useClinicRealtime";
@@ -272,6 +273,8 @@ export default function ClinicViewer() {
   const [remainCallSec, setRemainCallSec] = useState(0);
 
   const autoLeaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const timeUpHandledRef = useRef<boolean>(false);
+  const sessionEndProcessedRef = useRef<boolean>(false);
   
   const sourceTypeRef = useRef<string>('시험지');
 
@@ -699,6 +702,8 @@ export default function ClinicViewer() {
   };
 
   const processSessionEnd = async () => {
+    if (sessionEndProcessedRef.current) return;
+    sessionEndProcessedRef.current = true;
     try {
         const incorrectQIds: number[] = []; const unansweredQIds: number[] = []; const statusMap: Record<number, string> = {};
         let corrects = 0;
@@ -733,6 +738,8 @@ export default function ClinicViewer() {
   };
 
   const handleTimeUp = async (forceAction?: string, sessionExpired = false) => {
+    if (timeUpHandledRef.current) return;
+    timeUpHandledRef.current = true;
     setTimeIsUp(true); setIsBatchGrading(true);
 
     if (isTimedRound) {
@@ -782,38 +789,34 @@ export default function ClinicViewer() {
     else setSessionTimeUpModal(true);
 
     if (reviewList.length === 0) {
+      if (autoLeaveTimerRef.current) {
+        clearInterval(autoLeaveTimerRef.current);
+        autoLeaveTimerRef.current = null;
+      }
       let sec = 10; setAutoLeaveSec(sec);
-      autoLeaveTimerRef.current = setInterval(() => { 
+      const timerId = setInterval(() => { 
           sec--; 
           setAutoLeaveSec(sec); 
           if (sec <= 0) { 
-              if (autoLeaveTimerRef.current) clearInterval(autoLeaveTimerRef.current);
+              clearInterval(timerId);
+              if (autoLeaveTimerRef.current) {
+                clearInterval(autoLeaveTimerRef.current);
+                autoLeaveTimerRef.current = null;
+              }
               (wholeSessionEnd ? finalizeAndGoToLogin : leaveAndGoHome)(); 
           } 
       }, 1000);
+      autoLeaveTimerRef.current = timerId;
     }
   };
   handleTimeUpRef.current = handleTimeUp;
 
   const appendToExistingIncorrectPrint = async (qItem: any) => {
-    if (!qItem.question_id) return;
+    if (!qItem.question_id || !studentInfo.id) return;
     if (sourceTypeRef.current === '오답프린트' || sourceTypeRef.current === '오답') return;
 
     try {
-      const { data: assignments } = await supabaseClient.from('exam_assignment')
-        .select('assignment_id, exam_id, status, exam_master!inner(exam_type, total_questions)').eq('student_id', studentInfo.id).eq('exam_master.exam_type', '오답프린트')
-        .not('status', 'in', '("제출완료", "채점완료", "완료")').order('created_at', { ascending: false }).limit(1);
-
-      if (assignments && assignments.length > 0) {
-        const assign = assignments[0]; const examId = assign.exam_id;
-        const { data: existingItem } = await supabaseClient.from('exam_item').select('question_id').eq('exam_id', examId).eq('question_id', qItem.question_id).maybeSingle();
-        if (!existingItem) {
-          const { count } = await supabaseClient.from('exam_item').select('*', { count: 'exact', head: true }).eq('exam_id', examId);
-          const nextSortOrder = (count || 0) + 1;
-          await supabaseClient.from('exam_item').insert({ exam_id: examId, question_id: qItem.question_id, sort_order: nextSortOrder });
-          await supabaseClient.from('exam_master').update({ total_questions: nextSortOrder }).eq('exam_id', examId);
-        }
-      }
+      await appendToExistingIncorrectPrintAction(studentInfo.id, qItem.question_id);
     } catch (err) { console.error('오답 프린트 추가 실패:', err); }
   };
 

@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { ViewState } from "./types";
 import { useLearningFetch, LEVEL_ORDER } from "./hooks/useLearningFetch";
 import { useLearningActions } from "./hooks/useLearningActions";
+import { createClinicExamBundleAction, updateExamMasterFieldsAction } from "@/app/actions/clinicActions";
 import {
   fetchMainTextbookExclusionSet,
   isMainTextbookQuestion,
@@ -546,21 +547,20 @@ export default function LearningPage() {
         const subTitle = isBulkTargetDateActive ? `${bulkTargetDate.split('-')[1]}월 ${bulkTargetDate.split('-')[2]}일 수행 목표` : '-';
         const finalExamDate = isBulkTargetDateActive ? bulkTargetDate : null;
 
-        const { data: masterData, error: mstErr } = await supabase.from('exam_master').insert({
-          title: examTitle, sub_title: subTitle, exam_type: '오답유사', total_questions: finalMatchedIds.length,
-          instructor_id: instId, tenant_id: myTenantId,
-          layout_settings: { column: 2, split: 4, titleMode: 'all', template: 'basic1', numberColor: '#175b6a', titleColor: '#002864', lineColor: '#94a3b8', examDate: finalExamDate }
-        }).select().single();
+        const bundleRes = await createClinicExamBundleAction({
+          title: examTitle,
+          subTitle,
+          examType: '오답유사',
+          instructorId: instId,
+          tenantId: myTenantId,
+          layoutSettings: { column: 2, split: 4, titleMode: 'all', template: 'basic1', numberColor: '#175b6a', titleColor: '#002864', lineColor: '#94a3b8', examDate: finalExamDate },
+          questionIds: finalMatchedIds,
+          studentId: st.id,
+          classId: currentView.classId,
+          createClinicTasks: true
+        });
 
-        if (mstErr || !masterData) { skipNoMatch++; continue; }
-
-        const examItems = finalMatchedIds.map((qId: string, idx: number) => ({ exam_id: masterData.exam_id, question_id: qId, sort_order: idx + 1 }));
-        await supabase.from('exam_item').insert(examItems);
-
-        await supabase.from('exam_assignment').insert({ exam_id: masterData.exam_id, student_id: st.id, class_id: currentView.classId, status: '미응시' });
-
-        const tasks = finalMatchedIds.map((qId: string) => ({ student_id: st.id, task_type: '유형오답클리닉', question_id: qId, status: '대기' }));
-        await supabase.from('clinic_task').insert(tasks);
+        if (!bundleRes.success) { skipNoMatch++; continue; }
 
         successCount++;
       } catch (err) {
@@ -596,10 +596,8 @@ export default function LearningPage() {
         if (error) throw error;
       } else if (isExamType) {
         if (!masterId) throw new Error("마스터 ID를 찾을 수 없습니다.");
-        const { error } = await supabase.from('exam_master')
-          .update({ title: newTitle.trim() })
-          .eq('exam_id', masterId);
-        if (error) throw error;
+        const updRes = await updateExamMasterFieldsAction(masterId, { title: newTitle.trim() });
+        if (!updRes.success) throw new Error(updRes.error || "이름 변경 실패");
       }
 
       if (currentView.type === 'STUDENT') {

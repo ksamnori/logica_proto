@@ -5,6 +5,7 @@ import React, { useState, useEffect } from 'react';
 import LearningRow, { statusToneOf } from "./LearningRow";
 import { createClient } from '@supabase/supabase-js';
 import { useRouter } from 'next/navigation';
+import { createClinicExamBundleAction } from '@/app/actions/clinicActions';
 import {
   fetchMainTextbookExclusionSet,
   isMainTextbookQuestion,
@@ -541,14 +542,13 @@ export default function StudentTimeline({
       else if (modalTab === 'PERIOD') subTitle = '기간별 맞춤 오답 복습';
       else if (modalTab === 'SELECTED') subTitle = '학습지 맞춤 오답 복습';
 
-      const { data: masterData, error: masterErr } = await supabaseClient.from('exam_master').insert({
+      const bundleRes = await createClinicExamBundleAction({
         title: examTitle,
-        sub_title: subTitle,
-        exam_type: '오답유사',
-        total_questions: matchedCache.length,
-        instructor_id: instId,
-        tenant_id: myTenantId, 
-        layout_settings: {
+        subTitle,
+        examType: '오답유사',
+        instructorId: instId,
+        tenantId: myTenantId,
+        layoutSettings: {
           column: 2,
           split: 4,
           titleMode: 'all',
@@ -556,37 +556,13 @@ export default function StudentTimeline({
           numberColor: '#175b6a',
           titleColor: '#002864',
           lineColor: '#94a3b8'
-        }
-      }).select().single();
-
-      if (masterErr || !masterData) throw new Error(`시험지 마스터 생성 실패: ${masterErr?.message}`);
-      const newExamId = masterData.exam_id;
-
-      const examItems = matchedCache.map((qId, idx) => ({
-        exam_id: newExamId,
-        question_id: qId,
-        sort_order: idx + 1
-      }));
-      const { error: itemsErr } = await supabaseClient.from('exam_item').insert(examItems);
-      if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
-
-      const { error: assignErr } = await supabaseClient.from('exam_assignment').insert({
-        exam_id: newExamId,
-        student_id: currentView.studentId,
-        class_id: currentView.classId,
-        status: '미응시'
+        },
+        questionIds: matchedCache,
+        studentId: currentView.studentId,
+        classId: currentView.classId,
+        createClinicTasks: true
       });
-      if (assignErr) throw new Error(`학생 배부 실패: ${assignErr.message}`);
-
-      const tasks = matchedCache.map(qId => ({
-        student_id: currentView.studentId,
-        task_type: '유형오답클리닉',
-        question_id: qId,
-        status: '대기'
-      }));
-
-      const { error: taskErr } = await supabaseClient.from('clinic_task').insert(tasks);
-      if (taskErr) throw new Error(`클리닉 전송 실패: ${taskErr.message}`);
+      if (!bundleRes.success) throw new Error(`시험지 생성 및 배부 실패: ${bundleRes.error}`);
 
       alert(`[출제 및 전송 완료! 🎉]\n조회된 ${matchedCache.length}개의 맞춤 문항이 '학습 타임라인'에 배부되었으며,\n학생의 클리닉 패드로 즉시 전송되었습니다!`);
       setModalTab(null);
