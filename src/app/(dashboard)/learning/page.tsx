@@ -33,8 +33,19 @@ export default function LearningPage() {
 
   const [isBulkModalOpen, setIsBulkModalOpen] = useState(false);
   
-  // 🌟 클리닉 미리보기 모달 상태
-  const [previewModal, setPreviewModal] = useState<{ isOpen: boolean; studentName: string; stats: any } | null>(null);
+  // 🌟 클리닉 미리보기 모달 상태 (실제 학생 포털 /student/portal 로직·디자인 동기화)
+  const [previewModal, setPreviewModal] = useState<{
+    isOpen: boolean;
+    studentId: string;
+    studentName: string;
+    classes: string[];
+    blockStates: Record<string, any>;
+    hwProgress: Record<string, any>;
+    points: number;
+    clinicSession: any;
+  } | null>(null);
+  const [previewSelectedClass, setPreviewSelectedClass] = useState<string>('');
+  const [previewSelectedTaskIdx, setPreviewSelectedTaskIdx] = useState<Record<string, number>>({});
 
   // 🌟 개별 오답 관리 모달 상태
   const [rawIncManageModal, setRawIncManageModal] = useState<{ isOpen: boolean; studentId: string; studentName: string; month: string; records: any[] } | null>(null);
@@ -260,19 +271,24 @@ export default function LearningPage() {
   const handleOpenPreview = async () => {
     if (currentView.type !== 'STUDENT') return;
     setIsLoading(true);
-    const stats = await fetchStudentClinicPreview(currentView.studentId, currentView.classId);
-    const statKey = `${currentView.studentId}_${currentView.classId}`;
-    const localStats = studentStatsMap[statKey] || { examQ: 0, hwQ: 0, overdueQ: 0, printQ: 0 };
-    
-    const mergedStats = {
-      ...stats,
-      examQCount: localStats.examQ,
-      hwQCount: localStats.hwQ,
-      overdueQCount: localStats.overdueQ,
-      printQCount: stats.printCount 
-    };
-
-    setPreviewModal({ isOpen: true, studentName: currentView.studentName, stats: mergedStats });
+    const previewData = await fetchStudentClinicPreview(
+      currentView.studentId,
+      currentView.classId,
+      currentView.studentName,
+      currentView.className
+    );
+    setPreviewSelectedClass(previewData.selectedClass);
+    setPreviewSelectedTaskIdx({});
+    setPreviewModal({
+      isOpen: true,
+      studentId: currentView.studentId,
+      studentName: currentView.studentName,
+      classes: previewData.classes,
+      blockStates: previewData.blockStates,
+      hwProgress: previewData.hwProgress,
+      points: previewData.points,
+      clinicSession: previewData.clinicSession,
+    });
     setIsLoading(false);
   };
 
@@ -776,100 +792,698 @@ export default function LearningPage() {
         </div>
       </div>
 
-      {/* 🌟 클리닉 미리보기 모달 UI */}
-      {previewModal?.isOpen && (
-        <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out] p-4">
-          <div className="bg-slate-100 w-[950px] rounded-3xl shadow-2xl flex flex-col overflow-hidden">
-            <div className="flex justify-between items-center px-8 py-5 border-b border-slate-200 bg-white shrink-0">
-              <h2 className="text-xl font-bold text-slate-800 flex items-center gap-3">
-                <span className="text-2xl">👀</span>
-                <span className="text-brand">{previewModal.studentName}</span> 학생의 포털 진입 화면
-              </h2>
-              <button onClick={() => setPreviewModal(null)} className="text-slate-400 hover:text-slate-600 transition-colors bg-slate-50 hover:bg-slate-100 p-2 rounded-full">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-              </button>
+      {/* 🌟 클리닉 미리보기 모달 UI (실제 /student/portal 화면과 로직·디자인 100% 동일화) */}
+      {previewModal?.isOpen && (() => {
+        const activeClass = previewSelectedClass || previewModal.classes[0] || currentView.className || '반 미배정';
+        const cState = previewModal.blockStates?.[activeClass] || {};
+        const prog = previewModal.hwProgress?.[activeClass] || {};
+
+        const renderPreviewCard = (typeKey: string, round: number, className: string) => {
+          const clsState = previewModal.blockStates?.[className] || {};
+          const clsProg = previewModal.hwProgress?.[className] || {};
+          const listKey = typeKey === 'exam' ? 'examList' : typeKey === 'hw' ? 'hwList' : typeKey === 'overdue' ? 'overdueList' : null;
+          const items = listKey ? clsProg[listKey] || [] : [];
+          const cardKey = `${className}-${typeKey}`;
+
+          const selectedIdx = previewSelectedTaskIdx[cardKey] || 0;
+          const selectedItem = items[selectedIdx] || items[0] || {};
+          const hasMultiple = items.length > 1;
+
+          const isBoxDone =
+            (typeKey === 'print' ? clsProg.printPendingCount === 0 : items.length === 0) ||
+            clsState[typeKey] === '최종완료' ||
+            clsState[typeKey] === '채점완료';
+
+          const isExamClearedToProceed =
+            clsState.exam === '최종완료' ||
+            clsProg.hasAnyExamClearedToday ||
+            (clsProg.examList?.length || 0) === 0;
+          const isLocked = typeKey !== 'exam' && !isBoxDone && !isExamClearedToProceed;
+
+          const qCount =
+            typeKey === 'exam'
+              ? clsProg.examQCount
+              : typeKey === 'hw'
+              ? clsProg.hwQCount
+              : typeKey === 'print'
+              ? clsProg.printQCount
+              : 0;
+          const pendingStacks = typeKey === 'print' ? clsProg.printPendingCount : items.length;
+          const titleArray =
+            typeKey === 'print' ? clsProg.printTitles || [] : items.map((it: any) => it.title);
+
+          const examStatus = typeKey === 'exam' ? selectedItem.status || '대기' : '대기';
+          const initialScore = typeKey === 'exam' ? selectedItem.score : null;
+
+          const isSelectedItemWaiting = typeKey === 'exam' && examStatus === '제출완료';
+          const isSelectedItemFixing = typeKey === 'exam' && examStatus === '채점확정';
+          const isSelectedItem100 = isSelectedItemFixing && initialScore === 100;
+
+          const exType = selectedItem.exType || clsProg.examType || '';
+
+          let theme: any;
+          if (typeKey === 'exam') {
+            if (clsProg.activeExamMode === 'SIMILAR') {
+              theme = {
+                label: '🔁 과제오답유사',
+                desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.',
+                bg: 'bg-gradient-to-br from-violet-200 to-violet-50',
+                badge: 'bg-white/60 text-violet-800 border border-violet-200',
+                btnBg: 'bg-white hover:bg-violet-50',
+                btnText: 'text-violet-700',
+                textColor: 'text-violet-900/80',
+                accent: 'text-violet-800',
+              };
+            } else {
+              if (['분기테스트', '분기평가'].includes(exType)) {
+                theme = {
+                  label: '📅 분기평가',
+                  desc: '해당 분기의 학업 성취도를 종합적으로 평가합니다.',
+                  bg: 'bg-gradient-to-br from-fuchsia-200 to-fuchsia-50',
+                  badge: 'bg-white/60 text-fuchsia-800 border border-fuchsia-200',
+                  btnBg: 'bg-white hover:bg-fuchsia-50',
+                  btnText: 'text-fuchsia-700',
+                  textColor: 'text-fuchsia-900/80',
+                  accent: 'text-fuchsia-800',
+                };
+              } else if (['중간테스트', '중간평가'].includes(exType)) {
+                theme = {
+                  label: '📝 중간평가',
+                  desc: '이번 중간평가를 응시합니다.',
+                  bg: 'bg-gradient-to-br from-indigo-200 to-indigo-50',
+                  badge: 'bg-white/60 text-indigo-800 border border-indigo-200',
+                  btnBg: 'bg-white hover:bg-indigo-50',
+                  btnText: 'text-indigo-700',
+                  textColor: 'text-indigo-900/80',
+                  accent: 'text-indigo-800',
+                };
+              } else if (['입학테스트', '진단평가'].includes(exType)) {
+                theme = {
+                  label: '📊 진단평가',
+                  desc: '현재 실력을 진단하기 위한 평가를 진행합니다.',
+                  bg: 'bg-gradient-to-br from-cyan-200 to-cyan-50',
+                  badge: 'bg-white/60 text-cyan-800 border border-cyan-200',
+                  btnBg: 'bg-white hover:bg-cyan-50',
+                  btnText: 'text-cyan-700',
+                  textColor: 'text-cyan-900/80',
+                  accent: 'text-cyan-800',
+                };
+              } else {
+                const finalLabel =
+                  exType === '주간테스트' || !exType ? '📝 주간테스트' : `📝 ${exType}`;
+                theme = {
+                  label: finalLabel,
+                  desc: '오늘 배정된 테스트를 응시합니다.',
+                  bg: 'bg-gradient-to-br from-blue-200 to-blue-50',
+                  badge: 'bg-white/60 text-blue-800 border border-blue-200',
+                  btnBg: 'bg-white hover:bg-blue-50',
+                  btnText: 'text-blue-700',
+                  textColor: 'text-slate-600',
+                  accent: 'text-blue-800',
+                };
+              }
+            }
+
+            if (isSelectedItemWaiting) {
+              theme.label = '⏳ 채점 대기 중';
+              theme.desc =
+                '제출이 완료되었습니다! 선생님이 확인 후 최종 확정해 주실 때까지 잠시 기다려주세요.';
+              theme.bg = 'bg-gradient-to-br from-slate-200 to-slate-50';
+              theme.badge = 'bg-slate-300/50 text-slate-800';
+              theme.btnBg = 'bg-white/50';
+              theme.btnText = 'text-slate-600';
+              theme.textColor = 'text-slate-600';
+              theme.accent = 'text-slate-700';
+            } else if (isSelectedItemFixing) {
+              theme.label = '✍️ 시험지 오답 고치기';
+              theme.desc =
+                '채점이 확정되었습니다. 돌려받은 기존 시험지를 보면서 틀린 문제를 다시 풀고 정답을 입력하세요!';
+              theme.bg = 'bg-gradient-to-br from-amber-200 to-yellow-50';
+              theme.badge = 'bg-white/60 text-amber-900 border border-amber-300';
+              theme.btnBg = 'bg-amber-400 hover:bg-amber-300';
+              theme.btnText = 'text-amber-950';
+              theme.textColor = 'text-slate-700';
+              theme.accent = 'text-amber-800';
+            }
+          } else if (typeKey === 'hw') {
+            theme = {
+              label: '📚 과제',
+              desc: '미제출 과제 문항을 학습합니다.',
+              bg: 'bg-gradient-to-br from-orange-200 to-orange-50',
+              badge: 'bg-white/60 text-orange-900 border border-orange-200',
+              btnBg: 'bg-white hover:bg-orange-50',
+              btnText: 'text-orange-700',
+              textColor: 'text-slate-600',
+              accent: 'text-orange-800',
+            };
+          } else {
+            theme = {
+              label: '🖨️ 오답',
+              desc: '틀린 문제들만 모아 다시 풉니다.',
+              bg: 'bg-gradient-to-br from-emerald-200 to-emerald-50',
+              badge: 'bg-white/60 text-emerald-900 border border-emerald-200',
+              btnBg: 'bg-white hover:bg-emerald-50',
+              btnText: 'text-emerald-700',
+              textColor: 'text-slate-600',
+              accent: 'text-emerald-800',
+            };
+          }
+
+          const badgeLabel =
+            typeKey === 'print'
+              ? '통합'
+              : typeKey === 'exam'
+              ? `남은 평가 ${pendingStacks}건`
+              : `남은 과제 ${pendingStacks}건`;
+
+          return (
+            <div
+              key={cardKey}
+              className={`w-full h-full min-h-[240px] ${theme.bg} rounded-[2rem] p-7 md:p-8 shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${
+                isLocked ? 'grayscale opacity-60 bg-slate-200' : ''
+              }`}
+            >
+              {isLocked && <div className="absolute inset-0 bg-white/40 z-0"></div>}
+              {isBoxDone && (
+                <span className="absolute top-6 right-6 bg-white/90 text-slate-800 text-sm md:text-base font-bold px-4 py-2 rounded-full shadow-md z-20 border border-slate-100">
+                  ✅ 모두 완료됨
+                </span>
+              )}
+
+              <div className="relative z-10 shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 mb-3 pr-[120px] md:pr-[200px]">
+                  <span
+                    className={`text-sm md:text-base font-bold ${
+                      isLocked ? 'bg-white/60 text-slate-500 shadow-sm' : theme.badge
+                    } px-4 py-2 rounded-xl shadow-sm flex items-center`}
+                  >
+                    {isLocked ? '🔒 잠김' : theme.label}
+                  </span>
+                  {pendingStacks > 1 && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
+                    <span className="text-sm font-bold bg-white/60 text-slate-700 px-3 py-1.5 rounded-lg shadow-sm border border-white">
+                      {badgeLabel}
+                    </span>
+                  )}
+                </div>
+
+                <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto max-w-[55%] md:max-w-[280px]">
+                  <div className="flex items-center gap-2">
+                    {isSelectedItemWaiting && initialScore !== null && (
+                      <span className="text-sm md:text-base font-bold text-slate-700 bg-white/60 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm border border-white/50">
+                        가채점: {initialScore}점
+                      </span>
+                    )}
+                    {!isBoxDone && !isSelectedItemWaiting && qCount > 0 && (
+                      <span
+                        className={`text-sm md:text-base font-bold ${
+                          isLocked ? 'text-slate-500 bg-white/50' : 'text-slate-700 bg-white/60'
+                        } px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm border border-white/50`}
+                      >
+                        남은 문제: {selectedItem.remain || qCount}
+                      </span>
+                    )}
+                  </div>
+                  {hasMultiple && !isBoxDone && !isLocked && !isSelectedItemWaiting && (
+                    <select
+                      value={selectedIdx}
+                      onChange={(e) =>
+                        setPreviewSelectedTaskIdx((prev) => ({
+                          ...prev,
+                          [cardKey]: Number(e.target.value),
+                        }))
+                      }
+                      className="max-w-full w-[230px] text-xs md:text-sm font-bold bg-white/60 text-slate-800 border border-white/50 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-white/80 transition-colors shadow-sm"
+                      style={{
+                        backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23475569%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`,
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 12px top 50%',
+                        backgroundSize: '10px auto',
+                      }}
+                    >
+                      {items.map((item: any, idx: number) => (
+                        <option key={idx} value={idx} className="text-slate-800 bg-white">
+                          {item.title} (남은 {item.remain}문제)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <h3
+                  className={`text-[24px] md:text-[30px] font-bold mb-1.5 leading-tight ${
+                    isLocked ? 'text-slate-400' : 'text-slate-800'
+                  } pr-[80px] md:pr-[120px]`}
+                >
+                  {isSelectedItemWaiting || isSelectedItemFixing
+                    ? ''
+                    : theme.label.replace(/[^가-힣 ]/g, '').trim() + ' 클리닉'}
+                  {isSelectedItemWaiting ? '채점 결과 확인 중' : ''}
+                  {isSelectedItemFixing && !isSelectedItem100 ? '시험지 오답 고치기' : ''}
+                  {isSelectedItem100 ? '모든 문제를 맞췄습니다!' : ''}
+                </h3>
+
+                <p
+                  className={`text-sm md:text-base font-medium mt-0 mb-1.5 leading-snug ${
+                    isLocked ? 'text-slate-400' : theme.textColor
+                  } pr-[60px] md:pr-[10px]`}
+                >
+                  {isLocked
+                    ? '첫 번째 학습을 먼저 제출해주세요.'
+                    : isSelectedItem100
+                    ? '선택하신 학습에 더 이상 정정할 오답이 없습니다!'
+                    : theme.desc}
+                </p>
+              </div>
+
+              <div className="relative z-10 flex flex-1 min-h-0 items-stretch justify-between gap-4 mt-3">
+                <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col justify-start pb-1">
+                  {!isBoxDone && titleArray.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      {titleArray.slice(0, 4).map((t: string, idx: number) => (
+                        <div
+                          key={idx}
+                          className={`text-base md:text-lg font-bold ${
+                            isLocked ? 'text-slate-400' : theme.accent
+                          } truncate flex items-center gap-2.5`}
+                          title={t}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-current opacity-70 shrink-0"></span>
+                          <span className="truncate text-slate-700">{t}</span>
+                        </div>
+                      ))}
+                      {titleArray.length > 4 && (
+                        <div
+                          className={`text-xs md:text-sm font-bold ${
+                            isLocked ? 'text-slate-300' : theme.accent
+                          } pl-5 mt-0.5`}
+                        >
+                          ...외 {titleArray.length - 4}개의 학습 대기 중
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
+                  {isBoxDone ? (
+                    <button
+                      disabled
+                      className="bg-white/70 text-slate-500 font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-sm opacity-90 cursor-not-allowed"
+                    >
+                      학습 전체 완료
+                    </button>
+                  ) : isSelectedItem100 ? (
+                    <button
+                      disabled
+                      className="bg-white/70 text-slate-500 font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-sm opacity-90 cursor-not-allowed"
+                    >
+                      💯 정답 완료
+                    </button>
+                  ) : isSelectedItemWaiting ? (
+                    <button
+                      disabled
+                      className="bg-white/60 text-slate-500 font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2"
+                    >
+                      <span>🔒</span> 확인 대기
+                    </button>
+                  ) : isLocked ? (
+                    <button
+                      disabled
+                      className="bg-white/50 text-slate-400 font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2 border border-white"
+                    >
+                      <span>🔒</span> 잠김
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className={`${theme.btnBg} ${theme.btnText} font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-md border border-white/50 cursor-default`}
+                    >
+                      {isSelectedItemFixing ? '오답 정정 시작하기' : '학습하기'}
+                    </button>
+                  )}
+                </div>
+              </div>
             </div>
-            
-            <div className="p-8 grid grid-cols-2 grid-rows-2 gap-8 bg-slate-100">
-              {/* 1. 주간테스트 (EXAM) */}
-              <div className="w-full h-[220px] bg-gradient-to-br from-brand to-blue-800 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
-                <div className="relative z-10 shrink-0">
-                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-bold bg-blue-500 text-white px-4 py-2 rounded-xl shadow-sm flex items-center">📝 주간테스트</span>
-                  </div>
-                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
-                    <span className="text-sm font-bold text-blue-200 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
-                      남은 문제: {previewModal.stats.examQCount ?? 0}
+          );
+        };
+
+        const renderPreviewOverdueCard = (className: string) => {
+          const typeKey = 'overdue';
+          const clsState = previewModal.blockStates?.[className] || {};
+          const clsProg = previewModal.hwProgress?.[className] || {};
+          const items = clsProg.overdueList || [];
+          const cardKey = `${className}-${typeKey}`;
+          const selectedIdx = previewSelectedTaskIdx[cardKey] || 0;
+          const selectedItem = items[selectedIdx] || items[0] || {};
+          const hasMultiple = items.length > 1;
+
+          const isBoxDone = items.length === 0 || clsState.overdue === '최종완료';
+          const isExamClearedToProceed =
+            clsState.exam === '최종완료' ||
+            clsProg.hasAnyExamClearedToday ||
+            (clsProg.examList?.length || 0) === 0;
+          const isLocked = !isBoxDone && !isExamClearedToProceed;
+
+          const qCount = clsProg.overdueQCount || 0;
+          const titleArray = items.map((it: any) => it.title);
+          const pendingStacks = items.length;
+
+          const theme = {
+            label: '⏰ 미완료 과제',
+            desc: '다음 수업 전까지 끝내지 못해 밀린 과제입니다.',
+            bg: 'bg-gradient-to-br from-rose-200 to-rose-50',
+            badge: 'bg-white/60 text-rose-900 border border-rose-200',
+            btnBg: 'bg-white hover:bg-rose-50',
+            btnText: 'text-rose-700',
+            textColor: 'text-slate-600',
+            accent: 'text-rose-800',
+          };
+
+          return (
+            <div
+              key={cardKey}
+              className={`w-full h-full min-h-[240px] ${theme.bg} rounded-[2rem] p-7 md:p-8 shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${
+                isLocked ? 'grayscale opacity-60 bg-slate-200' : ''
+              }`}
+            >
+              {isLocked && <div className="absolute inset-0 bg-white/40 z-0"></div>}
+              {isBoxDone && (
+                <span className="absolute top-6 right-6 bg-white/90 text-slate-800 text-sm md:text-base font-bold px-4 py-2 rounded-full shadow-md z-20 border border-slate-100">
+                  ✅ 밀린 과제 없음
+                </span>
+              )}
+
+              <div className="relative z-10 shrink-0">
+                <div className="flex flex-wrap items-center gap-2.5 mb-3 pr-[120px] md:pr-[200px]">
+                  <span
+                    className={`text-sm md:text-base font-bold ${
+                      isLocked ? 'bg-white/60 text-slate-500 shadow-sm' : theme.badge
+                    } px-4 py-2 rounded-xl shadow-sm flex items-center`}
+                  >
+                    {isLocked ? '🔒 잠김' : theme.label}
+                  </span>
+                  {pendingStacks > 1 && !isBoxDone && !isLocked && (
+                    <span className="text-sm font-bold bg-white/60 text-slate-700 px-3 py-1.5 rounded-lg shadow-sm border border-white">
+                      밀린 과제 {pendingStacks}건
                     </span>
-                  </div>
-                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">주간테스트 클리닉</h3>
-                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-blue-200 pr-[60px]">
-                    오늘 배정된 테스트를 응시합니다.
-                  </p>
+                  )}
                 </div>
+
+                <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto max-w-[55%] md:max-w-[280px]">
+                  {!isBoxDone && qCount > 0 && (
+                    <span
+                      className={`text-sm md:text-base font-bold ${
+                        isLocked ? 'text-slate-500 bg-white/50' : 'text-slate-700 bg-white/60'
+                      } px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm border border-white/50`}
+                    >
+                      남은 문제: {selectedItem.remain || qCount}
+                    </span>
+                  )}
+                  {hasMultiple && !isBoxDone && !isLocked && (
+                    <select
+                      value={selectedIdx}
+                      onChange={(e) =>
+                        setPreviewSelectedTaskIdx((prev) => ({
+                          ...prev,
+                          [cardKey]: Number(e.target.value),
+                        }))
+                      }
+                      className="max-w-full w-[230px] text-xs md:text-sm font-bold bg-white/60 text-slate-800 border border-white/50 rounded-xl px-3 py-2 outline-none cursor-pointer truncate appearance-none hover:bg-white/80 transition-colors shadow-sm"
+                      style={{
+                        backgroundImage: `url("data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20width%3D%22292.4%22%20height%3D%22292.4%22%3E%3Cpath%20fill%3D%22%23475569%22%20d%3D%22M287%2069.4a17.6%2017.6%200%200%200-13-5.4H18.4c-5%200-9.3%201.8-12.9%205.4A17.6%2017.6%200%200%200%200%2082.2c0%205%201.8%209.3%205.4%2012.9l128%20127.9c3.6%203.6%207.8%205.4%2012.8%205.4s9.2-1.8%2012.8-5.4L287%2095c3.5-3.5%205.4-7.8%205.4-12.8%200-5-1.9-9.2-5.5-12.8z%22%2F%3E%3C%2Fsvg%3E")`,
+                        backgroundRepeat: 'no-repeat',
+                        backgroundPosition: 'right 12px top 50%',
+                        backgroundSize: '10px auto',
+                      }}
+                    >
+                      {items.map((item: any, idx: number) => (
+                        <option key={idx} value={idx} className="text-slate-800 bg-white">
+                          {item.title} (남은 {item.remain}문제)
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                <h3
+                  className={`text-[24px] md:text-[30px] font-bold mb-1.5 leading-tight ${
+                    isLocked ? 'text-slate-400' : 'text-slate-800'
+                  } pr-[80px] md:pr-[120px]`}
+                >
+                  미완료 과제 클리닉
+                </h3>
+                <p
+                  className={`text-sm md:text-base font-medium mt-0 mb-1.5 leading-snug ${
+                    isLocked ? 'text-slate-400' : theme.textColor
+                  } pr-[60px] md:pr-[10px]`}
+                >
+                  {isLocked ? '첫 번째 학습을 먼저 제출해주세요.' : theme.desc}
+                </p>
               </div>
 
-              {/* 2. 과제 (HW) */}
-              <div className="w-full h-[220px] bg-gradient-to-br from-amber-600 to-amber-500 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
-                <div className="relative z-10 shrink-0">
-                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-bold bg-amber-400 text-amber-900 px-4 py-2 rounded-xl shadow-sm flex items-center">📚 과제</span>
-                  </div>
-                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
-                    <span className="text-sm font-bold text-amber-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
-                      남은 문제: {previewModal.stats.hwQCount ?? 0}
-                    </span>
-                  </div>
-                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">과제 클리닉</h3>
-                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-amber-100 pr-[60px]">
-                    미제출 과제 문항을 학습합니다.
-                  </p>
+              <div className="relative z-10 flex flex-1 min-h-0 items-stretch justify-between gap-4 mt-3">
+                <div className="flex-1 min-h-0 overflow-y-auto no-scrollbar flex flex-col justify-start pb-1">
+                  {!isBoxDone && titleArray.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      {titleArray.slice(0, 4).map((t: string, idx: number) => (
+                        <div
+                          key={idx}
+                          className={`text-base md:text-lg font-bold ${
+                            isLocked ? 'text-slate-400' : theme.accent
+                          } truncate flex items-center gap-2.5`}
+                          title={t}
+                        >
+                          <span className="w-2 h-2 rounded-full bg-current opacity-70 shrink-0"></span>
+                          <span className="truncate text-slate-700">{t}</span>
+                        </div>
+                      ))}
+                      {titleArray.length > 4 && (
+                        <div
+                          className={`text-xs md:text-sm font-bold ${
+                            isLocked ? 'text-slate-300' : theme.accent
+                          } pl-5 mt-0.5`}
+                        >
+                          ...외 {titleArray.length - 4}개의 학습 대기 중
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
 
-              {/* 3. 미완료 과제 (OVERDUE) */}
-              <div className="w-full h-[220px] bg-gradient-to-br from-rose-700 to-rose-600 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
-                <div className="relative z-10 shrink-0">
-                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-bold bg-rose-400 text-rose-900 px-4 py-2 rounded-xl shadow-sm flex items-center">⏰ 미완료 과제</span>
-                  </div>
-                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
-                    <span className="text-sm font-bold text-rose-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
-                      남은 문제: {previewModal.stats.overdueQCount ?? 0}
-                    </span>
-                  </div>
-                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">미완료 과제 클리닉</h3>
-                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-rose-100 pr-[60px]">
-                    다음 수업 전까지 끝내지 못해 밀린 과제입니다.
-                  </p>
-                </div>
-              </div>
-
-              {/* 4. 오답 (PRINT) */}
-              <div className="w-full h-[220px] bg-gradient-to-br from-emerald-700 to-emerald-600 rounded-[2rem] p-8 text-white shadow-xl relative overflow-hidden group flex flex-col justify-between">
-                <div className="relative z-10 shrink-0">
-                  <div className="flex flex-wrap items-center gap-2.5 mb-3">
-                    <span className="text-sm font-bold bg-emerald-400 text-emerald-900 px-4 py-2 rounded-xl shadow-sm flex items-center">🖨️ 누적 오답</span>
-                  </div>
-                  <div className="absolute top-0 right-0 flex flex-col items-end gap-2 z-20 w-auto">
-                    <span className="text-sm font-bold text-emerald-100 bg-black/10 px-3.5 py-1.5 rounded-lg whitespace-nowrap shadow-sm">
-                      남은 문제: {previewModal.stats.printQCount ?? 0}
-                    </span>
-                  </div>
-                  <h3 className="text-[28px] font-bold mb-1.5 leading-tight pr-[80px]">통합 오답 클리닉</h3>
-                  <p className="text-sm font-medium mt-0 mb-1.5 leading-snug text-emerald-100 pr-[60px]">
-                    틀린 문제들만 모아 다시 풉니다.
-                  </p>
+                <div className="shrink-0 self-end flex flex-col items-end gap-2.5">
+                  {isBoxDone ? (
+                    <button
+                      disabled
+                      className="bg-white/70 text-slate-500 font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-sm opacity-90 cursor-not-allowed"
+                    >
+                      밀린 과제 없음
+                    </button>
+                  ) : isLocked ? (
+                    <button
+                      disabled
+                      className="bg-white/50 text-slate-400 font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-sm cursor-not-allowed flex items-center gap-2 border border-white"
+                    >
+                      <span>🔒</span> 잠김
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      disabled
+                      className={`${theme.btnBg} ${theme.btnText} font-bold px-6 py-3 text-base md:text-lg rounded-2xl shadow-md border border-white/50 cursor-default`}
+                    >
+                      학습하기
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
+          );
+        };
 
-            <div className="px-8 py-5 bg-white border-t border-slate-200 text-center text-sm font-bold text-slate-500">
-               학생이 포털 화면에서 마주하게 될 실제 디자인 및 잔여 문제(문항) 수와 동일하게 구성된 미리보기입니다.
+        const session = previewModal.clinicSession;
+        const isActiveSession = Boolean(session && !session.ended_at);
+        const remainingMs = isActiveSession
+          ? new Date(session.started_at || 0).getTime() +
+            (session.duration_ms || 60 * 60 * 1000) -
+            Date.now()
+          : 0;
+        const totalSec = Math.max(0, Math.floor(remainingMs / 1000));
+        const hours = Math.floor(totalSec / 3600);
+        const mins = Math.floor((totalSec % 3600) / 60);
+        const secs = totalSec % 60;
+        const timeStr = `${hours}:${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+        const isUrgent = isActiveSession && remainingMs <= 5 * 60 * 1000;
+        const isPortalAway = Boolean(session?.away_since);
+        const isPortalCalling = Boolean(
+          session?.active_calls?.['general'] && !session?.active_calls?.['general']?.verdict
+        );
+
+        return (
+          <div className="fixed inset-0 z-[100] flex justify-center items-center bg-slate-900/60 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out] p-4">
+            <div className="bg-slate-50 w-full max-w-[1400px] max-h-[94vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200 font-['Pretendard']">
+              {/* 관리자용 상단 안내 헤더 */}
+              <div className="flex justify-between items-center px-6 py-3.5 bg-slate-900 text-white shrink-0">
+                <div className="flex items-center gap-3">
+                  <span className="text-lg">👀</span>
+                  <span className="font-bold text-sm md:text-base">
+                    <span className="text-sky-300">{previewModal.studentName}</span> 학생 포털 실시간 미리보기
+                  </span>
+                  <span className="text-xs font-bold bg-slate-800 text-slate-300 px-3 py-1 rounded-full border border-slate-700">
+                    실제 학생 포털(/student/portal)과 동일한 로직·디자인
+                  </span>
+                </div>
+                <button
+                  onClick={() => setPreviewModal(null)}
+                  className="text-slate-300 hover:text-white transition-colors bg-slate-800 hover:bg-slate-700 px-3.5 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5"
+                >
+                  <span>미리보기 닫기</span>
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+                  </svg>
+                </button>
+              </div>
+
+              {/* 실제 학생 포털 상단 네비게이션 바 */}
+              <nav className="bg-white px-6 md:px-8 py-3.5 flex flex-wrap justify-between items-center border-b border-slate-200 shrink-0 gap-4">
+                <div className="flex items-center gap-6">
+                  <img
+                    src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png"
+                    alt="Logica"
+                    className="h-8 md:h-10 object-contain"
+                  />
+                </div>
+                <div className="flex flex-wrap items-center gap-3 md:gap-4">
+                  {isActiveSession && (
+                    <div
+                      className={`flex items-center gap-2 border rounded-full px-4 py-1.5 shadow-sm ${
+                        isUrgent
+                          ? 'bg-rose-100 border-rose-300 animate-pulse'
+                          : 'bg-indigo-50 border-indigo-200'
+                      }`}
+                    >
+                      <span className="text-indigo-500 text-base">🕐</span>
+                      <span className="text-xs md:text-sm font-bold text-indigo-600 opacity-80">
+                        남은 시간
+                      </span>
+                      <span className="text-lg md:text-xl font-bold text-indigo-600 tracking-wider">
+                        {remainingMs <= 0 ? '종료' : timeStr}
+                      </span>
+                    </div>
+                  )}
+                  {isActiveSession && (
+                    <span
+                      className={`text-xs md:text-sm font-bold rounded-full px-4 py-2 border shadow-sm ${
+                        isPortalAway
+                          ? 'bg-amber-400 border-amber-400 text-amber-950'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {isPortalAway ? '↩️ 자리 복귀' : '🚶 화장실 다녀오기'}
+                    </span>
+                  )}
+                  {isActiveSession && (
+                    <span
+                      className={`text-xs md:text-sm font-bold rounded-full px-4 py-2 border shadow-sm ${
+                        isPortalCalling
+                          ? 'bg-rose-500 border-rose-500 text-white animate-pulse'
+                          : 'bg-white border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      {isPortalCalling ? '🚨 부르기 취소' : '🙋 선생님 부르기'}
+                    </span>
+                  )}
+
+                  <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-full px-4 py-2 shadow-sm">
+                    <span className="text-xs md:text-sm font-bold text-amber-700">나의 포인트</span>
+                    <span className="text-amber-500 text-base md:text-lg font-bold">
+                      {(previewModal.points || 0).toLocaleString()} P
+                    </span>
+                  </div>
+                  <div className="w-px h-7 bg-slate-200 mx-1 hidden sm:block"></div>
+                  <div className="flex items-center gap-3">
+                    <div className="text-right">
+                      <p className="text-sm md:text-base font-bold text-slate-800">
+                        {previewModal.studentName} 학생
+                      </p>
+                      <p className="text-xs font-bold text-emerald-500 mt-0.5">
+                        {previewModal.classes.join(', ')}
+                      </p>
+                    </div>
+                    <div className="w-10 h-10 md:w-11 md:h-11 rounded-full bg-indigo-200 text-indigo-800 flex items-center justify-center text-xl shadow-sm border border-indigo-300">
+                      👦🏻
+                    </div>
+                    {session?.end_request_status === 'pending' ? (
+                      <span className="text-xs md:text-sm font-bold text-amber-700 bg-amber-100 border border-amber-300 rounded-full px-4 py-2.5 animate-pulse shadow-sm">
+                        ⏳ 끝내기 취소
+                      </span>
+                    ) : (
+                      <span className="text-xs md:text-sm font-bold text-white bg-slate-700 border border-slate-600 rounded-full px-5 py-2.5 shadow-md flex items-center gap-1.5">
+                        👋 오늘 공부 끝내기
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </nav>
+
+              {/* 실제 학생 포털 메인 클리닉 영역 */}
+              <main className="w-full max-w-[1600px] mx-auto p-6 lg:p-10 flex-1 flex flex-col min-h-0 overflow-y-auto">
+                <section className="flex flex-col flex-1 min-h-0">
+                  <div className="flex flex-wrap items-center gap-4 mb-6 shrink-0">
+                    <h2 className="text-2xl md:text-[34px] font-bold text-slate-800 flex items-center gap-3">
+                      🚀 오늘의 학습 클리닉
+                    </h2>
+                    {previewModal.classes.length > 1 &&
+                      previewModal.classes.map((cls) => {
+                        const clsProg = previewModal.hwProgress?.[cls] || {};
+                        let totalPending =
+                          (clsProg.examPendingCount || 0) +
+                          (clsProg.hwPendingCount || 0) +
+                          (clsProg.printPendingCount || 0) +
+                          (clsProg.overduePendingCount || 0);
+
+                        if (
+                          clsProg.examStatus === '채점확정' &&
+                          clsProg.examInitialScore === 100
+                        ) {
+                          totalPending = Math.max(0, totalPending - 1);
+                        }
+
+                        return (
+                          <button
+                            key={cls}
+                            type="button"
+                            onClick={() => setPreviewSelectedClass(cls)}
+                            className={`relative text-sm md:text-lg font-bold px-5 py-2 rounded-full shadow-sm transition-colors inline-flex items-center gap-2 ${
+                              activeClass === cls
+                                ? 'bg-indigo-400 text-white border-transparent'
+                                : 'bg-white border border-slate-200 text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>🏫</span>
+                            {cls}
+                            {totalPending > 0 && (
+                              <span className="absolute -top-2 -right-2 flex h-6 w-6 items-center justify-center rounded-full bg-rose-400 text-xs font-bold text-white shadow-sm ring-2 ring-white">
+                                {totalPending > 99 ? '99+' : totalPending}
+                              </span>
+                            )}
+                          </button>
+                        );
+                      })}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 grid-rows-2 gap-6 lg:gap-8 flex-1 min-h-0">
+                    {renderPreviewCard('exam', 1, activeClass)}
+                    {renderPreviewCard('hw', 2, activeClass)}
+                    {renderPreviewOverdueCard(activeClass)}
+                    {renderPreviewCard('print', 3, activeClass)}
+                  </div>
+                </section>
+              </main>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 🌟 [신규] 개별 오답 목록 관리 모달 UI */}
       {rawIncManageModal?.isOpen && (

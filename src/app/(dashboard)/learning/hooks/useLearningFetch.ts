@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { StudentInfo, ClassInfo, TabType } from "../types";
+import { getPointBalance } from "@/app/actions/shopPoints";
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -636,121 +637,533 @@ export function useLearningFetch() {
     } catch (e) { console.error(e); } finally { setIsLoading(false); }
   };
 
-  // 🌟 [추가] 클리닉 미리보기를 위한 미결 문항 수 집계 (학생 포털과 로직 100% 동일화)
-  const fetchStudentClinicPreview = async (studentId: string, classId: string) => {
-    try {
-      // 1. 순수 오답 데이터 추출
-      const { data: incData } = await supabase.from('student_incorrect_record')
-        .select('record_id, question_id, tq_id, status')
-        .eq('student_id', studentId)
-        .in('status', ['X', 'TX', 'TO', 'B'])
-        .is('resolved_at', null);
+  // 🌟 클리닉 미리보기를 위한 학생 포털 상태 집계 (실제 학생 포털 /student/portal 과 로직 100% 동일화)
+  const fetchStudentClinicPreview = async (
+    studentId: string,
+    classId: string,
+    studentNameParam?: string,
+    classNameParam?: string
+  ) => {
+    const getKSTDateString = () =>
+      new Date(Date.now() + 9 * 60 * 60 * 1000 - 6 * 60 * 60 * 1000)
+        .toISOString()
+        .split('T')[0];
 
-      // 2. 셀프 힐링: 교재문항(tq_id)를 고유 question_id로 치환
-      const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
-      let tqToQidMap = new Map();
-      if (rawTqIds.length > 0) {
-          const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
-          if (safeTqIds.length > 0) {
-              const { data: tqRows } = await supabase.from('textbook_question').select('tq_id, question_id').in('tq_id', safeTqIds);
-              tqRows?.forEach((t: any) => { if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id); });
-          }
+    const cleanTitle = (raw: string, studentName: string) => {
+      if (!raw) return '제목 없음';
+      let t = raw;
+
+      if (studentName) {
+        const nameTag = `[${studentName}]`;
+        t = t.split(nameTag).join('').trim();
       }
 
-      // 3. Set을 이용한 완벽한 중복 제거
-      const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
-      let uniqueIncIds = Array.from(new Set(resolvedQids)) as any[];
+      const overdueMatches = t.match(/(미완료\s*프린트\s*)+/);
+      if (overdueMatches) {
+        const count = overdueMatches[0].match(/미완료\s*프린트/g)?.length || 1;
+        t = t.replace(
+          /(미완료\s*프린트\s*)+/,
+          count > 1 ? `미완료 프린트 (${count}차) ` : '미완료 프린트 '
+        );
+      }
 
-      // 4. 셀프 힐링을 위한 학습 데이터 교차 로드
-      const [{ data: examAnsData }, { data: examsData }, { data: hwAnsData }, { data: hwsData }, { data: hwResData }] = await Promise.all([
-          supabase.from('student_answer').select('exam_assignment_id, question_id, grading_code').eq('student_id', studentId).in('grading_code', ['O', 'TO', 'RO']),
-          supabase.from('exam_assignment').select('assignment_id, status, exam_master!inner(exam_type, total_questions)').eq('student_id', studentId),
-          supabase.from('student_homework_answer').select('homework_id, tq_id').eq('student_id', studentId).in('grading_code', ['O', 'TO', 'RO']),
-          supabase.from('homework_assignment').select('homework_id, target_questions, due_date').or(`class_id.eq.${classId},target_student_id.eq.${studentId}`).neq('homework_title', '[시스템] 수업 진도 완료 기록'),
-          supabase.from('student_homework_result').select('homework_id, status').eq('student_id', studentId)
+      const wrongMatches = t.match(/(오답\s*프린트\s*)+/);
+      if (wrongMatches) {
+        const count = wrongMatches[0].match(/오답\s*프린트/g)?.length || 1;
+        t = t.replace(
+          /(오답\s*프린트\s*)+/,
+          count > 1 ? `오답 프린트 (${count}차) ` : '오답 프린트 '
+        );
+      }
+
+      return t.replace(/\s+/g, ' ').trim() || '제목 없음';
+    };
+
+    try {
+      const today = getKSTDateString();
+      let sName = studentNameParam || '';
+      let classes: string[] = [];
+      const nameToId: Record<string, string> = {};
+
+      try {
+        const { data: stuData } = await supabase
+          .from('student')
+          .select('name, enrollment(status, end_date, class(class_id, name))')
+          .eq('student_id', studentId)
+          .maybeSingle();
+
+        if (stuData) {
+          if (!sName && stuData.name) sName = stuData.name;
+          const activeEnrolls = (stuData.enrollment || []).filter(
+            (e: any) => !isEndedEnrollment(e)
+          );
+          activeEnrolls.forEach((e: any) => {
+            const clsObj = unwrap(e.class);
+            if (clsObj?.name) {
+              if (!classes.includes(clsObj.name)) classes.push(clsObj.name);
+              if (clsObj.class_id) nameToId[clsObj.name] = clsObj.class_id;
+            }
+          });
+        }
+      } catch (e) {}
+
+      if (classNameParam && !classes.includes(classNameParam)) {
+        classes.unshift(classNameParam);
+      }
+      if (classNameParam && classId && !nameToId[classNameParam]) {
+        nameToId[classNameParam] = classId;
+      }
+      if (classes.length === 0) {
+        classes = [classNameParam || '반 미배정'];
+      }
+
+      const { data: cData } = await supabase
+        .from('class')
+        .select('class_id, name')
+        .in('name', classes);
+      cData?.forEach((c: any) => {
+        nameToId[c.name] = c.class_id;
+      });
+
+      const selectedClass =
+        classNameParam && classes.includes(classNameParam)
+          ? classNameParam
+          : classes[0];
+
+      const newBlockStates: Record<string, any> = {};
+      const newHwProgress: Record<string, any> = {};
+
+      classes.forEach((c) => {
+        newBlockStates[c] = {
+          exam: 'NO_DATA',
+          hw: 'NO_DATA',
+          print: 'NO_DATA',
+          overdue: 'NO_DATA',
+        };
+        newHwProgress[c] = {
+          activeExamMode: 'DONE',
+          hasAnyExamClearedToday: false,
+          examList: [],
+          hwList: [],
+          overdueList: [],
+          printTitles: [],
+          examQCount: 0,
+          hwQCount: 0,
+          printQCount: 0,
+          overdueQCount: 0,
+          examPendingCount: 0,
+          hwPendingCount: 0,
+          printPendingCount: 0,
+          overduePendingCount: 0,
+          examStatus: '대기',
+          examInitialScore: null,
+          examType: '',
+        };
+      });
+
+      const [
+        pointsBalance,
+        { data: sessionRow },
+        { data: rData },
+        { data: incData },
+        { data: hwAnsData },
+        { data: examAnsData },
+        { data: examsData },
+      ] = await Promise.all([
+        getPointBalance(studentId).catch(() => 0),
+        supabase
+          .from('clinic_session_state')
+          .select(
+            'id, session_date, duration_ms, seat, manual_seat, started_at, ended_at, end_request_status, end_request_cooldown_until, active_calls, away_since'
+          )
+          .eq('student_id', studentId)
+          .eq('session_date', today)
+          .is('ended_at', null)
+          .order('session_no', { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+        supabase
+          .from('clinic_round_result')
+          .select('*')
+          .eq('student_id', studentId),
+        supabase
+          .from('student_incorrect_record')
+          .select('record_id, question_id, tq_id, status')
+          .eq('student_id', studentId)
+          .in('status', ['X', 'TX', 'TO', 'B'])
+          .is('resolved_at', null),
+        supabase
+          .from('student_homework_answer')
+          .select('homework_id, tq_id, grading_code')
+          .eq('student_id', studentId)
+          .in('grading_code', ['O', 'TO', 'RO']),
+        supabase
+          .from('student_answer')
+          .select('exam_assignment_id, question_id, grading_code')
+          .eq('student_id', studentId)
+          .in('grading_code', ['O', 'TO', 'RO']),
+        supabase
+          .from('exam_assignment')
+          .select(
+            'assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)'
+          )
+          .eq('student_id', studentId),
       ]);
 
-      // 5. 오답프린트에서 이미 완벽히 맞춘(O, RO) 문제 필터링
+      const roundResults: Record<string, any> = {};
+      rData?.forEach((r: any) => {
+        roundResults[`${r.class_name}::${r.round}`] = r;
+      });
+
+      const rawTqIds = (incData || []).map((r: any) => r.tq_id).filter(Boolean);
+      const tqToQidMap = new Map();
+      if (rawTqIds.length > 0) {
+        const safeTqIds = rawTqIds.filter((id: any) => !isNaN(Number(id)));
+        if (safeTqIds.length > 0) {
+          const { data: tqRows } = await supabase
+            .from('textbook_question')
+            .select('tq_id, question_id')
+            .in('tq_id', safeTqIds);
+          tqRows?.forEach((t: any) => {
+            if (t.question_id) tqToQidMap.set(t.tq_id, t.question_id);
+          });
+        }
+      }
+
+      const recordsToHealMissingQid = (incData || []).filter(
+        (r: any) => !r.question_id && r.tq_id && tqToQidMap.has(r.tq_id)
+      );
+      if (recordsToHealMissingQid.length > 0) {
+        Promise.all(
+          recordsToHealMissingQid.map((r: any) =>
+            supabase
+              .from('student_incorrect_record')
+              .update({ question_id: tqToQidMap.get(r.tq_id) })
+              .eq('record_id', r.record_id)
+          )
+        ).catch(() => {});
+      }
+
+      const resolvedQids = (incData || [])
+        .map((r: any) => r.question_id || tqToQidMap.get(r.tq_id))
+        .filter(Boolean);
+      let uniqueIncIds = Array.from(new Set(resolvedQids)) as any[];
+
       const printExamIds = new Set(
-          (examsData || [])
-          .filter((ex: any) => ['오답프린트', '오답'].includes(unwrap(ex.exam_master)?.exam_type))
+        (examsData || [])
+          .filter((ex: any) =>
+            ['오답프린트', '오답'].includes(unwrap(ex.exam_master)?.exam_type)
+          )
           .map((ex: any) => ex.assignment_id)
       );
 
       const fullyResolvedQids = new Set<any>();
       examAnsData?.forEach((a: any) => {
-          if (printExamIds.has(a.exam_assignment_id) && ['O', 'RO'].includes(a.grading_code)) {
-              fullyResolvedQids.add(a.question_id);
-          }
+        if (
+          printExamIds.has(a.exam_assignment_id) &&
+          ['O', 'RO'].includes(a.grading_code)
+        ) {
+          fullyResolvedQids.add(a.question_id);
+        }
       });
-      uniqueIncIds = uniqueIncIds.filter(id => !fullyResolvedQids.has(id));
 
-      // 6. 현재 채점확정(오답 고치기 진행 중)인 시험지에 속한 문항 보류
-      let fixingQids = new Set<any>();
+      const recordsToHealResolved = (incData || []).filter((r: any) => {
+        const qid = r.question_id || tqToQidMap.get(r.tq_id);
+        return qid && fullyResolvedQids.has(qid);
+      });
+
+      if (recordsToHealResolved.length > 0) {
+        const rIdsToHeal = recordsToHealResolved.map((r: any) => r.record_id);
+        supabase
+          .from('student_incorrect_record')
+          .update({ resolved_at: new Date().toISOString(), status: 'RO' })
+          .in('record_id', rIdsToHeal)
+          .then(() => {});
+      }
+      uniqueIncIds = uniqueIncIds.filter((id) => !fullyResolvedQids.has(id));
+
+      const fixingQids = new Set<any>();
       const fixingExamIds = (examsData || [])
-          .filter((ex: any) => ex.status === '채점확정')
-          .map((ex: any) => ex.assignment_id);
+        .filter((ex: any) => ex.status === '채점확정')
+        .map((ex: any) => ex.assignment_id);
 
       if (fixingExamIds.length > 0) {
-          const { data: fixingAnswers } = await supabase.from('student_answer').select('question_id').in('exam_assignment_id', fixingExamIds);
-          fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
+        const { data: fixingAnswers } = await supabase
+          .from('student_answer')
+          .select('question_id')
+          .in('exam_assignment_id', fixingExamIds);
+        fixingAnswers?.forEach((a: any) => fixingQids.add(a.question_id));
       }
-      uniqueIncIds = uniqueIncIds.filter(id => !fixingQids.has(id));
-      
-      // 7. 학생 포털과 100% 동일하게 산출된 최종 오답 문항 수
-      const printCount = uniqueIncIds.length;
 
-      const examResolvedMap = new Map();
-      examAnsData?.forEach((a:any) => {
-          if (!examResolvedMap.has(a.exam_assignment_id)) examResolvedMap.set(a.exam_assignment_id, new Set());
-          examResolvedMap.get(a.exam_assignment_id).add(a.question_id);
+      uniqueIncIds = uniqueIncIds.filter((id) => !fixingQids.has(id));
+      const totalPrintQCount = uniqueIncIds.length;
+
+      const hwResolvedMap = new Map<number, Set<number>>();
+      hwAnsData?.forEach((a: any) => {
+        if (!hwResolvedMap.has(a.homework_id))
+          hwResolvedMap.set(a.homework_id, new Set());
+        hwResolvedMap.get(a.homework_id)!.add(a.tq_id);
       });
 
-      let examCount = 0; let overdueCount = 0; let hwCount = 0;
+      const examResolvedMap = new Map<number, Set<any>>();
+      examAnsData?.forEach((a: any) => {
+        if (!examResolvedMap.has(a.exam_assignment_id))
+          examResolvedMap.set(a.exam_assignment_id, new Set());
+        examResolvedMap.get(a.exam_assignment_id)!.add(a.question_id);
+      });
 
-      examsData?.forEach((ex: any) => {
-          const type = unwrap(ex.exam_master)?.exam_type;
-          const tq = unwrap(ex.exam_master)?.total_questions || 0;
-          const isFinalDone = ['최종완료', '완료', '채점완료'].includes(ex.status);
-          if (isFinalDone) return;
+      const classIds = Object.values(nameToId).filter(Boolean);
+      const hwFilters: string[] = [];
+      if (classIds.length > 0) hwFilters.push(`class_id.in.(${classIds.join(',')})`);
+      hwFilters.push(`target_student_id.eq.${studentId}`);
+
+      const [{ data: hwAssignments }, { data: hwResData }] = await Promise.all([
+        supabase
+          .from('homework_assignment')
+          .select(
+            'homework_id, class_id, target_student_id, due_date, homework_title, target_questions'
+          )
+          .or(hwFilters.join(','))
+          .neq('homework_title', '[시스템] 수업 진도 완료 기록'),
+        supabase
+          .from('student_homework_result')
+          .select('homework_id, status, completed_tq_ids')
+          .eq('student_id', studentId),
+      ]);
+
+      const hwsData = hwAssignments || [];
+      const hwResMap = new Map();
+      hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r));
+
+      classes.forEach((c) => {
+        const cid = nameToId[c];
+
+        const hwExams: any[] = [];
+        const similarExams: any[] = [];
+        const overdueExams: any[] = [];
+        const regularExams: any[] = [];
+        let hasAnyExamClearedToday = false;
+
+        examsData?.forEach((ex: any) => {
+          if (ex.class_id && cid && ex.class_id !== cid) return;
+          const master = unwrap(ex.exam_master);
+          const type = master?.exam_type;
+          const rawTitle = master?.title;
+          const tq = master?.total_questions;
 
           const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
-          const remain = Math.max(0, tq - resolved);
+          const remain = Math.max(0, (tq || 0) - resolved);
 
-          if (['주간테스트', '중간테스트', '중간평가', '분기테스트', '분기평가', '오답유사', '과제오답유사'].includes(type)) examCount += remain;
-          else if (type === '미완료과제') overdueCount += remain;
-          else if (['과제', '과제프린트'].includes(type)) hwCount += remain;
-      });
+          if (
+            ex.status === '채점확정' &&
+            (ex.total_score === 100 || (tq > 0 && remain === 0))
+          ) {
+            supabase
+              .from('exam_assignment')
+              .update({ status: '최종완료' })
+              .eq('assignment_id', ex.assignment_id)
+              .then();
+            ex.status = '최종완료';
+          }
 
-      const hwResolvedMap = new Map();
-      hwAnsData?.forEach((a:any) => {
-          if (!hwResolvedMap.has(a.homework_id)) hwResolvedMap.set(a.homework_id, new Set());
-          hwResolvedMap.get(a.homework_id).add(a.tq_id);
-      });
-      const hwResMap = new Map();
-      hwResData?.forEach((r:any) => hwResMap.set(r.homework_id, r.status));
+          const isFinalDone = ['최종완료', '완료', '채점완료'].includes(
+            ex.status
+          );
 
-      const today = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().split('T')[0];
+          const isTestType = ![
+            '과제',
+            '과제프린트',
+            '미완료과제',
+            '오답프린트',
+            '오답',
+          ].includes(type);
+          if (
+            isTestType &&
+            !['미응시', '진행중', '대기'].includes(ex.status)
+          ) {
+            hasAnyExamClearedToday = true;
+          }
 
-      hwsData?.forEach((hw: any) => {
-          const status = hwResMap.get(hw.homework_id) || '미제출';
+          const cleanedTitle = cleanTitle(rawTitle, sName);
+          const item = {
+            id: ex.assignment_id,
+            title: cleanedTitle,
+            remain,
+            status: ex.status,
+            score: ex.total_score,
+            type: 'exam',
+            exType: type,
+          };
+
+          if (type === '오답프린트' || type === '오답') {
+          } else if (type === '과제' || type === '과제프린트') {
+            if (!isFinalDone && remain > 0) hwExams.push(item);
+          } else if (type === '오답유사' || type === '과제오답유사') {
+            if (!isFinalDone && remain > 0) similarExams.push(item);
+          } else if (type === '미완료과제') {
+            if (!isFinalDone && remain > 0) overdueExams.push(item);
+          } else {
+            if (!isFinalDone) regularExams.push(item);
+          }
+        });
+
+        const normalHws: any[] = [];
+        const overdueNormalHws: any[] = [];
+
+        hwsData?.forEach((hw: any) => {
+          if (hw.class_id && cid && hw.class_id !== cid) return;
+          if (hw.target_student_id && hw.target_student_id !== studentId)
+            return;
+
+          const resObj = hwResMap.get(hw.homework_id);
+          const status = resObj?.status || '미제출';
           if (['제출완료', '채점완료', '완료'].includes(status)) return;
-          
+
           let tqLen = 0;
-          try { tqLen = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : (hw.target_questions?.length || 0); } catch(e){}
+          try {
+            tqLen =
+              typeof hw.target_questions === 'string'
+                ? JSON.parse(hw.target_questions).length
+                : hw.target_questions?.length || 0;
+          } catch (e) {}
+
           const resolved = hwResolvedMap.get(hw.homework_id)?.size || 0;
           const remain = Math.max(0, tqLen - resolved);
-          
-          if (remain > 0) {
-              if (hw.due_date && hw.due_date < today) overdueCount += remain;
-              else hwCount += remain;
+          if (remain === 0) return;
+
+          const cleanedTitle = cleanTitle(hw.homework_title, sName);
+          const item = {
+            id: hw.homework_id,
+            title: cleanedTitle,
+            remain,
+            status,
+            score: null,
+            type: 'hw',
+          };
+
+          if (hw.due_date && hw.due_date < today) {
+            overdueNormalHws.push(item);
+          } else {
+            normalHws.push(item);
           }
+        });
+
+        const hasSimilar = similarExams.length > 0;
+        const hasRegular = regularExams.length > 0;
+
+        let finalExamList: any[] = [];
+        let activeExamMode = 'DONE';
+
+        if (hasRegular) {
+          activeExamMode = 'TEST';
+          finalExamList = regularExams;
+        } else if (hasSimilar) {
+          activeExamMode = 'SIMILAR';
+          finalExamList = similarExams;
+        }
+
+        const finalHwList = [...hwExams, ...normalHws];
+        const finalOverdueList = [...overdueExams, ...overdueNormalHws];
+
+        const eCount = finalExamList.reduce((acc, it) => acc + it.remain, 0);
+        const hCount = finalHwList.reduce((acc, it) => acc + it.remain, 0);
+        const oCount = finalOverdueList.reduce((acc, it) => acc + it.remain, 0);
+
+        const firstExam = finalExamList[0] || {};
+
+        newBlockStates[c].exam =
+          finalExamList.length > 0 ? '미응시' : '최종완료';
+        newBlockStates[c].hw = finalHwList.length > 0 ? '미응시' : '최종완료';
+        newBlockStates[c].print =
+          totalPrintQCount > 0 ? '미응시' : '최종완료';
+        newBlockStates[c].overdue =
+          finalOverdueList.length > 0 ? '미응시' : '최종완료';
+
+        if (roundResults[`${c}::1`]) newBlockStates[c].exam = '최종완료';
+        if (roundResults[`${c}::2`]) newBlockStates[c].hw = '최종완료';
+        if (roundResults[`${c}::3`]) newBlockStates[c].print = '최종완료';
+
+        newHwProgress[c] = {
+          activeExamMode,
+          hasAnyExamClearedToday,
+          examList: finalExamList,
+          hwList: finalHwList,
+          overdueList: finalOverdueList,
+          printTitles: totalPrintQCount > 0 ? ['[통합] 누적 오답 클리닉'] : [],
+
+          examQCount: eCount,
+          hwQCount: hCount,
+          printQCount: totalPrintQCount,
+          overdueQCount: oCount,
+          examPendingCount: finalExamList.length,
+          hwPendingCount: finalHwList.length,
+          printPendingCount: totalPrintQCount > 0 ? 1 : 0,
+          overduePendingCount: finalOverdueList.length,
+          examStatus: firstExam.status || '대기',
+          examInitialScore: firstExam.score ?? null,
+          examType:
+            activeExamMode === 'SIMILAR'
+              ? '오답유사'
+              : firstExam.exType || '',
+        };
       });
 
-      return { examCount, hwCount, overdueCount, printCount };
+      const primaryProg = newHwProgress[selectedClass] || {};
+
+      return {
+        classes,
+        selectedClass,
+        blockStates: newBlockStates,
+        hwProgress: newHwProgress,
+        points: pointsBalance || 0,
+        clinicSession: sessionRow || null,
+        examCount: primaryProg.examQCount || 0,
+        hwCount: primaryProg.hwQCount || 0,
+        overdueCount: primaryProg.overdueQCount || 0,
+        printCount: totalPrintQCount,
+      };
     } catch (e) {
       console.error(e);
-      return { examCount: 0, hwCount: 0, overdueCount: 0, printCount: 0 };
+      const fallbackClass = classNameParam || '반 미배정';
+      return {
+        classes: [fallbackClass],
+        selectedClass: fallbackClass,
+        blockStates: {
+          [fallbackClass]: {
+            exam: '최종완료',
+            hw: '최종완료',
+            print: '최종완료',
+            overdue: '최종완료',
+          },
+        },
+        hwProgress: {
+          [fallbackClass]: {
+            activeExamMode: 'DONE',
+            hasAnyExamClearedToday: false,
+            examList: [],
+            hwList: [],
+            overdueList: [],
+            printTitles: [],
+            examQCount: 0,
+            hwQCount: 0,
+            printQCount: 0,
+            overdueQCount: 0,
+            examPendingCount: 0,
+            hwPendingCount: 0,
+            printPendingCount: 0,
+            overduePendingCount: 0,
+            examStatus: '대기',
+            examInitialScore: null,
+            examType: '',
+          },
+        },
+        points: 0,
+        clinicSession: null,
+        examCount: 0,
+        hwCount: 0,
+        overdueCount: 0,
+        printCount: 0,
+      };
     }
   };
 
