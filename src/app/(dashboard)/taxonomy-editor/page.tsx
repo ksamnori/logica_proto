@@ -29,9 +29,9 @@ export default function TaxonomyEditorPage() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm, twinTargetBook, similarTargetBook,
-    isFixingLatex,
+    isFixingLatex, twinAiModel, setTwinAiModel,
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
-    normalRoots, trueOrphans, getDescendants,
+    normalRoots, trueOrphans, getDescendants, activeParentQuestion,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
     setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
@@ -44,7 +44,7 @@ export default function TaxonomyEditorPage() {
   const [gradeFilter, setGradeFilter] = React.useState<string>("ALL");
   const [typeFilter, setTypeFilter] = React.useState<string>("ALL");
   const [isBookPickerOpen, setIsBookPickerOpen] = React.useState(false);
-  const [pickerLimit, setPickerLimit] = React.useState(80);
+  const [pickerLimit, setPickerLimit] = React.useState(500);
   const [autoFetchOnSelect, setAutoFetchOnSelect] = React.useState(true);
   const [recentBooks, setRecentBooks] = React.useState<string[]>([]);
   const [questionTextFilter, setQuestionTextFilter] = React.useState("");
@@ -82,16 +82,16 @@ export default function TaxonomyEditorPage() {
 
   const detectBookGrade = (name: string): string => {
     const s = String(name || "");
-    if (/(?:초등?\s*1|초1|(?:^|[^0-9])1-[12](?:[^0-9]|$)|1학년|E1)/i.test(s) && !s.includes("중")) return "초1";
-    if (/(?:초등?\s*2|초2|(?:^|[^0-9])2-[12](?:[^0-9]|$)|2학년|E2)/i.test(s) && !s.includes("중")) return "초2";
-    if (/(?:초등?\s*3|초3|(?:^|[^0-9])3-[12](?:[^0-9]|$)|3학년|E3)/i.test(s) && !s.includes("중")) return "초3";
-    if (/(?:초등?\s*4|초4|(?:^|[^0-9])4-[12](?:[^0-9]|$)|4학년|E4)/i.test(s)) return "초4";
-    if (/(?:초등?\s*5|초5|(?:^|[^0-9])5-[12](?:[^0-9]|$)|5학년|E5)/i.test(s)) return "초5";
-    if (/(?:초등?\s*6|초6|(?:^|[^0-9])6-[12](?:[^0-9]|$)|6학년|E6)/i.test(s)) return "초6";
-    if (/(?:중등?\s*1|중1|(?:^|[^0-9])7-[12](?:[^0-9]|$)|M1)/i.test(s)) return "중1";
-    if (/(?:중등?\s*2|중2|(?:^|[^0-9])8-[12](?:[^0-9]|$)|M2)/i.test(s)) return "중2";
-    if (/(?:중등?\s*3|중3|(?:^|[^0-9])9-[12](?:[^0-9]|$)|M3)/i.test(s)) return "중3";
-    if (/(?:고등|고1|고2|고3|수학\s*\(?(?:상|하)\)?|수1|수2|미적분|확률과\s*통계|기하|H[123])/i.test(s)) return "고등";
+    if (/(?:고등|고[123]|수학\s*\(?(?:상|하)\)?|공통수학|수1|수2|미적분|확률과\s*통계|기하|대수|H[123])/i.test(s)) return "고등";
+    if (/(?:중등?\s*1|중1|(?:^|[^0-9])7\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|M1)/i.test(s)) return "중1";
+    if (/(?:중등?\s*2|중2|(?:^|[^0-9])8\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|M2)/i.test(s)) return "중2";
+    if (/(?:중등?\s*3|중3|(?:^|[^0-9])9\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|M3)/i.test(s)) return "중3";
+    if (/(?:초등?\s*1|초1|(?:^|[^0-9])1\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|(?:^|[^0-9A-Za-z])[ULul]\s*1[1-9](?:[^0-9]|$)|1\s*학년|E1)/i.test(s) && !s.includes("중")) return "초1";
+    if (/(?:초등?\s*2|초2|(?:^|[^0-9])2\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|(?:^|[^0-9A-Za-z])[ULul]\s*2[1-9](?:[^0-9]|$)|2\s*학년|E2)/i.test(s) && !s.includes("중")) return "초2";
+    if (/(?:초등?\s*3|초3|(?:^|[^0-9])3\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|(?:^|[^0-9A-Za-z])[ULul]\s*3[1-9](?:[^0-9]|$)|3\s*학년|E3)/i.test(s) && !s.includes("중")) return "초3";
+    if (/(?:초등?\s*4|초4|(?:^|[^0-9])4\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|(?:^|[^0-9A-Za-z])[ULul]\s*4[1-9](?:[^0-9]|$)|4\s*학년|E4)/i.test(s)) return "초4";
+    if (/(?:초등?\s*5|초5|(?:^|[^0-9])5\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|(?:^|[^0-9A-Za-z])[ULul]\s*5[1-9](?:[^0-9]|$)|5\s*학년|E5)/i.test(s)) return "초5";
+    if (/(?:초등?\s*6|초6|(?:^|[^0-9])6\s*[-_.]\s*[1-9]\d*(?:[^0-9]|$)|(?:^|[^0-9A-Za-z])[ULul]\s*6[1-9](?:[^0-9]|$)|6\s*학년|E6)/i.test(s)) return "초6";
     return "기타";
   };
 
@@ -370,25 +370,81 @@ export default function TaxonomyEditorPage() {
       {/* AI 쌍둥이/유사 문항 모달 */}
       {isTwinModalOpen && (
         <div className="fixed inset-0 z-[100] bg-slate-900/60 flex flex-col items-center justify-center p-6 sm:p-10 animate-in fade-in backdrop-blur-sm">
-          <div className="bg-white w-full max-w-6xl h-full max-h-[90vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
-            <div className="p-5 bg-gradient-to-r from-fuchsia-600 to-indigo-600 flex justify-between items-center shrink-0">
+          <div className="bg-white w-full max-w-6xl h-full max-h-[92vh] rounded-3xl shadow-2xl flex flex-col overflow-hidden border border-slate-200">
+            <div className="p-5 bg-gradient-to-r from-fuchsia-600 to-indigo-600 flex flex-wrap justify-between items-center gap-3 shrink-0">
               <div>
                 <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                  <span>👯</span> AI 쌍둥이/유사 문항 생성기
+                  <span>👯</span> AI 쌍둥이/유사 문항 생성기 (코드 기반 도형·그래프 이미지 자동 복제)
                 </h2>
-                <p className="text-fuchsia-100 font-bold text-xs mt-1">숫자와 상황이 변형된 클리닉용 유사 문항이 자동으로 생성되었습니다. 저장할 문제를 선택하세요.</p>
+                <p className="text-fuchsia-100 font-bold text-xs mt-1">
+                  원본 이미지를 분석하여 변형된 도형·그래프(SVG 벡터)와 수식·해설을 동시에 생성합니다. 저장 시 300DPI 고해상도 PNG로 자동 변환됩니다.
+                </p>
+                {selectedQuestion?.parent_question_id && (
+                  <div className="mt-2 inline-flex items-center gap-1.5 bg-white/20 text-white px-2.5 py-1 rounded-lg text-xs font-bold border border-white/30">
+                    <span>🔗 형제 문항 생성 모드:</span>
+                    <span>
+                      저장 시 부모 문항
+                      {activeParentQuestion
+                        ? ` ([${activeParentQuestion.source_book_name || activeParentQuestion.book_name} p.${activeParentQuestion.final_printed_page || activeParentQuestion.detected_page_num || '?'}] ${formatQNum(activeParentQuestion.question_number, activeParentQuestion.sub_num)})`
+                        : ''}
+                      의 쌍둥이/유사 문항으로 편입됩니다.
+                    </span>
+                  </div>
+                )}
               </div>
-              <button onClick={() => setIsTwinModalOpen(false)} className="text-white hover:text-fuchsia-200 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
-                닫기 ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center bg-black/20 p-1 rounded-xl border border-white/20">
+                  <button
+                    type="button"
+                    disabled={isGeneratingTwins}
+                    onClick={() => handleGenerateTwins("gemini-3.8-flash")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      twinAiModel === "gemini-3.8-flash"
+                        ? "bg-white text-indigo-700 shadow-sm"
+                        : "text-white/80 hover:text-white"
+                    }`}
+                    title="빠른 생성 속도, 일반 문항 및 기본 도형/그래프용"
+                  >
+                    ⚡ Gemini 3.8 Flash
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isGeneratingTwins}
+                    onClick={() => handleGenerateTwins("gemini-4-argon")}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+                      twinAiModel === "gemini-4-argon"
+                        ? "bg-amber-300 text-slate-900 shadow-sm"
+                        : "text-white/80 hover:text-white"
+                    }`}
+                    title="고난도 복합 도형·퍼즐·좌표 검증 특화 상위 모델"
+                  >
+                    🧠 Gemini 4 Argon
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  disabled={isGeneratingTwins}
+                  onClick={() => handleGenerateTwins(twinAiModel)}
+                  className="text-white bg-white/15 hover:bg-white/25 border border-white/25 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors disabled:opacity-50"
+                >
+                  🔄 다시 생성
+                </button>
+                <button onClick={() => { setIsTwinModalOpen(false); setTwinAiModel("gemini-3.8-flash"); }} className="text-white hover:text-fuchsia-200 bg-white/10 hover:bg-white/20 px-3 py-1.5 rounded-lg text-sm font-bold transition-colors">
+                  닫기 ✕
+                </button>
+              </div>
             </div>
             
             <div className="flex-1 overflow-y-auto p-6 bg-slate-50 custom-scroll">
               {isGeneratingTwins ? (
                 <div className="h-full flex flex-col items-center justify-center text-slate-500 gap-4">
                   <span className="text-5xl animate-spin">🌀</span>
-                  <p className="font-bold text-lg">AI가 쌍둥이와 유사 문제를 생성하고 있습니다...</p>
-                  <p className="text-sm font-bold text-slate-400">수식과 4단계 해설을 작성 중이므로 약 10초 정도 소요됩니다.</p>
+                  <p className="font-bold text-lg">
+                    AI({twinAiModel})가 원본 도형·그래프와 문제를 분석하여 쌍둥이/유사 문항을 조판하고 있습니다...
+                  </p>
+                  <p className="text-sm font-bold text-slate-400">
+                    수식, 4단계 해설, 그리고 새 문제에 맞춘 벡터 도형/그래프 이미지를 함께 생성 중입니다 (약 8~15초 소요).
+                  </p>
                 </div>
               ) : generatedTwins.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -406,6 +462,11 @@ export default function TaxonomyEditorPage() {
                           <span className={`px-2 py-1 rounded text-xs font-bold transition-colors ${twin.isSelected === false ? 'text-slate-400 bg-slate-100' : (twin.question_type === '유사' ? 'bg-amber-100 text-amber-700' : 'bg-indigo-100 text-indigo-700')}`}>
                             {twin.question_type === '유사' ? '💡 유사 문항' : '👯 쌍둥이 문항'}
                           </span>
+                          {twin.svg_code && twin.svg_code.includes('<svg') && (
+                            <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              🎨 새 도형/그래프 이미지 생성됨
+                            </span>
+                          )}
                         </label>
                         
                         <button
@@ -416,16 +477,69 @@ export default function TaxonomyEditorPage() {
                         </button>
                       </div>
                       
-                      <div className="flex flex-col gap-1.5 flex-1 mt-1">
-                        <label className="text-xs font-bold text-slate-500">문제 텍스트</label>
+                      <div className="flex flex-col gap-1.5 mt-1">
+                        <label className="text-xs font-bold text-slate-500">문제 텍스트 (상단)</label>
                         {twin.isPreviewMode ? (
-                          <div className="w-full min-h-[6rem] p-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
+                          <div className="w-full min-h-[4.5rem] p-3 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
                             {twin.question || <span className="text-slate-400 italic text-xs">텍스트가 없습니다.</span>}
                           </div>
                         ) : (
                           <textarea value={twin.question} onChange={(e) => handleTwinChange(idx, 'question', e.target.value)} className="w-full h-24 p-3 text-sm border border-slate-300 rounded-lg bg-yellow-50/30 resize-none outline-none focus:ring-2 focus:ring-indigo-400" />
                         )}
                       </div>
+
+                      {/* 🌟 새로 생성된 SVG 도형/그래프 이미지 실시간 미리보기 및 코드 편집 */}
+                      {(twin.svg_code || selectedQuestion?.image_url || selectedQuestion?.image_2_url) && (
+                        <div className="flex flex-col gap-1.5 mt-1 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-bold text-slate-600">
+                              🖼️ 생성된 문제 이미지 {twin.svg_code?.includes('<svg') ? '(신규 렌더링)' : '(원본 이미지 유지)'}
+                            </span>
+                          </div>
+                          {twin.svg_code && twin.svg_code.includes('<svg') ? (
+                            <div
+                              className="w-full bg-white rounded-lg border border-slate-200 p-2 flex items-center justify-center overflow-hidden shadow-inner"
+                              dangerouslySetInnerHTML={{ __html: twin.svg_code }}
+                            />
+                          ) : (
+                            <div className="w-full bg-white rounded-lg border border-slate-200 p-2 flex items-center justify-center">
+                              <img
+                                src={getCleanUrl(selectedQuestion?.image_url || selectedQuestion?.image_2_url)}
+                                alt="원본 이미지"
+                                className="max-h-48 object-contain"
+                              />
+                            </div>
+                          )}
+                          <details className="mt-1">
+                            <summary className="text-[11px] font-bold text-slate-500 cursor-pointer hover:text-indigo-600 select-none">
+                              🛠️ 이미지 벡터 코드(SVG) 직접 다듬기
+                            </summary>
+                            <textarea
+                              value={twin.svg_code || ''}
+                              onChange={(e) => handleTwinChange(idx, 'svg_code', e.target.value)}
+                              placeholder="<svg ...>...</svg> 코드를 수정하면 위 미리보기에 즉시 반영됩니다."
+                              className="mt-1.5 w-full h-28 p-2 font-mono text-[11px] border border-slate-300 rounded-lg bg-white outline-none focus:ring-2 focus:ring-indigo-400"
+                            />
+                          </details>
+                        </div>
+                      )}
+
+                      {(twin.question_2 || selectedQuestion?.question_2) && (
+                        <div className="flex flex-col gap-1.5 mt-1">
+                          <label className="text-xs font-bold text-slate-500">문제 텍스트 2 (이미지 하단 질문)</label>
+                          {twin.isPreviewMode ? (
+                            <div className="w-full min-h-[2.75rem] p-2.5 text-sm border border-slate-200 rounded-lg bg-white overflow-x-auto shadow-inner whitespace-pre-wrap font-medium text-slate-800">
+                              {twin.question_2 || <span className="text-slate-400 italic text-xs">하단 질문 없음</span>}
+                            </div>
+                          ) : (
+                            <textarea
+                              value={twin.question_2 || ''}
+                              onChange={(e) => handleTwinChange(idx, 'question_2', e.target.value)}
+                              className="w-full h-16 p-2.5 text-sm border border-slate-300 rounded-lg bg-yellow-50/30 resize-none outline-none focus:ring-2 focus:ring-indigo-400"
+                            />
+                          )}
+                        </div>
+                      )}
 
                       <div className="flex flex-col gap-1.5 mt-2">
                         <label className="text-xs font-bold text-slate-500">정답</label>
@@ -438,6 +552,16 @@ export default function TaxonomyEditorPage() {
                         )}
                       </div>
 
+                      {twin.answer_svg_code && twin.answer_svg_code.includes('<svg') && (
+                        <div className="flex flex-col gap-1.5 mt-1 bg-emerald-50/50 p-3 rounded-xl border border-emerald-200">
+                          <span className="text-xs font-bold text-emerald-700">✅ 생성된 해설/정답 이미지</span>
+                          <div
+                            className="w-full bg-white rounded-lg border border-emerald-200 p-2 flex items-center justify-center overflow-hidden shadow-inner"
+                            dangerouslySetInnerHTML={{ __html: twin.answer_svg_code }}
+                          />
+                        </div>
+                      )}
+
                       <details className="group mt-2">
                         <summary className="text-xs font-bold text-indigo-500 cursor-pointer hover:text-indigo-700 outline-none select-none flex items-center gap-1">
                           <span>▶</span> 상세 해설 (4단계) 보기 및 수정
@@ -447,7 +571,7 @@ export default function TaxonomyEditorPage() {
                             <div className="flex flex-col gap-2">
                               {twin.step_1_concept && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">1. 개념</span>{twin.step_1_concept}</div>}
                               {twin.step_2_approach && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">2. 접근</span>{twin.step_2_approach}</div>}
-                              {twin.step_3_process && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">3. 과정</span>{twin.step_3_process}</div>}
+                              {twin.step_3_process && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner whitespace-pre-wrap"><span className="font-bold text-indigo-600 mr-2">3. 과정</span>{twin.step_3_process}</div>}
                               {twin.step_4_conclusion && <div className="text-xs text-slate-800 bg-white p-2 rounded border border-slate-200 shadow-inner"><span className="font-bold text-indigo-600 mr-2">4. 결론</span>{twin.step_4_conclusion}</div>}
                             </div>
                           ) : (
@@ -480,6 +604,12 @@ export default function TaxonomyEditorPage() {
                     className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-indigo-700 bg-indigo-50 outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm cursor-pointer text-sm"
                   >
                     <option value={`${selectedBook} 쌍둥이`}>{selectedBook} 쌍둥이</option>
+                    {activeParentQuestion?.source_book_name &&
+                      activeParentQuestion.source_book_name !== selectedBook && (
+                        <option value={`${activeParentQuestion.source_book_name} 쌍둥이`}>
+                          {activeParentQuestion.source_book_name} 쌍둥이 (부모 교재 기준)
+                        </option>
+                      )}
                     <option value="주간테스트">주간테스트</option>
                     <option value="중간테스트">중간테스트</option>
                     <option value="분기테스트">분기테스트</option>
@@ -494,6 +624,12 @@ export default function TaxonomyEditorPage() {
                     className="px-3 py-1.5 border border-slate-300 rounded-lg font-bold text-amber-700 bg-amber-50 outline-none focus:ring-2 focus:ring-amber-500 shadow-sm cursor-pointer text-sm"
                   >
                     <option value={`${selectedBook} 유사`}>{selectedBook} 유사</option>
+                    {activeParentQuestion?.source_book_name &&
+                      activeParentQuestion.source_book_name !== selectedBook && (
+                        <option value={`${activeParentQuestion.source_book_name} 유사`}>
+                          {activeParentQuestion.source_book_name} 유사 (부모 교재 기준)
+                        </option>
+                      )}
                     <option value="주간테스트">주간테스트</option>
                     <option value="중간테스트">중간테스트</option>
                     <option value="분기테스트">분기테스트</option>
@@ -545,7 +681,7 @@ export default function TaxonomyEditorPage() {
               <button
                 key={g.id}
                 type="button"
-                onClick={() => { setGradeFilter(g.id); setPickerLimit(80); }}
+                onClick={() => { setGradeFilter(g.id); setPickerLimit(500); setIsBookPickerOpen(true); }}
                 className={`px-2 py-1 rounded-md text-xs font-bold transition-all ${
                   gradeFilter === g.id
                     ? "bg-brand text-white shadow-sm"
@@ -569,7 +705,7 @@ export default function TaxonomyEditorPage() {
               <button
                 key={t.id}
                 type="button"
-                onClick={() => { setTypeFilter(t.id); setPickerLimit(80); }}
+                onClick={() => { setTypeFilter(t.id); setPickerLimit(500); }}
                 className={`px-2.5 py-1 rounded-md text-xs font-bold transition-all ${
                   typeFilter === t.id
                     ? "bg-indigo-600 text-white shadow-sm"
@@ -612,7 +748,7 @@ export default function TaxonomyEditorPage() {
               type="text"
               placeholder="교재 키워드 검색 (예: 디딤돌, 쎈)"
               value={bookFilter}
-              onChange={(e) => { setBookFilter(e.target.value); setPickerLimit(80); setIsBookPickerOpen(true); }}
+              onChange={(e) => { setBookFilter(e.target.value); setPickerLimit(500); setIsBookPickerOpen(true); }}
               onFocus={() => setIsBookPickerOpen(true)}
               className="w-full pl-9 pr-7 py-2 border border-slate-300 rounded-lg text-sm font-bold outline-none focus:ring-2 focus:ring-brand transition-all bg-white shadow-sm"
             />
@@ -625,7 +761,7 @@ export default function TaxonomyEditorPage() {
           <div ref={pickerRef} className="relative flex-1 min-w-0 max-w-xl">
             <button
               type="button"
-              onClick={() => { setPickerLimit(80); setIsBookPickerOpen((v) => !v); }}
+              onClick={() => { setPickerLimit(500); setIsBookPickerOpen((v) => !v); }}
               className="w-full px-3.5 py-2 border border-slate-300 rounded-lg font-bold text-left bg-slate-50 hover:bg-white text-sm shadow-sm outline-none focus:ring-2 focus:ring-brand flex items-center justify-between gap-2 transition-colors"
             >
               <span className={`truncate ${selectedBook ? "text-brand" : "text-slate-500"}`}>
@@ -1103,8 +1239,24 @@ export default function TaxonomyEditorPage() {
                   
                   {!isEditingContent ? (
                     <div className="flex gap-2 shrink-0">
-                      <button onClick={handleGenerateTwins} disabled={!perms.twin || !!selectedQuestion.parent_question_id} className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${perms.twin && !selectedQuestion.parent_question_id ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white' : 'bg-slate-100 text-slate-400 cursor-not-allowed'}`} title={!!selectedQuestion.parent_question_id ? "쌍둥이 문항에서는 또 생성할 수 없습니다." : (!perms.twin ? "생성 권한이 없습니다." : "")}>
-                        <span>👯</span> <span>AI 유사생성</span>
+                      <button
+                        onClick={handleGenerateTwins}
+                        disabled={!perms.twin}
+                        className={`px-3 py-2 font-bold text-xs rounded-lg transition-colors shadow-md flex items-center gap-1.5 ${
+                          perms.twin
+                            ? 'bg-gradient-to-r from-fuchsia-600 to-indigo-600 hover:from-fuchsia-500 hover:to-indigo-500 text-white cursor-pointer'
+                            : 'bg-slate-100 text-slate-400 cursor-not-allowed'
+                        }`}
+                        title={
+                          !perms.twin
+                            ? "생성 권한이 없습니다."
+                            : selectedQuestion.parent_question_id
+                            ? "현재 쌍둥이 문항을 바탕으로 부모 문항에 소속될 새로운 형제(쌍둥이/유사) 문항을 생성합니다."
+                            : "현재 문항의 쌍둥이/유사 문항을 생성합니다."
+                        }
+                      >
+                        <span>👯</span>
+                        <span>{selectedQuestion.parent_question_id ? "AI 형제/유사생성" : "AI 유사생성"}</span>
                       </button>
 
                       <button 

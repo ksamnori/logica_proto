@@ -18,6 +18,25 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
+// 학부모 성함에 '학부모'(예: '홍정우 학부모')가 포함되어 있으면 '학부모' 단어를 하나 제거하여 '홍정우(학부모)'로 정리
+const formatParentDisplayName = (rawName?: string | null, rel?: string | null, studentName?: string | null): string => {
+  const relStr = String(rel || "학부모").trim() || "학부모";
+  const raw = String(rawName || "").trim();
+  const cleanStu = String(studentName || "").replace(/\s*학부모님?\s*/g, " ").trim();
+
+  const parenMatch = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (parenMatch) {
+    const innerRel = parenMatch[2].trim() || relStr;
+    const cleanedPrefix = parenMatch[1].replace(/\s*학부모님?\s*/g, " ").trim();
+    const base = cleanedPrefix && cleanedPrefix !== "미입력" ? cleanedPrefix : (cleanStu || "학부모");
+    return `${base}(${innerRel})`;
+  }
+
+  const cleaned = raw.replace(/\s*학부모님?\s*/g, " ").trim();
+  const base = cleaned && cleaned !== "미입력" ? cleaned : (cleanStu || "학부모");
+  return `${base}(${relStr})`;
+};
+
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
   if (!e) return true;
@@ -208,7 +227,13 @@ export default function AdminDashboardPage() {
     const uniqueMap = new Map();
     raw.forEach((item: any) => {
         const key = item.template_id === 'KA01TP260921034958500GAtQOl600yJ' ? `${item.student_id}_${item.parent_phone}_ATT` : item.queue_id;
-        if (!uniqueMap.has(key)) uniqueMap.set(key, item);
+        if (!uniqueMap.has(key)) {
+          const cleanedParent = formatParentDisplayName(item.parent_name, "학부모", item.student_name);
+          const cleanedDesc = typeof item.preview_desc === "string"
+            ? item.preview_desc.replace(/\s*학부모\s*(\([^)]+\))/g, "$1")
+            : item.preview_desc;
+          uniqueMap.set(key, { ...item, parent_name: cleanedParent, preview_desc: cleanedDesc });
+        }
     });
     setQueuedMessages(Array.from(uniqueMap.values()));
   };
@@ -815,9 +840,7 @@ export default function AdminDashboardPage() {
 
       const pushTarget = (phone: string, name: string, rel: string) => {
         if (!phone || phone.includes('unassigned')) return;
-        const relStr = rel || '학부모';
-        
-        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `${student.name}(${relStr})`;
+        const finalName = formatParentDisplayName(name, rel, student.name);
 
         if (bulkType === 'schedule') {
           newMessages.push({
@@ -1362,9 +1385,7 @@ export default function AdminDashboardPage() {
                     if (pInfo) {
                       const pushAttTarget = (phone: string, name: string, rel: string) => {
                         if (!phone || phone.includes('unassigned')) return;
-                        const relStr = rel || '학부모';
-                        
-                        const finalName = name && name !== '미입력' ? `${name}(${relStr})` : `${stuData.name}(${relStr})`;
+                        const finalName = formatParentDisplayName(name, rel, stuData.name);
 
                         expandedMsgs.push({
                           ...m,
@@ -1625,7 +1646,8 @@ export default function AdminDashboardPage() {
         const isMakeup = msg.template_id === "KA01TP26092103514300371OMrxorSxG";
         const isTestResult = Boolean(msg.test_name || String(msg.preview_title || "").includes("학습결과"));
 
-        const rawDetails = String(msg.details || "").trim();
+        const displayParentName = formatParentDisplayName(msg.parent_name, "학부모", msg.student_name);
+        const rawDetails = String(msg.details || "").trim().replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님");
         const isPreformattedSms =
           rawDetails.startsWith("[로지카대치본원학원] 보강 안내") ||
           rawDetails.includes("학부모님,");
@@ -1633,13 +1655,13 @@ export default function AdminDashboardPage() {
 
         const fullSmsText = isPreformattedSms
           ? `${rawDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 https://www.logicaclass.com/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`
-          : `[로지카대치본원학원]\n\n${msg.parent_name || "학부모"} 학부모님,\n\n${cleanedDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 https://www.logicaclass.com/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
+          : `[로지카대치본원학원]\n\n${displayParentName} 학부모님,\n\n${cleanedDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 https://www.logicaclass.com/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
 
-        const scheduleAlimtalkText = `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${msg.schedule_name || "-"}\n■ 적용 일시 : ${msg.apply_date || "-"}\n■ 상세 안내 : ${msg.details || "-"}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`;
+        const scheduleAlimtalkText = `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${displayParentName} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${msg.schedule_name || "-"}\n■ 적용 일시 : ${msg.apply_date || "-"}\n■ 상세 안내 : ${msg.details || "-"}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`;
 
-        const makeupAlimtalkText = `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${msg.old_date || "-"}\n■ 변경 일시 : ${msg.new_date || "-"}\n■ 상세 안내 : ${msg.details || "-"}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`;
+        const makeupAlimtalkText = `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${displayParentName} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${msg.old_date || "-"}\n■ 변경 일시 : ${msg.new_date || "-"}\n■ 상세 안내 : ${msg.details || "-"}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`;
 
-        const testResultAlimtalkText = `[로지카대치본원학원] 학습 결과 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n${msg.student_name || ""} 학생의 ${msg.test_name || "-"} 결과를 안내해 드립니다.\n\n시험명 : ${msg.test_name || "-"}\n\n학생 점수 : ${msg.student_score || "-"}점\n\n반 평균 : ${msg.class_average || "-"}점\n\n선생님 코멘트 : ${msg.comment || msg.details || "-"}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`;
+        const testResultAlimtalkText = `[로지카대치본원학원] 학습 결과 안내\n\n${displayParentName} 학부모님,\n${msg.student_name || ""} 학생의 ${msg.test_name || "-"} 결과를 안내해 드립니다.\n\n시험명 : ${msg.test_name || "-"}\n\n학생 점수 : ${msg.student_score || "-"}점\n\n반 평균 : ${msg.class_average || "-"}점\n\n선생님 코멘트 : ${msg.comment || msg.details || "-"}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`;
 
         return (
           <div
@@ -1676,7 +1698,7 @@ export default function AdminDashboardPage() {
                     {msg.preview_title}
                   </span>
                   <span className="font-bold text-slate-800">{msg.student_name}</span>
-                  <span className="font-bold text-indigo-600">{msg.parent_name}</span>
+                  <span className="font-bold text-indigo-600">{displayParentName}</span>
                 </div>
                 <span className="font-bold text-slate-500">{msg.parent_phone}</span>
               </div>
@@ -1699,7 +1721,7 @@ export default function AdminDashboardPage() {
 
                     <div className="p-4 text-xs text-slate-800 space-y-2.5 leading-relaxed font-medium whitespace-pre-wrap">
                       {isAttendance && (
-                        `[로지카대치본원학원] 출결 안내\n\n${msg.parent_name || "학부모"} 학부모님,\n${msg.student_name || ""} 학생의 출결 상태를 안내해 드립니다.\n\n■ 학생명 : ${msg.student_name || "-"}\n■ 출결상태 : ${msg.status_label || String(msg.preview_title || "").replace("[출결] ", "")}\n■ 일시 : ${msg.time_string || "-"}\n\n문의: 02-555-8875`
+                        `[로지카대치본원학원] 출결 안내\n\n${displayParentName} 학부모님,\n${msg.student_name || ""} 학생의 출결 상태를 안내해 드립니다.\n\n■ 학생명 : ${msg.student_name || "-"}\n■ 출결상태 : ${msg.status_label || String(msg.preview_title || "").replace("[출결] ", "")}\n■ 일시 : ${msg.time_string || "-"}\n\n문의: 02-555-8875`
                       )}
                       {isSchedule && scheduleAlimtalkText}
                       {isMakeup && makeupAlimtalkText}

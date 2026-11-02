@@ -68,19 +68,29 @@ export default function ExamListPage() {
     }
     return "";
   });
+  const PAGE_SIZE = 30;
+  const [currentPage, setCurrentPage] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const saved = JSON.parse(sessionStorage.getItem("logica_exam_list_filter_state") || "{}");
+        if (typeof saved.currentPage === "number" && saved.currentPage >= 1) return saved.currentPage;
+      } catch (e) {}
+    }
+    return 1;
+  });
   const listScrollRef = useRef<HTMLDivElement>(null);
   const restoredScrollRef = useRef(false);
 
-  // 탭/분류/검색 상태가 바뀔 때마다 sessionStorage에 즉시 저장하여 Viewer나 Step 2에서 돌아왔을 때 그대로 유지
+  // 탭/분류/검색/페이지 상태가 바뀔 때마다 sessionStorage에 즉시 저장하여 Viewer나 Step 2에서 돌아왔을 때 그대로 유지
   useEffect(() => {
     if (typeof window === "undefined") return;
     try {
       sessionStorage.setItem(
         EXAM_LIST_FILTER_STORAGE_KEY,
-        JSON.stringify({ mainTab, filterLevel, filterGrade, filterCreator, searchQuery })
+        JSON.stringify({ mainTab, filterLevel, filterGrade, filterCreator, searchQuery, currentPage })
       );
     } catch (e) {}
-  }, [mainTab, filterLevel, filterGrade, filterCreator, searchQuery]);
+  }, [mainTab, filterLevel, filterGrade, filterCreator, searchQuery, currentPage]);
 
   // 목록 로딩 완료 후 이전 스크롤 위치 복원
   useEffect(() => {
@@ -642,8 +652,24 @@ export default function ExamListPage() {
     });
   }, [exams, mainTab, filterLevel, filterGrade, filterCreator, searchQuery]);
 
+  const totalPages = Math.max(1, Math.ceil(filteredExams.length / PAGE_SIZE));
+  const safeCurrentPage = Math.min(currentPage, totalPages);
+
+  const pagedExams = useMemo(() => {
+    const start = (safeCurrentPage - 1) * PAGE_SIZE;
+    return filteredExams.slice(start, start + PAGE_SIZE);
+  }, [filteredExams, safeCurrentPage]);
+
+  const handlePageChange = (nextPage: number) => {
+    const clamped = Math.max(1, Math.min(totalPages, nextPage));
+    setCurrentPage(clamped);
+    if (listScrollRef.current) {
+      listScrollRef.current.scrollTop = 0;
+    }
+  };
+
   const resetFilters = () => {
-    setMainTab("ALL"); setFilterLevel("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL"); setSearchQuery("");
+    setMainTab("ALL"); setFilterLevel("ALL"); setFilterGrade("ALL"); setFilterCreator("ALL"); setSearchQuery(""); setCurrentPage(1);
     try {
       sessionStorage.removeItem(EXAM_LIST_FILTER_STORAGE_KEY);
       sessionStorage.removeItem(EXAM_LIST_SCROLL_STORAGE_KEY);
@@ -750,32 +776,32 @@ export default function ExamListPage() {
         
         <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl shadow-inner">
           <button 
-            onClick={() => setMainTab('ALL')} 
+            onClick={() => { setMainTab('ALL'); setCurrentPage(1); }} 
             className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'ALL' ? 'bg-white text-slate-800 shadow-md' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200'}`}
           >
             전체 보기
           </button>
           <div className="w-px h-5 bg-slate-300 mx-0.5"></div>
           <button 
-            onClick={() => setMainTab('EXAM')} 
+            onClick={() => { setMainTab('EXAM'); setCurrentPage(1); }} 
             className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'EXAM' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-500 hover:text-blue-600 hover:bg-blue-50'}`}
           >
             💯 정규 시험
           </button>
           <button 
-            onClick={() => setMainTab('HOMEWORK')} 
+            onClick={() => { setMainTab('HOMEWORK'); setCurrentPage(1); }} 
             className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'HOMEWORK' ? 'bg-amber-500 text-white shadow-md' : 'text-slate-500 hover:text-amber-600 hover:bg-amber-50'}`}
           >
             📝 문제지 과제
           </button>
           <button 
-            onClick={() => setMainTab('INCORRECT')} 
+            onClick={() => { setMainTab('INCORRECT'); setCurrentPage(1); }} 
             className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'INCORRECT' ? 'bg-emerald-500 text-white shadow-md' : 'text-slate-500 hover:text-emerald-600 hover:bg-emerald-50'}`}
           >
             ❌ 오답 복습
           </button>
           <button 
-            onClick={() => setMainTab('SIMILAR')} 
+            onClick={() => { setMainTab('SIMILAR'); setCurrentPage(1); }} 
             className={`px-5 py-2 rounded-lg font-bold text-[13px] transition-all whitespace-nowrap ${mainTab === 'SIMILAR' ? 'bg-violet-500 text-white shadow-md' : 'text-slate-500 hover:text-violet-600 hover:bg-violet-50'}`}
           >
             🔄 쌍둥이/유사
@@ -788,14 +814,14 @@ export default function ExamListPage() {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1); }}
               placeholder="문제지 제목, 부제목, 범위, 출제자 검색..."
               className="w-full pl-9 pr-8 py-2 border border-slate-300 rounded-lg text-sm font-bold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-brand focus:ring-1 focus:ring-brand bg-white shadow-inner"
             />
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery("")}
+                onClick={() => { setSearchQuery(""); setCurrentPage(1); }}
                 className="absolute inset-y-0 right-0 flex items-center pr-2.5 text-slate-400 hover:text-rose-500 font-bold text-xs"
                 title="검색어 지우기"
               >
@@ -803,7 +829,7 @@ export default function ExamListPage() {
               </button>
             )}
           </div>
-          <select value={filterLevel} onChange={e => setFilterLevel(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
+          <select value={filterLevel} onChange={e => { setFilterLevel(e.target.value); setCurrentPage(1); }} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">레벨 전체</option>
             <option value="Ultimate">Ultimate</option>
             <option value="Master">Master</option>
@@ -812,11 +838,11 @@ export default function ExamListPage() {
             <option value="Horizon">Horizon</option>
             <option value="기타">기타</option>
           </select>
-          <select value={filterGrade} onChange={e => setFilterGrade(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
+          <select value={filterGrade} onChange={e => { setFilterGrade(e.target.value); setCurrentPage(1); }} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">학년 전체</option>
             {uniqueGrades.map(g => <option key={g} value={g as string}>{g as string}</option>)}
           </select>
-          <select value={filterCreator} onChange={e => setFilterCreator(e.target.value)} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
+          <select value={filterCreator} onChange={e => { setFilterCreator(e.target.value); setCurrentPage(1); }} className="border border-slate-300 text-slate-600 text-sm font-bold rounded-lg px-3 py-2 focus:outline-none focus:border-brand">
             <option value="ALL">출제자 전체</option>
             {uniqueCreators.map(c => <option key={c} value={c as string}>{c as string}</option>)}
           </select>
@@ -857,7 +883,7 @@ export default function ExamListPage() {
               ) : filteredExams.length === 0 ? (
                 <tr><td colSpan={6} className="py-10 text-center text-slate-400 font-bold">해당 조건의 문제지가 없습니다.</td></tr>
               ) : (
-                filteredExams.map(exam => {
+                pagedExams.map(exam => {
                   const instructor = Array.isArray(exam.instructor) ? exam.instructor[0] : exam.instructor;
                   const creatorName = instructor?.name ? `${instructor.name} 선생님` : '시스템 선생님';
                   const deriveGradeFromExam = (ex: any): string => {
@@ -878,8 +904,8 @@ export default function ExamListPage() {
                   const diff = exam.avg_difficulty || '중';
                   
                   let scope = '전 범위';
-                  const cleanStart = exam.scope_start && exam.scope_start !== '분류 없음' && exam.scope_start !== '유형 분류 없음' ? exam.scope_start : '';
-                  const cleanEnd = exam.scope_end && exam.scope_end !== '분류 없음' && exam.scope_end !== '유형 분류 없음' ? exam.scope_end : '';
+                  const cleanStart = exam.scope_start && exam.scope_start !== '-' && exam.scope_start !== '분류 없음' && exam.scope_start !== '유형 분류 없음' ? exam.scope_start : '';
+                  const cleanEnd = exam.scope_end && exam.scope_end !== '-' && exam.scope_end !== '분류 없음' && exam.scope_end !== '유형 분류 없음' ? exam.scope_end : '';
                   if (cleanStart && cleanEnd) scope = (cleanStart === cleanEnd) ? cleanStart : `${cleanStart} ~ ${cleanEnd}`;
                   else if (cleanStart) scope = cleanStart;
 
@@ -991,6 +1017,84 @@ export default function ExamListPage() {
             </tbody>
           </table>
         </div>
+
+        {/* 🌟 하단 30개 단위 페이지네이션 바 */}
+        {!isLoading && filteredExams.length > 0 && (
+          <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex items-center justify-between flex-wrap gap-3 shrink-0">
+            <div className="text-xs font-bold text-slate-500">
+              총 <span className="text-brand">{filteredExams.length}</span>개 문제지 중{" "}
+              <span className="text-slate-700">
+                {(safeCurrentPage - 1) * PAGE_SIZE + 1}~{Math.min(safeCurrentPage * PAGE_SIZE, filteredExams.length)}
+              </span>
+              번째 표시 (페이지당 {PAGE_SIZE}개)
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => handlePageChange(1)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="첫 페이지"
+                >
+                  «
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage <= 1}
+                  onClick={() => handlePageChange(safeCurrentPage - 1)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  ‹ 이전
+                </button>
+
+                {(() => {
+                  const maxVisible = 7;
+                  let startP = Math.max(1, safeCurrentPage - Math.floor(maxVisible / 2));
+                  let endP = Math.min(totalPages, startP + maxVisible - 1);
+                  if (endP - startP + 1 < maxVisible) {
+                    startP = Math.max(1, endP - maxVisible + 1);
+                  }
+                  const pages: number[] = [];
+                  for (let p = startP; p <= endP; p++) pages.push(p);
+                  return pages.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => handlePageChange(p)}
+                      className={`min-w-[32px] h-[30px] px-2 rounded-lg text-xs font-bold border transition-all ${
+                        p === safeCurrentPage
+                          ? "bg-brand text-white border-brand shadow-sm"
+                          : "bg-white text-slate-600 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ));
+                })()}
+
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => handlePageChange(safeCurrentPage + 1)}
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  다음 ›
+                </button>
+                <button
+                  type="button"
+                  disabled={safeCurrentPage >= totalPages}
+                  onClick={() => handlePageChange(totalPages)}
+                  className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white text-xs font-bold text-slate-600 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  title="마지막 페이지"
+                >
+                  »
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       <PublishModal 

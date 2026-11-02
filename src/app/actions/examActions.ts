@@ -58,16 +58,18 @@ export async function getExamsAction() {
     if (error) throw error;
     const exams = data || [];
 
-    // 🌟 기존 시험지 중 major_grade가 비어 있거나("공통 과정") scope_start가 비어 있는("분류 없음") 시험지들을
-    // 문항들의 taxonomy_id 순서(제일 앞 depth6 ~ 제일 뒤 depth6) 및 주요 학년·학기로 자동 계산 및 DB 백필!
-    const needsEnrichExams = exams.filter(
+    // 🌟 최근 30개 이내 시험지 중 문항이 있으면서 아직 단원 범위(scope_start)가 백필되지 않은 시험지만 가볍게 보완
+    // (이미 '-' 등으로 확인 완료된 시험지는 재조회하지 않아 문제지가 수천 개 쌓여도 초기 로딩 속도 유지)
+    const needsEnrichExams = exams.slice(0, 30).filter(
       (e: any) =>
-        !e.major_grade ||
-        e.major_grade === "공통 과정" ||
-        !e.scope_start ||
-        e.scope_start === "분류 없음" ||
-        e.scope_start === "유형 분류 없음" ||
-        e.scope_start === "전 범위"
+        (e.total_questions || 0) > 0 &&
+        e.scope_start !== "-" &&
+        (!e.major_grade ||
+          e.major_grade === "공통 과정" ||
+          !e.scope_start ||
+          e.scope_start === "분류 없음" ||
+          e.scope_start === "유형 분류 없음" ||
+          e.scope_start === "전 범위")
     );
 
     if (needsEnrichExams.length > 0) {
@@ -221,16 +223,21 @@ export async function getExamsAction() {
             patch.major_grade = computedGrade;
           }
           if (
-            computedScopeStart &&
-            (!exam.scope_start ||
-              exam.scope_start === "분류 없음" ||
-              exam.scope_start === "유형 분류 없음" ||
-              exam.scope_start === "전 범위")
+            !exam.scope_start ||
+            exam.scope_start === "분류 없음" ||
+            exam.scope_start === "유형 분류 없음" ||
+            exam.scope_start === "전 범위"
           ) {
-            exam.scope_start = computedScopeStart;
-            exam.scope_end = computedScopeEnd || computedScopeStart;
-            patch.scope_start = exam.scope_start;
-            patch.scope_end = exam.scope_end;
+            if (computedScopeStart) {
+              exam.scope_start = computedScopeStart;
+              exam.scope_end = computedScopeEnd || computedScopeStart;
+              patch.scope_start = exam.scope_start;
+              patch.scope_end = exam.scope_end;
+            } else {
+              // 미분류 문항만 있는 시험지는 매번 재조회하지 않도록 '-' 마커 저장
+              exam.scope_start = "-";
+              patch.scope_start = "-";
+            }
           }
 
           if (Object.keys(patch).length > 0 && dbUpdates.length < 150) {

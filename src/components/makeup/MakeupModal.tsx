@@ -265,8 +265,10 @@ export default function MakeupModal({
     const list: { phone: string; finalName: string }[] = [];
     const pushTarget = (phone?: string, name?: string, rel?: string) => {
       if (!phone || String(phone).includes("unassigned") || !String(phone).trim()) return;
-      const relStr = rel || "학부모";
-      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${selectedStudentObj.name}(${relStr})`;
+      const relStr = (rel || "학부모").trim() || "학부모";
+      const cleanedName = String(name || "").replace(/\s*학부모님?\s*/g, " ").trim();
+      const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : selectedStudentObj.name;
+      const finalName = `${baseName}(${relStr})`;
       list.push({ phone: String(phone).trim(), finalName });
     };
     pushTarget(pInfo.phone, pInfo.name, pInfo.relationship);
@@ -321,9 +323,10 @@ export default function MakeupModal({
         if (pInfo) {
           const pushTarget = (phone?: string, name?: string, rel?: string) => {
             if (!phone || String(phone).includes("unassigned") || !String(phone).trim()) return;
-            const relStr = rel || "학부모";
-            const finalName =
-              name && name !== "미입력" ? `${name}(${relStr})` : `${selectedStudentObj.name}(${relStr})`;
+            const relStr = (rel || "학부모").trim() || "학부모";
+            const cleanedName = String(name || "").replace(/\s*학부모님?\s*/g, " ").trim();
+            const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : selectedStudentObj.name;
+            const finalName = `${baseName}(${relStr})`;
             targets.push({ phone: String(phone).trim(), finalName });
           };
           pushTarget(pInfo.phone, pInfo.name, pInfo.relationship);

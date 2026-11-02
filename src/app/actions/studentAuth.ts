@@ -288,8 +288,10 @@ export async function autoAttendOnPadLogin(studentId: string) {
 
     const pushTarget = (phone?: string | null, name?: string | null, rel?: string | null) => {
       if (!phone || String(phone).includes("unassigned")) return;
-      const relStr = rel || "학부모";
-      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `학부모(${relStr})`;
+      const relStr = (rel || "학부모").trim() || "학부모";
+      const cleanedName = String(name || "").replace(/\s*학부모님?\s*/g, " ").trim();
+      const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : (stu.name || "학부모");
+      const finalName = `${baseName}(${relStr})`;
       rows.push({
         tenant_id: stu.tenant_id,
         student_id: stu.student_id,

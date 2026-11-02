@@ -11,6 +11,35 @@ const supabaseAdmin = createClient(
 
 const ATTENDANCE_TEMPLATE_ID = "KA01TP260921034958500GAtQOl600yJ";
 
+// 🌟 학부모 성함에 '학부모'(예: '홍정우 학부모')가 들어있는 경우 중복되는 '학부모' 단어를 제거하여 '홍정우(학부모)' 형태로 정리
+function cleanParentDisplayName(
+  rawName?: string | null,
+  rel?: string | null,
+  studentName?: string | null
+): string {
+  const relStr = String(rel || "학부모").trim() || "학부모";
+  const raw = String(rawName || "").trim();
+  const cleanStu = String(studentName || "").replace(/\s*학부모님?\s*/g, " ").trim();
+
+  const parenMatch = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  if (parenMatch) {
+    const innerRel = parenMatch[2].trim() || relStr;
+    const cleanedPrefix = parenMatch[1].replace(/\s*학부모님?\s*/g, " ").trim();
+    const base =
+      cleanedPrefix && cleanedPrefix !== "미입력"
+        ? cleanedPrefix
+        : cleanStu || "학부모";
+    return `${base}(${innerRel})`;
+  }
+
+  const cleaned = raw.replace(/\s*학부모님?\s*/g, " ").trim();
+  const base =
+    cleaned && cleaned !== "미입력"
+      ? cleaned
+      : cleanStu || "학부모";
+  return `${base}(${relStr})`;
+}
+
 function interpretSolapiResult(response: any): {
   success: boolean; pending: boolean; reason: string;
 } {
@@ -66,7 +95,7 @@ export async function sendAttendanceAlimtalk({
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
-          "#{이름}": String(parentName || "학부모"),
+          "#{이름}": cleanParentDisplayName(parentName, "학부모", studentName),
           "#{학생명}": String(studentName),
           "#{일시}": String(timeString),
           "#{출결상태}": String(statusLabel),
@@ -94,7 +123,8 @@ export async function sendTestResultAlimtalk({
   const senderPhone = process.env.SOLAPI_SENDER_PHONE || process.env.SOLAPI_SENDER_NUMBER || "025558875";
   const kakaoPfId = process.env.SOLAPI_KAKAO_PFID || process.env.KAKAO_PFID || "KA01PF26082601194637290lqdNuJR1q";
 
-  const testResultText = `[로지카대치본원학원] 학습 결과 안내\n\n${parentName || "학부모"} 학부모님,\n${studentName} 학생의 ${testName} 결과를 안내해 드립니다.\n\n시험명 : ${testName}\n\n학생 점수 : ${studentScore}점\n\n반 평균 : ${classAverage}점\n\n선생님 코멘트 : ${comment}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`;
+  const cleanedParentName = cleanParentDisplayName(parentName, "학부모", studentName);
+  const testResultText = `[로지카대치본원학원] 학습 결과 안내\n\n${cleanedParentName} 학부모님,\n${studentName} 학생의 ${testName} 결과를 안내해 드립니다.\n\n시험명 : ${testName}\n\n학생 점수 : ${studentScore}점\n\n반 평균 : ${classAverage}점\n\n선생님 코멘트 : ${comment}\n\n상세한 분석 리포트는 다음 등원 시 배부될 예정입니다. 감사합니다.`;
 
   try {
     const response = await messageService.send([{
@@ -104,7 +134,7 @@ export async function sendTestResultAlimtalk({
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
-          "#{이름}": String(parentName || "학부모"),
+          "#{이름}": cleanedParentName,
           "#{학생명}": String(studentName),
           "#{테스트명}": String(testName),
           "#{학생점수}": String(studentScore),
@@ -143,7 +173,8 @@ export async function sendScheduleNoticeAlimtalk({
   const senderPhone = process.env.SOLAPI_SENDER_PHONE || process.env.SOLAPI_SENDER_NUMBER || "025558875";
   const kakaoPfId = process.env.SOLAPI_KAKAO_PFID || process.env.KAKAO_PFID || "KA01PF26082601194637290lqdNuJR1q";
 
-  const scheduleText = `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${parentName || "학부모"} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${scheduleName}\n■ 적용 일시 : ${applyDate}\n■ 상세 안내 : ${details}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`;
+  const cleanedParentName = cleanParentDisplayName(parentName, "학부모");
+  const scheduleText = `[로지카대치본원학원] 학사일정(휴원/개강) 안내\n\n${cleanedParentName} 학부모님,\n로지카 학원 대치 본원의 주요 학사일정을 안내해 드립니다.\n\n■ 일정 구분 : ${scheduleName}\n■ 적용 일시 : ${applyDate}\n■ 상세 안내 : ${details}\n\n학원 이용에 참고 부탁드리며, 관련하여 궁금하신 점은 학원으로 문의해 주시기 바랍니다. 감사합니다.`;
 
   try {
     const response = await messageService.send([{
@@ -153,7 +184,7 @@ export async function sendScheduleNoticeAlimtalk({
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
-          "#{이름}": String(parentName || "학부모"),
+          "#{이름}": cleanedParentName,
           "#{일정명}": String(scheduleName),
           "#{적용일시}": String(applyDate),
           "#{상세내용}": String(details)
@@ -180,7 +211,8 @@ export async function sendClassChangeAlimtalk({
   const senderPhone = process.env.SOLAPI_SENDER_PHONE || process.env.SOLAPI_SENDER_NUMBER || "025558875";
   const kakaoPfId = process.env.SOLAPI_KAKAO_PFID || process.env.KAKAO_PFID || "KA01PF26082601194637290lqdNuJR1q";
 
-  const changeText = `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${parentName || "학부모"} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${oldDate}\n■ 변경 일시 : ${newDate}\n■ 상세 안내 : ${details}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`;
+  const cleanedParentName = cleanParentDisplayName(parentName, "학부모");
+  const changeText = `[로지카대치본원학원] 시간표 변경 및 보강 안내\n\n${cleanedParentName} 학부모님,\n원생의 수업 시간 변경 및 보강 일정을 안내해 드립니다.\n\n■ 기존 일시 : ${oldDate}\n■ 변경 일시 : ${newDate}\n■ 상세 안내 : ${details}\n\n일정 확인 부탁드리며, 해당 일시에 등원이 어려운 경우 학원으로 미리 연락해 주시기 바랍니다. 감사합니다.`;
 
   try {
     const response = await messageService.send([{
@@ -190,7 +222,7 @@ export async function sendClassChangeAlimtalk({
       kakaoOptions: {
         pfId: String(kakaoPfId), templateId: String(templateId),
         variables: {
-          "#{이름}": String(parentName || "학부모"),
+          "#{이름}": cleanedParentName,
           "#{기존일시}": String(oldDate),
           "#{변경일시}": String(newDate),
           "#{상세내용}": String(details)
@@ -255,9 +287,7 @@ export async function queueAttendanceAlimtalk({
     const rows: any[] = [];
     const pushTarget = (phone?: string | null, name?: string | null, rel?: string | null) => {
       if (!phone || String(phone).includes("unassigned")) return;
-      const relStr = rel || "학부모";
-      
-      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${student.name}(${relStr})`;
+      const finalName = cleanParentDisplayName(name, rel, student.name);
 
       rows.push({
         tenant_id: student.tenant_id,          
@@ -340,9 +370,7 @@ export async function queueAttendanceNotice({
 
     const pushTarget = (phone?: string | null, name?: string | null, rel?: string | null) => {
       if (!phone || String(phone).includes("unassigned")) return;
-      const relStr = rel || "학부모";
-
-      const finalName = name && name !== "미입력" ? `${name}(${relStr})` : `${stu.name}(${relStr})`;
+      const finalName = cleanParentDisplayName(name, rel, stu.name);
 
       rows.push({
         tenant_id: stu.tenant_id,
@@ -423,9 +451,10 @@ export async function sendQueuedMessages(tenantId: string) {
         .update({ status: "발송중" })
         .eq("queue_id", msg.queue_id);
 
+      const cleanedMsgParentName = cleanParentDisplayName(msg.parent_name, "학부모", msg.student_name);
       const payload = {
         id: msg.queue_id, templateId: msg.template_id, parentPhone: msg.parent_phone,
-        parentName: msg.parent_name, studentName: msg.student_name,
+        parentName: cleanedMsgParentName, studentName: msg.student_name,
         statusLabel: msg.status_label, timeString: msg.time_string,
         scheduleName: msg.schedule_name, applyDate: msg.apply_date,
         oldDate: msg.old_date, newDate: msg.new_date, details: msg.details,
@@ -442,14 +471,14 @@ export async function sendQueuedMessages(tenantId: string) {
           res = await sendClassChangeAlimtalk(payload as any);
         } else if (msg.template_id === "GENERAL_SMS") {
           // 🌟 텍스트 기반 버튼 스타일 렌더링 (개별 보강 문자처럼 이미 머리말/학부모 호칭이 포함된 경우 중복 방지)
-          const rawDetails = String(msg.details || "").trim();
+          const rawDetails = String(msg.details || "").trim().replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님");
           const isPreformatted =
             rawDetails.startsWith("[로지카대치본원학원] 보강 안내") ||
             rawDetails.includes("학부모님,");
           const cleanedDetails = rawDetails.replace(/^\[로지카대치본원학원\]\s*/, "");
           const textContent = isPreformatted
             ? `${rawDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`
-            : `[로지카대치본원학원]\n\n${msg.parent_name} 학부모님,\n\n${cleanedDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
+            : `[로지카대치본원학원]\n\n${cleanedMsgParentName} 학부모님,\n\n${cleanedDetails}\n\n━━━━━━━━━━━━━━\n📱 [자녀 학습 현황 / 학부모 포탈]\n👉 ${portalBaseUrl}/p\n━━━━━━━━━━━━━━\n\n문의: 02-555-8875`;
           res = await sendGeneralMessage({ parentPhone: msg.parent_phone, textContent });
         } else {
           res = { success: false, message: `알 수 없는 템플릿: ${msg.template_id}` };
@@ -499,7 +528,7 @@ export async function sendQueuedMessages(tenantId: string) {
 
       await supabaseAdmin.from("notification_log").insert({
         tenant_id: tenantId,
-        target_name: `${msg.student_name} / ${msg.parent_name}`,
+        target_name: `${msg.student_name} / ${cleanedMsgParentName}`,
         target_phone: msg.parent_phone,
         message_content: res?.message ? `${logMessage} — ${res.message}` : logMessage,
         status: logStatus,
@@ -582,7 +611,22 @@ export async function addToQueue(
       if (dErr) throw dErr;
     }
 
-    const { error } = await supabaseAdmin.from("alimtalk_queue").insert(rows);
+    const sanitizedRows = rows.map((r: any) => {
+      const cleanedPName = cleanParentDisplayName(r.parent_name, "학부모", r.student_name);
+      const cleanedDesc = typeof r.preview_desc === "string"
+        ? r.preview_desc.replace(/\s*학부모\s*(\([^)]+\))/g, "$1")
+        : r.preview_desc;
+      const cleanedDetails = typeof r.details === "string"
+        ? r.details.replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님")
+        : r.details;
+      return {
+        ...r,
+        parent_name: cleanedPName,
+        preview_desc: cleanedDesc,
+        ...(cleanedDetails !== undefined ? { details: cleanedDetails } : {}),
+      };
+    });
+    const { error } = await supabaseAdmin.from("alimtalk_queue").insert(sanitizedRows);
     if (error) throw error;
 
     return { success: true, inserted: rows.length };

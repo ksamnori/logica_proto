@@ -159,7 +159,8 @@ export default function StudentKioskLogin() {
 
         const parentObj = Array.isArray(stuData.parent) ? stuData.parent[0] : stuData.parent;
         const parentPhone = parentObj?.phone;
-        const parentName = (parentObj?.name && parentObj.name !== '미입력') ? parentObj.name : stuData.name;
+        const cleanedPName = String(parentObj?.name || '').replace(/\s*학부모님?\s*/g, ' ').trim();
+        const parentName = `${(cleanedPName && cleanedPName !== '미입력') ? cleanedPName : stuData.name}(학부모)`;
         const activeEnrolls = ((stuData.enrollment as any[]) || []).filter((e: any) => !isEndedEnrollment(e));
         const targetEnroll = activeEnrolls[0] || null;
         const enrollmentId = targetEnroll?.enrollment_id || null;

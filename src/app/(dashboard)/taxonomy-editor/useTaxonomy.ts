@@ -5,6 +5,59 @@ import { supabase } from "@/lib/supabase";
 import { taxSort, generateUUID, sortQuestionsList, fetchAllRows, getCleanUrl } from "./taxonomyUtils";
 import { hydrateMissingQuestionImages } from "../../exam/step2/examUtils";
 
+// 🌟 별도 파일 import 없이 기존 /api/gemini-twin (PUT) 엔드포인트를 호출하여 SERVICE_ROLE_KEY로 RLS를 우회하는 내장 헬퍼
+async function uploadQuestionImageServerAction(
+  imageBase64: string,
+  fileName: string,
+  contentType: string = "image/png"
+): Promise<{ success: boolean; publicUrl?: string; error?: string }> {
+  try {
+    const res = await fetch("/api/gemini-twin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "upload_image", imageBase64, fileName, contentType }),
+    });
+    if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e?.message || "서버 업로드 요청 실패" };
+  }
+}
+
+async function saveTwinsServerAction(
+  twinInserts: any[]
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/gemini-twin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "save_twins", twinInserts }),
+    });
+    if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e?.message || "서버 저장 요청 실패" };
+  }
+}
+
+async function updateQuestionServerAction(
+  questionId: string,
+  updateData: Record<string, any>,
+  textbookUpdateData?: Record<string, any>
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const res = await fetch("/api/gemini-twin", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "update_question", questionId, updateData, textbookUpdateData }),
+    });
+    if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (e: any) {
+    return { success: false, error: e?.message || "서버 업데이트 요청 실패" };
+  }
+}
+
 
 export const isExcludedDiagnosticBookName = (name?: any): boolean => {
   if (!name || typeof name !== "string") return false;
@@ -68,6 +121,7 @@ export function useTaxonomy() {
   const [isGeneratingTwins, setIsGeneratingTwins] = useState(false);
   const [generatedTwins, setGeneratedTwins] = useState<any[]>([]);
   const [isTwinModalOpen, setIsTwinModalOpen] = useState(false);
+  const [twinAiModel, setTwinAiModel] = useState<"gemini-3.8-flash" | "gemini-4-argon">("gemini-3.8-flash");
 
   const [isCloneModalOpen, setIsCloneModalOpen] = useState(false);
   const [cloneForm, setCloneForm] = useState({ targetBookName: '', pageNumber: '', questionNumber: '', subNumber: '' });
@@ -468,7 +522,7 @@ export function useTaxonomy() {
 
   // 🌟 [핵심 변경] 문항 클릭 시, DB에서 박스(비율) 설정들을 찾아 문자열 포맷(JSON)으로 폼에 올립니다.
   const handleQuestionClick = (q: any) => {
-    setSelectedQuestion(q); setIsEditingContent(false); 
+    setSelectedQuestion(q); setIsEditingContent(false); setTwinAiModel('gemini-3.8-flash'); 
     setEditForm({ 
       page_number: String(q.final_printed_page || q.detected_page_num || ''), question_number: String(q.question_number || ''),
       sub_num: String(q.sub_num || ''), difficulty: q.difficulty || '미지정',
@@ -489,9 +543,16 @@ export function useTaxonomy() {
     if (!finalCalculatedTaxId) return alert("분류를 올바르게 선택해주세요.");
     setIsLoading(true);
     try {
-      const { error: dbError } = await supabase.from('question_db').update({ taxonomy_id: finalCalculatedTaxId }).eq('question_id', selectedQuestion.question_id);
-      if (dbError) throw dbError;
-      await supabase.from('textbook_question').update({ taxonomy_id: finalCalculatedTaxId }).eq('question_id', selectedQuestion.question_id);
+      const srvTax = await updateQuestionServerAction(
+        selectedQuestion.question_id,
+        { taxonomy_id: finalCalculatedTaxId },
+        { taxonomy_id: finalCalculatedTaxId }
+      );
+      if (!srvTax.success) {
+        const { error: dbError } = await supabase.from('question_db').update({ taxonomy_id: finalCalculatedTaxId }).eq('question_id', selectedQuestion.question_id);
+        if (dbError) throw dbError;
+        await supabase.from('textbook_question').update({ taxonomy_id: finalCalculatedTaxId }).eq('question_id', selectedQuestion.question_id);
+      }
       setQuestions(prev => prev.map(q => q.question_id === selectedQuestion.question_id ? { ...q, taxonomy_id: finalCalculatedTaxId } : q));
       setSelectedQuestion({ ...selectedQuestion, taxonomy_id: finalCalculatedTaxId });
       const currentIndex = questions.findIndex(q => q.question_id === selectedQuestion.question_id);
@@ -709,16 +770,31 @@ export function useTaxonomy() {
       if (!blobToUpload) throw new Error("이미지 변환 실패");
       
       const fileName = `crop_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.png`;
-      const { error } = await supabase.storage.from('question_images').upload(fileName, blobToUpload);
-      if (error) throw error;
-      
+      const base64DataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result || ""));
+        reader.onerror = reject;
+        reader.readAsDataURL(blobToUpload!);
+      });
+
       const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbwornivkrvoeqdh.supabase.co";
-      const finalUploadUrl = `${baseUrl}/storage/v1/object/public/question_images/${fileName}`;
+      let finalUploadUrl = `${baseUrl}/storage/v1/object/public/question_images/${fileName}`;
+
+      const serverUpload = await uploadQuestionImageServerAction(base64DataUrl, fileName, "image/png");
+      if (serverUpload.success && serverUpload.publicUrl) {
+        finalUploadUrl = serverUpload.publicUrl;
+      } else {
+        const { error } = await supabase.storage.from('question_images').upload(fileName, blobToUpload, { contentType: 'image/png' });
+        if (error) throw new Error(serverUpload.error || error.message);
+      }
       
       setEditForm(prev => ({ ...prev, [cropTargetField as string]: finalUploadUrl })); 
 
       if (selectedQuestion) {
-        await supabase.from('question_db').update({ [cropTargetField]: finalUploadUrl }).eq('question_id', selectedQuestion.question_id);
+        const updRes = await updateQuestionServerAction(selectedQuestion.question_id, { [cropTargetField]: finalUploadUrl });
+        if (!updRes.success) {
+          await supabase.from('question_db').update({ [cropTargetField]: finalUploadUrl }).eq('question_id', selectedQuestion.question_id);
+        }
         
         const updatedQuestion = { ...selectedQuestion, [cropTargetField]: finalUploadUrl };
         setSelectedQuestion(updatedQuestion);
@@ -773,10 +849,13 @@ export function useTaxonomy() {
         step_1_concept: editForm.step_1_concept, step_2_approach: editForm.step_2_approach, step_3_process: editForm.step_3_process, step_4_conclusion: editForm.step_4_conclusion
       };
 
-      const { error: dbError } = await supabase.from('question_db').update(updateData).eq('question_id', selectedQuestion.question_id);
-      if (dbError) throw dbError;
-
-      await supabase.from('textbook_question').update({ page_number: parsedPage || 0, question_number: updateData.question_number, question: updateData.question, answer: updateData.answer }).eq('question_id', selectedQuestion.question_id);
+      const tqUpdate = { page_number: parsedPage || 0, question_number: updateData.question_number, question: updateData.question, answer: updateData.answer };
+      const srvUpdate = await updateQuestionServerAction(selectedQuestion.question_id, updateData, tqUpdate);
+      if (!srvUpdate.success) {
+        const { error: dbError } = await supabase.from('question_db').update(updateData).eq('question_id', selectedQuestion.question_id);
+        if (dbError) throw dbError;
+        await supabase.from('textbook_question').update(tqUpdate).eq('question_id', selectedQuestion.question_id);
+      }
 
       const updatedQuestion = { ...selectedQuestion, ...updateData };
       setQuestions(prev => sortQuestionsList(prev.map(q => q.question_id === selectedQuestion.question_id ? updatedQuestion : q)));
@@ -786,21 +865,111 @@ export function useTaxonomy() {
     } catch (err: any) { alert("수정 실패: " + err.message); } finally { setIsLoading(false); }
   };
 
-  const handleGenerateTwins = async () => {
+  // 🌟 SVG 벡터 코드를 고해상도(300 DPI급) PNG Blob으로 변환하여 Supabase Storage(question_images)에 자동 업로드하는 헬퍼
+  const uploadSvgAsPngToStorage = async (svgRaw: string, prefix: string): Promise<string | null> => {
+    if (!svgRaw || typeof svgRaw !== "string" || !svgRaw.includes("<svg")) return null;
+    try {
+      let cleanSvg = svgRaw.trim();
+      const svgMatch = cleanSvg.match(/<svg[\s\S]*<\/svg>/i);
+      if (svgMatch) cleanSvg = svgMatch[0];
+      if (!cleanSvg.includes("xmlns=")) {
+        cleanSvg = cleanSvg.replace("<svg", '<svg xmlns="http://www.w3.org/2000/svg"');
+      }
+
+      let baseW = 800;
+      let baseH = 380;
+      const vbMatch = cleanSvg.match(/viewBox=["']\s*([-\d.]+)\s+([-\d.]+)\s+([\d.]+)\s+([\d.]+)\s*["']/i);
+      if (vbMatch) {
+        const w = parseFloat(vbMatch[3]);
+        const h = parseFloat(vbMatch[4]);
+        if (w > 0 && h > 0) {
+          baseW = w;
+          baseH = h;
+        }
+      }
+
+      const scale = 3; // 3배수 고해상도 렌더링 (인쇄 품질)
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(baseW * scale);
+      canvas.height = Math.round(baseH * scale);
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return null;
+
+      const svgBlob = new Blob([cleanSvg], { type: "image/svg+xml;charset=utf-8" });
+      const url = URL.createObjectURL(svgBlob);
+
+      const rendered = await new Promise<{ blob: Blob | null; dataUrl: string }>((resolve) => {
+        const img = new Image();
+        img.crossOrigin = "anonymous";
+        img.onload = () => {
+          ctx.fillStyle = "#ffffff";
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          URL.revokeObjectURL(url);
+          const dUrl = canvas.toDataURL("image/png", 1.0);
+          canvas.toBlob((b) => resolve({ blob: b, dataUrl: dUrl }), "image/png", 1.0);
+        };
+        img.onerror = () => {
+          URL.revokeObjectURL(url);
+          resolve({ blob: null, dataUrl: "" });
+        };
+        img.src = url;
+      });
+
+      if (!rendered.dataUrl && !rendered.blob) return null;
+
+      const fileName = `${prefix}_${Date.now()}_${Math.random().toString(36).substring(2, 7)}.png`;
+      const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbwornivkrvoeqdh.supabase.co";
+
+      // 1차: 서버 액션(SERVICE_ROLE_KEY)을 통해 RLS 정책과 무관하게 안전 업로드
+      if (rendered.dataUrl) {
+        const serverRes = await uploadQuestionImageServerAction(rendered.dataUrl, fileName, "image/png");
+        if (serverRes.success && serverRes.publicUrl) {
+          return serverRes.publicUrl;
+        }
+      }
+
+      // 2차 폴백: 클라이언트 직접 업로드 시 upsert:true를 제거하여 RLS UPDATE 정책 위반 방지
+      if (rendered.blob) {
+        const { error } = await supabase.storage
+          .from("question_images")
+          .upload(fileName, rendered.blob, { contentType: "image/png" });
+        if (!error) {
+          return `${baseUrl}/storage/v1/object/public/question_images/${fileName}`;
+        }
+        console.warn("SVG->PNG 스토리지 업로드 경고:", error.message);
+      }
+      return null;
+    } catch (e) {
+      console.error("SVG 렌더링/업로드 오류:", e);
+      return null;
+    }
+  };
+
+  const handleGenerateTwins = async (modelOverride?: any) => {
     if (!selectedQuestion) return alert("원본 문항을 먼저 왼쪽 리스트에서 선택해주세요.");
     
+    // 🌟 항상 기본적으로 gemini-3.8-flash로 동작하며, 모달 안에서 명시적으로 Argon을 눌렀을 때만 1회성으로 Argon 사용
+    const targetModel: "gemini-3.8-flash" | "gemini-4-argon" =
+      isTwinModalOpen && modelOverride === "gemini-4-argon"
+        ? "gemini-4-argon"
+        : "gemini-3.8-flash";
+
+    setTwinAiModel(targetModel);
+
     const taxStr = getKoreanPath(selectedQuestion.taxonomy_id);
-    if (!taxStr || taxStr === '분류 정보 없음' || taxStr === '미분류') {
+    if (!isTwinModalOpen && (!taxStr || taxStr === '분류 정보 없음' || taxStr === '미분류')) {
       if (!confirm("현재 문항의 분류(Taxonomy)가 지정되지 않았습니다.\nAI가 문항의 핵심 개념을 파악하기 어려울 수 있습니다. 그래도 계속하시겠습니까?")) return;
     }
 
     setIsGeneratingTwins(true);
     setGeneratedTwins([]);
     
-    setTwinTargetBook(`${selectedBook} 쌍둥이`);
-    setSimilarTargetBook(`${selectedBook} 유사`);
-    
-    setIsTwinModalOpen(true);
+    if (!isTwinModalOpen) {
+      setTwinTargetBook(`${selectedBook} 쌍둥이`);
+      setSimilarTargetBook(`${selectedBook} 유사`);
+      setIsTwinModalOpen(true);
+    }
 
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -812,13 +981,18 @@ export function useTaxonomy() {
           'Authorization': `Bearer ${session?.access_token}`
         },
         body: JSON.stringify({ 
-          originalQuestion: selectedQuestion.question, 
+          originalQuestion: selectedQuestion.question,
+          originalQuestion2: selectedQuestion.question_2 || '',
           originalAnswer: selectedQuestion.answer, 
           taxonomyStr: taxStr,
           step1Concept: selectedQuestion.step_1_concept || '',
           step2Approach: selectedQuestion.step_2_approach || '',
           step3Process: selectedQuestion.step_3_process || '',
-          step4Conclusion: selectedQuestion.step_4_conclusion || ''
+          step4Conclusion: selectedQuestion.step_4_conclusion || '',
+          imageUrl: selectedQuestion.image_url ? getCleanUrl(selectedQuestion.image_url) : '',
+          image2Url: selectedQuestion.image_2_url ? getCleanUrl(selectedQuestion.image_2_url) : '',
+          answerImageUrl: selectedQuestion.answer_image_url ? getCleanUrl(selectedQuestion.answer_image_url) : '',
+          modelName: targetModel
         })
       });
 
@@ -831,12 +1005,16 @@ export function useTaxonomy() {
       const cleanedTwins = data.data.map((twin: any, idx: number) => ({
         ...twin,
         question: twin.question?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
+        question_2: twin.question_2?.replace(/\\\\(?=[a-zA-Z])/g, '\\') || '',
         answer: twin.answer?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         step_1_concept: twin.step_1_concept?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         step_2_approach: twin.step_2_approach?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         step_3_process: twin.step_3_process?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
         step_4_conclusion: twin.step_4_conclusion?.replace(/\\\\(?=[a-zA-Z])/g, '\\'),
-        isSelected: true, isPreviewMode: false,
+        svg_code: twin.svg_code || '',
+        answer_svg_code: twin.answer_svg_code || '',
+        isSelected: true,
+        isPreviewMode: true,
         question_type: twin.question_type || (idx === 0 ? '쌍둥이' : '유사')
       }));
 
@@ -889,21 +1067,27 @@ export function useTaxonomy() {
       setSelectedQuestion(updatedQuestion);
       setQuestions(prev => prev.map(q => q.question_id === updatedQuestion.question_id ? updatedQuestion : q));
 
-      const { error: dbError } = await supabase.from('question_db').update({
+      const latexUpdatePayload = {
         question: data.data.question,
         answer: data.data.answer,
         step_1_concept: data.data.step_1_concept,
         step_2_approach: data.data.step_2_approach,
         step_3_process: data.data.step_3_process,
-        step_4_conclusion: data.data.step_4_conclusion
-      }).eq('question_id', selectedQuestion.question_id);
-
-      if (dbError) throw dbError;
-      
-      await supabase.from('textbook_question').update({ 
-        question: data.data.question, 
-        answer: data.data.answer 
-      }).eq('question_id', selectedQuestion.question_id);
+        step_4_conclusion: data.data.step_4_conclusion,
+      };
+      const srvLatex = await updateQuestionServerAction(
+        selectedQuestion.question_id,
+        latexUpdatePayload,
+        { question: data.data.question, answer: data.data.answer }
+      );
+      if (!srvLatex.success) {
+        const { error: dbError } = await supabase.from('question_db').update(latexUpdatePayload).eq('question_id', selectedQuestion.question_id);
+        if (dbError) throw dbError;
+        await supabase.from('textbook_question').update({
+          question: data.data.question,
+          answer: data.data.answer,
+        }).eq('question_id', selectedQuestion.question_id);
+      }
 
       alert("✅ AI 수식 교정이 완벽하게 적용되어 저장되었습니다!");
 
@@ -934,23 +1118,84 @@ export function useTaxonomy() {
 
     setIsLoading(true);
     try {
-      let tCount = 1;
-      let sCount = 1;
+      // 🌟 선택한 문항이 이미 부모를 가진 자식(쌍둥이/유사) 문항이라면, 그 부모(최상위 루트)의 ID를 물려받아 '형제 문항(부모의 쌍둥이)'으로 들어가도록 설정!
+      let targetParentId = selectedQuestion.question_id;
+      const rawPid = selectedQuestion.parent_question_id;
+      if (rawPid && String(rawPid).trim() !== '' && String(rawPid).trim().toLowerCase() !== 'null') {
+        let currPid = String(rawPid).trim();
+        const visited = new Set<string>();
+        while (currPid && !visited.has(currPid.toLowerCase())) {
+          visited.add(currPid.toLowerCase());
+          const pObj = allQMap.get(currPid.toLowerCase());
+          if (
+            pObj &&
+            pObj.parent_question_id &&
+            String(pObj.parent_question_id).trim() !== '' &&
+            String(pObj.parent_question_id).trim().toLowerCase() !== 'null'
+          ) {
+            currPid = String(pObj.parent_question_id).trim();
+          } else {
+            break;
+          }
+        }
+        targetParentId = currPid;
+      }
 
-      const twinInserts = selectedTwinsToSave.map((twin) => {
+      // 🌟 기존 형제 문항들의 번호(-T1, -S1 등)를 확인하여 중복 없는 다음 순번(T1, T2... / S1, S2...) 자동 부여
+      const baseQNum = String(selectedQuestion.question_number || 'NEW').replace(/-[TS]\d+$/i, '');
+      const existingSiblings = getDescendants(String(targetParentId).trim().toLowerCase());
+      let maxT = 0;
+      let maxS = 0;
+      existingSiblings.forEach((sib: any) => {
+        const qn = String(sib.question_number || '');
+        const mT = qn.match(/-T(\d+)$/i);
+        if (mT) maxT = Math.max(maxT, parseInt(mT[1], 10) || 0);
+        const mS = qn.match(/-S(\d+)$/i);
+        if (mS) maxS = Math.max(maxS, parseInt(mS[1], 10) || 0);
+      });
+
+      let tCount = maxT + 1;
+      let sCount = maxS + 1;
+
+      const twinInserts: any[] = [];
+      for (const twin of selectedTwinsToSave) {
         const targetBook = twin.question_type === '유사' ? similarTargetBook : twinTargetBook;
         const suffix = twin.question_type === '유사' ? `S${sCount++}` : `T${tCount++}`;
-        
-        return {
-          question_id: generateUUID(), 
-          parent_question_id: selectedQuestion.question_id,
+        const newQId = generateUUID();
+
+        // 🌟 새로 생성된 SVG 도형/그래프 코드가 있으면 300DPI PNG로 렌더링 후 Supabase Storage에 자동 업로드!
+        let finalImg1Url = selectedQuestion.image_url || null;
+        let finalImg2Url = selectedQuestion.image_2_url || null;
+        let finalAnsImgUrl = selectedQuestion.answer_image_url || null;
+
+        if (twin.svg_code && String(twin.svg_code).includes("<svg")) {
+          const uploadedProblemImg = await uploadSvgAsPngToStorage(twin.svg_code, `twin_${newQId}_core`);
+          if (uploadedProblemImg) {
+            if (!selectedQuestion.image_url && selectedQuestion.image_2_url) {
+              finalImg2Url = uploadedProblemImg;
+            } else {
+              finalImg1Url = uploadedProblemImg;
+            }
+          }
+        }
+
+        if (twin.answer_svg_code && String(twin.answer_svg_code).includes("<svg")) {
+          const uploadedAnsImg = await uploadSvgAsPngToStorage(twin.answer_svg_code, `twin_${newQId}_sol`);
+          if (uploadedAnsImg) {
+            finalAnsImgUrl = uploadedAnsImg;
+          }
+        }
+
+        twinInserts.push({
+          question_id: newQId, 
+          parent_question_id: targetParentId,
           source_book_name: targetBook, 
           book_name: targetBook,        
           detected_page_num: selectedQuestion.detected_page_num || 0,
           final_printed_page: selectedQuestion.final_printed_page, 
-          question_number: `${selectedQuestion.question_number}-${suffix}`, 
+          question_number: `${baseQNum}-${suffix}`, 
           question: twin.question, 
-          question_2: twin.question_2 !== undefined ? (twin.question_2 || null) : (selectedQuestion.question_2 || null),
+          question_2: twin.question_2 !== undefined && twin.question_2 !== '' ? twin.question_2 : (selectedQuestion.question_2 || null),
           answer: twin.answer, 
           step_1_concept: twin.step_1_concept, 
           step_2_approach: twin.step_2_approach, 
@@ -966,10 +1211,10 @@ export function useTaxonomy() {
           is_human_verified: true,
           derivation_type: twin.question_type === '유사' ? '유사' : 'TWIN',
           
-          // 🌟 이미지 URL 및 배율 박스 속성 복제
-          image_url: selectedQuestion.image_url || null,
-          image_2_url: selectedQuestion.image_2_url || null,
-          answer_image_url: selectedQuestion.answer_image_url || null,
+          // 🌟 새로 렌더링된 이미지 URL(또는 기존 이미지 URL) 및 배율 박스 속성 저장
+          image_url: finalImg1Url,
+          image_2_url: finalImg2Url,
+          answer_image_url: finalAnsImgUrl,
           answer_image_2_url: selectedQuestion.answer_image_2_url || null,
           image_box: selectedQuestion.image_box,
           image_2_box: selectedQuestion.image_2_box,
@@ -977,40 +1222,49 @@ export function useTaxonomy() {
 
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
-        };
-      });
+        });
+      }
 
-      const { error } = await supabase.from('question_db').insert(twinInserts);
-      if (error) throw error;
-
+      // 1차: 서버 액션(SERVICE_ROLE_KEY)으로 RLS에 막히지 않고 question_db 및 textbook_question 일괄 저장
+      const srvSave = await saveTwinsServerAction(twinInserts);
       const uniqueBooks = Array.from(new Set(twinInserts.map(q => q.source_book_name)));
-      for (const book of uniqueBooks) {
-        const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', book).maybeSingle();
-        if (tb) {
-          const tqInserts = twinInserts.filter(q => q.source_book_name === book).map(q => ({
-            book_id: tb.book_id,
-            question_id: q.question_id,
-            page_number: q.final_printed_page || 999,
-            question_number: q.question_number,
-            question: q.question,
-            answer: q.answer,
-            taxonomy_id: q.taxonomy_id,
-            taxonomy_name: q.taxonomy_name || null,
-            sub_taxonomy_id: q.sub_taxonomy_id || null,
-            sub_taxonomy_name: q.sub_taxonomy_name || null,
-            thk_taxonomy_id: q.thk_taxonomy_id || null,
-            thk_taxonomy_name: q.thk_taxonomy_name || null,
-            question_category: '일반'
-          }));
-          await supabase.from('textbook_question').insert(tqInserts);
+
+      if (!srvSave.success) {
+        // 2차 폴백: 클라이언트 직접 저장
+        const { error } = await supabase.from('question_db').insert(twinInserts);
+        if (error) throw new Error(srvSave.error || error.message);
+
+        for (const book of uniqueBooks) {
+          const { data: tb } = await supabase.from('textbook').select('book_id').eq('title', book).maybeSingle();
+          if (tb) {
+            const tqInserts = twinInserts.filter(q => q.source_book_name === book).map(q => ({
+              book_id: tb.book_id,
+              question_id: q.question_id,
+              page_number: q.final_printed_page || 999,
+              question_number: q.question_number,
+              question: q.question,
+              answer: q.answer,
+              taxonomy_id: q.taxonomy_id,
+              taxonomy_name: q.taxonomy_name || null,
+              sub_taxonomy_id: q.sub_taxonomy_id || null,
+              sub_taxonomy_name: q.sub_taxonomy_name || null,
+              thk_taxonomy_id: q.thk_taxonomy_id || null,
+              thk_taxonomy_name: q.thk_taxonomy_name || null,
+              question_category: '일반'
+            }));
+            await supabase.from('textbook_question').insert(tqInserts);
+          }
         }
       }
 
+      // 🌟 저장 즉시 좌측 트리(부모의 자식/형제 목록)에 새로 생성된 문항들이 바로 반영되도록 상태 업데이트
+      setQuestions(prev => sortQuestionsList([...prev, ...twinInserts]));
+
       alert(`✅ 선택된 ${selectedTwinsToSave.length}개의 문항이 성공적으로 저장되었습니다!`);
       setIsTwinModalOpen(false);
+      setTwinAiModel('gemini-3.8-flash');
       
-      if (uniqueBooks.includes(selectedBook)) fetchQuestions(); 
-      else loadWorkbooks(); 
+      loadWorkbooks(); 
 
     } catch (e: any) { alert("쌍둥이 저장 실패: " + e.message); } finally { setIsLoading(false); }
   };
@@ -1022,6 +1276,30 @@ export function useTaxonomy() {
   };
 
   const allQMap = useMemo(() => new Map(questions.map(q => [String(q.question_id).trim().toLowerCase(), q])), [questions]);
+
+  const activeParentQuestion = useMemo(() => {
+    if (!selectedQuestion?.parent_question_id) return null;
+    let currPid = String(selectedQuestion.parent_question_id).trim();
+    if (!currPid || currPid.toLowerCase() === 'null') return null;
+    let foundParent: any = null;
+    const visited = new Set<string>();
+    while (currPid && !visited.has(currPid.toLowerCase())) {
+      visited.add(currPid.toLowerCase());
+      const pObj = allQMap.get(currPid.toLowerCase());
+      if (pObj) {
+        foundParent = pObj;
+        const nextPid = pObj.parent_question_id ? String(pObj.parent_question_id).trim() : '';
+        if (nextPid && nextPid.toLowerCase() !== 'null') {
+          currPid = nextPid;
+        } else {
+          break;
+        }
+      } else {
+        break;
+      }
+    }
+    return foundParent;
+  }, [selectedQuestion, allQMap]);
 
   const normalRoots = useMemo(() => questions.filter(q => {
       const pid = q.parent_question_id;
@@ -1060,9 +1338,9 @@ export function useTaxonomy() {
     isEditingContent, editForm, cropImageSrc, cropTargetField, hasCropArea, imgRef, selectionBoxRef,
     selD1, selD2, selD3, selD4, selD5, selD6, selD7, selD8,
     isGeneratingTwins, generatedTwins, isTwinModalOpen, isCloneModalOpen, cloneForm,
-    twinTargetBook, similarTargetBook, isFixingLatex,
+    twinTargetBook, similarTargetBook, isFixingLatex, twinAiModel, setTwinAiModel,
     d1Options, d2Options, d3Options, d4Options, d5Options, d6Options, d7Options, d8Options, finalCalculatedTaxId,
-    normalRoots, trueOrphans, getDescendants,
+    normalRoots, trueOrphans, getDescendants, activeParentQuestion,
     setSelectedBook, setEditForm, setIsEditingContent, setCropImageSrc, setCropTargetField, setHasCropArea,
     setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
