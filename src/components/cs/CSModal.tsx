@@ -1,8 +1,21 @@
 // src/components/cs/CSModal.tsx
 "use client";
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
+
+const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
+const isEndedEnrollment = (e: any): boolean => {
+  if (!e) return true;
+  if (ENDED_ENROLLMENT_STATUSES.includes(String(e.status || "").trim())) return true;
+  if (e.end_date) return true;
+  return false;
+};
+
+const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
+  if (Array.isArray(obj)) return obj[0];
+  return obj || undefined;
+};
 
 interface CSModalProps {
   isOpen: boolean;
@@ -27,7 +40,12 @@ export default function CSModal({
   const [comments, setComments] = useState<any[]>([]);
   const [commentInput, setCommentInput] = useState("");
   const [isSaving, setIsSaving] = useState(false);
-  
+
+  // 🌟 반 선택 & 학생 이름 검색 상태
+  const [selectedClassId, setSelectedClassId] = useState<string>("all");
+  const [studentSearch, setStudentSearch] = useState<string>("");
+  const [localEnrichedStudents, setLocalEnrichedStudents] = useState<any[]>([]);
+
   const [isSuperAdminOrAdmin, setIsSuperAdminOrAdmin] = useState(false);
   
   const [canDeletePost, setCanDeletePost] = useState(false);
@@ -35,6 +53,108 @@ export default function CSModal({
   const [canSubmitAgenda, setCanSubmitAgenda] = useState(false); 
 
   const commentEndRef = useRef<HTMLDivElement>(null);
+
+  // 부모 페이지(cs/page.tsx)에서 전달된 students에 enrollment가 없을 경우 자체 보강 로드
+  useEffect(() => {
+    if (!isOpen) return;
+    const hasEnrollmentInfo = (students || []).some((s: any) => s.enrollment !== undefined);
+    if (hasEnrollmentInfo) {
+      setLocalEnrichedStudents(students);
+      return;
+    }
+
+    let cancelled = false;
+    const fetchEnrichedStudents = async () => {
+      const tenantId = localStorage.getItem("logica_tenant_id");
+      let q = supabase
+        .from("student")
+        .select("student_id, name, grade, enrollment(status, end_date, class(class_id, name))")
+        .eq("status", "재원")
+        .order("name");
+      if (tenantId && tenantId !== "hq") {
+        q = q.eq("tenant_id", tenantId);
+      }
+      const { data } = await q;
+      if (!cancelled && data) {
+        setLocalEnrichedStudents(data);
+      } else if (!cancelled) {
+        setLocalEnrichedStudents(students || []);
+      }
+    };
+    fetchEnrichedStudents();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, students]);
+
+  const effectiveStudents = useMemo(() => {
+    const base = localEnrichedStudents.length > 0 ? localEnrichedStudents : (students || []);
+    return base.map((s: any) => {
+      const enrolls = Array.isArray(s.enrollment) ? s.enrollment : s.enrollment ? [s.enrollment] : [];
+      const activeClasses: { id: string; name: string }[] = [];
+      enrolls.forEach((e: any) => {
+        if (isEndedEnrollment(e)) return;
+        const cls = unwrap(e.class);
+        const cid = cls?.class_id ? String(cls.class_id) : "";
+        const cname = cls?.class_name || cls?.name || "";
+        if (cid && cname && !activeClasses.some((c) => c.id === cid)) {
+          activeClasses.push({ id: cid, name: cname });
+        }
+      });
+      return {
+        ...s,
+        _activeClasses: activeClasses,
+        _classNamesStr: activeClasses.map((c) => c.name).join(", "),
+      };
+    });
+  }, [localEnrichedStudents, students]);
+
+  // 전체 반 목록 추출
+  const classOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    effectiveStudents.forEach((s: any) => {
+      (s._activeClasses || []).forEach((c: { id: string; name: string }) => {
+        map.set(c.id, c.name);
+      });
+    });
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name, "ko", { numeric: true }));
+  }, [effectiveStudents]);
+
+  // 선택된 반 및 이름 검색어로 학생 목록 필터링
+  const filteredStudents = useMemo(() => {
+    const kw = studentSearch.trim().toLowerCase();
+    return effectiveStudents.filter((s: any) => {
+      // 1) 반 필터
+      let matchClass = true;
+      if (selectedClassId && selectedClassId !== "all") {
+        if (selectedClassId === "unassigned") {
+          matchClass = !s._activeClasses || s._activeClasses.length === 0;
+        } else {
+          matchClass = (s._activeClasses || []).some((c: any) => String(c.id) === String(selectedClassId));
+        }
+      }
+      if (!matchClass) return false;
+
+      // 2) 학생 이름 검색 필터
+      if (kw) {
+        const nameStr = String(s.name || "").toLowerCase();
+        return nameStr.includes(kw);
+      }
+      return true;
+    });
+  }, [effectiveStudents, selectedClassId, studentSearch]);
+
+  // 현재 선택된 학생이 필터 결과 바깥에 있더라도 셀렉트박스에 표시되도록 보장
+  const selectStudentOptions = useMemo(() => {
+    const currentId = modalData?.student_id ? String(modalData.student_id) : "";
+    if (!currentId) return filteredStudents;
+    const exists = filteredStudents.some((s: any) => String(s.student_id) === currentId);
+    if (exists) return filteredStudents;
+    const currentStu = effectiveStudents.find((s: any) => String(s.student_id) === currentId);
+    return currentStu ? [currentStu, ...filteredStudents] : filteredStudents;
+  }, [filteredStudents, effectiveStudents, modalData?.student_id]);
 
   useEffect(() => {
     const checkPerms = async () => {
@@ -72,10 +192,16 @@ export default function CSModal({
 
     if (isOpen) {
       checkPerms();
+      setStudentSearch("");
       if (reqData) {
         setModalData({ ...reqData });
         setComments(reqData.comments || []);
+        const sid = reqData.student_id ? String(reqData.student_id) : "";
+        const matchedStu = effectiveStudents.find((s: any) => String(s.student_id) === sid);
+        const firstCid = matchedStu?._activeClasses?.[0]?.id;
+        setSelectedClassId(firstCid ? String(firstCid) : "all");
       } else {
+        setSelectedClassId("all");
         setModalData({ 
           request_id: "", 
           student_id: "", 
@@ -91,6 +217,15 @@ export default function CSModal({
     }
   }, [isOpen, reqData, currentUser]);
 
+  // 기존 요청을 열었을 때 학생의 반 정보가 뒤늦게 로드되면 반 선택값을 동기화
+  useEffect(() => {
+    if (isOpen && reqData?.student_id && selectedClassId === "all" && effectiveStudents.length > 0) {
+      const matchedStu = effectiveStudents.find((s: any) => String(s.student_id) === String(reqData.student_id));
+      const firstCid = matchedStu?._activeClasses?.[0]?.id;
+      if (firstCid) setSelectedClassId(String(firstCid));
+    }
+  }, [isOpen, reqData?.student_id, effectiveStudents]);
+
   useEffect(() => {
     if (commentEndRef.current) {
       commentEndRef.current.scrollIntoView({ behavior: "smooth" });
@@ -99,6 +234,50 @@ export default function CSModal({
 
   const handleModalChange = (field: string, value: any) => {
     setModalData((prev: any) => ({ ...prev, [field]: value }));
+  };
+
+  // 반 변경 핸들러
+  const handleClassChange = (nextClassId: string) => {
+    setSelectedClassId(nextClassId);
+    if (nextClassId !== "all" && modalData?.student_id) {
+      const currentStu = effectiveStudents.find((s: any) => String(s.student_id) === String(modalData.student_id));
+      if (currentStu) {
+        const inSelectedClass =
+          nextClassId === "unassigned"
+            ? !currentStu._activeClasses || currentStu._activeClasses.length === 0
+            : (currentStu._activeClasses || []).some((c: any) => String(c.id) === String(nextClassId));
+        if (!inSelectedClass) {
+          handleModalChange("student_id", "");
+        }
+      }
+    }
+  };
+
+  // 이름 검색 입력 핸들러 (검색 결과 1명 일치 시 자동 선택 편의 제공)
+  const handleStudentSearchChange = (val: string) => {
+    setStudentSearch(val);
+    const trimmed = val.trim().toLowerCase();
+    if (!trimmed) return;
+
+    const matches = effectiveStudents.filter((s: any) => {
+      if (selectedClassId && selectedClassId !== "all") {
+        if (selectedClassId === "unassigned") {
+          if (s._activeClasses && s._activeClasses.length > 0) return false;
+        } else if (!(s._activeClasses || []).some((c: any) => String(c.id) === String(selectedClassId))) {
+          return false;
+        }
+      }
+      return String(s.name || "").toLowerCase().includes(trimmed);
+    });
+
+    if (matches.length === 1) {
+      handleModalChange("student_id", String(matches[0].student_id));
+    } else {
+      const exactMatch = matches.find((s: any) => String(s.name || "").toLowerCase() === trimmed);
+      if (exactMatch) {
+        handleModalChange("student_id", String(exactMatch.student_id));
+      }
+    }
   };
 
   // 🌟 [핵심 변경] 댓글 등록 시 전체 새로고침(깜빡임) 유발하는 onSuccess 제거
@@ -222,7 +401,7 @@ export default function CSModal({
     if (!validTenantId) return alert("소속 지점 정보가 없습니다.");
 
     try {
-      const studentName = students.find(s => s.student_id === modalData.student_id)?.name || "학생";
+      const studentName = effectiveStudents.find((s: any) => String(s.student_id) === String(modalData.student_id))?.name || "학생";
       const { error } = await supabase.from("agenda").insert({
         title: `[CS요청] ${studentName} 학생 건`,
         content: modalData.reason,
@@ -255,30 +434,89 @@ export default function CSModal({
         <div className="flex-1 overflow-hidden p-6 flex flex-col gap-5 bg-slate-50">
           
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col flex-1 gap-4 overflow-hidden">
-            <div className="grid grid-cols-2 gap-4 shrink-0">
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-xs font-bold text-slate-500 mb-1">대상 학생 <span className="text-rose-500">*</span></label>
-                <select 
-                  value={modalData.student_id} onChange={(e) => handleModalChange("student_id", e.target.value)}
-                  disabled={isReadonly}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-slate-50 disabled:opacity-70"
-                >
-                  <option value="">학생 선택</option>
-                  {students.map(s => <option key={s.student_id} value={s.student_id}>{s.name} ({s.grade || '-'})</option>)}
-                </select>
+            <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 shrink-0 items-start">
+              {/* 🌟 좌상단: 대상 학생 선택 도구 (반 선택 + 학생 선택 + 학생 이름 검색) */}
+              <div className="sm:col-span-8 flex flex-col gap-2 bg-slate-50/80 p-3 rounded-xl border border-slate-200/80">
+                <div className="flex items-center justify-between">
+                  <label className="block text-xs font-bold text-slate-600">
+                    대상 학생 <span className="text-rose-500">*</span>
+                    <span className="ml-1.5 text-[11px] font-bold text-rose-500">({filteredStudents.length}명)</span>
+                  </label>
+                  {/* 학생 이름 검색 입력창 */}
+                  <div className="relative w-44 sm:w-48">
+                    <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none">🔍</span>
+                    <input
+                      type="text"
+                      value={studentSearch}
+                      onChange={(e) => handleStudentSearchChange(e.target.value)}
+                      disabled={isReadonly}
+                      placeholder="학생 이름 검색..."
+                      className="w-full pl-7 pr-6 py-1 rounded-lg border border-slate-300 bg-white text-xs font-bold text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-rose-500 disabled:opacity-70"
+                    />
+                    {studentSearch && !isReadonly && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentSearch("")}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 text-xs font-bold"
+                        title="검색어 지우기"
+                      >
+                        ✕
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* 반 선택 드롭다운 + 학생 선택 드롭다운 2분할 */}
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={selectedClassId}
+                    onChange={(e) => handleClassChange(e.target.value)}
+                    disabled={isReadonly}
+                    className="w-full px-2.5 py-2 rounded-lg border border-slate-300 font-bold text-xs sm:text-sm text-slate-700 focus:outline-none focus:border-rose-600 bg-white disabled:opacity-70 truncate"
+                  >
+                    <option value="all">🏫 전체 반 ({effectiveStudents.length}명)</option>
+                    {classOptions.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
+                    <option value="unassigned">반 미배정</option>
+                  </select>
+
+                  <select 
+                    value={modalData.student_id}
+                    onChange={(e) => handleModalChange("student_id", e.target.value)}
+                    disabled={isReadonly}
+                    className="w-full px-2.5 py-2 rounded-lg border border-slate-300 font-bold text-xs sm:text-sm text-slate-800 focus:outline-none focus:border-rose-600 bg-white disabled:opacity-70 truncate"
+                  >
+                    <option value="">
+                      {filteredStudents.length === 0 ? "검색 결과 없음" : `학생 선택 (${filteredStudents.length}명)`}
+                    </option>
+                    {selectStudentOptions.map((s: any) => (
+                      <option key={s.student_id} value={s.student_id}>
+                        {s.name} ({s.grade || "-"}
+                        {selectedClassId === "all" && s._classNamesStr ? ` · ${s._classNamesStr}` : ""})
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
-              <div className="col-span-2 sm:col-span-1">
-                <label className="block text-xs font-bold text-slate-500 mb-1">요청 분류 (유형) <span className="text-rose-500">*</span></label>
-                <select 
-                  value={modalData.request_type} onChange={(e) => handleModalChange("request_type", e.target.value)}
-                  disabled={isReadonly}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-slate-50 disabled:opacity-70"
-                >
-                  <option value="결석/보강">결석/보강</option>
-                  <option value="상담/기타">상담/기타</option>
-                  <option value="수납/행정">수납/행정</option>
-                  <option value="퇴원요청">퇴원요청</option>
-                </select>
+
+              {/* 우상단: 요청 분류 (유형) */}
+              <div className="sm:col-span-4 flex flex-col justify-between h-full">
+                <div>
+                  <label className="block text-xs font-bold text-slate-500 mb-1.5">요청 분류 (유형) <span className="text-rose-500">*</span></label>
+                  <select 
+                    value={modalData.request_type} onChange={(e) => handleModalChange("request_type", e.target.value)}
+                    disabled={isReadonly}
+                    className="w-full px-3 py-2.5 rounded-lg border border-slate-300 font-bold text-sm focus:outline-none focus:border-rose-600 bg-slate-50 disabled:opacity-70"
+                  >
+                    <option value="결석/보강">결석/보강</option>
+                    <option value="상담/기타">상담/기타</option>
+                    <option value="수납/행정">수납/행정</option>
+                    <option value="퇴원요청">퇴원요청</option>
+                  </select>
+                </div>
               </div>
             </div>
 

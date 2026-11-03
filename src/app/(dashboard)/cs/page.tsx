@@ -115,7 +115,12 @@ export default function CSBoardPage() {
 
     try {
       let instQuery = supabase.from("instructor").select("instructor_id, name, position").eq("status", "재직");
-      let stuQuery = supabase.from("student").select("student_id, name, grade").eq("status", "재원").order("name");
+      // 🌟 반별 필터링 및 검색을 위해 student -> enrollment -> class 정보를 함께 조회
+      let stuQuery = supabase
+        .from("student")
+        .select("student_id, name, grade, enrollment(status, end_date, class(class_id, name))")
+        .eq("status", "재원")
+        .order("name");
       
       if (tenantId && tenantId !== 'hq') {
          instQuery = instQuery.eq("tenant_id", tenantId);
