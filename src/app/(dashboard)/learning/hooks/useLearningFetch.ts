@@ -1,3 +1,4 @@
+import { healStudentIncorrectRecordsAction } from '@/app/actions/clinicActions';
 // src/app/(dashboard)/learning/hooks/useLearningFetch.ts
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
@@ -834,64 +835,15 @@ export function useLearningFetch() {
         (r: any) => !r.question_id && r.tq_id && tqToQidMap.has(r.tq_id)
       );
       if (recordsToHealMissingQid.length > 0) {
-        (async () => {
-          try {
-            const targetHealQids = Array.from(
-              new Set(
-                recordsToHealMissingQid
-                  .map((r: any) => String(tqToQidMap.get(r.tq_id)))
-                  .filter(Boolean)
-              )
-            );
-            const { data: existingQidRows } = await supabase
-              .from('student_incorrect_record')
-              .select('record_id, question_id, tq_id, status, resolved_at')
-              .eq('student_id', studentId)
-              .in('question_id', targetHealQids);
-
-            const existingByQid = new Map<string, any>();
-            (existingQidRows || []).forEach((row: any) => {
-              if (row.question_id) existingByQid.set(String(row.question_id), row);
-            });
-            const claimedQids = new Set<string>(existingByQid.keys());
-
-            for (const r of recordsToHealMissingQid) {
-              const targetQid = String(tqToQidMap.get(r.tq_id) || '');
-              if (!targetQid) continue;
-
-              if (claimedQids.has(targetQid)) {
-                const existingRow = existingByQid.get(targetQid);
-                if (existingRow && existingRow.record_id !== r.record_id) {
-                  if (existingRow.resolved_at !== null) {
-                    await supabase
-                      .from('student_incorrect_record')
-                      .update({
-                        status: r.status || 'X',
-                        resolved_at: null,
-                        tq_id: existingRow.tq_id || r.tq_id,
-                      })
-                      .eq('record_id', existingRow.record_id);
-                  }
-                }
-                await supabase
-                  .from('student_incorrect_record')
-                  .delete()
-                  .eq('record_id', r.record_id);
-              } else {
-                claimedQids.add(targetQid);
-                existingByQid.set(targetQid, {
-                  ...r,
-                  question_id: targetQid,
-                  resolved_at: null,
-                });
-                await supabase
-                  .from('student_incorrect_record')
-                  .update({ question_id: targetQid })
-                  .eq('record_id', r.record_id);
-              }
-            }
-          } catch (e) {}
-        })();
+        const healPayload = recordsToHealMissingQid
+          .map((r: any) => ({
+            record_id: r.record_id,
+            tq_id: r.tq_id,
+            target_qid: String(tqToQidMap.get(r.tq_id) || ''),
+            status: r.status,
+          }))
+          .filter((it: any) => it.target_qid);
+        healStudentIncorrectRecordsAction(studentId, healPayload).catch(() => {});
       }
 
       const resolvedQids = (incData || [])

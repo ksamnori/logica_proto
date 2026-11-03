@@ -714,3 +714,65 @@ export async function saveExamViewerMasterAction(params: {
         return { success: false, error: err?.message };
     }
 }
+
+// 🌟 [신규] student_incorrect_record의 누락된 question_id 자동 복구 및 중복(23505 uq_student_question) 병합/제거 서버 액션
+export async function healStudentIncorrectRecordsAction(
+    studentId: string,
+    items: { record_id: number; tq_id: number; target_qid: string; status?: string }[]
+) {
+    if (!studentId || !items || items.length === 0) return { success: true };
+    const supabaseAdmin = getAdminClient();
+
+    try {
+        const targetHealQids = Array.from(new Set(items.map((it) => String(it.target_qid)).filter(Boolean)));
+        if (targetHealQids.length === 0) return { success: true };
+
+        const { data: existingQidRows } = await supabaseAdmin
+            .from("student_incorrect_record")
+            .select("record_id, question_id, tq_id, status, resolved_at")
+            .eq("student_id", studentId)
+            .in("question_id", targetHealQids);
+
+        const existingByQid = new Map<string, any>();
+        (existingQidRows || []).forEach((row: any) => {
+            if (row.question_id) existingByQid.set(String(row.question_id), row);
+        });
+        const claimedQids = new Set<string>(existingByQid.keys());
+
+        for (const r of items) {
+            const targetQid = String(r.target_qid || "");
+            if (!targetQid) continue;
+
+            if (claimedQids.has(targetQid)) {
+                const existingRow = existingByQid.get(targetQid);
+                if (existingRow && existingRow.record_id !== r.record_id) {
+                    if (existingRow.resolved_at !== null) {
+                        await supabaseAdmin
+                            .from("student_incorrect_record")
+                            .update({
+                                status: r.status || "X",
+                                resolved_at: null,
+                                tq_id: existingRow.tq_id || r.tq_id
+                            })
+                            .eq("record_id", existingRow.record_id);
+                    }
+                }
+                await supabaseAdmin
+                    .from("student_incorrect_record")
+                    .delete()
+                    .eq("record_id", r.record_id);
+            } else {
+                claimedQids.add(targetQid);
+                existingByQid.set(targetQid, { ...r, question_id: targetQid, resolved_at: null });
+                await supabaseAdmin
+                    .from("student_incorrect_record")
+                    .update({ question_id: targetQid })
+                    .eq("record_id", r.record_id);
+            }
+        }
+        return { success: true };
+    } catch (err: any) {
+        console.error("healStudentIncorrectRecordsAction 실패:", err);
+        return { success: false, error: err?.message };
+    }
+}

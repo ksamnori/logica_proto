@@ -9,7 +9,7 @@ import { useClinicEndRequest } from '@/hooks/useClinicEndRequest';
 import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from '@/hooks/useToggleCooldown';
 import { getPointBalance } from '@/app/actions/shopPoints';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
-import { processIncompleteHomeworks, generateIncorrectClinic } from '@/app/actions/clinicActions';
+import { processIncompleteHomeworks, generateIncorrectClinic, healStudentIncorrectRecordsAction } from '@/app/actions/clinicActions';
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
 const isEndedEnrollment = (e: any): boolean => {
@@ -83,6 +83,7 @@ export default function StudentPortal() {
     const trackedSeatRef = useRef<string | null>(null);
     const seatKeysRef = useRef<string[]>([]);
     const isSyncingSessionRef = useRef(false);
+    const healedMissingQidRef = useRef(false);
 
     const [isMounted, setIsMounted] = useState(false);
 
@@ -576,60 +577,15 @@ export default function StudentPortal() {
         }
 
         const recordsToHealMissingQid = (incData || []).filter((r: any) => !r.question_id && r.tq_id && tqToQidMap.has(r.tq_id));
-        if (recordsToHealMissingQid.length > 0) {
-            (async () => {
-                try {
-                    const targetHealQids = Array.from(
-                        new Set(recordsToHealMissingQid.map((r: any) => String(tqToQidMap.get(r.tq_id))).filter(Boolean))
-                    );
-                    const { data: existingQidRows } = await supabaseClient
-                        .from('student_incorrect_record')
-                        .select('record_id, question_id, tq_id, status, resolved_at')
-                        .eq('student_id', sid)
-                        .in('question_id', targetHealQids);
-
-                    const existingByQid = new Map<string, any>();
-                    (existingQidRows || []).forEach((row: any) => {
-                        if (row.question_id) existingByQid.set(String(row.question_id), row);
-                    });
-                    const claimedQids = new Set<string>(existingByQid.keys());
-
-                    for (const r of recordsToHealMissingQid) {
-                        const targetQid = String(tqToQidMap.get(r.tq_id) || '');
-                        if (!targetQid) continue;
-
-                        if (claimedQids.has(targetQid)) {
-                            // 이미 동일한 (student_id, question_id) 행이 존재하면 uq_student_question(23505) 충돌 방지를 위해 병합 후 중복 행 삭제
-                            const existingRow = existingByQid.get(targetQid);
-                            if (existingRow && existingRow.record_id !== r.record_id) {
-                                if (existingRow.resolved_at !== null) {
-                                    await supabaseClient
-                                        .from('student_incorrect_record')
-                                        .update({
-                                            status: r.status || 'X',
-                                            resolved_at: null,
-                                            tq_id: existingRow.tq_id || r.tq_id
-                                        })
-                                        .eq('record_id', existingRow.record_id);
-                                }
-                            }
-                            await supabaseClient
-                                .from('student_incorrect_record')
-                                .delete()
-                                .eq('record_id', r.record_id);
-                        } else {
-                            claimedQids.add(targetQid);
-                            existingByQid.set(targetQid, { ...r, question_id: targetQid, resolved_at: null });
-                            await supabaseClient
-                                .from('student_incorrect_record')
-                                .update({ question_id: targetQid })
-                                .eq('record_id', r.record_id);
-                        }
-                    }
-                } catch (err) {
-                    console.error('Self-healing failed', err);
-                }
-            })();
+        if (recordsToHealMissingQid.length > 0 && !healedMissingQidRef.current) {
+            healedMissingQidRef.current = true;
+            const healPayload = recordsToHealMissingQid.map((r: any) => ({
+                record_id: r.record_id,
+                tq_id: r.tq_id,
+                target_qid: String(tqToQidMap.get(r.tq_id) || ''),
+                status: r.status
+            })).filter((it: any) => it.target_qid);
+            healStudentIncorrectRecordsAction(sid, healPayload).catch(err => console.error('Self-healing failed', err));
         }
 
         const resolvedQids = (incData || []).map((r: any) => r.question_id || tqToQidMap.get(r.tq_id)).filter(Boolean);
