@@ -1116,7 +1116,7 @@ function ReviewContent() {
         
         await supabase.from('student_homework_result').update({ status: '채점완료' }).eq('homework_id', parseInt(homeworkId as string)).eq('student_id', contextIds.studentId);
 
-        const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, tq_id').eq('student_id', contextIds.studentId);
+        const { data: exInc } = await supabase.from('student_incorrect_record').select('record_id, tq_id, question_id').eq('student_id', contextIds.studentId);
         const incInserts: any[] = [];
         const incUpdates: any[] = [];
 
@@ -1127,7 +1127,7 @@ function ReviewContent() {
           const isFullyCorrect = ['O', 'a', 'b', 'c'].includes(code) && !hadWrong;
           
           if (data.tq_id) {
-            const match = exInc?.find(e => String(e.tq_id) === String(data.tq_id));
+            const match = exInc?.find(e => String(e.tq_id) === String(data.tq_id) || (data.question_id && e.question_id && String(e.question_id) === String(data.question_id)));
             const p = { student_id: contextIds.studentId, tq_id: data.tq_id, question_id: data.question_id || null, source_type: '교재과제', status: code, resolved_at: isFullyCorrect ? new Date().toISOString() : null };
             if (match) incUpdates.push({ record_id: match.record_id, ...p });
             else incInserts.push(p);
