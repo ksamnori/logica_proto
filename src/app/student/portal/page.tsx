@@ -1060,10 +1060,10 @@ export default function StudentPortal() {
             if (prog.activeExamMode === 'SIMILAR') {
                 const isSelectedWeeklyPrint = isWeeklyIncorrectExam(exType, selectedItem.title) || ['오답프린트', '오답'].includes(exType);
                 const simLabel = isSelectedWeeklyPrint
-                    ? (String(selectedItem.title || '').includes('프린트') || exType === '오답프린트' ? '🖨️ 주차 오답프린트' : '🖨️ 주차 오답')
+                    ? '🖨️ 주간 오답'
                     : (exType === '오답유사' ? '🔁 오답유사' : '🔁 과제오답유사');
                 const simDesc = isSelectedWeeklyPrint
-                    ? '배부된 주차별 오답 프린트 문제를 다시 풀어봅니다.'
+                    ? '이번 주 틀렸던 오답 문제를 다시 풀어봅니다.'
                     : '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.';
                 theme = { label: simLabel, desc: simDesc, bg: 'bg-gradient-to-br from-violet-200 to-violet-50', badge: 'bg-white/60 text-violet-800 border border-violet-200', btnBg: 'bg-white hover:bg-violet-50', btnText: 'text-violet-700', textColor: 'text-violet-900/80', accent: 'text-violet-800' };
             } else {
