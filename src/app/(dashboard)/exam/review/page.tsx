@@ -625,6 +625,54 @@ function ReviewContent() {
   const [isDeletingReport, setIsDeletingReport] = useState(false);
 
   const [isMergedExam, setIsMergedExam] = useState(false);
+  const [canCreateReport, setCanCreateReport] = useState(false);
+  const [canViewReport, setCanViewReport] = useState(false);
+
+  useEffect(() => {
+    const checkReportAuth = async () => {
+      const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
+      const tId = localStorage.getItem("logica_tenant_id") || "";
+      const isTeacherViewMode = role === "TEACHER";
+      const isSuperAdmin = role === "SUPER_ADMIN" || (!isTeacherViewMode && pos.includes("최고관리자"));
+      const isPrincipal = !isTeacherViewMode && (role === "ADMIN" || (pos.includes("원장") && !pos.includes("부원장")));
+
+      if (isSuperAdmin) {
+        setCanCreateReport(true);
+        setCanViewReport(true);
+        return;
+      }
+
+      if (role && tId) {
+        const { data } = await supabase
+          .from("tenant_role_permissions")
+          .select("allowed_menus")
+          .eq("tenant_id", tId)
+          .eq("role_name", role)
+          .maybeSingle();
+
+        if (!data && isPrincipal) {
+          setCanCreateReport(true);
+          setCanViewReport(true);
+          return;
+        }
+
+        const menus: string[] = Array.isArray(data?.allowed_menus) ? data.allowed_menus : [];
+        const hasLegacyBoth =
+          menus.includes("action_manage_admission_report") &&
+          !menus.includes("action_create_admission_report") &&
+          !menus.includes("action_view_admission_report");
+
+        if (menus.includes("ALL") || menus.includes("action_create_admission_report") || hasLegacyBoth) {
+          setCanCreateReport(true);
+        }
+        if (menus.includes("ALL") || menus.includes("action_view_admission_report") || hasLegacyBoth) {
+          setCanViewReport(true);
+        }
+      }
+    };
+    checkReportAuth();
+  }, []);
 
   const [modalQ, setModalQ] = useState<any>(null);
   const [modalWrongLog, setModalWrongLog] = useState<any[] | null>(null);
@@ -1364,7 +1412,7 @@ function ReviewContent() {
               <p className="text-blue-200 text-sm mt-1">{headerInfo.subtitle}</p>
             </div>
             <div className="text-right flex items-center gap-4">
-              {isMergedExam && showReportBtn && (
+              {isMergedExam && canViewReport && showReportBtn && (
                 <button onClick={() => window.open(`/print/report?assignment_id=${assignmentId}&t=${Date.now()}`, '_blank')} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold px-5 py-2.5 rounded-xl shadow-lg flex items-center gap-2 transition-colors">
                   📊 진단 분석 레포트 열기
                 </button>
@@ -1491,17 +1539,17 @@ function ReviewContent() {
               <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                 {isSaving ? "저장 중... ⏳" : "1️⃣ 채점 내역 DB 저장 및 오답노트 전송"}
               </button>
-              {isMergedExam && (
+              {isMergedExam && canCreateReport && (
                 <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                   {isGeneratingReport ? "리포트 생성 중... ⏳" : "2️⃣ 진단 리포트 생성하기 🪄"}
                 </button>
               )}
-              {isMergedExam && showReportBtn && (
+              {isMergedExam && canViewReport && showReportBtn && (
                 <button onClick={() => window.open(`/print/report?assignment_id=${assignmentId}&t=${Date.now()}`, '_blank')} className="bg-emerald-500 hover:bg-emerald-600 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5">
                   3️⃣ 진단 리포트 열기 📊
                 </button>
               )}
-              {isMergedExam && showReportBtn && (
+              {isMergedExam && canCreateReport && showReportBtn && (
                 <button 
                   onClick={handleDeleteReport} 
                   disabled={isDeletingReport} 

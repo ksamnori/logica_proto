@@ -623,7 +623,8 @@ function ReviewContent() {
   const [isGeneratingReport, setIsGeneratingReport] = useState(false);
   const [isDeletingReport, setIsDeletingReport] = useState(false);
   
-  const [hasReportAuth, setHasReportAuth] = useState(false);
+  const [canCreateReport, setCanCreateReport] = useState(false);
+  const [canViewReport, setCanViewReport] = useState(false);
 
   const [modalQ, setModalQ] = useState<any>(null);
   const [modalWrongLog, setModalWrongLog] = useState<any[] | null>(null);
@@ -635,10 +636,15 @@ function ReviewContent() {
   useEffect(() => {
     const checkReportAuth = async () => {
       const role = localStorage.getItem("logica_instructor_role") || "";
+      const pos = localStorage.getItem("logica_instructor_position") || "";
       const tId = localStorage.getItem("logica_tenant_id") || "";
-      
-      if (role === 'SUPER_ADMIN') {
-        setHasReportAuth(true);
+      const isTeacherViewMode = role === 'TEACHER';
+      const isSuperAdmin = role === 'SUPER_ADMIN' || (!isTeacherViewMode && pos.includes('최고관리자'));
+      const isPrincipal = !isTeacherViewMode && (role === 'ADMIN' || (pos.includes('원장') && !pos.includes('부원장')));
+
+      if (isSuperAdmin) {
+        setCanCreateReport(true);
+        setCanViewReport(true);
         return;
       }
 
@@ -648,10 +654,25 @@ function ReviewContent() {
           .select('allowed_menus')
           .eq('tenant_id', tId)
           .eq('role_name', role)
-          .single();
-          
-        if (data && data.allowed_menus.includes("action_manage_admission_report")) {
-          setHasReportAuth(true);
+          .maybeSingle();
+
+        if (!data && isPrincipal) {
+          setCanCreateReport(true);
+          setCanViewReport(true);
+          return;
+        }
+
+        const menus: string[] = Array.isArray(data?.allowed_menus) ? data.allowed_menus : [];
+        const hasLegacyBoth =
+          menus.includes("action_manage_admission_report") &&
+          !menus.includes("action_create_admission_report") &&
+          !menus.includes("action_view_admission_report");
+
+        if (menus.includes("ALL") || menus.includes("action_create_admission_report") || hasLegacyBoth) {
+          setCanCreateReport(true);
+        }
+        if (menus.includes("ALL") || menus.includes("action_view_admission_report") || hasLegacyBoth) {
+          setCanViewReport(true);
         }
       }
     };
@@ -1229,6 +1250,7 @@ function ReviewContent() {
   };
 
   const triggerReportGeneration = async () => {
+    if (!canCreateReport) return alert("⛔ 진단 리포트를 생성할 권한이 없습니다.");
     if (Object.keys(pendingUpdates).length > 0) return alert("⚠️ 저장되지 않은 채점이 있습니다. 채점 내역을 먼저 저장하세요.");
     setIsGeneratingReport(true);
     try {
@@ -1326,6 +1348,7 @@ function ReviewContent() {
   };
 
   const handleDeleteReport = async () => {
+    if (!canCreateReport) return alert("⛔ 진단 리포트를 삭제할 권한이 없습니다.");
     if (!confirm("⚠️ 정말 이 진단 리포트를 삭제하시겠습니까?\n(채점 내역은 그대로 유지되며, 분석 리포트 데이터만 완전히 삭제됩니다.)")) return;
     
     setIsDeletingReport(true);
@@ -1374,7 +1397,7 @@ function ReviewContent() {
               <p className="text-blue-200 text-sm mt-1">{headerInfo.subtitle}</p>
             </div>
             <div className="text-right flex items-center gap-4">
-              {hasReportAuth && showReportBtn && (
+              {canViewReport && showReportBtn && (
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
                   window.open(`/print/report?assignment_id=${assignmentId}&_bust=${bustStr}`, '_blank');
@@ -1503,12 +1526,12 @@ function ReviewContent() {
               <button onClick={saveOnlyGrades} disabled={isSaving} className="bg-slate-700 hover:bg-slate-800 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                 {isSaving ? "저장 중... ⏳" : "1️⃣ 채점 내역 DB 저장 및 오답노트 전송"}
               </button>
-              {hasReportAuth && headerInfo.type === '입학테스트' && (
+              {canCreateReport && headerInfo.type === '입학테스트' && (
                 <button onClick={triggerReportGeneration} disabled={isGeneratingReport} className="bg-[#e74c3c] hover:bg-red-700 text-white font-bold text-lg py-3.5 px-6 rounded-xl shadow-lg transition-transform hover:-translate-y-0.5 disabled:opacity-50">
                   {isGeneratingReport ? "리포트 생성 중... ⏳" : "2️⃣ 진단 리포트 생성하기 🪄"}
                 </button>
               )}
-              {hasReportAuth && headerInfo.type === '입학테스트' && showReportBtn && (
+              {canViewReport && headerInfo.type === '입학테스트' && showReportBtn && (
                 <button onClick={() => {
                   const bustStr = new Date().getTime().toString(36) + Math.random().toString(36).substring(2);
                   window.open(`/print/report?assignment_id=${assignmentId}&_bust=${bustStr}`, '_blank');
@@ -1516,7 +1539,7 @@ function ReviewContent() {
                   3️⃣ 진단 리포트 열기 📊
                 </button>
               )}
-              {hasReportAuth && headerInfo.type === '입학테스트' && showReportBtn && (
+              {canCreateReport && headerInfo.type === '입학테스트' && showReportBtn && (
                 <button 
                   onClick={handleDeleteReport} 
                   disabled={isDeletingReport} 

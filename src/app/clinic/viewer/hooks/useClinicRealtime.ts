@@ -52,6 +52,8 @@ export function useClinicRealtime({
 }: UseClinicRealtimeProps) {
   
   const clinicChannelRef = useRef<any>(null);
+  const clinicChannelDisposedRef = useRef(false);
+  const clinicReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const gradingChannelRef = useRef<any>(null);
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
@@ -238,6 +240,9 @@ export function useClinicRealtime({
   useEffect(() => {
     if (!studentInfo.id || questions.length === 0) return;
 
+    let isDisposed = false;
+    let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
     const handleTaRealtimeUpdate = async (payload: any, type: 'exam' | 'hw') => {
       let newData = payload.new;
       if (!newData.student_id || (!newData.question_id && !newData.tq_id)) {
@@ -297,16 +302,23 @@ export function useClinicRealtime({
     };
 
     const connectGradingChannel = () => {
+        if (isDisposed) return;
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+
         if (gradingChannelRef.current) {
-            supabaseClient.removeChannel(gradingChannelRef.current);
+            const oldCh = gradingChannelRef.current;
             gradingChannelRef.current = null;
+            supabaseClient.removeChannel(oldCh).catch(() => {});
         }
         
         const channelName = `student_realtime_grading_listen_${studentInfo.id}`;
         
         supabaseClient.getChannels().forEach((ch) => {
             if (ch.topic === `realtime:${channelName}`) {
-                supabaseClient.removeChannel(ch);
+                supabaseClient.removeChannel(ch).catch(() => {});
             }
         });
         
@@ -317,20 +329,34 @@ export function useClinicRealtime({
               if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
           });
           
+        gradingChannelRef.current = channel;
         channel.subscribe((status) => {
-            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-                setTimeout(() => {
-                    if (gradingChannelRef.current === channel) connectGradingChannel();
+            // 의도적인 CLOSED 상태에서는 재연결하지 않고, 실제 오류/타임아웃 시에만 언마운트 여부를 확인 후 재연결
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                if (isDisposed || gradingChannelRef.current !== channel) return;
+                if (reconnectTimer) clearTimeout(reconnectTimer);
+                reconnectTimer = setTimeout(() => {
+                    if (!isDisposed && gradingChannelRef.current === channel) {
+                        connectGradingChannel();
+                    }
                 }, 3000);
             }
         });
-        gradingChannelRef.current = channel;
     };
 
     connectGradingChannel();
 
     return () => { 
-        if (gradingChannelRef.current) supabaseClient.removeChannel(gradingChannelRef.current); 
+        isDisposed = true;
+        if (reconnectTimer) {
+            clearTimeout(reconnectTimer);
+            reconnectTimer = null;
+        }
+        if (gradingChannelRef.current) {
+            const ch = gradingChannelRef.current;
+            gradingChannelRef.current = null;
+            supabaseClient.removeChannel(ch).catch(() => {});
+        }
     };
   }, [studentInfo.id, questions]);
 
@@ -448,13 +474,29 @@ export function useClinicRealtime({
   };
 
   const connectChannel = async (sId: string, sessionState: any) => {
+    if (clinicReconnectTimerRef.current) {
+      clearTimeout(clinicReconnectTimerRef.current);
+      clinicReconnectTimerRef.current = null;
+    }
+    clinicChannelDisposedRef.current = false;
+
     if (clinicChannelRef.current) {
-      await supabaseClient.removeChannel(clinicChannelRef.current);
+      const oldCh = clinicChannelRef.current;
       clinicChannelRef.current = null;
+      try { await supabaseClient.removeChannel(oldCh); } catch (e) {}
     }
     const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
     const channelName = `${CLINIC_ROOM}_${myTenantId}`;
     
+    // 동일 토픽으로 남아있는 좀비 채널 정리
+    supabaseClient.getChannels().forEach((ch: any) => {
+      if (ch.topic === `realtime:${channelName}`) {
+        supabaseClient.removeChannel(ch).catch(() => {});
+      }
+    });
+
+    if (clinicChannelDisposedRef.current) return;
+
     const channel = supabaseClient.channel(channelName);
     clinicChannelRef.current = channel;
     
@@ -490,9 +532,12 @@ export function useClinicRealtime({
       })
       .on('broadcast', { event: 'ta_action' }, ({ payload }: any) => handleTaActionRef.current(payload, sId, clinicSessionStateRef.current || sessionState))
       .subscribe((status) => {
-          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-              setTimeout(() => {
-                  if (clinicChannelRef.current === channel) {
+          // 의도적 CLOSED 이벤트에서는 재연결하지 않고, 실제 오류/타임아웃이며 종료되지 않은 상태에서만 재연결
+          if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              if (clinicChannelDisposedRef.current || clinicChannelRef.current !== channel) return;
+              if (clinicReconnectTimerRef.current) clearTimeout(clinicReconnectTimerRef.current);
+              clinicReconnectTimerRef.current = setTimeout(() => {
+                  if (!clinicChannelDisposedRef.current && clinicChannelRef.current === channel) {
                       connectChannel(sId, clinicSessionStateRef.current || sessionState);
                   }
               }, 3000);
@@ -519,6 +564,7 @@ export function useClinicRealtime({
   };
 
   const initSession = async (sId: string, round: number, cls: string) => {
+    clinicChannelDisposedRef.current = false;
     const today = getKSTDateString();
     const kioskSeat = localStorage.getItem('logica_kiosk_seat') || undefined;
     const sessionData = await resolveTodaySession(supabaseClient, sId, today, kioskSeat);
@@ -537,6 +583,11 @@ export function useClinicRealtime({
   };
 
   const untrackPresence = async () => {
+    clinicChannelDisposedRef.current = true;
+    if (clinicReconnectTimerRef.current) {
+      clearTimeout(clinicReconnectTimerRef.current);
+      clinicReconnectTimerRef.current = null;
+    }
     if (clinicChannelRef.current) {
       const ch = clinicChannelRef.current;
       clinicChannelRef.current = null; 
@@ -544,6 +595,23 @@ export function useClinicRealtime({
       try { await supabaseClient.removeChannel(ch); } catch(e) {}
     }
   };
+
+  // 컴포넌트 언마운트 시 클리닉 프레즌스 채널 및 재연결 타이머 보장 정리
+  useEffect(() => {
+    return () => {
+      clinicChannelDisposedRef.current = true;
+      if (clinicReconnectTimerRef.current) {
+        clearTimeout(clinicReconnectTimerRef.current);
+        clinicReconnectTimerRef.current = null;
+      }
+      if (clinicChannelRef.current) {
+        const ch = clinicChannelRef.current;
+        clinicChannelRef.current = null;
+        try { ch.untrack(); } catch (e) {}
+        try { supabaseClient.removeChannel(ch); } catch (e) {}
+      }
+    };
+  }, [supabaseClient]);
 
   const sendAction = async (action: string, extra: any = {}) => {
     if (clinicChannelRef.current && mySeatRef.current) {

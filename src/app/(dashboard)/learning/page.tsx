@@ -842,9 +842,23 @@ export default function LearningPage() {
           let theme: any;
           if (typeKey === 'exam') {
             if (clsProg.activeExamMode === 'SIMILAR') {
+              const isSelectedWeeklyPrint =
+                ['오답프린트', '오답'].includes(exType) ||
+                (/([0-9xX]+\s*주차|주차)/.test(String(selectedItem.title || '')) &&
+                  /오답\s*(프린트)?/.test(String(selectedItem.title || '')));
+              const simLabel = isSelectedWeeklyPrint
+                ? String(selectedItem.title || '').includes('프린트') || exType === '오답프린트'
+                  ? '🖨️ 주차 오답프린트'
+                  : '🖨️ 주차 오답'
+                : exType === '오답유사'
+                ? '🔁 오답유사'
+                : '🔁 과제오답유사';
+              const simDesc = isSelectedWeeklyPrint
+                ? '배부된 주차별 오답 프린트 문제를 다시 풀어봅니다.'
+                : '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.';
               theme = {
-                label: '🔁 과제오답유사',
-                desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.',
+                label: simLabel,
+                desc: simDesc,
                 bg: 'bg-gradient-to-br from-violet-200 to-violet-50',
                 badge: 'bg-white/60 text-violet-800 border border-violet-200',
                 btnBg: 'bg-white hover:bg-violet-50',

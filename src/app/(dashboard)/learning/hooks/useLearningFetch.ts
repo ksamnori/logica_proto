@@ -966,17 +966,41 @@ export function useLearningFetch() {
             ex.status = '최종완료';
           }
 
+          const isWeeklyIncorrect = (() => {
+            const t = String(rawTitle || '').trim();
+            const ty = String(type || '').trim();
+            if (t.includes('[통합]')) return false;
+            const hasWeekAndWrong = (s: string) =>
+              /([0-9xX]+\s*주차|주차)/.test(s) && /오답\s*(프린트)?/.test(s);
+            return hasWeekAndWrong(t) || hasWeekAndWrong(ty);
+          })();
+
+          if (
+            (type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) &&
+            tq > 0 &&
+            remain === 0 &&
+            !['최종완료', '완료', '채점완료'].includes(ex.status)
+          ) {
+            supabase
+              .from('exam_assignment')
+              .update({ status: '최종완료' })
+              .eq('assignment_id', ex.assignment_id)
+              .then();
+            ex.status = '최종완료';
+          }
+
           const isFinalDone = ['최종완료', '완료', '채점완료'].includes(
             ex.status
           );
 
-          const isTestType = ![
-            '과제',
-            '과제프린트',
-            '미완료과제',
-            '오답프린트',
-            '오답',
-          ].includes(type);
+          const isTestType =
+            ![
+              '과제',
+              '과제프린트',
+              '미완료과제',
+              '오답프린트',
+              '오답',
+            ].includes(type) || isWeeklyIncorrect;
           if (
             isTestType &&
             !['미응시', '진행중', '대기'].includes(ex.status)
@@ -995,11 +1019,11 @@ export function useLearningFetch() {
             exType: type,
           };
 
-          if (type === '오답프린트' || type === '오답') {
+          if (type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) {
+            if (!isFinalDone && (!tq || remain > 0)) similarExams.push(item);
+          } else if (type === '오답프린트' || type === '오답') {
           } else if (type === '과제' || type === '과제프린트') {
             if (!isFinalDone && remain > 0) hwExams.push(item);
-          } else if (type === '오답유사' || type === '과제오답유사') {
-            if (!isFinalDone && remain > 0) similarExams.push(item);
           } else if (type === '미완료과제') {
             if (!isFinalDone && remain > 0) overdueExams.push(item);
           } else {
@@ -1103,7 +1127,7 @@ export function useLearningFetch() {
           examInitialScore: firstExam.score ?? null,
           examType:
             activeExamMode === 'SIMILAR'
-              ? '오답유사'
+              ? firstExam.exType || '오답유사'
               : firstExam.exType || '',
         };
       });

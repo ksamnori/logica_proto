@@ -325,6 +325,38 @@ function PrintReportContent() {
 
   const fetchReportData = async () => {
     try {
+      if (typeof window !== "undefined") {
+        const role = localStorage.getItem("logica_instructor_role") || "";
+        const pos = localStorage.getItem("logica_instructor_position") || "";
+        const staffTenantId = localStorage.getItem("logica_tenant_id") || "";
+        if (role && staffTenantId) {
+          const isTeacherViewMode = role === "TEACHER";
+          const isSuperAdmin = role === "SUPER_ADMIN" || (!isTeacherViewMode && pos.includes("최고관리자"));
+          const isPrincipal = !isTeacherViewMode && (role === "ADMIN" || (pos.includes("원장") && !pos.includes("부원장")));
+          if (!isSuperAdmin) {
+            const { data: permRow } = await supabase
+              .from("tenant_role_permissions")
+              .select("allowed_menus")
+              .eq("tenant_id", staffTenantId)
+              .eq("role_name", role)
+              .maybeSingle();
+            if (permRow) {
+              const menus: string[] = Array.isArray(permRow.allowed_menus) ? permRow.allowed_menus : [];
+              const hasLegacyBoth =
+                menus.includes("action_manage_admission_report") &&
+                !menus.includes("action_create_admission_report") &&
+                !menus.includes("action_view_admission_report");
+              const canView = menus.includes("ALL") || menus.includes("action_view_admission_report") || hasLegacyBoth;
+              if (!canView) {
+                throw new Error("⛔ 진단 분석 리포트를 열람할 권한이 없습니다.");
+              }
+            } else if (!isPrincipal) {
+              throw new Error("⛔ 진단 분석 리포트를 열람할 권한이 없습니다.");
+            }
+          }
+        }
+      }
+
       const { data: assign, error: aErr } = await supabase.from('exam_assignment')
         .select('*, student(name, tenant_id), exam_master(title, sub_title, layout_settings)')
         .eq('assignment_id', assignmentId)

@@ -19,6 +19,16 @@ const isEndedEnrollment = (e: any): boolean => {
   return false;
 };
 
+// 'x주차 오답프린트', 'x주차 오답 프린트', 'x주차 오답' 등 주차별 오답 프린트 판별 헬퍼
+const isWeeklyIncorrectExam = (type?: string, rawTitle?: string): boolean => {
+  const t = String(rawTitle || "").trim();
+  const ty = String(type || "").trim();
+  if (t.includes("[통합]")) return false;
+  const hasWeekAndWrong = (s: string) =>
+    /([0-9xX]+\s*주차|주차)/.test(s) && /오답\s*(프린트)?/.test(s);
+  return hasWeekAndWrong(t) || hasWeekAndWrong(ty);
+};
+
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
 
@@ -65,6 +75,8 @@ export default function StudentPortal() {
     const [selectedTaskIdx, setSelectedTaskIdx] = useState<Record<string, number>>({});
 
     const channelRef = useRef<any>(null);
+    const portalChannelDisposedRef = useRef(false);
+    const portalReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const sessionEndedRef = useRef(false);
 
     const clinicSessionRef = useRef<any>(null);
@@ -79,6 +91,23 @@ export default function StudentPortal() {
     useEffect(() => {
         const interval = setInterval(() => setNow(Date.now()), 1000);
         return () => clearInterval(interval);
+    }, []);
+
+    // 좀비 채널 재연결 원천 차단용 클린업 헬퍼
+    const disposePortalChannel = useCallback(async (withUntrack = false) => {
+        portalChannelDisposedRef.current = true;
+        if (portalReconnectTimerRef.current) {
+            clearTimeout(portalReconnectTimerRef.current);
+            portalReconnectTimerRef.current = null;
+        }
+        if (channelRef.current) {
+            const ch = channelRef.current;
+            channelRef.current = null;
+            if (withUntrack) {
+                try { await ch.untrack(); } catch (e) {}
+            }
+            try { await supabaseClient.removeChannel(ch); } catch (e) {}
+        }
     }, []);
 
     // 좌석 배치 로드 및 실시간 채널 연결 함수
@@ -115,12 +144,30 @@ export default function StudentPortal() {
     }, []);
 
     const connectPortalChannel = useCallback(async (sId: string, sName: string, classes: string[], sessionState: any) => {
-        if (channelRef.current) {
-            await supabaseClient.removeChannel(channelRef.current);
-            channelRef.current = null;
+        if (portalReconnectTimerRef.current) {
+            clearTimeout(portalReconnectTimerRef.current);
+            portalReconnectTimerRef.current = null;
         }
+        portalChannelDisposedRef.current = false;
+
+        if (channelRef.current) {
+            const oldCh = channelRef.current;
+            channelRef.current = null;
+            try { await supabaseClient.removeChannel(oldCh); } catch (e) {}
+        }
+
         const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
         const channelName = `${CLINIC_ROOM}_${myTenantId}`;
+
+        // 동일 토픽으로 남아있는 좀비 채널 정리
+        supabaseClient.getChannels().forEach((ch: any) => {
+            if (ch.topic === `realtime:${channelName}`) {
+                supabaseClient.removeChannel(ch).catch(() => {});
+            }
+        });
+
+        if (portalChannelDisposedRef.current) return;
+
         const channel = supabaseClient.channel(channelName);
         channelRef.current = channel;
 
@@ -164,11 +211,7 @@ export default function StudentPortal() {
                 } else if (payload.action === 'force_return_to_seat') {
                     setIsPortalAway(false);
                 } else if (payload.action === 'relocated_away') {
-                    if (channelRef.current) {
-                        channelRef.current.untrack().catch(() => {});
-                        supabaseClient.removeChannel(channelRef.current).catch(() => {});
-                        channelRef.current = null;
-                    }
+                    disposePortalChannel(true);
                     localStorage.removeItem('logica_student_id');
                     localStorage.removeItem('logica_student_name');
                     localStorage.removeItem('logica_student_phone');
@@ -202,15 +245,18 @@ export default function StudentPortal() {
                 }
             })
             .subscribe((status: string) => {
-                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-                    setTimeout(() => {
-                        if (channelRef.current === channel) {
+                // 의도적 종료(CLOSED) 시에는 재연결하지 않고, 실제 에러/타임아웃이며 언마운트되지 않은 경우에만 재연결
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    if (portalChannelDisposedRef.current || channelRef.current !== channel) return;
+                    if (portalReconnectTimerRef.current) clearTimeout(portalReconnectTimerRef.current);
+                    portalReconnectTimerRef.current = setTimeout(() => {
+                        if (!portalChannelDisposedRef.current && channelRef.current === channel) {
                             connectPortalChannel(sId, sName, classes, clinicSessionRef.current || sessionState);
                         }
                     }, 3000);
                 }
             });
-    }, [router, trackPortalPresence]);
+    }, [router, trackPortalPresence, disposePortalChannel]);
 
     useEffect(() => {
         const sid = localStorage.getItem('logica_student_id');
@@ -220,6 +266,8 @@ export default function StudentPortal() {
             router.push('/student/login');
             return;
         }
+
+        portalChannelDisposedRef.current = false;
 
         const initData = async () => {
             const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
@@ -258,7 +306,9 @@ export default function StudentPortal() {
             if (session.active_calls?.['general'] && !session.active_calls?.['general']?.verdict) setIsPortalCalling(true);
 
             await assignSeatDirectly(sid, session);
-            await connectPortalChannel(sid, sname, classes, session);
+            if (!portalChannelDisposedRef.current) {
+                await connectPortalChannel(sid, sname, classes, session);
+            }
 
             const { data: rData } = await supabaseClient.from('clinic_round_result').select('*').eq('student_id', sid);
             const results: any = {};
@@ -271,14 +321,9 @@ export default function StudentPortal() {
         initData();
 
         return () => {
-            if (channelRef.current) {
-                const ch = channelRef.current;
-                channelRef.current = null;
-                ch.untrack().catch(() => {});
-                supabaseClient.removeChannel(ch).catch(() => {});
-            }
+            disposePortalChannel(true);
         };
-    }, [router, assignSeatDirectly, connectPortalChannel]);
+    }, [router, assignSeatDirectly, connectPortalChannel, disposePortalChannel]);
 
     const endRequest = useClinicEndRequest({
         supabaseClient, 
@@ -647,16 +692,20 @@ export default function StudentPortal() {
                 
                 const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - resolved);
+                const isWeeklyIncorrect = isWeeklyIncorrectExam(type, rawTitle);
 
-                // 채점확정 상태에서 100점(또는 남은 오답 0개)인 경우 자동으로 최종완료 처리
-                if (ex.status === '채점확정' && (ex.total_score === 100 || (tq > 0 && remain === 0))) {
+                // 채점확정 상태에서 100점(또는 남은 오답 0개)이거나, 오답유사/주차오답프린트 전 문항 해결 시 자동으로 최종완료 처리
+                if (
+                    (ex.status === '채점확정' && (ex.total_score === 100 || (tq > 0 && remain === 0))) ||
+                    ((type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) && tq > 0 && remain === 0 && !['최종완료', '완료', '채점완료'].includes(ex.status))
+                ) {
                     supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', ex.assignment_id).then();
                     ex.status = '최종완료';
                 }
 
                 const isFinalDone = ['최종완료', '완료', '채점완료'].includes(ex.status);
 
-                const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(type);
+                const isTestType = !['과제', '과제프린트', '미완료과제', '오답프린트', '오답'].includes(type) || isWeeklyIncorrect;
                 if (isTestType && !['미응시', '진행중', '대기'].includes(ex.status)) {
                     hasAnyExamClearedToday = true;
                 }
@@ -664,11 +713,13 @@ export default function StudentPortal() {
                 const cleanedTitle = cleanTitle(rawTitle, sName);
                 const item = { id: ex.assignment_id, title: cleanedTitle, remain, status: ex.status, score: ex.total_score, type: 'exam', exType: type };
 
-                if (type === '오답프린트' || type === '오답') { } 
-                else if (type === '과제' || type === '과제프린트') {
+                // 1번 박스: '오답유사', '과제오답유사'와 더불어 'x주차 오답프린트', 'x주차 오답'도 함께 노출
+                if (type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) {
+                    if (!isFinalDone && (!tq || remain > 0)) similarExams.push(item);
+                } else if (type === '오답프린트' || type === '오답') {
+                    // 일반/통합 오답프린트는 4번 박스(누적 오답 클리닉)에서 통합 처리
+                } else if (type === '과제' || type === '과제프린트') {
                     if (!isFinalDone && remain > 0) hwExams.push(item);
-                } else if (type === '오답유사' || type === '과제오답유사') {
-                    if (!isFinalDone && remain > 0) similarExams.push(item);
                 } else if (type === '미완료과제') {
                     if (!isFinalDone && remain > 0) overdueExams.push(item);
                 } else { 
@@ -748,7 +799,7 @@ export default function StudentPortal() {
                 examPendingCount: finalExamList.length, hwPendingCount: finalHwList.length, printPendingCount: totalPrintQCount > 0 ? 1 : 0, overduePendingCount: finalOverdueList.length,
                 examStatus: firstExam.status || '대기',
                 examInitialScore: firstExam.score ?? null,
-                examType: activeExamMode === 'SIMILAR' ? '오답유사' : (firstExam.exType || '')
+                examType: activeExamMode === 'SIMILAR' ? (firstExam.exType || '오답유사') : (firstExam.exType || '')
             };
         });
 
@@ -764,8 +815,8 @@ export default function StudentPortal() {
         try {
             if (channelRef.current && trackedSeatRef.current) {
                 await channelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: trackedSeatRef.current, action: 'depart', data: { studentId: studentInfo.id, name: studentInfo.name } } });
-                await channelRef.current.untrack();
             }
+            await disposePortalChannel(true);
 
             const allPendingHwIds: number[] = [];
             Object.values(hwProgress).forEach((prog: any) => {
@@ -966,13 +1017,9 @@ export default function StudentPortal() {
                 type: 'broadcast', event: 'student_action',
                 payload: { seat: trackedSeatRef.current, action: 'update_activity', data: { studentId: studentInfo.id, name: studentInfo.name, activity: `[${className}]${testName} 🏃‍♂️` } }
             });
-            await channelRef.current.untrack();
         }
 
-        if (channelRef.current) {
-            await supabaseClient.removeChannel(channelRef.current);
-            channelRef.current = null;
-        }
+        await disposePortalChannel(true);
 
         router.push(`/clinic/viewer?${params.toString()}`);
     };
@@ -1011,7 +1058,14 @@ export default function StudentPortal() {
         let theme: any;
         if (typeKey === 'exam') {
             if (prog.activeExamMode === 'SIMILAR') {
-                theme = { label: '🔁 과제오답유사', desc: '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.', bg: 'bg-gradient-to-br from-violet-200 to-violet-50', badge: 'bg-white/60 text-violet-800 border border-violet-200', btnBg: 'bg-white hover:bg-violet-50', btnText: 'text-violet-700', textColor: 'text-violet-900/80', accent: 'text-violet-800' };
+                const isSelectedWeeklyPrint = isWeeklyIncorrectExam(exType, selectedItem.title) || ['오답프린트', '오답'].includes(exType);
+                const simLabel = isSelectedWeeklyPrint
+                    ? (String(selectedItem.title || '').includes('프린트') || exType === '오답프린트' ? '🖨️ 주차 오답프린트' : '🖨️ 주차 오답')
+                    : (exType === '오답유사' ? '🔁 오답유사' : '🔁 과제오답유사');
+                const simDesc = isSelectedWeeklyPrint
+                    ? '배부된 주차별 오답 프린트 문제를 다시 풀어봅니다.'
+                    : '과제에서 틀렸던 문제와 비슷한 문제를 다시 풀어봅니다.';
+                theme = { label: simLabel, desc: simDesc, bg: 'bg-gradient-to-br from-violet-200 to-violet-50', badge: 'bg-white/60 text-violet-800 border border-violet-200', btnBg: 'bg-white hover:bg-violet-50', btnText: 'text-violet-700', textColor: 'text-violet-900/80', accent: 'text-violet-800' };
             } else {
                 if (['분기테스트', '분기평가'].includes(exType)) {
                     theme = { label: '📅 분기평가', desc: '해당 분기의 학업 성취도를 종합적으로 평가합니다.', bg: 'bg-gradient-to-br from-fuchsia-200 to-fuchsia-50', badge: 'bg-white/60 text-fuchsia-800 border border-fuchsia-200', btnBg: 'bg-white hover:bg-fuchsia-50', btnText: 'text-fuchsia-700', textColor: 'text-fuchsia-900/80', accent: 'text-fuchsia-800' };

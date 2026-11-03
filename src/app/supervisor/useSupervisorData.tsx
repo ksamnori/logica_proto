@@ -881,9 +881,13 @@ export function useSupervisorData() {
         const myTenantId = localStorage.getItem("logica_tenant_id") || "hq";
         const channelName = `${CLINIC_ROOM}_${myTenantId}`;
         
+        let isDisposed = false;
+        let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+
         if (channelRef.current) {
-            supabaseClient.removeChannel(channelRef.current).catch(console.error);
+            const oldCh = channelRef.current;
             channelRef.current = null;
+            supabaseClient.removeChannel(oldCh).catch(console.error);
         }
         
         const channel = supabaseClient.channel(channelName);
@@ -964,16 +968,28 @@ export function useSupervisorData() {
             .on('broadcast', { event: 'ta_action' }, ({ payload }: { payload: any }) => handleTaActionFromOtherScreen(payload))
             .on('broadcast', { event: SEAT_LAYOUT_UPDATED_EVENT }, () => loadSeats())
             .subscribe((status: string) => {
+                if (isDisposed || channelRef.current !== channel) return;
                 setConnectionStatus(status === 'SUBSCRIBED' ? 'connected' : status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' ? 'error' : 'connecting');
-                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-                    setTimeout(() => setReconnectTrigger(p => p + 1), 3000);
+                if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                    if (reconnectTimer) clearTimeout(reconnectTimer);
+                    reconnectTimer = setTimeout(() => {
+                        if (!isDisposed && channelRef.current === channel) {
+                            setReconnectTrigger(p => p + 1);
+                        }
+                    }, 3000);
                 }
             });
 
         return () => { 
+            isDisposed = true;
+            if (reconnectTimer) {
+                clearTimeout(reconnectTimer);
+                reconnectTimer = null;
+            }
             if (channelRef.current) {
-                supabaseClient.removeChannel(channelRef.current).catch(console.error);
+                const ch = channelRef.current;
                 channelRef.current = null;
+                supabaseClient.removeChannel(ch).catch(console.error);
             }
         };
     }, [isAuthorized, updateStudents, appendLog, removeLogsByTypeAndSeat, loadSeats, reconnectTrigger]);

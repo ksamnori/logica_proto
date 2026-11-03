@@ -74,7 +74,8 @@ const PERMISSION_GROUPS = [
       { id: "/admission", label: "진단평가 및 대기생 관리" },
       { id: "action_create_admission", label: "↳ [권한] 진단평가 새 일정 만들기", isAction: true },
       { id: "action_bulk_admission", label: "↳ [권한] 진단평가 일괄 관리 (상태/삭제)", isAction: true },
-      { id: "action_manage_admission_report", label: "↳ [권한] 진단 리포트 생성 및 열람", isAction: true },
+      { id: "action_create_admission_report", label: "↳ [권한] 진단 리포트 생성 (및 삭제)", isAction: true },
+      { id: "action_view_admission_report", label: "↳ [권한] 진단 리포트 열람", isAction: true },
     ]
   },
   {
@@ -257,7 +258,13 @@ export default function PermissionPage() {
     if (!error && data) {
       const perms: Record<string, string[]> = {};
       data.forEach(row => {
-        perms[row.role_name] = row.allowed_menus;
+        const menus = Array.isArray(row.allowed_menus) ? [...row.allowed_menus] : [];
+        // 기존 통합 권한(action_manage_admission_report)이 저장되어 있던 경우 생성/열람 권한으로 자동 분리 마이그레이션
+        if (menus.includes("action_manage_admission_report")) {
+          if (!menus.includes("action_create_admission_report")) menus.push("action_create_admission_report");
+          if (!menus.includes("action_view_admission_report")) menus.push("action_view_admission_report");
+        }
+        perms[row.role_name] = menus.filter(m => m !== "action_manage_admission_report");
       });
       ROLES.forEach(r => {
         if (!perms[r.id]) perms[r.id] = ["/home"];
@@ -344,7 +351,9 @@ export default function PermissionPage() {
     setIsSaving(true);
     
     try {
-      const finalPermissions = Array.from(new Set([...currentPermissions, "/home"]));
+      const finalPermissions = Array.from(
+        new Set([...currentPermissions.filter(id => id !== "action_manage_admission_report"), "/home"])
+      );
       const { error } = await supabase
         .from('tenant_role_permissions')
         .upsert({

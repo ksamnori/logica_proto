@@ -77,7 +77,8 @@ export default function AdmissionPage() {
   const router = useRouter();
 
   const [isAuthorized, setIsAuthorized] = useState<boolean | null>(null);
-  const [hasReportAuth, setHasReportAuth] = useState(false);
+  const [canViewReport, setCanViewReport] = useState(false);
+  const [canCreateReport, setCanCreateReport] = useState(false);
   const [tenantId, setTenantId] = useState<string>(""); // 🌟 [신규] 지점 ID 상태 추가
 
   const [sessions, setSessions] = useState<any[]>([]);
@@ -124,12 +125,14 @@ export default function AdmissionPage() {
       }
       setTenantId(tId); // 🌟 상태에 tenantId 저장
       
-      const isGodMode = role === 'SUPER_ADMIN' || role === 'ADMIN' || 
-                        pos.includes('최고관리자') || pos.includes('원장');
-      
-      if (isGodMode) {
+      const isTeacherViewMode = role === 'TEACHER';
+      const isSuperAdmin = role === 'SUPER_ADMIN' || (!isTeacherViewMode && pos.includes('최고관리자'));
+      const isPrincipal = !isTeacherViewMode && (role === 'ADMIN' || (pos.includes('원장') && !pos.includes('부원장')));
+
+      if (isSuperAdmin) {
         setIsAuthorized(true);
-        setHasReportAuth(true);
+        setCanViewReport(true);
+        setCanCreateReport(true);
         return;
       }
 
@@ -146,14 +149,31 @@ export default function AdmissionPage() {
         .eq('role_name', role)
         .maybeSingle();
 
-      if (!data || (!data.allowed_menus.includes("ALL") && !data.allowed_menus.includes("/admission"))) {
+      const menus: string[] = Array.isArray(data?.allowed_menus) ? data.allowed_menus : [];
+      const hasLegacyBoth =
+        menus.includes("action_manage_admission_report") &&
+        !menus.includes("action_create_admission_report") &&
+        !menus.includes("action_view_admission_report");
+
+      if (isPrincipal) {
+        setIsAuthorized(true);
+        if (!data) {
+          setCanViewReport(true);
+          setCanCreateReport(true);
+        } else {
+          setCanViewReport(menus.includes("ALL") || menus.includes("action_view_admission_report") || hasLegacyBoth);
+          setCanCreateReport(menus.includes("ALL") || menus.includes("action_create_admission_report") || hasLegacyBoth);
+        }
+        return;
+      }
+
+      if (!data || (!menus.includes("ALL") && !menus.includes("/admission"))) {
         alert("⛔ 진단평가 관리 페이지에 접근할 권한이 없습니다.");
         router.replace("/home");
       } else {
         setIsAuthorized(true);
-        if (data.allowed_menus.includes("action_manage_admission_report")) {
-          setHasReportAuth(true);
-        }
+        setCanViewReport(menus.includes("ALL") || menus.includes("action_view_admission_report") || hasLegacyBoth);
+        setCanCreateReport(menus.includes("ALL") || menus.includes("action_create_admission_report") || hasLegacyBoth);
       }
     };
 
@@ -810,28 +830,31 @@ export default function AdmissionPage() {
                             <button onClick={() => router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`)} className={`text-xs px-2.5 py-1.5 rounded font-bold shadow-sm border transition-colors flex items-center gap-1 shrink-0 ${isDone ? 'bg-indigo-50 text-indigo-700 border-indigo-200 hover:bg-indigo-100' : 'bg-brand text-white border-brand hover:bg-blue-900'}`}>
                               {isDone ? '채점/리뷰' : '채점하기'}
                             </button>
-                            {isDone && hasReportAuth && (
-                              shadowAssign.has_report ? (
-                                <button
-                                  onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')}
-                                  className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0"
-                                  title="생성된 진단 분석 리포트를 열람합니다"
-                                >
-                                  📊 리포트
-                                </button>
-                              ) : (
-                                <button
-                                  onClick={() => {
-                                    if (confirm("아직 진단 리포트가 생성되지 않은 학생입니다.\n채점/리뷰 화면으로 이동하여 [2️⃣ 진단 리포트 생성하기]를 진행하시겠습니까?")) {
-                                      router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`);
-                                    }
-                                  }}
-                                  className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-400 border border-dashed border-slate-300 px-2.5 py-1.5 rounded font-bold transition-colors ml-1 shrink-0"
-                                  title="채점은 완료되었으나 아직 리포트가 생성되지 않았습니다 (클릭 시 생성 화면 이동)"
-                                >
-                                  리포트 미생성
-                                </button>
-                              )
+                            {isDone && shadowAssign.has_report && canViewReport && (
+                              <button
+                                onClick={() => window.open(`/print/report?assignment_id=${shadowAssign.assignment_id}`, '_blank')}
+                                className="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 px-2.5 py-1.5 rounded font-bold transition-colors shadow-sm ml-1 shrink-0"
+                                title="생성된 진단 분석 리포트를 열람합니다"
+                              >
+                                📊 리포트
+                              </button>
+                            )}
+                            {isDone && !shadowAssign.has_report && (canCreateReport || canViewReport) && (
+                              <button
+                                onClick={() => {
+                                  if (!canCreateReport) {
+                                    alert("아직 진단 리포트가 생성되지 않은 학생입니다.\n(진단 리포트 생성 권한이 있는 담당자가 먼저 리포트를 생성해야 열람할 수 있습니다.)");
+                                    return;
+                                  }
+                                  if (confirm("아직 진단 리포트가 생성되지 않은 학생입니다.\n채점/리뷰 화면으로 이동하여 [2️⃣ 진단 리포트 생성하기]를 진행하시겠습니까?")) {
+                                    router.push(`/admission/review?assignment_id=${shadowAssign.assignment_id}`);
+                                  }
+                                }}
+                                className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-400 border border-dashed border-slate-300 px-2.5 py-1.5 rounded font-bold transition-colors ml-1 shrink-0"
+                                title={canCreateReport ? "채점은 완료되었으나 아직 리포트가 생성되지 않았습니다 (클릭 시 생성 화면 이동)" : "아직 진단 리포트가 생성되지 않았습니다"}
+                              >
+                                리포트 미생성
+                              </button>
                             )}
                           </div>
                         );

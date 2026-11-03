@@ -175,11 +175,21 @@ export async function generateIncorrectClinic(params: {
     const { studentId, studentName, targetClassId, targetInstructorId, uniqueQids, tenantId } = params;
 
     try {
-        const { data: oldPrints } = await supabaseAdmin.from('exam_assignment')
-            .select('assignment_id, exam_id, exam_master!inner(exam_type)')
+        const { data: rawOldPrints } = await supabaseAdmin.from('exam_assignment')
+            .select('assignment_id, exam_id, exam_master!inner(exam_type, title)')
             .eq('student_id', studentId)
             .in('status', ['미응시', '진행중', '대기'])
             .eq('exam_master.exam_type', '오답프린트');
+
+        // 1번 박스에 배부된 주차별 오답프린트(x주차 오답프린트 / x주차 오답)는 삭제 대상에서 제외
+        const oldPrints = (rawOldPrints || []).filter((p: any) => {
+            const m = Array.isArray(p.exam_master) ? p.exam_master[0] : p.exam_master;
+            const t = String(m?.title || '').trim();
+            if (!t.includes('[통합]') && /([0-9xX]+\s*주차|주차)/.test(t) && /오답\s*(프린트)?/.test(t)) {
+                return false;
+            }
+            return true;
+        });
             
         if (oldPrints && oldPrints.length > 0) {
             const oldAssignIds = oldPrints.map((p: any) => p.assignment_id);
