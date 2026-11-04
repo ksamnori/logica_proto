@@ -3,8 +3,6 @@ import { NextRequest, NextResponse } from 'next/server';
 import OpenAI from 'openai';
 import { createClient } from '@supabase/supabase-js';
 
-const openai = new OpenAI();
-
 const BASE_SYSTEM_PROMPT = `너는 학원(Academy) 운영 및 학습 관리 시스템(LMS) 'Logica'의 최고 수준 AI 회의록 분석 비서야.
 제공되는 텍스트는 [주간 강사 회의]의 음성 인식(STT) 기록이야.
 아래의 JSON 포맷 규칙에 맞춰서 회의 내용을 분석하고 구조화해 줘. 텍스트 외의 다른 말은 절대 덧붙이지 마.
@@ -57,6 +55,16 @@ export async function POST(request: NextRequest) {
     // ----------------------------------------------------
     // 본문 로직
     // ----------------------------------------------------
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) {
+      return NextResponse.json(
+        { success: false, error: "서버에 OPENAI_API_KEY 환경변수가 설정되지 않았습니다." },
+        { status: 500 }
+      );
+    }
+
+    const openai = new OpenAI({ apiKey });
+
     const { transcript, attendees } = await request.json();
 
     if (!transcript) {
