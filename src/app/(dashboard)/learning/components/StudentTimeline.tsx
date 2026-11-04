@@ -427,18 +427,17 @@ export default function StudentTimeline({
             else if (item.type.includes('hw')) {
               const hwId = item.realId;
               const { data: hwAns } = await supabaseClient.from('student_homework_answer')
-                .select('tq_id, question_id')
+                .select('tq_id')
                 .eq('homework_id', hwId)
                 .eq('student_id', currentView.studentId)
                 .in('grading_code', ['X', 'TX', '☆', 'B']);
 
               if (hwAns && hwAns.length > 0) {
-                const tqIds = hwAns.map(a => a.tq_id).filter(Boolean);
+                const tqIds = hwAns.map((a: any) => a.tq_id).filter(Boolean);
                 if (tqIds.length > 0) {
                   const { data: tqs } = await supabaseClient.from('textbook_question').select('question_id').in('tq_id', tqIds);
-                  tqs?.forEach(t => { if(t.question_id) tempQIds.push(t.question_id); });
+                  tqs?.forEach((t: any) => { if(t.question_id) tempQIds.push(t.question_id); });
                 }
-                hwAns.forEach(a => { if (a.question_id) tempQIds.push(a.question_id); });
               }
             }
           }

@@ -112,11 +112,10 @@ export default function SupervisorDashboard() {
             let qIds = answers.map(a => a.question_id).filter(Boolean);
 
             if (assignmentRecord?.exam_id) {
-                const { data: items } = await supabaseClient.from('exam_item').select('question_id, tq_id').eq('exam_id', assignmentRecord.exam_id);
+                const { data: items } = await supabaseClient.from('exam_item').select('question_id').eq('exam_id', assignmentRecord.exam_id);
                 if (items) {
-                    items.forEach(i => {
+                    items.forEach((i: any) => {
                         if (i.question_id) qIds.push(i.question_id);
-                        if (i.tq_id) qIds.push(i.tq_id);
                     });
                 }
             }

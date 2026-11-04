@@ -443,18 +443,17 @@ export default function LearningPage() {
 
             if (validHwIds.length > 0) {
               const { data: hwAns } = await supabase.from('student_homework_answer')
-                .select('tq_id, question_id')
+                .select('tq_id')
                 .eq('student_id', st.id)
                 .in('homework_id', validHwIds)
                 .in('grading_code', ['X', 'TX', '☆', 'B']);
                 
               if (hwAns && hwAns.length > 0) {
-                const tqIds = hwAns.map(a => a.tq_id).filter(Boolean);
+                const tqIds = hwAns.map((a: any) => a.tq_id).filter(Boolean);
                 if (tqIds.length > 0) {
                   const { data: tqs } = await supabase.from('textbook_question').select('question_id').in('tq_id', tqIds);
-                  tqs?.forEach(t => { if(t.question_id) targetQids.add(t.question_id); });
+                  tqs?.forEach((t: any) => { if(t.question_id) targetQids.add(t.question_id); });
                 }
-                hwAns.forEach(a => { if(a.question_id) targetQids.add(a.question_id); });
               }
             }
           }
