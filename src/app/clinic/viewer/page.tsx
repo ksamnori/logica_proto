@@ -492,9 +492,13 @@ export default function ClinicViewer() {
   };
 
   const toggleAnswerMode = () => {
-    const current = getAnswerMode(currentQIndex, questions[currentQIndex]);
+    const qCur = questions[currentQIndex];
+    const current = getAnswerMode(currentQIndex, qCur);
     const mode = current === 'pen' ? 'keypad' : 'pen';
-    if (mode === 'keypad' && !isKeypadEnterable(questions[currentQIndex]?.answer)) return;
+    if (mode === 'keypad' && !isKeypadEnterable(qCur?.answer)) {
+      alert("이 문제는 수식이나 문자가 포함되어 있어 손글씨(펜)로만 답을 작성할 수 있습니다.");
+      return;
+    }
     answerModes.current[currentQIndex] = mode;
     studentAnswers.current[currentQIndex] = mode === 'pen' ? (studentDrawings.current[currentQIndex] || null) : (keypadAnswers.current[currentQIndex] || null);
     forceUpdate();
@@ -663,8 +667,8 @@ export default function ClinicViewer() {
     const isSubj = !isObjectiveQuestion(qItem);
     const mode = getAnswerMode(idx, qItem);
     if (isSubj && mode === 'pen') { await ensurePenGraded(idx); return !!penGradeCache.current[idx]; }
-    if (isSubj) return keypadAnswersMatch(studentAnswers.current[idx], qItem.answer);
-    return mcAnswersMatch(studentAnswers.current[idx], qItem.answer);
+    if (isSubj) return keypadAnswersMatch(studentAnswers.current[idx], qItem.answer) || mcAnswersMatch(studentAnswers.current[idx], qItem.answer);
+    return mcAnswersMatch(studentAnswers.current[idx], qItem.answer) || keypadAnswersMatch(studentAnswers.current[idx], qItem.answer);
   }, [questions, ensurePenGraded]);
 
   useEffect(() => {
@@ -843,8 +847,8 @@ export default function ClinicViewer() {
         gradingMeta = await gradeHandwrittenAnswerWithGemini(myAns, qItem.answer, qItem.questionText);
         isCorrect = !!gradingMeta.is_correct;
       } catch (err: any) { setIsSubmitting(false); alert('채점 중 문제 발생:\n' + err.message); return; }
-    } else if (isSubjective) { isCorrect = keypadAnswersMatch(myAns, qItem.answer); } 
-    else { isCorrect = mcAnswersMatch(myAns, qItem.answer); }
+    } else if (isSubjective) { isCorrect = keypadAnswersMatch(myAns, qItem.answer) || mcAnswersMatch(myAns, qItem.answer); } 
+    else { isCorrect = mcAnswersMatch(myAns, qItem.answer) || keypadAnswersMatch(myAns, qItem.answer); }
 
     lastGradingContextRef.current = useAI ? { idx: currentQIndex, uid: qItem.uid, q: qItem, imageDataUrl: myAns, gradingMeta } : null;
     const gotTaHint = !!taHintState.current[currentQIndex];

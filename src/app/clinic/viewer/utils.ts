@@ -62,11 +62,17 @@ export const CIRCLED_DIGITS = ['①', '②', '③', '④', '⑤', '⑥', '⑦', 
 export const isObjectiveQuestion = (q: any) => {
   if (!q) return false;
   if (q.options && q.options.length > 0) return true;
-  const ans = String(q.answer ?? '').trim().replace(/\$/g, '').trim();
-  return CIRCLED_DIGITS.includes(ans);
+  return false;
 };
 
 export const matchLeadingKeypadToken = (s: string): { token: string; value: number } | null => {
+  if (s && s.length > 0) {
+    const cIdx = CIRCLED_DIGITS.indexOf(s[0]);
+    if (cIdx !== -1) {
+      const tokMatch = s.match(/^[①②③④⑤⑥⑦⑧⑨⑩]\s*번?/);
+      return { token: tokMatch ? tokMatch[0] : s[0], value: cIdx + 1 };
+    }
+  }
   let m = s.match(/^(-?\d+)\\d?frac\s*\{\s*(-?\d+)\s*\}\s*\{\s*(-?\d+)\s*\}/);
   if (m) {
     const whole = parseFloat(m[1]), num = parseFloat(m[2]), den = parseFloat(m[3]);
