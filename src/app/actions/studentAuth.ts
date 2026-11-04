@@ -29,20 +29,36 @@ export async function searchStudentsByDigits(code: string) {
   if (!code || code.length !== 4) return { success: false, data: [] };
 
   try {
-    const { data: studentMatch } = await supabaseAdmin
-      .from("student")
-      .select("student_id, name, grade, phone, parent(phone), enrollment(status, end_date, class(name))")
-      .like("phone", `%${code}%`);
+    const [studentRes, parentRes1, parentRes2, parentRes3] = await Promise.all([
+      supabaseAdmin
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("phone", `%${code}%`),
+      supabaseAdmin
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent!inner(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("parent.phone", `%${code}%`),
+      supabaseAdmin
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent!inner(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("parent.phone_2", `%${code}%`),
+      supabaseAdmin
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent!inner(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("parent.phone_3", `%${code}%`),
+    ]);
 
-    const { data: parentMatch } = await supabaseAdmin
-      .from("student")
-      .select("student_id, name, grade, phone, parent!inner(phone), enrollment(status, end_date, class(name))")
-      .like("parent.phone", `%${code}%`);
-
-    const merged = [...(studentMatch || []), ...(parentMatch || [])];
+    const merged = [
+      ...(studentRes.data || []),
+      ...(parentRes1.data || []),
+      ...(parentRes2.data || []),
+      ...(parentRes3.data || []),
+    ];
     const uniqueMap = new Map();
 
     merged.forEach((item: any) => {
+      if (item.status === "퇴원") return;
+
       const extractCleanDigits = (phoneStr: string) => {
         if (!phoneStr) return "";
         const withoutSuffix = phoneStr.replace(/-\d{1,2}$/, "");
@@ -50,23 +66,20 @@ export async function searchStudentsByDigits(code: string) {
       };
 
       const sPhoneCleaned = extractCleanDigits(item.phone);
-      
-      let rawPPhone = "";
-      const parentObj = item.parent;
-      if (parentObj && !Array.isArray(parentObj)) {
-        rawPPhone = parentObj.phone || "";
-      } else if (Array.isArray(parentObj)) {
-        rawPPhone = parentObj[0]?.phone || "";
-      }
-      const pPhoneCleaned = extractCleanDigits(rawPPhone);
+      const parentObj = Array.isArray(item.parent) ? item.parent[0] : item.parent;
+      const pPhones = [
+        extractCleanDigits(parentObj?.phone || ""),
+        extractCleanDigits(parentObj?.phone_2 || ""),
+        extractCleanDigits(parentObj?.phone_3 || ""),
+      ].filter(Boolean);
 
       const isStudentMatch = sPhoneCleaned.endsWith(code);
-      const isParentMatch = pPhoneCleaned.endsWith(code);
+      const isParentMatch = pPhones.some((p) => p.endsWith(code));
 
       if (isStudentMatch || isParentMatch) {
         const classNames = (item.enrollment || [])
           .filter((e: any) => !isEndedEnrollment(e))
-          .map((e: any) => e.class?.name)
+          .map((e: any) => (Array.isArray(e.class) ? e.class[0]?.name : e.class?.name))
           .filter(Boolean);
 
         uniqueMap.set(item.student_id, {

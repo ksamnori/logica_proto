@@ -334,10 +334,97 @@ export default function StudentKioskLogin() {
     setNewPinInput(prev => prev.slice(0, -1));
   };
 
+  const fallbackSearchByClient = async (code: string) => {
+    const [sRes, pRes1, pRes2, pRes3] = await Promise.all([
+      supabaseClient
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("phone", `%${code}%`),
+      supabaseClient
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent!inner(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("parent.phone", `%${code}%`),
+      supabaseClient
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent!inner(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("parent.phone_2", `%${code}%`),
+      supabaseClient
+        .from("student")
+        .select("student_id, name, grade, phone, status, parent!inner(phone, phone_2, phone_3), enrollment(status, end_date, class(name))")
+        .like("parent.phone_3", `%${code}%`),
+    ]);
+
+    const merged = [
+      ...(sRes.data || []),
+      ...(pRes1.data || []),
+      ...(pRes2.data || []),
+      ...(pRes3.data || []),
+    ];
+    const uniqueMap = new Map();
+    const extractCleanDigits = (phoneStr: string) => {
+      if (!phoneStr) return "";
+      return phoneStr.replace(/-\d{1,2}$/, "").replace(/[^0-9]/g, "");
+    };
+
+    merged.forEach((item: any) => {
+      if (item.status === "퇴원") return;
+      const sPhoneCleaned = extractCleanDigits(item.phone);
+      const parentObj = Array.isArray(item.parent) ? item.parent[0] : item.parent;
+      const pPhones = [
+        extractCleanDigits(parentObj?.phone || ""),
+        extractCleanDigits(parentObj?.phone_2 || ""),
+        extractCleanDigits(parentObj?.phone_3 || ""),
+      ].filter(Boolean);
+
+      if (sPhoneCleaned.endsWith(code) || pPhones.some((p) => p.endsWith(code))) {
+        const classNames = (item.enrollment || [])
+          .filter((e: any) => !isEndedEnrollment(e))
+          .map((e: any) => (Array.isArray(e.class) ? e.class[0]?.name : e.class?.name))
+          .filter(Boolean);
+
+        uniqueMap.set(item.student_id, {
+          student_id: item.student_id,
+          name: item.name,
+          grade: item.grade,
+          classNames: classNames.length > 0 ? classNames : ["반 미배정"],
+        });
+      }
+    });
+
+    const matches = Array.from(uniqueMap.values());
+    const GRADE_ORDER: Record<string, number> = { '고3': 1, '고2': 2, '고1': 3, '중3': 4, '중2': 5, '중1': 6, '초6': 7, '초5': 8, '초4': 9, '초3': 10, '초2': 11, '초1': 12 };
+    matches.sort((a, b) => (GRADE_ORDER[a.grade] || 99) - (GRADE_ORDER[b.grade] || 99));
+    return matches;
+  };
+
   const searchDBAndProcess = async (code: string) => {
     setIsProcessing(true);
     try {
-      const result = await searchStudentsByDigits(code);
+      let result: any = null;
+      try {
+        result = await searchStudentsByDigits(code);
+      } catch (firstErr) {
+        // 배포 직후 구버전 탭(Failed to find Server Action) 또는 일시적 네트워크 지연 시 1회 재시도 후 클라이언트 직접 조회 폴백
+        try {
+          await new Promise((r) => setTimeout(r, 250));
+          result = await searchStudentsByDigits(code);
+        } catch (secondErr: any) {
+          const fallbackMatches = await fallbackSearchByClient(code);
+          if (fallbackMatches.length > 0) {
+            result = { success: true, data: fallbackMatches };
+          } else {
+            const errMsg = String(secondErr?.message || secondErr || "");
+            if (errMsg.includes("Server Action") || errMsg.includes("fetch") || errMsg.includes("Failed")) {
+              setIsProcessing(false);
+              setDigits("");
+              window.location.reload();
+              return;
+            }
+            throw secondErr;
+          }
+        }
+      }
+
       setIsProcessing(false);
 
       if (!result?.success || !result?.data || result.data.length === 0) {
@@ -350,8 +437,9 @@ export default function StudentKioskLogin() {
       setStep("profile"); 
     } catch (e) {
       setIsProcessing(false);
-      alert(`서버 통신 오류가 발생했습니다.\n로컬 IP 접속 보안 설정(next.config.ts)을 확인하세요.\n${e}`);
+      alert("일시적인 네트워크 지연이 발생했습니다. 화면을 새로고침한 뒤 다시 시도해주세요.");
       setDigits("");
+      window.location.reload();
     }
   };
 
