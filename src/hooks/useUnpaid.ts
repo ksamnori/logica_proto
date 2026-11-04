@@ -135,7 +135,8 @@ export function useUnpaid() {
         // 💡 알림(Notification) 테이블은 전 지점 공용으로 쏴주는 테이블이라 tenant_id 꼬리표가 따로 없습니다.
         // 따라서 기존대로 보내기만 하면 됩니다.
         return {
-          receiver_phone: studentContact, 
+          target_name: studentName,
+          target_phone: studentContact,
           noti_type: 'UNPAID_ALERT',
           message_content: `[BILL_ID:${item.billing_id}] ` + msg,
           status: sendTime === 'reserve' ? '대기' : '발송완료',

@@ -898,44 +898,25 @@ export async function getStudentMessageHistoryAction({
 
     const { rawList, allVariants } = formatPhoneVariants(phoneCandidates);
 
-    // 2. 학원 DB (notification_log) 조회
+    // 2. 학원 DB (notification_log) 조회 (실제 컬럼명인 target_phone / target_name 기준 조회로 42703 에러 원천 차단)
     let dbLogs: any[] = [];
     const orFilters: string[] = [];
     allVariants.forEach((v) => {
       orFilters.push(`target_phone.eq.${v}`);
-      orFilters.push(`receiver_phone.eq.${v}`);
     });
     if (studentName && studentName.trim()) {
       orFilters.push(`target_name.ilike.%${studentName.trim()}%`);
     }
 
     if (orFilters.length > 0) {
-      const { data: rows, error: dbErr } = await supabaseAdmin
+      const { data: rows } = await supabaseAdmin
         .from("notification_log")
         .select("*")
         .or(orFilters.join(","))
         .order("created_at", { ascending: false })
         .limit(200);
 
-      if (dbErr) {
-        // receiver_phone 컬럼이 없는 스키마일 경우 target_phone과 target_name만으로 재시도
-        const fallbackFilters: string[] = [];
-        allVariants.forEach((v) => fallbackFilters.push(`target_phone.eq.${v}`));
-        if (studentName && studentName.trim()) {
-          fallbackFilters.push(`target_name.ilike.%${studentName.trim()}%`);
-        }
-        if (fallbackFilters.length > 0) {
-          const { data: fbRows } = await supabaseAdmin
-            .from("notification_log")
-            .select("*")
-            .or(fallbackFilters.join(","))
-            .order("created_at", { ascending: false })
-            .limit(200);
-          dbLogs = fbRows || [];
-        }
-      } else {
-        dbLogs = rows || [];
-      }
+      dbLogs = rows || [];
     }
 
     const formattedDbLogs = dbLogs.map((row: any, idx: number) => {

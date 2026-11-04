@@ -172,7 +172,7 @@ export function useBilling() {
         if (action === 'issue_send' && bData) {
           const notis = bData.map(b => {
             const t = targets.find((x: any) => x.student_id === b.student_id && x.class_id === b.class_id) || {};
-            return { receiver_phone: t.contact || '01000000000', noti_type: 'BILLING_ALERT', message_content: `[BILL_ID:${b.billing_id}] 청구서 발행`, status: '발송완료' };
+            return { target_name: t.student_name || '학부모', target_phone: t.contact || '01000000000', noti_type: 'BILLING_ALERT', message_content: `[BILL_ID:${b.billing_id}] 청구서 발행`, status: '발송완료' };
           });
           await supabase.from('notification_log').insert(notis);
         }
@@ -183,7 +183,7 @@ export function useBilling() {
         await supabase.from('academy_billing').delete().in('billing_id', ids);
       }
       else if (action === 'send') {
-        const notis = targets.map((t: any) => ({ receiver_phone: t.contact || '01000000000', noti_type: 'BILLING_ALERT', message_content: `[BILL_ID:${t.billing_id}] 청구서 발행`, status: '발송완료' }));
+        const notis = targets.map((t: any) => ({ target_name: t.student_name || '학부모', target_phone: t.contact || '01000000000', noti_type: 'BILLING_ALERT', message_content: `[BILL_ID:${t.billing_id}] 청구서 발행`, status: '발송완료' }));
         await supabase.from('notification_log').insert(notis);
       }
       else if (action === 'pay') {

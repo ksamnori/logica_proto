@@ -53,7 +53,7 @@ export async function sendBulkMessages(messages: SendMessageParams[]) {
 
     // 3. 발송 완료 후 Supabase `notification_log` 테이블에 기록 저장
     const logInserts = messages.map((msg) => ({
-      receiver_phone: msg.receiverPhone,
+      target_phone: msg.receiverPhone,
       noti_type: msg.isAlimtalk ? "알림톡" : "문자(LMS)",
       message_content: msg.messageContent,
       status: "성공", // 솔라피 응답에 따라 상세 분기 가능
