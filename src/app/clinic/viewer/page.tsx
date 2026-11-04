@@ -283,8 +283,9 @@ export default function ClinicViewer() {
   useEffect(() => {
     if (!studentInfo.id || params.round === 0) return;
     const fetchSourceType = async () => {
-      if (params.assignmentId) {
-        const { data } = await supabaseClient.from('exam_assignment').select('exam_master!inner(exam_type)').eq('assignment_id', params.assignmentId).maybeSingle();
+      const targetAssignId = questions[0]?.examAssignmentId || params.assignmentId;
+      if (targetAssignId) {
+        const { data } = await supabaseClient.from('exam_assignment').select('exam_master!inner(exam_type)').eq('assignment_id', targetAssignId).maybeSingle();
         if (data && data.exam_master) {
           const m = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
           if (m.exam_type) {
@@ -296,7 +297,7 @@ export default function ClinicViewer() {
       }
     };
     fetchSourceType();
-  }, [params, studentInfo.id]);
+  }, [params, studentInfo.id, questions]);
 
   useEffect(() => {
     if (callCooldownUntil <= 0) return;
@@ -677,9 +678,75 @@ export default function ClinicViewer() {
     return () => { ensurePenGraded(leavingIdx); };
   }, [currentQIndex, isTimedRound, isStarted, ensurePenGraded]);
 
+  // 🌟 student_answer_exam_assignment_id_fkey (23503) 외래키 위반 방지 헬퍼:
+  // 1) URL의 params.assignmentId 대신 실제 로드된 문항의 qItem.examAssignmentId를 우선 사용하고,
+  // 2) 풀이 도중 강사의 재출제/삭제 등으로 기존 assignment_id가 exam_assignment에서 사라진 경우
+  //    현재 학생에게 새로 배정된 동일 시험지(또는 동일 유형)의 유효한 assignment_id를 자동 탐색하여 교체합니다.
+  const resolveValidExamAssignmentId = async (preferredId?: string | number | null): Promise<string | null> => {
+    const rawCandidate = preferredId || questions[0]?.examAssignmentId || params.assignmentId;
+    const candidate = rawCandidate ? String(rawCandidate).trim() : '';
+    if (!candidate || !studentInfo.id) return null;
+
+    const { data: existing } = await supabaseClient
+      .from('exam_assignment')
+      .select('assignment_id')
+      .eq('assignment_id', candidate)
+      .maybeSingle();
+
+    if (existing?.assignment_id) {
+      return String(existing.assignment_id);
+    }
+
+    const { data: fallbackRows } = await supabaseClient
+      .from('exam_assignment')
+      .select('assignment_id, status, created_at, exam_master!inner(title, exam_type)')
+      .eq('student_id', studentInfo.id)
+      .order('created_at', { ascending: false })
+      .limit(15);
+
+    const rows = fallbackRows || [];
+    const targetTitle = String(globalExamTitle || questions[0]?.source || '').replace(/\s*\([0-9]+분\s*제한\)\s*$/, '').trim();
+    const targetType = String(sourceTypeRef.current || '').trim();
+    const isActiveStatus = (st: any) => !['채점완료', '완료', '최종완료'].includes(String(st || '').trim());
+
+    let matched = rows.find((r: any) => {
+      const m = Array.isArray(r.exam_master) ? r.exam_master[0] : r.exam_master;
+      const t = String(m?.title || '').trim();
+      return targetTitle && t === targetTitle && (params.retry || isActiveStatus(r.status));
+    });
+
+    if (!matched && targetType) {
+      matched = rows.find((r: any) => {
+        const m = Array.isArray(r.exam_master) ? r.exam_master[0] : r.exam_master;
+        const ty = String(m?.exam_type || '').trim();
+        return ty === targetType && (params.retry || isActiveStatus(r.status));
+      });
+    }
+
+    if (matched?.assignment_id) {
+      const newAssignId = String(matched.assignment_id);
+      questions.forEach((qItem: any) => {
+        if (!qItem.examAssignmentId || String(qItem.examAssignmentId) === candidate) {
+          qItem.examAssignmentId = newAssignId;
+        }
+      });
+      if (examAssignmentTotalsRef.current[candidate] !== undefined && examAssignmentTotalsRef.current[newAssignId] === undefined) {
+        examAssignmentTotalsRef.current[newAssignId] = examAssignmentTotalsRef.current[candidate];
+      }
+      return newAssignId;
+    }
+
+    return null;
+  };
+
   const persistExamAnswersToDB = async (): Promise<number> => {
-    if (!isTimedRound || !params.assignmentId) return 0;
-    await supabaseClient.from('student_answer').delete().eq('exam_assignment_id', params.assignmentId).eq('student_id', studentInfo.id);
+    const rawAssignId = questions[0]?.examAssignmentId || params.assignmentId;
+    if (!isTimedRound || !rawAssignId) return 0;
+
+    const validAssignId = await resolveValidExamAssignmentId(rawAssignId);
+    if (validAssignId) {
+      await supabaseClient.from('student_answer').delete().eq('exam_assignment_id', validAssignId).eq('student_id', studentInfo.id);
+    }
 
     const inserts: any[] = []; const incUpserts: any[] = []; let totalScore = 0;
     for (let idx = 0; idx < questions.length; idx++) {
@@ -689,20 +756,26 @@ export default function ClinicViewer() {
       const score = isCorrect ? (qItem.assigned_score ?? (100 / (totalQuestionsInRoundRef.current || 1))) : 0;
       totalScore += score;
 
-      inserts.push({ exam_assignment_id: params.assignmentId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
+      if (validAssignId) {
+        inserts.push({ exam_assignment_id: validAssignId, student_id: studentInfo.id, question_id: qItem.question_id, student_input: ans, is_correct: isCorrect, earned_score: score, grading_code: isCorrect ? 'O' : 'X', grading_status: '대기' });
+      }
       if (!isCorrect && qItem.question_id) { incUpserts.push({ student_id: studentInfo.id, question_id: qItem.question_id, source_type: sourceTypeRef.current, status: ans === '미입력' ? 'B' : 'X', resolved_at: null }); }
     }
 
-    if (inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
+    if (validAssignId && inserts.length > 0) await supabaseClient.from('student_answer').insert(inserts);
     if (incUpserts.length > 0) await supabaseClient.from('student_incorrect_record').upsert(incUpserts, { onConflict: 'student_id, question_id' });
     return roundScore(totalScore);
   };
   persistExamAnswersToDBRef.current = persistExamAnswersToDB;
 
   const saveExamResultsToDB = async () => {
-    if (!isTimedRound || !params.assignmentId) return;
+    const rawAssignId = questions[0]?.examAssignmentId || params.assignmentId;
+    if (!isTimedRound || !rawAssignId) return;
     const totalScore = await persistExamAnswersToDB();
-    await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', params.assignmentId);
+    const validAssignId = await resolveValidExamAssignmentId(questions[0]?.examAssignmentId || params.assignmentId);
+    if (validAssignId) {
+      await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', validAssignId);
+    }
   };
 
   const processSessionEnd = async () => {
@@ -875,7 +948,8 @@ export default function ClinicViewer() {
       qBoxStatus.current[currentQIndex] = 'wrong_red';
       if (qItem.record_id) { await bumpIncorrectRecord(qItem.record_id, gotTaHint ? 'TX' : 'X', false); await appendToExistingIncorrectPrint(qItem); }
       if (!isTimedRound) {
-        const assignId = qItem.examAssignmentId || params.assignmentId;
+        const rawAssignId = qItem.examAssignmentId || params.assignmentId;
+        const assignId = rawAssignId ? await resolveValidExamAssignmentId(rawAssignId) : null;
         
         if (assignId) {
             const gradingCode = gotTaHint ? 'TX' : 'X';
@@ -898,6 +972,9 @@ export default function ClinicViewer() {
             if (existingAns) await supabaseClient.from('student_answer').update(ansPayload).eq('answer_id', existingAns.answer_id);
             else await supabaseClient.from('student_answer').insert(ansPayload);
             
+            if (!qItem.record_id && qItem.question_id) { qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode); await appendToExistingIncorrectPrint(qItem); }
+        } else if (rawAssignId) {
+            const gradingCode = gotTaHint ? 'TX' : 'X';
             if (!qItem.record_id && qItem.question_id) { qItem.record_id = await upsertIncorrectRecord(qItem, gradingCode); await appendToExistingIncorrectPrint(qItem); }
         } else if (qItem.homework_id) {
             const { data: existing } = await supabaseClient.from('student_homework_answer').select('hw_answer_id, wrong_attempts_log').eq('homework_id', qItem.homework_id).eq('student_id', studentInfo.id).eq('tq_id', qItem.tq_id).maybeSingle();
@@ -972,7 +1049,8 @@ export default function ClinicViewer() {
     }
 
     if (!isTimedRound) {
-        const assignId = qItem.examAssignmentId || params.assignmentId;
+        const rawAssignId = qItem.examAssignmentId || params.assignmentId;
+        const assignId = rawAssignId ? await resolveValidExamAssignmentId(rawAssignId) : null;
         
         if (assignId) {
             const gradingCode = helped ? 'TO' : (params.retry || wasWrongBefore ? 'RO' : 'O');
@@ -1032,8 +1110,11 @@ export default function ClinicViewer() {
       setEmptyState({ title: '모든 문제를 해결했습니다!', desc: '수고하셨습니다. 이제 홈으로 돌아가세요.', awaited: false });
       sendAction('submit', { score: correctSolvedCountRef.current });
       
-      if (params.retry && params.assignmentId) {
-          await supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', params.assignmentId);
+      if (params.retry) {
+          const retryAssignId = await resolveValidExamAssignmentId(questions[0]?.examAssignmentId || params.assignmentId);
+          if (retryAssignId) {
+              await supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', retryAssignId);
+          }
       }
       
       try { localStorage.setItem(`logica_clinic_${studentInfo.id}_${params.className}_round${params.round}_score`, JSON.stringify({ correct: correctSolvedCountRef.current, total: totalQuestionsInRoundRef.current, savedAt: new Date().toISOString() })); } catch(e){}
@@ -1182,8 +1263,11 @@ export default function ClinicViewer() {
                 <button 
                   onClick={async () => {
                     setIsSubmitting(true);
-                    if (params.retry && params.assignmentId) {
-                        await supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', params.assignmentId);
+                    if (params.retry) {
+                        const retryAssignId = await resolveValidExamAssignmentId(questions[0]?.examAssignmentId || params.assignmentId);
+                        if (retryAssignId) {
+                            await supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', retryAssignId);
+                        }
                     }
                     await processSessionEnd();
                     leaveAndGoHome();

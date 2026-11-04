@@ -195,21 +195,57 @@ export async function generateIncorrectClinic(params: {
             return true;
         });
             
-        if (oldPrints && oldPrints.length > 0) {
-            const oldAssignIds = oldPrints.map((p: any) => p.assignment_id);
-            const oldExamIds = oldPrints.map((p: any) => p.exam_id);
-            await supabaseAdmin.from('student_answer').delete().in('exam_assignment_id', oldAssignIds);
-            await supabaseAdmin.from('exam_assignment').delete().in('assignment_id', oldAssignIds);
-            await supabaseAdmin.from('exam_item').delete().in('exam_id', oldExamIds);
-            await supabaseAdmin.from('exam_master').delete().in('exam_id', oldExamIds);
-        }
-
         let finalInstructorId = targetInstructorId;
         if (!finalInstructorId) {
             finalInstructorId = await getFallbackInstructorId(supabaseAdmin);
         }
         if (!finalInstructorId) {
             throw new Error("시험지를 배부할 강사(instructor_id) 정보를 DB에서 찾을 수 없어 통합 오답 생성을 중단했습니다.");
+        }
+
+        // 🌟 기존 미완료 [통합] 오답 클리닉이 있으면 첫 번째 배정(assignment_id)을 삭제하지 않고 재사용하여
+        // 중복 클릭·재진입·다중 탭에서 student_answer_exam_assignment_id_fkey (23503) 외래키 에러가 발생하는 것을 원천 차단
+        if (oldPrints && oldPrints.length > 0) {
+            const primaryPrint = oldPrints[0];
+            const extraPrints = oldPrints.slice(1);
+
+            if (extraPrints.length > 0) {
+                const extraAssignIds = extraPrints.map((p: any) => p.assignment_id);
+                const extraExamIds = extraPrints.map((p: any) => p.exam_id);
+                await supabaseAdmin.from('student_answer').delete().in('exam_assignment_id', extraAssignIds);
+                await supabaseAdmin.from('exam_assignment').delete().in('assignment_id', extraAssignIds);
+                await supabaseAdmin.from('exam_item').delete().in('exam_id', extraExamIds);
+                await supabaseAdmin.from('exam_master').delete().in('exam_id', extraExamIds);
+            }
+
+            await supabaseAdmin.from('student_answer').delete().eq('exam_assignment_id', primaryPrint.assignment_id);
+            await supabaseAdmin.from('exam_item').delete().eq('exam_id', primaryPrint.exam_id);
+
+            await supabaseAdmin.from('exam_master').update({
+                title: `[통합] ${studentName} 오답 클리닉`,
+                sub_title: '누적 오답 모음',
+                total_questions: uniqueQids.length,
+                instructor_id: finalInstructorId,
+            }).eq('exam_id', primaryPrint.exam_id);
+
+            const intScore = Math.round(100 / (uniqueQids.length || 1));
+            const examItems = uniqueQids.map((qId, idx) => ({
+                exam_id: primaryPrint.exam_id,
+                question_id: String(qId),
+                sort_order: idx + 1,
+                assigned_score: intScore
+            }));
+
+            for (let i = 0; i < examItems.length; i += 100) {
+                await supabaseAdmin.from('exam_item').insert(examItems.slice(i, i + 100));
+            }
+
+            await supabaseAdmin.from('exam_assignment').update({
+                class_id: targetClassId,
+                status: '미응시'
+            }).eq('assignment_id', primaryPrint.assignment_id);
+
+            return { success: true, assignmentId: primaryPrint.assignment_id };
         }
 
         const { data: masterData, error: masterErr } = await supabaseAdmin.from('exam_master').insert({
