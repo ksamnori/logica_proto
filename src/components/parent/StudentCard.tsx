@@ -1,7 +1,7 @@
 // src/components/parent/StudentCard.tsx
 "use client";
 
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { supabase } from "@/lib/supabase";
 import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
@@ -509,11 +509,27 @@ export default function StudentCard({
   const [isLogsLoading, setIsLogsLoading] = useState(false);
   const [showAllLogs, setShowAllLogs] = useState(false);
 
-  // 성적 데이터 상태
+  // 성적 데이터 상태 및 중복 호출 방지 캐시
   const [examResults, setExamResults] = useState<any[]>([]);
   const [categoryAnalysis, setCategoryAnalysis] = useState<any[]>([]);
   const [schoolExams, setSchoolExams] = useState<any[]>([]);
   const [isExamLoading, setIsExamLoading] = useState(false);
+  const examBundlePromiseRef = useRef<{ key: string; promise: Promise<any> } | null>(null);
+  const examDataLoadedKeyRef = useRef<string | null>(null);
+
+  const fetchExamBundleCached = (forceRefresh = false) => {
+    const cacheKey = `${student?.student_id || ""}_${parentId || ""}_${authToken || ""}`;
+    if (!forceRefresh && examBundlePromiseRef.current && examBundlePromiseRef.current.key === cacheKey) {
+      return examBundlePromiseRef.current.promise;
+    }
+    const promise = getStudentPortalExamDataAction({
+      parentId,
+      authToken,
+      studentId: student.student_id,
+    });
+    examBundlePromiseRef.current = { key: cacheKey, promise };
+    return promise;
+  };
 
   // 🌟 보강 관리 상태
   const [makeups, setMakeups] = useState<any[]>([]);
@@ -564,11 +580,22 @@ export default function StudentCard({
     loadPendingHomework();
   }, [student?.student_id]);
 
-  // 🌟 [첫 화면 요약] 최근 주간테스트 점수 (성적 탭을 열지 않아도 표시)
+  // 🌟 [첫 화면 요약 + 성적 탭 백그라운드 선로딩] 카드 마운트 시 단 1회 호출로 주간테스트·단원성취도·학교시험 모두 선로딩
   useEffect(() => {
-    if (student?.student_id) loadExamResults();
+    if (student?.student_id) {
+      const key = `${student.student_id}_${parentId || ""}_${authToken || ""}`;
+      if (examDataLoadedKeyRef.current !== key) {
+        Promise.all([
+          loadExamResults(),
+          loadCategoryAnalysis(),
+          loadSchoolExams(),
+        ]).then(() => {
+          examDataLoadedKeyRef.current = key;
+        });
+      }
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [student?.student_id]);
+  }, [student?.student_id, parentId, authToken]);
 
   const activeEnrollment = student.enrollment?.find(
     (e: any) => !isEndedEnrollment(e) && unwrap(e.class)?.name
@@ -700,9 +727,13 @@ export default function StudentCard({
     };
   }, [student?.student_id, authToken, parentId, allEnrolledClassIds, authSupabase]);
 
-  // 성적 데이터 로드
+  // 성적 데이터 로드 (마운트 시 이미 선로딩되었으면 로딩 스피너 없이 즉시 표시)
   useEffect(() => {
     if (activeTab === "exam" && student?.student_id) {
+      const key = `${student.student_id}_${parentId || ""}_${authToken || ""}`;
+      if (examDataLoadedKeyRef.current === key) {
+        return;
+      }
       const loadAllExamData = async () => {
         setIsExamLoading(true);
         await Promise.all([
@@ -710,11 +741,12 @@ export default function StudentCard({
           loadCategoryAnalysis(),
           loadSchoolExams(),
         ]);
+        examDataLoadedKeyRef.current = key;
         setIsExamLoading(false);
       };
       loadAllExamData();
     }
-  }, [activeTab, student]);
+  }, [activeTab, student?.student_id, parentId, authToken]);
 
   const loadExamResults = async () => {
     try {
@@ -724,11 +756,7 @@ export default function StudentCard({
       let gcData: any[] = [];
       let allAnswers: any[] = [];
 
-      const actionRes = await getStudentPortalExamDataAction({
-        parentId,
-        authToken,
-        studentId: student.student_id,
-      });
+      const actionRes = await fetchExamBundleCached();
 
       if (actionRes && actionRes.success) {
         validAssignments = actionRes.validAssignments || [];
@@ -977,11 +1005,7 @@ export default function StudentCard({
       let questions: any[] = [];
       const catMap = new Map<string, string>();
 
-      const actionRes = await getStudentPortalExamDataAction({
-        parentId,
-        authToken,
-        studentId: student.student_id,
-      });
+      const actionRes = await fetchExamBundleCached();
 
       if (actionRes && actionRes.success) {
         answers = actionRes.studentAnswersForCategory || [];
@@ -1128,11 +1152,7 @@ export default function StudentCard({
 
   const loadSchoolExams = async () => {
     try {
-      const actionRes = await getStudentPortalExamDataAction({
-        parentId,
-        authToken,
-        studentId: student.student_id,
-      });
+      const actionRes = await fetchExamBundleCached();
       if (actionRes && actionRes.success) {
         setSchoolExams(actionRes.schoolExams || []);
         return;

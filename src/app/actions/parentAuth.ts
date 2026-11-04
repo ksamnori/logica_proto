@@ -775,7 +775,7 @@ export async function getStudentPortalExtraDataAction({
 }
 
 // =========================================================================
-// 📊 학부모 포털: 자녀의 주간테스트 성적, 반 평균, 단원별 성취도, 학교 시험 성적 조회 (RLS 우회 안전 조회)
+// 📊 학부모 포털: 자녀의 주간테스트 성적, 반 평균, 단원별 성취도, 학교 시험 성적 조회 (RLS 우회 + 초고속 병렬 조회)
 // =========================================================================
 
 export async function getStudentPortalExamDataAction({
@@ -825,7 +825,8 @@ export async function getStudentPortalExamDataAction({
       }
     }
 
-    const [{ data: assignments }, { data: schoolExams }] = await Promise.all([
+    // 1단계: 학생 시험 배정 목록 + 학교 시험 성적 + 채점 기준표를 한 번에 병렬 조회
+    const [{ data: assignments }, { data: schoolExams }, { data: gcData }] = await Promise.all([
       supabaseAdmin
         .from("exam_assignment")
         .select(
@@ -840,6 +841,9 @@ export async function getStudentPortalExamDataAction({
         .order("year", { ascending: false })
         .order("semester", { ascending: false })
         .order("exam_type", { ascending: true }),
+      supabaseAdmin
+        .from("master_grading_code")
+        .select("code, description, is_correct, score_ratio, admission_ratio"),
     ]);
 
     const validAssignments = (assignments || [])
@@ -857,7 +861,7 @@ export async function getStudentPortalExamDataAction({
         validAssignments: [],
         allAssignmentsForExams: [],
         examItems: [],
-        gcData: [],
+        gcData: gcData || [],
         allAnswers: [],
         studentAnswersForCategory: [],
         questions: [],
@@ -867,14 +871,10 @@ export async function getStudentPortalExamDataAction({
     }
 
     const examIds = Array.from(new Set(validAssignments.map((a: any) => a.exam_id)));
-    const targetAssignIds = validAssignments.map((a: any) => a.assignment_id);
+    const targetAssignIdSet = new Set(validAssignments.map((a: any) => String(a.assignment_id)));
 
-    const [
-      { data: allAssignmentsForExams },
-      { data: examItems },
-      { data: gcData },
-      { data: studentAnswersForCategory },
-    ] = await Promise.all([
+    // 2단계: 같은 시험지를 본 전체 배정 목록 + 시험 문항(question_db.taxonomy_id 조인 포함)을 한 번에 병렬 조회
+    const [{ data: allAssignmentsForExams }, { data: rawExamItems }] = await Promise.all([
       supabaseAdmin
         .from("exam_assignment")
         .select("assignment_id, exam_id")
@@ -882,84 +882,119 @@ export async function getStudentPortalExamDataAction({
         .not("status", "in", '("응시전","미응시","예정","대기")'),
       supabaseAdmin
         .from("exam_item")
-        .select("exam_id, question_id, sort_order, assigned_score")
+        .select("exam_id, question_id, sort_order, assigned_score, question_db(question_id, taxonomy_id)")
         .in("exam_id", examIds)
         .order("sort_order"),
-      supabaseAdmin
-        .from("master_grading_code")
-        .select("code, description, is_correct, score_ratio, admission_ratio"),
-      supabaseAdmin
-        .from("student_answer")
-        .select("question_id, is_correct, grading_code")
-        .in("exam_assignment_id", targetAssignIds),
     ]);
 
-    const allAssignIds = (allAssignmentsForExams || []).map((a: any) => a.assignment_id);
-    let allAnswers: any[] = [];
-    for (let i = 0; i < allAssignIds.length; i += 200) {
-      const chunk = allAssignIds.slice(i, i + 200);
-      const { data: chunkAnswers } = await supabaseAdmin
-        .from("student_answer")
-        .select("exam_assignment_id, question_id, grading_code, earned_score")
-        .in("exam_assignment_id", chunk);
-      if (chunkAnswers) allAnswers = [...allAnswers, ...chunkAnswers];
-    }
+    const examItems = (rawExamItems || []).map((it: any) => ({
+      exam_id: it.exam_id,
+      question_id: it.question_id,
+      sort_order: it.sort_order,
+      assigned_score: it.assigned_score,
+    }));
 
-    const qIds = Array.from(
-      new Set((studentAnswersForCategory || []).map((a: any) => a.question_id).filter(Boolean))
-    );
-    let questions: any[] = [];
-    for (let i = 0; i < qIds.length; i += 200) {
-      const chunk = qIds.slice(i, i + 200);
-      const { data: qData } = await supabaseAdmin
-        .from("question_db")
-        .select("question_id, taxonomy_id")
-        .in("question_id", chunk);
-      if (qData) questions = [...questions, ...qData];
-    }
+    const questionsMap = new Map<string, { question_id: any; taxonomy_id: string }>();
+    (rawExamItems || []).forEach((it: any) => {
+      const qdb = Array.isArray(it.question_db) ? it.question_db[0] : it.question_db;
+      if (qdb && qdb.question_id && qdb.taxonomy_id) {
+        questionsMap.set(String(qdb.question_id), {
+          question_id: qdb.question_id,
+          taxonomy_id: qdb.taxonomy_id,
+        });
+      }
+    });
 
     const d4Codes = new Set<string>();
-    questions.forEach((q: any) => {
-      if (!q.taxonomy_id) return;
+    questionsMap.forEach((q) => {
       const parts = String(q.taxonomy_id).split("-");
       const d4Code = parts.length >= 2 ? parts.slice(0, 2).join("-") : String(q.taxonomy_id);
       if (d4Code) d4Codes.add(d4Code);
     });
 
-    const catMapEntries: [string, string][] = [];
-    await Promise.all(
-      Array.from(d4Codes).map(async (code) => {
-        try {
-          const { data } = await supabaseAdmin
+    const allAssignIds = (allAssignmentsForExams || []).map((a: any) => a.assignment_id);
+    const answerChunks: any[][] = [];
+    for (let i = 0; i < allAssignIds.length; i += 200) {
+      answerChunks.push(allAssignIds.slice(i, i + 200));
+    }
+
+    const uniqueD4List = Array.from(d4Codes).filter(Boolean);
+    const orFilter = uniqueD4List
+      .map((code) => `category_id.eq.${code},category_id.like.${code}-%`)
+      .join(",");
+
+    // 3단계: 모든 학생 답안 청크들과 단원명(master_category)을 단일 라운드트립으로 동시 병렬 조회
+    const [answerChunkResults, catResult] = await Promise.all([
+      Promise.all(
+        answerChunks.map((chunk) =>
+          supabaseAdmin
+            .from("student_answer")
+            .select("exam_assignment_id, question_id, grading_code, earned_score, is_correct")
+            .in("exam_assignment_id", chunk)
+        )
+      ),
+      uniqueD4List.length > 0
+        ? supabaseAdmin
             .from("master_category")
             .select("category_id, depth4")
-            .eq("category_id", code)
-            .limit(1);
-          if (data && data.length > 0 && data[0].depth4) {
-            catMapEntries.push([code, data[0].depth4]);
-            return;
-          }
-          const { data: likeData } = await supabaseAdmin
-            .from("master_category")
-            .select("category_id, depth4")
-            .like("category_id", `${code}-%`)
-            .limit(1);
-          if (likeData && likeData.length > 0 && likeData[0].depth4) {
-            catMapEntries.push([code, likeData[0].depth4]);
-          }
-        } catch {}
-      })
+            .or(orFilter)
+        : Promise.resolve({ data: [] as any[] }),
+    ]);
+
+    const allAnswers: any[] = [];
+    answerChunkResults.forEach((res: any) => {
+      if (res?.data) allAnswers.push(...res.data);
+    });
+
+    // 해당 학생 본인의 답안만 필터링하여 단원별 성취도 분석에 사용 (중복 DB 조회 제거)
+    const studentAnswersForCategory = allAnswers.filter((a: any) =>
+      targetAssignIdSet.has(String(a.exam_assignment_id))
     );
+
+    // 만약 exam_item에 없던 question_id가 답안에 있는 경우에만 보조 조회
+    const missingQIds = Array.from(
+      new Set(
+        studentAnswersForCategory
+          .map((a: any) => a.question_id)
+          .filter((qid: any) => qid && !questionsMap.has(String(qid)))
+      )
+    );
+    if (missingQIds.length > 0) {
+      const { data: extraQs } = await supabaseAdmin
+        .from("question_db")
+        .select("question_id, taxonomy_id")
+        .in("question_id", missingQIds);
+      (extraQs || []).forEach((q: any) => {
+        if (q?.question_id && q?.taxonomy_id) {
+          questionsMap.set(String(q.question_id), q);
+          const parts = String(q.taxonomy_id).split("-");
+          const d4Code = parts.length >= 2 ? parts.slice(0, 2).join("-") : String(q.taxonomy_id);
+          if (d4Code) d4Codes.add(d4Code);
+        }
+      });
+    }
+
+    const catMapEntries: [string, string][] = [];
+    const resolvedCodes = new Set<string>();
+    (catResult?.data || []).forEach((row: any) => {
+      if (!row?.category_id || !row?.depth4) return;
+      const parts = String(row.category_id).split("-");
+      const d4Code = parts.length >= 2 ? parts.slice(0, 2).join("-") : String(row.category_id);
+      if (d4Codes.has(d4Code) && !resolvedCodes.has(d4Code)) {
+        resolvedCodes.add(d4Code);
+        catMapEntries.push([d4Code, row.depth4]);
+      }
+    });
 
     return {
       success: true,
       validAssignments,
       allAssignmentsForExams: allAssignmentsForExams || [],
-      examItems: examItems || [],
+      examItems,
       gcData: gcData || [],
       allAnswers,
-      studentAnswersForCategory: studentAnswersForCategory || [],
-      questions,
+      studentAnswersForCategory,
+      questions: Array.from(questionsMap.values()),
       catMapEntries,
       schoolExams: schoolExams || [],
     };
