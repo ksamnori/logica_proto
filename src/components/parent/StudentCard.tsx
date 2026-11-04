@@ -5,7 +5,7 @@ import React, { useState, useEffect, useMemo } from "react";
 import { supabase } from "@/lib/supabase";
 import { createClient } from "@supabase/supabase-js";
 import { useRouter } from "next/navigation";
-import { getStudentPortalExtraDataAction } from "@/app/actions/parentAuth";
+import { getStudentPortalExtraDataAction, getStudentPortalExamDataAction } from "@/app/actions/parentAuth";
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
 
@@ -718,53 +718,89 @@ export default function StudentCard({
 
   const loadExamResults = async () => {
     try {
-      const { data: assignments } = await supabase
-        .from("exam_assignment")
-        .select(
-          "assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type, layout_settings)"
-        )
-        .eq("student_id", student.student_id)
-        .order("created_at", { ascending: false });
+      let validAssignments: any[] = [];
+      let allAssignmentsForExams: any[] = [];
+      let examItems: any[] = [];
+      let gcData: any[] = [];
+      let allAnswers: any[] = [];
 
-      const validAssignments = (assignments || [])
-        .filter((a: any) => {
-          if (["응시전", "미응시", "예정", "대기"].includes(a.status))
-            return false;
-          const master = Array.isArray(a.exam_master)
-            ? a.exam_master[0]
-            : a.exam_master;
-          if (master?.exam_type !== "주간테스트") return false;
-          return true;
-        })
-        .slice(0, 10);
+      const actionRes = await getStudentPortalExamDataAction({
+        parentId,
+        authToken,
+        studentId: student.student_id,
+      });
+
+      if (actionRes && actionRes.success) {
+        validAssignments = actionRes.validAssignments || [];
+        allAssignmentsForExams = actionRes.allAssignmentsForExams || [];
+        examItems = actionRes.examItems || [];
+        gcData = actionRes.gcData || [];
+        allAnswers = actionRes.allAnswers || [];
+        if (actionRes.schoolExams) {
+          setSchoolExams(actionRes.schoolExams);
+        }
+      } else {
+        const { data: assignments } = await authSupabase
+          .from("exam_assignment")
+          .select(
+            "assignment_id, exam_id, total_score, status, created_at, exam_master(title, total_questions, exam_type, layout_settings)"
+          )
+          .eq("student_id", student.student_id)
+          .order("created_at", { ascending: false });
+
+        validAssignments = (assignments || [])
+          .filter((a: any) => {
+            if (["응시전", "미응시", "예정", "대기"].includes(a.status))
+              return false;
+            const master = Array.isArray(a.exam_master)
+              ? a.exam_master[0]
+              : a.exam_master;
+            if (master?.exam_type !== "주간테스트") return false;
+            return true;
+          })
+          .slice(0, 10);
+
+        if (validAssignments.length > 0) {
+          const examIds = Array.from(
+            new Set(validAssignments.map((a: any) => a.exam_id))
+          );
+          const [resAllAssign, resItems, resGc] = await Promise.all([
+            authSupabase
+              .from("exam_assignment")
+              .select("assignment_id, exam_id")
+              .in("exam_id", examIds)
+              .not("status", "in", '("응시전","미응시","예정","대기")'),
+            authSupabase
+              .from("exam_item")
+              .select("exam_id, question_id, sort_order, assigned_score")
+              .in("exam_id", examIds)
+              .order("sort_order"),
+            authSupabase
+              .from("master_grading_code")
+              .select("code, description, is_correct, score_ratio, admission_ratio"),
+          ]);
+          allAssignmentsForExams = resAllAssign.data || [];
+          examItems = resItems.data || [];
+          gcData = resGc.data || [];
+
+          const allAssignIds = allAssignmentsForExams.map(
+            (a: any) => a.assignment_id
+          );
+          for (let i = 0; i < allAssignIds.length; i += 200) {
+            const chunk = allAssignIds.slice(i, i + 200);
+            const { data: chunkAnswers } = await authSupabase
+              .from("student_answer")
+              .select("exam_assignment_id, question_id, grading_code, earned_score")
+              .in("exam_assignment_id", chunk);
+            if (chunkAnswers) allAnswers = [...allAnswers, ...chunkAnswers];
+          }
+        }
+      }
 
       if (validAssignments.length === 0) {
         setExamResults([]);
         return;
       }
-
-      const examIds = Array.from(
-        new Set(validAssignments.map((a: any) => a.exam_id))
-      );
-      const [
-        { data: allAssignmentsForExams },
-        { data: examItems },
-        { data: gcData },
-      ] = await Promise.all([
-        authSupabase
-          .from("exam_assignment")
-          .select("assignment_id, exam_id")
-          .in("exam_id", examIds)
-          .not("status", "in", '("응시전","미응시","예정","대기")'),
-        authSupabase
-          .from("exam_item")
-          .select("exam_id, question_id, sort_order, assigned_score")
-          .in("exam_id", examIds)
-          .order("sort_order"),
-        authSupabase
-          .from("master_grading_code")
-          .select("code, description, is_correct, score_ratio, admission_ratio"),
-      ]);
 
       const gcMeta: Record<string, any> = {};
       gcData?.forEach((row: any) => {
@@ -801,19 +837,6 @@ export default function StudentCard({
           });
         }
       });
-
-      const allAssignIds = (allAssignmentsForExams || []).map(
-        (a) => a.assignment_id
-      );
-      let allAnswers: any[] = [];
-      for (let i = 0; i < allAssignIds.length; i += 200) {
-        const chunk = allAssignIds.slice(i, i + 200);
-        const { data: chunkAnswers } = await authSupabase
-          .from("student_answer")
-          .select("exam_assignment_id, question_id, grading_code, earned_score")
-          .in("exam_assignment_id", chunk);
-        if (chunkAnswers) allAnswers = [...allAnswers, ...chunkAnswers];
-      }
 
       const dedupAnsMap = new Map<string, any>();
       allAnswers.forEach((ans) => {
@@ -950,48 +973,69 @@ export default function StudentCard({
 
   const loadCategoryAnalysis = async () => {
     try {
-      const { data: assignments } = await supabase
-        .from("exam_assignment")
-        .select("assignment_id, status, exam_master(exam_type)")
-        .eq("student_id", student.student_id)
-        .order("created_at", { ascending: false });
+      let answers: any[] = [];
+      let questions: any[] = [];
+      const catMap = new Map<string, string>();
 
-      const validAssignments = (assignments || [])
-        .filter((a: any) => {
-          if (["응시전", "미응시", "예정", "대기"].includes(a.status))
-            return false;
-          const master = Array.isArray(a.exam_master)
-            ? a.exam_master[0]
-            : a.exam_master;
-          if (master?.exam_type !== "주간테스트") return false;
-          return true;
-        })
-        .slice(0, 10);
+      const actionRes = await getStudentPortalExamDataAction({
+        parentId,
+        authToken,
+        studentId: student.student_id,
+      });
 
-      if (validAssignments.length === 0) {
-        setCategoryAnalysis([]);
-        return;
+      if (actionRes && actionRes.success) {
+        answers = actionRes.studentAnswersForCategory || [];
+        questions = actionRes.questions || [];
+        (actionRes.catMapEntries || []).forEach(([k, v]: [string, string]) => {
+          catMap.set(k, v);
+        });
+      } else {
+        const { data: assignments } = await authSupabase
+          .from("exam_assignment")
+          .select("assignment_id, status, exam_master(exam_type)")
+          .eq("student_id", student.student_id)
+          .order("created_at", { ascending: false });
+
+        const validAssignments = (assignments || [])
+          .filter((a: any) => {
+            if (["응시전", "미응시", "예정", "대기"].includes(a.status))
+              return false;
+            const master = Array.isArray(a.exam_master)
+              ? a.exam_master[0]
+              : a.exam_master;
+            if (master?.exam_type !== "주간테스트") return false;
+            return true;
+          })
+          .slice(0, 10);
+
+        if (validAssignments.length === 0) {
+          setCategoryAnalysis([]);
+          return;
+        }
+        const targetAssignIds = validAssignments.map((a) => a.assignment_id);
+
+        const { data: ansData } = await authSupabase
+          .from("student_answer")
+          .select("question_id, is_correct, grading_code")
+          .in("exam_assignment_id", targetAssignIds);
+        answers = ansData || [];
+
+        if (answers.length > 0) {
+          const qIds = Array.from(new Set(answers.map((a) => a.question_id)));
+          for (let i = 0; i < qIds.length; i += 200) {
+            const chunk = qIds.slice(i, i + 200);
+            const { data: qData } = await authSupabase
+              .from("question_db")
+              .select("question_id, taxonomy_id")
+              .in("question_id", chunk);
+            if (qData) questions = [...questions, ...qData];
+          }
+        }
       }
-      const targetAssignIds = validAssignments.map((a) => a.assignment_id);
 
-      const { data: answers } = await supabase
-        .from("student_answer")
-        .select("question_id, is_correct, grading_code")
-        .in("exam_assignment_id", targetAssignIds);
       if (!answers || answers.length === 0) {
         setCategoryAnalysis([]);
         return;
-      }
-
-      const qIds = Array.from(new Set(answers.map((a) => a.question_id)));
-      let questions: any[] = [];
-      for (let i = 0; i < qIds.length; i += 200) {
-        const chunk = qIds.slice(i, i + 200);
-        const { data: qData } = await authSupabase
-          .from("question_db")
-          .select("question_id, taxonomy_id")
-          .in("question_id", chunk);
-        if (qData) questions = [...questions, ...qData];
       }
 
       const d4Codes = new Set<string>();
@@ -1012,30 +1056,31 @@ export default function StudentCard({
         return;
       }
 
-      const catMap = new Map<string, string>();
-      await Promise.all(
-        uniqueD4Array.map(async (code) => {
-          try {
-            const { data } = await supabase
-              .from("master_category")
-              .select("category_id, depth4")
-              .eq("category_id", code)
-              .limit(1);
-            if (data && data.length > 0 && data[0].depth4) {
-              catMap.set(code, data[0].depth4);
-              return;
-            }
-            const { data: likeData } = await supabase
-              .from("master_category")
-              .select("category_id, depth4")
-              .like("category_id", `${code}-%`)
-              .limit(1);
-            if (likeData && likeData.length > 0 && likeData[0].depth4) {
-              catMap.set(code, likeData[0].depth4);
-            }
-          } catch (e) {}
-        })
-      );
+      if (catMap.size === 0) {
+        await Promise.all(
+          uniqueD4Array.map(async (code) => {
+            try {
+              const { data } = await authSupabase
+                .from("master_category")
+                .select("category_id, depth4")
+                .eq("category_id", code)
+                .limit(1);
+              if (data && data.length > 0 && data[0].depth4) {
+                catMap.set(code, data[0].depth4);
+                return;
+              }
+              const { data: likeData } = await authSupabase
+                .from("master_category")
+                .select("category_id, depth4")
+                .like("category_id", `${code}-%`)
+                .limit(1);
+              if (likeData && likeData.length > 0 && likeData[0].depth4) {
+                catMap.set(code, likeData[0].depth4);
+              }
+            } catch (e) {}
+          })
+        );
+      }
 
       const aggMap = new Map();
       answers.forEach((a) => {
@@ -1082,14 +1127,25 @@ export default function StudentCard({
   };
 
   const loadSchoolExams = async () => {
-    const { data } = await supabase
-      .from("student_school_exam")
-      .select("*")
-      .eq("student_id", student.student_id)
-      .order("year", { ascending: false })
-      .order("semester", { ascending: false })
-      .order("exam_type", { ascending: true });
-    setSchoolExams(data || []);
+    try {
+      const actionRes = await getStudentPortalExamDataAction({
+        parentId,
+        authToken,
+        studentId: student.student_id,
+      });
+      if (actionRes && actionRes.success) {
+        setSchoolExams(actionRes.schoolExams || []);
+        return;
+      }
+      const { data } = await authSupabase
+        .from("student_school_exam")
+        .select("*")
+        .eq("student_id", student.student_id)
+        .order("year", { ascending: false })
+        .order("semester", { ascending: false })
+        .order("exam_type", { ascending: true });
+      setSchoolExams(data || []);
+    } catch {}
   };
 
   const year = currentMonth.getFullYear();
