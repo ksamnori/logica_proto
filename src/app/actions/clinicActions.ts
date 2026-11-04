@@ -121,8 +121,12 @@ export async function processIncompleteHomeworks(studentId: string, pendingHwIds
 
                 if (masterData) {
                     const newExamId = masterData.exam_id;
+                    const intScore = Math.round(100 / unresolvedQids.length);
                     const examItems = unresolvedQids.map((qId: number, idx: number) => ({
-                        exam_id: newExamId, question_id: String(qId), sort_order: idx + 1
+                        exam_id: newExamId,
+                        question_id: String(qId),
+                        sort_order: idx + 1,
+                        assigned_score: intScore
                     }));
 
                     for (let i = 0; i < examItems.length; i += 100) {
@@ -231,11 +235,13 @@ export async function generateIncorrectClinic(params: {
         }
 
         const newExamId = masterData.exam_id;
+        const intScore = Math.round(100 / (uniqueQids.length || 1));
         
         const examItems = uniqueQids.map((qId, idx) => ({
             exam_id: newExamId,
             question_id: String(qId),
-            sort_order: idx + 1
+            sort_order: idx + 1,
+            assigned_score: intScore
         }));
         
         for (let i = 0; i < examItems.length; i += 100) {
@@ -329,14 +335,16 @@ export async function generateIncorrectPrintServerAction(params: {
 
             if (newQIds.length > 0) {
                 const maxSortOrder = existingItems?.length || 0;
-                const itemsToInsert = newQIds.map((qid, i) => ({
-                    exam_id: existingExamId, question_id: String(qid), sort_order: maxSortOrder + i + 1, assigned_score: 0
-                }));
-                await supabaseAdmin.from('exam_item').insert(itemsToInsert);
-
                 const newTotal = maxSortOrder + newQIds.length;
+                // exam_item.assigned_score 컬럼이 integer 타입이므로 소수점(예: 33.33) 전달 시 22P02 에러가 발생하는 것을 방지하기 위해 정수 반올림 처리
+                const newScore = Math.round(100 / (newTotal || 1));
+                const itemsToInsert = newQIds.map((qid, i) => ({
+                    exam_id: existingExamId, question_id: String(qid), sort_order: maxSortOrder + i + 1, assigned_score: newScore
+                }));
+                const { error: insErr } = await supabaseAdmin.from('exam_item').insert(itemsToInsert);
+                if (insErr) throw insErr;
+
                 await supabaseAdmin.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
-                const newScore = Math.round((100 / newTotal) * 100) / 100;
                 await supabaseAdmin.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
             }
             merged = true;
@@ -367,13 +375,17 @@ export async function generateIncorrectPrintServerAction(params: {
                 throw new Error(exErr?.message || '오답프린트 exam_master 생성 실패');
             }
 
+            // exam_item.assigned_score가 integer 타입이므로 정수로 반올림하여 저장 (채점/뷰어에서는 100 / 문항수로 정밀 계산됨)
+            const intScore = Math.round(100 / (uIds.length || 1));
             const items = uIds.map((qid, i) => ({
                 exam_id: ex.exam_id,
                 question_id: String(qid),
                 sort_order: i + 1,
-                assigned_score: Math.round((100 / uIds.length) * 100) / 100
+                assigned_score: intScore
             }));
-            await supabaseAdmin.from('exam_item').insert(items);
+            const { error: itemErr } = await supabaseAdmin.from('exam_item').insert(items);
+            if (itemErr) throw itemErr;
+
             await supabaseAdmin.from('exam_assignment').insert({
                 exam_id: ex.exam_id,
                 student_id: studentId,
@@ -445,14 +457,16 @@ export async function generateOverduePrintServerAction(params: {
 
             if (newQIds.length > 0) {
                 const maxSortOrder = existingItems?.length || 0;
-                const itemsToInsert = newQIds.map((qid, i) => ({
-                    exam_id: existingExamId, question_id: String(qid), sort_order: maxSortOrder + i + 1, assigned_score: 0
-                }));
-                await supabaseAdmin.from('exam_item').insert(itemsToInsert);
-
                 const newTotal = maxSortOrder + newQIds.length;
+                // exam_item.assigned_score가 integer 타입이므로 정수로 반올림하여 22P02 에러 원천 차단
+                const newScore = Math.round(100 / (newTotal || 1));
+                const itemsToInsert = newQIds.map((qid, i) => ({
+                    exam_id: existingExamId, question_id: String(qid), sort_order: maxSortOrder + i + 1, assigned_score: newScore
+                }));
+                const { error: insErr } = await supabaseAdmin.from('exam_item').insert(itemsToInsert);
+                if (insErr) throw insErr;
+
                 await supabaseAdmin.from('exam_master').update({ total_questions: newTotal }).eq('exam_id', existingExamId);
-                const newScore = Math.round((100 / newTotal) * 100) / 100;
                 await supabaseAdmin.from('exam_item').update({ assigned_score: newScore }).eq('exam_id', existingExamId);
             }
             merged = true;
@@ -483,13 +497,16 @@ export async function generateOverduePrintServerAction(params: {
                 throw new Error(exErr?.message || '미완료과제 exam_master 생성 실패');
             }
 
+            const intScore = Math.round(100 / (uIds.length || 1));
             const items = uIds.map((qid, i) => ({
                 exam_id: ex.exam_id,
                 question_id: String(qid),
                 sort_order: i + 1,
-                assigned_score: Math.round((100 / uIds.length) * 100) / 100
+                assigned_score: intScore
             }));
-            await supabaseAdmin.from('exam_item').insert(items);
+            const { error: itemErr } = await supabaseAdmin.from('exam_item').insert(items);
+            if (itemErr) throw itemErr;
+
             await supabaseAdmin.from('exam_assignment').insert({
                 exam_id: ex.exam_id,
                 student_id: studentId,
@@ -534,10 +551,12 @@ export async function appendToExistingIncorrectPrintAction(studentId: string, qu
                     .select('*', { count: 'exact', head: true })
                     .eq('exam_id', examId);
                 const nextSortOrder = (count || 0) + 1;
+                const intScore = Math.round(100 / nextSortOrder);
                 await supabaseAdmin.from('exam_item').insert({
                     exam_id: examId,
                     question_id: String(questionId),
-                    sort_order: nextSortOrder
+                    sort_order: nextSortOrder,
+                    assigned_score: intScore
                 });
                 await supabaseAdmin.from('exam_master')
                     .update({ total_questions: nextSortOrder })
@@ -607,10 +626,12 @@ export async function createClinicExamBundleAction(params: {
         }
 
         const newExamId = masterData.exam_id;
+        const intScore = Math.round(100 / (questionIds.length || 1));
         const examItems = questionIds.map((qId, idx) => ({
             exam_id: newExamId,
             question_id: String(qId),
-            sort_order: idx + 1
+            sort_order: idx + 1,
+            assigned_score: intScore
         }));
 
         for (let i = 0; i < examItems.length; i += 100) {
@@ -659,6 +680,7 @@ export async function updateExamMasterFieldsAction(examId: string, fields: Recor
         return { success: false, error: err?.message };
     }
 }
+
 // 🌟 [신규] 시험지 뷰어(/exam/viewer)에서 exam_master 생성/갱신 및 문항 저장 (RLS 우회 보장)
 export async function saveExamViewerMasterAction(params: {
     targetExamIdToRebuild?: string | null;
@@ -693,7 +715,11 @@ export async function saveExamViewerMasterAction(params: {
             }
 
             if (preItems.length > 0 && finalExamId) {
-                const items = preItems.map((it) => ({ ...it, exam_id: finalExamId }));
+                const items = preItems.map((it) => ({
+                    ...it,
+                    assigned_score: it.assigned_score != null ? Math.round(Number(it.assigned_score)) : null,
+                    exam_id: finalExamId
+                }));
                 for (let i = 0; i < items.length; i += 100) {
                     const { error: itemsErr } = await supabaseAdmin.from("exam_item").insert(items.slice(i, i + 100));
                     if (itemsErr) throw new Error(`문항 저장 실패: ${itemsErr.message}`);
