@@ -81,6 +81,8 @@ export default function ClassReportPage() {
   const router = useRouter(); 
   
   const [currentUser, setCurrentUser] = useState({ instId: "", name: "", isSuperLevel: false, isAdmin: false });
+  const [canEditLessonLog, setCanEditLessonLog] = useState(false);
+  const [canDeleteLessonLog, setCanDeleteLessonLog] = useState(false);
 
   const [classes, setClasses] = useState<ClassInfo[]>([]);
   const [selectedClassId, setSelectedClassId] = useState<string>("");
@@ -214,9 +216,26 @@ export default function ClassReportPage() {
       const pos = localStorage.getItem('logica_instructor_position') || '';
       
       const isSuperLevel = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('최고관리자') || pos.includes('원장') || pos.includes('실장');
-      const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('원장') || pos.includes('최고관리자');
+      const isAdmin = role === 'SUPER_ADMIN' || role === 'ADMIN' || pos.includes('원장') || pos.includes('최고관리자') || pos.includes('대장');
 
       setCurrentUser({ instId, name, isSuperLevel, isAdmin });
+
+      if (isAdmin) {
+        setCanEditLessonLog(true);
+        setCanDeleteLessonLog(true);
+      } else if (tenantId && role) {
+        const validTenantId = tenantId === 'hq' ? '1ff4299c-d72b-4d99-97b0-45fee08e3b73' : tenantId;
+        const { data: permData } = await supabase
+          .from('tenant_role_permissions')
+          .select('allowed_menus')
+          .eq('tenant_id', validTenantId)
+          .eq('role_name', role)
+          .maybeSingle();
+        const menus: string[] = Array.isArray(permData?.allowed_menus) ? permData.allowed_menus : [];
+        const hasAll = menus.includes('ALL');
+        setCanEditLessonLog(hasAll || menus.includes('action_edit_lesson_log'));
+        setCanDeleteLessonLog(hasAll || menus.includes('action_delete_lesson_log'));
+      }
 
       let query = supabase.from('class').select('class_id, name, status, instructor_id, instructor(name)').order('name');
       if (tenantId && tenantId !== 'hq') query = query.eq('tenant_id', tenantId);
@@ -254,9 +273,16 @@ export default function ClassReportPage() {
 
   const handleDeleteLog = async (e: React.MouseEvent, logId: number) => {
     e.stopPropagation(); 
+    if (!canDeleteLessonLog) {
+      alert("⛔ 수업 일지를 삭제할 권한이 없습니다.");
+      return;
+    }
     if (!confirm("정말 이 수업 일지를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) return;
 
     try {
+      await supabase.from('lesson_log_student_comment').delete().eq('lesson_log_id', logId);
+      await supabase.from('lesson_progress').delete().eq('log_id', logId);
+      await supabase.from('homework_assignment').update({ log_id: null }).eq('log_id', logId);
       const { error } = await supabase.from('daily_lesson_log').delete().eq('lesson_log_id', logId);
       if (error) throw error;
       alert("✅ 성공적으로 삭제되었습니다.");
@@ -678,6 +704,10 @@ export default function ClassReportPage() {
   };
 
   const openEditLessonLogModal = (log: any) => {
+    if (!canEditLessonLog) {
+      alert("⛔ 수업 일지를 수정할 권한이 없습니다.");
+      return;
+    }
     setEditingLogData(log);
     setIsLessonLogModalOpen(true);
   };
@@ -710,20 +740,24 @@ export default function ClassReportPage() {
               <h2 className="text-2xl font-bold text-slate-800">수업 일지 기록</h2>
             </div>
             
-            {currentUser.isAdmin && (
+            {(canEditLessonLog || canDeleteLessonLog) && (
               <div className="flex gap-2 shrink-0">
-                <button 
-                  onClick={() => openEditLessonLogModal(selectedLog)}
-                  className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-lg transition-colors border border-indigo-200 text-sm shadow-sm"
-                >
-                  ✏️ 내용 수정
-                </button>
-                <button 
-                  onClick={(e) => handleDeleteLog(e, selectedLog.lesson_log_id)}
-                  className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg transition-colors border border-rose-200 text-sm shadow-sm"
-                >
-                  🗑️ 삭제
-                </button>
+                {canEditLessonLog && (
+                  <button 
+                    onClick={() => openEditLessonLogModal(selectedLog)}
+                    className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 font-bold rounded-lg transition-colors border border-indigo-200 text-sm shadow-sm"
+                  >
+                    ✏️ 내용 수정
+                  </button>
+                )}
+                {canDeleteLessonLog && (
+                  <button 
+                    onClick={(e) => handleDeleteLog(e, selectedLog.lesson_log_id)}
+                    className="px-4 py-2 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold rounded-lg transition-colors border border-rose-200 text-sm shadow-sm"
+                  >
+                    🗑️ 삭제
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -1053,7 +1087,7 @@ export default function ClassReportPage() {
                           </span>
                         </div>
                         
-                        {currentUser.isAdmin && (
+                        {canDeleteLessonLog && (
                           <button 
                             onClick={(e) => handleDeleteLog(e, log.lesson_log_id)}
                             className="text-slate-300 hover:text-rose-500 transition-colors p-1 rounded-md hover:bg-rose-50"

@@ -29,6 +29,8 @@ const PERMISSION_GROUPS = [
       { id: "/learning", label: "학습 관리 (시험/과제/오답 현황)" },
       { id: "action_delete_learning_exam", label: "↳ [권한] 타임라인 학습지(시험/과제) 강제 삭제", isAction: true },
       { id: "/class-report", label: "학습 결과 (학생별 성취도 리포트)" }, 
+      { id: "action_edit_lesson_log", label: "↳ [권한] 수업 일지 내용 수정", isAction: true },
+      { id: "action_delete_lesson_log", label: "↳ [권한] 수업 일지 삭제", isAction: true },
       { id: "/makeup", label: "보강 관리 (1:1 개별 보강)" },
       { id: "action_edit_makeup", label: "↳ [권한] 개별 보강 일정 수정", isAction: true },
       { id: "action_delete_makeup", label: "↳ [권한] 개별 보강 일정 삭제", isAction: true },
