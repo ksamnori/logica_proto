@@ -18,6 +18,20 @@ export const LEVEL_ORDER = ['Ultimate', 'Master', 'Apex', 'Titan', 'Horizon', '�
 
 export const unwrap = (obj: any) => Array.isArray(obj) ? obj[0] : obj;
 
+// Supabase PostgREST 기본 1,000행 제한으로 인해 최근 배부된 오답프린트/시험지/과제 결과가 누락되는 현상 방지
+async function fetchAllRows<T = any>(buildQuery: () => any, pageSize = 1000): Promise<T[]> {
+  const all: T[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error || !data || data.length === 0) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 // O, RO, TO만 정답 카운트 / X, TX만 오답 카운트
 export const tallyGrading = (counts: Record<string, { o: number; x: number; helped: number }>, key: any, code: string) => {
   if (!counts[key]) counts[key] = { o: 0, x: 0, helped: 0 };
@@ -165,37 +179,53 @@ export function useLearningFetch() {
       for (let i = 0; i < studentIds.length; i += chunkSize) {
         const chunk = studentIds.slice(i, i + chunkSize);
         
-        const { data: rawExams } = await supabase.from('exam_assignment')
-          .select('student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
-          .in('student_id', chunk);
+        const rawExams = await fetchAllRows(() =>
+          supabase.from('exam_assignment')
+            .select('assignment_id, student_id, status, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
+            .in('student_id', chunk)
+            .order('assignment_id', { ascending: true })
+        );
 
-        if (rawExams) {
-          const examOnly = rawExams.filter((s: any) => ['주간테스트', '중간테스트', '중간평가'].includes(s.exam_master?.exam_type));
+        if (rawExams && rawExams.length > 0) {
+          const examOnly = rawExams.filter((s: any) => ['주간테스트', '중간테스트', '중간평가'].includes(unwrap(s.exam_master)?.exam_type));
           fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => mapExamStat(s, 'EXAM'))];
           examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const quarterlyExams = rawExams.filter((s: any) => ['분기테스트', '분기평가'].includes(s.exam_master?.exam_type));
+          const quarterlyExams = rawExams.filter((s: any) => ['분기테스트', '분기평가'].includes(unwrap(s.exam_master)?.exam_type));
           quarterlyExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'quarterly', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const hwExams = rawExams.filter((s: any) => ['과제', '과제프린트'].includes(s.exam_master?.exam_type));
+          const hwExams = rawExams.filter((s: any) => ['과제', '과제프린트'].includes(unwrap(s.exam_master)?.exam_type));
           fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => mapExamStat(s, 'HW'))];
           hwExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const printExams = rawExams.filter((s: any) => ['오답프린트', '오답'].includes(s.exam_master?.exam_type));
+          const printExams = rawExams.filter((s: any) => ['오답프린트', '오답'].includes(unwrap(s.exam_master)?.exam_type));
           fetchedStats = [...fetchedStats, ...printExams.map((s: any) => mapExamStat(s, 'PRINT'))];
           printExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const similarExams = rawExams.filter((s: any) => ['오답유사', '과제오답유사'].includes(s.exam_master?.exam_type));
+          const similarExams = rawExams.filter((s: any) => ['오답유사', '과제오답유사'].includes(unwrap(s.exam_master)?.exam_type));
           fetchedStats = [...fetchedStats, ...similarExams.map((s: any) => mapExamStat(s, 'SIMILAR'))];
           similarExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'similar', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
-          const overdueExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '미완료과제');
+          const overdueExams = rawExams.filter((s: any) => unwrap(s.exam_master)?.exam_type === '미완료과제');
           fetchedStats = [...fetchedStats, ...overdueExams.map((s: any) => mapExamStat(s, 'OVERDUE'))];
           overdueExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'overdue', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
         }
         
-        const { data: allHws } = await supabase.from('homework_assignment').select('homework_id, class_id, homework_title, target_student_id, target_questions, created_at, due_date').in('class_id', classIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
-        const { data: hwStats } = await supabase.from('student_homework_result').select('student_id, status, homework_id').in('student_id', chunk);
+        const [allHws, hwStats] = await Promise.all([
+          fetchAllRows(() =>
+            supabase.from('homework_assignment')
+              .select('homework_id, class_id, homework_title, target_student_id, target_questions, created_at, due_date')
+              .in('class_id', classIds)
+              .neq('homework_title', '[시스템] 수업 진도 완료 기록')
+              .order('homework_id', { ascending: true })
+          ),
+          fetchAllRows(() =>
+            supabase.from('student_homework_result')
+              .select('hw_result_id, student_id, status, homework_id')
+              .in('student_id', chunk)
+              .order('hw_result_id', { ascending: true })
+          ),
+        ]);
         
         const hwResultMap = new Map();
         hwStats?.forEach(r => hwResultMap.set(`${r.student_id}_${r.homework_id}`, r));
@@ -413,6 +443,29 @@ export function useLearningFetch() {
 
       combined.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
       setTimelineData(combined);
+
+      // 학생 타임라인 조회 시 좌측 사이드바 버블(currentStats)도 해당 학생의 최신 상태로 즉시 동기화
+      const syncedStudentStats: any[] = [];
+      combined.forEach((item: any) => {
+        const statType =
+          item.type === 'exam' ? 'EXAM' :
+          item.type === 'hw' || item.type === 'hw_exam' ? 'HW' :
+          item.type === 'print' ? 'PRINT' :
+          item.type === 'similar' ? 'SIMILAR' :
+          item.type === 'overdue' ? 'OVERDUE' : null;
+        if (!statType) return;
+        syncedStudentStats.push({
+          student_id: studentId,
+          class_id: classId || studentObj?.classId,
+          status: item.status,
+          type: statType,
+          qCount: item.total || 0,
+        });
+      });
+      setCurrentStats(prev => [
+        ...prev.filter(p => p.student_id !== studentId),
+        ...syncedStudentStats,
+      ]);
     } catch(e) { console.error(e); } finally { setIsLoading(false); }
   };
 
@@ -482,7 +535,12 @@ export function useLearningFetch() {
           const chunk = studentIds.slice(i, i + chunkSize);
 
           if (tab === 'EXAM' || tab === 'QUARTERLY' || tab === 'INCORRECT' || tab === 'SIMILAR' || tab === 'OVERDUE') {
-            const { data: rawExams } = await supabase.from('exam_assignment').select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)').in('student_id', chunk);
+            const rawExams = await fetchAllRows(() =>
+              supabase.from('exam_assignment')
+                .select('assignment_id, status, created_at, class_id, class(name), student(name), student_id, exam_master!inner(exam_id, title, sub_title, total_questions, exam_type)')
+                .in('student_id', chunk)
+                .order('assignment_id', { ascending: true })
+            );
             
             if (rawExams) {
               let data: any[] = []; 

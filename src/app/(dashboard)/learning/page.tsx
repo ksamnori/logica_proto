@@ -255,7 +255,7 @@ export default function LearningPage() {
       if (!map[globalKey]) map[globalKey] = { examC: 0, examQ: 0, hwC: 0, hwQ: 0, printC: 0, printQ: 0, similarC: 0, similarQ: 0, overdueC: 0, overdueQ: 0 };
       
       const statusStr = e.status || '미제출';
-      const isPending = ['미제출', '진행중', '미응시', '응시전', '응시중'].includes(statusStr);
+      const isPending = !['채점완료', '제출완료', '완료', '최종완료'].includes(statusStr);
       
       if (isPending) { 
         const qCount = e.qCount || 0;
