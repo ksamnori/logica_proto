@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect } from 'react';
 import LearningRow, { statusToneOf } from "./LearningRow";
-import { createClient } from '@supabase/supabase-js';
+import { supabase as supabaseClient } from '@/lib/supabase';
 import { useRouter } from 'next/navigation';
 import { createClinicExamBundleAction } from '@/app/actions/clinicActions';
 import {
@@ -12,9 +12,7 @@ import {
   isWorkbookQuestion,
 } from '@/app/exam/step2/examUtils';
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// 공용 싱글톤 supabase 인스턴스 사용 (중복 GoTrue 리프레시 토큰 경합 방지)
 
 interface StudentTimelineProps {
   currentView: any;

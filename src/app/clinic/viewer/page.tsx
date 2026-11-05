@@ -3,7 +3,7 @@
 
 import React, { useEffect, useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@supabase/supabase-js";
+import { supabase as supabaseClient } from "@/lib/supabase";
 import { setActiveCall, clearActiveCall, setActiveRecheck, setAway, clearAway, checkAndBumpToggleCooldown } from "@/lib/clinicSession";
 import { useToggleCooldown, TOGGLE_COOLDOWN_MS } from "@/hooks/useToggleCooldown";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
@@ -223,7 +223,7 @@ function buildExamQuestionScoreMap(
 }
 
 
-const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+// 공용 싱글톤 supabaseClient 사용 (중복 GoTrue 인스턴스 생성 방지)
 
 export default function ClinicViewer() {
   const router = useRouter();

@@ -1,6 +1,6 @@
 // src/app/ta-dashboard/useTAClinic.ts
 import { useEffect, useState, useRef, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase as sharedSupabase } from "@/lib/supabase";
 
 // ==========================================
 // 상수 및 환경 설정 (보안 강화)
@@ -356,7 +356,7 @@ export function useTAClinic() {
         console.error("Supabase 환경 변수가 누락되었습니다.");
         return;
     }
-    const supabaseClient = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    const supabaseClient = sharedSupabase;
     clinicChannel.current = supabaseClient.channel(CLINIC_ROOM);
 
     clinicChannel.current

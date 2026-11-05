@@ -42,7 +42,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
       localStorage.clear();
       sessionStorage.clear();
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
@@ -182,7 +182,7 @@ export default function LoginPage() {
     setIsLoading(true);
 
     try {
-      await supabase.auth.signOut();
+      await supabase.auth.signOut({ scope: "local" }).catch(() => {});
       localStorage.clear();
       sessionStorage.clear(); 
       document.cookie = "sb-access-token=; path=/; max-age=0;"; 
