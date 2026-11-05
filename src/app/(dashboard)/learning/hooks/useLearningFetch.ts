@@ -806,7 +806,7 @@ export function useLearningFetch() {
         supabase
           .from('exam_assignment')
           .select(
-            'assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)'
+            'assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, sub_title, total_questions)'
           )
           .eq('student_id', studentId),
       ]);
@@ -937,6 +937,8 @@ export function useLearningFetch() {
       const hwResMap = new Map();
       hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r));
 
+      const activeClassIdSet = new Set(Object.values(nameToId).filter(Boolean));
+
       classes.forEach((c) => {
         const cid = nameToId[c];
 
@@ -947,11 +949,29 @@ export function useLearningFetch() {
         let hasAnyExamClearedToday = false;
 
         examsData?.forEach((ex: any) => {
-          if (ex.class_id && cid && ex.class_id !== cid) return;
           const master = unwrap(ex.exam_master);
           const type = master?.exam_type;
           const rawTitle = master?.title;
+          const rawSubTitle = master?.sub_title;
           const tq = master?.total_questions;
+
+          const isWeeklyIncorrect = (() => {
+            const t = String(rawTitle || '').trim();
+            const ty = String(type || '').trim();
+            const sub = String(rawSubTitle || '').trim();
+            if (t.includes('[통합]') || sub === '누적 오답 모음') return false;
+            if (ty === '오답프린트' || ty === '오답') return true;
+            const hasWeekAndWrong = (s: string) =>
+              /([0-9xX]+\s*주차|주차)/.test(s) && /오답\s*(프린트)?/.test(s);
+            return hasWeekAndWrong(t) || hasWeekAndWrong(ty);
+          })();
+
+          const isPersonalClinicExam =
+            isWeeklyIncorrect ||
+            ['오답유사', '과제오답유사', '오답프린트', '오답', '미완료과제'].includes(type);
+          const isOrphanClassId = ex.class_id && !activeClassIdSet.has(ex.class_id);
+
+          if (ex.class_id && cid && ex.class_id !== cid && !isPersonalClinicExam && !isOrphanClassId) return;
 
           const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
           const remain = Math.max(0, (tq || 0) - resolved);
@@ -967,15 +987,6 @@ export function useLearningFetch() {
               .then();
             ex.status = '최종완료';
           }
-
-          const isWeeklyIncorrect = (() => {
-            const t = String(rawTitle || '').trim();
-            const ty = String(type || '').trim();
-            if (t.includes('[통합]')) return false;
-            const hasWeekAndWrong = (s: string) =>
-              /([0-9xX]+\s*주차|주차)/.test(s) && /오답\s*(프린트)?/.test(s);
-            return hasWeekAndWrong(t) || hasWeekAndWrong(ty);
-          })();
 
           if (
             (type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) &&
@@ -1105,9 +1116,9 @@ export function useLearningFetch() {
         newBlockStates[c].overdue =
           finalOverdueList.length > 0 ? '미응시' : '최종완료';
 
-        if (roundResults[`${c}::1`]) newBlockStates[c].exam = '최종완료';
-        if (roundResults[`${c}::2`]) newBlockStates[c].hw = '최종완료';
-        if (roundResults[`${c}::3`]) newBlockStates[c].print = '최종완료';
+        if (finalExamList.length === 0 && roundResults[`${c}::1`]) newBlockStates[c].exam = '최종완료';
+        if (finalHwList.length === 0 && roundResults[`${c}::2`]) newBlockStates[c].hw = '최종완료';
+        if (totalPrintQCount === 0 && roundResults[`${c}::3`]) newBlockStates[c].print = '최종완료';
 
         newHwProgress[c] = {
           activeExamMode,

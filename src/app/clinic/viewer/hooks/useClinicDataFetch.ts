@@ -427,23 +427,28 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           matchedTitle = master?.title;
           displayLabel = master?.exam_type || '시험';
         } else {
-          // 정규 테스트가 없으면 배정된 오답유사/과제오답유사 및 주차별 오답프린트/오답 시험지가 있는지 확인
-          let simQuery = supabaseClient.from('exam_assignment')
-            .select('assignment_id, exam_id, exam_master!inner(title, exam_type, layout_settings, total_questions)')
+          // 정규 테스트가 없으면 배정된 오답유사/과제오답유사 및 개별 배부 오답프린트/오답 시험지가 있는지 확인 (타 반 ID 배부건도 폴백 허용)
+          const { data: simRows } = await supabaseClient.from('exam_assignment')
+            .select('assignment_id, exam_id, class_id, exam_master!inner(title, sub_title, exam_type, layout_settings, total_questions)')
             .eq('student_id', sId)
             .in('exam_master.exam_type', ['오답유사', '과제오답유사', '오답프린트', '오답'])
-            .not('status', 'in', '("제출완료", "채점완료", "완료", "최종완료")');
+            .not('status', 'in', '("제출완료", "채점완료", "완료", "최종완료")')
+            .order('created_at', { ascending: false });
 
-          if (cData?.class_id) simQuery = simQuery.eq('class_id', cData.class_id);
-          const { data: simRows } = await simQuery.order('created_at', { ascending: false });
-          const simData = (simRows || []).find((row: any) => {
+          const validSimRows = (simRows || []).filter((row: any) => {
             const m: any = Array.isArray(row.exam_master) ? row.exam_master[0] : row.exam_master;
             const t = String(m?.title || '').trim();
+            const sub = String(m?.sub_title || '').trim();
             const ty = String(m?.exam_type || '').trim();
             if (ty === '오답유사' || ty === '과제오답유사') return true;
-            if (t.includes('[통합]')) return false;
+            if (t.includes('[통합]') || sub === '누적 오답 모음') return false;
+            if (ty === '오답프린트' || ty === '오답') return true;
             return /([0-9xX]+\s*주차|주차)/.test(t) && /오답\s*(프린트)?/.test(t);
           });
+
+          const simData =
+            (cData?.class_id ? validSimRows.find((r: any) => r.class_id === cData.class_id) : null) ||
+            validSimRows[0];
 
           if (simData) {
             matchedAssignId = String(simData.assignment_id);

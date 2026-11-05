@@ -19,11 +19,13 @@ const isEndedEnrollment = (e: any): boolean => {
   return false;
 };
 
-// 'x주차 오답프린트', 'x주차 오답 프린트', 'x주차 오답' 등 주차별 오답 프린트 판별 헬퍼
-const isWeeklyIncorrectExam = (type?: string, rawTitle?: string): boolean => {
+// 'x주차 오답프린트' 및 [통합] 클리닉이 아닌 개별 배부 오답 프린트 판별 헬퍼
+const isWeeklyIncorrectExam = (type?: string, rawTitle?: string, subTitle?: string): boolean => {
   const t = String(rawTitle || "").trim();
   const ty = String(type || "").trim();
-  if (t.includes("[통합]")) return false;
+  const sub = String(subTitle || "").trim();
+  if (t.includes("[통합]") || sub === "누적 오답 모음") return false;
+  if (ty === "오답프린트" || ty === "오답") return true;
   const hasWeekAndWrong = (s: string) =>
     /([0-9xX]+\s*주차|주차)/.test(s) && /오답\s*(프린트)?/.test(s);
   return hasWeekAndWrong(t) || hasWeekAndWrong(ty);
@@ -610,7 +612,7 @@ export default function StudentPortal() {
                 .eq('student_id', sid)
                 .in('grading_code', ['O', 'TO', 'RO']),
             supabaseClient.from('exam_assignment')
-                .select('assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, total_questions)')
+                .select('assignment_id, status, total_score, class_id, created_at, exam_master!inner(exam_type, title, sub_title, total_questions)')
                 .eq('student_id', sid)
         ]);
 
@@ -688,6 +690,8 @@ export default function StudentPortal() {
         const hwResMap = new Map();
         hwResData?.forEach((r: any) => hwResMap.set(r.homework_id, r));
 
+        const activeClassIdSet = new Set(Object.values(nameToId).filter(Boolean));
+
         classes.forEach(c => {
             const cid = nameToId[c];
 
@@ -698,14 +702,20 @@ export default function StudentPortal() {
             let hasAnyExamClearedToday = false; 
 
             examsData?.forEach((ex: any) => {
-                if (ex.class_id && ex.class_id !== cid) return;
-                const type = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.exam_type : ex.exam_master?.exam_type;
-                const rawTitle = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.title : ex.exam_master?.title;
-                const tq = Array.isArray(ex.exam_master) ? ex.exam_master[0]?.total_questions : ex.exam_master?.total_questions;
+                const master = Array.isArray(ex.exam_master) ? ex.exam_master[0] : ex.exam_master;
+                const type = master?.exam_type;
+                const rawTitle = master?.title;
+                const rawSubTitle = master?.sub_title;
+                const tq = master?.total_questions;
+                const isWeeklyIncorrect = isWeeklyIncorrectExam(type, rawTitle, rawSubTitle);
+                const isPersonalClinicExam = isWeeklyIncorrect || ['오답유사', '과제오답유사', '오답프린트', '오답', '미완료과제'].includes(type);
+                const isOrphanClassId = ex.class_id && !activeClassIdSet.has(ex.class_id);
+
+                // 개인별 오답/유사/미완료 프린트이거나 반 이동 등으로 현재 활성 수강반에 없는 class_id인 경우 누락하지 않고 노출
+                if (ex.class_id && cid && ex.class_id !== cid && !isPersonalClinicExam && !isOrphanClassId) return;
                 
                 const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - resolved);
-                const isWeeklyIncorrect = isWeeklyIncorrectExam(type, rawTitle);
 
                 // 채점확정 상태에서 100점(또는 남은 오답 0개)이거나, 오답유사/주차오답프린트 전 문항 해결 시 자동으로 최종완료 처리
                 if (
@@ -796,9 +806,10 @@ export default function StudentPortal() {
             newBlockStates[c].print = totalPrintQCount > 0 ? '미응시' : '최종완료';
             newBlockStates[c].overdue = finalOverdueList.length > 0 ? '미응시' : '최종완료';
 
-            if (roundResults[`${c}::1`]) newBlockStates[c].exam = '최종완료';
-            if (roundResults[`${c}::2`]) newBlockStates[c].hw = '최종완료';
-            if (roundResults[`${c}::3`]) newBlockStates[c].print = '최종완료';
+            // 미응시/진행중 학습지가 남아있는 경우에는 과거 clinic_round_result 기록으로 완료 덮어쓰기를 하지 않음
+            if (finalExamList.length === 0 && roundResults[`${c}::1`]) newBlockStates[c].exam = '최종완료';
+            if (finalHwList.length === 0 && roundResults[`${c}::2`]) newBlockStates[c].hw = '최종완료';
+            if (totalPrintQCount === 0 && roundResults[`${c}::3`]) newBlockStates[c].print = '최종완료';
 
             newHwProgress[c] = { 
                 activeExamMode,
