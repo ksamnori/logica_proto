@@ -281,25 +281,6 @@ export default function ClinicViewer() {
   const [dynamicTimeLimitMin, setDynamicTimeLimitMin] = useState<number>(20);
 
   useEffect(() => {
-    if (!studentInfo.id || params.round === 0) return;
-    const fetchSourceType = async () => {
-      const targetAssignId = questions[0]?.examAssignmentId || params.assignmentId;
-      if (targetAssignId) {
-        const { data } = await supabaseClient.from('exam_assignment').select('exam_master!inner(exam_type)').eq('assignment_id', targetAssignId).maybeSingle();
-        if (data && data.exam_master) {
-          const m = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
-          if (m.exam_type) {
-            sourceTypeRef.current = m.exam_type;
-          }
-        }
-      } else if (params.homeworkIdsStr || params.assignmentIdsStr) {
-        sourceTypeRef.current = '과제';
-      }
-    };
-    fetchSourceType();
-  }, [params, studentInfo.id, questions]);
-
-  useEffect(() => {
     if (callCooldownUntil <= 0) return;
     const tick = () => {
       const remain = Math.ceil((callCooldownUntil - Date.now()) / 1000);
@@ -358,6 +339,25 @@ export default function ClinicViewer() {
     supabaseClient, studentInfo, params, forceUpdate,
     refs: { studentAnswers, studentDrawings, keypadAnswers, answerModes, qBoxStatus, totalQuestionsInRoundRef, hintState, correctSolvedCountRef, examAssignmentTotalsRef }
   });
+
+  useEffect(() => {
+    if (!studentInfo.id || params.round === 0) return;
+    const fetchSourceType = async () => {
+      const targetAssignId = questions[0]?.examAssignmentId || params.assignmentId;
+      if (targetAssignId) {
+        const { data } = await supabaseClient.from('exam_assignment').select('exam_master!inner(exam_type)').eq('assignment_id', targetAssignId).maybeSingle();
+        if (data && data.exam_master) {
+          const m = Array.isArray(data.exam_master) ? data.exam_master[0] : data.exam_master;
+          if (m.exam_type) {
+            sourceTypeRef.current = m.exam_type;
+          }
+        }
+      } else if (params.homeworkIdsStr || params.assignmentIdsStr) {
+        sourceTypeRef.current = '과제';
+      }
+    };
+    fetchSourceType();
+  }, [params, studentInfo.id, questions]);
 
   const isTimedRound = fetchedIsTimedRound && !params.retry;
 
