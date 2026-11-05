@@ -93,7 +93,7 @@ export async function registerStudentAction(data: {
       }
     }
 
-    const { error: studentError } = await supabaseAdmin.from("student").insert([
+    const { data: createdStudent, error: studentError } = await supabaseAdmin.from("student").insert([
       {
         name: name.trim(),
         grade: grade,
@@ -104,9 +104,18 @@ export async function registerStudentAction(data: {
         parent_id: finalParentId,
         tenant_id: secureTenantId, 
       },
-    ]);
+    ]).select("student_id").single();
 
     if (studentError) throw studentError;
+
+    if (createdStudent?.student_id) {
+      await supabaseAdmin
+        .from("student_points")
+        .upsert(
+          { student_id: String(createdStudent.student_id), balance: 0 },
+          { onConflict: "student_id", ignoreDuplicates: true }
+        );
+    }
 
     return { 
       success: true, 
