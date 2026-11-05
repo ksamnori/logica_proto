@@ -267,9 +267,15 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           if (code === 'O') {
             refs.qBoxStatus.current[i] = 'correct_blue';
             correctCount++;
+            if (qItem.examAssignmentId && refs.examAssignmentTotalsRef.current[qItem.examAssignmentId] !== undefined) {
+              refs.examAssignmentTotalsRef.current[qItem.examAssignmentId] = Math.max(0, refs.examAssignmentTotalsRef.current[qItem.examAssignmentId] - 1);
+            }
           } else if (code === 'TO' || code === 'RO') {
             refs.qBoxStatus.current[i] = 'correct_yellow'; 
             correctCount++;
+            if (qItem.examAssignmentId && refs.examAssignmentTotalsRef.current[qItem.examAssignmentId] !== undefined) {
+              refs.examAssignmentTotalsRef.current[qItem.examAssignmentId] = Math.max(0, refs.examAssignmentTotalsRef.current[qItem.examAssignmentId] - 1);
+            }
           } else if (code === 'X' || code === 'TX' || code === 'B' || code === '☆') {
             refs.qBoxStatus.current[i] = 'wrong_red';
           }

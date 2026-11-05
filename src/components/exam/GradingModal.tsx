@@ -139,7 +139,7 @@ export default function GradingModal({ isOpen, examId, title, onClose, onUpdate 
               {assignments.map(a => {
                 const sName = Array.isArray(a.student) ? a.student[0]?.name : a.student?.name;
                 const cName = Array.isArray(a.class) ? a.class[0]?.name : a.class?.name;
-                const isCompleted = ['채점완료', '제출완료', '완료'].includes(a.status);
+                const isCompleted = ['채점완료', '제출완료', '완료', '최종완료'].includes(a.status);
                 
                 return (
                   <div key={a.assignment_id} className="bg-white border border-slate-200 rounded-xl p-4 flex items-center justify-between shadow-sm hover:border-emerald-300 transition-colors">

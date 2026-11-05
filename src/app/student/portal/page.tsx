@@ -717,10 +717,10 @@ export default function StudentPortal() {
                 const resolved = examResolvedMap.get(ex.assignment_id)?.size || 0;
                 const remain = Math.max(0, (tq || 0) - resolved);
 
-                // 채점확정 상태에서 100점(또는 남은 오답 0개)이거나, 오답유사/주차오답프린트 전 문항 해결 시 자동으로 최종완료 처리
+                // 채점확정 상태에서 100점(또는 남은 오답 0개)이거나, 오답유사/주차오답프린트/과제류 전 문항 해결 시 자동으로 최종완료 처리 (학습관리 페이지 동기화)
                 if (
                     (ex.status === '채점확정' && (ex.total_score === 100 || (tq > 0 && remain === 0))) ||
-                    ((type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) && tq > 0 && remain === 0 && !['최종완료', '완료', '채점완료'].includes(ex.status))
+                    ((type === '오답유사' || type === '과제오답유사' || type === '과제' || type === '과제프린트' || type === '미완료과제' || isWeeklyIncorrect) && tq > 0 && remain === 0 && !['최종완료', '완료', '채점완료', '제출완료'].includes(ex.status))
                 ) {
                     supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', ex.assignment_id).then();
                     ex.status = '최종완료';
@@ -766,7 +766,18 @@ export default function StudentPortal() {
 
                 const resolved = hwResolvedMap.get(hw.homework_id)?.size || 0;
                 const remain = Math.max(0, tqLen - resolved);
-                if (remain === 0) return;
+                if (remain === 0) {
+                    // 모든 문항을 맞혀서 포털에서 완료로 숨겨질 때, student_homework_result가 미제출/진행중이면 채점완료로 자동 동기화
+                    if (tqLen > 0 && !['제출완료', '채점완료', '완료', '최종완료'].includes(status)) {
+                        const solvedArr = Array.from(hwResolvedMap.get(hw.homework_id) || []);
+                        if (resObj) {
+                            supabaseClient.from('student_homework_result').update({ status: '채점완료', completed_tq_ids: solvedArr, checked_at: new Date().toISOString() }).eq('student_id', sid).eq('homework_id', hw.homework_id).then();
+                        } else {
+                            supabaseClient.from('student_homework_result').insert({ student_id: sid, homework_id: hw.homework_id, status: '채점완료', completed_tq_ids: solvedArr, checked_at: new Date().toISOString() }).then();
+                        }
+                    }
+                    return;
+                }
 
                 const cleanedTitle = cleanTitle(hw.homework_title, sName);
                 const item = { id: hw.homework_id, title: cleanedTitle, remain, status, score: null, type: 'hw' };

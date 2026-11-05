@@ -142,7 +142,7 @@ export default function GlobalList({
               const isSelected = globalSelectedBlocks.includes(itemId);
               
               let statusStr = res.status || '미제출';
-              const isCompleted = ['채점완료', '제출완료', '완료'].includes(statusStr); 
+              const isCompleted = ['채점완료', '제출완료', '완료', '최종완료'].includes(statusStr); 
 
               let statusBadge = "bg-slate-100 text-slate-500";
               if(['미응시', '응시전', '미제출'].includes(statusStr)) statusBadge = "bg-rose-50 text-rose-500 border border-rose-100";

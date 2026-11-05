@@ -196,7 +196,7 @@ export default function TaGradingPage() {
         .neq('exam_master.exam_type', '주간테스트');
         
       pendingExams?.forEach((e: any) => {
-        if (['채점완료', '완료'].includes(e.status)) return;
+        if (['채점완료', '완료', '최종완료'].includes(e.status)) return;
         const m = Array.isArray(e.exam_master) ? e.exam_master[0] : e.exam_master;
         const qCount = m?.total_questions || 0;
         
@@ -229,7 +229,7 @@ export default function TaGradingPage() {
           if (h.target_student_id && h.target_student_id !== sId) return;
           if (!h.target_student_id && !sClasses.some(cl => cl.classId === h.class_id)) return;
           const status = hwResMap.get(`${h.homework_id}_${sId}`) || '미제출';
-          if (!['채점완료', '완료'].includes(status)) {
+          if (!['채점완료', '완료', '최종완료'].includes(status)) {
             let count = 0;
             try {
               const tqs = typeof h.target_questions === 'string' ? JSON.parse(h.target_questions) : (h.target_questions || []);
@@ -345,7 +345,7 @@ export default function TaGradingPage() {
           return {
             key: `exam_${e.assignment_id}`, kind, examType: m.exam_type, totalQ: m.total_questions || 0,
             title: cleanTitle, subtitle: subTitleStr,
-            date: e.created_at, status: ['채점완료', '완료'].includes(e.status) ? `채점완료 (${e.total_score ?? 0}점)` : (e.status || '미응시'), 
+            date: e.created_at, status: ['채점완료', '완료', '최종완료'].includes(e.status) ? `채점완료 (${e.total_score ?? 0}점)` : (e.status || '미응시'), 
             assignmentId: String(e.assignment_id), masterId: m?.exam_id,
           };
         });

@@ -1099,8 +1099,21 @@ export default function ClinicViewer() {
                     : hwAssign?.target_questions;
                 
                 if (!Array.isArray(tq)) tq = [];
-                const allDone = tq.every((id:any) => cSet.has(Number(id)));
-                await supabaseClient.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined }).eq('hw_result_id', hwRes.hw_result_id);
+                const allDone = tq.length > 0 && tq.every((id:any) => cSet.has(Number(id)));
+                await supabaseClient.from('student_homework_result').update({ completed_tq_ids: [...cSet], status: allDone ? '채점완료' : undefined, checked_at: allDone ? new Date().toISOString() : undefined }).eq('hw_result_id', hwRes.hw_result_id);
+            } else {
+                const { data: hwAssign } = await supabaseClient.from('homework_assignment').select('target_questions').eq('homework_id', qItem.homework_id).maybeSingle();
+                let tq = typeof hwAssign?.target_questions === 'string' ? JSON.parse(hwAssign.target_questions) : hwAssign?.target_questions;
+                if (!Array.isArray(tq)) tq = [];
+                const cSet = new Set([Number(qItem.tq_id)]);
+                const allDone = tq.length > 0 && tq.every((id:any) => cSet.has(Number(id)));
+                await supabaseClient.from('student_homework_result').insert({
+                    homework_id: qItem.homework_id,
+                    student_id: studentInfo.id,
+                    completed_tq_ids: [...cSet],
+                    status: allDone ? '채점완료' : '진행중',
+                    checked_at: allDone ? new Date().toISOString() : null
+                });
             }
         }
     }
@@ -1110,10 +1123,15 @@ export default function ClinicViewer() {
       setEmptyState({ title: '모든 문제를 해결했습니다!', desc: '수고하셨습니다. 이제 홈으로 돌아가세요.', awaited: false });
       sendAction('submit', { score: correctSolvedCountRef.current });
       
-      if (params.retry) {
-          const retryAssignId = await resolveValidExamAssignmentId(questions[0]?.examAssignmentId || params.assignmentId);
-          if (retryAssignId) {
-              await supabaseClient.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', retryAssignId);
+      const allAssignIds = Array.from(new Set(questions.map((q: any) => q.examAssignmentId).filter(Boolean)));
+      if (allAssignIds.length === 0 && params.assignmentId) allAssignIds.push(params.assignmentId);
+      const targetFinalStatus = params.retry || ['오답유사', '과제오답유사', '오답프린트', '오답', '과제', '과제프린트', '미완료과제'].includes(sourceTypeRef.current)
+        ? '최종완료'
+        : '제출완료';
+      for (const rawAid of allAssignIds) {
+          const validAid = await resolveValidExamAssignmentId(rawAid);
+          if (validAid) {
+              await supabaseClient.from('exam_assignment').update({ status: targetFinalStatus }).eq('assignment_id', validAid);
           }
       }
       

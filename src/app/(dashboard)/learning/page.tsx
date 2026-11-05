@@ -193,7 +193,7 @@ export default function LearningPage() {
         }
       }
       if (!filterByDate(item.sort_date || item.created_at)) return false;
-      const isCompleted = ['채점완료', '제출완료', '완료'].includes(item.status);
+      const isCompleted = ['채점완료', '제출완료', '완료', '최종완료'].includes(item.status);
       if (!showCompleted && isCompleted) return false; 
       return true;
     });

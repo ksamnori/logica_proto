@@ -339,7 +339,7 @@ export default function PublishPanel({ examId, layoutType, initialTargetGrade, o
                                 {list.map(a => {
                                     const statusField = a.status || '미응시';
                                     let statusText = '', statusColor = '';
-                                    if (['채점완료', '완료'].includes(statusField)) { statusText = `${a.total_score || 0}점`; statusColor = 'text-blue-600 bg-blue-50 border-blue-200'; }
+                                    if (['채점완료', '완료', '최종완료'].includes(statusField)) { statusText = `${a.total_score || 0}점`; statusColor = 'text-blue-600 bg-blue-50 border-blue-200'; }
                                     else if (['응시중', '제출완료'].includes(statusField)) { statusText = '대기중'; statusColor = 'text-rose-500 bg-rose-50 border-rose-200'; }
                                     else { statusText = '미응시'; statusColor = 'text-slate-500 bg-slate-100 border-slate-200'; }
                                     return (

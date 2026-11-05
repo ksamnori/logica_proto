@@ -364,7 +364,7 @@ export default function ClassReportPage() {
         });
 
         groupedExams.forEach(g => {
-          const isAllDone = g.statuses.length > 0 && g.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
+          const isAllDone = g.statuses.length > 0 && g.statuses.every((s: string) => ['제출완료', '채점완료', '완료', '최종완료'].includes(s));
           list.push({ ...g, status: isAllDone ? '완료' : '진행중', underlyingIds: Array.from(g.underlyingIds) });
         });
       }
@@ -399,7 +399,7 @@ export default function ClassReportPage() {
         });
 
         groupedHws.forEach(g => {
-          const isAllDone = g.statuses.length > 0 && g.statuses.every((s: string) => ['제출완료', '채점완료', '완료'].includes(s));
+          const isAllDone = g.statuses.length > 0 && g.statuses.every((s: string) => ['제출완료', '채점완료', '완료', '최종완료'].includes(s));
           list.push({ ...g, totalQ: g.tqSet.size, status: isAllDone ? '완료' : '진행중', underlyingIds: Array.from(g.underlyingIds) });
         });
       }
@@ -898,7 +898,7 @@ export default function ClassReportPage() {
             </thead>
             <tbody>
               {matrixRows.map((row, idx) => {
-                const isCompleted = ['완료', '채점완료', '제출완료'].includes(row.status);
+                const isCompleted = ['완료', '채점완료', '제출완료', '최종완료'].includes(row.status);
                 let assignedCount = 0;
                 matrixCols.forEach(col => { if (row.cells[col.qId] && !row.cells[col.qId].isBlocked) assignedCount++; });
 

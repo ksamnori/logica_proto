@@ -540,7 +540,7 @@ export default function ProgressPage() {
 
         hw.student_homework_result?.forEach((res: any) => {
           const sId = res.student_id;
-          const isFullyDone = ['채점완료', '제출완료', '완료'].includes(res.status);
+          const isFullyDone = ['채점완료', '제출완료', '완료', '최종완료'].includes(res.status);
 
           if (isFullyDone) {
             targetQs.forEach((tqId: number) => {
@@ -580,7 +580,7 @@ export default function ProgressPage() {
 
       examAssignments?.forEach((ea: any) => {
          const sId = ea.student_id;
-         const isDone = ['채점완료', '제출완료', '완료'].includes(ea.status);
+         const isDone = ['채점완료', '제출완료', '완료', '최종완료'].includes(ea.status);
          const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
          const items = m?.exam_item || [];
 
@@ -680,7 +680,7 @@ export default function ProgressPage() {
           .eq('student_id', stuId)
           .maybeSingle();
           
-        if (resData && !['채점완료', '제출완료', '완료'].includes(resData.status)) {
+        if (resData && !['채점완료', '제출완료', '완료', '최종완료'].includes(resData.status)) {
           targetHwToMerge = hw;
           break; 
         }

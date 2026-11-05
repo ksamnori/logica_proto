@@ -825,7 +825,7 @@ export default function LessonPage() {
 
       if (error) throw error;
 
-      const DONE = ["제출완료", "채점완료", "완료"];
+      const DONE = ["제출완료", "채점완료", "완료", "최종완료"];
       const missingCount = new Map<string, number>();
       (hwRows || []).forEach((hw: any) => {
         const targets: string[] = hw.target_student_id
@@ -1187,7 +1187,7 @@ export default function LessonPage() {
           hw.student_homework_result?.forEach((res: any) => {
             const sId = res.student_id;
             const parsedCompleted = safeParseIds(res.completed_tq_ids);
-            const isFullyCompleted = ["채점완료", "제출완료", "완료"].includes(res.status);
+            const isFullyCompleted = ["채점완료", "제출완료", "완료", "최종완료"].includes(res.status);
 
             let completedQs = parsedCompleted;
             if (isFullyCompleted && targetQs.length > 0) {
@@ -1260,7 +1260,7 @@ export default function LessonPage() {
 
         exAssigns.forEach((ea: any) => {
           const sId = ea.student_id;
-          const isCompleted = ["채점완료", "제출완료", "완료"].includes(ea.status);
+          const isCompleted = ["채점완료", "제출완료", "완료", "최종완료"].includes(ea.status);
           const assignYmd = toKstYmd(ea.created_at);
           const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
           const items = m?.exam_item || [];

@@ -29,7 +29,7 @@ export default function LearningCalendar({
       return globalList.map(g => ({
         date: g.sort_date || g.created_at,
         type: g.is_exam_hw ? 'hw_exam' : (activeTab === 'EXAM' ? 'exam' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'hw'),
-        isCompleted: ['채점완료', '제출완료', '완료'].includes(g.status || '미제출')
+        isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(g.status || '미제출')
       }));
     }
     if (currentView.type === 'CLASS') return classCalendarEvents.filter(e => e.class_id === currentView.classId);

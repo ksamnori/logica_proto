@@ -172,26 +172,26 @@ export function useLearningFetch() {
         if (rawExams) {
           const examOnly = rawExams.filter((s: any) => ['주간테스트', '중간테스트', '중간평가'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...examOnly.map((s: any) => mapExamStat(s, 'EXAM'))];
-          examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+          examOnly.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'exam', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const quarterlyExams = rawExams.filter((s: any) => ['분기테스트', '분기평가'].includes(s.exam_master?.exam_type));
-          quarterlyExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'quarterly', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+          quarterlyExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'quarterly', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const hwExams = rawExams.filter((s: any) => ['과제', '과제프린트'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...hwExams.map((s: any) => mapExamStat(s, 'HW'))];
-          hwExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+          hwExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'hw_exam', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const printExams = rawExams.filter((s: any) => ['오답프린트', '오답'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...printExams.map((s: any) => mapExamStat(s, 'PRINT'))];
-          printExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+          printExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'print', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const similarExams = rawExams.filter((s: any) => ['오답유사', '과제오답유사'].includes(s.exam_master?.exam_type));
           fetchedStats = [...fetchedStats, ...similarExams.map((s: any) => mapExamStat(s, 'SIMILAR'))];
-          similarExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'similar', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+          similarExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'similar', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
 
           const overdueExams = rawExams.filter((s: any) => s.exam_master?.exam_type === '미완료과제');
           fetchedStats = [...fetchedStats, ...overdueExams.map((s: any) => mapExamStat(s, 'OVERDUE'))];
-          overdueExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'overdue', isCompleted: ['채점완료', '제출완료', '완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
+          overdueExams.forEach((s: any) => allCalEvents.push({ date: s.created_at, type: 'overdue', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(s.status), class_id: s.class_id, student_id: s.student_id }));
         }
         
         const { data: allHws } = await supabase.from('homework_assignment').select('homework_id, class_id, homework_title, target_student_id, target_questions, created_at, due_date').in('class_id', classIds).neq('homework_title', '[시스템] 수업 진도 완료 기록');
@@ -209,7 +209,7 @@ export function useLearningFetch() {
              if (chunk.includes(hw.target_student_id)) {
                 const res = hwResultMap.get(`${hw.target_student_id}_${hw.homework_id}`);
                 fetchedStats.push({ student_id: hw.target_student_id, class_id: hw.class_id, status: res?.status || '미제출', type: 'HW', qCount: hwQCount });
-                allCalEvents.push({ date: hwDate, type: 'hw', isCompleted: ['채점완료', '제출완료', '완료'].includes(res?.status), class_id: hw.class_id, student_id: hw.target_student_id });
+                allCalEvents.push({ date: hwDate, type: 'hw', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(res?.status), class_id: hw.class_id, student_id: hw.target_student_id });
              }
           } else {
              chunk.forEach(sId => {
@@ -217,7 +217,7 @@ export function useLearningFetch() {
                 if (s && (s.allClassIds?.includes(hw.class_id) || s.classId === hw.class_id)) {
                    const res = hwResultMap.get(`${sId}_${hw.homework_id}`);
                    fetchedStats.push({ student_id: sId, class_id: hw.class_id, status: res?.status || '미제출', type: 'HW', qCount: hwQCount });
-                   allCalEvents.push({ date: hwDate, type: 'hw', isCompleted: ['채점완료', '제출완료', '완료'].includes(res?.status), class_id: hw.class_id, student_id: sId });
+                   allCalEvents.push({ date: hwDate, type: 'hw', isCompleted: ['채점완료', '제출완료', '완료', '최종완료'].includes(res?.status), class_id: hw.class_id, student_id: sId });
                 }
              });
           }
@@ -306,13 +306,22 @@ export function useLearningFetch() {
         else if (['오답유사', '과제오답유사'].includes(m?.exam_type)) type = 'similar';
         else if (m?.exam_type === '미완료과제') type = 'overdue'; 
 
+        const totalQ = m?.total_questions || 0;
+        const oCnt = exCounts[ex.assignment_id]?.o || 0;
+        const xCnt = exCounts[ex.assignment_id]?.x || 0;
+        let finalExStatus = ex.status;
+        if (totalQ > 0 && oCnt >= totalQ && xCnt === 0 && !['제출완료', '채점완료', '완료', '최종완료'].includes(finalExStatus)) {
+          finalExStatus = '최종완료';
+          supabase.from('exam_assignment').update({ status: '최종완료' }).eq('assignment_id', ex.assignment_id).then();
+        }
+
         combined.push({
           id: `${type}_${ex.assignment_id}`,
           type: type,
           realId: ex.assignment_id, masterId: m?.exam_id, title: m?.title || '제목 없음', subTitle: m?.sub_title, 
-          date: ex.created_at, status: ex.status, total: m?.total_questions || 0, score: ex.total_score || 0,
-          oCount: exCounts[ex.assignment_id]?.o || 0, xCount: exCounts[ex.assignment_id]?.x || 0, helpedCount: exCounts[ex.assignment_id]?.helped || 0,
-          isCompleted: ['제출완료', '채점완료', '완료'].includes(ex.status)
+          date: ex.created_at, status: finalExStatus, total: totalQ, score: ex.total_score || 0,
+          oCount: oCnt, xCount: xCnt, helpedCount: exCounts[ex.assignment_id]?.helped || 0,
+          isCompleted: ['제출완료', '채점완료', '완료', '최종완료'].includes(finalExStatus)
         });
       });
 
@@ -323,12 +332,24 @@ export function useLearningFetch() {
         let targetQs = [];
         try { targetQs = typeof hw.target_questions === 'string' ? JSON.parse(hw.target_questions) : hw.target_questions; } catch(e){}
         const tb = unwrap(hw.textbook);
+        const totalHwQ = targetQs?.length || 0;
+        const hwOCnt = hwCounts[hw.homework_id]?.o || 0;
+        const hwXCnt = hwCounts[hw.homework_id]?.x || 0;
+        let finalHwStatus = res?.status || '미제출';
+        if (totalHwQ > 0 && hwOCnt >= totalHwQ && hwXCnt === 0 && !['제출완료', '채점완료', '완료', '최종완료'].includes(finalHwStatus)) {
+          finalHwStatus = '채점완료';
+          if (res?.hw_result_id) {
+            supabase.from('student_homework_result').update({ status: '채점완료', checked_at: new Date().toISOString() }).eq('hw_result_id', res.hw_result_id).then();
+          } else {
+            supabase.from('student_homework_result').insert({ homework_id: hw.homework_id, student_id: studentId, status: '채점완료', completed_tq_ids: targetQs || [], checked_at: new Date().toISOString() }).then();
+          }
+        }
         combined.push({
           id: `hw_${hw.homework_id}`, type: 'hw', realId: hw.homework_id, masterId: hw.homework_id, 
           target_questions: targetQs, title: hw.homework_title, subTitle: tb?.title || '교재과제', source: tb?.title || '교재',
-          date: hw.created_at || new Date().toISOString(), status: res?.status || '미제출', total: targetQs?.length || 0,
-          oCount: hwCounts[hw.homework_id]?.o || 0, xCount: hwCounts[hw.homework_id]?.x || 0, helpedCount: hwCounts[hw.homework_id]?.helped || 0,
-          isCompleted: ['제출완료', '채점완료', '완료'].includes(res?.status)
+          date: hw.created_at || new Date().toISOString(), status: finalHwStatus, total: totalHwQ,
+          oCount: hwOCnt, xCount: hwXCnt, helpedCount: hwCounts[hw.homework_id]?.helped || 0,
+          isCompleted: ['제출완료', '채점완료', '완료', '최종완료'].includes(finalHwStatus)
         });
       });
 
@@ -989,10 +1010,10 @@ export function useLearningFetch() {
           }
 
           if (
-            (type === '오답유사' || type === '과제오답유사' || isWeeklyIncorrect) &&
+            (type === '오답유사' || type === '과제오답유사' || type === '과제' || type === '과제프린트' || type === '미완료과제' || isWeeklyIncorrect) &&
             tq > 0 &&
             remain === 0 &&
-            !['최종완료', '완료', '채점완료'].includes(ex.status)
+            !['최종완료', '완료', '채점완료', '제출완료'].includes(ex.status)
           ) {
             supabase
               .from('exam_assignment')
