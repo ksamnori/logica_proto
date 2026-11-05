@@ -257,9 +257,9 @@ export default function ExamClinicPreviewPage() {
   const [pendingRecheckReview, setPendingRecheckReview] = useState<any[]>([]);
 
   // 답안/채점 Ref (실제 /clinic/viewer와 동일한 구조)
-  const studentAnswers = useRef<Record<number, any>>({});
+  const studentAnswers = useRef<Record<number, string | null>>({});
   const studentDrawings = useRef<Record<number, string>>({});
-  const keypadAnswers = useRef<Record<number, string[]>>({});
+  const keypadAnswers = useRef<Record<number, string>>({});
   const keypadCursor = useRef<Record<number, number>>({});
   const answerModes = useRef<Record<number, "pen" | "keypad">>({});
   const qBoxStatus = useRef<Record<number, string>>({});
@@ -1538,7 +1538,7 @@ export default function ExamClinicPreviewPage() {
     studentAnswers.current[currentQIndex] =
       mode === "pen"
         ? studentDrawings.current[currentQIndex] || null
-        : keypadAnswers.current[currentQIndex]?.join("") || null;
+        : keypadAnswers.current[currentQIndex] || null;
     forceUpdate();
   };
 
