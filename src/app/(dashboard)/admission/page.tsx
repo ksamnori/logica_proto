@@ -233,7 +233,7 @@ export default function AdmissionPage() {
     setIsLoadingSessions(true);
     const { data, error } = await supabase
       .from('admission_session')
-      .select('*, exam_master(title, sub_title, major_grade), admission_application(application_id)')
+      .select('*, exam_master(title, sub_title, major_grade), admission_application(application_id, student_id, student(name))')
       .eq('tenant_id', currentTenantId) 
       .order('test_date', { ascending: false }); 
       
@@ -414,10 +414,21 @@ export default function AdmissionPage() {
       const matchGrade = filterGrade === "ALL" || s._extractedGrade === filterGrade;
       
       const keyword = searchKeyword.toLowerCase().trim();
+      const matchedStudentNames = (s.admission_application || [])
+        .map((app: any) => {
+          const st = Array.isArray(app.student) ? app.student[0] : app.student;
+          return String(st?.name || "").trim();
+        })
+        .filter(Boolean);
+      const hasStudentMatch = keyword
+        ? matchedStudentNames.some((name: string) => name.toLowerCase().includes(keyword))
+        : false;
+
       const matchKeyword = !keyword || 
-        s.title.toLowerCase().includes(keyword) || 
+        (s.title || "").toLowerCase().includes(keyword) || 
         (s.exam_master?.title || "").toLowerCase().includes(keyword) ||
-        (s.exam_master?.sub_title || "").toLowerCase().includes(keyword);
+        (s.exam_master?.sub_title || "").toLowerCase().includes(keyword) ||
+        hasStudentMatch;
 
       return matchDate && matchGrade && matchKeyword;
     });
@@ -442,6 +453,20 @@ export default function AdmissionPage() {
       }
     });
   }, [sessions, filterDateTime, filterGrade, searchKeyword, primarySort, dateSortOrder, gradeSortOrder]);
+
+  // 검색어나 필터로 인해 현재 선택된 일정이 필터 결과에서 제외된 경우 첫 번째 일치 일정을 자동 선택
+  useEffect(() => {
+    if (filteredSessions.length > 0) {
+      const existsInFiltered =
+        selectedSession &&
+        filteredSessions.some(
+          (s: any) => String(s.admission_session_id) === String(selectedSession.admission_session_id)
+        );
+      if (!existsInFiltered) {
+        setSelectedSession(filteredSessions[0]);
+      }
+    }
+  }, [filteredSessions, selectedSession]);
 
   const resetFilters = () => {
     setFilterDateTime("ALL");
@@ -610,8 +635,8 @@ export default function AdmissionPage() {
               type="text" 
               value={searchKeyword} 
               onChange={e => setSearchKeyword(e.target.value)} 
-              placeholder="방 코드(LT..), 시험지명 검색" 
-              className="border border-slate-300 text-slate-700 text-sm font-bold rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:border-brand w-[220px] bg-slate-50 focus:bg-white transition-colors"
+              placeholder="방 코드(LT..), 시험지명, 학생명 검색" 
+              className="border border-slate-300 text-slate-700 text-sm font-bold rounded-lg pl-8 pr-3 py-2 focus:outline-none focus:border-brand w-[250px] bg-slate-50 focus:bg-white transition-colors"
             />
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">⌨️</span>
           </div>
@@ -873,8 +898,13 @@ export default function AdmissionPage() {
                         : app.student?.parent?.phone;
                       const displayPhone = parentPhone || app.student?.phone || '-';
 
+                      const kwTrimmed = searchKeyword.toLowerCase().trim();
+                      const isKeywordMatchedStudent =
+                        !!kwTrimmed &&
+                        String(app.student?.name || "").toLowerCase().includes(kwTrimmed);
+
                       return (
-                        <tr key={app.application_id} className="hover:bg-blue-50/50 transition-colors">
+                        <tr key={app.application_id} className={`transition-colors ${isKeywordMatchedStudent ? "bg-amber-50/80 hover:bg-amber-100/70" : "hover:bg-blue-50/50"}`}>
                           <td className="py-3 px-3 text-center text-xs text-slate-400 font-bold">{idx + 1}</td>
                           <td className="py-3 px-5 font-bold text-brand cursor-pointer hover:underline" onClick={() => window.open(`/student/${app.student_id}`, '_blank')}>{app.student?.name}</td>
                           <td className="px-5 text-sm font-bold text-slate-600">{app.student?.school || '-'}</td>
