@@ -168,9 +168,7 @@ export function useTaHandheld() {
 
   const updateHandlingPresence = useCallback((callKey: string | null) => {
     if (!clinicChannelRef.current || !taName || !taClientId) return;
-    clinicChannelRef.current.untrack().catch(() => {}).then(() => {
-      clinicChannelRef.current.track({ role: 'ta', name: taName, joined_at: taJoinedAt, clientId: taClientId, handling: callKey, updatedAt: Date.now() });
-    });
+    clinicChannelRef.current.track({ role: 'ta', name: taName, joined_at: taJoinedAt, clientId: taClientId, handling: callKey, updatedAt: Date.now() }).catch(() => {});
   }, [taName, taClientId, taJoinedAt]);
 
   const syncFromPresenceRef = useRef<() => void>(() => {});

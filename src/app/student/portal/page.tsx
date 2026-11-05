@@ -130,17 +130,27 @@ export default function StudentPortal() {
         if (updated && !trackedSeatRef.current) trackedSeatRef.current = candidate;
     }, []);
 
-    const trackPortalPresence = useCallback((seat: string, sId: string, sName: string, classes: string[], sessionState: any) => {
+    const lastPortalTrackAtRef = useRef<number>(0);
+    const lastPortalTrackKeyRef = useRef<string>('');
+
+    // 🌟 ClientPresenceRateLimitReached 방지: 동일 상태 연속 track() 호출 3초 스로틀 적용
+    const trackPortalPresence = useCallback((seat: string, sId: string, sName: string, classes: string[], sessionState: any, force = false) => {
         if (!channelRef.current || !seat) return;
+        const dur = sessionState?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS;
+        const key = `${seat}_${dur}`;
+        const now = Date.now();
+        if (!force && key === lastPortalTrackKeyRef.current && now - lastPortalTrackAtRef.current < 3000) return;
+        lastPortalTrackKeyRef.current = key;
+        lastPortalTrackAtRef.current = now;
         channelRef.current.track({
             seat,
             name: sName,
             studentId: sId,
             classes,
             activity: '포털 대기 중 📋',
-            updatedAt: Date.now(),
-            startedAt: new Date(sessionState?.started_at || Date.now()).getTime(),
-            durationMs: sessionState?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS
+            updatedAt: now,
+            startedAt: new Date(sessionState?.started_at || now).getTime(),
+            durationMs: dur
         }).catch(() => {});
     }, []);
 
@@ -495,17 +505,16 @@ export default function StudentPortal() {
             if (!sid || cancelled) return;
             await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
 
+            // 🌟 15초마다 무조건 track()을 재전송하면 ClientPresenceRateLimitReached 에러가 발생하므로,
+            // Presence 상태에 내 좌석이 없을 때만 재등록합니다 (오프라인 판정은 위 last_seen_at DB 업데이트로 수행됨).
             if (channelRef.current && trackedSeatRef.current) {
-                channelRef.current.track({
-                    seat: trackedSeatRef.current, 
-                    name: studentInfo.name, 
-                    studentId: studentInfo.id, 
-                    classes: studentInfo.classes,
-                    activity: '포털 대기 중 📋', 
-                    updatedAt: Date.now(),
-                    startedAt: new Date(clinicSessionRef.current?.started_at || Date.now()).getTime(),
-                    durationMs: clinicSessionRef.current?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS
-                }).catch(() => {});
+                const state = channelRef.current.presenceState?.() || {};
+                const amIPresent = Object.values(state).some((metas: any) =>
+                    (metas as any[]).some((m: any) => m.studentId === studentInfo.id && m.seat === trackedSeatRef.current)
+                );
+                if (!amIPresent) {
+                    trackPortalPresence(trackedSeatRef.current, studentInfo.id, studentInfo.name, studentInfo.classes, clinicSessionRef.current);
+                }
             }
         };
         beat();

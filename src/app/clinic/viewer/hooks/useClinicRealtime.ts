@@ -57,6 +57,8 @@ export function useClinicRealtime({
   const gradingChannelRef = useRef<any>(null);
   const handleTaActionRef = useRef<any>(null);
   const trackPresenceRef = useRef<any>(null);
+  const lastTrackAtRef = useRef<number>(0);
+  const lastTrackKeyRef = useRef<string>('');
 
   const callbacksRef = useRef({ 
       processCorrectAnswer, handleTimeUp, forceUpdate, setRecheckToast, 
@@ -464,13 +466,20 @@ export function useClinicRealtime({
     }
   };
 
-  trackPresenceRef.current = (seat: string, sId: string, sessionState: any) => {
-    if (!clinicChannelRef.current) return;
+  // 🌟 ClientPresenceRateLimitReached 방지: 동일 상태의 연속 track() 호출에 최소 3초 스로틀 적용
+  trackPresenceRef.current = (seat: string, sId: string, sessionState: any, force = false) => {
+    if (!clinicChannelRef.current || !seat) return;
     const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
+    const dur = sessionState?.duration_ms || 0;
+    const key = `${seat}_${activity}_${dur}`;
+    const now = Date.now();
+    if (!force && key === lastTrackKeyRef.current && now - lastTrackAtRef.current < 3000) return;
+    lastTrackKeyRef.current = key;
+    lastTrackAtRef.current = now;
     clinicChannelRef.current.track({
-      seat, name: studentInfo.name, studentId: sId, classes: studentInfo.classes, activity, updatedAt: Date.now(),
-      startedAt: new Date(sessionState.started_at).getTime(), durationMs: sessionState.duration_ms
-    });
+      seat, name: studentInfo.name, studentId: sId, classes: studentInfo.classes, activity, updatedAt: now,
+      startedAt: new Date(sessionState?.started_at || now).getTime(), durationMs: sessionState?.duration_ms
+    }).catch(() => {});
   };
 
   const connectChannel = async (sId: string, sessionState: any) => {
@@ -686,12 +695,16 @@ export function useClinicRealtime({
       }
       await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
 
+      // 🌟 15초마다 무조건 track()을 호출하면 Supabase Realtime ClientPresenceRateLimitReached 에러가 발생하므로,
+      // 현재 Presence 목록에서 내 세션이 유실되었거나 duration_ms가 변경된 경우에만 trackPresenceRef를 호출합니다.
       if (clinicChannelRef.current && mySeatRef.current) {
-        const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
-        clinicChannelRef.current.track({
-          seat: mySeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes, activity, updatedAt: Date.now(),
-          startedAt: new Date(clinicSessionStateRef.current?.started_at || Date.now()).getTime(), durationMs: clinicSessionStateRef.current?.duration_ms
-        }).catch(() => {});
+        const state = clinicChannelRef.current.presenceState?.() || {};
+        const amIPresent = Object.values(state).some((metas: any) =>
+          (metas as any[]).some((m: any) => m.studentId === studentInfo.id && m.seat === mySeatRef.current)
+        );
+        if (!amIPresent) {
+          trackPresenceRef.current(mySeatRef.current, studentInfo.id, clinicSessionStateRef.current);
+        }
       }
     };
     beat();
