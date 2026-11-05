@@ -869,12 +869,12 @@ export default function ExamListPage() {
           <table className="w-full text-left border-collapse whitespace-nowrap">
             <thead className="bg-slate-50 border-b border-slate-200 sticky top-0 z-10">
               <tr>
-                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center w-24">학년 범위</th>
-                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center w-28">유형 속성</th>
-                <th className="py-3 px-5 font-bold text-slate-500 text-sm">시험지 제목 및 범위</th>
-                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center">생성일시</th>
-                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-center">출제자</th>
-                <th className="py-3 px-5 font-bold text-slate-500 text-sm text-right">관리 액션</th>
+                <th className="py-2 px-3 font-bold text-slate-500 text-xs text-center w-20">학년 범위</th>
+                <th className="py-2 px-3 font-bold text-slate-500 text-xs text-center w-24">유형 속성</th>
+                <th className="py-2 px-3.5 font-bold text-slate-500 text-xs">시험지 제목 및 범위</th>
+                <th className="py-2 px-3 font-bold text-slate-500 text-xs text-center">생성일시</th>
+                <th className="py-2 px-3 font-bold text-slate-500 text-xs text-center">출제자</th>
+                <th className="py-2 px-3.5 font-bold text-slate-500 text-xs text-right">관리 액션</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -931,34 +931,48 @@ export default function ExamListPage() {
 
                   return (
                     <tr key={exam.exam_id} className="hover:bg-slate-50 transition-colors border-b border-slate-100">
-                      <td className="py-4 px-5 text-center"><span className="font-bold text-slate-600 text-sm">{targetGrade}</span></td>
-                      <td className="py-4 px-5 text-center">
-                        <span className={`px-2.5 py-1 rounded text-xs font-bold shadow-sm border ${typeColorClass}`}>{displayTypeStr}</span>
+                      <td className="py-2 px-3 text-center"><span className="font-bold text-slate-600 text-xs">{targetGrade}</span></td>
+                      <td className="py-2 px-3 text-center">
+                        <span className={`px-2 py-0.5 rounded text-[11px] font-bold shadow-sm border ${typeColorClass}`}>{displayTypeStr}</span>
                       </td>
-                      <td className="py-4 px-5">
-                        <div className="flex items-center gap-2 mb-1 min-w-0">
+                      <td className="py-2 px-3.5">
+                        <div className="flex items-center gap-1.5 mb-0.5 min-w-0">
                           <button 
                             onClick={() => openAnswerModal(exam.exam_id, exam.title)} 
-                            className="bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-200 px-2 py-0.5 rounded text-xs font-bold shadow-sm shrink-0 transition-colors" 
+                            className="bg-slate-100 hover:bg-slate-200 text-slate-500 border border-slate-200 px-1.5 py-0.5 rounded text-[11px] font-bold shadow-sm shrink-0 transition-colors" 
                             title="정답지만 모아보기 및 인쇄"
                           >
                             📑 정답
                           </button>
 
-                          <button onClick={() => { clearSessionStorageForExam(); router.push(`/exam/viewer?exam_id=${exam.exam_id}`); }} className="font-bold text-slate-800 text-[15px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
+                          <button onClick={() => { clearSessionStorageForExam(); router.push(`/exam/viewer?exam_id=${exam.exam_id}`); }} className="font-bold text-slate-800 text-[13.5px] hover:underline hover:text-blue-600 transition-colors text-left truncate">{exam.title}</button>
                           
-                          {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-2 py-0.5 rounded text-xs font-bold shadow-sm shrink-0">{exam.sub_title}</span>}
-                          {isNew && <span className="text-xs font-bold text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">NEW</span>}
+                          {exam.sub_title && exam.sub_title !== '-' && <span className="bg-indigo-50 text-indigo-600 border border-indigo-200 px-1.5 py-0.5 rounded text-[11px] font-bold shadow-sm shrink-0">{exam.sub_title}</span>}
+                          {isNew && <span className="text-[10px] font-bold text-blue-500 tracking-tighter bg-blue-50 px-1.5 py-0.5 rounded border border-blue-100 shrink-0">NEW</span>}
                         </div>
-                        <div className="text-[12px] font-bold text-slate-500 tracking-tight flex items-center gap-1.5 pl-[52px]">
-                          <span>{exam.total_questions || 0}문제</span><span className="text-slate-300">|</span><span>{diff}</span><span className="text-slate-300">|</span><span className="truncate max-w-[250px]" title={scope}>{scope}</span>
+                        <div className="text-[11px] font-bold text-slate-400 tracking-tight flex items-center gap-1.5 pl-[46px]">
+                          <span>{exam.total_questions || 0}문제</span><span className="text-slate-300">|</span><span>{diff}</span><span className="text-slate-300">|</span><span className="truncate max-w-[240px]" title={scope}>{scope}</span>
                         </div>
                       </td>
-                      <td className="py-4 px-5 text-center text-slate-500 font-bold text-xs">{formatDateTime(exam.created_at)}</td>
-                      <td className="py-4 px-5 text-center text-slate-600 font-bold text-xs">{creatorName}</td>
-                      <td className="py-4 px-5">
-                        <div className="flex items-center justify-end gap-1.5 whitespace-nowrap">
-                          <button onClick={() => setPublishModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[64px] h-[30px] flex items-center justify-center shrink-0 bg-brand hover:bg-blue-900 text-white rounded text-xs font-bold shadow-sm transition-colors">
+                      <td className="py-2 px-3 text-center text-slate-500 font-bold text-[11px]">{formatDateTime(exam.created_at)}</td>
+                      <td className="py-2 px-3 text-center text-slate-600 font-bold text-[11px]">{creatorName}</td>
+                      <td className="py-2 px-3.5">
+                        <div className="flex items-center justify-end gap-1 whitespace-nowrap">
+                          <button
+                            onClick={() =>
+                              window.open(
+                                `/exam/clinic-preview?exam_id=${encodeURIComponent(exam.exam_id)}`,
+                                "_blank",
+                                "width=1680,height=980,top=40,left=60,resizable=yes,scrollbars=yes"
+                              )
+                            }
+                            className="px-2.5 h-[27px] flex items-center justify-center shrink-0 bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 rounded text-[11px] font-bold shadow-sm transition-colors cursor-pointer"
+                            title="학생 포털 및 클리닉 관제탑 시뮬레이터를 새 창에서 엽니다"
+                          >
+                            클리닉 미리보기
+                          </button>
+
+                          <button onClick={() => setPublishModal({ isOpen: true, examId: exam.exam_id, title: exam.title })} className="w-[56px] h-[27px] flex items-center justify-center shrink-0 bg-brand hover:bg-blue-900 text-white rounded text-[11px] font-bold shadow-sm transition-colors">
                             출제하기
                           </button>
                           
@@ -979,32 +993,32 @@ export default function ExamListPage() {
                               );
                             } catch (e) {}
                             setGradingModal({ isOpen: true, examId: exam.exam_id, title: exam.title });
-                          }} className="w-[84px] h-[30px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-xs font-bold shadow-sm transition-colors">
+                          }} className="w-[74px] h-[27px] flex items-center justify-center shrink-0 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold shadow-sm transition-colors">
                             출제현황({assignCount}명)
                           </button>
                           
                           {isDistributed ? (
                             isSuperAdmin ? (
-                              <button onClick={() => handleForceEdit(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-xs font-bold shadow-sm transition-colors border border-rose-200 gap-0.5" title="최고관리자 전용 강제 수정">
+                              <button onClick={() => handleForceEdit(exam.exam_id)} className="w-[66px] h-[27px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200 gap-0.5" title="최고관리자 전용 강제 수정">
                                 🚨 강제수정
                               </button>
                             ) : (
-                              <button disabled className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-slate-50 text-slate-400 rounded text-xs font-bold cursor-not-allowed border border-slate-200 gap-0.5" title="이미 출제되어 수정할 수 없습니다">
+                              <button disabled className="w-[66px] h-[27px] flex items-center justify-center shrink-0 bg-slate-50 text-slate-400 rounded text-[11px] font-bold cursor-not-allowed border border-slate-200 gap-0.5" title="이미 출제되어 수정할 수 없습니다">
                                 🔒 수정불가
                               </button>
                             )
                           ) : (
-                            <button onClick={() => editExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-slate-50 text-slate-600 rounded text-xs font-bold shadow-sm transition-colors border border-slate-300">
+                            <button onClick={() => editExam(exam.exam_id)} className="w-[58px] h-[27px] flex items-center justify-center shrink-0 bg-white hover:bg-slate-50 text-slate-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-slate-300">
                               수정
                             </button>
                           )}
 
-                          <button onClick={() => duplicateAndEditExam(exam.exam_id)} className="w-[76px] h-[30px] flex items-center justify-center shrink-0 bg-white hover:bg-indigo-50 text-indigo-600 rounded text-xs font-bold shadow-sm transition-colors border border-indigo-200">
+                          <button onClick={() => duplicateAndEditExam(exam.exam_id)} className="w-[66px] h-[27px] flex items-center justify-center shrink-0 bg-white hover:bg-indigo-50 text-indigo-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-indigo-200">
                             복제후수정
                           </button>
                           
                           {canDeleteExam && (
-                            <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[48px] h-[30px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-xs font-bold shadow-sm transition-colors border border-rose-200">
+                            <button onClick={() => deleteExam(exam.exam_id, exam.exam_type, assignCount)} className="w-[42px] h-[27px] flex items-center justify-center shrink-0 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded text-[11px] font-bold shadow-sm transition-colors border border-rose-200">
                               삭제
                             </button>
                           )}
