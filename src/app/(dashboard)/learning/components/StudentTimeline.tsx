@@ -935,7 +935,7 @@ export default function StudentTimeline({
               const meta = TYPE_META[item.type] || (item.type.includes('hw') ? { label: '과제', cls: 'bg-amber-100 text-amber-700 border-amber-200' } : { label: '', cls: '' });
               const isRawLike = item.type === 'raw_inc' || item.type === 'archive';
               const isExamLike = item.type === 'exam' || item.type === 'quarterly' || item.type === 'print' || item.type === 'hw_exam' || item.type === 'similar' || item.type === 'overdue';
-              const completeKind = (item.type === 'quarterly' || item.type === 'exam') ? 'exam' : item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam';
+              const completeKind = item.type === 'raw_inc' ? 'raw_inc' : item.type === 'archive' ? 'archive' : (item.type === 'quarterly' || item.type === 'exam') ? 'exam' : item.type.includes('hw') && item.type !== 'hw_exam' ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam';
               const printKind = isRawLike ? 'raw_inc' : item.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : activeTab === 'HOMEWORK' && !item.type.includes('hw_exam') ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'exam');
               const statusText = item.status || '미제출';
               const goDetail = () => {
@@ -974,7 +974,7 @@ export default function StudentTimeline({
                     : { label: '상세', onClick: goDetail }}
                   menu={[
                     { label: '문항 확인 및 개별 삭제', hidden: item.type !== 'raw_inc', onClick: () => openRawIncManageModal(currentView.studentId, currentView.studentName, item.realId) },
-                    { label: '이름 변경', onClick: (e) => handleRenameItem(e, item.type, item.realId, item.masterId, displayTitle) },
+                    { label: '이름 변경', hidden: isRawLike, onClick: (e) => handleRenameItem(e, item.type, item.realId, item.masterId, displayTitle) },
                     isRawLike
                       ? { label: '맞춤 오답 다시 출제', onClick: (e) => handleEditRawIncorrectToStep2?.(e, item.target_questions, displayTitle, currentView?.studentName, currentView?.studentId, currentView?.classId) }
                       : isExamLike

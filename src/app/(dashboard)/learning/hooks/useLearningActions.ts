@@ -151,9 +151,17 @@ export function useLearningActions({
       const affectedStudentIds = Array.from(new Set(globalSelectedBlocks.map(b => b.split('_').pop()!).filter(Boolean)));
       
       for (const block of globalSelectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('raw_inc_')) {
+          const parts = block.split('_');
+          const month = parts[2];
+          const sId = parts[3];
+          await resolveRawIncMonth(month, sId);
+        } else if (block.startsWith('archive_')) {
+          continue;
+        } else if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const aId = block.startsWith('hw_exam_') ? block.split('_')[2] : block.split('_')[1];
-          const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', aId);
+          if (!aId || isNaN(Number(aId))) continue;
+          const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', Number(aId));
           if (error) throw error;
         } else if (block.startsWith('hw_')) {
           const hwId = Number(block.split('_')[1]);
@@ -254,9 +262,15 @@ export function useLearningActions({
     setIsLoading(true);
     try {
       for (const block of selectedBlocks) {
-        if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
+        if (block.startsWith('raw_inc_')) {
+          const month = block.replace('raw_inc_', '');
+          await resolveRawIncMonth(month, currentView.studentId);
+        } else if (block.startsWith('archive_')) {
+          continue;
+        } else if (block.startsWith('exam_') || block.startsWith('quarterly_') || block.startsWith('print_') || block.startsWith('similar_') || block.startsWith('overdue_') || block.startsWith('hw_exam_')) {
           const assignId = block.split('_').pop();
-          const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', assignId);
+          if (!assignId || isNaN(Number(assignId))) continue;
+          const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', Number(assignId));
           if (error) throw error;
         } else if (block.startsWith('hw_')) {
           const hwId = Number(block.split('_')[1]);
@@ -345,13 +359,51 @@ export function useLearningActions({
     }
   };
 
+  // 🌟 월별 누적 원본 오답(raw_inc, 예: id="2026-11")을 강제 완료 처리할 때
+  // exam_assignment.assignment_id(integer)에 "2026-11"이 전달되어 22P02 에러가 발생하는 것을 방지하고,
+  // 해당 월의 미해결 student_incorrect_record를 해결됨(RO, resolved_at)으로 일괄 전환합니다.
+  const resolveRawIncMonth = async (month: string, studentId: string) => {
+    if (!month || !studentId) return;
+    const nowIso = new Date().toISOString();
+    if (month === 'Unknown') {
+      const { error } = await supabase
+        .from('student_incorrect_record')
+        .update({ status: 'RO', resolved_at: nowIso })
+        .eq('student_id', studentId)
+        .is('resolved_at', null)
+        .is('created_at', null);
+      if (error) throw error;
+      return;
+    }
+    const [y, m] = String(month).split('-').map(Number);
+    if (!y || !m) return;
+    const start = `${month}-01T00:00:00.000+09:00`;
+    const nextD = new Date(y, m, 1);
+    const end = `${nextD.getFullYear()}-${String(nextD.getMonth() + 1).padStart(2, '0')}-01T00:00:00.000+09:00`;
+    const { error } = await supabase
+      .from('student_incorrect_record')
+      .update({ status: 'RO', resolved_at: nowIso })
+      .eq('student_id', studentId)
+      .is('resolved_at', null)
+      .gte('created_at', start)
+      .lt('created_at', end);
+    if (error) throw error;
+  };
+
   const handleForceComplete = async (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => {
     e.stopPropagation();
-    if (!confirm("이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
+    if (type === 'archive') return;
+    const isRawMonth = type === 'raw_inc' || /^\d{4}-\d{2}$/.test(String(id || '')) || id === 'Unknown';
+    if (!confirm(isRawMonth ? "이 달의 누적 미해결 오답을 모두 '해결됨(완료)' 처리하시겠습니까?" : "이 항목을 강제로 '채점완료' 처리하시겠습니까?")) return;
     
     try {
-      if (type === 'exam' || type === 'quarterly' || type === 'print' || type === 'similar' || type === 'overdue' || type === 'hw_exam') {
-        const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', id);
+      if (isRawMonth) {
+        await resolveRawIncMonth(String(id), targetStudentId);
+      } else if (type === 'exam' || type === 'quarterly' || type === 'print' || type === 'similar' || type === 'overdue' || type === 'hw_exam') {
+        if (!id || isNaN(Number(id))) {
+          throw new Error(`유효하지 않은 시험 배정 ID입니다: ${id}`);
+        }
+        const { error } = await supabase.from('exam_assignment').update({ status: '채점완료' }).eq('assignment_id', Number(id));
         if (error) throw error;
       } else if (type === 'hw') {
         const { data: existing, error: findErr } = await supabase.from('student_homework_result').select('hw_result_id').eq('homework_id', id).eq('student_id', targetStudentId).maybeSingle();

@@ -22,7 +22,8 @@ interface GlobalListProps {
   handleForceComplete: (e: React.MouseEvent, type: string, id: string, targetStudentId: string) => void;
   handleDeleteExam: (assignmentId: string, studentId: string) => void;
   handleDeleteHomework: (hwId: string, studentId: string) => void;
-  handleDeletePrint: (assignmentId: string, examId: string, studentId: string) => void; 
+  handleDeletePrint: (assignmentId: string, examId: string, studentId: string) => void;
+  handleDeleteRawIncArchive?: (month: string, studentId: string, isArchive: boolean) => void;
   handlePrintItem: (e: React.MouseEvent, type: string, masterId: any, targetQuestions?: any[], title?: string, subTitle?: string) => void; 
   handleEditHomeworkToStep2?: (e: React.MouseEvent, type: string, hwId: any, targetQuestions?: any[], title?: string, subTitle?: string, studentName?: string, studentId?: string, classId?: string) => void; 
   handleEditExamToStep2?: (e: React.MouseEvent, assignId: any, masterId: any, title: string, subTitle: string, studentName: string, studentId: string, classId: string, examType: string) => void; 
@@ -35,7 +36,7 @@ interface GlobalListProps {
 export default function GlobalList({
   currentView, activeTab, globalList, isLoading, globalSelectedBlocks, handleSelectAllGlobal,
   handleBulkCompleteGlobal, handleBulkDeleteGlobal, handleExtractCommonHomework, handleViewChange, toggleGlobalSelection,
-  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
+  formatDateLabel, handleForceComplete, handleDeleteExam, handleDeleteHomework, handleDeletePrint, handleDeleteRawIncArchive, handlePrintItem, handleEditHomeworkToStep2, handleEditExamToStep2,
   handleBulkPrintAction, handleRenameItem, openRawIncManageModal, handleEditRawIncorrectToStep2
 }: GlobalListProps) {
   
@@ -185,7 +186,8 @@ export default function GlobalList({
               const typeCls = res.type === 'archive' ? 'bg-slate-200 text-slate-700 border-slate-300' : res.type === 'raw_inc' ? 'bg-rose-100 text-rose-700 border-rose-200' : res.is_exam_hw ? 'bg-sky-100 text-sky-700 border-sky-200' : 'bg-amber-100 text-amber-700 border-amber-200';
               const isRawLike = res.type === 'raw_inc' || res.type === 'archive';
               const isPlainHw = activeTab === 'HOMEWORK' && !res.is_exam_hw;
-              const completeKind = isPlainHw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam';
+              const completeKind = res.type === 'raw_inc' ? 'raw_inc' : res.type === 'archive' ? 'archive' : isPlainHw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : activeTab === 'OVERDUE' ? 'overdue' : 'exam';
+              const completeTargetId = isRawLike ? res.realId : (isPlainHw ? hw.homework_id : res.assignment_id);
               const printKind = isRawLike ? 'raw_inc' : res.type || (activeTab === 'EXAM' || activeTab === 'QUARTERLY' ? 'exam' : isPlainHw ? 'hw' : activeTab === 'INCORRECT' ? 'print' : activeTab === 'SIMILAR' ? 'similar' : 'overdue');
 
               return (
@@ -205,20 +207,20 @@ export default function GlobalList({
                   xCount={finalXCount}
                   status={statusStr}
                   statusTone={statusToneOf(statusStr, isCompleted, activeTab === 'OVERDUE')}
-                  onComplete={(e) => handleForceComplete(e, completeKind, isPlainHw ? hw.homework_id : res.assignment_id, res.student_id)}
+                  onComplete={(e) => handleForceComplete(e, completeKind, completeTargetId, res.student_id)}
                   primary={isRawLike
                     ? { label: '문제 보기', tone: 'danger', onClick: (e) => handlePrintItem(e, 'raw_inc', null, res.target_questions || hw.target_questions, titleStr, res.subTitle) }
                     : { label: '상세', onClick: () => { window.location.href = detailHref; } }}
                   menu={[
                     { label: '문항 확인 및 개별 삭제', hidden: res.type !== 'raw_inc', onClick: () => openRawIncManageModal(res.student_id, studentName, res.realId) },
-                    { label: '이름 변경', onClick: (e) => handleRenameItem(e, inferredType, rId, m?.exam_id, titleStr) },
+                    { label: '이름 변경', hidden: isRawLike, onClick: (e) => handleRenameItem(e, inferredType, rId, m?.exam_id, titleStr) },
                     isRawLike
                       ? { label: '맞춤 오답 다시 출제', onClick: (e) => handleEditRawIncorrectToStep2?.(e, res.target_questions, titleStr, studentName, res.student_id, res.class_id) }
                       : !isPlainHw
                         ? { label: '문제 수정', onClick: (e) => handleEditExamToStep2?.(e, res.assignment_id, m?.exam_id, titleStr, res.subTitle, studentName, res.student_id, res.class_id, m?.exam_type) }
                         : { label: '과제 문항 수정', onClick: (e) => handleEditHomeworkToStep2?.(e, res.type, hw.homework_id, res.target_questions || hw?.target_questions, titleStr, res.subTitle, studentName, res.student_id, res.class_id) },
                     { label: '문제 보기 및 출력', onClick: (e) => handlePrintItem(e, printKind, res.masterId || m?.exam_id, res.target_questions || hw.target_questions, titleStr, res.subTitle) },
-                    { label: '삭제', danger: true, onClick: () => { isPlainHw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); } },
+                    { label: '삭제', danger: true, onClick: () => { isRawLike ? handleDeleteRawIncArchive?.(res.realId, res.student_id, res.type === 'archive') : isPlainHw ? handleDeleteHomework(hw.homework_id, res.student_id) : (activeTab === 'INCORRECT' || activeTab === 'SIMILAR') ? handleDeletePrint(res.assignment_id, m?.exam_id, res.student_id) : handleDeleteExam(res.assignment_id, res.student_id); } },
                   ]}
                 />
               );
