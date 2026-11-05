@@ -225,9 +225,15 @@ export default function AttendanceControlPanel({ classStats, todayIso, onQueueMe
           if (selectedAttClassId) requestFetch(selectedAttClassId);
       }).subscribe();
 
+    // 🌟 clinic_session_state의 UPDATE(학생 하트비트 last_seen_at)를 구독하면
+    // IncreaseSubscriptionConnectionPool DB 타임아웃이 발생하므로 INSERT/DELETE만 구독합니다.
     const clinicChannel = supabase
       .channel('global_clinic_realtime_radar')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_session_state' }, () => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clinic_session_state' }, () => {
+          if (isBulkProcessing.current) return;
+          if (selectedAttClassId) requestFetch(selectedAttClassId);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clinic_session_state' }, () => {
           if (isBulkProcessing.current) return;
           if (selectedAttClassId) requestFetch(selectedAttClassId);
       }).subscribe();

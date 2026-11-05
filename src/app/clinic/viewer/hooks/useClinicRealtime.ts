@@ -324,12 +324,12 @@ export function useClinicRealtime({
             }
         });
         
+        // 🌟 clinic_session_state 테이블은 모든 학생의 하트비트(last_seen_at) UPDATE가 집중되므로
+        // postgres_changes 구독에서 제외하여 IncreaseSubscriptionConnectionPool 타임아웃을 방지합니다.
+        // (클리닉 세션 상태 동기화는 기존 ta_action 브로드캐스트와 5초 주기 runSelfCorrection 폴링으로 즉시 처리됨)
         const channel = supabaseClient.channel(channelName)
           .on('postgres_changes', { event: '*', schema: 'public', table: 'student_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'exam'))
-          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'))
-          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'clinic_session_state', filter: `student_id=eq.${studentInfo.id}` }, () => {
-              if (runSelfCorrectionRef.current) runSelfCorrectionRef.current();
-          });
+          .on('postgres_changes', { event: '*', schema: 'public', table: 'student_homework_answer', filter: `student_id=eq.${studentInfo.id}` }, (payload: any) => handleTaRealtimeUpdate(payload, 'hw'));
           
         gradingChannelRef.current = channel;
         channel.subscribe((status) => {
@@ -689,14 +689,9 @@ export function useClinicRealtime({
     const beat = async () => {
       const sid = clinicSessionStateRef.current?.id;
       if (!sid || cancelled) return;
-      const { data } = await supabaseClient.from('clinic_session_state').select('duration_ms').eq('id', sid).maybeSingle();
-      if (data && clinicSessionStateRef.current) {
-        clinicSessionStateRef.current.duration_ms = data.duration_ms;
-      }
       await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
 
-      // 🌟 15초마다 무조건 track()을 호출하면 Supabase Realtime ClientPresenceRateLimitReached 에러가 발생하므로,
-      // 현재 Presence 목록에서 내 세션이 유실되었거나 duration_ms가 변경된 경우에만 trackPresenceRef를 호출합니다.
+      // 🌟 Presence 목록에서 내 세션이 유실된 경우에만 trackPresenceRef를 호출합니다.
       if (clinicChannelRef.current && mySeatRef.current) {
         const state = clinicChannelRef.current.presenceState?.() || {};
         const amIPresent = Object.values(state).some((metas: any) =>
@@ -708,7 +703,7 @@ export function useClinicRealtime({
       }
     };
     beat();
-    const iv = setInterval(beat, 15000);
+    const iv = setInterval(beat, 30000);
     return () => { cancelled = true; clearInterval(iv); };
   }, [studentInfo.id]);
 

@@ -520,7 +520,7 @@ export default function StudentPortal() {
             }
         };
         beat();
-        const iv = setInterval(beat, 15000);
+        const iv = setInterval(beat, 30000);
         return () => { cancelled = true; clearInterval(iv); };
     }, [studentInfo.id, studentInfo.name, studentInfo.classes]);
 

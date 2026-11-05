@@ -226,8 +226,12 @@ export default function TeacherDashboardPage() {
           if (selectedClassId !== 'all') requestFetch(selectedClassId);
       }).subscribe();
 
+    // 🌟 clinic_session_state의 UPDATE(하트비트) 구독으로 인한 IncreaseSubscriptionConnectionPool 에러 방지 (INSERT/DELETE만 구독)
     const clinicChannel = supabase.channel('teacher_clinic_realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'clinic_session_state' }, () => {
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'clinic_session_state' }, () => {
+          if (selectedClassId !== 'all') requestFetch(selectedClassId);
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'clinic_session_state' }, () => {
           if (selectedClassId !== 'all') requestFetch(selectedClassId);
       }).subscribe();
 
