@@ -11,33 +11,51 @@ const supabaseAdmin = createClient(
 
 const ATTENDANCE_TEMPLATE_ID = "KA01TP260921034958500GAtQOl600yJ";
 
-// 🌟 학부모 성함에 '학부모'(예: '홍정우 학부모')가 들어있는 경우 중복되는 '학부모' 단어를 제거하여 '홍정우(학부모)' 형태로 정리
+// 🌟 학부모 표기 정리: 관계(relationship)가 공란이거나 빈 괄호 '()'인 경우 괄호를 아예 쓰지 않고 이름만 반환
 function cleanParentDisplayName(
   rawName?: string | null,
   rel?: string | null,
   studentName?: string | null
 ): string {
-  const relStr = String(rel || "학부모").trim() || "학부모";
-  const raw = String(rawName || "").trim();
-  const cleanStu = String(studentName || "").replace(/\s*학부모님?\s*/g, " ").trim();
+  const rawRelTrim = String(rel || "").replace(/\(\s*\)/g, "").trim();
+  const validRel =
+    rawRelTrim && rawRelTrim !== "-" && rawRelTrim !== "미입력" && rawRelTrim !== "학부모"
+      ? rawRelTrim
+      : "";
 
-  const parenMatch = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  const raw = String(rawName || "").trim();
+  const cleanStu = String(studentName || "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s*학부모님?\s*/g, " ")
+    .trim();
+
+  const parenMatch = raw.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
   if (parenMatch) {
-    const innerRel = parenMatch[2].trim() || relStr;
-    const cleanedPrefix = parenMatch[1].replace(/\s*학부모님?\s*/g, " ").trim();
+    const innerTrim = parenMatch[2].trim();
+    const validInner =
+      innerTrim && innerTrim !== "-" && innerTrim !== "미입력" && innerTrim !== "학부모"
+        ? innerTrim
+        : validRel;
+    const cleanedPrefix = parenMatch[1]
+      .replace(/\(\s*\)/g, "")
+      .replace(/\s*학부모님?\s*/g, " ")
+      .trim();
     const base =
       cleanedPrefix && cleanedPrefix !== "미입력"
         ? cleanedPrefix
-        : cleanStu || "학부모";
-    return `${base}(${innerRel})`;
+        : cleanStu || "원생";
+    return validInner ? `${base}(${validInner})` : base;
   }
 
-  const cleaned = raw.replace(/\s*학부모님?\s*/g, " ").trim();
+  const cleaned = raw
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s*학부모님?\s*/g, " ")
+    .trim();
   const base =
     cleaned && cleaned !== "미입력"
       ? cleaned
-      : cleanStu || "학부모";
-  return `${base}(${relStr})`;
+      : cleanStu || "원생";
+  return validRel ? `${base}(${validRel})` : base;
 }
 
 function interpretSolapiResult(response: any): {
@@ -471,7 +489,7 @@ export async function sendQueuedMessages(tenantId: string) {
           res = await sendClassChangeAlimtalk(payload as any);
         } else if (msg.template_id === "GENERAL_SMS") {
           // 🌟 텍스트 기반 버튼 스타일 렌더링 (개별 보강 문자처럼 이미 머리말/학부모 호칭이 포함된 경우 중복 방지)
-          const rawDetails = String(msg.details || "").trim().replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님");
+          const rawDetails = String(msg.details || "").trim().replace(/\(\s*\)/g, "").replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님");
           const isPreformatted =
             rawDetails.startsWith("[로지카대치본원학원] 보강 안내") ||
             rawDetails.includes("학부모님,");
@@ -617,7 +635,7 @@ export async function addToQueue(
         ? r.preview_desc.replace(/\s*학부모\s*(\([^)]+\))/g, "$1")
         : r.preview_desc;
       const cleanedDetails = typeof r.details === "string"
-        ? r.details.replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님")
+        ? r.details.replace(/\(\s*\)/g, "").replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님")
         : r.details;
       return {
         ...r,
@@ -885,8 +903,10 @@ export async function getStudentMessageHistoryAction({
             const d = String(ph).replace(/[^0-9]/g, "");
             if (!d) return;
             phoneCandidates.push(d);
-            const relLabel = rel || "학부모";
-            const nameLabel = nm && nm !== "미입력" ? `${nm} (${relLabel})` : `${stuRow.name} ${relLabel}`;
+            const relClean = String(rel || "").replace(/\(\s*\)/g, "").trim();
+            const validRelLabel = relClean && relClean !== "-" && relClean !== "미입력" ? relClean : "";
+            const baseNm = nm && nm !== "미입력" ? String(nm).replace(/\(\s*\)/g, "").trim() : stuRow.name;
+            const nameLabel = validRelLabel ? `${baseNm}(${validRelLabel})` : baseNm;
             parentLabelMap[d] = nameLabel;
           };
           addP(pObj.phone, pObj.name, pObj.relationship);

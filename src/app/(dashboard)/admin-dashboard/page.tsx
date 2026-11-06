@@ -18,23 +18,40 @@ const unwrap = <T,>(obj: T | T[] | undefined | null): T | undefined => {
   return obj || undefined;
 };
 
-// 학부모 성함에 '학부모'(예: '홍정우 학부모')가 포함되어 있으면 '학부모' 단어를 하나 제거하여 '홍정우(학부모)'로 정리
+// 학부모 표기 정리: 관계가 공란이거나 빈 괄호 '()'인 경우 괄호를 아예 쓰지 않고 이름만 반환
 const formatParentDisplayName = (rawName?: string | null, rel?: string | null, studentName?: string | null): string => {
-  const relStr = String(rel || "학부모").trim() || "학부모";
+  const rawRelTrim = String(rel || "").replace(/\(\s*\)/g, "").trim();
+  const validRel =
+    rawRelTrim && rawRelTrim !== "-" && rawRelTrim !== "미입력" && rawRelTrim !== "학부모"
+      ? rawRelTrim
+      : "";
   const raw = String(rawName || "").trim();
-  const cleanStu = String(studentName || "").replace(/\s*학부모님?\s*/g, " ").trim();
+  const cleanStu = String(studentName || "")
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s*학부모님?\s*/g, " ")
+    .trim();
 
-  const parenMatch = raw.match(/^(.*?)\s*\(([^)]+)\)\s*$/);
+  const parenMatch = raw.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
   if (parenMatch) {
-    const innerRel = parenMatch[2].trim() || relStr;
-    const cleanedPrefix = parenMatch[1].replace(/\s*학부모님?\s*/g, " ").trim();
-    const base = cleanedPrefix && cleanedPrefix !== "미입력" ? cleanedPrefix : (cleanStu || "학부모");
-    return `${base}(${innerRel})`;
+    const innerTrim = parenMatch[2].trim();
+    const validInner =
+      innerTrim && innerTrim !== "-" && innerTrim !== "미입력" && innerTrim !== "학부모"
+        ? innerTrim
+        : validRel;
+    const cleanedPrefix = parenMatch[1]
+      .replace(/\(\s*\)/g, "")
+      .replace(/\s*학부모님?\s*/g, " ")
+      .trim();
+    const base = cleanedPrefix && cleanedPrefix !== "미입력" ? cleanedPrefix : (cleanStu || "원생");
+    return validInner ? `${base}(${validInner})` : base;
   }
 
-  const cleaned = raw.replace(/\s*학부모님?\s*/g, " ").trim();
-  const base = cleaned && cleaned !== "미입력" ? cleaned : (cleanStu || "학부모");
-  return `${base}(${relStr})`;
+  const cleaned = raw
+    .replace(/\(\s*\)/g, "")
+    .replace(/\s*학부모님?\s*/g, " ")
+    .trim();
+  const base = cleaned && cleaned !== "미입력" ? cleaned : (cleanStu || "원생");
+  return validRel ? `${base}(${validRel})` : base;
 };
 
 const ENDED_ENROLLMENT_STATUSES = ["수강종료", "종료", "퇴원", "취소"];
@@ -1647,7 +1664,7 @@ export default function AdminDashboardPage() {
         const isTestResult = Boolean(msg.test_name || String(msg.preview_title || "").includes("학습결과"));
 
         const displayParentName = formatParentDisplayName(msg.parent_name, "학부모", msg.student_name);
-        const rawDetails = String(msg.details || "").trim().replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님");
+        const rawDetails = String(msg.details || "").trim().replace(/\(\s*\)/g, "").replace(/\s*학부모\s*(\([^)]+\))\s*학부모님/g, "$1 학부모님");
         const isPreformattedSms =
           rawDetails.startsWith("[로지카대치본원학원] 보강 안내") ||
           rawDetails.includes("학부모님,");

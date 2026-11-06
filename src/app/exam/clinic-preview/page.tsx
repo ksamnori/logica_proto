@@ -316,7 +316,7 @@ function HandwritingOverlayPreview({
   if (!hasQuestionContext) {
     return (
       <img
-        className="w-full max-h-[380px] object-contain rounded-lg bg-white"
+        className="w-full max-h-95 object-contain rounded-lg bg-white"
         src={imageDataUrl}
         alt="학생 손글씨 답안"
       />
@@ -1943,7 +1943,7 @@ export default function ExamClinicPreviewPage() {
     return (
       <div
         key={typeKey}
-        className={`w-full h-full min-h-[210px] ${theme.bg} rounded-[2rem] p-6 md:p-7 shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${
+        className={`w-full h-full min-h-52.5 ${theme.bg} rounded-4xl p-6 md:p-7 shadow-xl relative overflow-hidden group flex flex-col justify-between transition-all duration-300 ${
           isLocked ? "grayscale opacity-60 bg-slate-200" : ""
         } ${hasThisExam ? "ring-2 ring-brand/30" : ""}`}
       >
@@ -1955,7 +1955,7 @@ export default function ExamClinicPreviewPage() {
         )}
 
         <div className="relative z-10 shrink-0">
-          <div className="flex flex-wrap items-center gap-2 mb-2.5 pr-[110px]">
+          <div className="flex flex-wrap items-center gap-2 mb-2.5 pr-27.5">
             <span
               className={`text-xs md:text-sm font-bold ${
                 isLocked ? "bg-white/60 text-slate-500 shadow-sm" : theme.badge
@@ -2323,7 +2323,7 @@ export default function ExamClinicPreviewPage() {
             {/* 시작 전 인트로 오버레이 모달 */}
             {!isStarted && (
               <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center z-40 p-6">
-                <div className="bg-white rounded-[2rem] shadow-2xl p-8 md:p-10 w-full max-w-xl text-center">
+                <div className="bg-white rounded-4xl shadow-2xl p-8 md:p-10 w-full max-w-xl text-center">
                   <img
                     src="https://kfwlmbwornivkrvoeqdh.supabase.co/storage/v1/object/public/system_images/logica_logo.png"
                     alt="Logica"
@@ -2995,7 +2995,7 @@ export default function ExamClinicPreviewPage() {
 
           {/* 실제 관제탑 좌석 카드와 동일한 렌더링 */}
           <div className="flex items-center gap-3">
-            <div className="w-[180px] h-[112px] shrink-0">
+            <div className="w-45 h-28 shrink-0">
               {(() => {
                 const st = virtualSeatStudent;
                 const isSeatCall = st.status === "call";
@@ -3209,8 +3209,8 @@ export default function ExamClinicPreviewPage() {
           관제탑 모달 1: 질문 상세 보기 및 처리 모달 (실제 /supervisor와 동일)
       ===================================================================== */}
       {callProcessModal && callProcessModal.isOpen && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 md:p-8">
-          <div className="bg-slate-100 rounded-[2rem] shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-9999 flex items-center justify-center p-4 md:p-8">
+          <div className="bg-slate-100 rounded-4xl shadow-2xl w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden">
             <div className="bg-rose-600 text-white px-6 py-4 flex justify-between items-center shrink-0">
               <h2 className="text-xl font-bold">
                 🙋 {TEST_STUDENT_NAME} 학생 질문 상세 보기
@@ -3344,7 +3344,7 @@ export default function ExamClinicPreviewPage() {
           관제탑 모달 2: AI/수동 채점 재확인 모달 (실제 /supervisor SeatGrid와 동일)
       ===================================================================== */}
       {recheckModal.isOpen && activeRecheckItem && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[9999] px-4 backdrop-blur-sm">
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-9999 px-4 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg overflow-hidden">
             <div className="bg-indigo-600 text-white px-5 py-3.5 flex justify-between items-center">
               <span className="font-bold text-sm">
@@ -3439,8 +3439,8 @@ export default function ExamClinicPreviewPage() {
           관제탑 모달 3: 타이머 시험 오답 검수 모달 (실제 /supervisor와 동일)
       ===================================================================== */}
       {isVerifyModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-4 md:p-8">
-          <div className="bg-slate-100 rounded-[2rem] shadow-2xl w-full max-w-4xl h-full max-h-[88vh] flex flex-col overflow-hidden">
+        <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-sm z-9999 flex items-center justify-center p-4 md:p-8">
+          <div className="bg-slate-100 rounded-4xl shadow-2xl w-full max-w-4xl h-full max-h-[88vh] flex flex-col overflow-hidden">
             <div className="bg-brand text-white px-6 py-4 flex justify-between items-center shrink-0">
               <div>
                 <h2 className="text-xl font-bold">
@@ -3476,7 +3476,7 @@ export default function ExamClinicPreviewPage() {
                         isOverridden ? "border-emerald-400" : "border-rose-200"
                       }`}
                     >
-                      <div className="w-full md:w-2/3 p-5 relative bg-white border-b md:border-b-0 md:border-r border-slate-100 min-h-[220px]">
+                      <div className="w-full md:w-2/3 p-5 relative bg-white border-b md:border-b-0 md:border-r border-slate-100 min-h-55">
                         <div className="mb-2">
                           <span className="bg-brand text-white text-xs font-bold px-2.5 py-0.5 rounded-full">
                             {ans.idx + 1}번 문항
@@ -3589,8 +3589,8 @@ export default function ExamClinicPreviewPage() {
 
       {/* 관제탑 모달 4: 클리닉 종료 요청 승인/거부 */}
       {endRequestModal && (
-        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[9999] backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] text-center">
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-9999 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-85 text-center">
             <div className="text-4xl mb-3">🚪</div>
             <h3 className="text-lg font-bold text-slate-800 mb-2">
               클리닉 종료 요청
@@ -3651,8 +3651,8 @@ export default function ExamClinicPreviewPage() {
 
       {/* 관제탑 모달 5: 강제 퇴실 모달 */}
       {forceCheckoutModal && (
-        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-[9999] backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] text-center">
+        <div className="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-9999 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-6 w-85 text-center">
             <div className="text-4xl mb-3">🚪</div>
             <h3 className="text-lg font-bold text-slate-800 mb-2">
               강제 퇴실 확인

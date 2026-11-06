@@ -683,7 +683,7 @@ export default function TeacherDashboardPage() {
           name: s.name,
           pInfo: pInfo, 
           primaryParentName: pInfo?.name || pInfo?.name_2 || pInfo?.name_3 || "학부모",
-          primaryRel: pInfo?.relationship || pInfo?.relationship_2 || pInfo?.relationship_3 || "학부모",
+          primaryRel: [pInfo?.relationship, pInfo?.relationship_2, pInfo?.relationship_3].map((r: any) => String(r || "").replace(/\(\s*\)/g, "").trim()).find((r) => r && r !== "-" && r !== "미입력") || "",
           checked: true,
           individualMemo: ""
        };
@@ -771,8 +771,9 @@ export default function TeacherDashboardPage() {
       const pushTarget = (phone: string, name: string, rel: string) => {
         if (!phone || phone.includes('unassigned') || phone.trim() === '') return;
         
-        const relStr = rel || '학부모';
-        const finalName = `${st.name}(${relStr})`;
+        const relClean = String(rel || '').replace(/\(\s*\)/g, '').trim();
+        const validRel = relClean && relClean !== '-' && relClean !== '미입력' && relClean !== '학부모' ? relClean : '';
+        const finalName = validRel ? `${st.name}(${validRel})` : st.name;
 
         let fullDetails = "";
         let previewTitle = "";
@@ -1690,7 +1691,7 @@ export default function TeacherDashboardPage() {
                         />
                         <div className="flex items-baseline gap-1.5 flex-1">
                           <span className="text-[13px] font-bold text-slate-800">{st.name}</span>
-                          <span className="text-xs font-bold text-slate-500">{st.primaryParentName}({st.primaryRel})</span>
+                          <span className="text-xs font-bold text-slate-500">{st.primaryParentName ? String(st.primaryParentName).replace(/\(\s*\)/g, "").trim() : st.name}{st.primaryRel ? `(${st.primaryRel})` : ""}</span>
                         </div>
                       </div>
                       <div className="pl-7">

@@ -265,10 +265,11 @@ export default function MakeupModal({
     const list: { phone: string; finalName: string }[] = [];
     const pushTarget = (phone?: string, name?: string, rel?: string) => {
       if (!phone || String(phone).includes("unassigned") || !String(phone).trim()) return;
-      const relStr = (rel || "학부모").trim() || "학부모";
-      const cleanedName = String(name || "").replace(/\s*학부모님?\s*/g, " ").trim();
+      const relClean = String(rel || "").replace(/\(\s*\)/g, "").trim();
+      const validRel = relClean && relClean !== "-" && relClean !== "미입력" && relClean !== "학부모" ? relClean : "";
+      const cleanedName = String(name || "").replace(/\(\s*\)/g, "").replace(/\s*학부모님?\s*/g, " ").trim();
       const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : selectedStudentObj.name;
-      const finalName = `${baseName}(${relStr})`;
+      const finalName = validRel ? `${baseName}(${validRel})` : baseName;
       list.push({ phone: String(phone).trim(), finalName });
     };
     pushTarget(pInfo.phone, pInfo.name, pInfo.relationship);
@@ -323,10 +324,11 @@ export default function MakeupModal({
         if (pInfo) {
           const pushTarget = (phone?: string, name?: string, rel?: string) => {
             if (!phone || String(phone).includes("unassigned") || !String(phone).trim()) return;
-            const relStr = (rel || "학부모").trim() || "학부모";
-            const cleanedName = String(name || "").replace(/\s*학부모님?\s*/g, " ").trim();
+            const relClean = String(rel || "").replace(/\(\s*\)/g, "").trim();
+            const validRel = relClean && relClean !== "-" && relClean !== "미입력" && relClean !== "학부모" ? relClean : "";
+            const cleanedName = String(name || "").replace(/\(\s*\)/g, "").replace(/\s*학부모님?\s*/g, " ").trim();
             const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : selectedStudentObj.name;
-            const finalName = `${baseName}(${relStr})`;
+            const finalName = validRel ? `${baseName}(${validRel})` : baseName;
             targets.push({ phone: String(phone).trim(), finalName });
           };
           pushTarget(pInfo.phone, pInfo.name, pInfo.relationship);
@@ -376,6 +378,7 @@ export default function MakeupModal({
 
       if (!silentSuccess) {
         alert(`✅ ${selectedStudentObj.name} 학생 학부모님(${res.inserted}건)께 보강 안내 일반 문자가 발송 대기열에 등록되었습니다.`);
+        onSuccess();
       }
       return true;
     } catch (e: any) {
@@ -469,7 +472,7 @@ export default function MakeupModal({
     parentTargets.length > 0
       ? parentTargets[0].finalName
       : selectedStudentObj
-      ? `${selectedStudentObj.name}(학부모)`
+      ? `${selectedStudentObj.name}`
       : "#{이름}";
 
   const previewStudentName = selectedStudentObj?.name || "#{학생명}";
@@ -738,21 +741,22 @@ export default function MakeupModal({
 
           {/* 하단: 개별 보강 안내 일반 문자(SMS/LMS) 템플릿 작성 & 미리보기 & 발송 대기열 전송 도구 */}
           <div className="bg-indigo-50/50 border border-indigo-200 rounded-xl p-4 shadow-sm space-y-3">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="bg-indigo-600 text-white text-xs font-extrabold px-2 py-0.5 rounded shadow-sm">
+            <div className="flex items-center justify-between gap-2 flex-wrap sm:flex-nowrap">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="bg-indigo-600 text-white text-xs font-extrabold px-2 py-0.5 rounded shadow-sm shrink-0 whitespace-nowrap">
                   일반 문자 (SMS/LMS)
                 </span>
-                <span className="text-sm font-bold text-slate-800">
+                <span className="text-sm font-bold text-slate-800 truncate">
                   [로지카대치본원학원] 보강 안내 문자 템플릿 (발송 대기열 연동)
                 </span>
               </div>
               <button
                 type="button"
                 onClick={() => setShowSmsPreview((prev) => !prev)}
-                className="text-xs font-bold text-indigo-700 bg-white hover:bg-indigo-100 border border-indigo-200 px-2.5 py-1 rounded-lg transition-colors shadow-sm"
+                className="shrink-0 whitespace-nowrap text-xs font-bold text-indigo-700 bg-white hover:bg-indigo-100 border border-indigo-200 px-3 py-1.5 rounded-lg transition-colors shadow-sm flex items-center gap-1"
               >
-                {showSmsPreview ? "🔼 미리보기 접기" : "🔍 발송 내용 미리보기"}
+                <span>{showSmsPreview ? "🔼" : "🔍"}</span>
+                <span>{showSmsPreview ? "미리보기 접기" : "발송 내용 미리보기"}</span>
               </button>
             </div>
 

@@ -301,10 +301,11 @@ export async function autoAttendOnPadLogin(studentId: string) {
 
     const pushTarget = (phone?: string | null, name?: string | null, rel?: string | null) => {
       if (!phone || String(phone).includes("unassigned")) return;
-      const relStr = (rel || "학부모").trim() || "학부모";
-      const cleanedName = String(name || "").replace(/\s*학부모님?\s*/g, " ").trim();
-      const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : (stu.name || "학부모");
-      const finalName = `${baseName}(${relStr})`;
+      const relClean = String(rel || "").replace(/\(\s*\)/g, "").trim();
+      const validRel = relClean && relClean !== "-" && relClean !== "미입력" && relClean !== "학부모" ? relClean : "";
+      const cleanedName = String(name || "").replace(/\(\s*\)/g, "").replace(/\s*학부모님?\s*/g, " ").trim();
+      const baseName = cleanedName && cleanedName !== "미입력" ? cleanedName : (stu.name || "원생");
+      const finalName = validRel ? `${baseName}(${validRel})` : baseName;
       rows.push({
         tenant_id: stu.tenant_id,
         student_id: stu.student_id,
