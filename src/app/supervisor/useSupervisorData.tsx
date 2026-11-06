@@ -1154,6 +1154,17 @@ export function useSupervisorData() {
     };
     syncPresenceRef.current = syncActiveStudentsFromPresence;
 
+    useEffect(() => {
+        if (typeof window === 'undefined') return;
+        const onLocalVerified = (ev: Event) => {
+            const detail = (ev as CustomEvent<VerifiedGradingRecord>).detail;
+            if (!detail?.assignmentId) return;
+            setPendingVerifications(prev => prev.filter(p => Number(p.assignment_id) !== Number(detail.assignmentId)));
+        };
+        window.addEventListener('logica:grading-verified', onLocalVerified);
+        return () => window.removeEventListener('logica:grading-verified', onLocalVerified);
+    }, []);
+
     const checkClinicTimeExpiry = useCallback(() => {
         const current = { ...studentsRef.current };
         let isModified = false;
@@ -1568,6 +1579,6 @@ export function useSupervisorData() {
         resolveRecheck,
         ghostRect,
         seats, seatObjs, canvasWidth, canvasHeight, seatWidth, seatHeight, editorLocked,
-        pendingVerifications, confirmVerification
+        pendingVerifications, setPendingVerifications, confirmVerification
     };
 }

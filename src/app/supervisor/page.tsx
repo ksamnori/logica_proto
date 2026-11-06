@@ -609,11 +609,6 @@ export default function SupervisorDashboard() {
                       <UnlockPanel
                         verifierName={instructorInfo.name}
                         externalPendingRows={pendingVerifications}
-                        onVerified={(rec) => {
-                          supervisorData.setPendingVerifications((prev: any[]) =>
-                            prev.filter((p: any) => Number(p.assignment_id) !== Number(rec.assignmentId))
-                          );
-                        }}
                       />
                     </div>
 
