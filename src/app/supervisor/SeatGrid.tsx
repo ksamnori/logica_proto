@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import SeatCanvas from '../clinic/_shared/SeatCanvas';
 import SeatCardBody from './SeatCardBody';
+import { QuestionDisplay } from '@/app/clinic/viewer/components/QuestionDisplay';
 import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from '@/lib/clinicSeatLayout';
 
 
