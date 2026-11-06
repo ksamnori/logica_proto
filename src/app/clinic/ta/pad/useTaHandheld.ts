@@ -39,7 +39,9 @@ export interface CallData {
 
 export interface RecheckData {
   seat: string; studentId?: string; uid: string; qNum: number; name: string; classes: string[];
-  questionText: string; correctAnswer: string; imageDataUrl: string; recognizedText: string; aiExplanation: string; aiConfidence: number | null; requestedAt: number;
+  questionText: string; questionText2?: string; imageUrl?: string; image2Url?: string;
+  stageWidth?: number; stageHeight?: number; cropHeight?: number;
+  correctAnswer: string; imageDataUrl: string; recognizedText: string; aiExplanation: string; aiConfidence: number | null; requestedAt: number;
   initial?: boolean;
 }
 
@@ -308,7 +310,10 @@ export function useTaHandheld() {
           const r = dbRechecks[uid] || {};
           rechecksRef.current[key] = {
             seat: row.seat, studentId: row.student_id, uid, qNum: r.qNum, name, classes,
-            questionText: r.questionText || '', correctAnswer: r.correctAnswer || '',
+            questionText: r.questionText || '', questionText2: r.questionText2 || '',
+            imageUrl: r.imageUrl || '', image2Url: r.image2Url || '',
+            stageWidth: r.stageWidth, stageHeight: r.stageHeight, cropHeight: r.cropHeight,
+            correctAnswer: r.correctAnswer || '',
             imageDataUrl: r.imageDataUrl || '', recognizedText: r.recognizedText || '',
             aiExplanation: r.aiExplanation || '', aiConfidence: r.aiConfidence ?? null,
             requestedAt: r.requestedAt || Date.now(), initial: !!r.initial,
@@ -423,7 +428,10 @@ export function useTaHandheld() {
     else if (action === 'recheck_request') {
       rechecksRef.current[`${seat}::${data.uid}`] = {
         seat, studentId: st.studentId, uid: data.uid, qNum: data.qNum, name: data.name, classes: st.classes || [],
-        questionText: data.questionText || '', correctAnswer: data.correctAnswer || '',
+        questionText: data.questionText || '', questionText2: data.questionText2 || '',
+        imageUrl: data.imageUrl || '', image2Url: data.image2Url || '',
+        stageWidth: data.stageWidth, stageHeight: data.stageHeight, cropHeight: data.cropHeight,
+        correctAnswer: data.correctAnswer || '',
         imageDataUrl: data.imageDataUrl || '', recognizedText: data.recognizedText || '',
         aiExplanation: data.aiExplanation || '', aiConfidence: data.aiConfidence ?? null,
         requestedAt: Date.now(), initial: !!data.initial,

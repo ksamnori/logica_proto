@@ -179,3 +179,170 @@ export const combineDbHints = (step1: any, step2: any) => {
   
   return `<b>[개념]</b><br/>${s1 && s1 !== 'null' && s1 !== 'undefined' ? s1 : '생략됨'}<br/><br/><b>[접근법]</b><br/>${s2 && s2 !== 'null' && s2 !== 'undefined' ? s2 : '생략됨'}`;
 };
+
+/**
+ * 🌟 학생이 문제(지문 텍스트 + 문제 이미지) 위에 펜으로 작성한 캔버스를
+ * 화면상의 실제 렌더링 좌표(getBoundingClientRect) 그대로 하나의 이미지로 합성합니다.
+ * - AI 채점 시 뒤에 비치는 문제(빈칸 □, 세로셈, 도형 등)와 손글씨의 위치 관계를 완벽히 인식하게 하고
+ * - 선생님(수퍼바이저/조교) 화면의 '학생 손글씨 답안 이미지' 칸에도 문제와 손글씨가 정확한 좌표로 함께 표시되게 합니다.
+ */
+export const measureStageDimensions = async (
+  stageEl: HTMLElement | null,
+  rawInkDataUrl: string | null
+): Promise<{ stageWidth: number; stageHeight: number; cropHeight: number }> => {
+  if (typeof window === 'undefined' || !stageEl) {
+    return { stageWidth: 640, stageHeight: 480, cropHeight: 320 };
+  }
+  const stageRect = stageEl.getBoundingClientRect();
+  const stageW = Math.max(1, Math.round(stageRect.width));
+  const stageH = Math.max(1, Math.round(stageRect.height));
+
+  let contentMaxY = 0;
+  const qDisplayRoot = stageEl.firstElementChild as HTMLElement | null;
+  if (qDisplayRoot) {
+    contentMaxY = Math.max(contentMaxY, qDisplayRoot.scrollHeight || 0);
+    const r = qDisplayRoot.getBoundingClientRect();
+    if (r.height > 0) {
+      contentMaxY = Math.max(contentMaxY, r.bottom - stageRect.top);
+    }
+  }
+  const domImgs = Array.from(stageEl.querySelectorAll('img')) as HTMLImageElement[];
+  domImgs.forEach((el) => {
+    const r = el.getBoundingClientRect();
+    if (r.width > 0 && r.height > 0) {
+      contentMaxY = Math.max(contentMaxY, r.bottom - stageRect.top);
+    }
+  });
+
+  let inkMaxY = 0;
+  if (rawInkDataUrl) {
+    try {
+      const inkImg = await new Promise<HTMLImageElement | null>((resolve) => {
+        const im = new Image();
+        im.onload = () => resolve(im);
+        im.onerror = () => resolve(null);
+        im.src = rawInkDataUrl;
+      });
+      if (inkImg) {
+        const probeCanvas = document.createElement('canvas');
+        probeCanvas.width = stageW;
+        probeCanvas.height = stageH;
+        const pCtx = probeCanvas.getContext('2d');
+        if (pCtx) {
+          pCtx.drawImage(inkImg, 0, 0, stageW, stageH);
+          const imgData = pCtx.getImageData(0, 0, stageW, stageH).data;
+          for (let y = stageH - 1; y >= 0; y--) {
+            let rowHasInk = false;
+            const rowOffset = y * stageW * 4;
+            for (let x = 0; x < stageW; x += 2) {
+              if (imgData[rowOffset + x * 4 + 3] > 15) {
+                rowHasInk = true;
+                break;
+              }
+            }
+            if (rowHasInk) {
+              inkMaxY = y;
+              break;
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  const cropH = Math.min(
+    stageH,
+    Math.max(Math.ceil(contentMaxY), Math.ceil(inkMaxY), 180) + 36
+  );
+
+  return { stageWidth: stageW, stageHeight: stageH, cropHeight: cropH };
+};
+
+/**
+ * 🌟 AI 채점용 이미지 합성 헬퍼:
+ * - 문제에 이미지(<img>: 도형, 표, 그림 빈칸 등)가 있는 경우 실제 화면 좌표 그대로 배경에 깔고 그 위에 학생 필기를 합성하여 AI가 문제 그림과 필기를 함께 인식하게 합니다.
+ * - MathJax 수식 텍스트는 건드리지 않으므로 텍스트 깨짐("이개" 중복 등)이 전혀 발생하지 않습니다.
+ */
+export const captureCompositeQuestionImage = async (
+  stageEl: HTMLElement | null,
+  rawInkDataUrl: string | null
+): Promise<string> => {
+  if (!rawInkDataUrl) return '';
+  if (typeof window === 'undefined' || !stageEl) return rawInkDataUrl;
+
+  try {
+    const domImgs = Array.from(stageEl.querySelectorAll('img')) as HTMLImageElement[];
+    // 문제에 별도 <img>가 없는 경우(순수 텍스트/MathJax 문항)에는 원본 필기 이미지를 그대로 전달 (AI는 questionText의 LaTeX과 함께 채점)
+    if (domImgs.length === 0) return rawInkDataUrl;
+
+    const stageRect = stageEl.getBoundingClientRect();
+    const stageW = Math.round(stageRect.width);
+    const stageH = Math.round(stageRect.height);
+    if (stageW <= 0 || stageH <= 0) return rawInkDataUrl;
+
+    const loadImg = (src: string, useCors: boolean = true): Promise<HTMLImageElement | null> =>
+      new Promise((resolve) => {
+        if (!src) return resolve(null);
+        const im = new Image();
+        if (useCors && !src.startsWith('data:') && !src.startsWith('blob:')) {
+          im.crossOrigin = 'anonymous';
+        }
+        im.onload = () => resolve(im);
+        im.onerror = () => resolve(null);
+        im.src = src;
+      });
+
+    const loadCorsSafeImg = async (imgEl: HTMLImageElement): Promise<HTMLImageElement | null> => {
+      const src = imgEl.currentSrc || imgEl.src;
+      if (!src) return null;
+      if (src.startsWith('data:') || src.startsWith('blob:')) {
+        return loadImg(src, false);
+      }
+      try {
+        const res = await fetch(src, { mode: 'cors', credentials: 'omit' });
+        if (res.ok) {
+          const blob = await res.blob();
+          const objUrl = URL.createObjectURL(blob);
+          return await loadImg(objUrl, false);
+        }
+      } catch (e) {}
+      return loadImg(src, true);
+    };
+
+    const inkImg = await loadImg(rawInkDataUrl, false);
+    if (!inkImg) return rawInkDataUrl;
+
+    const { cropHeight } = await measureStageDimensions(stageEl, rawInkDataUrl);
+    const scale = Math.min(2, window.devicePixelRatio || 1);
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = Math.round(stageW * scale);
+    outCanvas.height = Math.round(cropHeight * scale);
+    const ctx = outCanvas.getContext('2d');
+    if (!ctx) return rawInkDataUrl;
+
+    ctx.scale(scale, scale);
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, stageW, cropHeight);
+
+    ctx.save();
+    ctx.globalAlpha = 0.78;
+    for (const imgEl of domImgs) {
+      const r = imgEl.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0) continue;
+      const safeImg = await loadCorsSafeImg(imgEl);
+      if (safeImg) {
+        ctx.drawImage(safeImg, r.left - stageRect.left, r.top - stageRect.top, r.width, r.height);
+      }
+    }
+    ctx.restore();
+
+    ctx.save();
+    ctx.globalAlpha = 1.0;
+    ctx.drawImage(inkImg, 0, 0, stageW, stageH);
+    ctx.restore();
+
+    return outCanvas.toDataURL('image/png');
+  } catch (err) {
+    return rawInkDataUrl;
+  }
+};

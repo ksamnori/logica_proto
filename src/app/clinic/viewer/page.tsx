@@ -27,7 +27,9 @@ import { HintRevealBox } from "./components/HintRevealBox";
 import {
   SUPABASE_URL, SUPABASE_ANON_KEY,
   PEN_COLORS, formatMathTextForWeb,
-  saveHintState, keypadAnswersMatch, isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion
+  saveHintState, keypadAnswersMatch, isKeypadEnterable, mcAnswersMatch, isObjectiveQuestion,
+  captureCompositeQuestionImage,
+  measureStageDimensions
 } from "./utils";
 
 // 대문항(그룹) 기준 균등 배점 + 서브문항((1),(2) 등) 분할 배점 및 TO/RO 부분점수(score_ratio) 계산 유틸리티
@@ -654,7 +656,9 @@ export default function ClinicViewer() {
     const mode = getAnswerMode(idx, qItem);
     const drawing = studentDrawings.current[idx];
     if (!qItem || !isSubj || mode !== 'pen' || !drawing) return Promise.resolve();
-    const p = gradeHandwrittenAnswerWithGemini(drawing, qItem.answer, qItem.questionText)
+    const stageEl = (typeof document !== 'undefined' && idx === currentQIndex) ? document.getElementById('clinic-question-stage') : null;
+    const p = captureCompositeQuestionImage(stageEl, drawing)
+      .then((compUrl) => gradeHandwrittenAnswerWithGemini(compUrl || drawing, qItem.answer, qItem.questionText))
       .then((meta: any) => { penGradeCache.current[idx] = !!meta.is_correct; penGradeMetaCache.current[idx] = meta; })
       .catch(() => {})
       .finally(() => { delete penGradeInFlight.current[idx]; });
@@ -910,20 +914,24 @@ export default function ClinicViewer() {
 
     if (!myAns) { alert(useAI ? "답을 먼저 그려주세요!" : "정답을 먼저 입력해주세요!"); return; }
 
-    if (useAI && qItem.aiGradable === false) { requestManualGradingDirect(currentQIndex, qItem, myAns); return; }
+    const stageEl = typeof document !== 'undefined' ? document.getElementById('clinic-question-stage') : null;
+    const stageDims = useAI ? await measureStageDimensions(stageEl, myAns) : { stageWidth: 640, stageHeight: 480, cropHeight: 320 };
+    const aiCompositeAns = useAI ? ((await captureCompositeQuestionImage(stageEl, myAns)) || myAns) : myAns;
+
+    if (useAI && qItem.aiGradable === false) { requestManualGradingDirect(currentQIndex, qItem, myAns, stageDims); return; }
 
     setIsSubmitting(true);
     let isCorrect = false; let gradingMeta: any = null;
 
     if (useAI) {
       try {
-        gradingMeta = await gradeHandwrittenAnswerWithGemini(myAns, qItem.answer, qItem.questionText);
+        gradingMeta = await gradeHandwrittenAnswerWithGemini(aiCompositeAns, qItem.answer, qItem.questionText);
         isCorrect = !!gradingMeta.is_correct;
       } catch (err: any) { setIsSubmitting(false); alert('채점 중 문제 발생:\n' + err.message); return; }
     } else if (isSubjective) { isCorrect = keypadAnswersMatch(myAns, qItem.answer) || mcAnswersMatch(myAns, qItem.answer); } 
     else { isCorrect = mcAnswersMatch(myAns, qItem.answer) || keypadAnswersMatch(myAns, qItem.answer); }
 
-    lastGradingContextRef.current = useAI ? { idx: currentQIndex, uid: qItem.uid, q: qItem, imageDataUrl: myAns, gradingMeta } : null;
+    lastGradingContextRef.current = useAI ? { idx: currentQIndex, uid: qItem.uid, q: qItem, imageDataUrl: myAns, stageDims, gradingMeta } : null;
     const gotTaHint = !!taHintState.current[currentQIndex];
 
     if (isCorrect) {
@@ -936,7 +944,11 @@ export default function ClinicViewer() {
       }
       recheckState.current[currentQIndex] = 'pending';
       const payload = {
-        uid: qItem.uid, qNum: currentQIndex + 1, questionText: qItem.questionText, correctAnswer: qItem.answer,
+        uid: qItem.uid, qNum: currentQIndex + 1,
+        questionText: qItem.questionText, questionText2: qItem.questionText2 || '',
+        imageUrl: qItem.imageUrl || '', image2Url: qItem.image2Url || '',
+        stageWidth: stageDims.stageWidth, stageHeight: stageDims.stageHeight, cropHeight: stageDims.cropHeight,
+        correctAnswer: qItem.answer,
         imageDataUrl: myAns, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null, initial: true,
       };
       sendAction('recheck_request', payload);
@@ -994,9 +1006,15 @@ export default function ClinicViewer() {
     setIsSubmitting(false);
   };
 
-  const requestManualGradingDirect = (idx: number, qItem: any, imageDataUrl: string) => {
+  const requestManualGradingDirect = (idx: number, qItem: any, imageDataUrl: string, stageDims?: { stageWidth: number; stageHeight: number; cropHeight: number }) => {
     recheckState.current[idx] = 'pending';
-    const payload = { uid: qItem.uid, qNum: idx + 1, questionText: qItem.questionText, correctAnswer: qItem.answer, imageDataUrl, recognizedText: '', aiExplanation: '', aiConfidence: null, initial: true };
+    const payload = {
+      uid: qItem.uid, qNum: idx + 1,
+      questionText: qItem.questionText, questionText2: qItem.questionText2 || '',
+      imageUrl: qItem.imageUrl || '', image2Url: qItem.image2Url || '',
+      stageWidth: stageDims?.stageWidth || 640, stageHeight: stageDims?.stageHeight || 480, cropHeight: stageDims?.cropHeight || 320,
+      correctAnswer: qItem.answer, imageDataUrl, recognizedText: '', aiExplanation: '', aiConfidence: null, initial: true
+    };
     sendAction('recheck_request', payload);
     const sid = clinicSessionStateRef.current?.id;
     if (sid) setActiveRecheck(supabaseClient, sid, qItem.uid, payload);
@@ -1154,9 +1172,15 @@ export default function ClinicViewer() {
 
   const requestRecheck = () => {
     if (!lastGradingContextRef.current) return;
-    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
+    const { idx, uid, q, imageDataUrl, stageDims, gradingMeta } = lastGradingContextRef.current;
     setResultModal(null); recheckState.current[idx] = 'pending';
-    const recheckPayload = { uid, qNum: idx + 1, questionText: q.questionText, correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null };
+    const recheckPayload = {
+      uid, qNum: idx + 1,
+      questionText: q.questionText, questionText2: q.questionText2 || '',
+      imageUrl: q.imageUrl || '', image2Url: q.image2Url || '',
+      stageWidth: stageDims?.stageWidth || 640, stageHeight: stageDims?.stageHeight || 480, cropHeight: stageDims?.cropHeight || 320,
+      correctAnswer: q.answer, imageDataUrl, recognizedText: gradingMeta?.recognized_text || '', aiExplanation: gradingMeta?.explanation || '', aiConfidence: gradingMeta?.confidence || null
+    };
     sendAction('recheck_request', recheckPayload);
     const sid = clinicSessionStateRef.current?.id;
     if (sid) setActiveRecheck(supabaseClient, sid, uid, recheckPayload);
@@ -1426,7 +1450,7 @@ export default function ClinicViewer() {
 
               <div className="flex-1 relative overflow-hidden">
                 <div className={`h-full overflow-y-auto custom-scrollbar p-8 md:p-10 ${!isTimedRound ? 'pb-32' : ''}`}>
-                  <div className="relative min-h-full">
+                  <div id="clinic-question-stage" className="relative min-h-full">
                     <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-loose lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-70' : ''}`}>
                       <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} image2Url={q.image2Url} html2={q.questionText2} />
                     </div>

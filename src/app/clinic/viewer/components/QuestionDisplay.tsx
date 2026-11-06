@@ -43,6 +43,7 @@ export const QuestionDisplay = React.memo(function QuestionDisplay({
       {imageUrl && (
         <img
           src={imageUrl}
+          crossOrigin="anonymous"
           className="mt-4 max-w-full rounded-lg border border-slate-200"
           alt="Question Image"
         />
@@ -50,6 +51,7 @@ export const QuestionDisplay = React.memo(function QuestionDisplay({
       {image2Url && (
         <img
           src={image2Url}
+          crossOrigin="anonymous"
           className="mt-4 max-w-full rounded-lg border border-slate-200"
           alt="Question Image 2"
         />

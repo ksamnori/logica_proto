@@ -25,6 +25,8 @@ import {
   safeParseOptions,
   combineDbHints,
   getCleanUrl,
+  captureCompositeQuestionImage,
+  measureStageDimensions,
 } from "@/app/clinic/viewer/utils";
 
 const DEFAULT_CLINIC_DURATION_MS = 60 * 60 * 1000;
@@ -227,6 +229,158 @@ interface LiveLogItem {
   subtitle: string;
   type?: string;
   data?: any;
+}
+
+
+// 🌟 학생 화면의 원본 스테이지 크기(stageWidth × stageHeight) 그대로 문제(MathJax+이미지)와 투명 손글씨를 (0,0)에 겹쳐 축소 표시하는 내장 컴포넌트
+function HandwritingOverlayPreview({
+  imageDataUrl,
+  questionText,
+  questionText2,
+  imageUrl,
+  image2Url,
+  stageWidth,
+  stageHeight,
+  cropHeight,
+}: {
+  imageDataUrl: string;
+  questionText?: string;
+  questionText2?: string;
+  imageUrl?: string;
+  image2Url?: string;
+  stageWidth?: number;
+  stageHeight?: number;
+  cropHeight?: number;
+}) {
+  const containerRef = React.useRef<HTMLDivElement>(null);
+  const contentMeasureRef = React.useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = React.useState<number>(0);
+  const [naturalSize, setNaturalSize] = React.useState<{ w: number; h: number }>({
+    w: stageWidth || 640,
+    h: stageHeight || 480,
+  });
+  const [measuredContentH, setMeasuredContentH] = React.useState<number>(0);
+
+  React.useEffect(() => {
+    if (!containerRef.current) return;
+    const updateWidth = () => {
+      if (containerRef.current) {
+        setContainerWidth(containerRef.current.clientWidth);
+      }
+    };
+    updateWidth();
+    const ro = new ResizeObserver(updateWidth);
+    ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  React.useEffect(() => {
+    if (!contentMeasureRef.current) return;
+    const updateContentH = () => {
+      if (contentMeasureRef.current) {
+        setMeasuredContentH(contentMeasureRef.current.scrollHeight);
+      }
+    };
+    updateContentH();
+    const timer = setTimeout(updateContentH, 250);
+    const ro = new ResizeObserver(updateContentH);
+    ro.observe(contentMeasureRef.current);
+    return () => {
+      clearTimeout(timer);
+      ro.disconnect();
+    };
+  }, [questionText, questionText2, imageUrl, image2Url]);
+
+  const baseW = stageWidth && stageWidth > 0 ? stageWidth : naturalSize.w;
+  const baseH = stageHeight && stageHeight > 0 ? stageHeight : naturalSize.h;
+
+  const hasQuestionContext = Boolean(
+    (questionText && questionText.trim()) ||
+      (questionText2 && questionText2.trim()) ||
+      (imageUrl && imageUrl.trim()) ||
+      (image2Url && image2Url.trim())
+  );
+
+  const effectiveCropH = (() => {
+    const baseCrop = cropHeight && cropHeight > 0 ? cropHeight : baseH;
+    if (measuredContentH > 0) {
+      return Math.min(baseH, Math.max(baseCrop, measuredContentH + 36, 180));
+    }
+    return Math.min(baseH, Math.max(baseCrop, 180));
+  })();
+
+  const scale =
+    containerWidth > 0 && baseW > 0 ? Math.min(1, containerWidth / baseW) : 1;
+  const scaledHeight = Math.round(effectiveCropH * scale);
+
+  if (!hasQuestionContext) {
+    return (
+      <img
+        className="w-full max-h-[380px] object-contain rounded-lg bg-white"
+        src={imageDataUrl}
+        alt="학생 손글씨 답안"
+      />
+    );
+  }
+
+  return (
+    <div
+      ref={containerRef}
+      className="w-full overflow-hidden rounded-lg bg-white relative"
+      style={{
+        height: scaledHeight > 0 ? `${scaledHeight}px` : "auto",
+        minHeight: "160px",
+        backgroundImage: "radial-gradient(#cbd5e1 1.25px, transparent 1.25px)",
+        backgroundSize: "20px 20px",
+      }}
+    >
+      <div
+        style={{
+          width: `${baseW}px`,
+          height: `${baseH}px`,
+          transform: `scale(${scale})`,
+          transformOrigin: "top left",
+          position: "relative",
+        }}
+      >
+        <div
+          ref={contentMeasureRef}
+          className="opacity-75 pointer-events-none select-none"
+        >
+          <QuestionDisplay
+            html={questionText || ""}
+            imageUrl={imageUrl}
+            image2Url={image2Url}
+            html2={questionText2}
+          />
+        </div>
+        <img
+          src={imageDataUrl}
+          alt="학생 손글씨 답안"
+          onLoad={(e) => {
+            if (!stageWidth || !stageHeight) {
+              const im = e.currentTarget;
+              if (im.naturalWidth > 0 && im.naturalHeight > 0) {
+                const dprGuess = im.naturalWidth > 1000 ? 2 : 1;
+                setNaturalSize({
+                  w: Math.round(im.naturalWidth / dprGuess),
+                  h: Math.round(im.naturalHeight / dprGuess),
+                });
+              }
+            }
+          }}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            width: `${baseW}px`,
+            height: `${baseH}px`,
+            pointerEvents: "none",
+          }}
+        />
+      </div>
+    </div>
+  );
 }
 
 export default function ExamClinicPreviewPage() {
@@ -994,6 +1148,10 @@ export default function ExamClinicPreviewPage() {
       return;
     }
 
+    const stageEl = typeof document !== "undefined" ? document.getElementById("preview-question-stage") : null;
+    const stageDims = useAI ? await measureStageDimensions(stageEl, myAns) : { stageWidth: 640, stageHeight: 480, cropHeight: 320 };
+    const aiCompositeAns = useAI ? ((await captureCompositeQuestionImage(stageEl, myAns)) || myAns) : myAns;
+
     // aiGradable === false 인 손글씨 문항은 즉시 우측 관제탑 로그로 수동 채점 요청 전송
     if (useAI && qItem.aiGradable === false) {
       recheckState.current[currentQIndex] = "pending";
@@ -1001,6 +1159,12 @@ export default function ExamClinicPreviewPage() {
         uid: qItem.uid,
         qNum: currentQIndex + 1,
         questionText: qItem.questionText,
+        questionText2: qItem.questionText2 || "",
+        imageUrl: qItem.imageUrl || "",
+        image2Url: qItem.image2Url || "",
+        stageWidth: stageDims.stageWidth,
+        stageHeight: stageDims.stageHeight,
+        cropHeight: stageDims.cropHeight,
         correctAnswer: qItem.answer,
         imageDataUrl: myAns,
         recognizedText: "",
@@ -1022,7 +1186,7 @@ export default function ExamClinicPreviewPage() {
     if (useAI) {
       try {
         gradingMeta = await gradeHandwrittenAnswerWithGemini(
-          myAns,
+          aiCompositeAns,
           qItem.answer,
           qItem.questionText
         );
@@ -1041,7 +1205,7 @@ export default function ExamClinicPreviewPage() {
     }
 
     lastGradingContextRef.current = useAI
-      ? { idx: currentQIndex, uid: qItem.uid, q: qItem, imageDataUrl: myAns, gradingMeta }
+      ? { idx: currentQIndex, uid: qItem.uid, q: qItem, imageDataUrl: myAns, stageDims, gradingMeta }
       : null;
     const gotTaHint = !!taHintState.current[currentQIndex];
 
@@ -1058,6 +1222,12 @@ export default function ExamClinicPreviewPage() {
         uid: qItem.uid,
         qNum: currentQIndex + 1,
         questionText: qItem.questionText,
+        questionText2: qItem.questionText2 || "",
+        imageUrl: qItem.imageUrl || "",
+        image2Url: qItem.image2Url || "",
+        stageWidth: stageDims.stageWidth,
+        stageHeight: stageDims.stageHeight,
+        cropHeight: stageDims.cropHeight,
         correctAnswer: qItem.answer,
         imageDataUrl: myAns,
         recognizedText: gradingMeta?.recognized_text || "",
@@ -1095,13 +1265,19 @@ export default function ExamClinicPreviewPage() {
   // 결과 모달에서 [선생님께 재확인 요청] 클릭 시
   const requestRecheck = () => {
     if (!lastGradingContextRef.current) return;
-    const { idx, uid, q, imageDataUrl, gradingMeta } = lastGradingContextRef.current;
+    const { idx, uid, q, imageDataUrl, stageDims, gradingMeta } = lastGradingContextRef.current;
     setResultModal(null);
     recheckState.current[idx] = "pending";
     const payload = {
       uid,
       qNum: idx + 1,
       questionText: q.questionText,
+      questionText2: q.questionText2 || "",
+      imageUrl: q.imageUrl || "",
+      image2Url: q.image2Url || "",
+      stageWidth: stageDims?.stageWidth || 640,
+      stageHeight: stageDims?.stageHeight || 480,
+      cropHeight: stageDims?.cropHeight || 320,
       correctAnswer: q.answer,
       imageDataUrl,
       recognizedText:
@@ -2362,7 +2538,7 @@ export default function ExamClinicPreviewPage() {
                           !isTimedRound ? "pb-28" : ""
                         }`}
                       >
-                        <div className="relative min-h-full">
+                        <div id="preview-question-stage" className="relative min-h-full">
                           <div
                             className={`transition-opacity text-xl md:text-2xl leading-relaxed font-semibold text-slate-800 ${
                               isSubjective && curAnsMode === "pen" ? "opacity-70" : ""
@@ -3184,8 +3360,8 @@ export default function ExamClinicPreviewPage() {
                 ✕
               </button>
             </div>
-            <div className="p-5 space-y-3 max-h-[70vh] overflow-y-auto custom-scroll">
-              {activeRecheckItem.questionText && (
+            <div className="p-5 space-y-3 max-h-[75vh] overflow-y-auto custom-scroll">
+              {!activeRecheckItem.imageDataUrl && activeRecheckItem.questionText && (
                 <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 text-sm text-slate-800 font-myungjo">
                   <MathText html={activeRecheckItem.questionText} />
                 </div>
@@ -3199,14 +3375,19 @@ export default function ExamClinicPreviewPage() {
                 </span>
               </div>
               {activeRecheckItem.imageDataUrl ? (
-                <div className="border border-slate-200 rounded-xl p-2 bg-white">
-                  <span className="text-[11px] font-bold text-slate-400 block mb-1">
-                    학생 손글씨 답안 이미지
+                <div className="border border-slate-200 rounded-xl p-3 bg-white">
+                  <span className="text-[11px] font-bold text-slate-400 block mb-2">
+                    학생 손글씨 답안 이미지 (문제 + 필기)
                   </span>
-                  <img
-                    className="w-full max-h-[260px] object-contain rounded-lg bg-slate-50"
-                    src={activeRecheckItem.imageDataUrl}
-                    alt="학생 손글씨 답안"
+                  <HandwritingOverlayPreview
+                    imageDataUrl={activeRecheckItem.imageDataUrl}
+                    questionText={activeRecheckItem.questionText}
+                    questionText2={activeRecheckItem.questionText2}
+                    imageUrl={activeRecheckItem.imageUrl}
+                    image2Url={activeRecheckItem.image2Url}
+                    stageWidth={activeRecheckItem.stageWidth}
+                    stageHeight={activeRecheckItem.stageHeight}
+                    cropHeight={activeRecheckItem.cropHeight}
                   />
                 </div>
               ) : (
