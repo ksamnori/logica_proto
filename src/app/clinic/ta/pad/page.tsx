@@ -7,6 +7,7 @@ import SeatCanvas from "@/app/clinic/_shared/SeatCanvas";
 import { DEFAULT_CANVAS_W, DEFAULT_CANVAS_H, DEFAULT_SEAT_CARD_W, DEFAULT_SEAT_CARD_H } from "@/lib/clinicSeatLayout";
 import TaTopBar from "../TaTopBar";
 import { QuestionDisplay } from "@/app/clinic/viewer/components/QuestionDisplay";
+import UnlockPanel from "@/components/clinic/UnlockPanel";
 
 let mathJaxInitStarted = false;
 
@@ -233,9 +234,8 @@ export default function TaHandheldDashboard() {
 
       <div className="max-w-[2200px] mx-auto px-4 pt-4 space-y-3 flex-1 flex flex-col pb-6 min-h-0 overflow-hidden w-full">
 
-        {/* 💡 [핵심 수정] 상단 영역 높이를 h-[32%] ~ h-[35%]로 줄여 하단 문제 영역이 화면의 65% 이상을 차지하도록 끌어올렸습니다. */}
-        {/* 💡 세로 뷰(모바일/태블릿 세로)를 고려해 우측 리스트 폭을 280px로 유연하게 조정했습니다. */}
-        <div className="max-w-[1400px] w-full grid grid-cols-[1fr_280px] md:grid-cols-[1fr_350px] gap-3 md:gap-4 items-stretch min-h-0 shrink-0 h-[32%] md:h-[35%]">
+        {/* 💡 우측 상단에 '채점 확인 대기' 패널과 '전체 요청 목록'을 상하로 함께 배치하기 위해 상단 높이와 우측 폭을 최적화했습니다. */}
+        <div className="max-w-[1400px] w-full grid grid-cols-[1fr_310px] md:grid-cols-[1fr_390px] gap-3 md:gap-4 items-stretch min-h-0 shrink-0 h-[40%] md:h-[42%]">
 
           {/* 좌석 현황 패널 */}
           <div className="bg-white rounded-2xl shadow-sm p-3 md:p-4 flex flex-col min-h-0 h-full">
@@ -283,11 +283,25 @@ export default function TaHandheldDashboard() {
             </div>
           </div>
 
-          {/* 호출 + 재확인 요청 리스트 패널 */}
-          <div className="bg-white rounded-2xl shadow-sm p-3 md:p-4 flex flex-col min-h-0 h-full">
-            <h2 className="text-[13px] font-bold text-slate-700 mb-2 md:mb-3 shrink-0 flex items-center justify-between">
-              전체 요청 목록 
-            </h2>
+          {/* 우측 패널: 상단 채점 확인 대기 (/supervisor 동일 기능) + 하단 전체 요청 목록 */}
+          <div className="flex flex-col gap-2.5 min-h-0 h-full overflow-hidden">
+            <div className="shrink-0">
+              <UnlockPanel
+                verifierName={taName}
+                verifierClientId={taClientId}
+                compact
+              />
+            </div>
+
+            <div className="bg-white rounded-2xl shadow-sm p-3 md:p-3.5 flex flex-col min-h-0 flex-1 overflow-hidden">
+              <h2 className="text-[13px] font-bold text-slate-700 mb-2 shrink-0 flex items-center justify-between">
+                <span>전체 요청 목록</span>
+                {requestList.length > 0 && (
+                  <span className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-rose-50 text-rose-600 border border-rose-200">
+                    {requestList.length}건
+                  </span>
+                )}
+              </h2>
             <div className="custom-scrollbar flex flex-col gap-2 overflow-y-auto pr-1 flex-1">
               {requestList.length === 0 ? <p className="text-[12px] text-slate-400 text-center py-8">대기 중인 요청이 없습니다.</p> :
                 requestList.map((req, i) => {
@@ -308,6 +322,7 @@ export default function TaHandheldDashboard() {
                   );
                 })
               }
+            </div>
             </div>
           </div>
         </div>

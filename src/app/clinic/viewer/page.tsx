@@ -780,6 +780,10 @@ export default function ClinicViewer() {
     if (validAssignId) {
       await supabaseClient.from('exam_assignment').update({ status: '제출완료', total_score: totalScore }).eq('assignment_id', validAssignId);
     }
+    if (clinicSessionStateRef.current?.id) {
+      await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', clinicSessionStateRef.current.id);
+    }
+    sendAction('submit', { score: totalScore });
   };
 
   const processSessionEnd = async () => {

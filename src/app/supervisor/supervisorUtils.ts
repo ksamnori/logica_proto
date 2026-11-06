@@ -11,7 +11,10 @@ export const DEFAULT_CLINIC_DURATION_MS = 60 * 60 * 1000;
 export const ALERT_THRESHOLD_MS = 3 * 60 * 1000;
 export const LOG_AUTO_EXPIRE_MS = 5 * 60 * 1000;
 export const PENDING_GUARD_MS = 8000;
-export const HEARTBEAT_TIMEOUT_MS = 45 * 1000;
+// 🌟 학생 패드 백그라운드 스로틀링 및 화면 전환(제출 -> 포털 이동) 시 오탐 방지를 위해 3분으로 여유 있게 설정
+export const HEARTBEAT_TIMEOUT_MS = 180 * 1000;
+// 🌟 주간테스트 제출 후 선생님/조교의 채점 검수를 기다리는 동안 패드를 내려놓아도 연결 끊김이 뜨지 않도록 15분 여유 부여
+export const SUBMITTED_VERIFICATION_TIMEOUT_MS = 15 * 60 * 1000;
 
 // 한국 표준시(KST) 기준 날짜 문자열 구하기 (오전 6시 리셋)
 export const getKSTDateString = () => {

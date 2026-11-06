@@ -606,7 +606,15 @@ export default function SupervisorDashboard() {
                 <aside className="w-[460px] xl:w-[500px] bg-white border-l border-slate-300 flex flex-col h-full shadow-2xl z-10 shrink-0">
 
                     <div className="p-2 shrink-0 border-b border-slate-200">
-                      <UnlockPanel />
+                      <UnlockPanel
+                        verifierName={instructorInfo.name}
+                        externalPendingRows={pendingVerifications}
+                        onVerified={(rec) => {
+                          supervisorData.setPendingVerifications((prev: any[]) =>
+                            prev.filter((p: any) => Number(p.assignment_id) !== Number(rec.assignmentId))
+                          );
+                        }}
+                      />
                     </div>
 
                     {(() => {

@@ -1,6 +1,6 @@
 // src/app/clinic/ta/pad/useTaHandheld.ts
 import { useEffect, useState, useRef, useCallback } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { supabase as sharedSupabaseClient } from "@/lib/supabase";
 import { clearActiveCall, clearActiveRecheck } from "@/lib/clinicSession";
 import { seedTaTenantId, getInstructorName } from "../taAccess";
 import { getActiveSeatLayout } from "@/app/actions/clinicSeatLayout";
@@ -45,12 +45,7 @@ export interface RecheckData {
   initial?: boolean;
 }
 
-const getSupabaseClient = () => {
-    if (typeof window === 'undefined') return createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    if (!(window as any)._supabaseInstance) (window as any)._supabaseInstance = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    return (window as any)._supabaseInstance;
-};
-const supabaseClient = getSupabaseClient();
+const supabaseClient = sharedSupabaseClient;
 
 export function useTaHandheld() {
   const [taName, setTaName] = useState<string>("");
@@ -424,7 +419,7 @@ export function useTaHandheld() {
     else if (action === 'hint') {
       st.status = 'hint';
       setTimeout(() => { if (activeStudentsRef.current[seat]?.status === 'hint') { activeStudentsRef.current[seat].status = 'idle'; flushState(); } }, 10000);
-    } else if (action === 'submit') { st.status = 'submitted'; st.score = data.score; }
+    } else if (action === 'submit') { st.status = 'submitted'; st.score = data.score; if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('logica:student-submitted')); }
     else if (action === 'recheck_request') {
       rechecksRef.current[`${seat}::${data.uid}`] = {
         seat, studentId: st.studentId, uid: data.uid, qNum: data.qNum, name: data.name, classes: st.classes || [],
@@ -470,6 +465,15 @@ export function useTaHandheld() {
         setSelectedCallKey(prev => prev === key ? null : prev);
         setMarkState(prev => { const n = {...prev}; delete n[key]; return n; });
         flushState();
+      }
+    } else if (action === 'grading_verified') {
+      const targetSeat = seat || Object.keys(activeStudentsRef.current).find(k => activeStudentsRef.current[k].studentId === payload.studentId);
+      if (targetSeat && activeStudentsRef.current[targetSeat]?.status === 'submitted') {
+        activeStudentsRef.current[targetSeat].status = 'idle';
+        flushState();
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('logica:grading-verified', { detail: payload }));
       }
     }
   }, [flushState]);
@@ -544,7 +548,7 @@ export function useTaHandheld() {
     if (!selectedCallKey) return;
     const r = rechecksRef.current[selectedCallKey];
     if (!r) return;
-    sendToStudent(r.seat, 'resolve_recheck', { uid: r.uid, verdict });
+    sendToStudent(r.seat, 'resolve_recheck', { uid: r.uid, verdict, taName, taClientId });
 
     const sid = activeStudentsRef.current[r.seat]?.sessionId;
     if (sid) clearActiveRecheck(supabaseClient, sid, r.uid);

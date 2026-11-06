@@ -664,7 +664,10 @@ export function useClinicRealtime({
             await supabaseClient.from('clinic_session_state').update({ active_rechecks: rechecks }).eq('id', sid);
         }
         else if (action === 'away' || action === 'cancel_away') {
-            await supabaseClient.from('clinic_session_state').update({ away_since: action === 'away' ? new Date().toISOString() : null }).eq('id', sid);
+            await supabaseClient.from('clinic_session_state').update({ away_since: action === 'away' ? new Date().toISOString() : null, last_seen_at: new Date().toISOString() }).eq('id', sid);
+        }
+        else if (action === 'submit' || action === 'depart') {
+            await supabaseClient.from('clinic_session_state').update({ last_seen_at: new Date().toISOString() }).eq('id', sid);
         }
     } catch(e) { console.error(e); }
   };

@@ -104,7 +104,14 @@ export default function LeftPanel({ data }: { data: any }) {
                                             </div>
                                         )}
                                         <div className="text-[10px] text-slate-400 font-semibold mt-2 pt-2 border-t border-slate-100">
-                                            누적 처리 <span className="text-slate-600 font-bold">{taStats[ta.clientId]?.total || 0}건</span> · 힌트 {taStats[ta.clientId]?.hint || 0} · 넘어가기 {taStats[ta.clientId]?.skip || 0}
+                                            {(() => {
+                                                const st = taStats[ta.clientId] || taStats[ta.name] || {};
+                                                return (
+                                                    <>
+                                                        누적 <span className="text-slate-600 font-bold">{st.total || 0}건</span> · 힌트 {st.hint || 0} · 넘김 {st.skip || 0} · 채점확인 <span className="text-emerald-600 font-bold">{st.verify || 0}</span>
+                                                    </>
+                                                );
+                                            })()}
                                         </div>
                                     </div>
                                 );

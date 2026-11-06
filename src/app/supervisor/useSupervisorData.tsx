@@ -1,6 +1,7 @@
 // src/app/supervisor/useSupervisorData.tsx
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { supabaseClient, CLINIC_ROOM, getKSTDateString, DEFAULT_CLINIC_DURATION_MS, LOG_AUTO_EXPIRE_MS, PENDING_GUARD_MS, HEARTBEAT_TIMEOUT_MS } from './supervisorUtils';
+import { supabaseClient, CLINIC_ROOM, getKSTDateString, DEFAULT_CLINIC_DURATION_MS, LOG_AUTO_EXPIRE_MS, PENDING_GUARD_MS, HEARTBEAT_TIMEOUT_MS, SUBMITTED_VERIFICATION_TIMEOUT_MS } from './supervisorUtils';
+import { saveVerifiedRecordToLocalCache, VerifiedGradingRecord } from '@/components/clinic/UnlockPanel';
 import { endTodaySession, pickLatestSessionPerStudent, resolveEndSessionForStudent, END_REQUEST_COOLDOWN_MS, clearAway } from '@/lib/clinicSession';
 import { getActiveSeatLayout } from '@/app/actions/clinicSeatLayout';
 import { listPadDevicesByTenant } from '@/app/actions/clinicPadDevice';
@@ -389,11 +390,15 @@ export function useSupervisorData() {
         }
     };
 
-    const confirmVerification = async (assignmentId: string, studentId: string, overrides: Record<string, boolean>) => {
+    const confirmVerification = async (assignmentId: string, studentId: string, overrides: Record<string, boolean>, verifierNameOverride?: string) => {
         try {
+            const actorName = (verifierNameOverride || instructorInfo.name || (typeof window !== 'undefined' && (localStorage.getItem('logica_instructor_name') || localStorage.getItem('logica_ta_name'))) || '총책임자').trim();
+            const nowIso = new Date().toISOString();
+            const statusTag = `완료(확인:${actorName}|${nowIso})`;
+
             const [{ data: allAnswers }, { data: asgData }, { data: gcData }] = await Promise.all([
-                supabaseClient.from('student_answer').select('*').eq('exam_assignment_id', assignmentId),
-                supabaseClient.from('exam_assignment').select('exam_id, exam_master(exam_type, total_questions, layout_settings)').eq('assignment_id', assignmentId).maybeSingle(),
+                supabaseClient.from('student_answer').select('answer_id, question_id, is_correct, grading_code, earned_score').eq('exam_assignment_id', assignmentId),
+                supabaseClient.from('exam_assignment').select('exam_id, student(name), exam_master(title, exam_type, total_questions, layout_settings)').eq('assignment_id', assignmentId).maybeSingle(),
                 supabaseClient.from('master_grading_code').select('code, description, is_correct, score_ratio, admission_ratio')
             ]);
 
@@ -443,6 +448,11 @@ export function useSupervisorData() {
                 if (updates.length > 0) {
                     await supabaseClient.from('student_answer').upsert(updates);
                 }
+
+                await supabaseClient
+                    .from('student_answer')
+                    .update({ grading_status: statusTag })
+                    .eq('exam_assignment_id', assignmentId);
                 
                 if (toDeleteIncorrectRecords.length > 0) {
                     await supabaseClient.from('student_incorrect_record')
@@ -460,19 +470,72 @@ export function useSupervisorData() {
             }).eq('assignment_id', assignmentId);
 
             if (updateError) console.error("시험 확정 업데이트 에러:", updateError);
-            
+
             const seat = Object.keys(studentsRef.current).find(s => studentsRef.current[s].studentId === studentId);
+            const rawSt: any = Array.isArray((asgData as any)?.student) ? (asgData as any)?.student[0] : (asgData as any)?.student;
+            const studentName = (seat && studentsRef.current[seat]?.name) || rawSt?.name || '학생';
+            const examTitle = em?.title || '테스트';
+
             if (seat) {
                 const sid = studentsRef.current[seat]?.sessionId;
                 if (sid) {
                     const { data: sessData } = await supabaseClient.from('clinic_session_state').select('active_calls').eq('id', sid).maybeSingle();
-                    const newCalls = { ...(sessData?.active_calls || {}), REFRESH: Date.now() };
-                    await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls }).eq('id', sid);
+                    const newCalls = {
+                        ...(sessData?.active_calls || {}),
+                        REFRESH: Date.now(),
+                        __last_verified: {
+                            assignmentId: Number(assignmentId),
+                            examTitle,
+                            finalScore: totalScore,
+                            verifierName: actorName,
+                            verifiedAt: nowIso
+                        }
+                    };
+                    await supabaseClient.from('clinic_session_state').update({ active_calls: newCalls, last_seen_at: nowIso }).eq('id', sid);
+                }
+                if (studentsRef.current[seat]?.status === 'submitted') {
+                    studentsRef.current[seat].status = 'idle';
+                    updateStudents({ ...studentsRef.current });
                 }
                 sendToStudent(seat, 'force_refresh'); 
             }
+
+            const verifiedRecord: VerifiedGradingRecord = {
+                assignmentId: Number(assignmentId),
+                studentId: String(studentId),
+                studentName,
+                examTitle,
+                finalScore: totalScore,
+                verifierName: actorName,
+                verifiedAt: nowIso
+            };
+            saveVerifiedRecordToLocalCache(verifiedRecord);
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('logica:grading-verified', { detail: verifiedRecord }));
+            }
+            if (channelRef.current && channelRef.current.state === 'joined') {
+                channelRef.current.send({
+                    type: 'broadcast',
+                    event: 'ta_action',
+                    payload: {
+                        seat: seat || null,
+                        studentId,
+                        action: 'grading_verified',
+                        assignmentId: Number(assignmentId),
+                        studentName,
+                        examTitle,
+                        finalScore: totalScore,
+                        verifierName: actorName,
+                        taName: actorName,
+                        verifiedAt: nowIso,
+                        timestamp: Date.now()
+                    }
+                });
+            }
+            appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-700', '채점확정', `${seat ? '[' + seat + '] ' : ''}${studentName} 채점 확인 완료`, `확인자: ${actorName} · 최종 ${totalScore}점 (${examTitle})`);
+            recordTaStat(actorName, 'verify');
             
-            setPendingVerifications(prev => prev.filter(p => p.assignment_id !== assignmentId));
+            setPendingVerifications(prev => prev.filter(p => String(p.assignment_id) !== String(assignmentId)));
         } catch (error) {
             console.error("검수 처리 중 예상치 못한 에러:", error);
             setPendingVerifications(prev => prev.filter(p => p.assignment_id !== assignmentId));
@@ -771,12 +834,29 @@ export function useSupervisorData() {
                 }
             }
 
+            const { data: pExams } = await supabaseClient
+                .from('exam_assignment')
+                .select('assignment_id, student_id, total_score, exam_master!inner(title, exam_type), student!inner(name)')
+                .eq('status', '제출완료')
+                .gte('created_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString());
+
+            const pendingVerifyStudentIds = new Set(
+                (pExams || []).map((ex: any) => String(ex.student_id))
+            );
+
             for (const [seat, dbRecord] of Array.from(dbSeats.entries())) {
                 if (!current[seat] || current[seat].dummy || current[seat].type === 'reserved' || !dbRecord.last_seen_at) continue;
                 
                 const sinceLastSeen = Date.now() - new Date(dbRecord.last_seen_at).getTime();
+                // 🌟 주간테스트 제출 후 채점 검수를 대기 중인 학생은 패드를 내려놓고 대기하므로 15분 동안 오프라인(연결 끊김) 알림을 띄우지 않음
+                const isWaitingVerification =
+                    current[seat].status === 'submitted' ||
+                    pendingVerifyStudentIds.has(String(current[seat].studentId));
+                const timeoutLimitMs = isWaitingVerification
+                    ? SUBMITTED_VERIFICATION_TIMEOUT_MS
+                    : HEARTBEAT_TIMEOUT_MS;
                 
-                if (sinceLastSeen > HEARTBEAT_TIMEOUT_MS) {
+                if (sinceLastSeen > timeoutLimitMs) {
                     if (current[seat].status !== 'offline') {
                         current[seat].status = 'offline';
                         isModified = true;
@@ -787,11 +867,13 @@ export function useSupervisorData() {
                     }
                 } else {
                     if (current[seat].status === 'offline') {
-                        current[seat].status = 'idle';
+                        current[seat].status = isWaitingVerification ? 'submitted' : 'idle';
                         isModified = true;
                     }
                     if (offlineLogSentRef.current.has(seat)) {
-                        appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '복귀', `[${seat}] ${current[seat].name} 연결 복구`, `기기 연결이 정상적으로 복구되었습니다.`);
+                        if (!isWaitingVerification) {
+                            appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '복귀', `[${seat}] ${current[seat].name} 연결 복구`, `기기 연결이 정상적으로 복구되었습니다.`);
+                        }
                         offlineLogSentRef.current.delete(seat);
                     }
                 }
@@ -806,12 +888,6 @@ export function useSupervisorData() {
                     isModified = true;
                 }
             });
-
-            const { data: pExams } = await supabaseClient
-                .from('exam_assignment')
-                .select('assignment_id, student_id, total_score, exam_master!inner(title, exam_type), student!inner(name)')
-                .eq('status', '제출완료')
-                .gte('created_at', new Date(Date.now() - 24 * 3600 * 1000).toISOString());
             
             if (pExams) {
                 const enriched = pExams.map((ex: any) => {
@@ -833,11 +909,14 @@ export function useSupervisorData() {
     }, [isAuthorized, isMounted, updateStudents, appendLog, removeLogsByTypeAndSeat]);
 
     const recordTaStat = (key: string, mark: string) => {
+        if (!key) return;
         setTaStats(prev => {
             const next = { ...prev };
-            if (!next[key]) next[key] = { total: 0, hint: 0, skip: 0 };
+            if (!next[key]) next[key] = { total: 0, hint: 0, skip: 0, verify: 0 };
             next[key].total++;
-            if (mark === 'hint') next[key].hint++; else if (mark === 'skip') next[key].skip++;
+            if (mark === 'hint') next[key].hint++;
+            else if (mark === 'skip') next[key].skip++;
+            else if (mark === 'verify') next[key].verify = (next[key].verify || 0) + 1;
             return next;
         });
     };
@@ -883,6 +962,34 @@ export function useSupervisorData() {
                 delete currentStudents[seat].rechecks[uid];
             }
             removeLogsByTypeAndSeat('recheck', seat, null, uid);
+        } else if (action === 'grading_verified') {
+            const targetSeat = seat || Object.keys(currentStudents).find(s => currentStudents[s].studentId === payload.studentId);
+            if (targetSeat && currentStudents[targetSeat]?.status === 'submitted') {
+                currentStudents[targetSeat].status = 'idle';
+            }
+            if (payload.assignmentId) {
+                setPendingVerifications(prev => prev.filter(p => String(p.assignment_id) !== String(payload.assignmentId)));
+                saveVerifiedRecordToLocalCache({
+                    assignmentId: Number(payload.assignmentId),
+                    studentId: String(payload.studentId || ''),
+                    studentName: payload.studentName || (targetSeat && currentStudents[targetSeat]?.name) || '학생',
+                    examTitle: payload.examTitle || '테스트',
+                    finalScore: Number(payload.finalScore ?? 0),
+                    verifierName: payload.verifierName || payload.taName || '조교',
+                    verifierClientId: payload.taClientId || '',
+                    verifiedAt: payload.verifiedAt || new Date().toISOString()
+                });
+            }
+            const vName = payload.verifierName || payload.taName || '조교';
+            const sName = payload.studentName || (targetSeat && currentStudents[targetSeat]?.name) || '학생';
+            appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-700', '채점확정', `${targetSeat ? '[' + targetSeat + '] ' : ''}${sName} 채점 확인 완료`, `확인자: ${vName} · 최종 ${payload.finalScore ?? 0}점 (${payload.examTitle || '테스트'})`);
+            recordTaStat(payload.taClientId || vName, 'verify');
+            if (payload.taClientId && vName && payload.taClientId !== vName) {
+                recordTaStat(vName, 'verify');
+            }
+            if (typeof window !== 'undefined') {
+                window.dispatchEvent(new CustomEvent('logica:grading-verified', { detail: payload }));
+            }
         }
         updateStudents(currentStudents);
     };
@@ -956,6 +1063,7 @@ export function useSupervisorData() {
                         setTimeout(() => { if (studentsRef.current[activeSeat]?.status === 'hint') updateStudents({ ...studentsRef.current, [activeSeat]: { ...studentsRef.current[activeSeat], status: 'idle' } }); }, 10000);
                     } else if (action === 'submit') {
                         st[activeSeat].status = 'submitted'; st[activeSeat].score = data.score;
+                        offlineLogSentRef.current.delete(activeSeat);
                         appendLog('border-emerald-500', 'bg-emerald-100 text-emerald-600', '답안제출', `[${activeSeat}] ${data.name} 제출`, `최종 점수 [${data.score}].`, 'submit', { seat: activeSeat, studentId: data.studentId });
                     } else if (action === 'recheck_request') {
                         if (!st[activeSeat].rechecks) st[activeSeat].rechecks = {};
