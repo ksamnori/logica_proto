@@ -326,6 +326,19 @@ export const hydrateMissingQuestionImages = async (supabaseClient: any, question
   const hasValidImg = (val: any) =>
     Boolean(val && String(val).trim() !== '' && String(val) !== 'null' && String(val) !== 'undefined');
 
+  const hasNonEmptyBox = (val: any) => {
+    if (!val || val === 'null' || val === 'undefined') return false;
+    if (typeof val === 'string') {
+      const trimmed = val.trim();
+      return trimmed !== '' && trimmed !== '{}' && trimmed !== 'null';
+    }
+    if (typeof val === 'object') return Object.keys(val).length > 0;
+    return false;
+  };
+
+  // 사용자가 의도적으로 이미지를 삭제한 문항(image_deleted 플래그 또는 image_box가 비워진 상태)은 자동 복원 대상에서 제외
+  const deletedQidSet = new Set<string>();
+
   // 1) 문항 자체의 raw_metadata / raw_source_tags 내부에 이미지가 들어있는 경우 우선 복원
   questionsArray.forEach((q: any) => {
     if (!q || hasValidImg(q.image_url)) return;
@@ -336,19 +349,26 @@ export const hydrateMissingQuestionImages = async (supabaseClient: any, question
         try { parsed = JSON.parse(parsed); } catch (e) { parsed = null; }
       }
       if (parsed && typeof parsed === 'object') {
-        if (hasValidImg(parsed.image_url)) q.image_url = parsed.image_url;
-        if (!hasValidImg(q.image_2_url) && hasValidImg(parsed.image_2_url)) q.image_2_url = parsed.image_2_url;
-        if (!q.image_box && parsed.image_box) q.image_box = parsed.image_box;
-        if (!q.image_2_box && parsed.image_2_box) q.image_2_box = parsed.image_2_box;
-        if (!hasValidImg(q.answer_image_url) && hasValidImg(parsed.answer_image_url)) q.answer_image_url = parsed.answer_image_url;
+        if (parsed.image_deleted) {
+          if (q.question_id) deletedQidSet.add(String(q.question_id).trim().replace(/_added_\d+$/, ''));
+          return;
+        }
+        if (hasValidImg(parsed.image_url) && hasNonEmptyBox(q.image_box)) q.image_url = parsed.image_url;
+        if (!hasValidImg(q.image_2_url) && hasValidImg(parsed.image_2_url) && !parsed.image_2_deleted && hasNonEmptyBox(q.image_2_box)) q.image_2_url = parsed.image_2_url;
+        if (!q.image_box && parsed.image_box && hasValidImg(q.image_url)) q.image_box = parsed.image_box;
+        if (!q.image_2_box && parsed.image_2_box && hasValidImg(q.image_2_url)) q.image_2_box = parsed.image_2_box;
+        if (!hasValidImg(q.answer_image_url) && hasValidImg(parsed.answer_image_url) && !parsed.answer_image_deleted && hasNonEmptyBox(q.answer_image_box)) q.answer_image_url = parsed.answer_image_url;
       }
     }
   });
 
-  const stillMissing = questionsArray.filter((q: any) => q && !hasValidImg(q.image_url));
+  const toRealId = (qid: any) => String(qid || '').trim().replace(/_added_\d+$/, '');
+  // image_box가 존재하는 문항만 실제로 이미지가 누락된 문항으로 간주 (사용자가 이미지를 삭제하여 image_url과 image_box가 모두 비워진 문항은 복원하지 않음)
+  const stillMissing = questionsArray.filter(
+    (q: any) => q && !hasValidImg(q.image_url) && !deletedQidSet.has(toRealId(q.question_id)) && hasNonEmptyBox(q.image_box)
+  );
   if (stillMissing.length === 0) return;
 
-  const toRealId = (qid: any) => String(qid || '').trim().replace(/_added_\d+$/, '');
   const missingIds = Array.from(new Set(stillMissing.map((q: any) => toRealId(q.question_id)).filter(Boolean)));
   const patchedDbPayloads = new Map<string, Record<string, any>>();
 
@@ -369,33 +389,41 @@ export const hydrateMissingQuestionImages = async (supabaseClient: any, question
           if (typeof meta === 'string') {
             try { meta = JSON.parse(meta); } catch (e) { meta = null; }
           }
-          if (meta && typeof meta === 'object' && (hasValidImg(meta.image_url) || hasValidImg(meta.image_2_url))) {
-            metaByQid.set(String(row.question_id).trim(), meta);
+          if (meta && typeof meta === 'object') {
+            const qidStr = String(row.question_id).trim();
+            if (meta.image_deleted) {
+              deletedQidSet.add(qidStr);
+              return;
+            }
+            if (hasValidImg(meta.image_url) || hasValidImg(meta.image_2_url)) {
+              metaByQid.set(qidStr, meta);
+            }
           }
         });
 
         stillMissing.forEach((q: any) => {
           const rId = toRealId(q.question_id);
+          if (deletedQidSet.has(rId)) return;
           const meta = metaByQid.get(rId);
           if (!meta) return;
           const dbPatch: Record<string, any> = {};
-          if (!hasValidImg(q.image_url) && hasValidImg(meta.image_url)) {
+          if (!hasValidImg(q.image_url) && hasValidImg(meta.image_url) && !meta.image_deleted) {
             q.image_url = meta.image_url;
             dbPatch.image_url = meta.image_url;
           }
-          if (!hasValidImg(q.image_2_url) && hasValidImg(meta.image_2_url)) {
+          if (!hasValidImg(q.image_2_url) && hasValidImg(meta.image_2_url) && !meta.image_2_deleted) {
             q.image_2_url = meta.image_2_url;
             dbPatch.image_2_url = meta.image_2_url;
           }
-          if (!q.image_box && meta.image_box) {
+          if (!q.image_box && meta.image_box && !meta.image_deleted) {
             q.image_box = meta.image_box;
             dbPatch.image_box = meta.image_box;
           }
-          if (!q.image_2_box && meta.image_2_box) {
+          if (!q.image_2_box && meta.image_2_box && !meta.image_2_deleted) {
             q.image_2_box = meta.image_2_box;
             dbPatch.image_2_box = typeof meta.image_2_box === 'object' ? JSON.stringify(meta.image_2_box) : meta.image_2_box;
           }
-          if (!hasValidImg(q.answer_image_url) && hasValidImg(meta.answer_image_url)) {
+          if (!hasValidImg(q.answer_image_url) && hasValidImg(meta.answer_image_url) && !meta.answer_image_deleted) {
             q.answer_image_url = meta.answer_image_url;
             dbPatch.answer_image_url = meta.answer_image_url;
           }
@@ -412,6 +440,8 @@ export const hydrateMissingQuestionImages = async (supabaseClient: any, question
     (q: any) =>
       q &&
       !hasValidImg(q.image_url) &&
+      !deletedQidSet.has(toRealId(q.question_id)) &&
+      hasNonEmptyBox(q.image_box) &&
       q.parent_question_id &&
       String(q.parent_question_id).trim() !== '' &&
       String(q.parent_question_id).trim() !== 'null'
@@ -464,7 +494,7 @@ export const hydrateMissingQuestionImages = async (supabaseClient: any, question
   }
 
   // 4) 동일 교재(source_book_name / book_name / pdf_source) + 동일 페이지 + 동일 문항번호의 다른 행에 이미지가 존재하는 경우 복원
-  const stillMissingAfterParent = questionsArray.filter((q: any) => q && !hasValidImg(q.image_url));
+  const stillMissingAfterParent = questionsArray.filter((q: any) => q && !hasValidImg(q.image_url) && !deletedQidSet.has(toRealId(q.question_id)) && hasNonEmptyBox(q.image_box));
   if (stillMissingAfterParent.length > 0) {
     try {
       const booksToLookup = Array.from(

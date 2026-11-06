@@ -74,6 +74,38 @@ function roundScore(val: number): number {
   return Math.round((num + Number.EPSILON) * 10) / 10;
 }
 
+const getRealQuestionId = (id: any) => String(id || "").trim().replace(/_added_\d+$/, "");
+
+const normalizeHiddenImageKey = (raw: any): string => {
+  const s = String(raw || "").trim();
+  const m = s.match(/^(.*?)__img([12])$/);
+  if (m) return `${getRealQuestionId(m[1])}__img${m[2]}`;
+  return getRealQuestionId(s);
+};
+
+function extractHiddenImageSet(layoutSettings: any): Set<string> {
+  if (!layoutSettings) return new Set();
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return new Set();
+    }
+  }
+  if (Array.isArray(s?.hiddenImageQuestions)) {
+    return new Set(s.hiddenImageQuestions.map(normalizeHiddenImageKey).filter(Boolean));
+  }
+  return new Set();
+}
+
+function isQuestionImageHidden(hiddenSet: Set<string> | undefined, qId: any, slot: 1 | 2): boolean {
+  if (!hiddenSet || hiddenSet.size === 0 || !qId) return false;
+  const realId = getRealQuestionId(qId);
+  if (!realId) return false;
+  return hiddenSet.has(realId) || hiddenSet.has(`${realId}__img${slot}`);
+}
+
 function extractMergedQuestionGroups(layoutSettings: any): string[][] {
   if (!layoutSettings) return [];
   let s = layoutSettings;
@@ -470,11 +502,14 @@ export default function ExamClinicPreviewPage() {
         validItems.length
       );
       const defaultItemScore = 100 / (groupCount || validItems.length || 1);
+      const hiddenImageSet = extractHiddenImageSet(master.layout_settings);
 
       const mapped = validItems.map((it: any, i: number) => {
         const qdb = it.question_db;
         const dbHint = combineDbHints(qdb.step_1_concept, qdb.step_2_approach);
         const qId = qdb.question_id;
+        const hideImg1 = isQuestionImageHidden(hiddenImageSet, qId, 1);
+        const hideImg2 = isQuestionImageHidden(hiddenImageSet, qId, 2);
         return {
           index: i,
           uid: `preview_q_${i}_${qId}`,
@@ -487,8 +522,8 @@ export default function ExamClinicPreviewPage() {
               : undefined,
           questionText: formatMathTextForWeb(qdb.question),
           questionText2: qdb.question_2 ? formatMathTextForWeb(qdb.question_2) : "",
-          imageUrl: getCleanUrl(qdb.image_url),
-          image2Url: getCleanUrl(qdb.image_2_url),
+          imageUrl: hideImg1 ? "" : getCleanUrl(qdb.image_url),
+          image2Url: hideImg2 ? "" : getCleanUrl(qdb.image_2_url),
           options: safeParseOptions(qdb.options),
           answer: String(qdb.answer || "").trim(),
           explanation: qdb.explanation || qdb.solution || "",

@@ -1027,6 +1027,20 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       const qMap: any = {}; fetchedQuestions.forEach(q => qMap[q.question_id] = q);
 
       const userMergedTextQuestions = extractMergedQuestionGroups(m?.layout_settings);
+      const getRealQId = (id: any) => String(id || '').trim().replace(/_added_\d+$/, '');
+      let rawLayout = m?.layout_settings;
+      if (typeof rawLayout === 'string') {
+        try { rawLayout = JSON.parse(rawLayout); } catch { rawLayout = null; }
+      }
+      const hiddenImgSet = new Set<string>(
+        Array.isArray(rawLayout?.hiddenImageQuestions)
+          ? rawLayout.hiddenImageQuestions.map((k: any) => {
+              const s = String(k || '').trim();
+              const match = s.match(/^(.*?)__img([12])$/);
+              return match ? `${getRealQId(match[1])}__img${match[2]}` : getRealQId(s);
+            })
+          : []
+      );
 
       const customGroupMap = new Map<string, string>();
       userMergedTextQuestions.forEach((arr, idx) => {
@@ -1074,7 +1088,15 @@ export default function GradingBoard({ mode, assignmentId, homeworkId, studentId
       let mainNum = 0; let currentGroupId: string | null = null; let subNum = 1;
 
       const rows = sortedUnionQids.map((qid) => {
-        const q = qMap[qid] || {};
+        const rawQ = qMap[qid] || {};
+        const realKey = getRealQId(rawQ.question_id || qid);
+        const hideImg1 = hiddenImgSet.has(realKey) || hiddenImgSet.has(`${realKey}__img1`);
+        const hideImg2 = hiddenImgSet.has(realKey) || hiddenImgSet.has(`${realKey}__img2`);
+        const q = {
+          ...rawQ,
+          image_url: hideImg1 ? '' : rawQ.image_url,
+          image_2_url: hideImg2 ? '' : rawQ.image_2_url,
+        };
         const gId = qidToGroupId.get(String(qid)) || `single_${qid}`;
         const groupSize = groupSizes.get(gId) || 1;
 

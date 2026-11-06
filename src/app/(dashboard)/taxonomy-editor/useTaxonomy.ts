@@ -40,15 +40,102 @@ async function saveTwinsServerAction(
   }
 }
 
+async function syncTextbookRawMetadataImagesClient(
+  questionId: string,
+  updateData: Record<string, any>,
+  textbookUpdateData?: Record<string, any>
+) {
+  try {
+    const imgFields = [
+      "image_url",
+      "image_2_url",
+      "answer_image_url",
+      "answer_image_2_url",
+      "image_box",
+      "image_2_box",
+      "answer_image_box",
+    ];
+    const hasImageUpdate =
+      updateData && imgFields.some((k) => Object.prototype.hasOwnProperty.call(updateData, k));
+
+    if (!hasImageUpdate) {
+      if (textbookUpdateData && Object.keys(textbookUpdateData).length > 0) {
+        await supabase.from("textbook_question").update(textbookUpdateData).eq("question_id", questionId);
+      }
+      return;
+    }
+
+    const { data: tqRows } = await supabase
+      .from("textbook_question")
+      .select("tq_id, raw_metadata")
+      .eq("question_id", questionId);
+
+    if (Array.isArray(tqRows) && tqRows.length > 0) {
+      for (const row of tqRows) {
+        let meta: Record<string, any> = {};
+        if (row.raw_metadata) {
+          if (typeof row.raw_metadata === "string") {
+            try {
+              meta = JSON.parse(row.raw_metadata) || {};
+            } catch (e) {
+              meta = {};
+            }
+          } else if (typeof row.raw_metadata === "object") {
+            meta = { ...row.raw_metadata };
+          }
+        }
+        for (const f of imgFields) {
+          if (Object.prototype.hasOwnProperty.call(updateData, f)) {
+            const val = updateData[f];
+            meta[f] = val === "" ? null : val;
+            if (f === "image_url") {
+              meta.imageUrl = val === "" ? null : val;
+              meta.image_deleted = !val || String(val).trim() === "";
+            }
+            if (f === "image_2_url") {
+              meta.image2Url = val === "" ? null : val;
+              meta.image_2_deleted = !val || String(val).trim() === "";
+            }
+            if (f === "answer_image_url") {
+              meta.answerImageUrl = val === "" ? null : val;
+              meta.answer_image_deleted = !val || String(val).trim() === "";
+            }
+            if (f === "answer_image_2_url") {
+              meta.answerImage2Url = val === "" ? null : val;
+              meta.answer_image_2_deleted = !val || String(val).trim() === "";
+            }
+          }
+        }
+        await supabase
+          .from("textbook_question")
+          .update({
+            ...(textbookUpdateData || {}),
+            raw_metadata: meta,
+          })
+          .eq("tq_id", row.tq_id);
+      }
+    } else if (textbookUpdateData && Object.keys(textbookUpdateData).length > 0) {
+      await supabase.from("textbook_question").update(textbookUpdateData).eq("question_id", questionId);
+    }
+  } catch (e) {
+    console.warn("textbook_question raw_metadata 동기화 경고:", e);
+  }
+}
+
 async function updateQuestionServerAction(
   questionId: string,
   updateData: Record<string, any>,
   textbookUpdateData?: Record<string, any>
 ): Promise<{ success: boolean; error?: string }> {
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData?.session?.access_token;
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (token) headers["Authorization"] = `Bearer ${token}`;
+
     const res = await fetch("/api/gemini-twin", {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers,
       body: JSON.stringify({ action: "update_question", questionId, updateData, textbookUpdateData }),
     });
     if (!res.ok) return { success: false, error: `HTTP ${res.status}` };
@@ -794,6 +881,7 @@ export function useTaxonomy() {
         const updRes = await updateQuestionServerAction(selectedQuestion.question_id, { [cropTargetField]: finalUploadUrl });
         if (!updRes.success) {
           await supabase.from('question_db').update({ [cropTargetField]: finalUploadUrl }).eq('question_id', selectedQuestion.question_id);
+          await syncTextbookRawMetadataImagesClient(selectedQuestion.question_id, { [cropTargetField]: finalUploadUrl });
         }
         
         const updatedQuestion = { ...selectedQuestion, [cropTargetField]: finalUploadUrl };
@@ -804,6 +892,69 @@ export function useTaxonomy() {
       setCropImageSrc(null); setCropTargetField(null); 
       alert("✅ 이미지가 성공적으로 잘라내어 저장(업서트)되었습니다!");
     } catch (err: any) { alert("이미지 업로드 실패: " + err.message); } finally { setIsLoading(false); }
+  };
+
+  // 🌟 이미지 삭제 버튼 클릭 시: 폼 상태에서 제거함과 동시에 DB(question_db 및 textbook_question.raw_metadata)에서도 해당 문항의 이미지 정보를 즉시 비웁니다.
+  const handleDeleteImage = async (fieldKey: string, boxFieldKey?: string) => {
+    const resolvedBoxKey =
+      boxFieldKey ||
+      (fieldKey === "image_url"
+        ? "image_box"
+        : fieldKey === "image_2_url"
+        ? "image_2_box"
+        : fieldKey === "answer_image_url"
+        ? "answer_image_box"
+        : undefined);
+
+    setEditForm((prev) => ({
+      ...prev,
+      [fieldKey]: "",
+      ...(resolvedBoxKey ? { [resolvedBoxKey]: "" } : {}),
+    }));
+
+    if (!selectedQuestion) return;
+
+    const dbPatch: Record<string, any> = {
+      [fieldKey]: null,
+      ...(resolvedBoxKey ? { [resolvedBoxKey]: null } : {}),
+    };
+
+    try {
+      const srvRes = await updateQuestionServerAction(selectedQuestion.question_id, dbPatch);
+      if (!srvRes.success) {
+        const { error: dbErr } = await supabase
+          .from("question_db")
+          .update(dbPatch)
+          .eq("question_id", selectedQuestion.question_id);
+        if (dbErr) throw dbErr;
+        await syncTextbookRawMetadataImagesClient(selectedQuestion.question_id, dbPatch);
+      }
+
+      const nextRawMeta =
+        selectedQuestion.raw_metadata && typeof selectedQuestion.raw_metadata === "object"
+          ? {
+              ...selectedQuestion.raw_metadata,
+              [fieldKey]: null,
+              ...(fieldKey === "image_url" ? { imageUrl: null, image_deleted: true } : {}),
+              ...(fieldKey === "image_2_url" ? { image2Url: null, image_2_deleted: true } : {}),
+              ...(fieldKey === "answer_image_url" ? { answerImageUrl: null, answer_image_deleted: true } : {}),
+              ...(fieldKey === "answer_image_2_url" ? { answerImage2Url: null, answer_image_2_deleted: true } : {}),
+              ...(resolvedBoxKey ? { [resolvedBoxKey]: null } : {}),
+            }
+          : selectedQuestion.raw_metadata;
+
+      const updatedQuestion = {
+        ...selectedQuestion,
+        ...dbPatch,
+        ...(nextRawMeta !== undefined ? { raw_metadata: nextRawMeta } : {}),
+      };
+      setSelectedQuestion(updatedQuestion);
+      setQuestions((prev) =>
+        prev.map((q) => (q.question_id === selectedQuestion.question_id ? updatedQuestion : q))
+      );
+    } catch (err: any) {
+      alert("이미지 정보 삭제 실패: " + err.message);
+    }
   };
 
   // 🌟 [핵심 변경] 저장 버튼 클릭 시, 폼에 들고 있는 문자열 박스(비율)들을 객체로 파싱해서 DB에 정확하게 저장!
@@ -827,21 +978,27 @@ export function useTaxonomy() {
         if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) return parsed;
         return null;
       };
-      const parsedImgBox = normalizeBoxForDb(editForm.image_box);
-      const parsedImg2Box = normalizeBoxForDb(editForm.image_2_box);
-      const parsedAnsImgBox = normalizeBoxForDb(editForm.answer_image_box);
+
+      const cleanImageUrl = editForm.image_url?.trim() || null;
+      const cleanImage2Url = editForm.image_2_url?.trim() || null;
+      const cleanAnswerImageUrl = editForm.answer_image_url?.trim() || null;
+      const cleanAnswerImage2Url = editForm.answer_image_2_url?.trim() || null;
+
+      const parsedImgBox = cleanImageUrl ? normalizeBoxForDb(editForm.image_box) : null;
+      const parsedImg2Box = cleanImage2Url ? normalizeBoxForDb(editForm.image_2_box) : null;
+      const parsedAnsImgBox = cleanAnswerImageUrl ? normalizeBoxForDb(editForm.answer_image_box) : null;
 
       const updateData = {
         final_printed_page: parsedPage, question_number: editForm.question_number, sub_num: parsedSubNum,
         difficulty: editForm.difficulty === '미지정' ? null : editForm.difficulty, solving_probability: parsedProbability,
         question: editForm.question, question_2: editForm.question_2 || null, answer: editForm.answer,
         
-        image_url: editForm.image_url, 
-        image_2_url: editForm.image_2_url, 
-        answer_image_url: editForm.answer_image_url, 
-        answer_image_2_url: editForm.answer_image_2_url,
+        image_url: cleanImageUrl, 
+        image_2_url: cleanImage2Url, 
+        answer_image_url: cleanAnswerImageUrl, 
+        answer_image_2_url: cleanAnswerImage2Url,
         
-        // 🌟 박스(배율) JSON 데이터 저장 (DB 스키마에 맞춰 image_2_box는 강제 String 변환)
+        // 🌟 박스(배율) JSON 데이터 저장 (이미지가 삭제된 경우 박스 데이터도 함께 null로 정리)
         image_box: parsedImgBox, 
         image_2_box: parsedImg2Box ? JSON.stringify(parsedImg2Box) : null, 
         answer_image_box: parsedAnsImgBox,
@@ -854,10 +1011,36 @@ export function useTaxonomy() {
       if (!srvUpdate.success) {
         const { error: dbError } = await supabase.from('question_db').update(updateData).eq('question_id', selectedQuestion.question_id);
         if (dbError) throw dbError;
-        await supabase.from('textbook_question').update(tqUpdate).eq('question_id', selectedQuestion.question_id);
+        await syncTextbookRawMetadataImagesClient(selectedQuestion.question_id, updateData, tqUpdate);
       }
 
-      const updatedQuestion = { ...selectedQuestion, ...updateData };
+      const nextRawMeta =
+        selectedQuestion.raw_metadata && typeof selectedQuestion.raw_metadata === "object"
+          ? {
+              ...selectedQuestion.raw_metadata,
+              image_url: cleanImageUrl,
+              imageUrl: cleanImageUrl,
+              image_deleted: !cleanImageUrl,
+              image_2_url: cleanImage2Url,
+              image2Url: cleanImage2Url,
+              image_2_deleted: !cleanImage2Url,
+              answer_image_url: cleanAnswerImageUrl,
+              answerImageUrl: cleanAnswerImageUrl,
+              answer_image_deleted: !cleanAnswerImageUrl,
+              answer_image_2_url: cleanAnswerImage2Url,
+              answerImage2Url: cleanAnswerImage2Url,
+              answer_image_2_deleted: !cleanAnswerImage2Url,
+              image_box: parsedImgBox,
+              image_2_box: parsedImg2Box ? JSON.stringify(parsedImg2Box) : null,
+              answer_image_box: parsedAnsImgBox,
+            }
+          : selectedQuestion.raw_metadata;
+
+      const updatedQuestion = {
+        ...selectedQuestion,
+        ...updateData,
+        ...(nextRawMeta !== undefined ? { raw_metadata: nextRawMeta } : {}),
+      };
       setQuestions(prev => sortQuestionsList(prev.map(q => q.question_id === selectedQuestion.question_id ? updatedQuestion : q)));
       setSelectedQuestion(updatedQuestion); setIsEditingContent(false);
       
@@ -1345,7 +1528,7 @@ export function useTaxonomy() {
     setSelD8, setIsTwinModalOpen, setGeneratedTwins, setIsCloneModalOpen, setCloneForm, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
-    handleCropExisting,
+    handleCropExisting, handleDeleteImage,
     saveQuestionContent, handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex
   };
 }

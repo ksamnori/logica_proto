@@ -71,6 +71,41 @@ function calcScoreRatio(
   return { newEarned, isCorrectEq, ratio };
 }
 
+const getRealQuestionId = (id: any) => String(id || "").trim().replace(/_added_\d+$/, "");
+
+const normalizeHiddenImageKey = (raw: any): string => {
+  const s = String(raw || "").trim();
+  const m = s.match(/^(.*?)__img([12])$/);
+  if (m) return `${getRealQuestionId(m[1])}__img${m[2]}`;
+  return getRealQuestionId(s);
+};
+
+/**
+ * layout_settings에서 hiddenImageQuestions 집합을 안전하게 추출합니다.
+ */
+function extractHiddenImageSet(layoutSettings: any): Set<string> {
+  if (!layoutSettings) return new Set();
+  let s = layoutSettings;
+  if (typeof s === "string") {
+    try {
+      s = JSON.parse(s);
+    } catch {
+      return new Set();
+    }
+  }
+  if (Array.isArray(s?.hiddenImageQuestions)) {
+    return new Set(s.hiddenImageQuestions.map(normalizeHiddenImageKey).filter(Boolean));
+  }
+  return new Set();
+}
+
+function isQuestionImageHidden(hiddenSet: Set<string> | undefined, qId: any, slot: 1 | 2): boolean {
+  if (!hiddenSet || hiddenSet.size === 0 || !qId) return false;
+  const realId = getRealQuestionId(qId);
+  if (!realId) return false;
+  return hiddenSet.has(realId) || hiddenSet.has(`${realId}__img${slot}`);
+}
+
 /**
  * layout_settings에서 userMergedTextQuestions 배열을 안전하게 추출합니다.
  */
@@ -313,10 +348,17 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         qIds = [...new Set([...qIds, ...uuidFromTqIds])];
       }
 
-      const [{ data: qDbRows }, { data: tqRows }] = await Promise.all([
+      const [{ data: qDbRows }, { data: tqRows }, { data: studentExamAssigns }] = await Promise.all([
         qIds.length > 0 ? supabaseClient.from('question_db').select('*').in('question_id', qIds) : Promise.resolve({ data: [] }),
         tqIds.length > 0 ? supabaseClient.from('textbook_question').select('*, textbook(book_type, title)').in('tq_id', tqIds) : Promise.resolve({ data: [] }),
+        supabaseClient.from('exam_assignment').select('exam_master(layout_settings)').eq('student_id', sId),
       ]);
+
+      const studentHiddenSet = new Set<string>();
+      (studentExamAssigns || []).forEach((ea: any) => {
+        const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
+        extractHiddenImageSet(m?.layout_settings).forEach((k) => studentHiddenSet.add(k));
+      });
       
       const tqQIds = (tqRows || []).map((tq: any) => tq.question_id).filter(Boolean);
       const allQIds = [...new Set([...qIds, ...tqQIds])];
@@ -333,11 +375,13 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         if (targetQId && qDbMap.has(targetQId)) {
           const qItem = qDbMap.get(targetQId);
           const dbHint = combineDbHints(qItem.step_1_concept, qItem.step_2_approach);
+          const hideImg1 = isQuestionImageHidden(studentHiddenSet, qItem.question_id, 1);
+          const hideImg2 = isQuestionImageHidden(studentHiddenSet, qItem.question_id, 2);
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(qItem.question),
             questionText2: qItem.question_2 ? formatMathTextForWeb(qItem.question_2) : '',
-            imageUrl: getCleanUrl(qItem.image_url), image2Url: getCleanUrl(qItem.image_2_url), options: safeParseOptions(qItem.options),
+            imageUrl: hideImg1 ? '' : getCleanUrl(qItem.image_url), image2Url: hideImg2 ? '' : getCleanUrl(qItem.image_2_url), options: safeParseOptions(qItem.options),
             answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '',
             hintText: dbHint,
             aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -351,11 +395,13 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
           const dbHint = combineDbHints(freshQ.step_1_concept || raw.step_1_concept, freshQ.step_2_approach || raw.step_2_approach);
           const tbFields = textbookHintFields(tq.textbook?.book_type);
           
+          const hideImg1 = isQuestionImageHidden(studentHiddenSet, tq.question_id, 1);
+          const hideImg2 = isQuestionImageHidden(studentHiddenSet, tq.question_id, 2);
           mapped.push({
             index: mapped.length, uid: 'rq' + mapped.length + '_' + Date.now(), record_id: r.record_id, tq_id: tq.tq_id, question_id: tq.question_id,
             source: '과제오답유사', questionText: formatMathTextForWeb(raw.question || '(문제 텍스트 없음)'),
             questionText2: (freshQ.question_2 || raw.question_2) ? formatMathTextForWeb(freshQ.question_2 || raw.question_2) : '',
-            imageUrl: getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), image2Url: getCleanUrl(freshQ.image_2_url || raw.image_2_url), options: safeParseOptions(raw.options),
+            imageUrl: hideImg1 ? '' : getCleanUrl(raw.image_url || raw.imageUrl || tq.image_url), image2Url: hideImg2 ? '' : getCleanUrl(freshQ.image_2_url || raw.image_2_url), options: safeParseOptions(raw.options),
             answer: String(tq.answer || '').trim(), explanation: raw.explanation || raw.solution || '',
             hintText: dbHint || tbFields.hintText,
             hasHint: !!dbHint || tbFields.hasHint,
@@ -489,17 +535,22 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
         validItems.length
       );
       const defaultItemScore = 100 / (groupCount || validItems.length || 1);
+      const hiddenImageSet = extractHiddenImageSet(matchedMaster?.layout_settings);
 
       const mapped = validItems.map((it:any, i:number) => {
         const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
         const qId = it.question_db.question_id;
+        const hideImg1 = isQuestionImageHidden(hiddenImageSet, qId, 1);
+        const hideImg2 = isQuestionImageHidden(hiddenImageSet, qId, 2);
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), question_id: qId, record_id: null,
           examAssignmentId: matchedAssignId,
           assigned_score: scoreByQuestionId.get(String(qId)) ?? defaultItemScore,
           source: matchedTitle || `이번 주 ${displayLabel}`, questionText: formatMathTextForWeb(it.question_db.question),
           questionText2: it.question_db.question_2 ? formatMathTextForWeb(it.question_db.question_2) : '',
-          imageUrl: getCleanUrl(it.question_db.image_url), image2Url: getCleanUrl(it.question_db.image_2_url), options: safeParseOptions(it.question_db.options),
+          imageUrl: hideImg1 ? '' : getCleanUrl(it.question_db.image_url),
+          image2Url: hideImg2 ? '' : getCleanUrl(it.question_db.image_2_url),
+          options: safeParseOptions(it.question_db.options),
           answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
           hintText: dbHint,
           aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -550,17 +601,22 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
       validItems.length
     );
     const defaultItemScore = 100 / (groupCount || validItems.length || 1);
+    const hiddenImageSet = extractHiddenImageSet(master?.layout_settings);
     
     const rows = validItems.map((it: any) => {
       const dbHint = combineDbHints(it.question_db.step_1_concept, it.question_db.step_2_approach);
       const qId = it.question_db.question_id;
+      const hideImg1 = isQuestionImageHidden(hiddenImageSet, qId, 1);
+      const hideImg2 = isQuestionImageHidden(hiddenImageSet, qId, 2);
       return {
         examAssignmentId: assignId, question_id: qId,
         assigned_score: scoreByQuestionId.get(String(qId)) ?? defaultItemScore,
         bookId: Number(assignId), bookType, bookTitle: title || '배정된 과제',
         source: title || '배정된 과제', questionText: formatMathTextForWeb(it.question_db.question),
         questionText2: it.question_db.question_2 ? formatMathTextForWeb(it.question_db.question_2) : '',
-        imageUrl: getCleanUrl(it.question_db.image_url), image2Url: getCleanUrl(it.question_db.image_2_url), options: safeParseOptions(it.question_db.options),
+        imageUrl: hideImg1 ? '' : getCleanUrl(it.question_db.image_url),
+        image2Url: hideImg2 ? '' : getCleanUrl(it.question_db.image_2_url),
+        options: safeParseOptions(it.question_db.options),
         answer: String(it.question_db.answer || '').trim(), explanation: it.question_db.explanation || it.question_db.solution || '',
         hintText: dbHint,
         aiGradable: it.question_db.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,
@@ -644,17 +700,28 @@ export function useClinicDataFetch({ supabaseClient, studentInfo, params, forceU
   const fetchIncorrect = async (sId: string) => {
     try {
       setIsTimedRound(false);
-      const { data: records } = await supabaseClient.from('student_incorrect_record').select('record_id, question_id, source_type, question_db(*)').eq('student_id', sId).is('resolved_at', null).in('status', ['X', 'TX', 'T', '☆', 'B', 'TO', 'RO']);
+      const [{ data: records }, { data: studentExamAssigns }] = await Promise.all([
+        supabaseClient.from('student_incorrect_record').select('record_id, question_id, source_type, question_db(*)').eq('student_id', sId).is('resolved_at', null).in('status', ['X', 'TX', 'T', '☆', 'B', 'TO', 'RO']),
+        supabaseClient.from('exam_assignment').select('exam_master(layout_settings)').eq('student_id', sId),
+      ]);
       if (!records || records.length === 0) { setPendingQCount(`대기 중인 오답: 0문제`); setQuestions([]); return; }
+
+      const studentHiddenSet = new Set<string>();
+      (studentExamAssigns || []).forEach((ea: any) => {
+        const m = Array.isArray(ea.exam_master) ? ea.exam_master[0] : ea.exam_master;
+        extractHiddenImageSet(m?.layout_settings).forEach((k) => studentHiddenSet.add(k));
+      });
       
       const mapped = records.filter((r:any) => r.question_db).map((r:any, i:number) => {
         const qItem = r.question_db;
         const dbHint = combineDbHints(qItem.step_1_concept, qItem.step_2_approach);
+        const hideImg1 = isQuestionImageHidden(studentHiddenSet, qItem.question_id, 1);
+        const hideImg2 = isQuestionImageHidden(studentHiddenSet, qItem.question_id, 2);
         return {
           index: i, uid: 'rq' + i + '_' + Date.now(), record_id: r.record_id, question_id: qItem.question_id,
           source: r.source_type || '오답노트', questionText: formatMathTextForWeb(qItem.question),
           questionText2: qItem.question_2 ? formatMathTextForWeb(qItem.question_2) : '',
-          imageUrl: getCleanUrl(qItem.image_url), image2Url: getCleanUrl(qItem.image_2_url), options: safeParseOptions(qItem.options),
+          imageUrl: hideImg1 ? '' : getCleanUrl(qItem.image_url), image2Url: hideImg2 ? '' : getCleanUrl(qItem.image_2_url), options: safeParseOptions(qItem.options),
           answer: String(qItem.answer || '').trim(), explanation: qItem.explanation || qItem.solution || '', 
           hintText: dbHint,
           aiGradable: qItem.ai_gradable !== false, hasHint: true, needsAiHint: !dbHint,

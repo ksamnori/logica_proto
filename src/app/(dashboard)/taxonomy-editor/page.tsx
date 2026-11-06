@@ -36,7 +36,7 @@ export default function TaxonomyEditorPage() {
     setSelD8, setIsTwinModalOpen, setCloneForm, setIsCloneModalOpen, setTwinTargetBook, setSimilarTargetBook,
     handleRenameBook, fetchQuestions, getKoreanPath, handleAutoFillTaxonomy, handleD1Change, handleD2Change, handleD3Change, handleD4Change, handleD5Change, handleD6Change, handleD7Change,
     handleQuestionClick, saveTaxonomy, createNewQuestion, deleteQuestion, executeClone, handleImageInput, handlePaste, handleDrop, handleCropMouseDown, handleCropMouseMove, handleCropMouseUp, handleCropUpload,
-    handleCropExisting,
+    handleCropExisting, handleDeleteImage,
     handleGenerateTwins, saveTwinsToDB, handleTwinChange, handleFixLatex, saveQuestionContent
   } = useTaxonomy() as any; 
 
@@ -211,7 +211,7 @@ export default function TaxonomyEditorPage() {
               <span className="text-slate-200">|</span>
               <button type="button" onClick={() => handleCropExisting(rawValue, fieldKey)} className="text-emerald-500 hover:text-emerald-700 underline tracking-tighter">자르기 ✂️</button>
               <span className="text-slate-200">|</span>
-              <button type="button" onClick={() => setEditForm({ ...editForm, [fieldKey]: '' })} className="text-rose-500 hover:text-rose-700 underline tracking-tighter">삭제 🗑️️</button>
+              <button type="button" onClick={() => handleDeleteImage(fieldKey, boxFieldKey)} className="text-rose-500 hover:text-rose-700 underline tracking-tighter">삭제 🗑️️</button>
             </div>
           )}
         </label>

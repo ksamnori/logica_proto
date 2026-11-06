@@ -256,11 +256,27 @@ export async function PUT(req: NextRequest) {
   try {
     const supabaseUrl =
       process.env.NEXT_PUBLIC_SUPABASE_URL || "https://kfwlmbwornivkrvoeqdh.supabase.co";
+    const hasServiceRoleKey = Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY);
     const serviceKey =
       process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
 
+    let userToken = req.headers.get("authorization")?.replace("Bearer ", "");
+    if (!userToken) userToken = req.cookies.get("sb-access-token")?.value;
+    if (!userToken) {
+      const allCookies = req.cookies.getAll();
+      const authCookie = allCookies.find((c) => c.name.startsWith("sb-") && c.name.endsWith("-auth-token"));
+      if (authCookie) {
+        try {
+          userToken = JSON.parse(authCookie.value)[0];
+        } catch (e) {}
+      }
+    }
+
     const supabaseAdmin = createClient(supabaseUrl, serviceKey, {
       auth: { persistSession: false, autoRefreshToken: false },
+      ...(!hasServiceRoleKey && userToken
+        ? { global: { headers: { Authorization: `Bearer ${userToken}` } } }
+        : {}),
     });
 
     const body = await req.json();
@@ -362,16 +378,91 @@ export async function PUT(req: NextRequest) {
         return NextResponse.json({ success: false, error: "문항 ID가 없습니다." });
       }
 
-      const { error: dbErr } = await supabaseAdmin
+      const { data: updatedRows, error: dbErr } = await supabaseAdmin
         .from("question_db")
         .update(updateData)
-        .eq("question_id", questionId);
+        .eq("question_id", questionId)
+        .select("question_id");
 
       if (dbErr) {
         return NextResponse.json({ success: false, error: dbErr.message });
       }
+      if (!updatedRows || updatedRows.length === 0) {
+        return NextResponse.json({
+          success: false,
+          error: "question_db 업데이트 대상 행이 없거나 권한(RLS)에 의해 차단되었습니다.",
+        });
+      }
 
-      if (textbookUpdateData && Object.keys(textbookUpdateData).length > 0) {
+      const imgFields = [
+        "image_url",
+        "image_2_url",
+        "answer_image_url",
+        "answer_image_2_url",
+        "image_box",
+        "image_2_box",
+        "answer_image_box",
+      ];
+      const hasImageUpdate =
+        updateData && imgFields.some((k) => Object.prototype.hasOwnProperty.call(updateData, k));
+
+      if (hasImageUpdate) {
+        const { data: tqRows } = await supabaseAdmin
+          .from("textbook_question")
+          .select("tq_id, raw_metadata")
+          .eq("question_id", questionId);
+
+        if (Array.isArray(tqRows) && tqRows.length > 0) {
+          for (const row of tqRows) {
+            let meta: Record<string, any> = {};
+            if (row.raw_metadata) {
+              if (typeof row.raw_metadata === "string") {
+                try {
+                  meta = JSON.parse(row.raw_metadata) || {};
+                } catch (e) {
+                  meta = {};
+                }
+              } else if (typeof row.raw_metadata === "object") {
+                meta = { ...row.raw_metadata };
+              }
+            }
+            for (const f of imgFields) {
+              if (Object.prototype.hasOwnProperty.call(updateData, f)) {
+                const val = updateData[f];
+                meta[f] = val === "" ? null : val;
+                if (f === "image_url") {
+                  meta.imageUrl = val === "" ? null : val;
+                  meta.image_deleted = !val || String(val).trim() === "";
+                }
+                if (f === "image_2_url") {
+                  meta.image2Url = val === "" ? null : val;
+                  meta.image_2_deleted = !val || String(val).trim() === "";
+                }
+                if (f === "answer_image_url") {
+                  meta.answerImageUrl = val === "" ? null : val;
+                  meta.answer_image_deleted = !val || String(val).trim() === "";
+                }
+                if (f === "answer_image_2_url") {
+                  meta.answerImage2Url = val === "" ? null : val;
+                  meta.answer_image_2_deleted = !val || String(val).trim() === "";
+                }
+              }
+            }
+            await supabaseAdmin
+              .from("textbook_question")
+              .update({
+                ...(textbookUpdateData || {}),
+                raw_metadata: meta,
+              })
+              .eq("tq_id", row.tq_id);
+          }
+        } else if (textbookUpdateData && Object.keys(textbookUpdateData).length > 0) {
+          await supabaseAdmin
+            .from("textbook_question")
+            .update(textbookUpdateData)
+            .eq("question_id", questionId);
+        }
+      } else if (textbookUpdateData && Object.keys(textbookUpdateData).length > 0) {
         await supabaseAdmin
           .from("textbook_question")
           .update(textbookUpdateData)

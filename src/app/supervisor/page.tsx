@@ -108,7 +108,22 @@ export default function SupervisorDashboard() {
                 return;
             }
 
-            const { data: assignmentRecord } = await supabaseClient.from('exam_assignment').select('exam_id').eq('assignment_id', exam.assignment_id).maybeSingle();
+            const { data: assignmentRecord } = await supabaseClient.from('exam_assignment').select('exam_id, exam_master(layout_settings)').eq('assignment_id', exam.assignment_id).maybeSingle();
+            const masterObj: any = Array.isArray((assignmentRecord as any)?.exam_master) ? (assignmentRecord as any).exam_master[0] : (assignmentRecord as any)?.exam_master;
+            let rawLayout = masterObj?.layout_settings;
+            if (typeof rawLayout === 'string') {
+                try { rawLayout = JSON.parse(rawLayout); } catch (e) { rawLayout = null; }
+            }
+            const getRealQId = (id: any) => String(id || '').trim().replace(/_added_\d+$/, '');
+            const hiddenImgSet = new Set<string>(
+                Array.isArray(rawLayout?.hiddenImageQuestions)
+                    ? rawLayout.hiddenImageQuestions.map((k: any) => {
+                          const s = String(k || '').trim();
+                          const m = s.match(/^(.*?)__img([12])$/);
+                          return m ? `${getRealQId(m[1])}__img${m[2]}` : getRealQId(s);
+                      })
+                    : []
+            );
             let qIds = answers.map(a => a.question_id).filter(Boolean);
 
             if (assignmentRecord?.exam_id) {
@@ -186,8 +201,11 @@ export default function SupervisorDashboard() {
                         return data.publicUrl;
                     };
 
-                    const rawImgUrl = parseVal(fallbackDb.image_url) || parseVal(rawMeta.image_url) || parseVal(rawMeta.imageUrl) || parseVal(fallbackTq.image_url);
-                    const rawImg2Url = parseVal(fallbackDb.image_2_url) || parseVal(rawMeta.image_2_url);
+                    const realQKey = getRealQId(fallbackDb.question_id || fallbackTq.question_id || strId);
+                    const hideImg1 = hiddenImgSet.has(realQKey) || hiddenImgSet.has(`${realQKey}__img1`);
+                    const hideImg2 = hiddenImgSet.has(realQKey) || hiddenImgSet.has(`${realQKey}__img2`);
+                    const rawImgUrl = hideImg1 ? '' : (parseVal(fallbackDb.image_url) || parseVal(rawMeta.image_url) || parseVal(rawMeta.imageUrl) || parseVal(fallbackTq.image_url));
+                    const rawImg2Url = hideImg2 ? '' : (parseVal(fallbackDb.image_2_url) || parseVal(rawMeta.image_2_url));
                     const finalImgUrl = resolveImgUrl(rawImgUrl);
                     const finalImg2Url = resolveImgUrl(rawImg2Url);
 
