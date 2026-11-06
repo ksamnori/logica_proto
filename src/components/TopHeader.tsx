@@ -16,6 +16,8 @@ const isEndedEnrollment = (e: any): boolean => {
 
 interface BoardPreviewItem {
   id: string;
+  stage: "todo" | "in_progress";
+  stageLabel: string;
   badge: string;
   badgeColor: string;
   title: string;
@@ -69,19 +71,33 @@ export default function TopHeader({
 
   const [isHeaderExpanded, setIsHeaderExpanded] = useState(true);
 
-  // 소통 및 업무관리 3종 To-Do 칸반 개수 및 미리보기 상태
+  // 소통 및 업무관리 3종 (To-Do + In Progress) 칸반 개수 및 미리보기 상태
   const [taskTodoCount, setTaskTodoCount] = useState(0);
-  const [urgentTaskTodoCount, setUrgentTaskTodoCount] = useState(0);
-  const [taskPreviewItems, setTaskPreviewItems] = useState<BoardPreviewItem[]>([]);
+  const [taskInProgressCount, setTaskInProgressCount] = useState(0);
+  const [urgentTaskActiveCount, setUrgentTaskActiveCount] = useState(0);
+  const [taskTodoItems, setTaskTodoItems] = useState<BoardPreviewItem[]>([]);
+  const [taskInProgressItems, setTaskInProgressItems] = useState<BoardPreviewItem[]>([]);
 
   const [supplyTodoCount, setSupplyTodoCount] = useState(0);
-  const [supplyPreviewItems, setSupplyPreviewItems] = useState<BoardPreviewItem[]>([]);
+  const [supplyInProgressCount, setSupplyInProgressCount] = useState(0);
+  const [supplyTodoItems, setSupplyTodoItems] = useState<BoardPreviewItem[]>([]);
+  const [supplyInProgressItems, setSupplyInProgressItems] = useState<BoardPreviewItem[]>([]);
 
   const [csTodoCount, setCsTodoCount] = useState(0);
-  const [assignedCsTodoCount, setAssignedCsTodoCount] = useState(0);
-  const [csPreviewItems, setCsPreviewItems] = useState<BoardPreviewItem[]>([]);
+  const [csInProgressCount, setCsInProgressCount] = useState(0);
+  const [assignedCsActiveCount, setAssignedCsActiveCount] = useState(0);
+  const [csTodoItems, setCsTodoItems] = useState<BoardPreviewItem[]>([]);
+  const [csInProgressItems, setCsInProgressItems] = useState<BoardPreviewItem[]>([]);
 
   const [openMenuKey, setOpenMenuKey] = useState<"task" | "supply" | "cs" | null>(null);
+  const [activePopoverTab, setActivePopoverTab] = useState<
+    Record<"task" | "supply" | "cs", "todo" | "in_progress">
+  >({
+    task: "todo",
+    supply: "todo",
+    cs: "todo",
+  });
+
   const hoverCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const reloadDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -102,7 +118,6 @@ export default function TopHeader({
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // 🌟 게스트(체험용) 계정 여부 판별 상태 추가
   const [isGuest, setIsGuest] = useState(false);
 
   const [imageSrc, setImageSrc] = useState<string | null>(null);
@@ -180,10 +195,10 @@ export default function TopHeader({
   }, []);
 
   /**
-   * 🌟 소통 및 업무관리 3종 보드(/task, /supply, /cs)의 To-Do 칸반 개수 및 알림 데이터 통합 로드
-   * - 각 아이콘에는 현재 To-Do(할일/대기) 컬럼에 남아있는 칸반 개수를 그대로 표시합니다.
-   * - 긴급공지(업무 공유)와 개인이 받은 CS 배정(학부모 요청/CS)은 읽음 처리를 했더라도
-   *   To-Do에서 해결(진행중/완료 이동)되지 않으면 개수와 상단 강조 배지가 계속 유지됩니다.
+   * 🌟 소통 및 업무관리 3종 보드(/task, /supply, /cs)의 미완료(To-Do + In Progress) 통합 로드
+   * - 아이콘 배지에는 (To-Do + In Progress) 미완료 합산 개수를 1개의 숫자로 깔끔하게 표시합니다.
+   * - 마우스 호버 시 열리는 팝오버 상단 탭에서 `To-Do (N)` / `In Progress (M)`를 분리해 보여줍니다.
+   * - 긴급공지와 개인 배정 CS는 읽음 처리를 했더라도 미완료 상태면 배지 숫자와 강조 표시가 그대로 유지됩니다.
    */
   const loadBoardTodoCounts = useCallback(async () => {
     if (!currentUid) return;
@@ -280,21 +295,32 @@ export default function TopHeader({
         csQuery.order("created_at", { ascending: false }).limit(500),
       ]);
 
-      // --- (1) 업무 공유 (/task) To-Do 집계 ---
+      const sortPreview = (arr: BoardPreviewItem[]) =>
+        [...arr].sort((a, b) => {
+          if (a.isUrgentOrAssigned !== b.isUrgentOrAssigned) {
+            return a.isUrgentOrAssigned ? -1 : 1;
+          }
+          return b.time.getTime() - a.time.getTime();
+        });
+
+      // --- (1) 업무 공유 (/task) To-Do & In Progress 집계 ---
       const allTasks = taskRes.data || [];
       const todoTasks = allTasks.filter(
         (t: any) => !t.status || t.status === "할일" || t.status === "대기"
       );
-      const urgentTodos = todoTasks.filter((t: any) => t.memo_type === "긴급공지");
+      const inProgTasks = allTasks.filter((t: any) => t.status === "진행중");
+      const urgentActiveTasks = [...todoTasks, ...inProgTasks].filter(
+        (t: any) => t.memo_type === "긴급공지"
+      );
 
-      // 긴급공지가 진행중이라도 아직 완료되지 않았다면 알림 미리보기에 함께 표시하되,
-      // To-Do 칸반 개수는 정확히 To-Do 컬럼 개수(todoTasks.length)를 유지 (미해결 긴급공지도 포함 보장)
-      const taskItems: BoardPreviewItem[] = todoTasks.map((t: any) => {
+      const mapTaskItem = (t: any, stage: "todo" | "in_progress"): BoardPreviewItem => {
         const isUrgent = t.memo_type === "긴급공지";
         const itemTime = new Date(t.updated_at || t.created_at);
         const isRead = clearedTime > 0 && itemTime.getTime() <= clearedTime;
         return {
           id: `task_${t.memo_id}`,
+          stage,
+          stageLabel: stage === "todo" ? "To-Do" : "In Progress",
           badge: isUrgent ? "🚨 긴급공지" : t.memo_type || "업무",
           badgeColor: isUrgent
             ? "bg-rose-100 text-rose-700 border-rose-200"
@@ -306,26 +332,27 @@ export default function TopHeader({
           isUrgentOrAssigned: isUrgent,
           isRead,
         };
-      });
-      // 긴급공지를 최상단으로 정렬
-      taskItems.sort((a, b) => {
-        if (a.isUrgentOrAssigned !== b.isUrgentOrAssigned) {
-          return a.isUrgentOrAssigned ? -1 : 1;
-        }
-        return b.time.getTime() - a.time.getTime();
-      });
+      };
 
       setTaskTodoCount(todoTasks.length);
-      setUrgentTaskTodoCount(urgentTodos.length);
-      setTaskPreviewItems(taskItems.slice(0, 12));
+      setTaskInProgressCount(inProgTasks.length);
+      setUrgentTaskActiveCount(urgentActiveTasks.length);
+      setTaskTodoItems(sortPreview(todoTasks.map((t: any) => mapTaskItem(t, "todo"))).slice(0, 15));
+      setTaskInProgressItems(
+        sortPreview(inProgTasks.map((t: any) => mapTaskItem(t, "in_progress"))).slice(0, 15)
+      );
 
-      // --- (2) 비품 신청 (/supply) To-Do 집계 ---
+      // --- (2) 비품 신청 (/supply) To-Do & In Progress 집계 ---
       const allSupplies = supplyRes.data || [];
       const todoSupplies = allSupplies.filter((r: any) => !r.status || r.status === "대기");
-      const supplyItems: BoardPreviewItem[] = todoSupplies.map((r: any) => {
+      const inProgSupplies = allSupplies.filter((r: any) => r.status === "진행중");
+
+      const mapSupplyItem = (r: any, stage: "todo" | "in_progress"): BoardPreviewItem => {
         const itemTime = new Date(r.updated_at || r.created_at);
         return {
-          id: `supply_${r.request_id}`,
+          id: `supply_${r.request_id || r.id}`,
+          stage,
+          stageLabel: stage === "todo" ? "Requested" : "In Progress",
           badge: r.request_type || "비품",
           badgeColor:
             r.request_type === "비품/장비"
@@ -334,15 +361,20 @@ export default function TopHeader({
               ? "bg-blue-50 text-blue-600 border-blue-200"
               : "bg-emerald-50 text-emerald-700 border-emerald-200",
           title: `${r.author_name || "신청자"} 선생님`,
-          subtitle: r.content || r.title || "신청 내용 없음",
+          subtitle: r.content || "신청 내용 없음",
           time: itemTime,
           link: "/supply",
         };
-      });
-      setSupplyTodoCount(todoSupplies.length);
-      setSupplyPreviewItems(supplyItems.slice(0, 12));
+      };
 
-      // --- (3) 학부모 요청/CS (/cs) To-Do 집계 ---
+      setSupplyTodoCount(todoSupplies.length);
+      setSupplyInProgressCount(inProgSupplies.length);
+      setSupplyTodoItems(todoSupplies.map((r: any) => mapSupplyItem(r, "todo")).slice(0, 15));
+      setSupplyInProgressItems(
+        inProgSupplies.map((r: any) => mapSupplyItem(r, "in_progress")).slice(0, 15)
+      );
+
+      // --- (3) 학부모 요청/CS (/cs) To-Do & In Progress 집계 ---
       const rawCs = (csRes.data || []).filter((req: any) => {
         if (req.is_private) {
           if (hasViewAllCs) return true;
@@ -353,21 +385,26 @@ export default function TopHeader({
         return true;
       });
       const todoCs = rawCs.filter((r: any) => !r.status || r.status === "대기");
-      const myAssignedTodoCs = todoCs.filter(
+      const inProgCs = rawCs.filter(
+        (r: any) => r.status === "처리중" || r.status === "진행중"
+      );
+      const myAssignedActiveCs = [...todoCs, ...inProgCs].filter(
         (r: any) => String(r.processed_instructor_id) === String(currentUid)
       );
 
-      const csItems: BoardPreviewItem[] = todoCs.map((c: any) => {
+      const mapCsItem = (c: any, stage: "todo" | "in_progress"): BoardPreviewItem => {
         const sName = Array.isArray(c.student) ? c.student[0]?.name : c.student?.name;
         const isMyAssigned = String(c.processed_instructor_id) === String(currentUid);
         const itemTime = new Date(c.updated_at || c.created_at);
         const isRead = clearedTime > 0 && itemTime.getTime() <= clearedTime;
         return {
           id: `cs_${c.request_id}`,
+          stage,
+          stageLabel: stage === "todo" ? "To-Do" : "In Progress",
           badge: isMyAssigned ? "🎯 내 배정 CS" : c.request_type || "CS 요청",
           badgeColor: isMyAssigned
             ? "bg-rose-100 text-rose-700 border-rose-200"
-            : "bg-blue-50 text-blue-700 border-blue-200",
+            : "bg-slate-100 text-slate-700 border-slate-200",
           title: `${sName || "학생"} (${c.request_type || "요청"})`,
           subtitle: c.reason || "내용 없음",
           time: itemTime,
@@ -375,20 +412,39 @@ export default function TopHeader({
           isUrgentOrAssigned: isMyAssigned,
           isRead,
         };
-      });
-      // 내게 배정된 미해결 CS를 최상단으로 정렬
-      csItems.sort((a, b) => {
-        if (a.isUrgentOrAssigned !== b.isUrgentOrAssigned) {
-          return a.isUrgentOrAssigned ? -1 : 1;
-        }
-        return b.time.getTime() - a.time.getTime();
-      });
+      };
 
       setCsTodoCount(todoCs.length);
-      setAssignedCsTodoCount(myAssignedTodoCs.length);
-      setCsPreviewItems(csItems.slice(0, 12));
+      setCsInProgressCount(inProgCs.length);
+      setAssignedCsActiveCount(myAssignedActiveCs.length);
+      setCsTodoItems(sortPreview(todoCs.map((c: any) => mapCsItem(c, "todo"))).slice(0, 15));
+      setCsInProgressItems(
+        sortPreview(inProgCs.map((c: any) => mapCsItem(c, "in_progress"))).slice(0, 15)
+      );
+
+      // To-Do가 0건이고 In Progress만 있는 보드는 호버 시 자동으로 In Progress 탭을 기본 선택
+      setActivePopoverTab((prev) => ({
+        task:
+          todoTasks.length === 0 && inProgTasks.length > 0
+            ? "in_progress"
+            : todoTasks.length > 0 && inProgTasks.length === 0
+            ? "todo"
+            : prev.task,
+        supply:
+          todoSupplies.length === 0 && inProgSupplies.length > 0
+            ? "in_progress"
+            : todoSupplies.length > 0 && inProgSupplies.length === 0
+            ? "todo"
+            : prev.supply,
+        cs:
+          todoCs.length === 0 && inProgCs.length > 0
+            ? "in_progress"
+            : todoCs.length > 0 && inProgCs.length === 0
+            ? "todo"
+            : prev.cs,
+      }));
     } catch (err) {
-      console.error("[헤더] 소통/업무 To-Do 카운트 로드 오류:", err);
+      console.error("[헤더] 소통/업무 미완료 카운트 로드 오류:", err);
     }
   }, [currentUid, isSuperAdmin]);
 
@@ -404,7 +460,6 @@ export default function TopHeader({
       }, 300);
     };
 
-    // 🌟 단일 채널에 3개 테이블(instructor_memo, supply_request, parent_request_log)을 함께 구독하여 웹소켓 연결 수 절약
     const suffix = `${currentUid}_${Math.random().toString(36).slice(2, 8)}`;
     const commChannel = supabase
       .channel(`hdr_comm_boards_${suffix}`)
@@ -431,7 +486,6 @@ export default function TopHeader({
     };
   }, [currentUid, loadBoardTodoCounts]);
 
-  // 읽음 처리: 읽음 시각을 기록하더라도 To-Do에서 해결되지 않은 항목과 칸반 개수는 그대로 유지됨
   const markNotificationsRead = (e: React.MouseEvent) => {
     e.stopPropagation();
     localStorage.setItem(`noti_cleared_at_${currentUid}`, new Date().toISOString());
@@ -653,105 +707,177 @@ export default function TopHeader({
 
   const finalProfileImgUrl = getValidImageUrl(currentProfileImg);
 
+  const taskTotalActive = taskTodoCount + taskInProgressCount;
+  const supplyTotalActive = supplyTodoCount + supplyInProgressCount;
+  const csTotalActive = csTodoCount + csInProgressCount;
+
   const renderBoardDropdown = (
+    boardKey: "task" | "supply" | "cs",
     title: string,
     subtitle: string,
     targetPath: string,
-    items: BoardPreviewItem[],
+    todoItems: BoardPreviewItem[],
+    inProgressItems: BoardPreviewItem[],
+    todoCount: number,
+    inProgressCount: number,
     emptyText: string,
     showReadBtn?: boolean
-  ) => (
-    <div
-      onMouseEnter={() => {
-        if (hoverCloseTimerRef.current) {
-          clearTimeout(hoverCloseTimerRef.current);
-          hoverCloseTimerRef.current = null;
-        }
-      }}
-      onMouseLeave={scheduleCloseHoverMenu}
-      className="absolute top-13 right-0 w-80 bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.14)] border border-slate-200 z-[70] flex flex-col overflow-hidden allow-guest-interaction"
-    >
-      <div className="bg-slate-50 px-4 py-3 border-b border-slate-200 flex justify-between items-center shrink-0">
-        <div>
-          <h3 className="font-bold text-slate-800 text-xs md:text-sm">{title}</h3>
-          <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{subtitle}</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => {
-            setOpenMenuKey(null);
-            router.push(targetPath);
-          }}
-          className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition-colors shrink-0"
-        >
-          보드로 이동 →
-        </button>
-      </div>
+  ) => {
+    const selectedTab = activePopoverTab[boardKey] || "todo";
+    const visibleItems = selectedTab === "todo" ? todoItems : inProgressItems;
+    const allItems = [...todoItems, ...inProgressItems];
 
-      <div className="max-h-[340px] overflow-y-auto custom-scroll p-2 flex flex-col gap-1.5 bg-white">
-        {items.length === 0 ? (
-          <div className="text-center py-8 text-xs font-bold text-slate-400">{emptyText}</div>
-        ) : (
-          items.map((item) => (
-            <div
-              key={item.id}
+    return (
+      <div
+        onMouseEnter={() => {
+          if (hoverCloseTimerRef.current) {
+            clearTimeout(hoverCloseTimerRef.current);
+            hoverCloseTimerRef.current = null;
+          }
+        }}
+        onMouseLeave={scheduleCloseHoverMenu}
+        className="absolute top-13 right-0 w-84 bg-white rounded-2xl shadow-[0_15px_40px_rgba(0,0,0,0.14)] border border-slate-200 z-[70] flex flex-col overflow-hidden allow-guest-interaction"
+      >
+        <div className="bg-slate-50 px-4 pt-3 pb-2.5 border-b border-slate-200 shrink-0">
+          <div className="flex justify-between items-center">
+            <div>
+              <h3 className="font-bold text-slate-800 text-xs md:text-sm">{title}</h3>
+              <p className="text-[11px] font-semibold text-slate-400 mt-0.5">{subtitle}</p>
+            </div>
+            <button
+              type="button"
               onClick={() => {
                 setOpenMenuKey(null);
-                router.push(item.link);
+                router.push(targetPath);
               }}
-              className={`p-2.5 border rounded-xl cursor-pointer hover:shadow-md transition-all ${
-                item.isUrgentOrAssigned
-                  ? "bg-rose-50/60 border-rose-200 text-slate-700"
-                  : "bg-slate-50 border-slate-200 text-slate-600"
+              className="text-xs font-bold text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 px-2.5 py-1 rounded-lg transition-colors shrink-0"
+            >
+              보드로 이동 →
+            </button>
+          </div>
+
+          {/* To-Do / In Progress 분리 탭 */}
+          <div className="mt-2.5 grid grid-cols-2 gap-1.5 bg-slate-200/70 p-1 rounded-xl">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActivePopoverTab((prev) => ({ ...prev, [boardKey]: "todo" }));
+              }}
+              className={`py-1 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 ${
+                selectedTab === "todo"
+                  ? "bg-white text-slate-800 shadow-xs"
+                  : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              <div className="flex justify-between items-center gap-2 mb-1">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <span
-                    className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${item.badgeColor}`}
-                  >
-                    {item.badge}
-                  </span>
-                  <span className="text-xs font-bold text-slate-800 truncate">{item.title}</span>
-                </div>
-                <span className="text-[10px] font-bold text-slate-400 shrink-0">
-                  {item.time.toLocaleDateString("ko-KR", {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </div>
-              <div className="text-xs font-medium text-slate-600 line-clamp-2 leading-snug break-keep">
-                {item.subtitle}
-              </div>
-              {item.isUrgentOrAssigned && item.isRead && (
-                <div className="mt-1 text-[10px] font-bold text-rose-500">
-                  📌 읽음 확인됨 · To-Do 미해결 상태
-                </div>
-              )}
+              <span>To-Do</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                  selectedTab === "todo"
+                    ? "bg-rose-100 text-rose-700"
+                    : "bg-slate-300/70 text-slate-600"
+                }`}
+              >
+                {todoCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setActivePopoverTab((prev) => ({ ...prev, [boardKey]: "in_progress" }));
+              }}
+              className={`py-1 px-2 rounded-lg text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 ${
+                selectedTab === "in_progress"
+                  ? "bg-white text-slate-800 shadow-xs"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <span>In Progress</span>
+              <span
+                className={`px-1.5 py-0.2 rounded-full text-[10px] ${
+                  selectedTab === "in_progress"
+                    ? "bg-blue-100 text-blue-700"
+                    : "bg-slate-300/70 text-slate-600"
+                }`}
+              >
+                {inProgressCount}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <div className="max-h-[320px] overflow-y-auto custom-scroll p-2 flex flex-col gap-1.5 bg-white">
+          {visibleItems.length === 0 ? (
+            <div className="text-center py-8 text-xs font-bold text-slate-400">
+              {selectedTab === "todo"
+                ? `To-Do(대기) 항목이 없습니다.${
+                    inProgressCount > 0 ? ` (In Progress ${inProgressCount}건)` : ""
+                  }`
+                : emptyText}
             </div>
-          ))
+          ) : (
+            visibleItems.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => {
+                  setOpenMenuKey(null);
+                  router.push(item.link);
+                }}
+                className={`p-2.5 border rounded-xl cursor-pointer hover:shadow-md transition-all ${
+                  item.isUrgentOrAssigned
+                    ? "bg-rose-50/60 border-rose-200 text-slate-700"
+                    : "bg-slate-50 border-slate-200 text-slate-600"
+                }`}
+              >
+                <div className="flex justify-between items-center gap-2 mb-1">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 ${item.badgeColor}`}
+                    >
+                      {item.badge}
+                    </span>
+                    <span className="text-xs font-bold text-slate-800 truncate">{item.title}</span>
+                  </div>
+                  <span className="text-[10px] font-bold text-slate-400 shrink-0">
+                    {item.time.toLocaleDateString("ko-KR", {
+                      month: "short",
+                      day: "numeric",
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                  </span>
+                </div>
+                <div className="text-xs font-medium text-slate-600 line-clamp-2 leading-snug break-keep">
+                  {item.subtitle}
+                </div>
+                {item.isUrgentOrAssigned && item.isRead && (
+                  <div className="mt-1 text-[10px] font-bold text-rose-500">
+                    📌 읽음 확인됨 · 미완료 상태 유지 중
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+        </div>
+
+        {showReadBtn && allItems.some((i) => i.isUrgentOrAssigned && !i.isRead) && (
+          <div className="px-3 py-2 border-t border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
+            <span className="text-[10px] font-semibold text-slate-400">
+              * 읽음 처리 후에도 완료 전까지 배지 숫자가 유지됩니다.
+            </span>
+            <button
+              type="button"
+              onClick={markNotificationsRead}
+              className="text-[11px] font-bold text-slate-500 hover:text-rose-600 transition-colors shrink-0 ml-2"
+            >
+              읽음 확인
+            </button>
+          </div>
         )}
       </div>
-
-      {showReadBtn && items.some((i) => i.isUrgentOrAssigned && !i.isRead) && (
-        <div className="px-3 py-2 border-t border-slate-100 bg-slate-50 flex justify-between items-center shrink-0">
-          <span className="text-[10px] font-semibold text-slate-400">
-            * 읽음 처리 후에도 To-Do 해결 전까지 개수가 유지됩니다.
-          </span>
-          <button
-            type="button"
-            onClick={markNotificationsRead}
-            className="text-[11px] font-bold text-slate-500 hover:text-rose-600 transition-colors shrink-0 ml-2"
-          >
-            읽음 확인
-          </button>
-        </div>
-      )}
-    </div>
-  );
+    );
+  };
 
   return (
     <>
@@ -790,7 +916,7 @@ export default function TopHeader({
           <QuickMemo instId={instId} />
         </div>
 
-        {/* 2. 업무 공유 (/task) 아이콘 — To-Do 칸반 개수 + 미해결 긴급공지 강조 */}
+        {/* 2. 업무 공유 (/task) 아이콘 — 미완료 합산 배지 (To-Do + In Progress) */}
         <div
           className="relative shrink-0 ml-1.5"
           onMouseEnter={() => openHoverMenu("task")}
@@ -799,14 +925,12 @@ export default function TopHeader({
           <button
             type="button"
             onClick={() => router.push("/task")}
-            title={`업무 공유 (To-Do ${taskTodoCount}건${
-              urgentTaskTodoCount > 0 ? ` · 긴급공지 ${urgentTaskTodoCount}건` : ""
-            })`}
+            title={`업무 공유 미완료 ${taskTotalActive}건 (To-Do ${taskTodoCount} · In Progress ${taskInProgressCount})`}
             aria-label="업무 공유 보드로 이동"
             className={`relative w-10 h-10 rounded-full border flex items-center justify-center transition-colors focus:outline-none ${
               pathname === "/task"
                 ? "bg-indigo-100 border-indigo-300 text-indigo-700"
-                : urgentTaskTodoCount > 0
+                : urgentTaskActiveCount > 0
                 ? "bg-rose-50 border-rose-200 text-rose-600 hover:bg-rose-100"
                 : "bg-indigo-50/70 border-indigo-200 text-indigo-600 hover:bg-indigo-100"
             }`}
@@ -824,31 +948,35 @@ export default function TopHeader({
                 d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"
               />
             </svg>
-            {taskTodoCount > 0 && (
+            {taskTotalActive > 0 && (
               <span
                 className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center leading-none pointer-events-none ${
-                  urgentTaskTodoCount > 0 ? "bg-rose-500 animate-pulse" : "bg-indigo-600"
+                  urgentTaskActiveCount > 0 ? "bg-rose-500 animate-pulse" : "bg-indigo-600"
                 }`}
               >
-                {taskTodoCount > 99 ? "99+" : taskTodoCount}
+                {taskTotalActive > 99 ? "99+" : taskTotalActive}
               </span>
             )}
           </button>
 
           {openMenuKey === "task" &&
             renderBoardDropdown(
-              `📋 업무 공유 To-Do (${taskTodoCount}건)`,
-              urgentTaskTodoCount > 0
-                ? `🚨 미해결 긴급공지 ${urgentTaskTodoCount}건 포함`
-                : "현재 할 일(To-Do) 컬럼에 대기 중인 업무",
+              "task",
+              `📋 업무 공유 미완료 (${taskTotalActive}건)`,
+              urgentTaskActiveCount > 0
+                ? `🚨 미해결 긴급공지 ${urgentTaskActiveCount}건 포함`
+                : `To-Do ${taskTodoCount}건 · In Progress ${taskInProgressCount}건`,
               "/task",
-              taskPreviewItems,
-              "대기 중인 업무 공유 항목이 없습니다.",
+              taskTodoItems,
+              taskInProgressItems,
+              taskTodoCount,
+              taskInProgressCount,
+              "진행 중인 업무 공유 항목이 없습니다.",
               true
             )}
         </div>
 
-        {/* 3. 비품 신청 (/supply) 아이콘 — To-Do 칸반 개수 */}
+        {/* 3. 비품 신청 (/supply) 아이콘 — 미완료 합산 배지 (To-Do + In Progress) */}
         <div
           className="relative shrink-0 ml-1.5"
           onMouseEnter={() => openHoverMenu("supply")}
@@ -857,7 +985,7 @@ export default function TopHeader({
           <button
             type="button"
             onClick={() => router.push("/supply")}
-            title={`비품 신청 (대기 ${supplyTodoCount}건)`}
+            title={`비품 신청 미완료 ${supplyTotalActive}건 (To-Do ${supplyTodoCount} · In Progress ${supplyInProgressCount})`}
             aria-label="비품 신청 보드로 이동"
             className={`relative w-10 h-10 rounded-full border flex items-center justify-center transition-colors focus:outline-none ${
               pathname === "/supply"
@@ -878,25 +1006,29 @@ export default function TopHeader({
                 d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"
               />
             </svg>
-            {supplyTodoCount > 0 && (
+            {supplyTotalActive > 0 && (
               <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 bg-emerald-600 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center leading-none pointer-events-none">
-                {supplyTodoCount > 99 ? "99+" : supplyTodoCount}
+                {supplyTotalActive > 99 ? "99+" : supplyTotalActive}
               </span>
             )}
           </button>
 
           {openMenuKey === "supply" &&
             renderBoardDropdown(
-              `📦 비품 신청 대기 (${supplyTodoCount}건)`,
-              "현재 신청 대기(To-Do) 컬럼에 있는 비품 내역",
+              "supply",
+              `📦 비품 신청 미완료 (${supplyTotalActive}건)`,
+              `To-Do ${supplyTodoCount}건 · In Progress ${supplyInProgressCount}건`,
               "/supply",
-              supplyPreviewItems,
-              "대기 중인 비품 신청이 없습니다.",
+              supplyTodoItems,
+              supplyInProgressItems,
+              supplyTodoCount,
+              supplyInProgressCount,
+              "진행 중인 비품 신청이 없습니다.",
               false
             )}
         </div>
 
-        {/* 4. 학부모 요청/CS (/cs) 아이콘 — To-Do 칸반 개수 + 개인 배정 CS 강조 */}
+        {/* 4. 학부모 요청/CS (/cs) 아이콘 — 미완료 합산 배지 (To-Do + In Progress) */}
         <div
           className="relative shrink-0 ml-1.5"
           onMouseEnter={() => openHoverMenu("cs")}
@@ -905,9 +1037,7 @@ export default function TopHeader({
           <button
             type="button"
             onClick={() => router.push("/cs")}
-            title={`학부모 요청/CS (대기 ${csTodoCount}건${
-              assignedCsTodoCount > 0 ? ` · 내 배정 ${assignedCsTodoCount}건` : ""
-            })`}
+            title={`학부모 요청/CS 미완료 ${csTotalActive}건 (To-Do ${csTodoCount} · In Progress ${csInProgressCount})`}
             aria-label="학부모 요청/CS 보드로 이동"
             className={`relative w-10 h-10 rounded-full border flex items-center justify-center transition-colors focus:outline-none ${
               pathname === "/cs"
@@ -928,26 +1058,30 @@ export default function TopHeader({
                 d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"
               />
             </svg>
-            {csTodoCount > 0 && (
+            {csTotalActive > 0 && (
               <span
                 className={`absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 text-white text-xs font-bold rounded-full border-2 border-white flex items-center justify-center leading-none pointer-events-none ${
-                  assignedCsTodoCount > 0 ? "bg-rose-600 animate-pulse" : "bg-rose-500"
+                  assignedCsActiveCount > 0 ? "bg-rose-600 animate-pulse" : "bg-rose-500"
                 }`}
               >
-                {csTodoCount > 99 ? "99+" : csTodoCount}
+                {csTotalActive > 99 ? "99+" : csTotalActive}
               </span>
             )}
           </button>
 
           {openMenuKey === "cs" &&
             renderBoardDropdown(
-              `🎧 학부모 요청/CS 대기 (${csTodoCount}건)`,
-              assignedCsTodoCount > 0
-                ? `🎯 내게 배정된 미해결 CS ${assignedCsTodoCount}건 포함`
-                : "현재 접수 대기(To-Do) 컬럼에 있는 CS 요청",
+              "cs",
+              `🎧 학부모 요청/CS 미완료 (${csTotalActive}건)`,
+              assignedCsActiveCount > 0
+                ? `🎯 내게 배정된 미해결 CS ${assignedCsActiveCount}건 포함`
+                : `To-Do ${csTodoCount}건 · In Progress ${csInProgressCount}건`,
               "/cs",
-              csPreviewItems,
-              "대기 중인 학부모 요청/CS가 없습니다.",
+              csTodoItems,
+              csInProgressItems,
+              csTodoCount,
+              csInProgressCount,
+              "진행 중인 학부모 요청/CS가 없습니다.",
               true
             )}
         </div>
