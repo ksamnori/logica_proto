@@ -603,45 +603,165 @@ export default function SupervisorDashboard() {
                 <LeftPanel data={supervisorData} />
                 <SeatGrid data={supervisorData} />
 
-                <aside className="w-[260px] bg-white border-l border-slate-300 flex flex-col h-full shadow-2xl z-10 shrink-0">
+                <aside className="w-[460px] xl:w-[500px] bg-white border-l border-slate-300 flex flex-col h-full shadow-2xl z-10 shrink-0">
 
-                    <div className="p-2 shrink-0">
+                    <div className="p-2 shrink-0 border-b border-slate-200">
                       <UnlockPanel />
                     </div>
 
-                    <div className="bg-slate-800 text-white px-4 py-2 font-bold text-[12px] flex justify-between items-center shrink-0">
-                        <span>⚡ 현장 라이브 로그</span>
-                        <span className="text-[10px] bg-rose-500 px-1.5 py-0.5 rounded animate-pulse">Live</span>
-                    </div>
-                    <div className="flex-1 overflow-y-auto p-3 space-y-2 bg-slate-50">
-                        {logs.length === 0 ? <div className="text-center text-[11px] text-slate-400 py-8">접수된 기록이 없습니다.</div> : logs.map((log: any) => (
-                            <div key={log.id} className={`bg-white p-2 rounded-lg border-l-4 ${log.borderClass} shadow-sm`}>
-                                <div className="flex justify-between items-start mb-0.5">
-                                    <span className="text-[9px] font-bold text-slate-400">{log.timestamp}</span>
-                                    <span className={`${log.badgeBg} text-[8px] font-bold px-1 py-0.5 rounded`}>{log.badgeText}</span>
+                    {(() => {
+                        const CALL_BADGE_SET = new Set([
+                            '조교호출', '질문호출', '재확인요청', '종료요청',
+                            '호출해제', '호출처리완료', '종료요청거부'
+                        ]);
+                        const isCallLog = (log: any) =>
+                            log.type === 'call' ||
+                            log.type === 'recheck' ||
+                            log.type === 'end_request' ||
+                            CALL_BADGE_SET.has(String(log.badgeText || ''));
+
+                        const callLogs = logs.filter(isCallLog);
+                        const statusLogs = logs.filter((l: any) => !isCallLog(l));
+
+                        return (
+                            <div className="flex-1 grid grid-cols-2 divide-x divide-slate-200 min-h-0 overflow-hidden">
+                                {/* 1단(좌측): 호출 전용 로그 */}
+                                <div className="flex flex-col min-h-0 overflow-hidden bg-rose-50/20">
+                                    <div className="bg-slate-800 text-white px-3 py-2 font-bold text-[11px] flex justify-between items-center shrink-0 border-r border-slate-700">
+                                        <span className="flex items-center gap-1.5">
+                                            <span>🚨 호출 로그</span>
+                                            {callLogs.length > 0 && (
+                                                <span className="text-[10px] bg-rose-500 text-white px-1.5 py-0.5 rounded-full leading-none">
+                                                    {callLogs.length}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span className="text-[9px] bg-rose-500 px-1.5 py-0.5 rounded animate-pulse">Live</span>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scroll">
+                                        {callLogs.length === 0 ? (
+                                            <div className="text-center text-[11px] text-slate-400 py-10">
+                                                대기 중인 호출 기록이 없습니다.
+                                            </div>
+                                        ) : (
+                                            callLogs.map((log: any) => (
+                                                <div
+                                                    key={log.id}
+                                                    className={`bg-white p-2 rounded-lg border-l-4 ${log.borderClass} shadow-sm border border-slate-100`}
+                                                >
+                                                    <div className="flex justify-between items-start mb-0.5">
+                                                        <span className="text-[9px] font-bold text-slate-400">{log.timestamp}</span>
+                                                        <span className={`${log.badgeBg} text-[8px] font-bold px-1 py-0.5 rounded`}>
+                                                            {log.badgeText}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] font-bold text-slate-800 leading-tight break-keep">
+                                                        {log.title}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-600 mt-0.5 leading-snug break-keep">
+                                                        {log.subtitle}
+                                                    </p>
+
+                                                    {log.type === 'call' && (
+                                                        <button
+                                                            onClick={() => {
+                                                                const st = activeStudents[log.data.seat];
+                                                                const callInfo = st?.calls?.[log.data.qNum];
+                                                                if (log.data.qNum === 'general' || !callInfo?.questionText) {
+                                                                    taAction(log.data.seat, 'cancel_call', log.data.qNum, 'skip');
+                                                                } else {
+                                                                    setCallProcessModal({
+                                                                        isOpen: true,
+                                                                        seat: log.data.seat,
+                                                                        qNum: log.data.qNum,
+                                                                        callInfo,
+                                                                    });
+                                                                }
+                                                            }}
+                                                            className="mt-1.5 w-full bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold py-1 rounded transition-colors"
+                                                        >
+                                                            {log.data.qNum === 'general' ? '호출 확인 완료' : '상세 보기 및 처리'}
+                                                        </button>
+                                                    )}
+
+                                                    {log.type === 'recheck' && log.data?.seat && log.data?.uid && (
+                                                        <button
+                                                            onClick={() =>
+                                                                supervisorData.setRecheckModal({
+                                                                    isOpen: true,
+                                                                    seat: log.data.seat,
+                                                                    uid: log.data.uid,
+                                                                })
+                                                            }
+                                                            className="mt-1.5 w-full bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-bold py-1 rounded transition-colors"
+                                                        >
+                                                            채점 재확인 열기
+                                                        </button>
+                                                    )}
+
+                                                    {log.type === 'end_request' && log.data?.seat && (
+                                                        <button
+                                                            onClick={() =>
+                                                                supervisorData.setEndRequestModal({
+                                                                    isOpen: true,
+                                                                    seat: log.data.seat,
+                                                                })
+                                                            }
+                                                            className="mt-1.5 w-full bg-rose-500 hover:bg-rose-600 text-white text-[10px] font-bold py-1 rounded transition-colors"
+                                                        >
+                                                            종료 승인 / 거부
+                                                        </button>
+                                                    )}
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
                                 </div>
-                                <p className="text-[12px] font-bold text-slate-800 leading-tight">{log.title}</p>
-                                <p className="text-[10px] text-slate-600 mt-0.5 leading-snug">{log.subtitle}</p>
-                                
-                                {log.type === 'call' && (
-                                    <button 
-                                        onClick={() => {
-                                            const st = activeStudents[log.data.seat];
-                                            const callInfo = st?.calls?.[log.data.qNum];
-                                            if (log.data.qNum === 'general' || !callInfo?.questionText) {
-                                                taAction(log.data.seat, 'cancel_call', log.data.qNum, 'skip');
-                                            } else {
-                                                setCallProcessModal({ isOpen: true, seat: log.data.seat, qNum: log.data.qNum, callInfo });
-                                            }
-                                        }} 
-                                        className="mt-1.5 w-full bg-rose-600 hover:bg-rose-700 text-white text-[10px] font-bold py-1 rounded transition-colors"
-                                    >
-                                        {log.data.qNum === 'general' ? '호출 확인 완료' : '상세 보기 및 처리'}
-                                    </button>
-                                )}
+
+                                {/* 2단(우측): 접속 · 상태 갱신 로그 */}
+                                <div className="flex flex-col min-h-0 overflow-hidden bg-slate-50">
+                                    <div className="bg-slate-800 text-white px-3 py-2 font-bold text-[11px] flex justify-between items-center shrink-0">
+                                        <span className="flex items-center gap-1.5">
+                                            <span>⚡ 접속 · 상태 로그</span>
+                                            {statusLogs.length > 0 && (
+                                                <span className="text-[10px] bg-slate-600 text-slate-100 px-1.5 py-0.5 rounded-full leading-none">
+                                                    {statusLogs.length}
+                                                </span>
+                                            )}
+                                        </span>
+                                        <span className="text-[9px] bg-emerald-500 px-1.5 py-0.5 rounded">상태</span>
+                                    </div>
+                                    <div className="flex-1 overflow-y-auto p-2.5 space-y-2 custom-scroll">
+                                        {statusLogs.length === 0 ? (
+                                            <div className="text-center text-[11px] text-slate-400 py-10">
+                                                접수된 상태 기록이 없습니다.
+                                            </div>
+                                        ) : (
+                                            statusLogs.map((log: any) => (
+                                                <div
+                                                    key={log.id}
+                                                    className={`bg-white p-2 rounded-lg border-l-4 ${log.borderClass} shadow-sm border border-slate-100`}
+                                                >
+                                                    <div className="flex justify-between items-start mb-0.5">
+                                                        <span className="text-[9px] font-bold text-slate-400">{log.timestamp}</span>
+                                                        <span className={`${log.badgeBg} text-[8px] font-bold px-1 py-0.5 rounded`}>
+                                                            {log.badgeText}
+                                                        </span>
+                                                    </div>
+                                                    <p className="text-[11px] font-bold text-slate-800 leading-tight break-keep">
+                                                        {log.title}
+                                                    </p>
+                                                    <p className="text-[10px] text-slate-600 mt-0.5 leading-snug break-keep">
+                                                        {log.subtitle}
+                                                    </p>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
                             </div>
-                        ))}
-                    </div>
+                        );
+                    })()}
                 </aside>
             </div>
         </div>

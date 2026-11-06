@@ -345,7 +345,19 @@ export function useSupervisorData() {
             expiresAt: persistUntilResolved ? null : Date.now() + LOG_AUTO_EXPIRE_MS
         };
 
-        setLogs(prev => [newLog, ...prev].slice(0, 100));
+        setLogs(prev => {
+            // 동일 좌석의 이전 'update_activity'(상태 갱신) 로그는 최신 상태 1개로 교체하여 로그 폭주 방지
+            const filtered =
+                type === 'update_activity' && data?.seat
+                    ? prev.filter(l => !(l.type === 'update_activity' && l.data?.seat === data.seat))
+                    : prev;
+            const next = [newLog, ...filtered];
+            if (next.length <= 150) return next;
+            // 150개 초과 시 미해결 호출/재확인/종료요청 로그는 절대 밀려나지 않도록 보존
+            const persistent = next.filter(l => l.type && PERSIST_UNTIL_RESOLVED_TYPES.includes(l.type));
+            const normal = next.filter(l => !l.type || !PERSIST_UNTIL_RESOLVED_TYPES.includes(l.type)).slice(0, Math.max(50, 150 - persistent.length));
+            return [...persistent, ...normal].sort((a, b) => (b.id > a.id ? 1 : -1));
+        });
 
         if (!persistUntilResolved) {
             setTimeout(() => {

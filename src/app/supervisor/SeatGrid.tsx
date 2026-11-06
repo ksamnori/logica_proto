@@ -207,8 +207,8 @@ export default function SeatGrid({ data }: { data: any }) {
         : null;
 
     return (
-        <main className="flex-1 p-6 bg-slate-200 overflow-hidden relative flex items-center justify-center">
-            <div className="absolute inset-6 flex items-center justify-center">
+        <main className="flex-1 p-3 bg-slate-200 overflow-hidden relative flex items-center justify-center">
+            <div className="absolute inset-3 flex items-center justify-center">
                 <div className="w-full h-full max-w-full max-h-full flex items-center justify-center" style={{ aspectRatio: `${cw} / ${ch}` }}>
                 <SeatCanvas
                     seats={seatObjs || []}

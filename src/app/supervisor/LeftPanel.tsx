@@ -19,7 +19,7 @@ export default function LeftPanel({ data }: { data: any }) {
     });
 
     return (
-        <aside className="w-[230px] bg-white border-r border-slate-300 flex flex-col h-full shrink-0 shadow-lg z-10">
+        <aside className="w-[210px] bg-white border-r border-slate-300 flex flex-col h-full shrink-0 shadow-lg z-10">
             <div className="flex shrink-0 border-b border-slate-200">
                 <button onClick={() => setLeftTab('ta')} className={`flex-1 py-2 text-[11px] font-bold border-b-2 transition-colors ${leftTab === 'ta' ? 'bg-white border-indigo-600 text-indigo-700' : 'bg-slate-50 border-transparent text-slate-500 hover:bg-slate-100'}`}>👩‍🏫 조교 현황</button>
                 <button onClick={() => setLeftTab('students')} className={`flex-1 py-2 text-[11px] font-bold border-b-2 transition-colors ${leftTab === 'students' ? 'bg-white border-indigo-600 text-indigo-700' : 'bg-slate-50 border-transparent text-slate-500 hover:bg-slate-100'}`}>👩‍🎓 학생 목록</button>
