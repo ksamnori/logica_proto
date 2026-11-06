@@ -2365,7 +2365,7 @@ export default function ExamClinicPreviewPage() {
                         <div className="relative min-h-full">
                           <div
                             className={`transition-opacity text-xl md:text-2xl leading-relaxed font-semibold text-slate-800 ${
-                              isSubjective && curAnsMode === "pen" ? "opacity-30" : ""
+                              isSubjective && curAnsMode === "pen" ? "opacity-70" : ""
                             }`}
                           >
                             <QuestionDisplay

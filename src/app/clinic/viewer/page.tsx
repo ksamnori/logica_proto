@@ -1427,7 +1427,7 @@ export default function ClinicViewer() {
               <div className="flex-1 relative overflow-hidden">
                 <div className={`h-full overflow-y-auto custom-scrollbar p-8 md:p-10 ${!isTimedRound ? 'pb-32' : ''}`}>
                   <div className="relative min-h-full">
-                    <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-loose lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-30' : ''}`}>
+                    <div className={`transition-opacity text-2xl md:text-3xl lg:text-[36px] leading-loose lg:leading-[2.2] font-semibold text-slate-800 ${isSubjective && curAnsMode === 'pen' ? 'opacity-70' : ''}`}>
                       <QuestionDisplay html={q.questionText} imageUrl={q.imageUrl} image2Url={q.image2Url} html2={q.questionText2} />
                     </div>
                     {isSubjective && curAnsMode === 'pen' && (
