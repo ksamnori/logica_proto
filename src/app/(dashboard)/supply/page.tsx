@@ -75,6 +75,24 @@ export default function SupplyBoardPage() {
       const now = new Date();
       setStatsMonth(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`);
       fetchRequests();
+
+      const tenantId = localStorage.getItem("logica_tenant_id");
+      const channel = supabase.channel(`supply_board_realtime_${tenantId}`)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'supply_request' }, (payload) => {
+          if (payload.eventType === 'INSERT') {
+            setRequests(prev => {
+              if (prev.find(r => r.request_id === payload.new.request_id)) return prev;
+              return [payload.new, ...prev];
+            });
+          } else if (payload.eventType === 'UPDATE') {
+            setRequests(prev => prev.map(r => r.request_id === payload.new.request_id ? { ...r, ...payload.new } : r));
+          } else if (payload.eventType === 'DELETE') {
+            setRequests(prev => prev.filter(r => r.request_id !== payload.old.request_id));
+          }
+        })
+        .subscribe();
+
+      return () => { supabase.removeChannel(channel); };
     }
   }, [isAuthorized]);
 
