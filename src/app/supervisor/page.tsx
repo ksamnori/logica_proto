@@ -428,7 +428,7 @@ export default function SupervisorDashboard() {
                             <button onClick={() => setVerifyingExam(null)} className="px-6 py-4 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold rounded-xl transition-colors">나중에 검수하기 (목록으로)</button>
                             <button onClick={async () => {
                                 setIsVerifying(true);
-                                await supervisorData.confirmVerification(verifyingExam.assignment_id, verifyingExam.student_id, verificationOverrides);
+                                await supervisorData.confirmVerification(verifyingExam.assignment_id, verifyingExam.student_id, verificationOverrides, instructorInfo.name);
                                 setVerifyingExam(null);
                                 setIsVerifying(false);
                             }} disabled={isVerifying} className="px-10 py-4 bg-brand hover:bg-blue-900 text-white text-lg font-bold rounded-xl shadow-lg transition-colors flex items-center gap-2 disabled:opacity-50">

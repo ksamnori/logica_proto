@@ -392,7 +392,7 @@ export function useSupervisorData() {
 
     const confirmVerification = async (assignmentId: string, studentId: string, overrides: Record<string, boolean>, verifierNameOverride?: string) => {
         try {
-            const actorName = (verifierNameOverride || instructorInfo.name || (typeof window !== 'undefined' && (localStorage.getItem('logica_instructor_name') || localStorage.getItem('logica_ta_name'))) || '총책임자').trim();
+            const actorName = (verifierNameOverride || (typeof window !== 'undefined' && (localStorage.getItem('logica_instructor_name') || localStorage.getItem('logica_ta_name'))) || '총책임자').trim();
             const nowIso = new Date().toISOString();
             const statusTag = `완료(확인:${actorName}|${nowIso})`;
 
