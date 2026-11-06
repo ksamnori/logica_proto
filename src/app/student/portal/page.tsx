@@ -141,7 +141,8 @@ export default function StudentPortal() {
         const dur = sessionState?.duration_ms || DEFAULT_CLINIC_SESSION_DURATION_MS;
         const key = `${seat}_${dur}`;
         const now = Date.now();
-        if (!force && key === lastPortalTrackKeyRef.current && now - lastPortalTrackAtRef.current < 3000) return;
+        if (now - lastPortalTrackAtRef.current < 5000) return;
+        if (!force && key === lastPortalTrackKeyRef.current && now - lastPortalTrackAtRef.current < 25000) return;
         lastPortalTrackKeyRef.current = key;
         lastPortalTrackAtRef.current = now;
         channelRef.current.track({

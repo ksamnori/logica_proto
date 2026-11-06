@@ -466,14 +466,17 @@ export function useClinicRealtime({
     }
   };
 
-  // 🌟 ClientPresenceRateLimitReached 방지: 동일 상태의 연속 track() 호출에 최소 3초 스로틀 적용
-  trackPresenceRef.current = (seat: string, sId: string, sessionState: any, force = false) => {
+  // 🌟 ClientPresenceRateLimitReached 원천 차단: 모든 track() 호출에 최소 5초 스로틀 강제 적용
+  trackPresenceRef.current = (seat: string, sId: string, sessionState: any, force = false, customActivity?: string) => {
     if (!clinicChannelRef.current || !seat) return;
-    const activity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
+    const defaultActivity = params.round === 1 ? (params.weekType === 'even' ? '과제오답유사 풀이중' : '주간테스트 풀이중') : params.round === 2 ? (params.overdue ? '미완료 과제 풀이중' : '과제 풀이중') : params.round === 3 ? '오답 클리닉 풀이중' : '클리닉 풀이중';
+    const activity = customActivity || defaultActivity;
     const dur = sessionState?.duration_ms || 0;
     const key = `${seat}_${activity}_${dur}`;
     const now = Date.now();
-    if (!force && key === lastTrackKeyRef.current && now - lastTrackAtRef.current < 3000) return;
+    // 상태가 같으면 25초 이내 재전송 금지, 상태가 바뀌었더라도 최소 5초 이내 연속 track() 금지
+    if (now - lastTrackAtRef.current < 5000) return;
+    if (!force && key === lastTrackKeyRef.current && now - lastTrackAtRef.current < 25000) return;
     lastTrackKeyRef.current = key;
     lastTrackAtRef.current = now;
     clinicChannelRef.current.track({
@@ -627,12 +630,7 @@ export function useClinicRealtime({
       clinicChannelRef.current.send({ type: 'broadcast', event: 'student_action', payload: { seat: mySeatRef.current, action, data: { name: studentInfo.name, studentId: studentInfo.id, ...extra } } });
 
       if (action === 'update_activity' && extra.activity) {
-          clinicChannelRef.current.track({
-              seat: mySeatRef.current, name: studentInfo.name, studentId: studentInfo.id, classes: studentInfo.classes,
-              activity: extra.activity, updatedAt: Date.now(),
-              startedAt: new Date(clinicSessionStateRef.current?.started_at || Date.now()).getTime(),
-              durationMs: clinicSessionStateRef.current?.duration_ms
-          }).catch(() => {});
+          trackPresenceRef.current(mySeatRef.current, studentInfo.id, clinicSessionStateRef.current, false, extra.activity);
       }
     }
 

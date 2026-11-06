@@ -163,9 +163,43 @@ export function useTaHandheld() {
     }
   }, []);
 
-  const updateHandlingPresence = useCallback((callKey: string | null) => {
+  const lastTaTrackAtRef = useRef<number>(0);
+  const lastTaHandlingRef = useRef<string | null | undefined>(undefined);
+  const taTrackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // 🌟 ClientPresenceRateLimitReached 원천 차단: 조교가 요청 카드를 빠르게 연속 터치해도
+  // 400ms 디바운스 + 최소 2초 간격 스로틀로 묶어 마지막 선택 상태 1건만 track() 전송
+  const updateHandlingPresence = useCallback((callKey: string | null, immediate = false) => {
     if (!clinicChannelRef.current || !taName || !taClientId) return;
-    clinicChannelRef.current.track({ role: 'ta', name: taName, joined_at: taJoinedAt, clientId: taClientId, handling: callKey, updatedAt: Date.now() }).catch(() => {});
+    if (!immediate && lastTaHandlingRef.current === callKey && Date.now() - lastTaTrackAtRef.current < 30000) return;
+
+    if (taTrackTimerRef.current) {
+      clearTimeout(taTrackTimerRef.current);
+      taTrackTimerRef.current = null;
+    }
+
+    const sendTrack = () => {
+      if (!clinicChannelRef.current) return;
+      lastTaHandlingRef.current = callKey;
+      lastTaTrackAtRef.current = Date.now();
+      clinicChannelRef.current.track({
+        role: 'ta',
+        name: taName,
+        joined_at: taJoinedAt,
+        clientId: taClientId,
+        handling: callKey,
+        updatedAt: Date.now()
+      }).catch(() => {});
+    };
+
+    const elapsed = Date.now() - lastTaTrackAtRef.current;
+    const MIN_INTERVAL_MS = 2000;
+    if (immediate && elapsed >= MIN_INTERVAL_MS) {
+      sendTrack();
+    } else {
+      const delay = Math.max(350, MIN_INTERVAL_MS - elapsed);
+      taTrackTimerRef.current = setTimeout(sendTrack, delay);
+    }
   }, [taName, taClientId, taJoinedAt]);
 
   const syncFromPresenceRef = useRef<() => void>(() => {});
@@ -520,7 +554,7 @@ export function useTaHandheld() {
         .on('broadcast', { event: SEAT_LAYOUT_UPDATED_EVENT }, () => loadAllSeats())
         .subscribe((status: string) => {
           setIsConnected(status === 'SUBSCRIBED');
-          if (status === 'SUBSCRIBED') updateHandlingPresence(selectedCallKey);
+          if (status === 'SUBSCRIBED') updateHandlingPresence(selectedCallKey, true);
         });
     }).catch(err => console.error('클리닉 채널 연결 오류:', err));
   };
