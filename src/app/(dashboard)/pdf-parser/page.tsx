@@ -538,7 +538,7 @@ export function sortDbKey(item: any): [number, number, number, number, number] {
   return [safeP, qNum, weight, safeS, safeSs];
 }
 
-export function sortProblemsList<T>(items: T[]): T[] {
+export function sortProblemsList(items: any[]): any[] {
   return [...items].sort((a, b) => {
     const ka = sortDbKey(a);
     const kb = sortDbKey(b);
@@ -580,7 +580,7 @@ export function autoInferProblemType(qText: string, q2Text: string, ansText: str
 }
 
 export function normalizeRecordForQuestionDb(raw: any, fallbackBookTitle = ""): any {
-  const rec = { ...raw };
+  const rec: any = { ...raw };
 
   if (!rec.question_id) {
     rec.question_id = rec.id || generateUUID();
@@ -1114,9 +1114,9 @@ export default function PdfParserPage() {
             .replace(/_Problems_Final\.json$/i, "")
             .replace(/_Problems_Extracted\.json$/i, "")
             .replace(/\.json$/i, "");
-          const normalized = sortProblemsList(
-            arr.map((r: any) => {
-              const norm = normalizeRecordForQuestionDb(r, bookTitle || fallbackBn);
+          const normalized: any[] = sortProblemsList(
+            arr.map((r: any): any => {
+              const norm: any = normalizeRecordForQuestionDb(r, bookTitle || fallbackBn);
               for (const f of TARGET_FIELDS) {
                 if (norm[f]) norm[f] = cleanLatex(norm[f]);
               }
@@ -1127,7 +1127,7 @@ export default function PdfParserPage() {
           setActiveCropTarget(null);
           setProblems(normalized);
           setCurrentIdx(0);
-          setBookTitle(normalized[0]?.book_name || normalized[0]?.source_book_name || fallbackBn);
+          setBookTitle((normalized[0] as any)?.book_name || (normalized[0] as any)?.source_book_name || fallbackBn);
           addLog(
             `📂 JSON 파일(${jf.name})에서 ${normalized.length}개 문항을 불러오고 V302 수식 정제 및 정렬을 완료했습니다.`
           );
@@ -1903,7 +1903,7 @@ export default function PdfParserPage() {
                   const res = resultMap.get(String(q.question_id));
                   if (!res) return q;
 
-                  const nextQ = { ...q };
+                  const nextQ: any = { ...q };
                   nextQ.taxonomy_id = String(res.curriculum_id || "").trim() || null;
                   nextQ.taxonomy_name =
                     String(res.curriculum_name || "").trim() || "이름 누락됨";
@@ -1997,7 +1997,7 @@ export default function PdfParserPage() {
       setProblems((prev) =>
         prev.map((item, idx) => {
           if (idx !== currentIdx) return item;
-          const updated = { ...item, [field]: value };
+          const updated: any = { ...item, [field]: value };
           if (field === "book_name") {
             updated.source_book_name = value;
             setBookTitle(value);
@@ -2014,7 +2014,7 @@ export default function PdfParserPage() {
     setProblems((prev) =>
       prev.map((item, idx) => {
         if (!magicScopeAll && idx !== currentIdx) return item;
-        const copy = { ...item };
+        const copy: any = { ...item };
         for (const f of TARGET_FIELDS) {
           if (copy[f] && typeof copy[f] === "string") {
             copy[f] = fn(copy[f]);
@@ -2056,7 +2056,7 @@ export default function PdfParserPage() {
         setProblems((prev) =>
           prev.map((item, idx) => {
             if (idx !== currentIdx) return item;
-            const next = { ...item };
+            const next: any = { ...item };
             for (const f of TARGET_FIELDS) {
               if (res[f] && typeof res[f] === "string") {
                 next[f] = res[f].trim();
@@ -2147,7 +2147,7 @@ export default function PdfParserPage() {
       setProblems((prev) =>
         prev.map((p) => {
           if (p.question_id !== questionId) return p;
-          const next = { ...p, [field]: fileName };
+          const next: any = { ...p, [field]: fileName };
           if (field === "image_url") {
             next.image_box = [0, 0, 1000, 1000];
             next.image_type = "core";
